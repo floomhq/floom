@@ -158,13 +158,17 @@ function declaredSecrets(manifest: Record<string, unknown>): Set<string> {
   return result;
 }
 
-function toolApp(toolSlug: string, declaredApps: Iterable<string>): string {
+function toolApp(toolSlug: string, declared: Map<string, Set<string> | null>): string {
   const normalized = toolSlug.toUpperCase();
-  const matches = [...declaredApps].filter((app) =>
+  const matches = [...declared.keys()].filter((app) =>
     normalized.startsWith(`${app.toUpperCase().replaceAll("-", "_")}_`),
   );
-  if (matches.length === 0) return "";
-  return matches.sort((a, b) => b.length - a.length)[0];
+  if (matches.length > 0) return matches.sort((a, b) => b.length - a.length)[0];
+  const allowlistMatches = [...declared.entries()]
+    .filter(([, allowedTools]) => allowedTools !== null && allowedTools.has(normalized))
+    .map(([app]) => app);
+  if (allowlistMatches.length === 0) return "";
+  return allowlistMatches.sort((a, b) => b.length - a.length)[0];
 }
 
 function validateNativeRuntimeContract(
@@ -206,7 +210,7 @@ function validateNativeRuntimeContract(
     toolSlugs.add(candidate);
   }
   for (const slug of toolSlugs) {
-    const app = toolApp(slug, declared.keys());
+    const app = toolApp(slug, declared);
     if (!app || !declared.has(app)) {
       errors.push(`run.py references ${slug}, but worker.yml does not declare connection '${app || "unknown"}'`);
       continue;

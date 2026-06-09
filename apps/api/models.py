@@ -5,7 +5,7 @@ import os
 import re
 import socket
 import warnings
-from typing import Any, Dict, List, Literal, Optional, Union
+from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional, Union
 from urllib.parse import unquote, urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from enum import Enum
@@ -726,15 +726,31 @@ def read_only_presets() -> Dict[str, List[str]]:
     return {app: list(tools) for app, tools in READ_ONLY_TOOL_PRESETS.items()}
 
 
-def composio_app_for_tool_slug(tool_slug: str, declared_apps: List[str]) -> Optional[str]:
+def composio_app_for_tool_slug(
+    tool_slug: str,
+    declared_connections: Mapping[str, Optional[List[str]]] | Iterable[str],
+) -> Optional[str]:
     normalized_tool = tool_slug.upper()
+    if isinstance(declared_connections, Mapping):
+        declared_apps = list(declared_connections.keys())
+    else:
+        declared_apps = list(declared_connections)
     matches = [
         app for app in declared_apps
         if normalized_tool.startswith(app.upper().replace("-", "_") + "_")
     ]
-    if not matches:
+    if matches:
+        return max(matches, key=len)
+    if not isinstance(declared_connections, Mapping):
         return None
-    return max(matches, key=len)
+    allowlist_matches = [
+        app
+        for app, allowed_tools in declared_connections.items()
+        if allowed_tools is not None and normalized_tool in {tool.upper() for tool in allowed_tools}
+    ]
+    if not allowlist_matches:
+        return None
+    return max(allowlist_matches, key=len)
 
 
 class WorkerContextMount(BaseModel):

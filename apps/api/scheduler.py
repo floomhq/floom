@@ -17,6 +17,7 @@ import logging
 import threading
 from datetime import datetime, timezone
 from typing import Any, Optional
+from zoneinfo import ZoneInfo
 
 from croniter import croniter
 
@@ -90,15 +91,29 @@ _scheduler_thread: threading.Thread | None = None
 _scheduler_lock = threading.Lock()
 
 
-def compute_next_run_at(cron_expr: str, after: datetime) -> Optional[str]:
+def _cron_zone(cron_timezone: str | None) -> ZoneInfo:
+    timezone_name = (cron_timezone or "UTC").strip() or "UTC"
+    try:
+        return ZoneInfo(timezone_name)
+    except Exception:
+        logger.warning("Invalid cron timezone %r; falling back to UTC", cron_timezone)
+        return ZoneInfo("UTC")
+
+
+def compute_next_run_at(cron_expr: str, after: datetime, cron_timezone: str | None = None) -> Optional[str]:
     """Return the next ISO run time after `after` for the given cron expression.
 
     Returns None if the expression is invalid.
     """
     try:
-        it = croniter(cron_expr, after)
+        if after.tzinfo is None:
+            after = after.replace(tzinfo=timezone.utc)
+        local_after = after.astimezone(_cron_zone(cron_timezone))
+        it = croniter(cron_expr, local_after)
         next_dt = it.get_next(datetime)
-        return next_dt.replace(tzinfo=timezone.utc).isoformat()
+        if next_dt.tzinfo is None:
+            next_dt = next_dt.replace(tzinfo=local_after.tzinfo)
+        return next_dt.astimezone(timezone.utc).isoformat()
     except Exception as exc:
         logger.warning("Invalid cron expression %r: %s", cron_expr, exc)
         return None
@@ -113,7 +128,7 @@ def _is_worker_running(worker_id: str) -> bool:
     return repos.runs.count_running_for_worker(user_id=owner_id, worker_id=worker_id) > 0
 
 
-def _get_or_init_next_run_at(worker_id: str, cron_expr: str) -> Optional[str]:
+def _get_or_init_next_run_at(worker_id: str, cron_expr: str, cron_timezone: str | None = None) -> Optional[str]:
     """Get next_run_at from DB, initializing it if NULL."""
     repos = get_repositories()
     row = repos.workers.get_schedule_state(worker_id=worker_id)
@@ -124,7 +139,7 @@ def _get_or_init_next_run_at(worker_id: str, cron_expr: str) -> Optional[str]:
 
     # Initialize: compute from now
     now = datetime.now(timezone.utc)
-    next_at = compute_next_run_at(cron_expr, now)
+    next_at = compute_next_run_at(cron_expr, now, cron_timezone)
     if next_at:
         repos.workers.set_next_run_at(worker_id=worker_id, next_run_at=next_at)
     return next_at
@@ -145,6 +160,20 @@ def _cron_expr_from_trigger_config(config_json: Optional[str]) -> Optional[str]:
         return None
     if isinstance(config, dict):
         return config.get("cron")
+    return None
+
+
+def _cron_timezone_from_trigger_config(config_json: Optional[str]) -> Optional[str]:
+    """Extract the timezone from a worker_triggers row config blob."""
+    if not config_json:
+        return None
+    try:
+        config: Any = json.loads(config_json)
+    except Exception:
+        return None
+    if isinstance(config, dict):
+        value = config.get("timezone")
+        return value if isinstance(value, str) and value.strip() else None
     return None
 
 
@@ -200,6 +229,7 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
                 "Trigger %s (worker %s) is type=schedule but has no cron", trigger_id, worker_id
             )
             continue
+        cron_timezone = _cron_timezone_from_trigger_config(row.get("config_json")) or row.get("cron_timezone") or "UTC"
         if _worker_is_archived(worker_id):
             logger.info("Skipping schedule trigger %s — worker %s is archived", trigger_id, worker_id)
             continue
@@ -207,7 +237,7 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
         # Initialize next_run_at on first sight.
         next_at_str = row.get("next_run_at")
         if not next_at_str:
-            next_at_str = compute_next_run_at(cron_expr, now)
+            next_at_str = compute_next_run_at(cron_expr, now, cron_timezone)
             if next_at_str:
                 repos.workers.set_trigger_next_run_at(trigger_id=trigger_id, next_run_at=next_at_str)
             continue  # never fire on the same tick we initialized
@@ -223,7 +253,7 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
         if now < next_at:
             continue  # not due yet
 
-        new_next = compute_next_run_at(cron_expr, now)
+        new_next = compute_next_run_at(cron_expr, now, cron_timezone)
         # Concurrency guard is per-WORKER (one bundle, one running run at a time).
         running_count = (
             repos.runs.count_running_for_worker(user_id=user_id, worker_id=worker_id)
@@ -352,6 +382,7 @@ def _tick() -> None:
         worker_id = w["id"]
         user_id = w.get("owner_id")
         cron_expr = w.get("cron_expr")
+        cron_timezone = w.get("cron_timezone") or "UTC"
         if not cron_expr:
             logger.warning(
                 "Worker %s has trigger.type=schedule but no cron expression", worker_id
@@ -371,7 +402,7 @@ def _tick() -> None:
         except Exception:
             pass
 
-        next_at_str = _get_or_init_next_run_at(worker_id, cron_expr)
+        next_at_str = _get_or_init_next_run_at(worker_id, cron_expr, cron_timezone)
         if not next_at_str:
             continue
 
@@ -394,7 +425,7 @@ def _tick() -> None:
         # two concurrent callers (if any) cannot both pass the check.
         # Note: the scheduler runs in a single daemon thread, so this is
         # belt-and-suspenders for future multi-scheduler safety.
-        new_next = compute_next_run_at(cron_expr, now)
+        new_next = compute_next_run_at(cron_expr, now, cron_timezone)
         running_count = (
             repos.runs.count_running_for_worker(user_id=user_id, worker_id=worker_id)
             if user_id
@@ -455,7 +486,7 @@ def _tick() -> None:
             start_run(run_id, worker_id, scheduled_inputs, user_id=user_id, repos=repos)
 
             # Update last_scheduled_run_at + next_run_at
-            new_next = compute_next_run_at(cron_expr, now)
+            new_next = compute_next_run_at(cron_expr, now, cron_timezone)
             repos.workers.mark_scheduled_run(
                 worker_id=worker_id,
                 last_scheduled_run_at=now_iso_str,
