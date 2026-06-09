@@ -720,6 +720,77 @@ class TestOverviewConsecutiveFailureAlerting:
         assert consecutive[0]["message"] == "3 consecutive failures"
 
 
+@_LINUX_ONLY
+class TestSystemAlertsScopeAndStreamCap:
+    def test_system_alerts_are_scoped_to_worker_owner(self, client_and_repos):
+        client, repos = client_and_repos
+        main = importlib.import_module("main")
+        alerting = importlib.import_module("alerting")
+        other_worker_id = f"other-{uuid.uuid4().hex[:10]}"
+
+        repos.workers.create(
+            user_id="other-user",
+            worker_id=other_worker_id,
+            manifest_json={
+                "schema_version": "0.3",
+                "name": "other-tenant-worker",
+                "title": "Other Tenant Worker",
+                "description": "Other tenant worker for alert scope testing.",
+                "version": "0.1.0",
+                "trigger": {"type": "manual"},
+                "exec": {
+                    "entry": "run.py",
+                    "runtime": "python311",
+                    "runner": "e2b",
+                    "command": "python run.py",
+                },
+                "inputs": [],
+                "outputs": [],
+                "secrets": [],
+                "connections": [],
+            },
+            enabled=True,
+        )
+
+        with main.get_db() as conn:
+            alerting._ensure_alert_incidents_table(conn)
+            alerting._open_incident(conn, _WORKER_ID, "consecutive_failures", "current tenant", "current details")
+            alerting._open_incident(conn, other_worker_id, "consecutive_failures", "other tenant", "other details")
+            conn.commit()
+
+        resp = client.get("/system/alerts")
+        assert resp.status_code == 200, resp.text
+        incidents = resp.json()["incidents"]
+        assert [item["worker_id"] for item in incidents] == [_WORKER_ID]
+        assert incidents[0]["reason"] == "current tenant"
+
+    def test_default_sse_stream_cap_is_fifty(self, monkeypatch):
+        monkeypatch.delenv("WORKEROS_MAX_CONCURRENT_STREAMS", raising=False)
+        main = importlib.import_module("main")
+        assert main._max_concurrent_streams() == 50
+
+    @pytest.mark.parametrize("endpoint", ["/runs/{run_id}/stream", "/runs/{run_id}/events"])
+    def test_second_concurrent_stream_returns_429(self, client_and_repos, monkeypatch, endpoint):
+        client, _ = client_and_repos
+        monkeypatch.setenv("WORKEROS_MAX_CONCURRENT_STREAMS", "1")
+        main = importlib.import_module("main")
+        run_id = _create_run(client, status="running")
+        slot_key = main._sse_stream_acquire(_USER_ID)
+        try:
+            from fastapi.testclient import TestClient
+
+            with TestClient(main.app, raise_server_exceptions=False, base_url="https://testserver") as second:
+                resp = second.get(
+                    endpoint.format(run_id=run_id),
+                    headers={"x-floom-secret": _SECRET},
+                )
+        finally:
+            main._sse_stream_release(slot_key)
+
+        assert resp.status_code == 429, resp.text
+        assert "Too many concurrent streams" in resp.text
+
+
 # ---------------------------------------------------------------------------
 # Email sending (pure unit tests — no DB, no fcntl, cross-platform)
 # ---------------------------------------------------------------------------
