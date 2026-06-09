@@ -8,18 +8,7 @@ The open-source, self-hosted runtime for AI workers. Sandboxed by default.
 
 Pure-script workers run in an **E2B sandbox by default** — isolated dependencies, no host process access, contained resource usage. Agent workers (`SKILL.md`) run through the API-hosted AgentDriver tool loop. There is no supported local in-process worker runner.
 
-**Cost comparison at typical use (100 runs/day × 30s average):**
-
-| Service | Cost per month | Volume cap |
-|---|---|---|
-| **workeros + E2B (self-hosted)** | **~$15** | unlimited, $0.20/hr sandbox time |
-| Zapier Professional | $49 | 2,000 tasks |
-| Zapier Pro Plus | $103 | 5,000 tasks |
-| n8n Cloud Pro | $50 | 5,000 executions |
-| n8n Cloud Business | $200 | 25,000 executions |
-| Make.com Pro | $16 | 10,000 operations |
-
-For workers that fire every few seconds or need offline operation, keep `runner: e2b` and tune the schedule or worker implementation; local in-process execution is not supported.
+You pay only for sandbox execution time (E2B bills per second of run time), with **no per-task or per-execution caps** — unlike task-metered automation platforms. Tune schedules and worker code to keep run time low.
 
 ---
 
@@ -157,7 +146,9 @@ workeros workers push ./workers/<id>
 workeros run <id> --inputs-file inputs.json
 ```
 
-### Included workers
+### Example workers
+
+A few of the workers shipped in [`workers/`](workers/) — browse the directory for the full set:
 
 - **weekly_update** — Turns raw notes into a polished weekly update (AI, requires approval)
 - **csv_enricher** — Enriches CSV rows using custom instructions (AI)
