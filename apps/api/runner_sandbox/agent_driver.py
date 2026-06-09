@@ -1832,7 +1832,19 @@ class AgentDriver(SandboxDriver):
                     f"Approval {'approved' if approved else 'rejected'}: {label} (approval_id={approval_id})",
                     "info",
                 )
-                return {"ok": True, "approved": approved, "approval_id": approval_id}
+                edited_output = None
+                try:
+                    raw = row.get("edited_output_json")
+                    if raw:
+                        edited_output = json.loads(raw)
+                except Exception:
+                    pass
+                return {
+                    "ok": True,
+                    "approved": approved,
+                    "approval_id": approval_id,
+                    "edited_output": edited_output,
+                }
 
             if _time.monotonic() >= deadline:
                 log_fn(f"Approval timed out after {timeout_seconds}s: {label}", "warning")

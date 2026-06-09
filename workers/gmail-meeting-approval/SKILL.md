@@ -32,7 +32,7 @@ Scan the 10 most recent Gmail inbox messages, detect meeting requests, and for e
      metadata={"from": "...", "subject": "...", "proposed_time": "...", "duration_minutes": ..., "location": "..."}
    )
    ```
-   - If `approved: true` — create the Google Calendar event using `composio__googlecalendar__execute` with `tool="GOOGLECALENDAR_CREATE_EVENT"` and these exact argument keys:
+   - If `approved: true` — first check `result.edited_output.text`: if present, re-parse it to extract any corrected `summary`, `proposed_time`, `duration_minutes`, or `location` and override your originally extracted values with those corrections before creating the event. Then create the Google Calendar event using `composio__googlecalendar__execute` with `tool="GOOGLECALENDAR_CREATE_EVENT"` and these exact argument keys:
      ```
      arguments={
        "summary": "<subject or concise meeting title>",

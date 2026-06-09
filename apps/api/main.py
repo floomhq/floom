@@ -11907,6 +11907,7 @@ def reject_destructive_action(
 @app.post("/approvals/{approval_id}/approve", response_model=ActionResponse)
 def approve_agent_tool_approval(
     approval_id: str,
+    body: ApproveRequest = Body(default_factory=ApproveRequest),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ActionResponse:
@@ -11914,6 +11915,7 @@ def approve_agent_tool_approval(
 
     Does NOT spawn a new run. Flips the approval record to 'approved' so the
     in-process polling loop in agent_driver can resume the run in-place.
+    Any edited_output is stored and returned to the agent by the polling loop.
     """
     approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
     if approval is None:
@@ -11932,10 +11934,12 @@ def approve_agent_tool_approval(
             detail="This approval is not an agent-tool approval. Use POST /runs/{run_id}/approve instead.",
         )
 
+    edited_output_json = json.dumps(body.edited_output) if body.edited_output is not None else None
     repos.approvals.approve(
         owner_id=auth.user_id,
         run_id=approval["run_id"],
         decided_at=now_iso(),
+        edited_output_json=edited_output_json,
     )
 
     _sse_publish(approval["run_id"], {
