@@ -18,7 +18,8 @@ export async function serverFetch<T>(
   options?: RequestInit & { next?: { revalidate?: number | false; tags?: string[] } }
 ): Promise<T> {
   const { next, ...fetchOptions } = options ?? {};
-  const workspaceCookie = cookies().get(ACTIVE_WORKSPACE_COOKIE_KEY)?.value || "";
+  const cookieStore = await cookies();
+  const workspaceCookie = cookieStore.get(ACTIVE_WORKSPACE_COOKIE_KEY)?.value || "";
   const activeWorkspace =
     workspaceCookie && workspaceCookie !== "local-default" ? decodeURIComponent(workspaceCookie) : "";
   const res = await fetch(`${API_BASE}${path}`, {
