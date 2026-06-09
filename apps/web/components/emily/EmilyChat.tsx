@@ -337,6 +337,11 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
 
       {/* Input */}
       <div className={cn("shrink-0", fullPage ? "px-6 pb-6 pt-3" : "px-3 pb-3 pt-0")}>
+        {error && (
+          <div className="mb-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {error}
+          </div>
+        )}
         <Separator className="mb-3" />
         <PromptInput
           value={input}

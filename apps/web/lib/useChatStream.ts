@@ -328,10 +328,11 @@ export function useChatStream(): ChatStreamState {
               // Fold event into messages
               setMessages((prev) => reduceSSEEvent(prev, event, assistantMsgId));
 
-              if (event.type === "finish" || event.type === "error") {
-                if (event.type === "error") {
-                  setError(sseErrorMessage(event));
-                }
+              if (event.type === "error") {
+                setError(sseErrorMessage(event));
+                break;
+              }
+              if (event.type === "finish") {
                 break;
               }
             }
