@@ -666,6 +666,10 @@ def _preview_result(result: Any) -> Any:
 
 
 def _card_kind_for_tool(tool_name: str) -> str:
+    if tool_name == "workers__list_all":
+        return "worker-list"
+    if tool_name == "workers__run":
+        return "run"
     if tool_name.startswith("workers__"):
         return "worker"
     if tool_name.startswith("runs__"):
@@ -684,6 +688,10 @@ def _card_kind_for_tool(tool_name: str) -> str:
 
 
 def _tool_title(tool_name: str, args_preview: Any) -> str:
+    if tool_name == "workers__list_all":
+        return "List workers"
+    if tool_name == "workers__run":
+        return "Run worker"
     if tool_name == "workers__create_from_prompt":
         return "Create worker from prompt"
     if tool_name == "workers__create":
@@ -721,7 +729,7 @@ def _tool_actions(tool_name: str, resource: Optional[Dict[str, Any]], status: st
         run_id = str(resource["run_id"])
         actions.append({"id": "open_run", "method": "GET", "href": f"/runs/{run_id}"})
         actions.append({"id": "cancel_run", "method": "POST", "href": f"/runs/{run_id}/cancel"})
-    if resource and resource.get("worker_id") and status == "succeeded":
+    if resource and resource.get("worker_id") and status == "completed":
         worker_id = str(resource["worker_id"])
         if worker_id != "worker-author":
             actions.append({"id": "open_worker", "method": "GET", "href": f"/workers/{worker_id}"})
@@ -764,7 +772,7 @@ def build_tool_event_metadata(
     phase: str,
 ) -> Dict[str, Any]:
     args_preview = build_args_preview(tool_name, args)
-    status = "starting" if phase == "call" else "succeeded"
+    status = "starting" if phase == "call" else "completed"
     if phase == "result" and isinstance(result, dict) and not result.get("ok", True):
         status = "failed"
     if phase == "result" and isinstance(result, dict) and result.get("ok", True) and result.get("run_id"):

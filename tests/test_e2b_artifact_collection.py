@@ -114,6 +114,20 @@ class FakeFallbackSandbox(FakeFullSandbox):
         return cls()
 
 
+class FakeBillingBlockedFallbackSandbox(FakeFullSandbox):
+    instances = []
+    last_create_kwargs = {}
+    create_api_keys = []
+
+    @classmethod
+    def create(cls, **kwargs):
+        cls.create_api_keys.append(kwargs["api_key"])
+        cls.last_create_kwargs = kwargs
+        if len(cls.create_api_keys) == 1:
+            raise RuntimeError("403: team is blocked: missing payment method")
+        return cls()
+
+
 class FakeWritableFiles(FakeFiles):
     def __init__(self, files: dict[str, bytes]):
         super().__init__(files)
@@ -357,7 +371,7 @@ def test_e2b_driver_falls_back_to_next_key_on_quota_error(tmp_path, monkeypatch)
     assert FakeFallbackSandbox.last_create_kwargs["api_key"] == fallback_key
     assert active_sandbox_count() == 0
     joined_logs = "\n".join(msg for _level, msg in logs)
-    assert "quota/rate limit" in joined_logs
+    assert "quota/billing/rate limit" in joined_logs
     assert primary_key not in joined_logs
     assert fallback_key not in joined_logs
 
@@ -374,9 +388,55 @@ def test_e2b_quota_error_detection_handles_status_and_text():
     class PaymentRequired(Exception):
         status_code = 402
 
+    class TeamBlocked(Exception):
+        status_code = 403
+
     assert _is_e2b_quota_or_rate_limit_error(PaymentRequired("payment required"))
     assert _is_e2b_quota_or_rate_limit_error(RuntimeError("quota exhausted"))
+    assert _is_e2b_quota_or_rate_limit_error(
+        RuntimeError("403: team is blocked: missing payment method")
+    )
+    assert _is_e2b_quota_or_rate_limit_error(
+        TeamBlocked("team is blocked: missing payment method")
+    )
     assert not _is_e2b_quota_or_rate_limit_error(RuntimeError("network unreachable"))
+    assert not _is_e2b_quota_or_rate_limit_error(TeamBlocked("forbidden: invalid scope"))
+
+
+def test_e2b_driver_falls_back_on_billing_blocked_primary_key(tmp_path, monkeypatch):
+    primary_key = "e2b-primary-billing-blocked"
+    fallback_key = "e2b-fallback-billing-blocked"
+    monkeypatch.setenv("E2B_API_KEY", primary_key)
+    monkeypatch.setenv("E2B_API_KEY_FALLBACK", fallback_key)
+    monkeypatch.delenv("E2B_API_KEYS", raising=False)
+    monkeypatch.setitem(sys.modules, "e2b", types.SimpleNamespace(Sandbox=FakeBillingBlockedFallbackSandbox))
+    monkeypatch.setattr(e2b_driver, "WORKERS_DIR", tmp_path / "workers")
+    FakeBillingBlockedFallbackSandbox.instances = []
+    FakeBillingBlockedFallbackSandbox.last_create_kwargs = {}
+    FakeBillingBlockedFallbackSandbox.create_api_keys = []
+    with e2b_driver._active_sandboxes_lock:
+        e2b_driver._active_sandboxes.clear()
+
+    worker_dir = tmp_path / "workers" / "billing-fallback-worker"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "run.py").write_text("print('ok')\n")
+    logs = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="billing-fallback-worker",
+        run_id="run_billing_fallback",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((level, msg)),
+        trace_id="trace-billing-fallback",
+        timeout_seconds=30,
+    )
+
+    assert result.status == "success"
+    assert FakeBillingBlockedFallbackSandbox.create_api_keys == [primary_key, fallback_key]
+    assert FakeBillingBlockedFallbackSandbox.last_create_kwargs["api_key"] == fallback_key
+    joined_logs = "\n".join(msg for _level, msg in logs)
+    assert "quota/billing/rate limit" in joined_logs
 
 
 def test_sandbox_api_url_prefers_e2b_specific_origin(monkeypatch):
