@@ -23,6 +23,7 @@ DB_PATH = _configured_db_path()
 logger = logging.getLogger("floom.db")
 _WAL_LOCK = threading.Lock()
 _WAL_INITIALIZED_PATHS: set[str] = set()
+_DB_TRANSACTION_LOCK = threading.RLock()
 _DB_CONNECTION_STATE = threading.local()
 
 
@@ -208,10 +209,13 @@ def get_db() -> Generator[sqlite3.Connection, None, None]:
     depth = getattr(_DB_CONNECTION_STATE, "depth", 0)
     _DB_CONNECTION_STATE.depth = depth + 1
     savepoint_name = None
+    acquired_lock = False
     if depth > 0:
         savepoint_name = f"db_ctx_{depth}"
         conn.execute(f"SAVEPOINT {savepoint_name}")
     else:
+        _DB_TRANSACTION_LOCK.acquire()
+        acquired_lock = True
         conn.execute("BEGIN")
     try:
         yield conn
@@ -228,6 +232,8 @@ def get_db() -> Generator[sqlite3.Connection, None, None]:
         raise
     finally:
         _DB_CONNECTION_STATE.depth = depth
+        if acquired_lock:
+            _DB_TRANSACTION_LOCK.release()
 
 
 def now_iso() -> str:
@@ -386,6 +392,13 @@ def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
 
         approvals_source = "approvals"
         approvals_preserved = False
+        table_preserves: list[tuple[str, str]] = []
+        for table_name in ("logs", "artifacts"):
+            if _table_exists(conn, table_name):
+                preserve_name = f"{table_name}_preserve"
+                conn.execute(f"DROP TABLE IF EXISTS {preserve_name}")
+                conn.execute(f"CREATE TEMP TABLE {preserve_name} AS SELECT * FROM {table_name}")
+                table_preserves.append((table_name, preserve_name))
         if _table_exists(conn, "approvals"):
             missing_approval_workers = conn.execute(
                 """
@@ -488,6 +501,11 @@ def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
             conn.execute("ALTER TABLE approvals_new RENAME TO approvals")
             if approvals_preserved:
                 conn.execute("DROP TABLE approvals_preserve")
+
+        for table_name, preserve_name in table_preserves:
+            conn.execute(f"DELETE FROM {table_name}")
+            conn.execute(f"INSERT INTO {table_name} SELECT * FROM {preserve_name}")
+            conn.execute(f"DROP TABLE {preserve_name}")
 
         _execute_sql_script(conn,
             """

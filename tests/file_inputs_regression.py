@@ -38,6 +38,7 @@ BLOBS_DIR = Path("/tmp/workeros-t1d-file-inputs-blobs")
 ARTIFACTS_DIR = Path("/tmp/workeros-t1d-file-inputs-artifacts")
 TEST_SECRET = "test-secret-file-inputs"
 AUTH_HEADERS = {"x-floom-secret": TEST_SECRET}
+TEST_WORKER_ID = "file-access-test"
 
 
 def reset_environment() -> None:
@@ -56,7 +57,7 @@ def reset_environment() -> None:
 
 def write_test_worker() -> None:
     """Worker with one required and one optional file input."""
-    worker_dir = TEST_WORKERS_DIR / "file_access_test"
+    worker_dir = TEST_WORKERS_DIR / TEST_WORKER_ID
     worker_dir.mkdir(parents=True, exist_ok=True)
     (worker_dir / "worker.yml").write_text(
         """schema_version: '0.3'
@@ -344,7 +345,7 @@ def _main_body() -> int:
     check("pdf upload succeeds", pdf_upload.status_code == 200, pdf_upload.text[:200])
     # Try to bind a PDF to a text/csv file input — should fail at run creation
     bad_bind_response = client.post(
-        "/workers/file_access_test/runs",
+        f"/workers/{TEST_WORKER_ID}/runs",
         json={
             "inputs": {"upload": pdf_sha},
             "trigger_source": "file_inputs_regression",
@@ -361,7 +362,7 @@ def _main_body() -> int:
     for raw_value in ("/etc/hosts", "not-a-sha"):
         trigger = f"non_sha_{raw_value.replace('/', '_').replace('-', '_')}"
         response = client.post(
-            "/workers/file_access_test/runs",
+            f"/workers/{TEST_WORKER_ID}/runs",
             json={
                 "inputs": {"upload": raw_value},
                 "trigger_source": trigger,
@@ -384,10 +385,7 @@ def _main_body() -> int:
         )
         check(
             f"non-SHA value {raw_value!r} did not execute worker",
-            row is not None
-            and row["status"] == "failed"
-            and row["output_json"] in (None, "{}")
-            and "SHA-256 reference" in (row["error"] or ""),
+            row is None,
             dict(row) if row else "no run row",
         )
 
@@ -395,7 +393,7 @@ def _main_body() -> int:
     print("\n[section] Bind non-existent SHA")
     fake_sha = "a" * 64
     bad_sha_response = client.post(
-        "/workers/file_access_test/runs",
+        f"/workers/{TEST_WORKER_ID}/runs",
         json={
             "inputs": {"upload": fake_sha},
             "trigger_source": "file_inputs_regression",
@@ -435,7 +433,7 @@ def _main_body() -> int:
     check("3MB upload succeeds with larger upload limit", large_upload.status_code == 200, large_upload.text[:200])
     check("3MB upload hash matches", large_upload.json().get("sha256") == large_sha, large_upload.text[:200])
     large_bind = client.post(
-        "/workers/file_access_test/runs",
+        f"/workers/{TEST_WORKER_ID}/runs",
         json={
             "inputs": {"upload": large_sha},
             "trigger_source": "file_inputs_regression_large",
@@ -461,7 +459,7 @@ def _main_body() -> int:
     api_main._resolve_file_input_references = fail_bind
     try:
         ref_fail_bind = client.post(
-            "/workers/file_access_test/runs",
+            f"/workers/{TEST_WORKER_ID}/runs",
             json={
                 "inputs": {"upload": ref_fail_sha},
                 "trigger_source": "file_inputs_regression_ref_fail",
@@ -497,7 +495,7 @@ def _main_body() -> int:
     multi_ref_before = db_scalar("SELECT ref_count FROM files WHERE id = ?", (multi_sha,))
     missing_optional_sha = "b" * 64
     multi_bind = client.post(
-        "/workers/file_access_test/runs",
+        f"/workers/{TEST_WORKER_ID}/runs",
         json={
             "inputs": {"upload": multi_sha, "optional_doc": missing_optional_sha},
             "trigger_source": "file_inputs_regression_multi_fail",
@@ -548,7 +546,7 @@ def _main_body() -> int:
     # --- Happy-path run: file is staged per-run ---
     print("\n[section] Happy-path run with file input")
     run_response = client.post(
-        "/workers/file_access_test/runs",
+        f"/workers/{TEST_WORKER_ID}/runs",
         json={
             "inputs": {
                 "upload": expected_sha,
@@ -593,7 +591,7 @@ def _main_body() -> int:
 
     def launch_run(sha: str) -> dict[str, Any]:
         r = client.post(
-            "/workers/file_access_test/runs",
+            f"/workers/{TEST_WORKER_ID}/runs",
             json={
                 "inputs": {"upload": sha},
                 "trigger_source": "concurrent_test",
@@ -635,7 +633,7 @@ def _main_body() -> int:
 
     # Run 1: with optional file
     run1_resp = client.post(
-        "/workers/file_access_test/runs",
+        f"/workers/{TEST_WORKER_ID}/runs",
         json={
             "inputs": {"upload": expected_sha, "optional_doc": opt_sha},
             "trigger_source": "optional_test",
@@ -649,7 +647,7 @@ def _main_body() -> int:
 
     # Run 2: without optional file
     run2_resp = client.post(
-        "/workers/file_access_test/runs",
+        f"/workers/{TEST_WORKER_ID}/runs",
         json={
             "inputs": {"upload": expected_sha},
             "trigger_source": "optional_test",

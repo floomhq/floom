@@ -39,6 +39,38 @@ def _clear_auth_cache():
         pass
 
 
+def _reset_modules():
+    for name in [
+        "main",
+        "db",
+        "db._legacy_sqlite",
+        "db.sqlite",
+        "db.factory",
+        "db.dependency",
+        "db.interface",
+        "auth",
+        "auth.context",
+        "auth.dependency",
+        "auth.factory",
+        "auth.interface",
+        "auth.local",
+        "auth.multi_member",
+    ]:
+        sys.modules.pop(name, None)
+
+
+def _isolated_empty_db(monkeypatch, tmp_path):
+    db_path = tmp_path / "floom.db"
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    monkeypatch.setenv("WORKEROS_DB", str(db_path))
+    monkeypatch.setenv("FLOOM_DB", str(db_path))
+    monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
+    _reset_modules()
+    import db
+    db.init_db()
+    db.get_repositories.cache_clear()
+
+
 # ---------------------------------------------------------------------------
 # #594 — FLOOM_SECRET set: wrong/missing secret must return 401
 # ---------------------------------------------------------------------------
@@ -81,10 +113,11 @@ def test_594_correct_secret_returns_200_when_secret_configured(monkeypatch):
     assert data.get("role") == "admin"
 
 
-def test_594_dev_mode_still_works_without_secret(monkeypatch):
+def test_594_dev_mode_still_works_without_secret(monkeypatch, tmp_path):
     """When FLOOM_SECRET is NOT set, dev mode (0 users → admin) must still work
     for local installs that haven't configured a secret."""
-    monkeypatch.delenv("FLOOM_SECRET", raising=False)
+    monkeypatch.setenv("FLOOM_SECRET", "")
+    _isolated_empty_db(monkeypatch, tmp_path)
     _clear_auth_cache()
     client = _client()
     r = client.get("/auth/me")
@@ -97,11 +130,12 @@ def test_594_dev_mode_still_works_without_secret(monkeypatch):
 # #597 — PAT create returns 409 (not 500) in dev mode
 # ---------------------------------------------------------------------------
 
-def test_597_pat_create_returns_409_not_500_in_dev_mode(monkeypatch):
+def test_597_pat_create_returns_409_not_500_in_dev_mode(monkeypatch, tmp_path):
     """POST /auth/tokens must return 409 with a clear message when called in
     dev mode (ghost auth — no real user row in the DB).
     Previously raised sqlite3.IntegrityError → 500."""
-    monkeypatch.delenv("FLOOM_SECRET", raising=False)
+    monkeypatch.setenv("FLOOM_SECRET", "")
+    _isolated_empty_db(monkeypatch, tmp_path)
     _clear_auth_cache()
     client = _client()
     r = client.post("/auth/tokens", json={"name": "test-pat"})
@@ -115,7 +149,7 @@ def test_597_pat_create_returns_409_not_500_in_dev_mode(monkeypatch):
 
 def test_597_pat_create_error_is_not_500(monkeypatch):
     """Specifically verify that the PAT create endpoint does not return 500."""
-    monkeypatch.delenv("FLOOM_SECRET", raising=False)
+    monkeypatch.setenv("FLOOM_SECRET", "")
     _clear_auth_cache()
     client = _client()
     r = client.post("/auth/tokens", json={"name": "any-name"})
