@@ -1,14 +1,13 @@
 # Gmail Meeting Approval
 
-Scan the 10 most recent Gmail inbox messages, detect meeting requests, write a summary to `out/result.json`, then create Google Calendar events for every meeting request found.
-
-The run will pause for human approval after you write the output — the user will review what you found and approve or reject before the calendar events are considered confirmed. Your job is to find the requests and create the events; the platform handles the approval gate.
+Scan the 10 most recent Gmail inbox messages, detect meeting requests, and for each one call `request_approval()` to pause the run and ask the operator. Only create a Google Calendar event if the operator approves. Write a JSON summary and finish.
 
 ## Available tools
 
 - `composio__gmail__execute(tool="GMAIL_FETCH_EMAILS", arguments={...})` — list inbox messages
 - `composio__gmail__execute(tool="GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID", arguments={"message_id": "..."})` — fetch full message
 - `composio__googlecalendar__execute(tool="GOOGLECALENDAR_CREATE_EVENT", arguments={...})` — create calendar event
+- `request_approval(title, description, metadata)` — pause the run and ask the operator to approve or reject an action
 
 ## Steps
 
@@ -25,20 +24,34 @@ The run will pause for human approval after you write the output — the user wi
    - `duration_minutes` — numeric if stated, otherwise null
    - `location` — physical location or conferencing link, or empty string
 
-5. Create a Google Calendar event for each meeting request using `composio__googlecalendar__execute` with `tool="GOOGLECALENDAR_CREATE_EVENT"`. Use the proposed time as start, add duration (default 30 min if not stated), include sender and subject in the event description. Record the calendar_event_id from the response (or empty string if not returned).
+5. For each meeting request, call `request_approval` **before** creating any calendar event:
+   ```
+   request_approval(
+     title="Create calendar event: <subject>",
+     description="From: <sender>\nProposed time: <time>\nDuration: <duration_minutes> min\nLocation: <location>",
+     metadata={"from": "...", "subject": "...", "proposed_time": "...", "duration_minutes": ..., "location": "..."}
+   )
+   ```
+   - If the result has `approved: true` — create the Google Calendar event using `composio__googlecalendar__execute` with `tool="GOOGLECALENDAR_CREATE_EVENT"`. Record the `calendar_event_id` from the response (or empty string if not returned). Mark `approval_status: "approved"` in the summary.
+   - If the result has `approved: false` — skip creating the event. Mark `approval_status: "rejected"` in the summary.
 
 6. Create the `out/` directory if needed. Write `out/result.json` with exactly this shape:
 ```json
 {
   "emails_scanned": <number>,
   "meeting_requests_found": <number>,
-  "meeting_requests": [
+  "approvals_raised": [
     {
-      "from": "...",
       "subject": "...",
+      "from": "...",
       "proposed_time": "...",
-      "duration_minutes": <number or null>,
-      "location": "...",
+      "approval_status": "approved" | "rejected"
+    }
+  ],
+  "events_created": [
+    {
+      "summary": "...",
+      "start": "...",
       "calendar_event_id": "..."
     }
   ]
@@ -48,7 +61,13 @@ The run will pause for human approval after you write the output — the user wi
 7. Call `finish_with_outputs({"result": "out/result.json"})`.
 
 ## Rules
-- If no meeting requests are found, write the JSON with `meeting_requests_found: 0` and an empty array. Still finish normally.
+- Call `request_approval` once per detected meeting request, in order. Do NOT call it in a loop around the entire run.
+- Only create a calendar event after receiving `approved: true` from `request_approval`.
+- If no meeting requests are found, write the JSON with `meeting_requests_found: 0` and empty arrays. Still finish normally.
 - If a single email fails to parse, skip it and continue.
 - Do not invent data. If a field is missing use an empty string or null.
 - The output file must be valid JSON only.
+
+## Important: approval tool vs manifest-level approvals
+
+This worker uses the `request_approval()` tool to pause mid-run for per-item decisions. The worker manifest does NOT declare `approvals: required: true` — that is a different, whole-run gate that would conflict with this per-item tool and cause an infinite loop.

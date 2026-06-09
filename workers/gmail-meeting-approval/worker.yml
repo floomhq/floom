@@ -24,10 +24,6 @@ trigger:
 limits:
   max_tool_iterations: 40
   timeout_seconds: 600
-approvals:
-  required: true
-  title: "Review meeting requests before booking"
-  description: "Approve to create the calendar events listed in the output. Reject to discard."
 connections:
   - app: "gmail"
     allowed_tools:

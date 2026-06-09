@@ -16,8 +16,10 @@ import re
 import sqlite3
 import subprocess
 import threading
+import time as _time
 import uuid
 from dataclasses import dataclass
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Callable, Dict, Optional
 
@@ -946,6 +948,39 @@ class AgentDriver(SandboxDriver):
             {
                 "type": "function",
                 "function": {
+                    "name": "request_approval",
+                    "description": (
+                        "Pause the agent run and ask the human operator for approval. "
+                        "The run status is set to pending_approval while waiting. "
+                        "Returns {\"ok\": true, \"approved\": true/false, \"approval_id\": \"...\"} "
+                        "once the operator decides. Use this to gate destructive or sensitive actions. "
+                        "Do NOT use this if the worker manifest already declares approvals.required — "
+                        "that is a separate manifest-level gate and combining both causes an infinite loop."
+                    ),
+                    "parameters": {
+                        "type": "object",
+                        "properties": {
+                            "title": {
+                                "type": "string",
+                                "description": "Short approval title shown to the operator.",
+                            },
+                            "description": {
+                                "type": "string",
+                                "description": "Longer description explaining what needs approval and why.",
+                            },
+                            "metadata": {
+                                "type": "object",
+                                "description": "Optional structured context (e.g. extracted fields) shown alongside the request.",
+                                "additionalProperties": True,
+                            },
+                        },
+                        "required": ["title"],
+                    },
+                },
+            },
+            {
+                "type": "function",
+                "function": {
                     "name": "list_dir",
                     "description": "List files under the skill bundle.",
                     "parameters": {
@@ -1115,6 +1150,17 @@ class AgentDriver(SandboxDriver):
                         return _json_dumps({"ok": False, "error": "Tool arguments must be an object"})
                 except json.JSONDecodeError as exc:
                     return _json_dumps({"ok": False, "error": f"Invalid JSON arguments: {exc}"})
+                # request_approval needs async polling — dispatch directly here
+                if tool_name == "request_approval":
+                    result = await self._request_approval_async(
+                        args=args,
+                        run_id=state.run_id,
+                        worker_id=state.worker_id,
+                        user_id=state.user_id,
+                        log_fn=state.log_fn,
+                        timeout_seconds=state.timeout_seconds,
+                    )
+                    return _json_dumps(result)
                 result = self._handle_tool(
                     name=tool_name,
                     args=args,
@@ -1215,6 +1261,10 @@ class AgentDriver(SandboxDriver):
                 )
             if name == "invoke_worker":
                 return self._invoke_worker(args, state_user_id=user_id, config=config, run_id=run_id)
+            if name == "request_approval":
+                # request_approval is async (polls DB); callers must use the async path
+                # in _sdk_tools._invoke_async_tool instead of this sync dispatcher.
+                return {"ok": False, "error": "request_approval must be invoked via the async dispatch path"}
             if name == "log":
                 level = str(args.get("level") or "info")
                 log_fn(str(args.get("message") or ""), level)
@@ -1675,6 +1725,132 @@ class AgentDriver(SandboxDriver):
             user_id=user_id,
             log_fn=log_fn,
         )
+
+    async def _request_approval_async(
+        self,
+        args: Dict[str, Any],
+        run_id: str,
+        worker_id: str,
+        user_id: str | None,
+        log_fn: Callable[[str, str], None],
+        timeout_seconds: int,
+    ) -> Dict[str, Any]:
+        """Create an approval record, set run status to pending_approval, and poll
+        until the operator approves/rejects or the run timeout is reached.
+
+        Returns:
+            {"ok": True, "approved": True/False, "approval_id": "apr_..."}
+        """
+        if not user_id:
+            return {"ok": False, "error": "request_approval requires an authenticated run owner"}
+
+        title = str(args.get("title") or "").strip() or "Approval required"
+        description = str(args.get("description") or "").strip()
+        metadata = args.get("metadata") or {}
+
+        from db import get_repositories
+        from run_service import publish_run_part
+        from models import RunStatus
+
+        repos = get_repositories()
+        approval_id = f"apr_{uuid.uuid4().hex[:12]}"
+        now_ts = datetime.now(timezone.utc).isoformat()
+
+        # Build label/preview from title + description + metadata
+        label = title
+        preview_parts = [description] if description else []
+        if metadata and isinstance(metadata, dict):
+            try:
+                preview_parts.append(json.dumps(metadata, default=str))
+            except Exception:
+                pass
+        preview = "\n".join(preview_parts)[:500]
+
+        try:
+            repos.approvals.create(
+                owner_id=user_id,
+                id=approval_id,
+                run_id=run_id,
+                worker_id=worker_id,
+                status="pending",
+                label=label,
+                preview=preview,
+                created_at=now_ts,
+            )
+        except Exception as exc:
+            logger.error("request_approval: failed to create approval row for run %s: %s", run_id, exc)
+            return {"ok": False, "error": f"Failed to create approval record: {exc}"}
+
+        # Set run status to pending_approval and emit SSE
+        try:
+            repos.runs.update_status(
+                user_id=user_id,
+                run_id=run_id,
+                status=RunStatus.PENDING_APPROVAL.value,
+            )
+        except Exception as exc:
+            logger.warning("request_approval: could not update run status for %s: %s", run_id, exc)
+
+        try:
+            from run_service import _publish_sse
+            _publish_sse(run_id, {
+                "type": "status",
+                "run_id": run_id,
+                "status": RunStatus.PENDING_APPROVAL.value,
+                "approval_id": approval_id,
+                "label": label,
+            })
+        except Exception:
+            pass
+        publish_run_part(run_id, {"type": "tool-approval-pending", "approval_id": approval_id, "label": label})
+        log_fn(f"Approval requested: {label} (approval_id={approval_id})", "info")
+
+        # Poll DB every 3 seconds until decided or timeout
+        deadline = _time.monotonic() + timeout_seconds
+        _poll_interval = 3.0
+        while True:
+            await asyncio.sleep(_poll_interval)
+            try:
+                row = repos.approvals.get_by_run_id(run_id=run_id)
+            except Exception as exc:
+                logger.warning("request_approval: poll error for %s: %s", run_id, exc)
+                row = None
+
+            if row and row.get("status") in ("approved", "rejected"):
+                approved = row["status"] == "approved"
+                # Restore run status to running so the agent loop continues
+                try:
+                    repos.runs.update_status(
+                        user_id=user_id,
+                        run_id=run_id,
+                        status=RunStatus.RUNNING.value,
+                    )
+                except Exception:
+                    pass
+                log_fn(
+                    f"Approval {'approved' if approved else 'rejected'}: {label} (approval_id={approval_id})",
+                    "info",
+                )
+                return {"ok": True, "approved": approved, "approval_id": approval_id}
+
+            if _time.monotonic() >= deadline:
+                log_fn(f"Approval timed out after {timeout_seconds}s: {label}", "warning")
+                return {
+                    "ok": False,
+                    "approved": False,
+                    "approval_id": approval_id,
+                    "error": f"Approval timed out after {timeout_seconds}s",
+                }
+
+            # Check cancel flag so a cancelled run doesn't spin forever
+            if self._cancel_requested(run_id):
+                log_fn("request_approval: run cancelled while waiting for approval", "info")
+                return {
+                    "ok": False,
+                    "approved": False,
+                    "approval_id": approval_id,
+                    "error": "Run cancelled while waiting for approval",
+                }
 
     def _usage_tokens(self, usage: Any) -> int:
         if usage is None:
