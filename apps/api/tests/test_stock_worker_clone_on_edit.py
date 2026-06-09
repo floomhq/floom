@@ -1,11 +1,11 @@
-"""Tests for stock-worker clone-on-edit + add-tool-when-none + two-way YAML sync.
+"""Tests for stock-worker write protection + add-tool-when-none + two-way YAML sync.
 
 Covers the X5/X6 fixes:
 
   X5 — Editing a read-only stock worker (PROTECTED_STOCK_WORKER_IDS) via
-       PUT /workers/{id}/files no longer 403s. It transparently FORKS the stock
-       worker into a user-owned editable copy and applies the edit there
-       (clone-on-edit). The stock template on disk is never mutated.
+       PUT /workers/{id} or PUT /workers/{id}/files is rejected. Stock templates
+       are shared, git-tracked bundles and direct edit routes must not mutate or
+       implicitly fork them.
 
   X6 — Adding a tool/connection to a worker that declares `connections: []`
        writes a new connections entry to worker.yml. And the UI<->YAML round trip
@@ -60,7 +60,7 @@ exec:
 _USCORE_STOCK_ID = "weekly_update"
 _USCORE_STOCK_WORKER_YML = """\
 schema_version: "0.3"
-name: "weekly-update"
+name: "weekly_update"
 is_example: true
 title: "Weekly Update"
 description: "Stock weekly update worker."
@@ -96,7 +96,7 @@ _RUN_PY = 'print("hello")\n'
 
 
 @_LINUX_ONLY
-class TestStockWorkerCloneOnEdit:
+class TestStockWorkerWriteProtection:
     @pytest.fixture(autouse=True)
     def _clear_caches(self):
         import db.factory as factory_mod
@@ -160,13 +160,12 @@ class TestStockWorkerCloneOnEdit:
             client = TestClient(app, raise_server_exceptions=False)
             yield client, workers_dir
 
-    # ----- X5: clone-on-edit -------------------------------------------------
+    # ----- X5: direct stock edits are blocked -------------------------------
 
-    def test_attach_brain_to_stock_worker_clones_instead_of_403(self, client):
+    def test_attach_brain_to_stock_worker_is_blocked(self, client):
         c, workers_dir = client
         # The brain pack must exist before a worker can reference it.
-        assert c.post("/contexts/my-brain-pack", headers=HEADERS).status_code in (200, 201)
-        # Operator attaches a brain pack (contexts block) to the stock worker.
+        assert c.post("/contexts/my-brain-pack", headers=HEADERS).status_code in (200, 201, 409)
         stock_yml = (workers_dir / _STOCK_ID / "worker.yml").read_text()
         edited = pyyaml.safe_load(stock_yml)
         edited["contexts"] = ["my-brain-pack"]
@@ -180,26 +179,14 @@ class TestStockWorkerCloneOnEdit:
             ]},
             headers=HEADERS,
         )
-        assert r.status_code == 200, r.text
-        body = r.json()
+        assert r.status_code == 403, r.text
+        assert r.json() == {"detail": "Stock workers cannot be modified through the API"}
 
-        # Forked into a user-owned copy: new id + cloned_from set to the stock id.
-        assert body["cloned_from"] == _STOCK_ID
-        assert body["id"] != _STOCK_ID
-        assert body["id"].startswith(f"{_STOCK_ID}-copy")
-
-        # The edit persisted on the COPY's worker.yml.
-        copy_dir = workers_dir / body["id"]
-        assert copy_dir.is_dir()
-        copy_cfg = pyyaml.safe_load((copy_dir / "worker.yml").read_text())
-        assert copy_cfg.get("contexts") == ["my-brain-pack"]
-
-        # The stock template on disk is UNCHANGED (no contexts, still its own id).
         stock_after = pyyaml.safe_load((workers_dir / _STOCK_ID / "worker.yml").read_text())
         assert "contexts" not in stock_after
         assert stock_after["name"] == _STOCK_ID
 
-    def test_add_tool_to_stock_worker_clones_and_persists_connection(self, client):
+    def test_put_stock_worker_is_blocked(self, client):
         c, workers_dir = client
         stock_yml = (workers_dir / _STOCK_ID / "worker.yml").read_text()
         edited = pyyaml.safe_load(stock_yml)
@@ -207,28 +194,19 @@ class TestStockWorkerCloneOnEdit:
         edited_yml = pyyaml.safe_dump(edited, sort_keys=False)
 
         r = c.put(
-            f"/workers/{_STOCK_ID}/files",
-            json={"files": [
-                {"path": "worker.yml", "content": edited_yml},
-                {"path": "run.py", "content": _RUN_PY},
-            ]},
+            f"/workers/{_STOCK_ID}",
+            json={"worker_yml": edited_yml, "run_py": _RUN_PY},
             headers=HEADERS,
         )
-        assert r.status_code == 200, r.text
-        body = r.json()
-        assert body["cloned_from"] == _STOCK_ID
-        copy_cfg = pyyaml.safe_load((workers_dir / body["id"] / "worker.yml").read_text())
-        assert copy_cfg.get("connections") == ["gmail"]
+        assert r.status_code == 403, r.text
+        assert r.json() == {"detail": "Stock workers cannot be modified through the API"}
 
-    # ----- X5 regression: underscore-named stock worker ----------------------
+        stock_after = pyyaml.safe_load((workers_dir / _STOCK_ID / "worker.yml").read_text())
+        assert "connections" not in stock_after
 
-    def test_attach_brain_to_underscore_stock_worker_slugifies_copy_id(self, client):
-        """Underscore-named stock worker clone must slugify the copy id.
+    # ----- Explicit create/fork keeps underscore stock ids safe -------------
 
-        `weekly_update-copy` is NOT a valid SLUG_PATTERN id (underscore), so the
-        clone path must derive the base from a slugified id -> `weekly-update`
-        -> `weekly-update-copy`. Before the fix this 400'd.
-        """
+    def test_create_from_underscore_stock_worker_slugifies_copy_id(self, client):
         c, workers_dir = client
         assert c.post("/contexts/my-brain-pack", headers=HEADERS).status_code in (200, 201, 409)
 
@@ -237,19 +215,14 @@ class TestStockWorkerCloneOnEdit:
         edited["contexts"] = ["my-brain-pack"]
         edited_yml = pyyaml.safe_dump(edited, sort_keys=False)
 
-        r = c.put(
-            f"/workers/{_USCORE_STOCK_ID}/files",
-            json={"files": [
-                {"path": "worker.yml", "content": edited_yml},
-                {"path": "run.py", "content": _RUN_PY},
-            ]},
+        r = c.post(
+            "/workers",
+            json={"worker_yml": edited_yml, "run_py": _RUN_PY},
             headers=HEADERS,
         )
         assert r.status_code == 200, r.text
         body = r.json()
 
-        # Forked into a user-owned copy with a SLUGIFIED id (no underscore).
-        assert body["cloned_from"] == _USCORE_STOCK_ID
         assert body["id"] == "weekly-update-copy"
         assert "_" not in body["id"]
 
@@ -267,8 +240,8 @@ class TestStockWorkerCloneOnEdit:
         assert stock_after.get("is_example") is True
         assert "contexts" not in stock_after
 
-    def test_underscore_stock_clone_collision_appends_suffix(self, client):
-        """A second clone of the same underscore stock worker gets a `-2` suffix."""
+    def test_underscore_stock_create_copy_collision_appends_suffix(self, client):
+        """A second explicit copy of the same underscore stock worker gets a `-2` suffix."""
         c, workers_dir = client
         assert c.post("/contexts/my-brain-pack", headers=HEADERS).status_code in (200, 201, 409)
 
@@ -276,16 +249,13 @@ class TestStockWorkerCloneOnEdit:
         edited = pyyaml.safe_load(stock_yml)
         edited["contexts"] = ["my-brain-pack"]
         edited_yml = pyyaml.safe_dump(edited, sort_keys=False)
-        files = {"files": [
-            {"path": "worker.yml", "content": edited_yml},
-            {"path": "run.py", "content": _RUN_PY},
-        ]}
+        payload = {"worker_yml": edited_yml, "run_py": _RUN_PY}
 
-        first = c.put(f"/workers/{_USCORE_STOCK_ID}/files", json=files, headers=HEADERS)
+        first = c.post("/workers", json=payload, headers=HEADERS)
         assert first.status_code == 200, first.text
         assert first.json()["id"] == "weekly-update-copy"
 
-        second = c.put(f"/workers/{_USCORE_STOCK_ID}/files", json=files, headers=HEADERS)
+        second = c.post("/workers", json=payload, headers=HEADERS)
         assert second.status_code == 200, second.text
         assert second.json()["id"] == "weekly-update-copy-2"
 
@@ -350,7 +320,7 @@ class TestStockWorkerCloneOnEdit:
     def test_two_way_sync_yaml_edit_reflected_on_get(self, client):
         c, workers_dir = client
         # YAML edit (Source tab) writes a contexts block -> GET reflects it.
-        assert c.post("/contexts/docs-pack", headers=HEADERS).status_code in (200, 201)
+        assert c.post("/contexts/docs-pack", headers=HEADERS).status_code in (200, 201, 409)
         plain_yml = (workers_dir / _PLAIN_ID / "worker.yml").read_text()
         edited = pyyaml.safe_load(plain_yml)
         edited["contexts"] = ["docs-pack"]
