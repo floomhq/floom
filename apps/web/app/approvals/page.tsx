@@ -430,9 +430,11 @@ function ApprovalsContent() {
   const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
   const [selected, setSelected] = useState<Set<string>>(new Set());
   const [bulkBusy, setBulkBusy] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
 
   const load = useCallback(async () => {
     try {
+      setLoadError(null);
       const rows = await api.approvals.list("pending");
       setApprovals(rows);
       // Drop any selections that no longer exist.
@@ -441,8 +443,10 @@ function ApprovalsContent() {
         const next = new Set([...prev].filter((id) => ids.has(id)));
         return next;
       });
-    } catch {
-      // silently fail
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "Could not load approvals";
+      setLoadError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -631,6 +635,18 @@ function ApprovalsContent() {
 
       {loading ? (
         <ApprovalsListSkeleton />
+      ) : loadError ? (
+        <div className="rounded-[var(--radius-card)] border border-red-200 bg-red-50/80 p-5 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+          <div className="font-medium">Could not load approvals.</div>
+          <div className="mt-1">{loadError}</div>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="mt-3 inline-flex h-8 items-center rounded-[var(--radius-button)] border border-red-200 px-3 text-xs font-medium hover:bg-red-100 dark:border-red-800 dark:hover:bg-red-900/40"
+          >
+            Retry
+          </button>
+        </div>
       ) : approvals.length === 0 ? (
         <div className="w-full rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--paper)] px-6 py-10 text-center">
           <CheckCircle className="mx-auto h-8 w-8 text-[var(--ink-faint)]" />
