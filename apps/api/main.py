@@ -288,14 +288,18 @@ async def lifespan(app: FastAPI):
     try:
         _bootstrap_uid = _bootstrap_user_id()
         _startup_repos = get_repositories()
+        _n = 0
         _startup_cfg = _git_cfg_get(_bootstrap_uid)
         if _startup_cfg and _startup_cfg.get("github_pat") and _startup_cfg.get("repo_full_name"):
             _n = _load_secrets_from_enc(
                 _bootstrap_uid, _startup_repos,
                 _startup_cfg["github_pat"], _startup_cfg["repo_full_name"],
             )
-            if _n:
-                logger.info("Restored %d secrets from %s on startup", _n, _SECRETS_ENC_FILENAME)
+        if _n:
+            logger.info("Restored %d secrets from %s on startup", _n, _SECRETS_ENC_FILENAME)
+        _seeded = _seed_bootstrap_secrets(_bootstrap_uid, _startup_repos)
+        if _seeded:
+            logger.info("Seeded %d bootstrap secrets from process env on startup", _seeded)
         _t = _load_workspace_tools_yml(_bootstrap_uid, _startup_repos)
         if _t:
             logger.info("Restored %d MCP tools from %s on startup", _t, _WORKSPACE_TOOLS_FILENAME)
@@ -3459,6 +3463,38 @@ def _composio_webhook_url() -> str:
 def _bootstrap_user_id() -> str:
     configured = (os.environ.get("WORKEROS_USER_ID") or "").strip()
     return configured or "federico"
+
+
+_BOOTSTRAP_SECRETS_TO_SEED: tuple[str, ...] = ("OPENAI_API_KEY",)
+
+
+def _seed_bootstrap_secrets(user_id: str, repos: Repositories) -> int:
+    """Copy bootstrap-owned env secrets into the DB on first setup.
+
+    The secrets UI and worker status checks are DB-backed. On a fresh install
+    the process env may already carry OPENAI_API_KEY, but the secrets table has
+    no row yet, so the operator sees the worker-author/defaulted worker as
+    "missing secret" even though the key is present. Seed the bootstrap user's
+    row from env exactly once when it is absent or empty.
+    """
+    seeded = 0
+    for name in _BOOTSTRAP_SECRETS_TO_SEED:
+        value = os.environ.get(name)
+        if not value or not value.strip():
+            continue
+        try:
+            existing = repos.secrets.get(user_id=user_id, name=name)
+        except Exception:
+            logger.warning("Failed to read bootstrap secret row for %s", name, exc_info=True)
+            continue
+        if existing and existing.get("value"):
+            continue
+        try:
+            repos.secrets.set(user_id=user_id, name=name, value=value, status=SecretStatus.SET.value)
+            seeded += 1
+        except Exception:
+            logger.warning("Failed to seed bootstrap secret %s", name, exc_info=True)
+    return seeded
 
 
 def _resolve_composio_connection_id(connection_ref: str) -> str:
@@ -8235,6 +8271,29 @@ def _call_draft_llm(
         raise HTTPException(status_code=502, detail=f"LLM returned invalid JSON: {exc}") from exc
 
 
+def _repair_generated_worker_manifest(raw_manifest: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize small schema drift in generated WorkerContract YAML.
+
+    The worker-author and draft-from-prompt LLMs occasionally emit `schema_version`
+    as a numeric scalar and omit the required top-level `version`. Repair those
+    two cases in the generation path so the backend returns a valid contract
+    instead of bouncing a retry on a trivially fixable format error.
+    """
+    repaired = dict(raw_manifest)
+    schema_version = repaired.get("schema_version")
+    if schema_version is not None and not isinstance(schema_version, str):
+        repaired["schema_version"] = str(schema_version)
+    if repaired.get("schema_version") == "0.3":
+        version = repaired.get("version")
+        if not isinstance(version, str) or not version.strip():
+            repaired["version"] = "0.1.0"
+        elif not version:
+            repaired["version"] = "0.1.0"
+    if "version" in repaired and repaired["version"] is not None and not isinstance(repaired["version"], str):
+        repaired["version"] = str(repaired["version"])
+    return repaired
+
+
 @app.post("/workers/draft-from-prompt", response_model=DraftFromPromptResponse)
 async def draft_worker_from_prompt(
     payload: DraftFromPromptRequest,
@@ -8263,7 +8322,7 @@ async def draft_worker_from_prompt(
 
 Detected Composio apps that may be needed: {detected_connections if detected_connections else 'none detected, infer from context'}
 
-Generate the full WorkerContract YAML and metadata JSON as specified. Make sure the YAML is valid and passes schema_version 0.3 validation. Remember: every string scalar in the YAML must be wrapped in double quotes."""
+Generate the full WorkerContract YAML and metadata JSON as specified. Make sure the YAML is valid and passes schema_version "0.3" validation. Always include version: "0.1.0" in the top-level manifest. Remember: every string scalar in the YAML must be wrapped in double quotes."""
 
     from openai import OpenAI
     import yaml as pyyaml
@@ -8296,6 +8355,13 @@ Generate the full WorkerContract YAML and metadata JSON as specified. Make sure 
             raw_manifest = pyyaml.safe_load(worker_yml)
             if not isinstance(raw_manifest, dict):
                 raise ValueError("worker_yml must be a YAML mapping")
+            raw_manifest = _repair_generated_worker_manifest(raw_manifest)
+            worker_yml = pyyaml.safe_dump(
+                raw_manifest,
+                sort_keys=False,
+                default_flow_style=False,
+            )
+            parsed["worker_yml"] = worker_yml
             parse_worker_manifest(raw_manifest)
             last_yaml_error = None
             break
@@ -9074,7 +9140,8 @@ async def draft_and_create_worker(
         f"Detected Composio apps that may be needed: "
         f"{detected_connections if detected_connections else 'none detected, infer from context'}\n\n"
         "Generate the full WorkerContract YAML and metadata JSON as specified. "
-        "Make sure the YAML is valid and passes schema_version 0.3 validation. "
+        "Make sure the YAML is valid and passes schema_version \"0.3\" validation. "
+        "Always include version: \"0.1.0\" in the top-level manifest. "
         "Remember: every string scalar in the YAML must be wrapped in double quotes."
     )
 
@@ -9105,6 +9172,13 @@ async def draft_and_create_worker(
             raw_manifest = pyyaml.safe_load(worker_yml_str)
             if not isinstance(raw_manifest, dict):
                 raise ValueError("worker_yml must be a YAML mapping")
+            raw_manifest = _repair_generated_worker_manifest(raw_manifest)
+            worker_yml_str = pyyaml.safe_dump(
+                raw_manifest,
+                sort_keys=False,
+                default_flow_style=False,
+            )
+            parsed_llm["worker_yml"] = worker_yml_str
             parse_worker_manifest(raw_manifest)
             last_yaml_error = None
             break

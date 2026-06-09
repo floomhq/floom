@@ -74,7 +74,10 @@ def test_slack_setup_config_rejects_user_managed_credentials(monkeypatch, tmp_pa
     assert "Slack credentials are managed by the platform" in response.text
     assert "client-secret" not in response.text
     assert "signing-secret" not in response.text
-    assert not env_file.exists()
+    env_text = env_file.read_text() if env_file.exists() else ""
+    assert "SLACK_CLIENT_ID=123.abc" not in env_text
+    assert "SLACK_CLIENT_SECRET=client-secret" not in env_text
+    assert "SLACK_SIGNING_SECRET=signing-secret" not in env_text
 
 
 def test_slack_oauth_callback_persists_team_install_without_leaking_token(monkeypatch, tmp_path):

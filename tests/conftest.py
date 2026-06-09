@@ -52,11 +52,8 @@ if not os.environ.get("FLOOM_ARTIFACTS_DIR"):
 #     trips the plaintext-.env pre-commit guard. WORKEROS_API_ENV_FILE is the
 #     canonical override both honour.
 if not os.environ.get("WORKEROS_API_ENV_FILE") and not os.environ.get("FLOOM_API_ENV_FILE"):
-    _suite_env_file = tempfile.NamedTemporaryFile(
-        prefix="workeros-suite-secrets-", suffix=".env", delete=False
-    )
-    _suite_env_file.close()
-    os.environ["WORKEROS_API_ENV_FILE"] = _suite_env_file.name
+    _suite_env_dir = tempfile.mkdtemp(prefix="workeros-suite-secrets-")
+    os.environ["WORKEROS_API_ENV_FILE"] = os.path.join(_suite_env_dir, "api.env")
 
 # 2) Force single-tenant local deploy mode for the suite.
 os.environ.setdefault("WORKEROS_DEPLOY", "local")
