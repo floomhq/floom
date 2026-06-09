@@ -115,6 +115,10 @@ def _manifest_field(section: str, field: str) -> str | None:
     return match.group(1).strip()
 
 
+def _manifest_status(section: str) -> str:
+    return (_manifest_field(section, "Status") or "").strip().upper()
+
+
 def load_active_workers(manifest_path: Path = WORKERS_DOC) -> list[WorkerSmokeSpec]:
     text = manifest_path.read_text(encoding="utf-8")
     in_active_workers = False
@@ -131,6 +135,10 @@ def load_active_workers(manifest_path: Path = WORKERS_DOC) -> list[WorkerSmokeSp
         runtime = _manifest_field(section, "Runtime") or "unknown"
         if smoke_input is None:
             raise RuntimeError(f"Missing smoke input for active worker {current_id}")
+        if "ARCHIVED" in _manifest_status(section):
+            current_id = None
+            current_lines = []
+            return
         smoke_input = re.sub(r"\s+\(\+ file upload\)$", "", smoke_input).strip()
         sample_file = None
         file_input_name = None
@@ -505,11 +513,23 @@ def main(argv: list[str] | None = None) -> int:
     parser.add_argument("--poll-timeout", type=int, default=900)
     parser.add_argument("--poll-interval", type=int, default=10)
     parser.add_argument("--manifest", default=str(WORKERS_DOC))
+    parser.add_argument(
+        "--workers",
+        default=None,
+        help="Comma-separated worker IDs to run. Defaults to every non-archived worker in the active manifest section.",
+    )
     args = parser.parse_args(argv)
 
     secret = _read_secret(args.secret)
     manifest_path = Path(args.manifest)
     specs = load_active_workers(manifest_path)
+    if args.workers:
+        selected = {worker_id.strip() for worker_id in args.workers.split(",") if worker_id.strip()}
+        known = {spec.worker_id for spec in specs}
+        unknown = sorted(selected - known)
+        if unknown:
+            raise SystemExit(f"Unknown or inactive worker(s): {', '.join(unknown)}")
+        specs = [spec for spec in specs if spec.worker_id in selected]
     session = requests.Session()
     session.headers.update({"x-floom-secret": secret})
 
