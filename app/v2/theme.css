@@ -1,0 +1,92 @@
+/* v2 preview theme — tokens from the FINAL wireframe spec (localhost:8899).
+   Scoped: overrides the source vars that globals.css derives everything from,
+   so every existing landing-ref component re-skins without modification. */
+
+.theme-v2 {
+  /* source tokens */
+  --bg-app: #FBFBFC;
+  --bg-card: #FFFFFF;
+  --text-primary: #16171A;
+  --text-muted: #6B7280;
+  --border-default: rgba(16, 17, 20, 0.09);
+  --border-soft: rgba(16, 17, 20, 0.055);
+  --primary: #16171A;
+  --primary-text: #FFFFFF;
+  --warning: #E5533D;
+  --pending: #C98A1A;
+  --radius-card: 16px;
+  --radius-button: 10px;
+  --shadow-card: none;
+  --active-nav-bg: #F3F4F6;
+
+  /* literals globals.css does not derive */
+  --bg-2: #F3F4F6;
+  --bg-3: #ECEDF0;
+  --paper-2: #F6F7F8;
+  --line-strong: rgba(16, 17, 20, 0.16);
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-pop: 0 12px 32px rgba(16, 17, 20, 0.10), 0 0 0 1px var(--border-default);
+  --shadow-btn: none;
+
+  /* spec accent (blue) for selection + highlights */
+  --v2-accent: #3E6FE0;
+  --v2-sel: #EEF3FE;
+
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.theme-v2.dark {
+  --bg-app: #191A1D;
+  --bg-card: #212327;
+  --text-primary: #ECEDEF;
+  --text-muted: #9A9EA6;
+  --border-default: rgba(255, 255, 255, 0.10);
+  --border-soft: rgba(255, 255, 255, 0.055);
+  --primary: #ECEDEF;
+  --primary-text: #191A1D;
+  --active-nav-bg: #292B30;
+
+  --bg-2: #292B30;
+  --bg-3: #33363C;
+  --paper-2: #232529;
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--border-default);
+
+  --v2-accent: #5B8DEF;
+  --v2-sel: rgba(91, 141, 239, 0.16);
+}
+
+/* derived chain (globals.css derives these from the source tokens at :root
+   scope; redeclare locally so the scoped override actually cascades) */
+.theme-v2,
+.theme-v2.dark {
+  --bg: var(--bg-app);
+  --paper: var(--bg-app);
+  --ink: var(--text-primary);
+  --ink-soft: var(--text-muted);
+  --line: var(--border-default);
+  --line-soft: var(--border-soft);
+  --background: var(--bg-app);
+  --foreground: var(--text-primary);
+  --card: var(--bg-card);
+  --card-foreground: var(--text-primary);
+  --secondary: var(--bg-2);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--bg-2);
+  --muted-foreground: var(--text-muted);
+  --border: var(--border-default);
+  --accent: var(--primary);
+  --accent-foreground: var(--primary-text);
+  --primary-foreground: var(--primary-text);
+}
+
+/* spec highlight grammar (prompt tool mentions) */
+.theme-v2 .v2-hl {
+  background: var(--v2-sel);
+  color: var(--v2-accent);
+  border-radius: 4px;
+  padding: 0 3px;
+  font-weight: 500;
+}
