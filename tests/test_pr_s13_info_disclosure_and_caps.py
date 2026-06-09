@@ -1179,7 +1179,7 @@ def test_stock_worker_webhook_secret_rotate_is_blocked(monkeypatch, tmp_path):
     assert resp.json() == {"detail": "Stock workers cannot be modified through the API"}
 
 
-def test_stock_worker_direct_mutations_block_but_create_put_and_files_fork(monkeypatch, tmp_path):
+def test_stock_worker_direct_mutations_block_but_create_can_fork(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
     _insert_minimal_worker(main, "research_brief")
@@ -1209,13 +1209,11 @@ def test_stock_worker_direct_mutations_block_but_create_put_and_files_fork(monke
     assert create_resp.status_code == 200, create_resp.text
     assert create_resp.json()["id"] == "research-brief-copy"
     assert create_resp.json()["is_example"] is False
-    assert put_resp.status_code == 200, put_resp.text
-    assert put_resp.json()["id"] == "research-brief-copy-2"
-    assert put_resp.json()["cloned_from"] == "research_brief"
+    assert put_resp.status_code == 403, put_resp.text
+    assert put_resp.json() == {"detail": "Stock workers cannot be modified through the API"}
     assert patch_resp.status_code == 403, patch_resp.text
-    assert files_resp.status_code == 200, files_resp.text
-    assert files_resp.json()["id"] == "research-brief-copy-3"
-    assert files_resp.json()["cloned_from"] == "research_brief"
+    assert files_resp.status_code == 403, files_resp.text
+    assert files_resp.json() == {"detail": "Stock workers cannot be modified through the API"}
 
 
 def test_worker_schema_validation_does_not_leak_pydantic_details(monkeypatch, tmp_path):
