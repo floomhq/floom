@@ -1049,7 +1049,7 @@ def test_shipped_worker_directories_match_protected_set(monkeypatch, tmp_path):
     assert shipped_worker_ids == set(main.PROTECTED_STOCK_WORKER_IDS)
 
 
-def test_protected_stock_worker_direct_mutations_block_but_put_and_files_fork(monkeypatch, tmp_path):
+def test_protected_stock_worker_direct_mutations_are_blocked(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path, stock_workers=("linkedin-post-engagements",))
     client = TestClient(main.app)
 
@@ -1068,27 +1068,18 @@ def test_protected_stock_worker_direct_mutations_block_but_put_and_files_fork(mo
             headers=_headers("user-a"),
             json={"trigger_type": "manual"},
         ),
+        "put": client.put(
+            "/workers/linkedin-post-engagements",
+            headers=_headers("user-a"),
+            json=payload,
+        ),
+        "files": client.put(
+            "/workers/linkedin-post-engagements/files",
+            headers=_headers("user-a"),
+            json=files_payload,
+        ),
     }
-    put_forked = client.put(
-        "/workers/linkedin-post-engagements",
-        headers=_headers("user-a"),
-        json=payload,
-    )
-    forked = client.put(
-        "/workers/linkedin-post-engagements/files",
-        headers=_headers("user-a"),
-        json=files_payload,
-    )
 
     for name, response in blocked_checks.items():
         assert response.status_code == 403, f"{name}: {response.status_code} {response.text}"
-    assert put_forked.status_code == 200, put_forked.text
-    put_body = put_forked.json()
-    assert put_body["id"] == "linkedin-post-engagements-copy"
-    assert put_body["cloned_from"] == "linkedin-post-engagements"
-    assert put_body["is_example"] is False
-    assert forked.status_code == 200, forked.text
-    body = forked.json()
-    assert body["id"] == "linkedin-post-engagements-copy-2"
-    assert body["cloned_from"] == "linkedin-post-engagements"
-    assert body["is_example"] is False
+        assert response.json() == {"detail": "Stock workers cannot be modified through the API"}

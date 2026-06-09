@@ -38,10 +38,15 @@ if not os.environ.get("WORKEROS_DB") and not os.environ.get("FLOOM_DB"):
 #     deterministic and left hundreds of untracked tw*/fb-* dirs behind).
 #     Stock-worker tests that genuinely need the real workers/ override this
 #     explicitly (os.environ[...] = REPO_ROOT/workers, not setdefault).
+_SUITE_WORKSPACE_DIR = os.environ.get("WORKEROS_WORKSPACE_DIR")
 _SUITE_WORKERS_DIR = os.environ.get("FLOOM_WORKERS_DIR")
 if not _SUITE_WORKERS_DIR:
-    _SUITE_WORKERS_DIR = tempfile.mkdtemp(prefix="workeros-suite-workers-")
+    _SUITE_WORKSPACE_DIR = tempfile.mkdtemp(prefix="workeros-suite-workspace-")
+    _SUITE_WORKERS_DIR = os.path.join(_SUITE_WORKSPACE_DIR, "workers")
+    os.makedirs(_SUITE_WORKERS_DIR, exist_ok=True)
     os.environ["FLOOM_WORKERS_DIR"] = _SUITE_WORKERS_DIR
+if _SUITE_WORKSPACE_DIR and not os.environ.get("WORKEROS_WORKSPACE_DIR"):
+    os.environ["WORKEROS_WORKSPACE_DIR"] = _SUITE_WORKSPACE_DIR
 if not os.environ.get("FLOOM_ARTIFACTS_DIR"):
     os.environ["FLOOM_ARTIFACTS_DIR"] = tempfile.mkdtemp(prefix="workeros-suite-artifacts-")
 
@@ -141,6 +146,7 @@ _VOLATILE_ENV_KEYS = (
     "WORKEROS_PRECLEAR_BACKUP_DIR",
     "WORKEROS_RATE_LIMIT_DEV",
     "WORKEROS_MIN_FREE_DISK_BYTES",
+    "WORKEROS_WORKSPACE_DIR",
     "WORKEROS_API_ENV_FILE",
     "FLOOM_API_ENV_FILE",
     "COMPOSIO_API_KEY",
@@ -238,6 +244,8 @@ def _isolate_global_state(request):
     elif _SUITE_WORKERS_DIR:
         _target_workers_dir = _SUITE_WORKERS_DIR
         os.environ["FLOOM_WORKERS_DIR"] = _SUITE_WORKERS_DIR
+        if _SUITE_WORKSPACE_DIR:
+            os.environ["WORKEROS_WORKSPACE_DIR"] = _SUITE_WORKSPACE_DIR
     else:
         _target_workers_dir = None
     # worker_registry.WORKERS_DIR is a module global resolved ONCE at import; the
