@@ -21,15 +21,15 @@ version: "0.1.0"
 is_example: false
 trigger:
   type: "manual"
+connections:
+  - app: "gmail"
+    allowed_tools:
+      - "GMAIL_FETCH_EMAILS"
+      - "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID"
 exec:
   entry: "SKILL.md"
   runtime: "skill"
   runner: "e2b"
-  connections:
-    - app: "gmail"
-      allowed_tools:
-        - "GMAIL_FETCH_EMAILS"
-        - "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID"
   inputs: []
   outputs:
     - name: "latest_email"
