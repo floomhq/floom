@@ -4104,18 +4104,21 @@ def _list_visible_workers(
     use_cache: bool = True,
     role: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    # Pre-load ownership for all git-tracked workers in one query so
+    # _worker_hidden_from_api() inside the loop doesn't fire N extra SELECTs.
+    _owned = _build_owned_tracked_ids()
     visible = {
         worker["id"]: worker
         for worker in _list_db_workers(user_id=user_id, repos=repos, role=role)
         if not str(worker.get("id") or "").startswith(".")
-        and not _worker_hidden_from_api(str(worker.get("id") or ""))
+        and not _worker_hidden_from_api(str(worker.get("id") or ""), _owned)
     }
     for worker in _stock_workers_from_filesystem(use_cache=use_cache):
         visible.setdefault(worker["id"], worker)
     if _shared_filesystem_fallback_allowed():
         for worker in discover_workers(use_cache=use_cache):
             worker_id = str(worker.get("id") or "")
-            if worker_id and not _worker_hidden_from_api(worker_id):
+            if worker_id and not _worker_hidden_from_api(worker_id, _owned):
                 visible.setdefault(worker_id, worker)
     return list(visible.values())
 
@@ -11739,6 +11742,35 @@ async def upload_public_approval_screenshot(
     )
 
 
+def _load_typed_approval(
+    approval_id: str,
+    user_id: str,
+    expected_kind: str,
+    repos: Repositories,
+) -> Dict[str, Any]:
+    """Fetch an approval by ID and validate ownership, pending status, and kind.
+
+    Raises HTTPException(404/409/400) on any check failure so callers only need
+    to handle the happy path. Returns the approval row dict.
+    """
+    approval = repos.approvals.get(owner_id=user_id, approval_id=approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if approval.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="Approval already decided")
+    decision_input: Dict[str, Any] = {}
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if decision_input.get("kind") != expected_kind:
+        raise HTTPException(
+            status_code=400,
+            detail=f"This approval has kind={decision_input.get('kind')!r}, expected {expected_kind!r}.",
+        )
+    return approval
+
+
 @app.post("/runs/{run_id}/approve", response_model=ActionResponse)
 def approve_run(
     run_id: str,
@@ -11991,23 +12023,8 @@ def approve_destructive_action(
     reviewer feedback without a request body; the route body carries it for
     authed callers.
     """
-    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
-    if approval is None:
-        raise HTTPException(status_code=404, detail="Approval not found")
-    if approval.get("status") != "pending":
-        raise HTTPException(status_code=409, detail="Approval already decided")
-
-    decision_input: Dict[str, Any] = {}
-    try:
-        decision_input = json.loads(approval.get("decision_input_json") or "{}")
-    except Exception:
-        pass
-    if decision_input.get("kind") != "destructive_delete":
-        raise HTTPException(
-            status_code=400,
-            detail="This approval is not a destructive-action request. Use POST /runs/{run_id}/approve instead.",
-        )
-
+    approval = _load_typed_approval(approval_id, auth.user_id, "destructive_delete", repos)
+    decision_input: Dict[str, Any] = json.loads(approval.get("decision_input_json") or "{}")
     path = decision_input.get("path", "")
     description = _execute_destructive_delete(path, auth.user_id, repos)
 
@@ -12039,23 +12056,8 @@ def reject_destructive_action(
     repos: Repositories = Depends(get_repos),
 ):
     """Reject a sandboxed-worker DELETE request without executing it."""
-    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
-    if approval is None:
-        raise HTTPException(status_code=404, detail="Approval not found")
-    if approval.get("status") != "pending":
-        raise HTTPException(status_code=409, detail="Approval already decided")
-
-    decision_input: Dict[str, Any] = {}
-    try:
-        decision_input = json.loads(approval.get("decision_input_json") or "{}")
-    except Exception:
-        pass
-    if decision_input.get("kind") != "destructive_delete":
-        raise HTTPException(
-            status_code=400,
-            detail="This approval is not a destructive-action request. Use POST /runs/{run_id}/reject instead.",
-        )
-
+    approval = _load_typed_approval(approval_id, auth.user_id, "destructive_delete", repos)
+    decision_input: Dict[str, Any] = json.loads(approval.get("decision_input_json") or "{}")
     annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
     repos.approvals.reject(
         owner_id=auth.user_id,
@@ -12088,23 +12090,7 @@ def approve_agent_tool_approval(
     in-process polling loop in agent_driver can resume the run in-place.
     Any edited_output is stored and returned to the agent by the polling loop.
     """
-    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
-    if approval is None:
-        raise HTTPException(status_code=404, detail="Approval not found")
-    if approval.get("status") != "pending":
-        raise HTTPException(status_code=409, detail="Approval already decided")
-
-    decision_input: Dict[str, Any] = {}
-    try:
-        decision_input = json.loads(approval.get("decision_input_json") or "{}")
-    except Exception:
-        pass
-    if decision_input.get("kind") != "agent_tool":
-        raise HTTPException(
-            status_code=400,
-            detail="This approval is not an agent-tool approval. Use POST /runs/{run_id}/approve instead.",
-        )
-
+    approval = _load_typed_approval(approval_id, auth.user_id, "agent_tool", repos)
     edited_output_json = json.dumps(body.edited_output) if body.edited_output is not None else None
     repos.approvals.approve(
         owner_id=auth.user_id,
@@ -12136,23 +12122,7 @@ def reject_agent_tool_approval(
     Does NOT affect run status directly — the polling loop in agent_driver
     picks up the 'rejected' status and resumes with approved=False.
     """
-    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
-    if approval is None:
-        raise HTTPException(status_code=404, detail="Approval not found")
-    if approval.get("status") != "pending":
-        raise HTTPException(status_code=409, detail="Approval already decided")
-
-    decision_input: Dict[str, Any] = {}
-    try:
-        decision_input = json.loads(approval.get("decision_input_json") or "{}")
-    except Exception:
-        pass
-    if decision_input.get("kind") != "agent_tool":
-        raise HTTPException(
-            status_code=400,
-            detail="This approval is not an agent-tool approval. Use POST /runs/{run_id}/reject instead.",
-        )
-
+    approval = _load_typed_approval(approval_id, auth.user_id, "agent_tool", repos)
     annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
     repos.approvals.reject(
         owner_id=auth.user_id,
