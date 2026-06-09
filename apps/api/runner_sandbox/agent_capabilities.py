@@ -446,9 +446,11 @@ def _trim_composio_response(obj: Any, _depth: int = 0) -> Any:
         return {k: _trim_composio_response(v, _depth + 1) for k, v in obj.items()}
     if isinstance(obj, list):
         trimmed = obj[:_MAX_COMPOSIO_ARRAY_LEN]
-        result = [_trim_composio_response(item, _depth + 1) for item in trimmed]
-        if len(obj) > _MAX_COMPOSIO_ARRAY_LEN:
-            result.append(f"…[{len(obj) - _MAX_COMPOSIO_ARRAY_LEN} more items trimmed]")
+        result: list[Any] = [_trim_composio_response(item, _depth + 1) for item in trimmed]
+        # Do NOT append a string sentinel — the list may contain typed dicts
+        # (e.g. Gmail message objects) and any downstream `item["id"]` would
+        # raise TypeError: string indices must be integers on the extra element.
+        # Truncation is visible implicitly from the shorter list length.
         return result
     return obj
 

@@ -260,6 +260,7 @@ class AgentDriver(SandboxDriver):
                         _repos_t.approvals.reject(
                             owner_id=user_id,
                             run_id=run_id,
+                            approval_id=str(_apr.get("id") or ""),
                             decided_at=datetime.now(timezone.utc).isoformat(),
                             reason=f"Run timed out after {timeout_seconds}s",
                         )
@@ -349,8 +350,19 @@ class AgentDriver(SandboxDriver):
         transcript.append({"role": "system", "content": system_prompt})
         transcript.append({"role": "user", "content": run_input})
 
+        # OpenAI's hard cap is ~16 384 output tokens for most models. Passing
+        # 1 000 000 (the WorkerLimits sentinel meaning "no limit") raises
+        # InvalidRequestError before the first token is generated. Only forward
+        # max_tokens when the worker explicitly set a value below the safe cap;
+        # otherwise let the API use the model's own default.
+        _OPENAI_MAX_OUTPUT_CAP = 16_384
+        _effective_max_tokens = (
+            limits.max_output_tokens
+            if limits.max_output_tokens <= _OPENAI_MAX_OUTPUT_CAP
+            else None
+        )
         model_settings = ModelSettings(
-            max_tokens=limits.max_output_tokens,
+            max_tokens=_effective_max_tokens,
             include_usage=True,
         )
         # Per-run, loop-local OpenAI client. The SDK's default provider shares a
@@ -1829,7 +1841,10 @@ class AgentDriver(SandboxDriver):
         while True:
             await asyncio.sleep(_poll_interval)
             try:
-                row = repos.approvals.get_by_run_id(run_id=run_id)
+                # Poll by approval_id (not run_id) to avoid reading a different
+                # approval row when multiple sequential request_approval() calls
+                # are in flight for the same run.
+                row = repos.approvals.get(owner_id=user_id, approval_id=approval_id) if user_id else None
             except Exception as exc:
                 logger.warning("request_approval: poll error for %s: %s", run_id, exc)
                 row = None
@@ -1877,6 +1892,7 @@ class AgentDriver(SandboxDriver):
                     repos.approvals.reject(
                         owner_id=user_id,
                         run_id=run_id,
+                        approval_id=approval_id,
                         decided_at=datetime.now(timezone.utc).isoformat(),
                         reason=f"Timed out after {timeout_seconds}s — no decision received",
                     )
@@ -1904,6 +1920,7 @@ class AgentDriver(SandboxDriver):
                     repos.approvals.reject(
                         owner_id=user_id,
                         run_id=run_id,
+                        approval_id=approval_id,
                         decided_at=datetime.now(timezone.utc).isoformat(),
                         reason="Run cancelled while awaiting approval",
                     )
