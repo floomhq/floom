@@ -1,0 +1,48 @@
+schema_version: "0.3"
+name: "gmail-meeting-approval"
+title: "Gmail Meeting Approval"
+description: "Scans recent Gmail messages for meeting requests and creates approved Calendar events"
+long_description: "Scans the 10 most recent Gmail inbox messages, identifies likely meeting requests, and asks for approval before creating any Google Calendar event. Each detected meeting request gets its own approval with sender, subject, proposed time, duration, location, and a short summary of the ask. Approved requests are added to Google Calendar and all actions are returned in a structured JSON summary."
+use_cases:
+  - "Review meeting requests before adding them to Calendar"
+  - "Turn email scheduling requests into approved calendar events"
+  - "Keep a clear audit trail of approvals and created events"
+example_input: {}
+example_output: "{\n  \"emails_scanned\": 10,\n  \"meeting_requests_found\": 2,\n  \"approvals_raised\": [\n    {\"subject\": \"Intro call next week\", \"from\": \"alex@example.com\", \"proposed_time\": \"2026-06-12T15:00:00\", \"approval_status\": \"approved\"}\n  ],\n  \"events_created\": [\n    {\"summary\": \"Intro call next week\", \"start\": \"2026-06-12T15:00:00\", \"calendar_event_id\": \"abc123\"}\n  ]\n}"
+how_it_works: "Fetch recent Gmail inbox messages -> inspect each full message -> detect meeting requests -> request one approval per request -> create Calendar events only for approved requests -> write JSON summary"
+folder: "Operations/Reporting"
+tags:
+  - "gmail"
+  - "calendar"
+  - "approval"
+  - "automation"
+  - "on-demand"
+version: "0.1.0"
+is_example: false
+trigger:
+  type: "manual"
+limits:
+  max_tool_iterations: 30
+  max_output_tokens: 4096
+  max_total_tokens: 50000
+  timeout_seconds: 600
+exec:
+  entry: "SKILL.md"
+  runtime: "skill"
+  runner: "e2b"
+  connections:
+    - app: "gmail"
+      allowed_tools:
+        - "GMAIL_FETCH_EMAILS"
+        - "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID"
+    - app: "googlecalendar"
+      allowed_tools:
+        - "GOOGLECALENDAR_CREATE_EVENT"
+  inputs: []
+  outputs:
+    - name: "result"
+      kind: "file"
+      media_type: "application/json"
+      path: "out/result.json"
+      required: true
+      label: "Approval Summary"

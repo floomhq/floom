@@ -39,7 +39,32 @@ for attempt in range(5):
         break
 ```
 
-## 3. Missing output write
+## 3. `connections:` nested under `exec:`
+
+**Never** put `connections:` inside the `exec:` block. It is a **top-level field**, a sibling of `exec:`, not a child.
+
+```yaml
+# BAD — Pydantic silently drops connections nested under exec
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+  connections:          # ← WRONG PLACEMENT
+    - app: "gmail"
+      allowed_tools: [GMAIL_FETCH_EMAILS]
+
+# GOOD — connections at top level, exec has no connections key
+connections:
+  - app: "gmail"
+    allowed_tools:
+      - GMAIL_FETCH_EMAILS
+exec:
+  entry: "SKILL.md"
+  runner: "e2b"
+```
+
+When `connections:` is under `exec:`, the server silently drops it, the agent never receives Gmail/Calendar/Slack tools, and the run fails with "worker not directly invokable" or "missing_connection". This is the single most common generated-worker failure.
+
+## 4. Missing output write
 
 **Never** finish a `run.py` without writing declared outputs. Undeclared outputs are invisible to the platform.
 
