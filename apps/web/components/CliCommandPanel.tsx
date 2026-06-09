@@ -7,6 +7,8 @@ import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { McpToolCatalog } from "@/components/McpToolCatalog";
 import { getPublicApiBase, getPublicApiHost } from "@/lib/api-base";
+import { getActiveWorkspaceId } from "@/lib/api";
+import { buildMcpJson } from "@/lib/mcp-config";
 
 const SECRET_STORAGE_KEYS = ["floom_secret", "FLOOM_SECRET", "workeros_api_secret"];
 const API_BASE = getPublicApiBase();
@@ -51,22 +53,8 @@ function buildMcpSnippet(target: McpTarget): string {
 
 // The OSS MCP server is HTTP transport: clients connect to /mcp-tools/serve and
 // authenticate with the x-floom-secret header (see apps/mcp/src/commands/mcp.ts
-// resolveMcpConfig). This is the ready-to-paste mcpServers entry the CLI would
-// otherwise write for you — here with the token embedded so it is copy-paste-ready.
-function buildMcpJson(secret: string): string {
-  return JSON.stringify(
-    {
-      mcpServers: {
-        workeros: {
-          url: `${API_BASE}/mcp-tools/serve`,
-          headers: { "x-floom-secret": secret },
-        },
-      },
-    },
-    null,
-    2,
-  );
-}
+// resolveMcpConfig). The ready-to-paste mcpServers entry — token embedded, and
+// the active workspace pinned — is built by @/lib/mcp-config (buildMcpJson).
 
 // CLI subcommands surfaced for the CLI tab (mirror of apps/mcp/src/cli.ts). The
 // curated MCP-tool catalog (McpToolCatalog) covers the MCP/agent surface; this
@@ -173,12 +161,16 @@ export function CliCommandPanel() {
   const [mcpTarget, setMcpTarget] = useState<McpTarget>("claude");
   const [generating, setGenerating] = useState(false);
   const [errorText, setErrorText] = useState("");
+  const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
 
   useEffect(() => {
     // The generated OSS token is cached in this browser so setup snippets can
     // show the same credential the CLI receives from the device-flow endpoint.
     const stored = readStoredSecret();
     if (stored) setStoredSecret(stored);
+    // Pin the active workspace (if non-default) into the MCP/curl snippets so
+    // they target the workspace the user is currently viewing.
+    setActiveWorkspace(getActiveWorkspaceId());
   }, []);
 
   function storeSecret(value: string) {
@@ -263,15 +255,16 @@ export function CliCommandPanel() {
       `npm i -g @floomhq/workeros\nWORKEROS_API_SECRET=${secret} workeros whoami`;
     // MCP: ready-to-paste mcpServers JSON with the token embedded. The
     // `workeros mcp install` command would write the same thing after login.
-    const mcp = (secret: string) => buildMcpJson(secret);
+    const mcp = (secret: string) => buildMcpJson(secret, activeWorkspace);
     const api = (secret: string) =>
-      `curl -sS ${API_BASE}/workers?shape=list \\\n  -H "x-floom-secret: ${secret}"`;
+      `curl -sS ${API_BASE}/workers?shape=list \\\n  -H "x-floom-secret: ${secret}"` +
+      (activeWorkspace ? ` \\\n  -H "x-workeros-workspace: ${activeWorkspace}"` : "");
     return {
       cli: { display: cli(displaySecret), copy: cli(copySecret) },
       mcp: { display: mcp(displaySecret), copy: mcp(copySecret) },
       api: { display: api(displaySecret), copy: api(copySecret) },
     };
-  }, [displaySecret, copySecret]);
+  }, [displaySecret, copySecret, activeWorkspace]);
 
   async function copySnippet(key: "cli" | "mcp" | "api") {
     await navigator.clipboard.writeText(snippets[key].copy);
