@@ -270,6 +270,26 @@ test("workers validate accepts GSC proxy worker with long app prefix", async () 
   assert.match(result.stdout, /Validated cli-test-worker/);
 });
 
+test("workers push accepts cross-app Composio tool in explicit allowlist", async (t) => {
+  const mock = await startMockApi({ existing: false });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+  const dir = await makeWorkerDir({
+    workerYml: `${scriptWorkerYml}connections:\n  - app: googlesheets\n    allowed_tools:\n      - GOOGLESHEETS_BATCH_GET\n      - GOOGLEDRIVE_ADD_FILE_SHARING_PREFERENCE\n`,
+    run: `import os\nTOOL = "GOOGLEDRIVE_ADD_FILE_SHARING_PREFERENCE"\nAPI = os.environ["WORKEROS_API_URL"]\nRUN = os.environ["FLOOM_RUN_ID"]\nurl = f"{API}/runs/{RUN}/composio-execute/{TOOL}"\n`,
+  });
+
+  const result = await runCli(["workers", "push", dir], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Created cli-test-worker/);
+  assert.deepEqual(mock.seen, [
+    "GET /workers/cli-test-worker",
+    "POST /workers",
+  ]);
+  assert.match(mock.bodies[0].worker_yml, /GOOGLEDRIVE_ADD_FILE_SHARING_PREFERENCE/);
+});
+
 test("workers push creates a new worker with POST /workers", async (t) => {
   const mock = await startMockApi({ existing: false });
   t.after(() => mock.server.close());

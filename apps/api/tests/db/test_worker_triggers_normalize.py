@@ -20,6 +20,7 @@ from __future__ import annotations
 import importlib
 import json
 import sys
+from datetime import datetime, timezone
 
 
 def _fresh_scheduler():
@@ -173,6 +174,74 @@ def test_two_schedule_triggers_both_fire_distinct_runs(repo_bundle, monkeypatch)
     assert len(fired) == 2, f"expected both triggers to fire, got {fired}"
     refs = {ref for _rid, ref in fired}
     assert refs == {rows[0]["id"], rows[1]["id"]}, f"distinct trigger refs expected: {refs}"
+
+
+def test_scheduler_initializes_trigger_next_run_at_in_declared_timezone(repo_bundle, monkeypatch):
+    repos, db, manifest = repo_bundle
+    scheduler = _fresh_scheduler()
+
+    _make_worker(repos, manifest)
+    rows = repos.workers.reconcile_triggers(
+        worker_id="w1",
+        triggers=[{"type": "schedule", "cron": "0 9 * * *", "timezone": "America/Los_Angeles"}],
+    )
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = datetime(2026, 6, 9, 7, 0, tzinfo=timezone.utc)
+            return value.astimezone(tz) if tz else value.replace(tzinfo=None)
+
+    monkeypatch.setattr(scheduler, "datetime", FixedDateTime)
+    monkeypatch.setattr(scheduler, "get_repositories", lambda: repos)
+    monkeypatch.setattr(scheduler, "alerting_tick", lambda: None)
+
+    scheduler._tick()
+
+    with db.get_db() as conn:
+        next_run_at = conn.execute(
+            "SELECT next_run_at FROM worker_triggers WHERE id = ?",
+            (rows[0]["id"],),
+        ).fetchone()[0]
+
+    assert next_run_at == "2026-06-09T16:00:00+00:00"
+
+
+def test_scheduler_initializes_legacy_next_run_at_in_declared_timezone(repo_bundle, monkeypatch):
+    repos, _db, manifest = repo_bundle
+    scheduler = _fresh_scheduler()
+
+    worker_id = "legacy-timezone-worker"
+    repos.workers.create(
+        user_id="federico",
+        worker_id=worker_id,
+        name=worker_id,
+        manifest_json={
+            **manifest(worker_id, worker_id),
+            "trigger": {"type": "schedule", "cron": "0 9 * * *", "timezone": "America/Los_Angeles"},
+        },
+        bundle_path=f"workers/{worker_id}",
+        trigger_type="schedule",
+        cron_expr="0 9 * * *",
+        cron_timezone="America/Los_Angeles",
+    )
+
+    class FixedDateTime(datetime):
+        @classmethod
+        def now(cls, tz=None):
+            value = datetime(2026, 6, 9, 7, 0, tzinfo=timezone.utc)
+            return value.astimezone(tz) if tz else value.replace(tzinfo=None)
+
+    monkeypatch.setattr(scheduler, "datetime", FixedDateTime)
+    monkeypatch.setattr(scheduler, "get_repositories", lambda: repos)
+    monkeypatch.setattr(scheduler, "alerting_tick", lambda: None)
+    monkeypatch.setattr(repos.workers, "count_schedule_trigger_rows", lambda: 0)
+
+    scheduler._tick()
+
+    state = repos.workers.get_schedule_state(worker_id=worker_id)
+    assert state is not None
+    assert state["next_run_at"] == "2026-06-09T16:00:00+00:00"
 
 
 def test_scheduler_respects_running_worker_concurrency(repo_bundle, monkeypatch):

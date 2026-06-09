@@ -124,6 +124,78 @@ def test_composio_proxy_derives_entity_id_from_run_owner(monkeypatch, tmp_path):
     db.get_repositories.cache_clear()
 
 
+def test_composio_proxy_accepts_cross_app_tool_in_explicit_allowlist(monkeypatch, tmp_path):
+    db, main = _load_app(monkeypatch, tmp_path)
+    repos = db.get_repositories()
+    manifest = {
+        "id": "sheets-worker",
+        "name": "Sheets Worker",
+        "trigger": {"type": "manual"},
+        "runtime": {"type": "python", "entrypoint": "run.py", "runner": "e2b"},
+        "inputs": [],
+        "outputs": [],
+        "secrets": [],
+        "connections": [
+            {
+                "app": "googlesheets",
+                "allowed_tools": [
+                    "GOOGLESHEETS_BATCH_GET",
+                    "GOOGLEDRIVE_ADD_FILE_SHARING_PREFERENCE",
+                ],
+            }
+        ],
+    }
+    repos.workers.create(
+        user_id="owner-a",
+        worker_id="sheets-worker",
+        name="Sheets Worker",
+        manifest_json=manifest,
+        bundle_path="workers/sheets-worker",
+    )
+    repos.runs.create(
+        user_id="owner-a",
+        run_id="run-sheets",
+        worker_id="sheets-worker",
+        status="running",
+        trigger_source="manual",
+        runner="e2b",
+    )
+    repos.connections.upsert(
+        user_id="owner-a",
+        id="conn-row",
+        app_name="googlesheets",
+        composio_connection_id="ca_sheets",
+        status="active",
+    )
+
+    captured = {}
+
+    class _Response:
+        def json(self):
+            return {"successful": True, "data": {"shared": True}}
+
+    def fake_post(url, *, headers, json, timeout):
+        captured["url"] = url
+        captured["json"] = json
+        return _Response()
+
+    monkeypatch.setattr("requests.post", fake_post)
+
+    client = TestClient(main.app)
+    resp = client.post(
+        "/runs/run-sheets/composio-execute/GOOGLEDRIVE_ADD_FILE_SHARING_PREFERENCE",
+        headers=_run_headers("run-sheets"),
+        json={"connected_account_id": "ca_sheets", "arguments": {"file_id": "sheet-1"}},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert captured["url"].endswith("/GOOGLEDRIVE_ADD_FILE_SHARING_PREFERENCE")
+    assert captured["json"]["connected_account_id"] == "ca_sheets"
+    assert captured["json"]["entity_id"] == "owner-a"
+    assert captured["json"]["arguments"] == {"file_id": "sheet-1"}
+    db.get_repositories.cache_clear()
+
+
 def test_composio_proxy_rejects_sandbox_user_id_override(monkeypatch, tmp_path):
     db, main = _load_app(monkeypatch, tmp_path)
     repos = db.get_repositories()

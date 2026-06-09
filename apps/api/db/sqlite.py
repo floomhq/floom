@@ -899,7 +899,7 @@ class SqliteWorkerRepository:
         with get_db() as conn:
             rows = conn.execute(
                 """
-                SELECT id, owner_id, cron_expr, next_run_at
+                SELECT id, owner_id, cron_expr, cron_timezone, next_run_at
                 FROM workers
                 WHERE enabled = 1 AND trigger_type IN ('schedule', 'cron', 'scheduled')
                 ORDER BY created_at, id
@@ -910,7 +910,7 @@ class SqliteWorkerRepository:
     def get_schedule_state(self, *, worker_id: str) -> dict[str, Any] | None:
         with get_db() as conn:
             row = conn.execute(
-                "SELECT owner_id, next_run_at, cron_expr FROM workers WHERE id = ?",
+                "SELECT owner_id, next_run_at, cron_expr, cron_timezone FROM workers WHERE id = ?",
                 (worker_id,),
             ).fetchone()
         return _row_dict(row) if row else None
@@ -1204,7 +1204,7 @@ class SqliteWorkerRepository:
             rows = conn.execute(
                 """
                 SELECT t.id, t.worker_id, t.config_json, t.next_run_at,
-                       t.last_fired_at, w.owner_id
+                       t.last_fired_at, w.owner_id, w.cron_timezone
                 FROM worker_triggers t
                 JOIN workers w ON w.id = t.worker_id
                 WHERE t.type = 'schedule'
