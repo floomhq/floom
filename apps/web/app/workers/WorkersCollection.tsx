@@ -8,6 +8,7 @@ import type { WorkerSummary, WorkerDetail } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection, Avatar } from "@/components/collection";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
+import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import { can, isViewOnly, canLeaveFeedback, visibilityLabel } from "@/lib/permissions";
 import {
   isSystemWorker,
@@ -73,6 +74,14 @@ function AboutTab({ w }: { w: WorkerSummary }) {
   const d = useWorkerDetail(w.id);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <WorkerAsciiDiagram
+        workerName={w.name}
+        worker={{ id: w.id, name: w.name, connections: w.connections, tags: w.tags }}
+        connections={w.connections}
+        triggerType={w.trigger_type}
+        inputs={(d?.config?.inputs ?? []).map((i) => ({ name: i.name, label: i.label, type: i.type }))}
+        outputs={(d?.config?.outputs ?? []).map((o) => ({ name: o.name, label: o.label, type: o.type }))}
+      />
       <p style={{ margin: 0 }}>{w.long_description || w.description || "No description yet."}</p>
       {d?.use_cases && d.use_cases.length > 0 && (
         <div>
