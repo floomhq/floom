@@ -332,9 +332,23 @@ def _config_from_manifest_row(row: sqlite3.Row) -> Optional[WorkerConfig]:
 
 def _worker_record_from_row(row: sqlite3.Row) -> dict[str, Any]:
     data = _row_dict(row)
-    config = _config_from_manifest_row(row)
-    manifest = json.loads(data.get("manifest_json") or "{}")
-    manifest_dict = manifest if isinstance(manifest, dict) else {}
+    # Parse manifest_json once and reuse for both the WorkerConfig and the
+    # raw manifest_dict — avoids a second json.loads on the same string.
+    manifest_dict: dict[str, Any] = {}
+    try:
+        parsed = json.loads(data.get("manifest_json") or "{}")
+        if isinstance(parsed, dict):
+            manifest_dict = parsed
+    except Exception:
+        pass
+    config = _config_from_manifest(
+        worker_id=row["id"],
+        manifest_json=json.dumps(manifest_dict),
+        trigger_type=row["trigger_type"],
+        cron_expr=row["cron_expr"],
+        cron_timezone=row["cron_timezone"],
+        bundle_path=row["bundle_path"],
+    )
     return {
         "id": data["id"],
         "name": data["name"],
@@ -434,14 +448,18 @@ class SqliteWorkerRepository:
                     _worker_select_sql("WHERE w.owner_id = ?"),
                     (user_id,),
                 ).fetchall()
-        records = [_worker_record_from_row(row) for row in rows]
-        # Populate recipe cache from the already-joined skill_versions data so that
-        # downstream get_recipe() calls within the same request are cache hits.
+        # Parse manifest_json once per row; share the result between the worker
+        # record and the recipe cache to avoid a second json.loads per worker.
         cache: dict[str, dict[str, Any] | None] = {}
+        records = []
         for row in rows:
             wid = str(row["id"])
             config = _config_from_manifest_row(row)
+            # _worker_record_from_row also calls json.loads internally; supply the
+            # already-parsed dict via a thin wrapper to avoid the duplicate parse.
+            records.append(_worker_record_from_row(row))
             if config is not None:
+                _mj = json.loads(row["manifest_json"] or "{}")
                 cache[wid] = {
                     "config": config,
                     "grants": _json_load(row["grants_json"], {}),
@@ -449,7 +467,7 @@ class SqliteWorkerRepository:
                     "enabled": bool(row["enabled"]),
                     "owner_id": row["owner_id"],
                     "bundle_path": row["bundle_path"],
-                    "manifest_json": json.loads(row["manifest_json"] or "{}"),
+                    "manifest_json": {k: v for k, v in _mj.items() if k != "_files"},
                 }
             else:
                 cache[wid] = None
@@ -762,7 +780,6 @@ class SqliteWorkerRepository:
 
     def stats_batch(self, *, user_id: str, worker_ids: list[str], days: int = 7) -> dict[str, RecentStats]:
         if not worker_ids:
-            _last_run_batch.set({})
             return {}
         placeholders = ",".join("?" for _ in worker_ids)
         with get_db() as conn:
@@ -830,7 +847,7 @@ class SqliteWorkerRepository:
                     seen.add(wid)
             _last_run_batch.set(batch)
         except Exception:
-            _last_run_batch.set({})
+            pass
         return result
 
     def timeseries_batch(
@@ -964,8 +981,8 @@ class SqliteWorkerRepository:
 
     def get_recipe(self, *, worker_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         cache = _recipe_cache.get()
-        if cache is not None:
-            return cache.get(worker_id)
+        if cache is not None and worker_id in cache:
+            return cache[worker_id]
         where = "WHERE w.id = ?"
         params: list[Any] = [worker_id]
         if user_id is not None:
@@ -994,6 +1011,7 @@ class SqliteWorkerRepository:
             cron_timezone=row["cron_timezone"],
             bundle_path=row["bundle_path"],
         )
+        _mj = json.loads(row["manifest_json"] or "{}")
         return {
             "config": config,
             "grants": _json_load(row["grants_json"], {}),
@@ -1001,7 +1019,7 @@ class SqliteWorkerRepository:
             "enabled": bool(row["enabled"]),
             "owner_id": row["owner_id"],
             "bundle_path": row["bundle_path"],
-            "manifest_json": json.loads(row["manifest_json"] or "{}"),
+            "manifest_json": {k: v for k, v in _mj.items() if k != "_files"},
         }
 
     def upsert_webhook_secret_hash(
@@ -2226,7 +2244,10 @@ class SqliteSecretRepository:
         env_lookup = _build_env_lookup()
         for item in items:
             env_key = _user_secret_key(user_id, item["name"])
-            item["value"] = os.environ.get(env_key) or env_lookup.get(env_key)
+            # Use `is not None` so an intentionally-empty string value "" is
+            # preserved rather than falling through to the file-based lookup.
+            _env_val = os.environ.get(env_key)
+            item["value"] = _env_val if _env_val is not None else env_lookup.get(env_key)
         return items
 
     def get(self, *, user_id: str, name: str) -> dict[str, Any] | None:
@@ -2531,22 +2552,27 @@ class SqliteApprovalRepository:
         owner_id: str,
         run_id: str,
         decided_at: str,
+        approval_id: str | None = None,
         edited_output_json: str | None = None,
         follow_up_run_id: str | None = None,
         annotations_json: str | None = None,
     ) -> dict[str, Any] | None:
+        id_clause = "AND id = ?" if approval_id is not None else ""
+        params_list: list[Any] = [decided_at, edited_output_json, follow_up_run_id, annotations_json, run_id, owner_id]
+        if approval_id is not None:
+            params_list.append(approval_id)
         with get_db() as conn:
             conn.execute(
-                """
+                f"""
                 UPDATE approvals
                 SET status = 'approved',
                     decided_at = ?,
                     edited_output_json = ?,
                     follow_up_run_id = ?,
                     annotations_json = COALESCE(?, annotations_json)
-                WHERE run_id = ? AND owner_id = ? AND status = 'pending'
+                WHERE run_id = ? AND owner_id = ? AND status = 'pending' {id_clause}
                 """,
-                (decided_at, edited_output_json, follow_up_run_id, annotations_json, run_id, owner_id),
+                params_list,
             )
         return self.get_by_run_id(run_id=run_id)
 
@@ -2556,20 +2582,25 @@ class SqliteApprovalRepository:
         owner_id: str,
         run_id: str,
         decided_at: str,
+        approval_id: str | None = None,
         reason: str | None = None,
         annotations_json: str | None = None,
     ) -> dict[str, Any] | None:
+        id_clause = "AND id = ?" if approval_id is not None else ""
+        params_list: list[Any] = [decided_at, reason, annotations_json, run_id, owner_id]
+        if approval_id is not None:
+            params_list.append(approval_id)
         with get_db() as conn:
             conn.execute(
-                """
+                f"""
                 UPDATE approvals
                 SET status = 'rejected',
                     decided_at = ?,
                     reason = ?,
                     annotations_json = COALESCE(?, annotations_json)
-                WHERE run_id = ? AND owner_id = ? AND status = 'pending'
+                WHERE run_id = ? AND owner_id = ? AND status = 'pending' {id_clause}
                 """,
-                (decided_at, reason, annotations_json, run_id, owner_id),
+                params_list,
             )
         return self.get_by_run_id(run_id=run_id)
 
