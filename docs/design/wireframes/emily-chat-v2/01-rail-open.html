@@ -1,0 +1,449 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1440">
+  <title>Emily v2 – Full Layout, Rail Open</title>
+  <link rel="stylesheet" href="_shared.css">
+  <style>
+    /* This screen: Workers list in main area + full Emily rail with card flow */
+    .page-body { padding: 20px; }
+
+    /* Workers table */
+    .workers-table { width: 100%; border-collapse: collapse; }
+    .workers-table th {
+      text-align: left;
+      font-size: 11.5px;
+      font-weight: 500;
+      color: var(--muted-foreground);
+      padding: 0 12px 8px;
+      border-bottom: 1px solid var(--border);
+      text-transform: uppercase;
+      letter-spacing: 0.04em;
+    }
+    .workers-table td {
+      padding: 10px 12px;
+      font-size: 13.5px;
+      border-bottom: 1px solid var(--border);
+      vertical-align: middle;
+    }
+    .workers-table tr:hover td { background: var(--accent); }
+    .worker-name { font-weight: 500; }
+    .worker-trigger { font-size: 12px; color: var(--muted-foreground); }
+    .status-pill {
+      display: inline-flex; align-items: center; gap: 4px;
+      padding: 2px 8px;
+      border-radius: 999px;
+      font-size: 11.5px;
+      font-weight: 500;
+    }
+    .status-pill.live   { background: #f0fdf4; color: #16a34a; border: 1px solid #bbf7d0; }
+    .status-pill.draft  { background: var(--muted); color: var(--muted-foreground); border: 1px solid var(--border); }
+    .status-pill.paused { background: #fffbeb; color: #d97706; border: 1px solid #fde68a; }
+    .dot-sm { width: 5px; height: 5px; border-radius: 50%; background: currentColor; }
+
+    /* Chat message group spacing */
+    .msg-group { display: flex; flex-direction: column; }
+    .msg-group + .msg-group { margin-top: 16px; }
+
+    /* Card inside assistant message */
+    .assistant-cards { margin-top: 8px; display: flex; flex-direction: column; gap: 6px; }
+  </style>
+</head>
+<body>
+<div class="app-shell">
+
+  <!-- ── Left nav sidebar ───────────────────────────── -->
+  <aside class="left-sidebar">
+    <div class="sidebar-header">
+      <div class="sidebar-logo-mark">
+        <svg width="14" height="14" viewBox="0 0 100 100" fill="none">
+          <path d="M28 20 h22 l24 24 a4 4 0 0 1 0 12 l-24 24 h-22 a8 8 0 0 1 -8 -8 v-44 a8 8 0 0 1 8 -8 z" fill="#fafafa"/>
+        </svg>
+      </div>
+      <span class="sidebar-wordmark">Workeros</span>
+    </div>
+
+    <nav class="sidebar-nav">
+      <a class="nav-item" href="#">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="1.5" y="1.5" width="5" height="5" rx="1"/>
+          <rect x="9.5" y="1.5" width="5" height="5" rx="1"/>
+          <rect x="1.5" y="9.5" width="5" height="5" rx="1"/>
+          <rect x="9.5" y="9.5" width="5" height="5" rx="1"/>
+        </svg>
+        Overview
+      </a>
+      <a class="nav-item active" href="#">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="8" cy="5" r="2.5"/><path d="M3 13.5c0-2.76 2.24-5 5-5s5 2.24 5 5"/>
+        </svg>
+        Workers
+      </a>
+      <a class="nav-item" href="#">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M2 4h12M2 8h8M2 12h5"/>
+        </svg>
+        Runs
+      </a>
+      <a class="nav-item" href="#">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <path d="M8 1.5v13M1.5 8h13"/>
+        </svg>
+        Connections
+      </a>
+      <div class="nav-section-label">Workspace</div>
+      <a class="nav-item" href="#">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <circle cx="8" cy="8" r="6.5"/><path d="M8 5v3.5l2 2"/>
+        </svg>
+        Brain
+      </a>
+      <a class="nav-item" href="#">
+        <svg class="nav-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+          <rect x="2" y="2" width="12" height="12" rx="2"/><path d="M5 8h6M8 5v6"/>
+        </svg>
+        Settings
+      </a>
+    </nav>
+
+    <div class="sidebar-footer">
+      <div class="user-row">
+        <div class="user-avatar">F</div>
+        <div>
+          <div class="user-name">Federico</div>
+          <div style="font-size:11px;color:var(--muted-foreground);">Admin</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- ── Main content ───────────────────────────────── -->
+  <div class="main-content">
+    <div class="topbar">
+      <span class="topbar-title">Workers</span>
+      <span class="topbar-spacer"></span>
+      <button class="topbar-btn">
+        <svg width="13" height="13" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><circle cx="7" cy="7" r="5"/><path d="M11 11l3 3"/></svg>
+        Filter
+      </button>
+      <button class="topbar-btn primary">+ New worker</button>
+    </div>
+
+    <div class="page-body">
+      <table class="workers-table">
+        <thead>
+          <tr>
+            <th>Worker</th>
+            <th>Trigger</th>
+            <th>Last run</th>
+            <th>Status</th>
+          </tr>
+        </thead>
+        <tbody>
+          <tr>
+            <td>
+              <div class="worker-name">Invoice chaser</div>
+              <div class="worker-trigger">Gmail → Stripe</div>
+            </td>
+            <td><span class="text-muted text-xs">Daily 09:00</span></td>
+            <td><span class="text-muted text-xs">2 min ago</span></td>
+            <td><span class="status-pill live"><span class="dot-sm"></span>Live</span></td>
+          </tr>
+          <tr>
+            <td>
+              <div class="worker-name">Lead enricher</div>
+              <div class="worker-trigger">Webhook → Apollo → CRM</div>
+            </td>
+            <td><span class="text-muted text-xs">On webhook</span></td>
+            <td><span class="text-muted text-xs">14 min ago</span></td>
+            <td><span class="status-pill live"><span class="dot-sm"></span>Live</span></td>
+          </tr>
+          <tr>
+            <td>
+              <div class="worker-name">Weekly digest</div>
+              <div class="worker-trigger">Slack → Notion</div>
+            </td>
+            <td><span class="text-muted text-xs">Mon 08:00</span></td>
+            <td><span class="text-muted text-xs">6 days ago</span></td>
+            <td><span class="status-pill live"><span class="dot-sm"></span>Live</span></td>
+          </tr>
+          <tr>
+            <td>
+              <div class="worker-name">Contract reviewer</div>
+              <div class="worker-trigger">Google Drive → Gmail</div>
+            </td>
+            <td><span class="text-muted text-xs">Manual</span></td>
+            <td><span class="text-muted text-xs">3 days ago</span></td>
+            <td><span class="status-pill paused"><span class="dot-sm"></span>Paused</span></td>
+          </tr>
+          <tr>
+            <td>
+              <div class="worker-name">Outbound emailer</div>
+              <div class="worker-trigger">Airtable → Gmail</div>
+            </td>
+            <td><span class="text-muted text-xs">Daily 07:00</span></td>
+            <td><span class="text-muted text-xs">—</span></td>
+            <td><span class="status-pill draft">Draft</span></td>
+          </tr>
+        </tbody>
+      </table>
+    </div>
+  </div>
+
+  <!-- ── Emily right rail ───────────────────────────── -->
+  <aside class="emily-rail">
+    <!-- Resize handle -->
+    <div class="rail-resize-handle"></div>
+
+    <!-- Rail main (shown when open) -->
+    <div class="rail-main" style="display:flex;flex-direction:column;height:100%;min-height:0;">
+
+      <!-- Header -->
+      <div class="rail-header">
+        <div class="emily-avatar">E</div>
+        <div style="flex:1;min-width:0;">
+          <div class="rail-title">Emily</div>
+          <div class="rail-subtitle">Chief of Staff</div>
+        </div>
+        <div class="rail-header-actions">
+          <!-- New conversation -->
+          <button class="icon-btn" title="New conversation">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M8 2v12M2 8h12"/>
+            </svg>
+          </button>
+          <!-- Expand to full page -->
+          <button class="icon-btn" title="Open full page">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M3 3h4M3 3v4M13 13h-4M13 13v-4M3 13h4M3 13v-4M13 3h-4M13 3v4"/>
+            </svg>
+          </button>
+          <!-- Collapse rail -->
+          <button class="icon-btn" title="Collapse">
+            <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+              <path d="M10 3l-5 5 5 5"/>
+            </svg>
+          </button>
+        </div>
+      </div>
+
+      <!-- Chat container (prompt-kit ChatContainerRoot) -->
+      <div class="chat-container">
+        <div class="chat-content">
+
+          <div class="conv-date-divider">Today</div>
+
+          <!-- ── User message ── -->
+          <div class="msg-group">
+            <div class="message-row user">
+              <div class="msg-avatar" style="background:var(--muted);">F</div>
+              <div class="msg-body">
+                <div class="msg-content">Create a worker that chases unpaid invoices from Gmail every morning and logs to Slack.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Emily text + worker creation card ── -->
+          <div class="msg-group" style="margin-top:12px;">
+            <div class="message-row assistant">
+              <div class="msg-avatar emily">E</div>
+              <div class="msg-body" style="max-width:calc(100% - 40px);">
+                <div class="msg-sender-label">Emily</div>
+                <div class="msg-content">On it. I'll create an Invoice Chaser worker with Gmail + Slack connections. This will run daily at 09:00 and post unpaid summaries to your #finance channel.</div>
+                <div class="msg-actions">
+                  <button class="msg-action-btn" title="Copy">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><rect x="5" y="5" width="9" height="9" rx="1.5"/><path d="M5 11H3a1.5 1.5 0 0 1-1.5-1.5V3A1.5 1.5 0 0 1 3 1.5h6.5A1.5 1.5 0 0 1 11 3v2"/></svg>
+                  </button>
+                  <button class="msg-action-btn" title="Retry">
+                    <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5"><path d="M2.5 8a5.5 5.5 0 1 0 1-3.18"/><path d="M2.5 2v4h4"/></svg>
+                  </button>
+                </div>
+
+                <!-- Agentic cards -->
+                <div class="assistant-cards">
+
+                  <!-- Worker creation card — stages -->
+                  <div class="tool-card">
+                    <div class="tool-card-header">
+                      <div class="tool-card-icon">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                          <circle cx="8" cy="5.5" r="2.5"/><path d="M2.5 13.5c0-3.04 2.46-5.5 5.5-5.5s5.5 2.46 5.5 5.5"/>
+                        </svg>
+                      </div>
+                      <span class="tool-card-title">Invoice Chaser</span>
+                      <div class="tool-card-status">
+                        <div class="status-dot running"></div>
+                        <span style="color:var(--muted-foreground);">Generating</span>
+                      </div>
+                    </div>
+                    <div class="tool-card-body">
+                      <div class="stage-row">
+                        <div class="stage-step done">
+                          <svg width="11" height="11" viewBox="0 0 16 16" fill="none" stroke="#22c55e" stroke-width="2.5"><path d="M3 8l4 4 6-6"/></svg>
+                          Drafting
+                        </div>
+                        <span class="stage-sep">›</span>
+                        <div class="stage-step active">
+                          <div class="stage-spinner"></div>
+                          Generating code
+                        </div>
+                        <span class="stage-sep">›</span>
+                        <div class="stage-step">Smoke test</div>
+                        <span class="stage-sep">›</span>
+                        <div class="stage-step">Ready</div>
+                      </div>
+                      <div style="font-size:12px;color:var(--muted-foreground);">
+                        Trigger: Daily 09:00 · Tools: Gmail, Slack
+                      </div>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── User follow-up ── -->
+          <div class="msg-group" style="margin-top:12px;">
+            <div class="message-row user">
+              <div class="msg-avatar">F</div>
+              <div class="msg-body">
+                <div class="msg-content">Run it now on this month's invoices.</div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Emily + run card ── -->
+          <div class="msg-group" style="margin-top:12px;">
+            <div class="message-row assistant">
+              <div class="msg-avatar emily">E</div>
+              <div class="msg-body" style="max-width:calc(100% - 40px);">
+                <div class="msg-sender-label">Emily</div>
+                <div class="msg-content">Running Invoice Chaser now. I'll let you know when it's done.</div>
+                <div class="assistant-cards">
+
+                  <!-- Run card — completed -->
+                  <div class="tool-card">
+                    <div class="tool-card-header">
+                      <div class="tool-card-icon">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                          <polygon points="5,2 14,8 5,14"/>
+                        </svg>
+                      </div>
+                      <div style="flex:1;min-width:0;">
+                        <div class="tool-card-title">Run · Invoice Chaser</div>
+                        <div style="font-size:11px;color:var(--muted-foreground);">run_8a2k4f · 12s</div>
+                      </div>
+                      <div class="tool-card-status">
+                        <div class="status-dot success"></div>
+                        <span style="color:#22c55e;">Completed</span>
+                      </div>
+                    </div>
+                    <div class="tool-card-body">
+                      <div class="output-preview">Found 3 unpaid invoices: Acme Corp $4,200 (31d), Bright Labs $1,050 (15d), Nova Inc $780 (8d). Posted to #finance.</div>
+                      <div class="artifact-row">
+                        <svg class="artifact-icon" viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                          <path d="M9 1H4a1.5 1.5 0 0 0-1.5 1.5v11A1.5 1.5 0 0 0 4 15h8a1.5 1.5 0 0 0 1.5-1.5V6L9 1z"/>
+                          <polyline points="9,1 9,6 13.5,6"/>
+                        </svg>
+                        <div class="artifact-meta">
+                          <div class="artifact-name">invoice_report_june.csv</div>
+                          <div class="artifact-size">4.2 KB</div>
+                        </div>
+                        <button class="artifact-dl-btn">Download</button>
+                      </div>
+                    </div>
+                    <div class="card-actions">
+                      <button class="card-action-btn">View run</button>
+                      <button class="card-action-btn">Rerun</button>
+                    </div>
+                  </div>
+
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- ── Approval card ── -->
+          <div class="msg-group" style="margin-top:12px;">
+            <div class="message-row assistant">
+              <div class="msg-avatar emily">E</div>
+              <div class="msg-body" style="max-width:calc(100% - 40px);">
+                <div class="msg-sender-label">Emily</div>
+                <div class="msg-content">The Acme Corp invoice is overdue by 31 days. I can send a follow-up email. Want me to proceed?</div>
+                <div class="assistant-cards">
+                  <div class="tool-card">
+                    <div class="tool-card-header">
+                      <div class="tool-card-icon">
+                        <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                          <circle cx="8" cy="8" r="6.5"/><path d="M8 5v3.5l2 2"/>
+                        </svg>
+                      </div>
+                      <span class="tool-card-title">Approval required</span>
+                      <div class="tool-card-status">
+                        <div class="status-dot pending"></div>
+                        <span style="color:#3b82f6;">Waiting</span>
+                      </div>
+                    </div>
+                    <div class="tool-card-body">
+                      <div style="font-size:12.5px;line-height:1.5;">
+                        <strong>Send overdue notice</strong> to Acme Corp<br>
+                        <span style="color:var(--muted-foreground);">Subject: Invoice #1042 — Payment overdue (31 days)</span>
+                      </div>
+                    </div>
+                    <div class="card-actions">
+                      <button class="card-action-btn approve">Approve</button>
+                      <button class="card-action-btn danger">Reject</button>
+                      <button class="card-action-btn" style="margin-left:auto;">Edit draft</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Scroll anchor -->
+          <div class="chat-scroll-anchor"></div>
+        </div>
+      </div>
+
+      <!-- PromptInput (prompt-kit faithful) -->
+      <div class="prompt-input-wrap">
+        <div class="prompt-input-root">
+          <textarea class="prompt-textarea" placeholder="Ask Emily…" rows="1"></textarea>
+          <div class="prompt-actions">
+            <!-- Attach -->
+            <button class="prompt-action-btn" title="Attach file">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <path d="M13.5 8.5l-6 6a4 4 0 0 1-5.66-5.66l6-6a2.5 2.5 0 0 1 3.54 3.54l-6 6a1 1 0 0 1-1.42-1.42l5.3-5.3"/>
+              </svg>
+            </button>
+            <!-- Context -->
+            <button class="prompt-action-btn" title="Add context">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="1.5">
+                <rect x="2" y="4" width="12" height="8" rx="1.5"/>
+                <path d="M5 4V2.5M11 4V2.5"/>
+              </svg>
+            </button>
+            <div class="prompt-spacer"></div>
+            <!-- Send button (disabled — empty state) -->
+            <button class="prompt-send-btn disabled" title="Send">
+              <svg viewBox="0 0 16 16" fill="none" stroke="currentColor" stroke-width="2">
+                <path d="M3 8h10M9 4l4 4-4 4"/>
+              </svg>
+            </button>
+          </div>
+        </div>
+      </div>
+
+    </div><!-- /rail-main -->
+
+    <!-- Collapsed strip (hidden in open state) -->
+    <div class="rail-collapsed-strip"></div>
+
+  </aside>
+
+</div><!-- /app-shell -->
+</body>
+</html>
