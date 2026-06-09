@@ -100,6 +100,7 @@ function Row<T>({
     <div
       role="button"
       tabIndex={0}
+      data-collrow
       aria-current={selected ? "true" : undefined}
       className={`c-lrow ${selected ? "sel" : ""}`}
       style={compact ? undefined : { gridTemplateColumns: template }}

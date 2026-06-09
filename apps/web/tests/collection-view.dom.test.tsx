@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { useState } from "react";
-import { render, screen } from "@testing-library/react";
+import { render, screen, fireEvent } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { CollectionView } from "@/components/collection/CollectionView";
 import { Avatar } from "@/components/collection/Avatar";
@@ -157,6 +157,18 @@ describe("CollectionView — split detail (§8e)", () => {
 
     await user.click(screen.getByRole("button", { name: "Expand list" }));
     expect(container.querySelector(".c-split.lc")).not.toBeInTheDocument();
+  });
+
+  it("resting list: ArrowDown roves focus, Enter opens the focused row (§8c)", () => {
+    const { container } = render(
+      <Harness config={makeConfig()} initial={{ ...emptyState("list") }} />,
+    );
+    const root = container.firstChild as HTMLElement;
+    fireEvent.keyDown(root, { key: "ArrowDown" }); // focus row 0 (Weekly Update)
+    fireEvent.keyDown(root, { key: "ArrowDown" }); // focus row 1 (DACH Compliance)
+    expect(document.activeElement?.textContent).toContain("DACH Compliance");
+    fireEvent.keyDown(document.activeElement!, { key: "Enter" }); // row opens itself
+    expect(screen.getByText("About DACH Compliance")).toBeInTheDocument();
   });
 
   it("Escape closes the detail", async () => {
