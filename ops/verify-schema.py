@@ -43,6 +43,7 @@ INTENTIONALLY_ABSENT: frozenset[str] = frozenset(
         "composio_connections_new",
         "secrets_new",
         "worker_alerts_new",
+        "worker_webhook_secrets_new",
         # workers_legacy is actually present in the DB as a migration artefact;
         # we skip it here because its presence is acceptable but optional.
         "workers_legacy",
