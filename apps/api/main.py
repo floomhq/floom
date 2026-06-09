@@ -4024,7 +4024,25 @@ def _tracked_worker_ids() -> frozenset[str]:
     return frozenset(worker_ids)
 
 
-def _worker_hidden_from_api(worker_id: str) -> bool:
+def _build_owned_tracked_ids() -> frozenset[str]:
+    """Single SELECT: returns all git-tracked worker IDs that have a DB owner."""
+    tracked = _tracked_worker_ids()
+    if not tracked:
+        return frozenset()
+    from db import get_db as _get_db
+    try:
+        placeholders = ",".join("?" for _ in tracked)
+        with _get_db() as conn:
+            rows = conn.execute(
+                f"SELECT id FROM workers WHERE id IN ({placeholders})",
+                list(tracked),
+            ).fetchall()
+        return frozenset(str(r["id"]) for r in rows)
+    except Exception:
+        return frozenset()
+
+
+def _worker_hidden_from_api(worker_id: str, _owned_tracked_ids: frozenset[str] | None = None) -> bool:
     if worker_id.startswith("."):
         return True
     if any(worker_id.startswith(prefix) for prefix in _INTERNAL_WORKER_ID_PREFIXES):
@@ -4037,13 +4055,15 @@ def _worker_hidden_from_api(worker_id: str) -> bool:
             return False
         # Git-tracked workers that have a DB owner are user workers — always visible.
         # Only pure engine/stock workers (no DB owner) are hidden from the user API.
+        if _owned_tracked_ids is not None:
+            return worker_id not in _owned_tracked_ids
         from db import get_repositories
         try:
             owner = get_repositories().workers.get_owner(worker_id=worker_id)
             if owner:
                 return False
         except Exception:
-            pass
+            return False  # fail open — don't silently hide workers on DB error
         return True
     return False
 
@@ -4076,18 +4096,21 @@ def _list_visible_workers(
     use_cache: bool = True,
     role: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    # Pre-load ownership for all git-tracked workers in one query so
+    # _worker_hidden_from_api() inside the loop doesn't fire N extra SELECTs.
+    _owned = _build_owned_tracked_ids()
     visible = {
         worker["id"]: worker
         for worker in _list_db_workers(user_id=user_id, repos=repos, role=role)
         if not str(worker.get("id") or "").startswith(".")
-        and not _worker_hidden_from_api(str(worker.get("id") or ""))
+        and not _worker_hidden_from_api(str(worker.get("id") or ""), _owned)
     }
     for worker in _stock_workers_from_filesystem(use_cache=use_cache):
         visible.setdefault(worker["id"], worker)
     if _shared_filesystem_fallback_allowed():
         for worker in discover_workers(use_cache=use_cache):
             worker_id = str(worker.get("id") or "")
-            if worker_id and not _worker_hidden_from_api(worker_id):
+            if worker_id and not _worker_hidden_from_api(worker_id, _owned):
                 visible.setdefault(worker_id, worker)
     return list(visible.values())
 
@@ -11542,6 +11565,8 @@ def approve_public_approval(
             annotations=body.annotations,
         )
         return ActionResponse(status=str(result.get("status") or "approved"), run_id=str(approval["run_id"]))
+    if decision_input.get("kind") == "agent_tool":
+        return approve_agent_tool_approval(approval_id, ApproveRequest(edited_output=body.edited_output), auth, repos)
     return approve_run(
         str(approval["run_id"]),
         ApproveRequest(edited_output=body.edited_output, annotations=body.annotations),
@@ -11573,6 +11598,8 @@ def reject_public_approval(
             repos,
         )
         return ActionResponse(status=str(result.get("status") or "rejected"), run_id=str(approval["run_id"]))
+    if decision_input.get("kind") == "agent_tool":
+        return reject_agent_tool_approval(approval_id, RejectRequest(reason=body.reason), auth, repos)
     return reject_run(
         str(approval["run_id"]),
         RejectRequest(reason=body.reason, annotations=body.annotations),
@@ -11630,6 +11657,35 @@ async def upload_public_approval_screenshot(
     )
 
 
+def _load_typed_approval(
+    approval_id: str,
+    user_id: str,
+    expected_kind: str,
+    repos: Repositories,
+) -> Dict[str, Any]:
+    """Fetch an approval by ID and validate ownership, pending status, and kind.
+
+    Raises HTTPException(404/409/400) on any check failure so callers only need
+    to handle the happy path. Returns the approval row dict.
+    """
+    approval = repos.approvals.get(owner_id=user_id, approval_id=approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if approval.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="Approval already decided")
+    decision_input: Dict[str, Any] = {}
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if decision_input.get("kind") != expected_kind:
+        raise HTTPException(
+            status_code=400,
+            detail=f"This approval has kind={decision_input.get('kind')!r}, expected {expected_kind!r}.",
+        )
+    return approval
+
+
 @app.post("/runs/{run_id}/approve", response_model=ActionResponse)
 def approve_run(
     run_id: str,
@@ -11654,6 +11710,18 @@ def approve_run(
         raise HTTPException(status_code=404, detail="Approval record not found")
     if approval_row.get("status") != "pending":
         raise HTTPException(status_code=409, detail="Approval already decided")
+
+    # Mid-run agent-tool approvals must use /approvals/{id}/approve, not this endpoint.
+    _di: Dict[str, Any] = {}
+    try:
+        _di = json.loads(approval_row.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if _di.get("kind") == "agent_tool":
+        raise HTTPException(
+            status_code=400,
+            detail="This approval has kind=agent_tool. Use POST /approvals/{id}/approve instead.",
+        )
 
     # Load original inputs
     original_inputs: Dict[str, Any] = {}
@@ -11757,6 +11825,18 @@ def reject_run(
     if approval_row.get("status") != "pending":
         raise HTTPException(status_code=409, detail="Approval already decided")
 
+    # Mid-run agent-tool approvals must use /approvals/{id}/reject, not this endpoint.
+    _di2: Dict[str, Any] = {}
+    try:
+        _di2 = json.loads(approval_row.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if _di2.get("kind") == "agent_tool":
+        raise HTTPException(
+            status_code=400,
+            detail="This approval has kind=agent_tool. Use POST /approvals/{id}/reject instead.",
+        )
+
     decided_at = now_iso()
     annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
     repos.approvals.reject(
@@ -11857,23 +11937,8 @@ def approve_destructive_action(
     reviewer feedback without a request body; the route body carries it for
     authed callers.
     """
-    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
-    if approval is None:
-        raise HTTPException(status_code=404, detail="Approval not found")
-    if approval.get("status") != "pending":
-        raise HTTPException(status_code=409, detail="Approval already decided")
-
-    decision_input: Dict[str, Any] = {}
-    try:
-        decision_input = json.loads(approval.get("decision_input_json") or "{}")
-    except Exception:
-        pass
-    if decision_input.get("kind") != "destructive_delete":
-        raise HTTPException(
-            status_code=400,
-            detail="This approval is not a destructive-action request. Use POST /runs/{run_id}/approve instead.",
-        )
-
+    approval = _load_typed_approval(approval_id, auth.user_id, "destructive_delete", repos)
+    decision_input: Dict[str, Any] = json.loads(approval.get("decision_input_json") or "{}")
     path = decision_input.get("path", "")
     description = _execute_destructive_delete(path, auth.user_id, repos)
 
@@ -11905,23 +11970,8 @@ def reject_destructive_action(
     repos: Repositories = Depends(get_repos),
 ):
     """Reject a sandboxed-worker DELETE request without executing it."""
-    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
-    if approval is None:
-        raise HTTPException(status_code=404, detail="Approval not found")
-    if approval.get("status") != "pending":
-        raise HTTPException(status_code=409, detail="Approval already decided")
-
-    decision_input: Dict[str, Any] = {}
-    try:
-        decision_input = json.loads(approval.get("decision_input_json") or "{}")
-    except Exception:
-        pass
-    if decision_input.get("kind") != "destructive_delete":
-        raise HTTPException(
-            status_code=400,
-            detail="This approval is not a destructive-action request. Use POST /runs/{run_id}/reject instead.",
-        )
-
+    approval = _load_typed_approval(approval_id, auth.user_id, "destructive_delete", repos)
+    decision_input: Dict[str, Any] = json.loads(approval.get("decision_input_json") or "{}")
     annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
     repos.approvals.reject(
         owner_id=auth.user_id,
@@ -11954,23 +12004,7 @@ def approve_agent_tool_approval(
     in-process polling loop in agent_driver can resume the run in-place.
     Any edited_output is stored and returned to the agent by the polling loop.
     """
-    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
-    if approval is None:
-        raise HTTPException(status_code=404, detail="Approval not found")
-    if approval.get("status") != "pending":
-        raise HTTPException(status_code=409, detail="Approval already decided")
-
-    decision_input: Dict[str, Any] = {}
-    try:
-        decision_input = json.loads(approval.get("decision_input_json") or "{}")
-    except Exception:
-        pass
-    if decision_input.get("kind") != "agent_tool":
-        raise HTTPException(
-            status_code=400,
-            detail="This approval is not an agent-tool approval. Use POST /runs/{run_id}/approve instead.",
-        )
-
+    approval = _load_typed_approval(approval_id, auth.user_id, "agent_tool", repos)
     edited_output_json = json.dumps(body.edited_output) if body.edited_output is not None else None
     repos.approvals.approve(
         owner_id=auth.user_id,
@@ -12001,23 +12035,7 @@ def reject_agent_tool_approval(
     Does NOT affect run status directly — the polling loop in agent_driver
     picks up the 'rejected' status and resumes with approved=False.
     """
-    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
-    if approval is None:
-        raise HTTPException(status_code=404, detail="Approval not found")
-    if approval.get("status") != "pending":
-        raise HTTPException(status_code=409, detail="Approval already decided")
-
-    decision_input: Dict[str, Any] = {}
-    try:
-        decision_input = json.loads(approval.get("decision_input_json") or "{}")
-    except Exception:
-        pass
-    if decision_input.get("kind") != "agent_tool":
-        raise HTTPException(
-            status_code=400,
-            detail="This approval is not an agent-tool approval. Use POST /runs/{run_id}/reject instead.",
-        )
-
+    approval = _load_typed_approval(approval_id, auth.user_id, "agent_tool", repos)
     annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
     repos.approvals.reject(
         owner_id=auth.user_id,
@@ -18618,6 +18636,9 @@ def system_overview(
     active_workers_count = sum(1 for row in workers if not _overview_worker_paused(row))
     paused_workers_count = max(0, len(workers) - active_workers_count)
     worker_names = {row["id"]: row.get("name") or row["id"] for row in workers if row.get("id")}
+    # Pre-built once to avoid N+1 _get_db_worker() calls when filtering run lists
+    # by worker visibility (set lookup vs one SELECT per row).
+    _visible_worker_ids: set = {w["id"] for w in workers if w.get("id")}
 
     # G5 FIX 3: the headline success rate must reflect the partner's ACTIVE,
     # real workers — not legacy/paused/example/system churn that drags the
@@ -18689,7 +18710,7 @@ def system_overview(
             trigger_source=row.get("trigger_source") or "manual",
         )
         for row in recent_rows
-        if _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+        if row.get("worker_id") in _visible_worker_ids
     ][:10]
 
     scheduled_today: List[OverviewScheduledItem] = []
@@ -18735,13 +18756,13 @@ def system_overview(
     # worker is no longer API-visible so the cluster + its link cannot 404.
     failure_runs = [
         row for row in failure_runs
-        if _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+        if row.get("worker_id") in _visible_worker_ids
     ]
     visible_terminal_runs = [
         row for row in runs_14d_rows
         if str(row.get("status") or "").lower()
         in {"completed", "approved", "success", "succeeded", "failed", "error", "cancelled", "rejected", "timeout"}
-        and _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+        and row.get("worker_id") in _visible_worker_ids
     ]
     attention_items.extend(
         _overview_consecutive_failure_items(

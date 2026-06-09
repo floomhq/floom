@@ -756,6 +756,7 @@ function ReviewContent() {
     [approval, decisionInput]
   );
   const isDestructiveDelete = decisionInput.kind === "destructive_delete";
+  const isAgentTool = decisionInput.kind === "agent_tool";
 
   useEffect(() => {
     setChatComment("");
@@ -814,10 +815,13 @@ function ReviewContent() {
         await api.approvals.publicApprove(approval.id, token, undefined, annotationsPayload);
       } else if (isDestructiveDelete) {
         await api.approvals.approveAction(approval.id, annotationsPayload);
+      } else if (isAgentTool) {
+        await api.approvals.approveAgentTool(approval.id);
+        toast.success("Approved — run will resume");
       } else {
         await api.runs.approve(approval.run_id, undefined, annotationsPayload);
+        toast.success("Approved");
       }
-      toast.success("Approved");
       notifyApprovalsChanged();
       removeCurrent();
       if (!isSignedLink) void load();
@@ -826,7 +830,7 @@ function ReviewContent() {
     } finally {
       setBusy(null);
     }
-  }, [annotationsPayload, approval, isDestructiveDelete, isSignedLink, load, removeCurrent, token]);
+  }, [annotationsPayload, approval, isDestructiveDelete, isAgentTool, isSignedLink, load, removeCurrent, token]);
 
   const reject = useCallback(async () => {
     if (!approval) return;
@@ -837,6 +841,8 @@ function ReviewContent() {
         await api.approvals.publicReject(approval.id, token, reason, annotationsPayload);
       } else if (isDestructiveDelete) {
         await api.approvals.rejectAction(approval.id, reason, annotationsPayload);
+      } else if (isAgentTool) {
+        await api.approvals.rejectAgentTool(approval.id, reason);
       } else {
         await api.runs.reject(approval.run_id, reason, annotationsPayload);
       }
@@ -849,7 +855,7 @@ function ReviewContent() {
     } finally {
       setBusy(null);
     }
-  }, [annotationsPayload, chatComment, approval, isDestructiveDelete, isSignedLink, load, removeCurrent, token]);
+  }, [annotationsPayload, chatComment, approval, isDestructiveDelete, isAgentTool, isSignedLink, load, removeCurrent, token]);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[var(--bg)] px-4 py-6">
