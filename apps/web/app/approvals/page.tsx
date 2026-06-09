@@ -90,6 +90,7 @@ function ApprovalCard({
 
   const decisionInput = parseDecisionInput(approval.decision_input_json);
   const isDestructiveDelete = decisionInput.kind === "destructive_delete";
+  const isAgentTool = decisionInput.kind === "agent_tool";
 
   // Scroll into view and briefly highlight when this card is the deep-link target.
   useEffect(() => {
@@ -105,6 +106,11 @@ function ApprovalCard({
       if (isDestructiveDelete) {
         const res = await api.approvals.approveAction(approval.id);
         toast.success(res.detail || "Delete approved and executed");
+        notifyApprovalsChanged();
+        onDecision();
+      } else if (isAgentTool) {
+        await api.approvals.approveAgentTool(approval.id);
+        toast.success("Approved — run will resume");
         notifyApprovalsChanged();
         onDecision();
       } else {
@@ -127,7 +133,7 @@ function ApprovalCard({
     } finally {
       setBusy(null);
     }
-  }, [approval.id, approval.run_id, editing, editedText, approval.preview, isDestructiveDelete, onDecision]);
+  }, [approval.id, approval.run_id, editing, editedText, approval.preview, isDestructiveDelete, isAgentTool, onDecision]);
 
   const handleReject = useCallback(async () => {
     setBusy("reject");
@@ -135,6 +141,9 @@ function ApprovalCard({
       if (isDestructiveDelete) {
         await api.approvals.rejectAction(approval.id, rejectReason || undefined);
         toast.success("Delete request rejected");
+      } else if (isAgentTool) {
+        await api.approvals.rejectAgentTool(approval.id, rejectReason || undefined);
+        toast.success("Rejected — run will continue skipping this item");
       } else {
         await api.runs.reject(approval.run_id, rejectReason || undefined);
         toast.success("Rejected");
@@ -146,7 +155,7 @@ function ApprovalCard({
     } finally {
       setBusy(null);
     }
-  }, [approval.id, approval.run_id, rejectReason, isDestructiveDelete, onDecision]);
+  }, [approval.id, approval.run_id, rejectReason, isDestructiveDelete, isAgentTool, onDecision]);
 
   return (
     <div
@@ -562,11 +571,14 @@ function ApprovalsContent() {
         try {
           const di = parseDecisionInput(row.decision_input_json);
           const isDelete = di.kind === "destructive_delete";
+          const isTool = di.kind === "agent_tool";
           if (action === "approve") {
             if (isDelete) await api.approvals.approveAction(row.id);
+            else if (isTool) await api.approvals.approveAgentTool(row.id);
             else await api.runs.approve(row.run_id);
           } else {
             if (isDelete) await api.approvals.rejectAction(row.id);
+            else if (isTool) await api.approvals.rejectAgentTool(row.id);
             else await api.runs.reject(row.run_id);
           }
           ok += 1;
