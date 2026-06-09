@@ -13248,7 +13248,7 @@ def composio_execute_proxy(
     config = get_worker_config_for_run(worker_id)
     declared_connections = declared_composio_connections(config)
     declared_scopes = declared_composio_connection_scopes(config)
-    tool_prefix = composio_app_for_tool_slug(tool_slug, list(declared_connections.keys()))
+    tool_prefix = composio_app_for_tool_slug(tool_slug, declared_connections)
     if not tool_prefix:
         raise HTTPException(
             status_code=403,
@@ -18701,10 +18701,11 @@ def system_overview(
     for worker in workers:
         for trigger in _overview_schedule_triggers(worker):
             cron_expr = trigger.get("cron") or worker.get("cron_expr")
+            cron_timezone = trigger.get("timezone") or worker.get("cron_timezone") or "UTC"
             next_fire = _parse_iso8601(worker.get("next_run_at"))
             if next_fire is None or next_fire <= now or next_fire > next_24h:
                 if compute_next_run_at and cron_expr:
-                    computed = compute_next_run_at(str(cron_expr), now)
+                    computed = compute_next_run_at(str(cron_expr), now, str(cron_timezone))
                     next_fire = _parse_iso8601(computed) if computed else None
             if next_fire is None or next_fire <= now or next_fire > next_24h:
                 continue
