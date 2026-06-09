@@ -18,6 +18,7 @@ import { formatRelativeTime } from "@/components/connections/connection-data";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { ShareWorkerButton } from "@/components/ShareWorkerButton";
 import { PromptText } from "@/components/PromptText";
+import { sortWorkersByRecentActivity } from "@/lib/worker-list-order";
 
 const LS_KEY_FAVORITES = "workeros:favorites";
 
@@ -234,20 +235,16 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
     if (tab === "starred") {
       pool = pool.filter((w) => favorites.has(w.id));
     } else if (tab === "recent") {
-      pool = pool
-        .filter((w) => w.recent_stats?.last_run_at)
-        .sort((a, b) => {
-          const ta = new Date(a.recent_stats!.last_run_at!).getTime();
-          const tb = new Date(b.recent_stats!.last_run_at!).getTime();
-          return tb - ta;
-        })
-        .slice(0, 10);
+      pool = sortWorkersByRecentActivity(pool.filter((w) => w.recent_stats?.last_run_at)).slice(0, 10);
     } else if (folderFilter) {
       pool = pool.filter(
         (w) =>
           w.folder === folderFilter ||
           (w.folder || "").startsWith(`${folderFilter}/`)
       );
+    }
+    if (tab === "all" && !searchLower && !folderFilter) {
+      pool = sortWorkersByRecentActivity(pool);
     }
     if (searchLower) {
       // Tag matching is folded into the search box (Federico 2026-05-29): the

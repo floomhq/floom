@@ -24,6 +24,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
+import { EmilyAvatar } from "@/components/emily/EmilyAvatar";
 
 type TabKey = "base" | "instructions" | "prompt";
 
@@ -274,8 +275,14 @@ export default function AssistantPage() {
   return (
     <div className="space-y-6">
       <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">Assistant</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <EmilyAvatar size="md" />
+            <div>
+              <h1 className="text-2xl font-semibold tracking-tight">Emily</h1>
+              <p className="text-xs text-muted-foreground">Chief of Staff</p>
+            </div>
+          </div>
           {agent?.model ? (
             <Badge variant="outline" className="font-mono text-xs">
               {agent.model}
@@ -288,8 +295,8 @@ export default function AssistantPage() {
               <AssetVisibilityControl
                 visibility={agent.visibility}
                 canShare={agent.permissions?.can_share ?? true}
-                noun="assistant"
-                titleLabel="Assistant visibility"
+                noun="Emily"
+                titleLabel="Emily visibility"
                 onApply={async (next) => {
                   const updated = await api.system.setAssistantVisibility(next);
                   setAgent(updated);
@@ -300,9 +307,7 @@ export default function AssistantPage() {
           ) : null}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Your interactive workspace assistant — chat with it to get help and orchestrate your
-          workers. Two layers shape how it behaves: Base instructions apply to every conversation,
-          and Workspace instructions add your tenant-specific rules on top.
+          Emily&apos;s persona, workspace notes, and compiled prompt live here.
         </p>
       </div>
 
@@ -317,9 +322,9 @@ export default function AssistantPage() {
       <Tabs value={tab} onValueChange={changeTab}>
         <div className="-mx-1 max-w-full overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <TabsList>
-            <TabsTrigger value="base">Base instructions</TabsTrigger>
-            <TabsTrigger value="instructions">Workspace instructions</TabsTrigger>
-            <TabsTrigger value="prompt">Final prompt</TabsTrigger>
+            <TabsTrigger value="base">Persona</TabsTrigger>
+            <TabsTrigger value="instructions">Workspace notes</TabsTrigger>
+            <TabsTrigger value="prompt">Compiled prompt</TabsTrigger>
           </TabsList>
         </div>
 
@@ -334,14 +339,13 @@ export default function AssistantPage() {
               <div className="flex items-center justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h2 className="text-sm font-medium">Base instructions</h2>
+                    <h2 className="text-sm font-medium">Emily persona</h2>
                     <Badge variant="outline" className="text-xs">
                       {baseIsCustom ? "Custom" : "Built-in default"}
                     </Badge>
                   </div>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    The assistant&apos;s core identity and behavior. Applies to every conversation
-                    and is layered before your workspace instructions.
+                    Emily&apos;s core identity and style.
                   </p>
                 </div>
                 {editingBase ? (
@@ -413,10 +417,9 @@ export default function AssistantPage() {
             <>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-medium">Workspace instructions</h2>
+                  <h2 className="text-sm font-medium">Workspace notes</h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Tenant-specific rules and context. Saved in workspace.md and layered after the
-                    base instructions.
+                    Workspace-specific context and preferences.
                   </p>
                 </div>
                 {editingInstructions ? (
@@ -474,9 +477,9 @@ export default function AssistantPage() {
             <>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-medium">Final system prompt</h2>
+                  <h2 className="text-sm font-medium">Compiled prompt</h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Read-only preview of the base instructions plus your saved workspace instructions.
+                    Read-only preview of Emily&apos;s full system prompt.
                   </p>
                 </div>
                 <Badge variant="outline" className="text-xs">Read-only</Badge>

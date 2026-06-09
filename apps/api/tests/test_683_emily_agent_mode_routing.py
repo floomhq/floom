@@ -22,6 +22,17 @@ def _read_persona() -> str:
     return text[start:end]
 
 
+def _read_authoring_rules() -> str:
+    from pathlib import Path
+    src = Path(__file__).parents[1] / "chat_service.py"
+    text = src.read_text(encoding="utf-8")
+    start = text.find("WORKER_AUTHORING_RULES")
+    assert start != -1, "WORKER_AUTHORING_RULES not found in chat_service.py"
+    end = text.find('"""', start + len("WORKER_AUTHORING_RULES") + 5)
+    assert end != -1
+    return text[start:end]
+
+
 def _read_tool_desc(tool_name: str) -> str:
     """Return the description string for the named tool in chat_service.py."""
     from pathlib import Path
@@ -37,35 +48,35 @@ def _read_tool_desc(tool_name: str) -> str:
 
 def test_persona_mentions_create_from_prompt_for_agent_mode():
     """Emily's persona must explicitly name workers__create_from_prompt for agent-mode."""
-    persona = _read_persona()
-    assert "workers__create_from_prompt" in persona, (
-        "EMILY_BASE_PERSONA must instruct Emily to use workers__create_from_prompt "
+    rules = _read_authoring_rules()
+    assert "workers__create_from_prompt" in rules, (
+        "WORKER_AUTHORING_RULES must instruct Emily to use workers__create_from_prompt "
         "for agent-mode workers"
     )
 
 
 def test_persona_prohibits_create_for_agent_mode():
     """The persona rule must say workers__create is NOT for agent-mode workers."""
-    persona = _read_persona()
+    rules = _read_authoring_rules()
     # The rule should distinguish the two tools
-    assert "workers__create_from_prompt" in persona
+    assert "workers__create_from_prompt" in rules
     # Should mention the failure mode so Emily understands WHY
-    assert "SKILL.md" in persona, (
+    assert "SKILL.md" in rules, (
         "Persona should explain that workers__create does not produce SKILL.md"
     )
 
 
 def test_persona_exec_mode_section_present():
     """The Exec mode section must exist in the persona."""
-    persona = _read_persona()
-    assert "Exec mode" in persona
+    rules = _read_authoring_rules()
+    assert "Exec mode" in rules
 
 
 def test_persona_rule_covers_connections():
     """The routing rule must apply to workers that use external connections."""
-    persona = _read_persona()
+    rules = _read_authoring_rules()
     # The rule should cover the connection-using case
-    lower = persona.lower()
+    lower = rules.lower()
     assert "connection" in lower or "external" in lower
 
 
