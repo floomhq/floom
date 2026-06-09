@@ -1776,6 +1776,7 @@ class AgentDriver(SandboxDriver):
                 label=label,
                 preview=preview,
                 created_at=now_ts,
+                decision_input_json=json.dumps({"kind": "agent_tool"}),
             )
         except Exception as exc:
             logger.error("request_approval: failed to create approval row for run %s: %s", run_id, exc)
