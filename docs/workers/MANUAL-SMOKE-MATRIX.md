@@ -5,7 +5,7 @@ Use this matrix for run-form and manual smoke passes.
 | Worker | Input mode | Manual UI path |
 | --- | --- | --- |
 | `node-smoke-test` | No inputs | Click `Run worker`; there is no sample-fill step. |
-| `github-digest` | No manual inputs, GitHub connection required | Run tab is enabled when the GitHub connection status is active, valid, or connected. |
+| `github-digest` | Connection-gated | Run tab is enabled only when the GitHub connection status is active, valid, or connected. If no active GitHub account is present, verify the connect-and-test CTA instead of treating it as a no-input smoke. |
 | `csv_enricher` | File upload plus scalar input | `Fill with sample input` synthesizes `csv_file` from inline CSV content and fills `instruction`; API smoke may upload `sample_candidates.csv`. |
 | `cv_writeup` | File upload plus scalar inputs | `Fill with sample input` synthesizes `cv_file` from inline TXT content and fills the scalar fields; API smoke may upload `sample_cv.txt`. |
 | `reverse_match_crm` | File upload plus scalar inputs | API smoke uploads `sample_crm.csv`; manual UI upload remains required unless inline file content is added to the worker sample. |

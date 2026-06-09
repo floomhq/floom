@@ -64,6 +64,19 @@ function test690ConnectionGateUsesBackendLiveStatuses(): void {
     src.includes("LIVE_CONNECTION_STATUSES.has(String(c.status || \"\").toLowerCase())"),
     "activeConnectionSlugs must filter using LIVE_CONNECTION_STATUSES",
   );
+  assert(
+    src.includes("Connect and test required tools") &&
+      src.includes("Connect ${humanizeOptionLabel(missingConnections[0])} to run") &&
+      src.includes("Test connections"),
+    "missing connection state must render a clear connect-and-test CTA instead of a plain no-input run",
+  );
+
+  const manualMatrix = read("docs/workers/MANUAL-SMOKE-MATRIX.md");
+  assert(
+    manualMatrix.includes("Connection-gated") &&
+      manualMatrix.includes("verify the connect-and-test CTA instead of treating it as a no-input smoke"),
+    "manual smoke matrix must classify github-digest as connection-gated",
+  );
 }
 
 function test691FileSamplesAreInlineAndUploaded(): void {
