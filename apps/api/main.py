@@ -21358,7 +21358,7 @@ async def _mcp_dispatch(
 
     # --- triggers ---
     if name == "triggers.list":
-        data, s = await _api_call("GET", "/triggers", request, params={"worker_id": a.get("worker_id"), "app": a.get("app")})
+        data, s = await _api_call("GET", "/integrations/triggers", request, params={"worker_id": a.get("worker_id"), "app": a.get("app")})
         return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
 
     # --- approvals ---
