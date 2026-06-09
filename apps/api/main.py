@@ -450,6 +450,9 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
         "cv_writeup",
         "dach_compliance",
         "github-digest",
+        "gmail-latest-email-reader",
+        "gmail-meeting-approval",
+        "gmail-summarize-latest",
         "gmail_intake_brief",
         "gmail_inbox_manager",
         "kugelaudio-bug-intake",
@@ -472,12 +475,30 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
     }
 )
 
+_worker_create_locks_guard = threading.Lock()
+_worker_create_locks: Dict[str, threading.Lock] = {}
+_git_ops_lock = threading.Lock()
+
+
+def _acquire_worker_create_lock(worker_id: str) -> threading.Lock:
+    with _worker_create_locks_guard:
+        lock = _worker_create_locks.get(worker_id)
+        if lock is None:
+            lock = threading.Lock()
+            _worker_create_locks[worker_id] = lock
+    lock.acquire()
+    return lock
+
+
 PUBLIC_STOCK_WORKER_IDS = frozenset(
     {
         "csv_enricher",
         "cv_writeup",
         "dach_compliance",
         "github-digest",
+        "gmail-latest-email-reader",
+        "gmail-meeting-approval",
+        "gmail-summarize-latest",
         "gmail_intake_brief",
         "gmail_inbox_manager",
         "kugelaudio-bug-intake",
@@ -2789,10 +2810,11 @@ def _git_commit_worker(
 ) -> None:
     try:
         workspace = _git_workspace()
-        _ensure_git_workspace_ready(workspace)
-        rel = _git_join(_workers_git_prefix(), worker_id)
-        _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
-        _git_ops.push_background(workspace)
+        with _git_ops_lock:
+            _ensure_git_workspace_ready(workspace)
+            rel = _git_join(_workers_git_prefix(), worker_id)
+            _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
+            _git_ops.push_background(workspace)
     except Exception as exc:
         logger.warning("git commit failed for worker %s: %s", worker_id, exc)
 
@@ -2809,10 +2831,11 @@ def _git_commit_context(
         return  # sensitive contexts never enter git
     try:
         workspace = _git_workspace()
-        _ensure_git_workspace_ready(workspace)
-        rel = _context_git_path(name, rel_path)
-        _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
-        _git_ops.push_background(workspace)
+        with _git_ops_lock:
+            _ensure_git_workspace_ready(workspace)
+            rel = _context_git_path(name, rel_path)
+            _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
+            _git_ops.push_background(workspace)
     except Exception as exc:
         logger.warning("git commit failed for context %s: %s", name, exc)
 
@@ -2826,13 +2849,14 @@ def _git_commit_workspace_md(
     try:
         from chat_service import WORKSPACE_MD_PATH
         workspace = _git_workspace()
-        _ensure_git_workspace_ready(workspace)
-        try:
-            rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
-        except ValueError:
-            rel = "workspace.md"
-        _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
-        _git_ops.push_background(workspace)
+        with _git_ops_lock:
+            _ensure_git_workspace_ready(workspace)
+            try:
+                rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
+            except ValueError:
+                rel = "workspace.md"
+            _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
+            _git_ops.push_background(workspace)
     except Exception as exc:
         logger.warning("git commit failed for workspace.md: %s", exc)
 
@@ -2846,13 +2870,14 @@ def _git_commit_workspace_base_md(
     try:
         from chat_service import WORKSPACE_BASE_PERSONA_PATH
         workspace = _git_workspace()
-        _ensure_git_workspace_ready(workspace)
-        try:
-            rel = WORKSPACE_BASE_PERSONA_PATH.relative_to(workspace).as_posix()
-        except ValueError:
-            rel = "workspace.base.md"
-        _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
-        _git_ops.push_background(workspace)
+        with _git_ops_lock:
+            _ensure_git_workspace_ready(workspace)
+            try:
+                rel = WORKSPACE_BASE_PERSONA_PATH.relative_to(workspace).as_posix()
+            except ValueError:
+                rel = "workspace.base.md"
+            _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
+            _git_ops.push_background(workspace)
     except Exception as exc:
         logger.warning("git commit failed for workspace.base.md: %s", exc)
 
@@ -4006,6 +4031,8 @@ def _worker_hidden_from_api(worker_id: str) -> bool:
         return True
     tracked_ids = _tracked_worker_ids()
     if worker_id in tracked_ids:
+        if worker_id in _SYSTEM_WORKER_IDS:
+            return True
         if worker_id in PUBLIC_STOCK_WORKER_IDS:
             return False
         # Git-tracked workers that have a DB owner are user workers — always visible.
@@ -7774,7 +7801,9 @@ def _delete_worker_impl(worker_id: str, owner_id: str, repos: Repositories) -> N
             try:
                 workspace = _git_workspace()
                 prefix = _workers_git_prefix()
-                _git_ops.commit_paths(workspace, [f"{prefix}/{worker_id}"], f"worker: delete {worker_id}")
+                with _git_ops_lock:
+                    _ensure_git_workspace_ready(workspace)
+                    _git_ops.commit_paths(workspace, [f"{prefix}/{worker_id}"], f"worker: delete {worker_id}")
             except Exception as _git_exc:
                 logger.warning("git commit for worker deletion failed (non-fatal): %s", _git_exc)
         except Exception as exc:
@@ -8921,10 +8950,14 @@ def _cleanup_worker_create_state(
     staging_dir: Optional[Path] = None,
     target_dir: Optional[Path] = None,
     skill_version_id: Optional[str] = None,
+    delete_persisted: bool = True,
 ) -> None:
     for path in (staging_dir, target_dir):
         if path and path.is_dir():
             shutil.rmtree(path, ignore_errors=True)
+    if not delete_persisted:
+        invalidate_worker_cache()
+        return
     try:
         repos.workers.delete(user_id=user_id, worker_id=worker_id)
     except Exception:
@@ -9522,6 +9555,97 @@ def _reject_raw_local_runner_on_create(worker_yml: str) -> None:
         )
 
 
+def _create_worker_from_parsed_payload(
+    *,
+    worker_id: str,
+    worker_yml: str,
+    payload: WorkerCreateRequest,
+    config: WorkerConfig,
+    auth: AuthContext,
+    repos: Repositories,
+) -> WorkerDetail:
+    from worker_registry import WORKERS_DIR
+
+    create_lock = _acquire_worker_create_lock(worker_id)
+    try:
+        target_dir = WORKERS_DIR / worker_id
+        if target_dir.exists():
+            raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
+        try:
+            if repos.workers.get_any(worker_id=worker_id) is not None:
+                raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
+        except HTTPException:
+            raise
+        except Exception:
+            logger.warning("worker existence lookup failed for %s", worker_id, exc_info=True)
+
+        staging_dir = Path(tempfile.mkdtemp(prefix=f".{worker_id}.", dir=str(WORKERS_DIR.parent)))
+        worker_record: Optional[Dict[str, Any]] = None
+        skill_version_id: Optional[str] = None
+        create_complete = False
+        target_committed = False
+        delete_persisted = True
+        try:
+            _write_worker_bundle_files(
+                staging_dir,
+                worker_yml=worker_yml,
+                run_py=payload.run_py,
+                skill_md=payload.skill_md,
+                config=config,
+            )
+            worker_record = _worker_record_from_worker_yml(worker_id, worker_yml)
+            skill_version_id = _skill_version_id(worker_id, worker_record.get("manifest") or {})
+            invalidate_worker_cache()
+            with get_db() as conn:
+                _persist_discovered_workers(conn, [worker_record], user_id=auth.user_id)
+            _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+            os.replace(staging_dir, target_dir)
+            target_committed = True
+            invalidate_worker_cache()
+            detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+            # Commit new worker files to the workspace git repo.
+            author_name, author_email = _git_author(auth)
+            worker_name = (config.name if config else None) or worker_id
+            _git_commit_worker(
+                worker_id,
+                message=f"worker: create {worker_name}",
+                author_name=author_name,
+                author_email=author_email,
+            )
+            create_complete = True
+            return detail
+        except sqlite3.IntegrityError as exc:
+            raise HTTPException(
+                status_code=409,
+                detail=(
+                    f"Worker {worker_id!r} already exists or conflicts with a previous version. "
+                    "Delete the old worker first, then recreate."
+                ),
+            ) from exc
+        except FileExistsError as exc:
+            delete_persisted = False
+            raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists") from exc
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=500, detail=f"Failed to create worker {worker_id!r}: {exc}") from exc
+        finally:
+            if not create_complete:
+                _cleanup_worker_create_state(
+                    worker_id=worker_id,
+                    user_id=auth.user_id,
+                    repos=repos,
+                    staging_dir=staging_dir,
+                    target_dir=target_dir if target_committed else None,
+                    skill_version_id=skill_version_id,
+                    delete_persisted=delete_persisted,
+                )
+    finally:
+        create_lock.release()
+
+
 @app.post("/workers", response_model=WorkerDetail)
 def create_worker(
     payload: WorkerCreateRequest,
@@ -9530,8 +9654,6 @@ def create_worker(
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
     """Create a new worker from YAML + Python source."""
-    from worker_registry import WORKERS_DIR
-
     _require_worker_write_workspace_context(request)
 
     worker_yml = payload.worker_yml
@@ -9548,71 +9670,14 @@ def create_worker(
             worker_yml = _rewrite_worker_yml_id(worker_yml, worker_id)
     _reject_raw_local_runner_on_create(worker_yml)
     worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
-
-    target_dir = WORKERS_DIR / worker_id
-    if target_dir.exists():
-        raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
-    try:
-        if repos.workers.get_any(worker_id=worker_id) is not None:
-            raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
-    except HTTPException:
-        raise
-    except Exception:
-        logger.warning("worker existence lookup failed for %s", worker_id, exc_info=True)
-
-    staging_dir = Path(tempfile.mkdtemp(prefix=f".{worker_id}.", dir=str(WORKERS_DIR.parent)))
-    worker_record: Optional[Dict[str, Any]] = None
-    skill_version_id: Optional[str] = None
-    create_complete = False
-    target_committed = False
-    try:
-        _write_worker_bundle_files(
-            staging_dir,
-            worker_yml=worker_yml,
-            run_py=payload.run_py,
-            skill_md=payload.skill_md,
-            config=config,
-        )
-        worker_record = _worker_record_from_worker_yml(worker_id, worker_yml)
-        skill_version_id = _skill_version_id(worker_id, worker_record.get("manifest") or {})
-        invalidate_worker_cache()
-        with get_db() as conn:
-            _persist_discovered_workers(conn, [worker_record], user_id=auth.user_id)
-        _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
-        os.replace(staging_dir, target_dir)
-        target_committed = True
-        invalidate_worker_cache()
-        detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
-        # Commit new worker files to the workspace git repo
-        author_name, author_email = _git_author(auth)
-        worker_name = (config.name if config else None) or worker_id
-        _git_commit_worker(worker_id, message=f"worker: create {worker_name}", author_name=author_name, author_email=author_email)
-        create_complete = True
-        return detail
-    except sqlite3.IntegrityError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Worker {worker_id!r} already exists or conflicts with a previous version. "
-                "Delete the old worker first, then recreate."
-            ),
-        ) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to create worker {worker_id!r}: {exc}") from exc
-    finally:
-        if not create_complete:
-            _cleanup_worker_create_state(
-                worker_id=worker_id,
-                user_id=auth.user_id,
-                repos=repos,
-                staging_dir=staging_dir,
-                target_dir=target_dir if target_committed else None,
-                skill_version_id=skill_version_id,
-            )
+    return _create_worker_from_parsed_payload(
+        worker_id=worker_id,
+        worker_yml=worker_yml,
+        payload=payload,
+        config=config,
+        auth=auth,
+        repos=repos,
+    )
 
 
 # ---------------------------------------------------------------------------
@@ -10314,22 +10379,7 @@ def update_worker(
             status_code=400,
             detail=f"worker_yml name {raw_worker_id!r} does not match path worker_id {worker_id!r}",
         )
-    if worker_id in PROTECTED_STOCK_WORKER_IDS:
-        edited_files = [
-            WorkerFilePatch(path="worker.yml", content=payload.worker_yml),
-            WorkerFilePatch(path="run.py", content=payload.run_py),
-        ]
-        if payload.skill_md is not None:
-            edited_files.append(WorkerFilePatch(path="SKILL.md", content=payload.skill_md))
-        new_id = _clone_protected_worker_for_edit(
-            worker_id,
-            edited_files,
-            user_id=auth.user_id,
-            repos=repos,
-        )
-        detail = _build_worker_detail(new_id, user_id=auth.user_id, repos=repos)
-        detail.cloned_from = worker_id
-        return detail
+    _raise_if_protected_worker_mutation(worker_id)
 
     parsed_worker_id, _config = _parse_worker_payload(payload.worker_yml, user_id=auth.user_id)
     if parsed_worker_id.replace("-", "_") != worker_id.replace("-", "_"):
@@ -10537,22 +10587,7 @@ def update_worker_files(
             raise HTTPException(status_code=400, detail=f"duplicate file path: {item.path!r}")
         seen_paths.add(item.path)
 
-    # Stock/example workers are read-only shared templates: instead of erroring on
-    # a brain attach / tool add, transparently fork the worker into a user-owned
-    # editable copy and apply the edit there (clone-on-edit). The response carries
-    # `cloned_from` + a different `id` so the UI redirects to the new worker.
-    if worker_id in PROTECTED_STOCK_WORKER_IDS:
-        if "worker.yml" not in seen_paths:
-            raise HTTPException(status_code=400, detail="files must include worker.yml")
-        new_id = _clone_protected_worker_for_edit(
-            worker_id,
-            payload.files,
-            user_id=auth.user_id,
-            repos=repos,
-        )
-        detail = _build_worker_detail(new_id, user_id=auth.user_id, repos=repos)
-        detail.cloned_from = worker_id
-        return detail
+    _raise_if_protected_worker_mutation(worker_id)
 
     config_dict = worker.get("config") or {}
     try:
@@ -19232,13 +19267,16 @@ def _sync_secrets_to_enc(user_id: str, repos: Repositories, pat: str, repo_full_
             return
         key = _get_or_create_secrets_key(pat, repo_full_name)
         blob = _encrypt_secrets_blob(secrets, key)
-        enc_path = _git_workspace() / _SECRETS_ENC_FILENAME
+        workspace = _git_workspace()
+        enc_path = workspace / _SECRETS_ENC_FILENAME
         enc_path.write_bytes(blob)
-        _git_ops.commit_paths(
-            _git_workspace(), [_SECRETS_ENC_FILENAME],
-            "secrets: update encrypted vault",
-        )
-        _git_ops.push_background(_git_workspace())
+        with _git_ops_lock:
+            _ensure_git_workspace_ready(workspace)
+            _git_ops.commit_paths(
+                workspace, [_SECRETS_ENC_FILENAME],
+                "secrets: update encrypted vault",
+            )
+            _git_ops.push_background(workspace)
         logger.debug("Encrypted %d secrets to %s", len(secrets), _SECRETS_ENC_FILENAME)
     except Exception as exc:
         logger.warning("Failed to sync secrets to %s: %s", _SECRETS_ENC_FILENAME, exc)
@@ -20717,16 +20755,19 @@ def _sync_workspace_tools_yml(user_id: str, repos: Repositories) -> None:
                 for t in tools
             ],
         }
-        yml_path = _git_workspace() / _WORKSPACE_TOOLS_FILENAME
+        workspace = _git_workspace()
+        yml_path = workspace / _WORKSPACE_TOOLS_FILENAME
         yml_path.write_text(
             pyyaml.safe_dump(doc, sort_keys=False, default_flow_style=False, allow_unicode=True),
             encoding="utf-8",
         )
-        _git_ops.commit_paths(
-            _git_workspace(), [_WORKSPACE_TOOLS_FILENAME],
-            f"tools: update workspace-tools.yml ({len(tools)} tool{'s' if len(tools) != 1 else ''})",
-        )
-        _git_ops.push_background(_git_workspace())
+        with _git_ops_lock:
+            _ensure_git_workspace_ready(workspace)
+            _git_ops.commit_paths(
+                workspace, [_WORKSPACE_TOOLS_FILENAME],
+                f"tools: update workspace-tools.yml ({len(tools)} tool{'s' if len(tools) != 1 else ''})",
+            )
+            _git_ops.push_background(workspace)
     except Exception as exc:
         logger.warning("Failed to sync %s: %s", _WORKSPACE_TOOLS_FILENAME, exc)
 
