@@ -270,6 +270,21 @@ export default function ConnectionsCollection({
                 </div>
               ),
             },
+            {
+              key: "Config",
+              label: "Config",
+              render: () => (
+                <pre style={codeBlock}>
+                  {JSON.stringify(
+                    c.mcp_transport === "stdio" || c.mcp_command
+                      ? { command: c.mcp_command, args: c.mcp_args ?? [], transport: c.mcp_transport ?? "stdio" }
+                      : { url: c.mcp_url, transport: c.mcp_transport ?? "streamable_http" },
+                    null,
+                    2,
+                  )}
+                </pre>
+              ),
+            },
           ],
         };
       }
@@ -333,3 +348,14 @@ export default function ConnectionsCollection({
 
 const pad: React.CSSProperties = { color: "var(--muted-foreground)", padding: "8px 2px" };
 const pillBtn: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5 };
+const codeBlock: React.CSSProperties = {
+  border: "1px solid var(--line)",
+  borderRadius: 12,
+  background: "var(--bg-2)",
+  color: "var(--ink-soft)",
+  padding: 13,
+  whiteSpace: "pre-wrap",
+  overflow: "auto",
+  fontSize: 12,
+  fontFamily: "var(--font-mono)",
+};

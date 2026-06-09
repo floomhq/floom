@@ -28,6 +28,7 @@ export function CollectionGrid<T>({
           <div
             role="button"
             tabIndex={0}
+            data-collrow
             key={id}
             aria-current={id === selectedId ? "true" : undefined}
             className={`c-gcard ${id === selectedId ? "sel" : ""}`}
