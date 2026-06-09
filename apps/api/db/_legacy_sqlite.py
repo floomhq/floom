@@ -994,6 +994,40 @@ def _make_worker_alerts_url_nullable(conn: sqlite3.Connection) -> None:
     )
 
 
+def _migrate_worker_webhook_secrets_fk(conn: sqlite3.Connection) -> None:
+    rows = conn.execute("PRAGMA foreign_key_list(worker_webhook_secrets)").fetchall()
+    if rows and all(row["table"] == "workers" for row in rows):
+        return
+
+    conn.execute("PRAGMA foreign_keys = OFF")
+    conn.execute(
+        """
+        CREATE TABLE IF NOT EXISTS worker_webhook_secrets_new (
+            worker_id TEXT PRIMARY KEY,
+            secret_hash TEXT NOT NULL,
+            created_at TEXT NOT NULL,
+            rotated_at TEXT,
+            FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE
+        )
+        """
+    )
+    if _table_exists(conn, "worker_webhook_secrets"):
+        conn.execute(
+            """
+            INSERT OR REPLACE INTO worker_webhook_secrets_new
+                (worker_id, secret_hash, created_at, rotated_at)
+            SELECT s.worker_id, s.secret_hash, s.created_at, s.rotated_at
+            FROM worker_webhook_secrets s
+            WHERE EXISTS (
+                SELECT 1 FROM workers w WHERE w.id = s.worker_id
+            )
+            """
+        )
+        conn.execute("DROP TABLE worker_webhook_secrets")
+    conn.execute("ALTER TABLE worker_webhook_secrets_new RENAME TO worker_webhook_secrets")
+    conn.execute("PRAGMA foreign_keys = ON")
+
+
 # ---------------------------------------------------------------------------
 # Migrations
 # ---------------------------------------------------------------------------
@@ -1760,6 +1794,8 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_cli_api_tokens_user_id
         ON cli_api_tokens(user_id);
     """,
+    # -- migration 62: repair webhook-secret FK after workers table rebuild ----
+    _migrate_worker_webhook_secrets_fk,
 ]
 
 
