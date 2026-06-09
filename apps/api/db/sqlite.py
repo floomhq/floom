@@ -1850,6 +1850,68 @@ class SqliteRunRepository:
                     )
         return failed
 
+    def fail_all_pending_approval(
+        self,
+        *,
+        error: str,
+        error_code: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fail ALL runs stuck in pending_approval.
+
+        Called once on startup. Any pending_approval row at boot time has a
+        dead in-process polling loop — there is no live executor to resume it.
+        Unlike fail_stale_running (which uses a timeout+grace window), we fail
+        all of them immediately because a server restart is definitive proof the
+        loop is gone.
+        """
+        completed_at = now_iso()
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT r.id, r.started_at, r.created_at, w.owner_id AS user_id
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE r.status = 'pending_approval'
+                ORDER BY COALESCE(r.started_at, r.created_at) ASC
+                """,
+            ).fetchall()
+            failed: list[dict[str, Any]] = []
+            for row in rows:
+                started_at = row["started_at"] or row["created_at"]
+                duration_ms = None
+                if started_at:
+                    try:
+                        started = _dt.datetime.fromisoformat(started_at)
+                        completed = _dt.datetime.fromisoformat(completed_at)
+                        duration_ms = int((completed - started).total_seconds() * 1000)
+                    except Exception:
+                        duration_ms = None
+                cursor = conn.execute(
+                    """
+                    UPDATE runs
+                    SET status = ?, error = ?, error_code = ?, completed_at = ?, duration_ms = ?
+                    WHERE id = ? AND status = 'pending_approval'
+                    """,
+                    (
+                        RunStatus.FAILED.value,
+                        error,
+                        error_code,
+                        completed_at,
+                        duration_ms,
+                        row["id"],
+                    ),
+                )
+                if cursor.rowcount:
+                    failed.append({
+                        "id": row["id"],
+                        "run_id": row["id"],
+                        "user_id": row["user_id"],
+                        "started_at": row["started_at"],
+                        "created_at": row["created_at"],
+                        "completed_at": completed_at,
+                    })
+        return failed
+
     def count_running_for_worker(self, *, user_id: str, worker_id: str) -> int:
         with get_db() as conn:
             row = conn.execute(
