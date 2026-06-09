@@ -780,6 +780,9 @@ class SqliteWorkerRepository:
 
     def stats_batch(self, *, user_id: str, worker_ids: list[str], days: int = 7) -> dict[str, RecentStats]:
         if not worker_ids:
+            # Do NOT set _last_run_batch — {} is not None so any later
+            # get_last_run() would see a "populated" cache and return None
+            # for every worker instead of falling back to the DB.
             return {}
         placeholders = ",".join("?" for _ in worker_ids)
         with get_db() as conn:
@@ -847,7 +850,7 @@ class SqliteWorkerRepository:
                     seen.add(wid)
             _last_run_batch.set(batch)
         except Exception:
-            pass
+            pass  # Leave cache unpopulated; get_last_run() will fall back to DB
         return result
 
     def timeseries_batch(
@@ -982,7 +985,10 @@ class SqliteWorkerRepository:
     def get_recipe(self, *, worker_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         cache = _recipe_cache.get()
         if cache is not None and worker_id in cache:
+            # Cache hit — return what was pre-fetched by list().
             return cache[worker_id]
+        # Cache miss (cache absent OR worker created after list() was called):
+        # fall through to a direct DB query rather than returning None.
         where = "WHERE w.id = ?"
         params: list[Any] = [worker_id]
         if user_id is not None:
@@ -2557,10 +2563,14 @@ class SqliteApprovalRepository:
         follow_up_run_id: str | None = None,
         annotations_json: str | None = None,
     ) -> dict[str, Any] | None:
+        # approval_id filter prevents bulk-approving all pending rows for a run
+        # when multiple sequential request_approval() calls are in flight.
         id_clause = "AND id = ?" if approval_id is not None else ""
-        params_list: list[Any] = [decided_at, edited_output_json, follow_up_run_id, annotations_json, run_id, owner_id]
-        if approval_id is not None:
-            params_list.append(approval_id)
+        params: tuple[Any, ...] = (
+            decided_at, edited_output_json, follow_up_run_id, annotations_json,
+            run_id, owner_id,
+            *((approval_id,) if approval_id is not None else ()),
+        )
         with get_db() as conn:
             conn.execute(
                 f"""
@@ -2570,10 +2580,13 @@ class SqliteApprovalRepository:
                     edited_output_json = ?,
                     follow_up_run_id = ?,
                     annotations_json = COALESCE(?, annotations_json)
-                WHERE run_id = ? AND owner_id = ? AND status = 'pending' {id_clause}
+                WHERE run_id = ? AND owner_id = ? AND status = 'pending'
+                {id_clause}
                 """,
-                params_list,
+                params,
             )
+        if approval_id is not None:
+            return self.get(owner_id=owner_id, approval_id=approval_id)
         return self.get_by_run_id(run_id=run_id)
 
     def reject(
@@ -2587,9 +2600,11 @@ class SqliteApprovalRepository:
         annotations_json: str | None = None,
     ) -> dict[str, Any] | None:
         id_clause = "AND id = ?" if approval_id is not None else ""
-        params_list: list[Any] = [decided_at, reason, annotations_json, run_id, owner_id]
-        if approval_id is not None:
-            params_list.append(approval_id)
+        params: tuple[Any, ...] = (
+            decided_at, reason, annotations_json,
+            run_id, owner_id,
+            *((approval_id,) if approval_id is not None else ()),
+        )
         with get_db() as conn:
             conn.execute(
                 f"""
@@ -2598,10 +2613,13 @@ class SqliteApprovalRepository:
                     decided_at = ?,
                     reason = ?,
                     annotations_json = COALESCE(?, annotations_json)
-                WHERE run_id = ? AND owner_id = ? AND status = 'pending' {id_clause}
+                WHERE run_id = ? AND owner_id = ? AND status = 'pending'
+                {id_clause}
                 """,
-                params_list,
+                params,
             )
+        if approval_id is not None:
+            return self.get(owner_id=owner_id, approval_id=approval_id)
         return self.get_by_run_id(run_id=run_id)
 
 
