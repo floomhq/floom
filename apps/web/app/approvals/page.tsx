@@ -109,7 +109,11 @@ function ApprovalCard({
         notifyApprovalsChanged();
         onDecision();
       } else if (isAgentTool) {
-        await api.approvals.approveAgentTool(approval.id);
+        let editedOutput: Record<string, unknown> | undefined;
+        if (editing && editedText !== (approval.preview ?? "")) {
+          editedOutput = { text: editedText };
+        }
+        await api.approvals.approveAgentTool(approval.id, editedOutput);
         toast.success("Approved — run will resume");
         notifyApprovalsChanged();
         onDecision();
