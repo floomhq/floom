@@ -215,7 +215,7 @@ def test_approve_run_rejects_agent_tool_kind(monkeypatch):
             with pytest.raises(HTTPException) as exc_info:
                 m.approve_run("run_abc", MagicMock(), auth, repos)
             assert exc_info.value.status_code == 400
-            assert "agent_tool" in exc_info.value.detail
+            assert "request_approval()" in exc_info.value.detail
 
 
 # ---------------------------------------------------------------------------
