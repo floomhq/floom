@@ -24,6 +24,7 @@ import os
 import shutil
 import sqlite3
 import sys
+import tempfile
 import time
 from pathlib import Path
 from types import SimpleNamespace
@@ -32,20 +33,22 @@ from typing import Any
 ROOT = Path(__file__).resolve().parents[1]
 API_DIR = ROOT / "apps" / "api"
 WORKERS_DIR = ROOT / "workers"
-TEST_WORKERS_DIR = Path("/tmp/workeros-t1d-file-inputs-workers")
-DB_PATH = Path("/tmp/workeros-t1d-file-inputs.db")
-BLOBS_DIR = Path("/tmp/workeros-t1d-file-inputs-blobs")
-ARTIFACTS_DIR = Path("/tmp/workeros-t1d-file-inputs-artifacts")
+TMP_ROOT = Path(
+    os.environ.get("WORKEROS_FILE_INPUTS_TMPDIR")
+    or tempfile.mkdtemp(prefix=f"workeros-t1d-file-inputs-{os.getpid()}-")
+)
+TEST_WORKERS_DIR = TMP_ROOT / "workers"
+DB_PATH = TMP_ROOT / "floom.db"
+BLOBS_DIR = TMP_ROOT / "blobs"
+ARTIFACTS_DIR = TMP_ROOT / "artifacts"
 TEST_SECRET = "test-secret-file-inputs"
 AUTH_HEADERS = {"x-floom-secret": TEST_SECRET}
 TEST_WORKER_ID = "file-access-test"
 
 
 def reset_environment() -> None:
-    DB_PATH.unlink(missing_ok=True)
-    shutil.rmtree(BLOBS_DIR, ignore_errors=True)
-    shutil.rmtree(TEST_WORKERS_DIR, ignore_errors=True)
-    shutil.rmtree(ARTIFACTS_DIR, ignore_errors=True)
+    shutil.rmtree(TMP_ROOT, ignore_errors=True)
+    TMP_ROOT.mkdir(parents=True, exist_ok=True)
     os.environ["FLOOM_DB"] = str(DB_PATH)
     os.environ["FLOOM_BLOBS_DIR"] = str(BLOBS_DIR)
     os.environ["FLOOM_WORKERS_DIR"] = str(TEST_WORKERS_DIR)

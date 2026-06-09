@@ -31,7 +31,7 @@ jobs:
           WORKEROS_DEPLOY: local
           WORKEROS_ROOT: ${{ github.workspace }}
           FLOOM_SECRET: ci-test-secret
-          OPENAI_API_KEY: ""
+          OPENAI_API_KEY: sk-test-fake-key
         # #604: -p no:warnings keeps output clean; all test files auto-discovered.
         run: pytest tests/ -v --tb=short -p no:warnings
 
@@ -56,7 +56,7 @@ jobs:
           WORKEROS_DEPLOY: local
           WORKEROS_ROOT: ${{ github.workspace }}
           FLOOM_SECRET: ci-test-secret
-          OPENAI_API_KEY: ""
+          OPENAI_API_KEY: sk-test-fake-key
         # #604: root pytest.ini points at tests/ (66 files). These cover the
         # full worker runtime — agent driver, E2B sandbox, run orchestration —
         # and were previously not run in CI.
