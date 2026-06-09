@@ -18,6 +18,7 @@ from .interface import (
     SecretRepository,
     UserRepository,
     UserSessionRepository,
+    WorkerFeedbackRepository,
     WorkerRepository,
     WorkspaceMemberRepository,
 )
@@ -33,6 +34,7 @@ from .sqlite import (
     SqliteSecretRepository,
     SqliteUserRepository,
     SqliteUserSessionRepository,
+    SqliteWorkerFeedbackRepository,
     SqliteWorkerRepository,
     SqliteWorkspaceMemberRepository,
 )
@@ -57,6 +59,9 @@ class Repositories(NamedTuple):
     users: Optional[UserRepository] = None
     tokens: Optional[PersonalAccessTokenRepository] = None
     sessions: Optional[UserSessionRepository] = None
+    # Worker feedback (#731). Optional for downstream repositories until Cloud
+    # ships its Supabase-backed implementation.
+    worker_feedback: Optional[WorkerFeedbackRepository] = None
 
 
 def _local_repositories() -> Repositories:
@@ -74,6 +79,7 @@ def _local_repositories() -> Repositories:
         users=SqliteUserRepository(),
         tokens=SqlitePersonalAccessTokenRepository(),
         sessions=SqliteUserSessionRepository(),
+        worker_feedback=SqliteWorkerFeedbackRepository(),
     )
 
 

@@ -1814,6 +1814,24 @@ MIGRATIONS: list[Migration] = [
     """,
     # -- migration 62: repair webhook-secret FK after workers table rebuild ----
     _migrate_worker_webhook_secrets_fk,
+    # -- migration 63: worker feedback comments ------------------------------
+    """
+    CREATE TABLE IF NOT EXISTS worker_feedback (
+        id          TEXT PRIMARY KEY,
+        worker_id   TEXT NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+        author_id   TEXT NOT NULL,
+        body        TEXT NOT NULL,
+        resolved    INTEGER NOT NULL DEFAULT 0,
+        resolved_by TEXT,
+        resolved_at TEXT,
+        created_at  TEXT NOT NULL,
+        updated_at  TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_worker_feedback_worker_created
+        ON worker_feedback(worker_id, created_at DESC);
+    CREATE INDEX IF NOT EXISTS idx_worker_feedback_worker_resolved
+        ON worker_feedback(worker_id, resolved);
+    """,
 ]
 
 

@@ -2620,6 +2620,127 @@ def get_worker_logs(
 
 
 # ---------------------------------------------------------------------------
+# Feedback: member-visible worker comments
+# ---------------------------------------------------------------------------
+
+class WorkerFeedbackCreate(BaseModel):
+    body: str = Field(..., min_length=1, max_length=4000)
+
+
+class WorkerFeedbackResolve(BaseModel):
+    resolved: bool = True
+
+
+class WorkerFeedbackItem(BaseModel):
+    id: str
+    worker_id: str
+    author_id: str
+    body: str
+    resolved: bool = False
+    resolved_by: Optional[str] = None
+    resolved_at: Optional[str] = None
+    created_at: str
+    updated_at: str
+
+
+def _require_worker_feedback_repo(repos: Repositories):
+    feedback_repo = getattr(repos, "worker_feedback", None)
+    if feedback_repo is None:
+        raise HTTPException(status_code=501, detail="Worker feedback is not available in this deployment")
+    return feedback_repo
+
+
+def _worker_feedback_item(row: Dict[str, Any]) -> WorkerFeedbackItem:
+    return WorkerFeedbackItem(
+        id=str(row.get("id") or ""),
+        worker_id=str(row.get("worker_id") or ""),
+        author_id=str(row.get("author_id") or ""),
+        body=str(row.get("body") or ""),
+        resolved=bool(row.get("resolved")),
+        resolved_by=row.get("resolved_by"),
+        resolved_at=row.get("resolved_at"),
+        created_at=str(row.get("created_at") or ""),
+        updated_at=str(row.get("updated_at") or ""),
+    )
+
+
+@app.get("/workers/{worker_id}/feedback", response_model=List[WorkerFeedbackItem])
+def list_worker_feedback(
+    worker_id: str,
+    include_resolved: bool = Query(False),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[WorkerFeedbackItem]:
+    """List feedback comments for a worker the caller can see."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    feedback_repo = _require_worker_feedback_repo(repos)
+    return [
+        _worker_feedback_item(row)
+        for row in feedback_repo.list(worker_id=worker_id, include_resolved=include_resolved)
+    ]
+
+
+@app.post("/workers/{worker_id}/feedback", response_model=WorkerFeedbackItem, status_code=201)
+def create_worker_feedback(
+    worker_id: str,
+    body: WorkerFeedbackCreate,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerFeedbackItem:
+    """Create feedback for a worker the caller can see.
+
+    This intentionally gates on visibility, not edit permission: workspace
+    members who can run or view a shared worker can leave owner-visible feedback.
+    """
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    feedback_repo = _require_worker_feedback_repo(repos)
+    clean_body = body.body.strip()
+    if not clean_body:
+        raise HTTPException(status_code=400, detail="Feedback body is required")
+    row = feedback_repo.create(
+        feedback_id=f"wfb_{_uuid_mod.uuid4().hex[:12]}",
+        worker_id=worker_id,
+        author_id=auth.user_id,
+        body=clean_body,
+        created_at=now_iso(),
+    )
+    return _worker_feedback_item(row)
+
+
+@app.patch("/workers/{worker_id}/feedback/{feedback_id}", response_model=WorkerFeedbackItem)
+def resolve_worker_feedback(
+    worker_id: str,
+    feedback_id: str,
+    body: WorkerFeedbackResolve,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerFeedbackItem:
+    """Resolve a worker feedback item. Owners/admin editors only."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    if body.resolved is not True:
+        raise HTTPException(status_code=400, detail="Worker feedback can only be resolved")
+    perms = _worker_permissions(worker, user_id=auth.user_id, repos=repos)
+    if not perms.can_edit:
+        raise HTTPException(status_code=403, detail="Only a worker owner or admin can resolve feedback")
+    feedback_repo = _require_worker_feedback_repo(repos)
+    row = feedback_repo.resolve(
+        feedback_id=feedback_id,
+        worker_id=worker_id,
+        resolved_by=auth.user_id,
+        resolved_at=now_iso(),
+    )
+    if row is None:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    return _worker_feedback_item(row)
+
+
+# ---------------------------------------------------------------------------
 # Alerts: POST/GET/DELETE /workers/{id}/alerts
 # ---------------------------------------------------------------------------
 
@@ -21197,6 +21318,9 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "workers.alerts.list", "description": "List configured alerts for a worker (email/webhook on failure, success, etc.).", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "workers.alerts.create", "description": "Add an alert to a worker — fires on specified events via webhook or email.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "on": {"type": "array", "items": {"type": "string"}, "description": "Events to alert on, e.g. ['failed', 'approval_required']."}, "url": {"type": "string"}, "email_to": {"type": "array", "items": {"type": "string"}}}, "required": ["id", "on"]}},
     {"name": "workers.alerts.delete", "description": "Remove a worker alert by its ID.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "alert_id": {"type": "string"}}, "required": ["id", "alert_id"]}},
+    {"name": "workers.feedback.list", "description": "List member feedback comments for a worker.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "include_resolved": {"type": "boolean", "default": False}}, "required": ["id"]}},
+    {"name": "workers.feedback.create", "description": "Leave feedback on a worker the caller can see.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "body": {"type": "string", "description": "Feedback text."}}, "required": ["id", "body"]}},
+    {"name": "workers.feedback.resolve", "description": "Resolve a worker feedback item. Requires owner/admin edit permission.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "feedback_id": {"type": "string"}}, "required": ["id", "feedback_id"]}},
     # --- runs ---
     {"name": "runs.list", "description": "List Workeros runs, optionally filtered by worker id.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "status": {"type": "string"}, "limit": {"type": "integer", "default": 50}, "offset": {"type": "integer", "default": 0}}}},
     {"name": "runs.get", "description": "Get a Workeros run by id, including logs, outputs, artifacts, and approval status.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
@@ -21339,6 +21463,15 @@ async def _mcp_dispatch(
         return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
     if name == "workers.alerts.delete":
         data, s = await _api_call("DELETE", f"/workers/{_enc(a['id'])}/alerts/{_enc(a['alert_id'])}", request)
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.feedback.list":
+        data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/feedback", request, params={"include_resolved": a.get("include_resolved", False)})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.feedback.create":
+        data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/feedback", request, body={"body": a["body"]})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "workers.feedback.resolve":
+        data, s = await _api_call("PATCH", f"/workers/{_enc(a['id'])}/feedback/{_enc(a['feedback_id'])}", request, body={"resolved": True})
         return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
 
     # --- runs ---
