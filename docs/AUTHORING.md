@@ -329,6 +329,22 @@ contexts:
 
 Local packs are copied from the workspace context store. Git-backed packs are cloned into the E2B sandbox at run time; they are read-only from Workeros' perspective. Add `writeable: true` only for local packs that the worker is allowed to persist back after a successful run.
 
+Working example:
+
+```yaml
+contexts:
+  - name: hello-world
+    source: git+https://github.com/octocat/Hello-World.git
+```
+
+Inside `run.py`, the cloned pack is available under `context/hello-world/`. A minimal smoke can list that directory and write `result.json` only after the clone succeeds.
+
+Prod smoke command:
+
+```bash
+python scripts/smoke_git_context_worker.py --secret "$FLOOM_SECRET"
+```
+
 ### Triggers
 
 - **manual** — runs only from /workers/<id> Run tab or via `POST /workers/<id>/runs`.
