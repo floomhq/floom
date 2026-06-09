@@ -332,6 +332,85 @@ def test_create_worker_run_rejects_exceeded_depth(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# 10b. worker-call metadata and polling scope
+# ---------------------------------------------------------------------------
+
+def test_worker_call_run_metadata_uses_parent_run_id():
+    from auth.context import AuthContext
+    import main as _main
+
+    auth = AuthContext(
+        user_id="u1",
+        auth_method="run_token",
+        run_token_payload={
+            "user_id": "u1",
+            "parent_run_id": "run-parent",
+            "callable_workers": ["child-worker"],
+            "depth": 0,
+            "exp": int(time.time()) + 3600,
+        },
+    )
+
+    trigger_source, trigger_ref = _main._worker_call_run_metadata(auth)
+
+    assert trigger_source == "worker_call"
+    assert trigger_ref == "run-parent"
+
+
+def test_worker_call_token_allows_child_creation_and_matching_poll(monkeypatch):
+    monkeypatch.setenv("FLOOM_SECRET", "test-secret-abc")
+    import main as _main
+
+    token_payload = {
+        "user_id": "u1",
+        "parent_run_id": "run-parent",
+        "callable_workers": ["child-worker"],
+        "depth": 0,
+        "exp": int(time.time()) + 3600,
+    }
+
+    class _Runs:
+        def __init__(self, row):
+            self._row = row
+
+        def get_any(self, run_id):
+            return self._row if run_id == "run-child" else None
+
+    class _Repos:
+        def __init__(self, row):
+            self.runs = _Runs(row)
+
+    create_allowed = _main._worker_call_token_allows_request(
+        path="/workers/child-worker/runs",
+        method="POST",
+        token_payload=token_payload,
+    )
+    poll_allowed = _main._worker_call_token_allows_request(
+        path="/runs/run-child",
+        method="GET",
+        token_payload=token_payload,
+        repos=_Repos({"trigger_source": "worker_call", "trigger_ref": "run-parent"}),
+    )
+    poll_blocked = _main._worker_call_token_allows_request(
+        path="/runs/run-child",
+        method="GET",
+        token_payload=token_payload,
+        repos=_Repos({"trigger_source": "manual", "trigger_ref": "run-parent"}),
+    )
+    other_blocked = _main._worker_call_token_allows_request(
+        path="/workers/child-worker/runs/ignored",
+        method="GET",
+        token_payload=token_payload,
+        repos=_Repos({"trigger_source": "worker_call", "trigger_ref": "run-parent"}),
+    )
+
+    assert create_allowed is True
+    assert poll_allowed is True
+    assert poll_blocked is False
+    assert other_blocked is False
+
+
+# ---------------------------------------------------------------------------
 # 11. workeros_helper: WORKEROS_PY_CONTENT is importable and exports call_worker
 # ---------------------------------------------------------------------------
 
