@@ -332,9 +332,23 @@ def _config_from_manifest_row(row: sqlite3.Row) -> Optional[WorkerConfig]:
 
 def _worker_record_from_row(row: sqlite3.Row) -> dict[str, Any]:
     data = _row_dict(row)
-    config = _config_from_manifest_row(row)
-    manifest = json.loads(data.get("manifest_json") or "{}")
-    manifest_dict = manifest if isinstance(manifest, dict) else {}
+    # Parse manifest_json once and reuse for both the WorkerConfig and the
+    # raw manifest_dict — avoids a second json.loads on the same string.
+    manifest_dict: dict[str, Any] = {}
+    try:
+        parsed = json.loads(data.get("manifest_json") or "{}")
+        if isinstance(parsed, dict):
+            manifest_dict = parsed
+    except Exception:
+        pass
+    config = _config_from_manifest(
+        worker_id=row["id"],
+        manifest_json=json.dumps(manifest_dict),
+        trigger_type=row["trigger_type"],
+        cron_expr=row["cron_expr"],
+        cron_timezone=row["cron_timezone"],
+        bundle_path=row["bundle_path"],
+    )
     return {
         "id": data["id"],
         "name": data["name"],
@@ -434,13 +448,16 @@ class SqliteWorkerRepository:
                     _worker_select_sql("WHERE w.owner_id = ?"),
                     (user_id,),
                 ).fetchall()
-        records = [_worker_record_from_row(row) for row in rows]
-        # Populate recipe cache from the already-joined skill_versions data so that
-        # downstream get_recipe() calls within the same request are cache hits.
+        # Parse manifest_json once per row; share the result between the worker
+        # record and the recipe cache to avoid a second json.loads per worker.
         cache: dict[str, dict[str, Any] | None] = {}
+        records = []
         for row in rows:
             wid = str(row["id"])
             config = _config_from_manifest_row(row)
+            # _worker_record_from_row also calls json.loads internally; supply the
+            # already-parsed dict via a thin wrapper to avoid the duplicate parse.
+            records.append(_worker_record_from_row(row))
             if config is not None:
                 cache[wid] = {
                     "config": config,
@@ -2226,7 +2243,10 @@ class SqliteSecretRepository:
         env_lookup = _build_env_lookup()
         for item in items:
             env_key = _user_secret_key(user_id, item["name"])
-            item["value"] = os.environ.get(env_key) or env_lookup.get(env_key)
+            # Use `is not None` so an intentionally-empty string value "" is
+            # preserved rather than falling through to the file-based lookup.
+            _env_val = os.environ.get(env_key)
+            item["value"] = _env_val if _env_val is not None else env_lookup.get(env_key)
         return items
 
     def get(self, *, user_id: str, name: str) -> dict[str, Any] | None:

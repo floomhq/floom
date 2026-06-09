@@ -90,28 +90,20 @@ def _resolve_connections(
         cursor = conn.cursor()
         for app_name in declared:
             if user_id:
-                cursor.execute(
-                    """
-                    SELECT composio_connection_id, status
-                    FROM composio_connections
-                    WHERE app_name = ? AND user_id = ? AND status = 'active'
-                    ORDER BY updated_at DESC
-                    LIMIT 1
-                    """,
-                    (app_name.lower(), user_id),
+                sql = (
+                    "SELECT composio_connection_id FROM composio_connections"
+                    " WHERE app_name = ? AND user_id = ? AND status = 'active'"
+                    " ORDER BY updated_at DESC LIMIT 1"
                 )
+                params: tuple = (app_name.lower(), user_id)
             else:
-                cursor.execute(
-                    """
-                    SELECT composio_connection_id, status
-                    FROM composio_connections
-                    WHERE app_name = ? AND status = 'active'
-                    ORDER BY updated_at DESC
-                    LIMIT 1
-                    """,
-                    (app_name.lower(),),
+                sql = (
+                    "SELECT composio_connection_id FROM composio_connections"
+                    " WHERE app_name = ? AND status = 'active'"
+                    " ORDER BY updated_at DESC LIMIT 1"
                 )
-            row = cursor.fetchone()
+                params = (app_name.lower(),)
+            row = cursor.execute(sql, params).fetchone()
             if row:
                 connection_ids[app_name.lower()] = row["composio_connection_id"]
             else:

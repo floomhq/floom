@@ -248,6 +248,13 @@ class RunRepository(Protocol):
         error_code: str | None = None,
     ) -> list[RowDict]: ...
 
+    def fail_all_pending_approval(
+        self,
+        *,
+        error: str,
+        error_code: str | None = None,
+    ) -> list[RowDict]: ...
+
 
 class ConnectionRepository(Protocol):
     def list(self, *, user_id: str) -> list[RowDict]: ...
