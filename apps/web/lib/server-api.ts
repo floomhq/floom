@@ -6,20 +6,28 @@
  * and Route Handlers — never import this from client-side code.
  */
 
+import { cookies } from "next/headers";
+
 const API_BASE =
   process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
 const API_SECRET = process.env.FLOOM_API_SECRET || "";
+const ACTIVE_WORKSPACE_COOKIE_KEY = "workeros.activeWorkspaceId";
 
 export async function serverFetch<T>(
   path: string,
   options?: RequestInit & { next?: { revalidate?: number | false; tags?: string[] } }
 ): Promise<T> {
   const { next, ...fetchOptions } = options ?? {};
+  const cookieStore = await cookies();
+  const workspaceCookie = cookieStore.get(ACTIVE_WORKSPACE_COOKIE_KEY)?.value || "";
+  const activeWorkspace =
+    workspaceCookie && workspaceCookie !== "local-default" ? decodeURIComponent(workspaceCookie) : "";
   const res = await fetch(`${API_BASE}${path}`, {
     ...fetchOptions,
     headers: {
       "content-type": "application/json",
       "x-floom-secret": API_SECRET,
+      ...(activeWorkspace ? { "x-workeros-workspace": activeWorkspace } : {}),
       ...fetchOptions?.headers,
     },
     // next.js cache config — passed through as NextFetchRequestConfig
