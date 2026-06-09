@@ -6,9 +6,10 @@ import { Check, Copy, Eye, EyeOff, RefreshCw } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { McpToolCatalog } from "@/components/McpToolCatalog";
+import { getPublicApiBase, getPublicApiHost } from "@/lib/api-base";
 
 const SECRET_STORAGE_KEYS = ["floom_secret", "FLOOM_SECRET", "workeros_api_secret"];
-const API_BASE = "https://workers-api.floom.dev";
+const API_BASE = getPublicApiBase();
 const PROXY_BASE = "/api/proxy";
 
 type McpTarget = "claude" | "codex" | "cursor" | "vscode" | "windsurf" | "generic";
@@ -307,7 +308,7 @@ export function CliCommandPanel() {
           <h2 className="text-base font-medium text-foreground">OSS API token</h2>
           <p className="text-sm text-muted-foreground mt-0.5">
             Generate a browser copy of the single-user token for{" "}
-            <code className="font-mono">workers-api.floom.dev</code>. Use it as{" "}
+            <code className="font-mono">{getPublicApiHost()}</code>. Use it as{" "}
             <code className="font-mono">x-floom-secret</code>; Cloud PATs start
             with <code className="font-mono">floom_</code> and belong to{" "}
             <code className="font-mono">workeros-api.floom.dev</code>.
