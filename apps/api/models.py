@@ -940,8 +940,8 @@ class WorkerEntrypoint(BaseModel):
 
 class WorkerLimits(BaseModel):
     max_tool_iterations: int = Field(default=12, ge=1)
-    max_output_tokens: int = Field(default=16000, ge=1)
-    max_total_tokens: int = Field(default=50000, ge=1)
+    max_output_tokens: int = Field(default=1000000, ge=1)
+    max_total_tokens: int = Field(default=1000000, ge=1)
     timeout_seconds: int = Field(default=300, ge=1)
 
 
