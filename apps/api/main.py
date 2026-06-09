@@ -4024,7 +4024,25 @@ def _tracked_worker_ids() -> frozenset[str]:
     return frozenset(worker_ids)
 
 
-def _worker_hidden_from_api(worker_id: str) -> bool:
+def _build_owned_tracked_ids() -> frozenset[str]:
+    """Single SELECT: returns all git-tracked worker IDs that have a DB owner."""
+    tracked = _tracked_worker_ids()
+    if not tracked:
+        return frozenset()
+    from db import get_db as _get_db
+    try:
+        placeholders = ",".join("?" for _ in tracked)
+        with _get_db() as conn:
+            rows = conn.execute(
+                f"SELECT id FROM workers WHERE id IN ({placeholders})",
+                list(tracked),
+            ).fetchall()
+        return frozenset(str(r["id"]) for r in rows)
+    except Exception:
+        return frozenset()
+
+
+def _worker_hidden_from_api(worker_id: str, _owned_tracked_ids: frozenset[str] | None = None) -> bool:
     if worker_id.startswith("."):
         return True
     if any(worker_id.startswith(prefix) for prefix in _INTERNAL_WORKER_ID_PREFIXES):
@@ -4037,13 +4055,15 @@ def _worker_hidden_from_api(worker_id: str) -> bool:
             return False
         # Git-tracked workers that have a DB owner are user workers — always visible.
         # Only pure engine/stock workers (no DB owner) are hidden from the user API.
+        if _owned_tracked_ids is not None:
+            return worker_id not in _owned_tracked_ids
         from db import get_repositories
         try:
             owner = get_repositories().workers.get_owner(worker_id=worker_id)
             if owner:
                 return False
         except Exception:
-            pass
+            return False  # fail open — don't silently hide workers on DB error
         return True
     return False
 
@@ -11545,6 +11565,8 @@ def approve_public_approval(
             annotations=body.annotations,
         )
         return ActionResponse(status=str(result.get("status") or "approved"), run_id=str(approval["run_id"]))
+    if decision_input.get("kind") == "agent_tool":
+        return approve_agent_tool_approval(approval_id, ApproveRequest(edited_output=body.edited_output), auth, repos)
     return approve_run(
         str(approval["run_id"]),
         ApproveRequest(edited_output=body.edited_output, annotations=body.annotations),
@@ -11576,6 +11598,8 @@ def reject_public_approval(
             repos,
         )
         return ActionResponse(status=str(result.get("status") or "rejected"), run_id=str(approval["run_id"]))
+    if decision_input.get("kind") == "agent_tool":
+        return reject_agent_tool_approval(approval_id, RejectRequest(reason=body.reason), auth, repos)
     return reject_run(
         str(approval["run_id"]),
         RejectRequest(reason=body.reason, annotations=body.annotations),
@@ -11687,6 +11711,18 @@ def approve_run(
     if approval_row.get("status") != "pending":
         raise HTTPException(status_code=409, detail="Approval already decided")
 
+    # Mid-run agent-tool approvals must use /approvals/{id}/approve, not this endpoint.
+    _di: Dict[str, Any] = {}
+    try:
+        _di = json.loads(approval_row.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if _di.get("kind") == "agent_tool":
+        raise HTTPException(
+            status_code=400,
+            detail="This approval has kind=agent_tool. Use POST /approvals/{id}/approve instead.",
+        )
+
     # Load original inputs
     original_inputs: Dict[str, Any] = {}
     raw_decision_input = approval_row.get("decision_input_json")
@@ -11788,6 +11824,18 @@ def reject_run(
         raise HTTPException(status_code=404, detail="Approval record not found")
     if approval_row.get("status") != "pending":
         raise HTTPException(status_code=409, detail="Approval already decided")
+
+    # Mid-run agent-tool approvals must use /approvals/{id}/reject, not this endpoint.
+    _di2: Dict[str, Any] = {}
+    try:
+        _di2 = json.loads(approval_row.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if _di2.get("kind") == "agent_tool":
+        raise HTTPException(
+            status_code=400,
+            detail="This approval has kind=agent_tool. Use POST /approvals/{id}/reject instead.",
+        )
 
     decided_at = now_iso()
     annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
@@ -18588,6 +18636,9 @@ def system_overview(
     active_workers_count = sum(1 for row in workers if not _overview_worker_paused(row))
     paused_workers_count = max(0, len(workers) - active_workers_count)
     worker_names = {row["id"]: row.get("name") or row["id"] for row in workers if row.get("id")}
+    # Pre-built once to avoid N+1 _get_db_worker() calls when filtering run lists
+    # by worker visibility (set lookup vs one SELECT per row).
+    _visible_worker_ids: set = {w["id"] for w in workers if w.get("id")}
 
     # G5 FIX 3: the headline success rate must reflect the partner's ACTIVE,
     # real workers — not legacy/paused/example/system churn that drags the
@@ -18659,7 +18710,7 @@ def system_overview(
             trigger_source=row.get("trigger_source") or "manual",
         )
         for row in recent_rows
-        if _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+        if row.get("worker_id") in _visible_worker_ids
     ][:10]
 
     scheduled_today: List[OverviewScheduledItem] = []
@@ -18705,13 +18756,13 @@ def system_overview(
     # worker is no longer API-visible so the cluster + its link cannot 404.
     failure_runs = [
         row for row in failure_runs
-        if _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+        if row.get("worker_id") in _visible_worker_ids
     ]
     visible_terminal_runs = [
         row for row in runs_14d_rows
         if str(row.get("status") or "").lower()
         in {"completed", "approved", "success", "succeeded", "failed", "error", "cancelled", "rejected", "timeout"}
-        and _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+        and row.get("worker_id") in _visible_worker_ids
     ]
     attention_items.extend(
         _overview_consecutive_failure_items(
