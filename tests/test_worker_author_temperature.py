@@ -187,6 +187,60 @@ def test_worker_author_retries_until_bundle_has_functional_run_py(monkeypatch, t
     out = module.generate_bundle({"prompt": "Reverse a text string", "mode": "draft"})
 
     assert completions.calls and len(completions.calls) == 2
-    assert out["worker_yml"] == second_functional["worker_yml"]
     assert out["run_code"] == _FUNCTIONAL_REVERSE_RUN_PY
     assert "error" not in out
+    import yaml as pyyaml
+
+    repaired = pyyaml.safe_load(out["worker_yml"])
+    assert repaired["schema_version"] == "0.3"
+    assert repaired["version"] == "0.1.0"
+
+
+def test_worker_author_repairs_schema_version_and_missing_version(monkeypatch, tmp_path):
+    module = _load_worker_author_module()
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setenv("OPENAI_API_KEY", "sk-test")
+    monkeypatch.setattr(module, "_read_context_file", lambda *a, **k: "")
+    monkeypatch.setattr(module, "_list_context_dir", lambda *a, **k: [])
+    monkeypatch.setattr(module, "_read_existing_workers", lambda *a, **k: [])
+
+    bad_yaml = (
+        "schema_version: 0.3\n"
+        "name: reverse-string\n"
+        'title: "Reverse String"\n'
+        'description: "Reverses a text string."\n'
+        "exec:\n"
+        '  entry: "run.py"\n'
+        '  command: "python run.py"\n'
+        '  runtime: "python311"\n'
+        '  runner: "e2b"\n'
+        "trigger:\n"
+        '  type: "manual"\n'
+    )
+    payload = {
+        "worker_yml": bad_yaml,
+        "skill_md": None,
+        "run_code": _FUNCTIONAL_REVERSE_RUN_PY,
+        "requirements_txt": None,
+        "suggested_id": "reverse-string",
+        "sample_input_json": "{\"text\":\"abc\"}",
+    }
+
+    completions = _QueuedCompletions([payload])
+
+    class _FakeOpenAI:
+        def __init__(self, api_key):
+            self.chat = SimpleNamespace(completions=completions)
+
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=_FakeOpenAI))
+
+    out = module.generate_bundle({"prompt": "Reverse a text string", "mode": "draft"})
+
+    import yaml as pyyaml
+
+    assert completions.calls and len(completions.calls) == 1
+    assert "error" not in out
+    assert out["worker_yml"]
+    raw = pyyaml.safe_load(out["worker_yml"])
+    assert raw["schema_version"] == "0.3"
+    assert raw["version"] == "0.1.0"

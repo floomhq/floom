@@ -42,6 +42,7 @@ def _load_api(monkeypatch, tmp_path):
         "db.dependency", "db.interface", "models", "worker_registry",
         "run_service", "composio_client", "auth", "auth.context",
         "auth.dependency", "auth.factory", "auth.interface", "auth.local",
+        "auth.local_workspaces",
     ]:
         sys.modules.pop(name, None)
     sys.modules["scheduler"] = types.SimpleNamespace(

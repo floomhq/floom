@@ -153,6 +153,7 @@ def _validate_worker_yml(yml_string: str) -> Optional[str]:
         manifest = pyyaml.safe_load(yml_string)
         if not isinstance(manifest, dict):
             return "worker_yml must be a YAML mapping"
+        manifest = _repair_generated_worker_manifest(manifest)
         schema_ver = manifest.get("schema_version")
         if schema_ver != "0.3":
             return f"schema_version must be '0.3', got {schema_ver!r}"
@@ -183,6 +184,23 @@ def _load_manifest(yml_string: str) -> Optional[Dict[str, Any]]:
         return parsed if isinstance(parsed, dict) else None
     except Exception:
         return None
+
+
+def _repair_generated_worker_manifest(manifest: Dict[str, Any]) -> Dict[str, Any]:
+    """Normalize tiny schema drift in generated WorkerContract YAML."""
+    repaired = dict(manifest)
+    schema_version = repaired.get("schema_version")
+    if schema_version is not None and not isinstance(schema_version, str):
+        repaired["schema_version"] = str(schema_version)
+    if repaired.get("schema_version") == "0.3":
+        version = repaired.get("version")
+        if not isinstance(version, str) or not version.strip():
+            repaired["version"] = "0.1.0"
+        elif not version:
+            repaired["version"] = "0.1.0"
+    if "version" in repaired and repaired["version"] is not None and not isinstance(repaired["version"], str):
+        repaired["version"] = str(repaired["version"])
+    return repaired
 
 
 def _exec_block(manifest: Dict[str, Any]) -> Dict[str, Any]:
@@ -317,7 +335,7 @@ Output ONLY a JSON object (no markdown, no code fences) with this exact shape:
 }
 
 Rules:
-- worker_yml must be schema_version 0.3, valid YAML (all strings double-quoted), exec.runner: "e2b"
+- worker_yml must be schema_version "0.3", include version: "0.1.0", be valid YAML (all strings double-quoted), and use exec.runner: "e2b"
 - Agent mode (entry: SKILL.md): set skill_md, leave run_code null
 - Script mode (entry: run.py): set run_code, leave skill_md null; always add exec.command
 
@@ -567,6 +585,14 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
             log(f"worker-author: attempt {attempt} validation failed: {validation_error}", level="warning")
             continue
 
+        import yaml as pyyaml
+
+        repaired_manifest = _repair_generated_worker_manifest(_load_manifest(worker_yml) or {})
+        parsed["worker_yml"] = pyyaml.safe_dump(
+            repaired_manifest,
+            sort_keys=False,
+            default_flow_style=False,
+        )
         last_error = None
         break
 
