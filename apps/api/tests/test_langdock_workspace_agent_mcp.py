@@ -4,6 +4,8 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 from fastapi.testclient import TestClient
 
 
@@ -43,6 +45,10 @@ def _auth_headers(token: str = "test-langdock-token"):
     }
 
 
+def _secret_headers():
+    return {"x-floom-secret": "test-api-secret"}
+
+
 def _rpc(method, request_id=1, params=None):
     payload = {"jsonrpc": "2.0", "id": request_id, "method": method}
     if params is not None:
@@ -68,12 +74,50 @@ def test_langdock_mcp_initialize_bypasses_floom_secret_with_bearer_auth(monkeypa
     assert "tools" in body["result"]["capabilities"]
 
 
+@pytest.mark.parametrize(
+    "path,expected_status",
+    [
+        ("/api/mcp", 200),
+        ("/mcp", 200),
+        ("/api/mcp/setup/langdock", 200),
+        ("/mcp/setup/langdock", 200),
+        ("/langdock/mcp", 200),
+        ("/workspace-agent/mcp", 200),
+        ("/api/langdock/mcp", 200),
+        ("/api/workspace-agent/mcp", 200),
+    ],
+)
+def test_workspace_agent_mcp_discovery_routes_require_auth(monkeypatch, tmp_path, path, expected_status):
+    main = _load_api(monkeypatch, tmp_path)
+
+    with TestClient(main.app) as client:
+        missing = client.get(path)
+        authenticated = client.get(path, headers=_secret_headers())
+
+    assert missing.status_code == 401, missing.text
+    assert authenticated.status_code == expected_status, authenticated.text
+    body = authenticated.json()
+    if "setup" in path:
+        assert body["server_url"] == "https://workeros-api.floom.dev/api/mcp"
+        assert body["transport"] == "STREAMABLE_HTTP"
+        assert body["authentication"]["method"] == "API Key"
+        assert body["authentication"]["token_configured"] is True
+    else:
+        assert body["name"] == "workeros"
+        assert body["version"] == "0.2.0"
+        assert body["protocol"] == "2024-11-05"
+        assert body["transport"] == "streamable-http"
+        assert body["endpoint"] == "POST /api/mcp"
+        assert "workers.list" in body["tools"]
+        assert "contexts.write" in body["tools"]
+
+
 def test_workspace_agent_mcp_get_discovery_matches_nova_pattern(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
 
     with TestClient(main.app) as client:
-        response = client.get("/api/mcp")
-        mounted_response = client.get("/mcp")
+        response = client.get("/api/mcp", headers=_secret_headers())
+        mounted_response = client.get("/mcp", headers=_secret_headers())
 
     assert response.status_code == 200, response.text
     assert mounted_response.status_code == 200, mounted_response.text
@@ -296,7 +340,7 @@ def test_langdock_setup_card_exposes_self_service_metadata(monkeypatch, tmp_path
     main = _load_api(monkeypatch, tmp_path)
 
     with TestClient(main.app) as client:
-        response = client.get("/api/mcp/setup/langdock")
+        response = client.get("/api/mcp/setup/langdock", headers=_secret_headers())
 
     assert response.status_code == 200, response.text
     body = response.json()
