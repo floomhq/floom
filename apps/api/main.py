@@ -2971,6 +2971,10 @@ class ContextDetail(ContextSummary):
 
 class ContextCreateRequest(BaseModel):
     writeable: bool = False
+    # Sensitive (the default) excludes the context from git versioning — it may
+    # hold credentials. Set false to opt the context into git history (versions,
+    # rollback). See contexts.is_context_sensitive.
+    sensitive: bool = True
 
 
 class ContextTextWriteRequest(BaseModel):
@@ -5989,6 +5993,7 @@ def create_context(
     set_context_metadata(
         safe_name,
         writeable=bool(payload.writeable) if payload else False,
+        sensitive=bool(payload.sensitive) if payload else True,
         owner_id=auth.user_id,
     )
     # Materialize the access-control mirror row (default private) so the Share
@@ -21143,7 +21148,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "connections.test", "description": "Run a live connectivity check on a configured connection.", "inputSchema": {"type": "object", "properties": {"connection_id": {"type": "string"}}, "required": ["connection_id"]}},
     # --- contexts ---
     {"name": "contexts.list", "description": "List Workeros context folders.", "inputSchema": {"type": "object", "properties": {}}},
-    {"name": "contexts.create", "description": "Create a new brain pack context folder.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "writeable": {"type": "boolean", "default": False}}, "required": ["name"]}},
+    {"name": "contexts.create", "description": "Create a new brain pack context folder.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "writeable": {"type": "boolean", "default": False}, "sensitive": {"type": "boolean", "default": True, "description": "Sensitive contexts (default) are excluded from git versioning. Set false to enable version history and rollback."}}, "required": ["name"]}},
     {"name": "contexts.read", "description": "Read a UTF-8 context file, or return metadata for binary files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
     {"name": "contexts.write", "description": "Create or update a UTF-8 text file inside a context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["name", "path", "content"]}},
     {"name": "contexts.delete", "description": "Delete a brain pack context and all its files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "force": {"type": "boolean", "default": False}}, "required": ["name"]}},
@@ -21331,7 +21336,7 @@ async def _mcp_dispatch(
         data, s = await _api_call("GET", "/contexts", request)
         return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
     if name == "contexts.create":
-        data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}", request, body={"writeable": a.get("writeable", False)})
+        data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}", request, body={"writeable": a.get("writeable", False), "sensitive": a.get("sensitive", True)})
         return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
     if name == "contexts.read":
         encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
