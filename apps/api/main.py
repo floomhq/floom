@@ -3093,6 +3093,12 @@ def rollback_worker(
     with get_db() as conn:
         _persist_discovered_workers(conn, this_worker_list, user_id=auth.user_id)
 
+    try:
+        from worker_registry import WORKERS_DIR as _WD
+        _embed_files_in_skill_version(worker_id, _WD / worker_id)
+    except Exception:
+        logger.warning("Failed to embed files in DB after rollback for worker %s", worker_id, exc_info=True)
+
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
 
@@ -3775,6 +3781,24 @@ def _persist_discovered_workers(
         is_archived = manifest.get("archived") is True
         enabled_value = 0 if is_archived or manifest.get("paused") is True or manifest.get("enabled") is False else 1
 
+        # Preserve _files if previously embedded — the raw manifest from disk
+        # never contains _files, so a plain upsert would wipe them on every
+        # discover cycle, breaking container-redeploy resilience.
+        sv_name = manifest.get("name") or worker_id.replace("_", "-")
+        sv_version = manifest.get("version") or "0.1.0"
+        existing_sv = conn.execute(
+            "SELECT manifest_json FROM skill_versions WHERE id = ?",
+            (skill_version_id,),
+        ).fetchone()
+        manifest_to_store = manifest
+        if existing_sv:
+            try:
+                existing_manifest = json.loads(existing_sv["manifest_json"] or "{}")
+                if "_files" in existing_manifest and "_files" not in manifest:
+                    manifest_to_store = dict(manifest)
+                    manifest_to_store["_files"] = existing_manifest["_files"]
+            except Exception:
+                pass
         conn.execute(
             """
             INSERT INTO skill_versions
@@ -3786,9 +3810,9 @@ def _persist_discovered_workers(
             """,
             (
                 skill_version_id,
-                manifest.get("name") or worker_id.replace("_", "-"),
-                manifest.get("version") or "0.1.0",
-                json.dumps(manifest),
+                sv_name,
+                sv_version,
+                json.dumps(manifest_to_store),
                 f"workers/{worker_id}",
                 now,
             ),
@@ -4024,25 +4048,17 @@ def _tracked_worker_ids() -> frozenset[str]:
     return frozenset(worker_ids)
 
 
-def _build_owned_tracked_ids() -> frozenset[str]:
-    """Single SELECT: returns all git-tracked worker IDs that have a DB owner."""
-    tracked = _tracked_worker_ids()
-    if not tracked:
-        return frozenset()
-    from db import get_db as _get_db
-    try:
-        placeholders = ",".join("?" for _ in tracked)
-        with _get_db() as conn:
-            rows = conn.execute(
-                f"SELECT id FROM workers WHERE id IN ({placeholders})",
-                list(tracked),
-            ).fetchall()
-        return frozenset(str(r["id"]) for r in rows)
-    except Exception:
-        return frozenset()
+def _worker_hidden_from_api(
+    worker_id: str,
+    _owned_tracked_ids: frozenset[str] | None = None,
+) -> bool:
+    """Return True if worker_id should be hidden from the public API.
 
-
-def _worker_hidden_from_api(worker_id: str, _owned_tracked_ids: frozenset[str] | None = None) -> bool:
+    Pass _owned_tracked_ids (a pre-fetched frozenset of git-tracked workers
+    that have a DB owner) when calling inside a list loop to avoid one
+    extra SELECT per worker (N+1). When absent the function falls back to
+    an individual get_owner() query.
+    """
     if worker_id.startswith("."):
         return True
     if any(worker_id.startswith(prefix) for prefix in _INTERNAL_WORKER_ID_PREFIXES):
@@ -4063,9 +4079,35 @@ def _worker_hidden_from_api(worker_id: str, _owned_tracked_ids: frozenset[str] |
             if owner:
                 return False
         except Exception:
-            return False  # fail open — don't silently hide workers on DB error
+            # On DB error expose the worker rather than silently clearing the
+            # entire list (fail open for visibility, not fail closed).
+            return False
         return True
     return False
+
+
+def _build_owned_tracked_ids() -> frozenset[str]:
+    """Return the set of git-tracked worker IDs that have a DB owner.
+
+    Called once before a list loop to pre-load ownership for all tracked
+    workers in a single query, eliminating the N+1 problem in
+    _worker_hidden_from_api().
+    """
+    tracked = _tracked_worker_ids()
+    if not tracked:
+        return frozenset()
+    from db import get_repositories
+    try:
+        placeholders = ",".join("?" * len(tracked))
+        from db import get_db
+        with get_db() as conn:
+            rows = conn.execute(
+                f"SELECT id FROM workers WHERE id IN ({placeholders}) AND owner_id IS NOT NULL",
+                tuple(tracked),
+            ).fetchall()
+        return frozenset(str(r["id"]) for r in rows)
+    except Exception:
+        return frozenset(tracked)  # Fail open: treat all as owned
 
 
 def _worker_source_visible_to_api(worker_id: str) -> bool:
@@ -4376,6 +4418,95 @@ def _should_ignore_worker_file(rel_path: str) -> bool:
         if part.endswith(".pyc"):
             return True
     return False
+
+
+_SENSITIVE_FILE_NAMES = frozenset({".env", ".env.local", ".env.production", ".env.development"})
+_SENSITIVE_FILE_SUFFIXES = frozenset({".pem", ".key", ".p12", ".pfx", ".crt", ".cer", ".p8", ".der", ".ppk"})
+
+
+def _should_embed_file(rel_path: str) -> bool:
+    if _should_ignore_worker_file(rel_path):
+        return False
+    name = Path(rel_path).name
+    if name in _SENSITIVE_FILE_NAMES or name.startswith(".env"):
+        return False
+    if Path(rel_path).suffix.lower() in _SENSITIVE_FILE_SUFFIXES:
+        return False
+    return True
+
+
+def _embed_files_in_skill_version(worker_id: str, worker_dir: Path) -> None:
+    """Store all text worker files into manifest_json._files so they survive container redeploys."""
+    files: dict = {}
+    for fpath in sorted(worker_dir.rglob("*")):
+        if fpath.is_symlink() or not fpath.is_file():
+            continue
+        rel = fpath.relative_to(worker_dir).as_posix()
+        if not _should_embed_file(rel):
+            continue
+        try:
+            files[rel] = fpath.read_text(encoding="utf-8")
+        except (UnicodeDecodeError, OSError):
+            pass
+    if not files:
+        return
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT sv.id, sv.manifest_json FROM skill_versions sv "
+            "JOIN workers w ON w.skill_version_id = sv.id WHERE w.id = ?",
+            (worker_id,),
+        ).fetchone()
+        if not row:
+            return
+        manifest = json.loads(row["manifest_json"] or "{}")
+        manifest["_files"] = files
+        conn.execute(
+            "UPDATE skill_versions SET manifest_json = ? WHERE id = ?",
+            (json.dumps(manifest), row["id"]),
+        )
+
+
+def rematerialize_worker_from_db(worker_id: str) -> bool:
+    """Write worker files from manifest_json._files back to WORKERS_DIR.
+
+    Returns True if files were written, False if no _files stored in DB.
+    Uses an atomic temp-dir swap so a partial failure never leaves a corrupt dir.
+    """
+    import shutil as _shutil
+    from worker_registry import WORKERS_DIR
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT sv.manifest_json FROM skill_versions sv "
+            "JOIN workers w ON w.skill_version_id = sv.id WHERE w.id = ?",
+            (worker_id,),
+        ).fetchone()
+    if not row:
+        return False
+    manifest = json.loads(row["manifest_json"] or "{}")
+    files = manifest.get("_files")
+    if not files:
+        return False
+    worker_dir = WORKERS_DIR / worker_id
+    tmp_dir = Path(tempfile.mkdtemp(prefix=f".rmat.{worker_id}.", dir=str(WORKERS_DIR)))
+    try:
+        resolved_tmp = tmp_dir.resolve()
+        for rel_path, content in files.items():
+            dest = (tmp_dir / rel_path).resolve()
+            try:
+                dest.relative_to(resolved_tmp)
+            except ValueError:
+                logger.warning("Skipping path traversal in _files for worker %s: %s", worker_id, rel_path)
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content, encoding="utf-8")
+        if worker_dir.exists():
+            _shutil.rmtree(worker_dir)
+        tmp_dir.rename(worker_dir)
+    except Exception:
+        _shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
+    logger.info("Re-materialized %d files for worker %s from DB", len(files), worker_id)
+    return True
 
 
 def _language_for_path(rel_path: str) -> str:
@@ -9120,6 +9251,11 @@ def _register_worker_from_files(
             invalidate_worker_cache()
             raise HTTPException(status_code=409, detail=str(exc)) from exc
 
+    try:
+        _embed_files_in_skill_version(worker_id, target_dir)
+    except Exception:
+        logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
+
     return worker_id
 
 
@@ -9161,6 +9297,11 @@ def persist_worker_run_py(worker_id: str, run_py: str, *, user_id: str | None) -
         raise RuntimeError(f"worker {worker_id!r} not found after repair persist")
     with get_db() as conn:
         _persist_discovered_workers(conn, this_worker_list, user_id=user_id)
+
+    try:
+        _embed_files_in_skill_version(worker_id, target_dir)
+    except Exception:
+        logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
 
 
 @app.post("/workers/draft-and-create", response_model=DraftAndCreateResponse)
@@ -9693,14 +9834,75 @@ def create_worker(
             worker_yml = _rewrite_worker_yml_id(worker_yml, worker_id)
     _reject_raw_local_runner_on_create(worker_yml)
     worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
-    return _create_worker_from_parsed_payload(
-        worker_id=worker_id,
-        worker_yml=worker_yml,
-        payload=payload,
-        config=config,
-        auth=auth,
-        repos=repos,
-    )
+
+    target_dir = WORKERS_DIR / worker_id
+    if target_dir.exists():
+        raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
+    try:
+        if repos.workers.get_any(worker_id=worker_id) is not None:
+            raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
+    except HTTPException:
+        raise
+    except Exception:
+        logger.warning("worker existence lookup failed for %s", worker_id, exc_info=True)
+
+    staging_dir = Path(tempfile.mkdtemp(prefix=f".{worker_id}.", dir=str(WORKERS_DIR.parent)))
+    worker_record: Optional[Dict[str, Any]] = None
+    skill_version_id: Optional[str] = None
+    create_complete = False
+    target_committed = False
+    try:
+        _write_worker_bundle_files(
+            staging_dir,
+            worker_yml=worker_yml,
+            run_py=payload.run_py,
+            skill_md=payload.skill_md,
+            config=config,
+        )
+        worker_record = _worker_record_from_worker_yml(worker_id, worker_yml)
+        skill_version_id = _skill_version_id(worker_id, worker_record.get("manifest") or {})
+        invalidate_worker_cache()
+        with get_db() as conn:
+            _persist_discovered_workers(conn, [worker_record], user_id=auth.user_id)
+        _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+        os.replace(staging_dir, target_dir)
+        target_committed = True
+        try:
+            _embed_files_in_skill_version(worker_id, target_dir)
+        except Exception:
+            logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
+        invalidate_worker_cache()
+        detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+        # Commit new worker files to the workspace git repo
+        author_name, author_email = _git_author(auth)
+        worker_name = (config.name if config else None) or worker_id
+        _git_commit_worker(worker_id, message=f"worker: create {worker_name}", author_name=author_name, author_email=author_email)
+        create_complete = True
+        return detail
+    except sqlite3.IntegrityError as exc:
+        raise HTTPException(
+            status_code=409,
+            detail=(
+                f"Worker {worker_id!r} already exists or conflicts with a previous version. "
+                "Delete the old worker first, then recreate."
+            ),
+        ) from exc
+    except RuntimeError as exc:
+        raise HTTPException(status_code=502, detail=str(exc)) from exc
+    except HTTPException:
+        raise
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to create worker {worker_id!r}: {exc}") from exc
+    finally:
+        if not create_complete:
+            _cleanup_worker_create_state(
+                worker_id=worker_id,
+                user_id=auth.user_id,
+                repos=repos,
+                staging_dir=staging_dir,
+                target_dir=target_dir if target_committed else None,
+                skill_version_id=skill_version_id,
+            )
 
 
 # ---------------------------------------------------------------------------
@@ -9849,6 +10051,11 @@ async def create_worker_from_bundle(
             shutil.rmtree(target_dir, ignore_errors=True)
             invalidate_worker_cache()
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    try:
+        _embed_files_in_skill_version(worker_id, target_dir)
+    except Exception:
+        logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
 
     return _build_worker_detail(
         worker_id,
@@ -10720,6 +10927,11 @@ def update_worker_files(
             bak.unlink(missing_ok=True)
         backed_up.clear()
 
+        try:
+            _embed_files_in_skill_version(worker_id, target_dir)
+        except Exception:
+            logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
+
         # Commit the updated files to the workspace git repo
         author_name, author_email = _git_author(auth)
         _git_commit_worker(worker_id, message=f"worker: save files for {worker_id}", author_name=author_name, author_email=author_email)
@@ -11566,7 +11778,12 @@ def approve_public_approval(
         )
         return ActionResponse(status=str(result.get("status") or "approved"), run_id=str(approval["run_id"]))
     if decision_input.get("kind") == "agent_tool":
-        return approve_agent_tool_approval(approval_id, ApproveRequest(edited_output=body.edited_output), auth, repos)
+        return approve_agent_tool_approval(
+            approval_id,
+            ApproveRequest(edited_output=body.edited_output, annotations=body.annotations),
+            auth,
+            repos,
+        )
     return approve_run(
         str(approval["run_id"]),
         ApproveRequest(edited_output=body.edited_output, annotations=body.annotations),
@@ -11599,7 +11816,12 @@ def reject_public_approval(
         )
         return ActionResponse(status=str(result.get("status") or "rejected"), run_id=str(approval["run_id"]))
     if decision_input.get("kind") == "agent_tool":
-        return reject_agent_tool_approval(approval_id, RejectRequest(reason=body.reason), auth, repos)
+        return reject_agent_tool_approval(
+            approval_id,
+            RejectRequest(reason=body.reason, annotations=body.annotations),
+            auth,
+            repos,
+        )
     return reject_run(
         str(approval["run_id"]),
         RejectRequest(reason=body.reason, annotations=body.annotations),
@@ -11711,7 +11933,9 @@ def approve_run(
     if approval_row.get("status") != "pending":
         raise HTTPException(status_code=409, detail="Approval already decided")
 
-    # Mid-run agent-tool approvals must use /approvals/{id}/approve, not this endpoint.
+    # Reject agent-tool approvals — they must use POST /approvals/{id}/approve
+    # to avoid spawning a follow-up run while the in-process polling loop also
+    # resumes the original agent (double execution).
     _di: Dict[str, Any] = {}
     try:
         _di = json.loads(approval_row.get("decision_input_json") or "{}")
@@ -11720,7 +11944,7 @@ def approve_run(
     if _di.get("kind") == "agent_tool":
         raise HTTPException(
             status_code=400,
-            detail="This approval has kind=agent_tool. Use POST /approvals/{id}/approve instead.",
+            detail="This approval was created by request_approval(). Use POST /approvals/{approval_id}/approve instead.",
         )
 
     # Load original inputs
@@ -11825,16 +12049,15 @@ def reject_run(
     if approval_row.get("status") != "pending":
         raise HTTPException(status_code=409, detail="Approval already decided")
 
-    # Mid-run agent-tool approvals must use /approvals/{id}/reject, not this endpoint.
-    _di2: Dict[str, Any] = {}
+    _di_r: Dict[str, Any] = {}
     try:
-        _di2 = json.loads(approval_row.get("decision_input_json") or "{}")
+        _di_r = json.loads(approval_row.get("decision_input_json") or "{}")
     except Exception:
         pass
-    if _di2.get("kind") == "agent_tool":
+    if _di_r.get("kind") == "agent_tool":
         raise HTTPException(
             status_code=400,
-            detail="This approval has kind=agent_tool. Use POST /approvals/{id}/reject instead.",
+            detail="This approval was created by request_approval(). Use POST /approvals/{approval_id}/reject instead.",
         )
 
     decided_at = now_iso()
@@ -12009,6 +12232,7 @@ def approve_agent_tool_approval(
     repos.approvals.approve(
         owner_id=auth.user_id,
         run_id=approval["run_id"],
+        approval_id=approval_id,
         decided_at=now_iso(),
         edited_output_json=edited_output_json,
     )
@@ -12040,6 +12264,7 @@ def reject_agent_tool_approval(
     repos.approvals.reject(
         owner_id=auth.user_id,
         run_id=approval["run_id"],
+        approval_id=approval_id,
         decided_at=now_iso(),
         reason=body.reason,
         annotations_json=annotations_json,
