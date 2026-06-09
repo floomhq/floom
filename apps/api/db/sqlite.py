@@ -11,6 +11,7 @@ except ImportError:
         def flock(fd, op): pass
     _LOCK_EX = 1
     _LOCK_UN = 8
+import contextvars
 import json
 import os
 import re
@@ -35,6 +36,16 @@ from ._legacy_sqlite import _row_dict, get_db, now_iso
 
 _SECRET_PREFIX = "__WORKEROS_SECRET__"
 _FLOOM_USER_ID = "federico"
+
+# Per-request batch caches — same pattern as supabase_repos.py in the cloud.
+# Populated before per-worker loops; consumed by get_last_run() / get_recipe().
+# ContextVar isolation ensures no cross-request contamination.
+_last_run_batch: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
+    "_workeros_last_run_batch", default=None
+)
+_recipe_cache: contextvars.ContextVar[dict[str, dict[str, Any] | None] | None] = contextvars.ContextVar(
+    "_workeros_recipe_cache", default=None
+)
 
 # Per-asset visibility default. Private-by-default matches the Codex design
 # (Notion/Drive convention) — automation assets that hold secrets must not be
@@ -262,6 +273,21 @@ def _read_env_var(name: str) -> str | None:
     return None
 
 
+def _build_env_lookup() -> dict[str, str]:
+    """Parse all secret env files into a single dict (first match wins).
+
+    Used by SqliteSecretRepository.list() to avoid re-reading the file N times.
+    """
+    result: dict[str, str] = {}
+    for env_path in secret_store_read_paths():
+        for line in _read_env_lines(env_path):
+            stripped = line.rstrip("\n")
+            if "=" in stripped and not stripped.startswith("#"):
+                k, _, v = stripped.partition("=")
+                result.setdefault(k, v)  # first file / first occurrence wins
+    return result
+
+
 def _skill_version_id(worker_id: str, manifest: dict[str, Any]) -> str:
     version = str(manifest.get("version") or "0.1.0").replace(".", "_").replace("-", "_")
     return f"sv_{worker_id}_{version}"
@@ -408,7 +434,27 @@ class SqliteWorkerRepository:
                     _worker_select_sql("WHERE w.owner_id = ?"),
                     (user_id,),
                 ).fetchall()
-        return [_worker_record_from_row(row) for row in rows]
+        records = [_worker_record_from_row(row) for row in rows]
+        # Populate recipe cache from the already-joined skill_versions data so that
+        # downstream get_recipe() calls within the same request are cache hits.
+        cache: dict[str, dict[str, Any] | None] = {}
+        for row in rows:
+            wid = str(row["id"])
+            config = _config_from_manifest_row(row)
+            if config is not None:
+                cache[wid] = {
+                    "config": config,
+                    "grants": _json_load(row["grants_json"], {}),
+                    "input_values": _json_load(row["input_values_json"], {}),
+                    "enabled": bool(row["enabled"]),
+                    "owner_id": row["owner_id"],
+                    "bundle_path": row["bundle_path"],
+                    "manifest_json": json.loads(row["manifest_json"] or "{}"),
+                }
+            else:
+                cache[wid] = None
+        _recipe_cache.set(cache)
+        return records
 
     def get(self, *, user_id: str, worker_id: str, role: str | None = None) -> dict[str, Any] | None:
         """Get a single worker, respecting visibility rules.
@@ -708,11 +754,15 @@ class SqliteWorkerRepository:
         return [_row_dict(row) for row in rows]
 
     def get_last_run(self, *, user_id: str, worker_id: str) -> dict[str, Any] | None:
+        batch = _last_run_batch.get()
+        if batch is not None:
+            return batch.get(worker_id)
         runs = self.list_recent_runs(user_id=user_id, worker_id=worker_id, limit=1)
         return runs[0] if runs else None
 
     def stats_batch(self, *, user_id: str, worker_ids: list[str], days: int = 7) -> dict[str, RecentStats]:
         if not worker_ids:
+            _last_run_batch.set({})
             return {}
         placeholders = ",".join("?" for _ in worker_ids)
         with get_db() as conn:
@@ -751,6 +801,36 @@ class SqliteWorkerRepository:
                 if current_rate is not None and previous_rate is not None
                 else None,
             )
+        # Batch-fetch the last run per worker (SQLite equivalent of DISTINCT ON).
+        # Populate _last_run_batch so per-worker get_last_run() calls are cache hits.
+        try:
+            with get_db() as conn:
+                last_run_rows = conn.execute(
+                    f"""
+                    SELECT r.*
+                    FROM runs r
+                    INNER JOIN (
+                        SELECT worker_id, MAX(created_at) AS max_at
+                        FROM runs
+                        WHERE worker_id IN ({placeholders})
+                        GROUP BY worker_id
+                    ) latest ON r.worker_id = latest.worker_id AND r.created_at = latest.max_at
+                    JOIN workers w ON w.id = r.worker_id
+                    WHERE w.owner_id = ?
+                    """,
+                    [*worker_ids, user_id],
+                ).fetchall()
+            batch: dict[str, Any] = {wid: None for wid in worker_ids}
+            seen: set[str] = set()
+            for lr in last_run_rows:
+                d = _row_dict(lr)
+                wid = str(d.get("worker_id", ""))
+                if wid and wid not in seen:
+                    batch[wid] = d
+                    seen.add(wid)
+            _last_run_batch.set(batch)
+        except Exception:
+            _last_run_batch.set({})
         return result
 
     def timeseries_batch(
@@ -883,6 +963,9 @@ class SqliteWorkerRepository:
             )
 
     def get_recipe(self, *, worker_id: str, user_id: str | None = None) -> dict[str, Any] | None:
+        cache = _recipe_cache.get()
+        if cache is not None:
+            return cache.get(worker_id)
         where = "WHERE w.id = ?"
         params: list[Any] = [worker_id]
         if user_id is not None:
@@ -2076,8 +2159,12 @@ class SqliteSecretRepository:
                 (user_id,),
             ).fetchall()
         items = [_row_dict(row) for row in rows]
+        # Read env files once and resolve all values from the resulting dict —
+        # avoids re-reading the file for every secret.
+        env_lookup = _build_env_lookup()
         for item in items:
-            item["value"] = self.read_value(user_id=user_id, name=item["name"])
+            env_key = _user_secret_key(user_id, item["name"])
+            item["value"] = os.environ.get(env_key) or env_lookup.get(env_key)
         return items
 
     def get(self, *, user_id: str, name: str) -> dict[str, Any] | None:
