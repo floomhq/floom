@@ -9,6 +9,7 @@ import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection, Avatar } from "@/components/collection";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
+import { FilesEditor } from "@/components/worker-form/FilesEditor";
 import { can, isViewOnly, canLeaveFeedback, visibilityLabel } from "@/lib/permissions";
 import {
   isSystemWorker,
@@ -54,17 +55,6 @@ function useWorkerDetail(id: string): WorkerDetail | undefined {
   }, [id]);
   return detail;
 }
-
-const SOURCE_FILES: { key: string; label: string; pick: (d: WorkerDetail) => string | undefined }[] = [
-  { key: "yml", label: "worker.yml", pick: (d) => d.manifest_yaml },
-  { key: "skill", label: "SKILL.md", pick: (d) => d.skill_md_content },
-  { key: "run", label: "run.py", pick: (d) => d.run_py_content || d.run_py },
-  {
-    key: "req",
-    label: "requirements.txt",
-    pick: (d) => d.files?.find((f) => f.path.endsWith("requirements.txt"))?.content,
-  },
-];
 
 function Loading() {
   return <div style={muted}>Loading…</div>;
@@ -182,25 +172,17 @@ function RunsTab({ w }: { w: WorkerSummary }) {
 
 function SourceTab({ w }: { w: WorkerSummary }) {
   const d = useWorkerDetail(w.id);
-  const [sub, setSub] = useState("yml");
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
   if (!d) return <Loading />;
-  const active = SOURCE_FILES.find((f) => f.key === sub) ?? SOURCE_FILES[0];
+  const files = d.files ?? [];
+  // Reuse the worker-form file viewer (syntax highlight + preview/raw + list).
   return (
-    <div>
-      <div style={{ display: "flex", gap: 2, marginBottom: 12, flexWrap: "wrap" }}>
-        {SOURCE_FILES.map((f) => (
-          <button
-            key={f.key}
-            type="button"
-            className={`c-dtab ${f.key === sub ? "on" : ""}`}
-            onClick={() => setSub(f.key)}
-          >
-            {f.label}
-          </button>
-        ))}
-      </div>
-      <pre style={code}>{active.pick(d) || "(empty)"}</pre>
-    </div>
+    <FilesEditor
+      mode="view"
+      files={files}
+      selectedPath={selectedPath ?? files[0]?.path ?? null}
+      onSelect={setSelectedPath}
+    />
   );
 }
 
@@ -436,16 +418,4 @@ const h4: React.CSSProperties = {
 };
 const kv: React.CSSProperties = { display: "grid", gridTemplateColumns: "140px 1fr", gap: "9px 16px" };
 const kvK: React.CSSProperties = { color: "var(--muted-foreground)", fontSize: 12.5 };
-const code: React.CSSProperties = {
-  border: "1px solid var(--line)",
-  borderRadius: 12,
-  background: "var(--bg-2)",
-  color: "var(--ink-soft)",
-  padding: 13,
-  whiteSpace: "pre-wrap",
-  overflow: "auto",
-  fontSize: 12,
-  fontFamily: "var(--font-mono)",
-  maxHeight: 420,
-};
 const pillBtn: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5 };
