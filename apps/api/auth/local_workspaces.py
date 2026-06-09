@@ -142,4 +142,12 @@ def scope_local_auth_context(request: Request, ctx: AuthContext) -> AuthContext:
     scoped_user_id = local_workspace_user_id(base_user_id, str(workspace["id"]))
     if scoped_user_id == ctx.user_id:
         return ctx
-    return AuthContext(user_id=scoped_user_id, email=ctx.email, scopes=ctx.scopes)
+    return AuthContext(
+        user_id=scoped_user_id,
+        email=ctx.email,
+        scopes=ctx.scopes,
+        role=ctx.role,
+        auth_method=ctx.auth_method,
+        username=ctx.username,
+        run_token_payload=ctx.run_token_payload,
+    )

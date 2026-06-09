@@ -524,7 +524,9 @@ def test_new_worker_from_prompt_oversized_body_rejected(monkeypatch, tmp_path):
     )
 
     assert resp.status_code == 413, resp.text
-    assert resp.json() == {"detail": "Request body too large"}
+    assert resp.json() == {
+        "detail": "Request body is too large. Reduce the payload size and try again."
+    }
 
 
 def test_run_creation_quota_is_shared_across_workers_and_ips(monkeypatch, tmp_path):

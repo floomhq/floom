@@ -48,7 +48,15 @@ def _load_api(monkeypatch, tmp_path):
     return main
 
 
-def _valid_manifest(worker_id: str, connections: str = "connections: [gmail]") -> dict:
+def _valid_manifest(
+    worker_id: str,
+    connections: str = """\
+connections:
+  - app: gmail
+    allowed_tools:
+      - GMAIL_SEND_EMAIL
+""",
+) -> dict:
     import yaml as _yaml
 
     return _yaml.safe_load(
@@ -77,7 +85,17 @@ trigger:
     )
 
 
-def _seed_worker(main, *, owner_id: str, connections: str = "connections: [gmail]") -> str:
+def _seed_worker(
+    main,
+    *,
+    owner_id: str,
+    connections: str = """\
+connections:
+  - app: gmail
+    allowed_tools:
+      - GMAIL_SEND_EMAIL
+""",
+) -> str:
     """Create a worker owned by ``owner_id``; return its id."""
     import yaml as _yaml
     from worker_registry import WORKERS_DIR

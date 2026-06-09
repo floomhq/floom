@@ -46,6 +46,8 @@ def client_and_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))
+    monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(tmp_path))
+    monkeypatch.delenv("WORKEROS_GIT_REMOTE", raising=False)
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
     # Owner-mismatch hiding only applies when scoping is on OR cloud; force it
@@ -235,6 +237,10 @@ def test_context_file_metadata_tags_roundtrip(client_and_main):
 def test_brain_file_versions_are_per_file_and_workspace_versions_queryable(client_and_main):
     client, _main = client_and_main
     assert client.post("/contexts/my-company").status_code == 200
+    assert client.patch(
+        "/contexts/my-company/sensitive",
+        json={"sensitive": False},
+    ).status_code == 200
     first = client.put(
         "/contexts/my-company/files/research/gsc.md",
         json={"content": "first version"},

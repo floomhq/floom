@@ -16,7 +16,8 @@ _tmp_db = tempfile.NamedTemporaryFile(suffix=".db", delete=False)
 _tmp_db.close()
 os.environ.setdefault("FLOOM_DB", _tmp_db.name)
 os.environ.pop("FLOOM_SECRET", None)
-os.environ.setdefault("OPENAI_API_KEY", "sk-test-fake-key")
+if not os.environ.get("OPENAI_API_KEY", "").strip():
+    os.environ["OPENAI_API_KEY"] = "sk-test-fake-key"
 
 
 def _valid_worker_yml(name: str = "applicant-followup") -> str:

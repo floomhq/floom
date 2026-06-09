@@ -52,7 +52,11 @@ def client_and_db(monkeypatch, tmp_path):
     main = importlib.import_module("main")
 
     from fastapi.testclient import TestClient
-    with TestClient(main.app, headers={"x-floom-secret": "test-secret-workspaces"}) as client:
+    with TestClient(
+        main.app,
+        headers={"x-floom-secret": "test-secret-workspaces"},
+        base_url="https://testserver",
+    ) as client:
         yield client, db
     db.get_repositories.cache_clear()
 
@@ -204,6 +208,7 @@ def test_secret_auth_sees_legacy_private_workers(client_and_db):
     ids = {row["id"] for row in listing.json()}
     assert "legacy-private-local-default" in ids
     assert "legacy-private-empty-workspace" in ids
+    assert "smoke-fl1-db-owned" not in ids
 
     detail = client.get("/workers/legacy-private-empty-workspace")
     assert detail.status_code == 200, detail.text
@@ -222,9 +227,10 @@ def test_federico_login_maps_to_legacy_worker_owner(client_and_db):
         json={"username": "federico", "password": "federico-pass"},
     )
     assert setup.status_code == 201, setup.text
-    me = client.get("/auth/me")
+    me = client.get("/auth/me", headers={"x-floom-secret": ""})
     assert me.status_code == 200, me.text
-    assert me.json()["user_id"] == "federico"
+    assert me.json()["username"] == "federico"
+    assert me.json()["auth_method"] == "session"
 
     listing = client.get("/workers")
     assert listing.status_code == 200, listing.text
