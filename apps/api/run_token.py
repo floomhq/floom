@@ -104,8 +104,10 @@ WORKER_CALL_TOKEN_PREFIX = "wrt_"
 MAX_CALL_DEPTH = 3
 
 
-def _worker_call_signing_key() -> str:
-    return (os.environ.get("FLOOM_SECRET") or "dev-secret-not-set").strip()
+def _worker_call_signing_key(secret: str | None = None) -> str:
+    if secret is None:
+        secret = os.environ.get("FLOOM_SECRET")
+    return (secret or "dev-secret-not-set").strip()
 
 
 def _wrt_b64url_encode(data: bytes) -> str:
@@ -124,6 +126,7 @@ def issue_worker_call_token(
     callable_workers: list[str],
     depth: int = 0,
     ttl_seconds: int = 3600,
+    secret: str | None = None,
 ) -> str:
     """Issue a signed token that allows a run to invoke specific child workers."""
     payload: dict[str, Any] = {
@@ -138,14 +141,14 @@ def issue_worker_call_token(
         json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
     )
     sig = hmac.new(
-        _worker_call_signing_key().encode("utf-8"),
+        _worker_call_signing_key(secret).encode("utf-8"),
         encoded.encode("ascii"),
         hashlib.sha256,
     ).hexdigest()
     return f"{WORKER_CALL_TOKEN_PREFIX}{encoded}.{sig}"
 
 
-def validate_worker_call_token(raw_token: str) -> dict[str, Any]:
+def validate_worker_call_token(raw_token: str, *, secret: str | None = None) -> dict[str, Any]:
     """Validate a worker-call token and return its payload.
 
     Raises ValueError on any failure (bad format, bad signature, expired).
@@ -158,7 +161,7 @@ def validate_worker_call_token(raw_token: str) -> dict[str, Any]:
     except ValueError:
         raise ValueError("invalid worker-call token format")
     expected = hmac.new(
-        _worker_call_signing_key().encode("utf-8"),
+        _worker_call_signing_key(secret).encode("utf-8"),
         encoded.encode("ascii"),
         hashlib.sha256,
     ).hexdigest()
