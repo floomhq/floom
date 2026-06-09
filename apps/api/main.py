@@ -11904,6 +11904,98 @@ def reject_destructive_action(
     return {"status": "rejected", "path": decision_input.get("path", ""), "reason": body.reason}
 
 
+@app.post("/approvals/{approval_id}/approve", response_model=ActionResponse)
+def approve_agent_tool_approval(
+    approval_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    """Approve a mid-run agent-tool approval (kind=agent_tool).
+
+    Does NOT spawn a new run. Flips the approval record to 'approved' so the
+    in-process polling loop in agent_driver can resume the run in-place.
+    """
+    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if approval.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="Approval already decided")
+
+    decision_input: Dict[str, Any] = {}
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if decision_input.get("kind") != "agent_tool":
+        raise HTTPException(
+            status_code=400,
+            detail="This approval is not an agent-tool approval. Use POST /runs/{run_id}/approve instead.",
+        )
+
+    repos.approvals.approve(
+        owner_id=auth.user_id,
+        run_id=approval["run_id"],
+        decided_at=now_iso(),
+    )
+
+    _sse_publish(approval["run_id"], {
+        "type": "approval_decided",
+        "run_id": approval["run_id"],
+        "approval_id": approval_id,
+        "decision": "approved",
+    })
+
+    return ActionResponse(status="approved", run_id=str(approval["run_id"]))
+
+
+@app.post("/approvals/{approval_id}/reject", response_model=ActionResponse)
+def reject_agent_tool_approval(
+    approval_id: str,
+    body: RejectRequest = Body(default_factory=RejectRequest),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    """Reject a mid-run agent-tool approval (kind=agent_tool).
+
+    Does NOT affect run status directly — the polling loop in agent_driver
+    picks up the 'rejected' status and resumes with approved=False.
+    """
+    approval = repos.approvals.get(owner_id=auth.user_id, approval_id=approval_id)
+    if approval is None:
+        raise HTTPException(status_code=404, detail="Approval not found")
+    if approval.get("status") != "pending":
+        raise HTTPException(status_code=409, detail="Approval already decided")
+
+    decision_input: Dict[str, Any] = {}
+    try:
+        decision_input = json.loads(approval.get("decision_input_json") or "{}")
+    except Exception:
+        pass
+    if decision_input.get("kind") != "agent_tool":
+        raise HTTPException(
+            status_code=400,
+            detail="This approval is not an agent-tool approval. Use POST /runs/{run_id}/reject instead.",
+        )
+
+    annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
+    repos.approvals.reject(
+        owner_id=auth.user_id,
+        run_id=approval["run_id"],
+        decided_at=now_iso(),
+        reason=body.reason,
+        annotations_json=annotations_json,
+    )
+
+    _sse_publish(approval["run_id"], {
+        "type": "approval_decided",
+        "run_id": approval["run_id"],
+        "approval_id": approval_id,
+        "decision": "rejected",
+    })
+
+    return ActionResponse(status="rejected", run_id=str(approval["run_id"]))
+
+
 @app.get("/runs/{run_id}/download")
 def download_run_bundle(
     run_id: str,

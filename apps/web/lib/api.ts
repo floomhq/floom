@@ -390,6 +390,19 @@ export const api = {
           body: JSON.stringify({ reason, annotations: annotations ?? null }),
         }
       ),
+    approveAgentTool: (approvalId: string) =>
+      fetchJson<import("./types").ActionResponse>(
+        `/approvals/${approvalId}/approve`,
+        { method: "POST" }
+      ),
+    rejectAgentTool: (approvalId: string, reason?: string) =>
+      fetchJson<import("./types").ActionResponse>(
+        `/approvals/${approvalId}/reject`,
+        {
+          method: "POST",
+          body: JSON.stringify({ reason: reason ?? null }),
+        }
+      ),
     publicGet: (approvalId: string, token: string) =>
       fetchJson<import("./types").ApprovalRow>(
         `/approvals/public/${encodeURIComponent(approvalId)}?token=${encodeURIComponent(token)}`
