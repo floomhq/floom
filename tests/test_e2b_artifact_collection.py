@@ -653,6 +653,69 @@ def test_persists_writeable_context_tar_under_owner_scope(tmp_path, monkeypatch)
     assert (foreign_target / "state.json").read_text() == '{"foreign": true}\n'
 
 
+def test_writeable_context_round_trip_persists_sandbox_edits(tmp_path, monkeypatch):
+    contexts_root = tmp_path / "contexts"
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+    monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
+    target = contexts_root / "history"
+    target.mkdir(parents=True)
+    (target / "state.json").write_text('{"before": true}\n')
+
+    class _RoundTripCommands:
+        def __init__(self, files):
+            self.files = files
+
+        def run(self, command, **_kwargs):
+            tar_path = command.split("tar -cf ", 1)[1].split(" ", 1)[0]
+            prefix = "/home/user/worker/context/history/"
+            buffer = BytesIO()
+            with tarfile.open(fileobj=buffer, mode="w") as archive:
+                for path, content in self.files._files.items():
+                    if not path.startswith(prefix) or path.endswith(".tar"):
+                        continue
+                    rel = path[len(prefix):]
+                    if not rel:
+                        continue
+                    info = tarfile.TarInfo(rel)
+                    info.size = len(content)
+                    archive.addfile(info, BytesIO(content))
+            self.files.write(tar_path, buffer.getvalue())
+            return types.SimpleNamespace(exit_code=0, stdout="", stderr="")
+
+    sandbox = FakeFullSandbox()
+    sandbox.commands = _RoundTripCommands(sandbox.files)
+    config = WorkerConfig(
+        id="context-round-trip-test",
+        name="Context Round Trip Test",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(type="python311", command="python run.py", mode="pure-script"),
+        contexts=[{"name": "history", "writeable": True}],
+        outputs=[],
+    )
+
+    err = E2BSandboxDriver()._upload_contexts_to_sandbox(
+        sandbox=sandbox,
+        workdir="/home/user/worker",
+        config=config,
+        made_dirs={"/home/user/worker"},
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+    assert err is None
+    assert sandbox.files._files["/home/user/worker/context/history/state.json"] == b'{"before": true}\n'
+
+    sandbox.files._files["/home/user/worker/context/history/state.json"] = b'{"after": true}\n'
+
+    E2BSandboxDriver()._persist_writeable_contexts(
+        sandbox=sandbox,
+        workdir="/home/user/worker",
+        run_id="run_context_round_trip",
+        config=config,
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+
+    assert (target / "state.json").read_text() == '{"after": true}\n'
+
+
 def test_e2b_driver_maps_oom_exit_to_sandbox_oom(tmp_path, monkeypatch):
     monkeypatch.setenv("E2B_API_KEY", "e2b-test")
     monkeypatch.setitem(sys.modules, "e2b", types.SimpleNamespace(Sandbox=FakeOOMSandbox))
