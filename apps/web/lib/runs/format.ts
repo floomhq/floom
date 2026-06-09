@@ -67,3 +67,20 @@ export function dayLabel(iso: string | undefined, now: number): string {
 export function runSortTime(r: RunSummary): number {
   return Date.parse(r.created_at ?? r.started_at ?? "") || 0;
 }
+
+/** Flatten runs into CSV rows (pure; the unparse/download stays in the view). */
+export function runsToCsvRows(
+  runs: RunSummary[],
+): Record<string, string | number>[] {
+  return runs.map((r) => ({
+    id: r.id,
+    worker_id: r.worker_id,
+    worker_name: r.worker_name ?? "",
+    status: r.status,
+    trigger_source: r.trigger_source,
+    created_at: r.created_at || "",
+    started_at: r.started_at || "",
+    completed_at: r.completed_at || "",
+    duration_ms: r.duration_ms ?? "",
+  }));
+}

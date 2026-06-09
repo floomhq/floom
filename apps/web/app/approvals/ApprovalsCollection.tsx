@@ -1,12 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ApprovalRow } from "@/lib/types";
-import type { CollectionConfig } from "@/lib/collection/types";
+import type { ApprovalRow, WorkerSummary } from "@/lib/types";
+import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection, Avatar } from "@/components/collection";
+import { contentTagOptions } from "@/lib/workers/derive";
 import {
   ApprovalActionItems,
   approvalActionLine,
@@ -34,8 +35,15 @@ const KV_STYLE: React.CSSProperties = {
 
 export default function ApprovalsCollection() {
   const [items, setItems] = useState<ApprovalRow[]>([]);
+  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+
+  const workerTags = useMemo(() => {
+    const m: Record<string, string[]> = {};
+    for (const w of workers) m[w.id] = w.tags ?? [];
+    return m;
+  }, [workers]);
 
   const refresh = useCallback(async () => {
     try {
@@ -51,6 +59,8 @@ export default function ApprovalsCollection() {
 
   useEffect(() => {
     void refresh();
+    // Content tags are inherited from the parent worker (SPEC §11).
+    api.workers.list().then(setWorkers).catch(() => {});
   }, [refresh]);
 
   // Keep the sidebar badge + other tabs in sync (preserves legacy behavior).
@@ -76,6 +86,9 @@ export default function ApprovalsCollection() {
     error,
     idOf: (a) => a.id,
     searchOf: (a) => `${a.worker_name ?? ""} ${a.label ?? ""}`,
+    tagsOf: (a) =>
+      ({ content: workerTags[a.worker_id] ?? [] }) as Partial<Record<TagFamilyKey, string[]>>,
+    tags: { content: contentTagOptions(workers) },
     counts: [{ value: items.length, label: "pending" }],
     view: { default: "list", grid: true },
     columns: {

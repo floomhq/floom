@@ -387,10 +387,14 @@ export default function AssistantPage() {
                         Reset to default
                       </Button>
                     ) : null}
-                    <Button size="sm" variant="outline" onClick={() => setEditingBase(true)}>
-                      <Edit3 className="size-3.5" />
-                      Edit
-                    </Button>
+                    {agent?.permissions?.can_edit === false ? (
+                      <span className="text-xs text-muted-foreground">View only</span>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => setEditingBase(true)}>
+                        <Edit3 className="size-3.5" />
+                        Edit
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>
@@ -450,10 +454,16 @@ export default function AssistantPage() {
                       onRollback={handleInstructionsRollback}
                       confirmLabel="This will overwrite your current workspace instructions."
                     />
-                    <Button size="sm" variant="outline" onClick={() => setEditingInstructions(true)}>
-                      <Edit3 className="size-3.5" />
-                      Edit
-                    </Button>
+                    {agent?.permissions?.can_edit === false ? (
+                      <span className="text-xs text-muted-foreground">
+                        View only · editing the workspace prompt requires Admin
+                      </span>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => setEditingInstructions(true)}>
+                        <Edit3 className="size-3.5" />
+                        Edit
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>

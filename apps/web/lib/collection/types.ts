@@ -138,6 +138,8 @@ export interface CollectionConfig<T> {
 
   /** +Add button: label + handler (SPEC §0 control bar). */
   add?: { label: string; onSelect: () => void };
+  /** Extra control-bar actions (e.g. Runs "Export CSV"), left of +Add. */
+  toolbarActions?: ReactNode;
   /** Optional banner above the list (e.g. member-visibility note). */
   banner?: ReactNode;
 }
