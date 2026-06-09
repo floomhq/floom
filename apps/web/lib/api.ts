@@ -6,6 +6,7 @@
 export const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 const WEB_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
+const ACTIVE_WORKSPACE_COOKIE_KEY = "workeros.activeWorkspaceId";
 const APP_API_BASE = API_BASE.endsWith("/api/proxy")
   ? API_BASE.slice(0, -"/api/proxy".length) + "/api"
   : "/api";
@@ -21,8 +22,10 @@ export function setActiveWorkspaceId(workspaceId: string | null) {
   if (typeof window === "undefined") return;
   if (!workspaceId || workspaceId === "local-default") {
     window.localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+    window.document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=; Path=/; Max-Age=0; SameSite=Lax`;
   } else {
     window.localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, workspaceId);
+    window.document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=${encodeURIComponent(workspaceId)}; Path=/; Max-Age=31536000; SameSite=Lax`;
   }
 }
 
