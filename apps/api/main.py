@@ -18608,6 +18608,8 @@ def system_workspace_agent(
     return {
         "agent_id": info["agent_id"],
         "model": info["model"],
+        "base_persona": info.get("base_persona"),
+        "worker_authoring_rules": info.get("worker_authoring_rules"),
         "system_prompt": info["system_prompt"],
         "tools": info["tools"],
         "settings": info.get("settings") or {},
@@ -19899,12 +19901,11 @@ async def reset_workspace_base_persona(
     was_custom = base_persona_is_custom()
     clear_workspace_base_persona()
     if was_custom:
-        _snapshot_workspace_base_persona(
-            user_id=auth.user_id,
-            repos=repos,
-            asset_id=_workspace_base_persona_asset_id(request),
-            content=get_workspace_base_persona(),
-            change_source="reset-to-default",
+        author_name, author_email = _git_author(auth)
+        _git_commit_workspace_base_md(
+            message="workspace base: reset to default",
+            author_name=author_name,
+            author_email=author_email,
         )
     return Response(status_code=204)
 

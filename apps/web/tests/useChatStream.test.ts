@@ -1,10 +1,12 @@
 import { describe, expect, it } from "vitest";
 import type { ChatMessage, ChatSSEEvent } from "@/lib/emily-chat-types";
 import {
+  getAutoOpenRunDetailsHref,
   getToolCardTitle,
   isInternalToolName,
   normalizeToolName,
   reduceSSEEvent,
+  shouldAutoOpenRunDetails,
 } from "@/lib/useChatStream";
 
 function toolCards(messages: ChatMessage[]) {
@@ -153,5 +155,57 @@ describe("Emily chat tool cards", () => {
     expect(card.workerId).toBe("research_brief");
     expect(card.workerName).toBe("research_brief");
     expect(card.streams?.parts).toBe("/runs/run_123/stream");
+    expect(card.toolName).toBe("workers.run");
+  });
+
+  it("marks completed runs.get cards for automatic navigation to run details", () => {
+    const call: ChatSSEEvent = {
+      type: "tool-call",
+      callId: "call_run_details",
+      toolName: "runs.get",
+      args: { id: "run_123" },
+      args_preview: { id: "run_123" },
+    };
+    const result: ChatSSEEvent = {
+      type: "tool-result",
+      callId: "call_run_details",
+      toolName: "runs.get",
+      isError: false,
+      result: { ok: true, run_id: "run_123" },
+      card: { kind: "run", status: "completed", title: "Opened run details" },
+      resource: { kind: "run", run_id: "run_123", worker_id: "research_brief" },
+    };
+
+    const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), result, "assistant_1");
+    const card = toolCards(messages)[0]?.card;
+
+    if (card?.kind !== "run") throw new Error("expected run card");
+    expect(card.toolName).toBe("runs.get");
+    expect(shouldAutoOpenRunDetails(card)).toBe(true);
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs/run_123?tab=logs");
+  });
+
+  it("does not auto-open run cards from worker runs", () => {
+    const call: ChatSSEEvent = {
+      type: "tool-call",
+      callId: "call_worker_run",
+      toolName: "workers.run",
+      args: { id: "research_brief" },
+    };
+    const result: ChatSSEEvent = {
+      type: "tool-result",
+      callId: "call_worker_run",
+      toolName: "workers.run",
+      isError: false,
+      result: { ok: true, run_id: "run_456" },
+      card: { kind: "run", status: "running" },
+      resource: { kind: "run", run_id: "run_456", worker_id: "research_brief" },
+    };
+
+    const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), result, "assistant_1");
+    const card = toolCards(messages)[0]?.card;
+
+    if (card?.kind !== "run") throw new Error("expected run card");
+    expect(shouldAutoOpenRunDetails(card)).toBe(false);
   });
 });

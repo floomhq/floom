@@ -259,6 +259,7 @@ export interface WorkerCreateCard extends BaseCard {
 
 export interface RunCard extends BaseCard {
   kind: "run";
+  toolName?: string;
   workerName: string;
   workerId?: string;
   runId?: string;
