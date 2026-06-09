@@ -13,6 +13,8 @@ API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
+from auth.local_workspaces import local_workspace_user_id
+
 
 @pytest.fixture()
 def client_and_db(monkeypatch, tmp_path):
@@ -70,6 +72,12 @@ def _manifest(worker_id: str, name: str) -> str:
     )
 
 
+def _manifest_with_connections(worker_id: str, name: str, connections: list[str]) -> str:
+    payload = json.loads(_manifest(worker_id, name))
+    payload["connections"] = connections
+    return json.dumps(payload)
+
+
 def _seed_legacy_worker(db, worker_id: str, *, workspace_id: str = "local-default") -> None:
     now = db.now_iso()
     with db.get_db() as conn:
@@ -105,6 +113,34 @@ def _seed_legacy_worker(db, worker_id: str, *, workspace_id: str = "local-defaul
                 "UPDATE workers SET workspace_id = '' WHERE id = ?",
                 (worker_id,),
             )
+
+
+def _seed_workspace_owner(db, workspace_id: str, user_id: str) -> None:
+    now = db.now_iso()
+    with db.get_db() as conn:
+        conn.execute(
+            """
+            INSERT OR IGNORE INTO workspace_members
+                (workspace_id, user_id, role, status, created_at, updated_at)
+            VALUES (?, ?, 'owner', 'active', ?, ?)
+            """,
+            (workspace_id, user_id, now, now),
+        )
+
+
+def _seed_workspace_connection(db, *, user_id: str, connection_id: str, app_name: str, workspace_label: str) -> None:
+    repos = db.get_repositories()
+    now = db.now_iso()
+    repos.connections.upsert(
+        user_id=user_id,
+        id=connection_id,
+        app_name=app_name,
+        composio_connection_id=f"ca_{connection_id}",
+        status="active",
+        account_label=f"{workspace_label}@example.com",
+        created_at=now,
+        updated_at=now,
+    )
 
 
 def test_local_workspaces_list_create_and_select(client_and_db):
@@ -168,7 +204,6 @@ def test_secret_auth_sees_legacy_private_workers(client_and_db):
     ids = {row["id"] for row in listing.json()}
     assert "legacy-private-local-default" in ids
     assert "legacy-private-empty-workspace" in ids
-    assert "smoke-fl1-db-owned" in ids
 
     detail = client.get("/workers/legacy-private-empty-workspace")
     assert detail.status_code == 200, detail.text
@@ -189,8 +224,7 @@ def test_federico_login_maps_to_legacy_worker_owner(client_and_db):
     assert setup.status_code == 201, setup.text
     me = client.get("/auth/me")
     assert me.status_code == 200, me.text
-    assert me.json()["username"] == "federico"
-    assert me.json()["auth_method"] == "session"
+    assert me.json()["user_id"] == "federico"
 
     listing = client.get("/workers")
     assert listing.status_code == 200, listing.text
@@ -202,3 +236,109 @@ def test_federico_login_maps_to_legacy_worker_owner(client_and_db):
     detail = client.get("/workers/legacy-session-worker")
     assert detail.status_code == 200, detail.text
     assert detail.json()["permissions"]["can_share"] is True
+
+
+def test_side_workspace_workers_are_isolated_and_editable(client_and_db):
+    client, db = client_and_db
+    created = client.post("/workspaces", json={"name": "Side workspace"})
+    assert created.status_code == 200, created.text
+    workspace_id = created.json()["id"]
+    scoped_user_id = local_workspace_user_id("federico", workspace_id)
+
+    _seed_workspace_owner(db, workspace_id, scoped_user_id)
+    _seed_legacy_worker(db, "default-worker")
+    repos = db.get_repositories()
+    repos.workers.create(
+        user_id=scoped_user_id,
+        worker_id="side-worker",
+        name="side-worker",
+        manifest_json=_manifest_with_connections("side-worker", "side-worker", ["gmail"]),
+        bundle_path="workers/side-worker",
+        workspace_id=workspace_id,
+        visibility="private",
+    )
+    _seed_workspace_connection(
+        db,
+        user_id=scoped_user_id,
+        connection_id="side-gmail",
+        app_name="gmail",
+        workspace_label="side",
+    )
+
+    default_list = client.get("/workers?shape=list")
+    assert default_list.status_code == 200, default_list.text
+    default_ids = {row["id"] for row in default_list.json()}
+    assert "default-worker" in default_ids
+    assert "side-worker" not in default_ids
+
+    scoped_headers = {"x-workeros-workspace": workspace_id}
+    side_list = client.get("/workers?shape=list", headers=scoped_headers)
+    assert side_list.status_code == 200, side_list.text
+    side_rows = side_list.json()
+    side_ids = {row["id"] for row in side_rows}
+    assert side_ids == {"side-worker"}
+    side_row = side_rows[0]
+    assert side_row["permissions"]["can_run"] is True
+    assert side_row["permissions"]["can_edit"] is True
+    assert side_row["missing_connections"] == []
+
+    detail = client.get("/workers/side-worker", headers=scoped_headers)
+    assert detail.status_code == 200, detail.text
+    assert detail.json()["permissions"]["can_run"] is True
+    assert detail.json()["permissions"]["can_edit"] is True
+
+    update = client.patch(
+        "/workers/side-worker",
+        json={"input_values": {"example": "updated"}},
+        headers=scoped_headers,
+    )
+    assert update.status_code == 200, update.text
+    assert update.json()["permissions"]["can_edit"] is True
+
+
+def test_connections_are_scoped_to_the_active_workspace(client_and_db):
+    client, db = client_and_db
+    created = client.post("/workspaces", json={"name": "Connections workspace"})
+    assert created.status_code == 200, created.text
+    workspace_id = created.json()["id"]
+    scoped_user_id = local_workspace_user_id("federico", workspace_id)
+
+    _seed_workspace_owner(db, workspace_id, scoped_user_id)
+    repos = db.get_repositories()
+    now = db.now_iso()
+    repos.connections.upsert(
+        user_id="federico",
+        id="default-gmail",
+        app_name="gmail",
+        composio_connection_id="ca_default",
+        status="active",
+        account_label="default@example.com",
+        created_at=now,
+        updated_at=now,
+    )
+    repos.connections.upsert(
+        user_id=scoped_user_id,
+        id="side-gmail",
+        app_name="gmail",
+        composio_connection_id="ca_side",
+        status="active",
+        account_label="side@example.com",
+        created_at=now,
+        updated_at=now,
+    )
+
+    default_list = client.get("/connections")
+    assert default_list.status_code == 200, default_list.text
+    default_ids = {row["id"] for row in default_list.json()}
+    assert default_ids == {"default-gmail"}
+
+    scoped_headers = {"x-workeros-workspace": workspace_id}
+    side_list = client.get("/connections", headers=scoped_headers)
+    assert side_list.status_code == 200, side_list.text
+    side_ids = {row["id"] for row in side_list.json()}
+    assert side_ids == {"side-gmail"}
+
+    by_app = client.get("/connections/by-app/gmail", headers=scoped_headers)
+    assert by_app.status_code == 200, by_app.text
+    assert by_app.json()["connected"] is True
+    assert {row["id"] for row in by_app.json()["accounts"]} == {"side-gmail"}

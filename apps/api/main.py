@@ -3783,6 +3783,8 @@ def _list_db_workers(
 def _worker_access_user_id(auth: AuthContext) -> str:
     """Resolve the engine owner id for worker visibility checks."""
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy == "local" and auth.user_id != local_workspace_base_user_id(auth.user_id):
+        return auth.user_id
     username = (auth.username or "").strip()
     if deploy != "local" or not username or username == auth.user_id:
         return auth.user_id
@@ -3816,6 +3818,18 @@ def _worker_access_user_id(auth: AuthContext) -> str:
     except Exception:
         logger.debug("worker access user-id compatibility lookup failed", exc_info=True)
     return auth.user_id
+
+
+def _worker_repo_role(auth: AuthContext) -> str | None:
+    """Return the worker-repo role for the current auth context.
+
+    Local OSS secret auth uses the shared backdoor but still needs workspace
+    boundaries, so it must not bypass the repo with admin visibility. Session /
+    PAT / cloud auth keep their declared role semantics.
+    """
+    if (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() == "local" and auth.auth_method == "secret":
+        return None
+    return auth.role
 
 
 def _user_scoped_local_mode() -> bool:
@@ -5978,7 +5992,12 @@ def list_workers(
                              Default: excluded from All/Starred/Recent; shown only in Archived view.
     """
     worker_user_id = _worker_access_user_id(auth)
-    workers = _list_visible_workers(user_id=worker_user_id, repos=repos, use_cache=True, role=auth.role)
+    workers = _list_visible_workers(
+        user_id=worker_user_id,
+        repos=repos,
+        use_cache=True,
+        role=_worker_repo_role(auth),
+    )
     # Filter out system_worker: true workers unless explicitly requested.
     if not include_system:
         workers = [
@@ -6975,7 +6994,7 @@ def get_worker_detail(
         canonical_id,
         user_id=_worker_access_user_id(auth),
         repos=repos,
-        role=auth.role,
+        role=_worker_repo_role(auth),
     )
 
 
