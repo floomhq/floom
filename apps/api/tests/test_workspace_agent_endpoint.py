@@ -85,6 +85,9 @@ def test_endpoint_returns_prompt_and_tools(client_and_main):
     body = resp.json()
     assert body["agent_id"] == "workspace-agent"
     assert body["model"] == "gpt-5-mini"
+    assert body["base_persona"].startswith("# Emily")
+    assert "Worker authoring rules" not in body["base_persona"]
+    assert "## Worker authoring rules" in body["worker_authoring_rules"]
     assert body["channels"]["slack"] == {
         "events_configured": False,
         "bot_configured": False,
@@ -96,6 +99,7 @@ def test_endpoint_returns_prompt_and_tools(client_and_main):
     assert "{{WORKSPACE_PREAMBLE}}" not in body["system_prompt"]
     assert "Workspace snapshot" in body["system_prompt"]
     assert "Secret names: OPENAI_API_KEY" in body["system_prompt"]
+    assert body["system_prompt"].index(body["base_persona"]) < body["system_prompt"].index("## Worker authoring rules")
     assert body["settings"] == {
         "brain_read": True,
         "brain_write": False,
@@ -240,7 +244,7 @@ def test_base_persona_state_and_reset_to_default(client_and_main):
 
     # The reset is captured in version history.
     versions = client.get("/workspace/base/versions").json()
-    assert any(v.get("change_source") == "reset-to-default" for v in versions)
+    assert any("workspace base: reset-to-default" in v["message"] for v in versions)
 
 
 def test_endpoint_requires_auth(client_and_main):
