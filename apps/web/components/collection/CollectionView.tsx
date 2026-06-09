@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { Search, LayoutGrid, List as ListIcon, Plus, ChevronsRight } from "lucide-react";
 import {
   type CollectionConfig,
@@ -91,16 +91,29 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
       return;
     }
     if ((e.key === "ArrowDown" || e.key === "ArrowUp") && filtered.length) {
-      e.preventDefault();
-      const ids = filtered.map(config.idOf);
-      const idx = state.sel ? ids.indexOf(state.sel) : -1;
-      const nextIdx =
-        e.key === "ArrowDown"
-          ? Math.min(ids.length - 1, idx + 1)
-          : Math.max(0, idx <= 0 ? 0 : idx - 1);
-      if (isOpen) patch({ sel: ids[nextIdx], tab: null });
+      const down = e.key === "ArrowDown";
+      if (isOpen) {
+        // Split mode: arrows change the open selection.
+        e.preventDefault();
+        const ids = filtered.map(config.idOf);
+        const idx = state.sel ? ids.indexOf(state.sel) : -1;
+        const nextIdx = down ? Math.min(ids.length - 1, idx + 1) : Math.max(0, idx <= 0 ? 0 : idx - 1);
+        patch({ sel: ids[nextIdx], tab: null });
+      } else {
+        // Resting list: roving DOM focus across rows/cards; Enter (handled by the
+        // row itself) opens the focused item (SPEC §8c).
+        const rows = Array.from(
+          bodyRef.current?.querySelectorAll<HTMLElement>("[data-collrow]") ?? [],
+        );
+        if (!rows.length) return;
+        e.preventDefault();
+        const cur = rows.indexOf(document.activeElement as HTMLElement);
+        const nextIdx = down ? Math.min(rows.length - 1, cur + 1) : Math.max(0, cur <= 0 ? 0 : cur - 1);
+        rows[cur < 0 ? 0 : nextIdx]?.focus();
+      }
     }
   };
+  const bodyRef = useRef<HTMLDivElement>(null);
 
   const header = (
     <div style={{ padding: `22px ${PAGE_X}px 0` }}>
@@ -235,7 +248,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
             </div>
           )}
           <div className="c-body" style={{ marginTop: 14 }}>
-            <div className="c-listcol" style={{ padding: `0 ${PAGE_X}px 26px` }}>
+            <div className="c-listcol" ref={bodyRef} style={{ padding: `0 ${PAGE_X}px 26px` }}>
               {config.banner}
               {listOrGrid(false)}
             </div>

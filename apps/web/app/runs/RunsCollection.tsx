@@ -111,19 +111,38 @@ function StepsTab({ r }: { r: RunSummary }) {
   );
 }
 
-function InputsTab({ r }: { r: RunSummary }) {
+function ToolsTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id);
   if (!d) return <div style={muted}>Loading…</div>;
-  const entries = Object.entries(d.input ?? {});
+  const calls = d.tool_calls ?? [];
   return (
-    <div style={kv}>
-      {entries.map(([k, v]) => (
-        <span key={k} style={{ display: "contents" }}>
-          <span style={kvK}>{k}</span>
-          <span style={{ fontFamily: "var(--font-mono)" }}>{JSON.stringify(v)}</span>
-        </span>
+    <div className="c-ltable">
+      {calls.map((t) => (
+        <div key={t.id} className="c-lrow" style={{ gridTemplateColumns: "1fr auto" }}>
+          <div className="c-lprimary">
+            <div className="c-lp-tx">
+              <div className="nm" style={{ fontFamily: "var(--font-mono)" }}>
+                {t.name}
+              </div>
+              <div className="sub" style={{ whiteSpace: "normal" }}>
+                {JSON.stringify(t.arguments).slice(0, 200)}
+              </div>
+            </div>
+          </div>
+          {t.error ? (
+            <span className="c-pill err">
+              <span className="dot" />
+              error
+            </span>
+          ) : (
+            <span className="c-pill ok">
+              <span className="dot" />
+              ok
+            </span>
+          )}
+        </div>
       ))}
-      {entries.length === 0 && <span style={muted}>No inputs.</span>}
+      {calls.length === 0 && <div style={{ ...muted, padding: 14 }}>No tool calls in this run.</div>}
     </div>
   );
 }
@@ -206,6 +225,16 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     }
   };
 
+  const replay = async (r: RunSummary) => {
+    try {
+      const res = await api.runs.replay(r.worker_id, r.id);
+      toast.success(res.run_id ? `Replaying · #${res.run_id}` : "Replay started");
+      await refresh();
+    } catch {
+      toast.error("Could not replay this run.");
+    }
+  };
+
   const config: CollectionConfig<RunSummary> = {
     title: "Run history",
     subtitle: "Worker executions grouped by day.",
@@ -281,15 +310,25 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
           </span>
         ),
         actions: (
-          <Link href={`/runs/${r.id}`} className="c-vpill" style={{ padding: "6px 11px" }}>
-            Open full run →
-          </Link>
+          <>
+            <button
+              type="button"
+              className="c-vpill"
+              style={{ padding: "6px 11px" }}
+              onClick={() => void replay(r)}
+            >
+              Replay
+            </button>
+            <Link href={`/runs/${r.id}`} className="c-vpill" style={{ padding: "6px 11px" }}>
+              Open full run →
+            </Link>
+          </>
         ),
       },
       tabs: [
         { key: "Output", label: "Output", render: () => <OutputTab r={r} /> },
         { key: "Steps", label: "Steps", render: () => <StepsTab r={r} /> },
-        { key: "Inputs", label: "Inputs", render: () => <InputsTab r={r} /> },
+        { key: "Tools", label: "Tools", render: () => <ToolsTab r={r} /> },
         { key: "Cost", label: "Cost", render: () => <CostTab r={r} /> },
       ],
     }),
