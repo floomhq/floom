@@ -24,6 +24,56 @@ logger = logging.getLogger(__name__)
 
 
 # ---------------------------------------------------------------------------
+# Safety guard: never version into the engine's own source checkout
+#
+# _git_workspace() falls back to WORKERS_DIR.parent when WORKEROS_WORKSPACE_DIR
+# is unset. If the server is run from inside a clone of the WorkerOS source repo
+# (the common dev case), that fallback IS the source checkout — so every worker/
+# context/workspace edit would auto-commit into the engine's own repo, and
+# push_background would push it to that repo's origin (e.g. floomhq/workeros).
+#
+# Fail safe: if the workspace root is the engine source checkout, skip committing
+# and pushing entirely. To enable versioning, the operator sets
+# WORKEROS_WORKSPACE_DIR to a separate directory (local history; this moves the
+# root off the source tree so the guard no longer trips) and optionally
+# WORKEROS_GIT_REMOTE to push to their own repo.
+# ---------------------------------------------------------------------------
+
+_engine_source_warned = False
+
+
+def is_engine_source_checkout(workspace_dir: Path) -> bool:
+    """True if workspace_dir is the WorkerOS engine's own source tree.
+
+    Detected by the engine entrypoint apps/api/main.py at the root. We must never
+    auto-commit or push workspace snapshots into it.
+    """
+    try:
+        return (Path(workspace_dir) / "apps" / "api" / "main.py").is_file()
+    except OSError:  # pragma: no cover - defensive
+        return False
+
+
+def _block_engine_source_versioning(workspace_dir: Path) -> bool:
+    """Return True (and warn once) when versioning must be skipped because the
+    workspace root is the engine source checkout."""
+    if not is_engine_source_checkout(workspace_dir):
+        return False
+    global _engine_source_warned
+    if not _engine_source_warned:
+        _engine_source_warned = True
+        logger.warning(
+            "Workspace git versioning DISABLED: workspace root %s is the WorkerOS "
+            "source checkout. Worker/context/workspace edits will not be committed "
+            "or pushed (prevents leaking them into the engine repo and its origin). "
+            "Set WORKEROS_WORKSPACE_DIR to a separate directory to enable local "
+            "history, and WORKEROS_GIT_REMOTE to push to your own repo.",
+            workspace_dir,
+        )
+    return True
+
+
+# ---------------------------------------------------------------------------
 # Workspace ID resolver — cloud hook
 #
 # In OSS single-tenant mode this is never set; everything lives in one repo.
@@ -163,6 +213,8 @@ def commit_paths(
     there was nothing new to commit. Returns None if the repo has no commits
     yet and nothing was staged.
     """
+    if _block_engine_source_versioning(workspace_dir):
+        return None
     for rel in rel_paths:
         _git(["add", "--", rel], workspace_dir)
 
@@ -308,6 +360,8 @@ def push_background(workspace_dir: Path) -> None:
 
     def _run() -> None:
         try:
+            if _block_engine_source_versioning(workspace_dir):
+                return
             has_remote = _git(["remote", "get-url", "origin"], workspace_dir, check=False)
             if has_remote.returncode != 0:
                 return
