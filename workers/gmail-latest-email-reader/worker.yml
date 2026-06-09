@@ -1,0 +1,40 @@
+schema_version: "0.3"
+name: "gmail-latest-email-reader"
+title: "Gmail Latest Email Reader"
+description: "Fetches the newest Gmail message and returns its key details as JSON"
+long_description: "Fetches the most recent email available in the connected Gmail inbox and returns a structured JSON file with the sender, recipients, subject, date, snippet, body text, message ID, and thread ID.\n\nThis worker is read-only: it does not send, archive, label, delete, or otherwise modify any Gmail messages."
+use_cases:
+  - "Quickly inspect the latest inbound Gmail message."
+  - "Feed the newest email into a downstream workflow."
+  - "Capture email metadata for lightweight reporting."
+example_input: {}
+example_output: "{\n  \"status\": \"success\",\n  \"latest_email\": {\n    \"subject\": \"Quarterly planning notes\",\n    \"from\": \"Alex Rivera <alex@example.com>\",\n    \"date\": \"Tue, 04 Jun 2026 09:15:00 -0700\",\n    \"snippet\": \"Here are the notes from our planning meeting...\"\n  }\n}"
+how_it_works: "Connect Gmail -> fetch the newest message -> fetch full message details when needed -> write structured JSON output"
+folder: "Operations/Reporting"
+tags:
+  - "gmail"
+  - "email"
+  - "json"
+  - "on-demand"
+  - "report"
+version: "0.1.0"
+is_example: false
+trigger:
+  type: "manual"
+exec:
+  entry: "SKILL.md"
+  runtime: "skill"
+  runner: "e2b"
+  connections:
+    - app: "gmail"
+      allowed_tools:
+        - "GMAIL_FETCH_EMAILS"
+        - "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID"
+  inputs: []
+  outputs:
+    - name: "latest_email"
+      kind: "file"
+      media_type: "application/json"
+      path: "out/latest_email.json"
+      required: true
+      label: "Latest Email JSON"
