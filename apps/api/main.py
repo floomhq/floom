@@ -1398,10 +1398,15 @@ async def auth_middleware(request: Request, call_next):
       cryptographically impossible for sandboxed worker code to delete workers,
       modify other workers, or access the operator API.
 
+    Worker-call bearer tokens (Authorization: Bearer wrt_...):
+      Worker-to-worker chains use a separate token family. Those tokens can
+      create a child run through POST /workers/{id}/runs and poll the child
+      run they spawned through GET /runs/{run_id}, but nothing else.
+
     When FLOOM_SECRET is not set (localhost dev mode), all requests pass.
     """
     from fastapi.responses import JSONResponse as _JSONResponse  # noqa: PLC0415
-    from run_token import verify_run_token  # noqa: PLC0415
+    from run_token import validate_worker_call_token, verify_run_token  # noqa: PLC0415
 
     secret = os.environ.get("FLOOM_SECRET", "")
     if request.method == "OPTIONS":
@@ -1413,10 +1418,27 @@ async def auth_middleware(request: Request, call_next):
     if authorization_header.startswith("Bearer "):
         bearer_token_header = authorization_header[7:].strip()
     if bearer_token_header.startswith("wrt_"):
-        if request.method != "POST" or not _RE_WORKER_RUN_CREATE.match(path):
+        try:
+            worker_call_payload = validate_worker_call_token(bearer_token_header, secret=secret)
+        except ValueError as exc:
+            return _JSONResponse(status_code=401, content={"detail": str(exc)})
+        worker_call_repos = None
+        if request.method == "GET" and _RE_RUN_DETAIL.match(path):
+            try:
+                from db import get_repositories  # noqa: PLC0415
+
+                worker_call_repos = get_repositories()
+            except Exception:
+                worker_call_repos = None
+        if not _worker_call_token_allows_request(
+            path=path,
+            method=request.method,
+            token_payload=worker_call_payload,
+            repos=worker_call_repos,
+        ):
             return _JSONResponse(
                 status_code=403,
-                content={"detail": "Worker-call tokens are only valid for child run creation"},
+                content={"detail": "Worker-call tokens are only valid for child run creation and child-run polling"},
             )
 
     # Run-scoped token check — always evaluated, even in dev mode. A run token
@@ -1515,6 +1537,39 @@ logger = logging.getLogger("floom.api")
 import re as _re
 _RE_RUN_COMPOSIO_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/composio-execute/[A-Z0-9_]+$")
 _RE_WORKER_RUN_CREATE = _re.compile(r"^/workers/[^/]+/runs$")
+_RE_RUN_DETAIL = _re.compile(r"^/runs/([a-zA-Z0-9_-]+)$")
+
+
+def _worker_call_run_metadata(auth: AuthContext) -> tuple[str | None, str | None]:
+    """Return the trigger metadata for a worker-call child run, if any."""
+    if auth.auth_method != "run_token" or not auth.run_token_payload:
+        return None, None
+    parent_run_id = str(auth.run_token_payload.get("parent_run_id") or "").strip() or None
+    if not parent_run_id:
+        return None, None
+    return "worker_call", parent_run_id
+
+
+def _worker_call_token_allows_request(
+    *,
+    path: str,
+    method: str,
+    token_payload: Dict[str, Any],
+    repos: Any | None = None,
+) -> bool:
+    """Allow worker-call bearer tokens only on child creation and child polling."""
+    if method == "POST" and _RE_WORKER_RUN_CREATE.match(path):
+        return True
+    run_match = _RE_RUN_DETAIL.match(path)
+    if method != "GET" or run_match is None or repos is None:
+        return False
+    run_row = repos.runs.get_any(run_id=run_match.group(1))
+    if not run_row:
+        return False
+    return (
+        str(run_row.get("trigger_source") or "") == "worker_call"
+        and str(run_row.get("trigger_ref") or "") == str(token_payload.get("parent_run_id") or "")
+    )
 
 # Process start time for /system/metrics uptime reporting.
 _PROCESS_START_TIME = time.time()
@@ -10455,6 +10510,8 @@ def create_worker_run(
     worker_id = _canonical_worker_id(worker_id)
 
     # Worker-to-worker call token enforcement
+    trigger_source = payload.trigger_source
+    trigger_ref = None
     if auth.auth_method == "run_token" and auth.run_token_payload:
         rtp = auth.run_token_payload
         callable_workers: list[str] = rtp.get("callable_workers") or []
@@ -10470,6 +10527,8 @@ def create_worker_run(
                 status_code=403,
                 detail=f"Maximum worker call depth ({MAX_CALL_DEPTH}) exceeded",
             )
+        trigger_source, trigger_ref = _worker_call_run_metadata(auth)
+        trigger_source = trigger_source or "worker_call"
 
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
@@ -10533,9 +10592,10 @@ def create_worker_run(
     run_id = create_run(
         worker_id,
         payload.inputs,
-        payload.trigger_source,
+        trigger_source,
         status=RunStatus.RUNNING.value,
         user_id=auth.user_id,
+        trigger_ref=trigger_ref,
         repos=repos,
     )
     bound_by = auth.user_id or "anonymous"
