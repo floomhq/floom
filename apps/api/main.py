@@ -1564,9 +1564,9 @@ _sse_stream_count_lock = threading.Lock()
 
 def _max_concurrent_streams() -> int:
     try:
-        return max(1, int(os.environ.get("WORKEROS_MAX_CONCURRENT_STREAMS", "10")))
+        return max(1, int(os.environ.get("WORKEROS_MAX_CONCURRENT_STREAMS", "50")))
     except (TypeError, ValueError):
-        return 10
+        return 50
 
 
 def _sse_stream_acquire(user_id: str) -> str:
@@ -17756,42 +17756,50 @@ async def _workspace_agent_mcp_post(request: Request) -> Response:
 
 
 @app.get("/api/mcp")
-async def workspace_agent_mcp_discovery() -> Response:
+async def workspace_agent_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
+    del auth
     return JSONResponse(_workspace_agent_mcp_discovery())
 
 
 @app.get("/mcp")
-async def workspace_agent_mcp_mount_discovery() -> Response:
+async def workspace_agent_mcp_mount_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
+    del auth
     return JSONResponse(_workspace_agent_mcp_discovery())
 
 
 @app.get("/api/mcp/setup/langdock")
-async def workspace_agent_mcp_langdock_setup() -> Response:
+async def workspace_agent_mcp_langdock_setup(auth: AuthContext = Depends(get_auth_context)) -> Response:
+    del auth
     return JSONResponse(_workspace_agent_mcp_setup_card())
 
 
 @app.get("/mcp/setup/langdock")
-async def workspace_agent_mcp_mount_langdock_setup() -> Response:
+async def workspace_agent_mcp_mount_langdock_setup(auth: AuthContext = Depends(get_auth_context)) -> Response:
+    del auth
     return JSONResponse(_workspace_agent_mcp_setup_card())
 
 
 @app.get("/langdock/mcp")
-async def langdock_workspace_agent_mcp_discovery() -> Response:
+async def langdock_workspace_agent_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
+    del auth
     return JSONResponse(_workspace_agent_mcp_discovery())
 
 
 @app.get("/workspace-agent/mcp")
-async def workspace_agent_named_mcp_discovery() -> Response:
+async def workspace_agent_named_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
+    del auth
     return JSONResponse(_workspace_agent_mcp_discovery())
 
 
 @app.get("/api/langdock/mcp")
-async def api_langdock_workspace_agent_mcp_discovery() -> Response:
+async def api_langdock_workspace_agent_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
+    del auth
     return JSONResponse(_workspace_agent_mcp_discovery())
 
 
 @app.get("/api/workspace-agent/mcp")
-async def api_workspace_agent_named_mcp_discovery() -> Response:
+async def api_workspace_agent_named_mcp_discovery(auth: AuthContext = Depends(get_auth_context)) -> Response:
+    del auth
     return JSONResponse(_workspace_agent_mcp_discovery())
 
 
@@ -19197,11 +19205,14 @@ def system_alerts(auth: AuthContext = Depends(get_auth_context)):
         with get_db() as conn:
             rows = conn.execute(
                 """
-                SELECT id, worker_id, incident_key, reason, details, fired_at, resolved_at
-                FROM alert_incidents
-                ORDER BY fired_at DESC
+                SELECT ai.id, ai.worker_id, ai.incident_key, ai.reason, ai.details, ai.fired_at, ai.resolved_at
+                FROM alert_incidents ai
+                JOIN workers w ON w.id = ai.worker_id
+                WHERE w.owner_id = ?
+                ORDER BY ai.fired_at DESC
                 LIMIT 200
-                """
+                """,
+                (auth.user_id,),
             ).fetchall()
     except Exception:
         # Table may not exist yet if migrations haven't run (e.g., test env)
