@@ -3762,7 +3762,7 @@ def _persist_discovered_workers(
                 manifest.get("name") or worker_id.replace("_", "-"),
                 manifest.get("version") or "0.1.0",
                 json.dumps(manifest),
-                str((WORKERS_DIR / worker_id).resolve()),
+                f"workers/{worker_id}",
                 now,
             ),
         )
