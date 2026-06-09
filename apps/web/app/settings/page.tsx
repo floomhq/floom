@@ -159,16 +159,38 @@ function PersonalAccessTokensPanel() {
 // belongs in Settings, not Connections.
 // S-dev: renamed "API access" tab to "Developer" (value "api" → "developer").
 // The old ?tab=api / #api URLs are handled by the legacy fallback below.
-type TabKey = "developer" | "system" | "git" | "slack" | "assistant" | "notifications" | "appearance" | "danger";
+// SPEC §12: "Channels" (Slack · WhatsApp · Agent-install) is a Settings tab —
+// set-once, low-frequency config lives here (nav placement follows frequency).
+// The old "slack" tab folds into Channels; #slack deep-links still resolve.
+type TabKey =
+  | "developer"
+  | "system"
+  | "git"
+  | "channels"
+  | "slack"
+  | "assistant"
+  | "notifications"
+  | "appearance"
+  | "danger";
 
-const VISIBLE_TAB_KEYS: TabKey[] = ["developer", "system", "git", "slack", "appearance", "danger"];
-const TAB_KEYS: TabKey[] = ["developer", "system", "git", "slack", "assistant", "notifications", "appearance", "danger"];
+const VISIBLE_TAB_KEYS: TabKey[] = ["developer", "system", "git", "channels", "appearance", "danger"];
+const TAB_KEYS: TabKey[] = [
+  "developer",
+  "system",
+  "git",
+  "channels",
+  "slack",
+  "assistant",
+  "notifications",
+  "appearance",
+  "danger",
+];
 
 const NAV_ITEMS: { key: TabKey; label: string }[] = [
   { key: "developer", label: "Developer" },
   { key: "system", label: "System" },
   { key: "git", label: "Git" },
-  { key: "slack", label: "Slack" },
+  { key: "channels", label: "Channels" },
   { key: "appearance", label: "Appearance" },
   { key: "danger", label: "Danger zone" },
 ];
@@ -178,7 +200,8 @@ function isValidTab(value: string | null): value is TabKey {
 }
 
 function visibleTabFromCandidate(value: string | null): TabKey | null {
-  const candidate = value === "api" ? "developer" : value;
+  // Legacy aliases: #api → developer, #slack → channels.
+  const candidate = value === "api" ? "developer" : value === "slack" ? "channels" : value;
   return isValidTab(candidate) && VISIBLE_TAB_KEYS.includes(candidate)
     ? candidate
     : null;
@@ -499,8 +522,8 @@ function SettingsContent() {
           </section>
         </TabsContent>
 
-        <TabsContent value="slack" className="pt-6">
-          <SlackConnect />
+        <TabsContent value="channels" className="space-y-8 pt-6">
+          <ChannelsTab />
         </TabsContent>
 
         <TabsContent value="git" className="pt-6">
@@ -625,5 +648,67 @@ function ToggleRow({
         </Badge>
       ) : null}
     </div>
+  );
+}
+
+// SPEC §12: Channels — how you reach Emily/workers (inbound), set once.
+// Slack (live), WhatsApp (coming), and "install in your agent" over MCP/CLI.
+function ChannelsTab() {
+  return (
+    <>
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-sm font-medium">Messaging</h2>
+          <p className="text-xs text-muted-foreground">
+            Where workers reach you and where Emily can be reached.
+          </p>
+        </div>
+        <SlackConnect />
+        <Card>
+          <CardContent className="flex items-center gap-3 py-4">
+            <div className="flex-1">
+              <div className="text-sm font-medium">WhatsApp</div>
+              <div className="text-xs text-muted-foreground">Not connected</div>
+            </div>
+            <Badge variant="secondary">Coming soon</Badge>
+          </CardContent>
+        </Card>
+      </section>
+
+      <section className="space-y-3">
+        <div>
+          <h2 className="text-sm font-medium">Agent install</h2>
+          <p className="text-xs text-muted-foreground">
+            Let an external AI agent operate your workers over MCP, or drive them from the CLI.
+          </p>
+        </div>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">MCP (Claude Desktop, Cursor, VS Code)</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <pre className="overflow-auto rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]">
+{`{
+  "mcpServers": {
+    "workeros": { "command": "npx", "args": ["-y", "@floomhq/workeros", "mcp"] }
+  }
+}`}
+            </pre>
+          </CardContent>
+        </Card>
+        <Card>
+          <CardHeader>
+            <CardTitle className="text-sm font-medium">CLI</CardTitle>
+          </CardHeader>
+          <CardContent>
+            <pre className="overflow-auto rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]">
+{`npm i -g @floomhq/workeros
+workeros login
+workeros run <worker>`}
+            </pre>
+          </CardContent>
+        </Card>
+      </section>
+    </>
   );
 }
