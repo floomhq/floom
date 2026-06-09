@@ -244,6 +244,18 @@ function SettingsContent() {
   const [claimedWhatsAppToken, setClaimedWhatsAppToken] = useState<string | null>(null);
   const [waClaimBanner, setWaClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
   const [fromInstallChannel, setFromInstallChannel] = useState<string | null>(null);
+  // SPEC §6: the Danger zone is admin-only. Default to shown so single-tenant
+  // (no role) and admins never lose it; hide once we learn the viewer is a member.
+  const [isAdmin, setIsAdmin] = useState(true);
+  useEffect(() => {
+    api
+      .me()
+      .then((u) => {
+        const who = u as { role?: string; is_admin?: boolean };
+        setIsAdmin(who.is_admin ?? (who.role == null ? true : who.role === "admin" || who.role === "owner"));
+      })
+      .catch(() => {});
+  }, []);
   // PR S19 (I-44): type-to-confirm text for the Clear runs button.
   const [clearConfirmText, setClearConfirmText] = useState("");
 
@@ -428,7 +440,7 @@ function SettingsContent() {
       <Tabs value={tab} onValueChange={handleTabChange}>
         <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
           <TabsList>
-            {NAV_ITEMS.map((item) => (
+            {NAV_ITEMS.filter((item) => item.key !== "danger" || isAdmin).map((item) => (
               <TabsTrigger key={item.key} value={item.key}>
                 {item.label}
               </TabsTrigger>
@@ -566,6 +578,7 @@ function SettingsContent() {
         </TabsContent>
 
         <TabsContent value="danger" className="space-y-4 pt-6">
+          {isAdmin && (
           <Card className="border-destructive/40">
             <CardHeader>
               <CardTitle className="text-sm font-medium text-destructive">Danger zone</CardTitle>
@@ -603,6 +616,7 @@ function SettingsContent() {
               </div>
             </CardContent>
           </Card>
+          )}
         </TabsContent>
       </Tabs>
     </div>

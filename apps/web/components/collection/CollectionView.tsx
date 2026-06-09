@@ -219,7 +219,10 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           <div className="c-toolbar" style={{ padding: `14px ${PAGE_X}px 0` }}>
             {searchBox()}
             {viewToggle}
-            <div style={{ marginLeft: "auto" }}>{addButton}</div>
+            <div style={{ marginLeft: "auto", display: "flex", gap: 10, alignItems: "center" }}>
+              {config.toolbarActions}
+              {addButton}
+            </div>
           </div>
           {config.tags && (
             <div style={{ padding: `12px ${PAGE_X}px 2px` }}>
