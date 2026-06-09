@@ -42,7 +42,7 @@ The API is solid: auth, security headers, rate limiting, secret isolation, E2E r
 - All cut endpoints return 404: approve, pause, /approvals
 
 ### E2E Worker Runs
-- **research_brief** (agent/skill/E2B): completed in ~16s, 2 artifacts, 5 transcript entries, `brief` markdown output present
+- **research_brief** (agent/skill/AgentDriver in API process): completed in ~16s, 2 artifacts, 5 transcript entries, `brief` markdown output present
 - **csv_enricher** (pure-script/python311/E2B): completed in <8s, `enriched_csv` output with new column
 - **dach_compliance** (pure-script/python311/E2B): completed, 3 output fields (`compliance_report`, `rate_benchmark`, `red_flags` with risk_level=LOW)
 - **Cancel in-flight**: `POST /runs/{id}/cancel` → `status=cancel_requested` (200) → run transitions to `status=failed`, `error="Run cancelled by user"`

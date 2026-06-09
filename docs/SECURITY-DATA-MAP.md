@@ -1,6 +1,6 @@
 # Security Data Map — Workeros
 
-Last updated: 2026-05-29
+Last updated: 2026-06-09
 
 Where user data lives, how it is protected at rest, and how long it is kept.
 Workeros OS is a single-tenant deployment: one account owner, no third-party
@@ -53,14 +53,34 @@ NEVER injected into worker sandboxes (`_PLATFORM_SECRET_NAMES` denylist in
 `run_service.py`). User-managed secrets added via the secrets API are stored
 in the DB `secrets` table, not here.
 
-## 5. E2B sandboxes (ephemeral)
+## 5. Worker execution topology
 
-Worker code runs in E2B microVMs. Each sandbox receives only:
+Workeros has two execution paths:
+
+- Pure-script workers (`.py`, `.sh`, `.js`, or `runtime.mode: pure-script`) run in E2B microVMs.
+- Agent workers (`.md`, `SKILL.md`, or `runtime.mode: agent`) run in the API process through AgentDriver.
+
+Product/security decision: agent workers are trusted platform-controlled code in the current single-tenant deployment. They are not a sandbox for arbitrary user-authored or marketplace code.
+
+### 5.1 E2B sandboxes for pure-script workers
+
+Pure-script worker code runs in E2B microVMs. Each sandbox receives only:
 `FLOOM_RUN_ID`, `FLOOM_TRACE_ID`, the worker's declared inputs, declared
 context files, and the declared/user secrets resolved through
 `get_secrets_for_worker` (platform infra secrets are filtered out). The
 sandbox `os.environ` does NOT contain any platform secret. Sandboxes are
 destroyed when the run ends; nothing persists in them.
+
+### 5.2 AgentDriver for agent workers
+
+Agent workers run the OpenAI Agents SDK loop inside the API host process. They
+can access their staged worker bundle, per-run artifacts and contexts, declared
+secrets passed by the runtime, configured MCP/Composio clients, and API-host
+process resources exposed through AgentDriver tools. Platform secret values are
+not returned to the browser, but this path is not microVM-isolated from the API
+host. Security review scope for agent workers is approval gates, MCP/Composio
+scoping, declared-secret filtering, artifact/log redaction, cancellation, and
+cost caps.
 
 ## 6. Logs / journald
 
@@ -78,10 +98,10 @@ Browser ──(/api/proxy, server-injected x-floom-secret)──▶ API (FastAPI
                                                             │
                           ┌─────────────────────────────────┼───────────────┐
                           ▼                                 ▼                ▼
-                     SQLite (floom.db)              artifacts/contexts   E2B microVM
-                     workers/runs/secrets/          on server disk       (ephemeral,
-                     connections/conversations/                          declared
-                     contexts/approvals/...                              secrets only)
+                     SQLite (floom.db)              artifacts/contexts   Worker runtime
+                     workers/runs/secrets/          on server disk       pure-script: E2B
+                     connections/conversations/                          agent: API-host
+                     contexts/approvals/...                              AgentDriver
 ```
 
 The browser never receives platform secrets or user secret values; the

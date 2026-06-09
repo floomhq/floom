@@ -14,9 +14,9 @@ Single source of truth for what gets audited every time. If a row is not checked
 | 6 | Triggers — cron | scheduled fire via croniter | `cron-firing` (NEW) | ❌ not yet (time-based) |
 | 7 | Triggers — webhook | HMAC POST /webhooks/{id} | `codex-security` (signature) + `webhook-firing` (full path) | 🟡 partial |
 | 8 | Triggers — Composio | event from real SaaS into /composio-events | requires you connecting Gmail | ❌ deferred (no triggers registered yet) |
-| 9 | Sandbox — local | subprocess runner | `codex-roast` (csv_enricher etc.) | ✅ implicit (pure-script workers ran) |
-| 10 | Sandbox — E2B | E2B sandboxed runner | `e2b-run` (NEW) | ❌ not yet (e2b_test worker exists but not exercised) |
-| 11 | Agent runtime | OpenAI tool loop, research_brief + weekly_update | manual end-to-end | ✅ done (this turn) |
+| 9 | Sandbox — E2B pure-script | `.py`/`.sh`/`.js` workers in E2B microVMs | `e2b-run` (NEW) | ❌ not yet (e2b_test worker exists but not exercised) |
+| 10 | Agent runtime — in-process | `SKILL.md` / `.md` workers through API-host AgentDriver | manual end-to-end + security review for tool scopes | ✅ done (this turn) |
+| 11 | Execution policy | Product decision: agent workers are trusted platform code, not sandbox-isolated user scripts | docs/security review | ✅ documented 2026-06-09 |
 | 12 | File uploads | /uploads sha256 dedup + per-run mount | `codex-roast` step 8 | ✅ done |
 | 13 | Auth — secret gate | x-floom-secret at WAF + origin | `codex-security` | ✅ done (post-fix) |
 | 14 | Auth — HMAC webhook | per-worker secret rotation | `codex-security` | ✅ done |
@@ -46,7 +46,7 @@ For each surface in the matrix:
 | Agent runtime (the actual product execution) | 15% |
 | Triggers (cron/webhook/composio) | 10% |
 | CLI | 5% |
-| Sandbox (local + E2B) | 3% |
+| Sandbox / execution policy (E2B pure-script + trusted in-process agents) | 3% |
 | Disaster recovery | 2% |
 
 Sum = 100. If a surface is `N/A` for this project, redistribute its weight proportionally across the rest.
@@ -57,5 +57,6 @@ Sum = 100. If a surface is `N/A` for this project, redistribute its weight propo
 - MCP: dispatching new `mcp-integration` agent
 - CLI: dispatching new `cli-smoke` agent
 - UI: dispatching new `ui-walk` via authenticated chrome broker
-- E2B: dispatching new `e2b-run` agent
+- E2B pure-script: dispatching new `e2b-run` agent
+- Agent in-process boundary: documented in `ARCHITECTURE.md` and `docs/SECURITY-DATA-MAP.md`
 - Cron / webhook firing / cost caps / restart survival: queued

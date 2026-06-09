@@ -28,14 +28,16 @@
 
 **Also absent from `secrets.json`** as of the 2026-05-26 fix. Earlier code (`run_service.py` pre-fix at lines 340-341) unioned every key in `/root/.config/workeros/api.env` into the secrets dict serialized into the sandbox payload, leaking platform credentials to any pure-script worker that read `secrets.json`. The fix adds a `_PLATFORM_SECRET_NAMES` denylist so platform infra credentials can NEVER appear in the sandbox payload, regardless of whether a worker.yml or the secrets DB tries to declare one of those names. See `tests/test_sandbox_secrets_isolation.py` for the regression.
 
-This means attacks like:
+For pure-script workers, this means attacks like:
 - Worker reaches localhost FastAPI to read `/secrets`
 - Worker reads `os.environ` and exfiltrates platform secrets
 - Worker introspects `sys.modules` to find the FastAPI app and inject routes
 - Worker mutates env vars seen by subsequent workers
 - Worker writes to API service files
 
-**do not apply to Workeros.** They require workers to share a Python interpreter with the API. They don't. If a security audit produces these findings, the audit was run against the wrong infrastructure (typically a clone of the repo with a hand-spun `uvicorn main:app` instance and no E2B credentials).
+**do not apply to the pure-script Workeros path.** They require the worker to share a Python interpreter with the API. Pure-script workers don't. If a security audit produces these findings for a `.py`/`.sh`/`.js` worker, the audit was run against the wrong infrastructure (typically a clone of the repo with a hand-spun `uvicorn main:app` instance and no E2B credentials).
+
+For agent workers, the trust boundary is different by design: `.md`/`mode: agent` workers are trusted platform-controlled code that runs in the API process through AgentDriver. Agent runs can read their staged worker bundle, run AgentDriver file tools against approved paths, dial configured MCP/Composio clients, and use API-host process resources made available by the runtime. Do not treat an arbitrary user-authored agent bundle as sandbox-isolated. Product policy for the current single-tenant deployment is: agent workers are owned/trusted platform code; untrusted or marketplace agent code needs a new isolation decision before launch.
 
 ## API authentication
 
@@ -52,9 +54,10 @@ Every response includes: HSTS (max-age 31536000), X-Frame-Options DENY, Content-
 ## How to run a real audit
 
 1. Hit `https://workers-api.floom.dev` (not localhost) with the production `x-floom-secret`.
-2. Test that workers can NOT do what they shouldn't by submitting a malicious bundle and verifying the result. The E2B sandbox isolates them.
-3. If you want to test the API surface (auth, rate limit, input validation, path traversal, etc.), point your tools at `workers-api.floom.dev`.
-4. Read this file before filing any "workers can compromise the platform" finding.
+2. Test that pure-script workers can NOT do what they shouldn't by submitting a malicious `.py`/`.sh`/`.js` bundle and verifying the result. The E2B sandbox isolates that path.
+3. Test agent workers as trusted in-process code: verify approval gates, MCP/Composio scoping, declared-secret filtering, artifact redaction, cancellation, and cost caps. Do not file "agent can access the API host" as a sandbox escape; file it as a policy violation only if the agent bundle is untrusted.
+4. If you want to test the API surface (auth, rate limit, input validation, path traversal, etc.), point your tools at `workers-api.floom.dev`.
+5. Read this file before filing any "workers can compromise the platform" finding.
 
 ## How to operate
 
