@@ -72,8 +72,8 @@ body.dark .tag.on{border-color:var(--primary)}body.dark .av{background:#33363C}b
 .tagbar{scrollbar-width:none}.tagbar::-webkit-scrollbar{height:0;display:none}
 .tgroup{display:flex;gap:5px;align-items:center;flex:0 0 auto}
 .tgroup+.tgroup{padding-left:10px;border-left:1px solid var(--line)}
-.tag{display:inline-flex;align-items:center;gap:5px;border:1px solid var(--line);border-radius:var(--r-pill);padding:3px 9px;font-size:11.5px;color:var(--ink-soft);background:var(--bg-card);white-space:nowrap}
-.tag:hover{border-color:rgba(16,17,20,.22)}
+.tag{display:inline-flex;align-items:center;gap:5px;border:1px solid transparent;border-radius:var(--r-pill);padding:3px 10px;font-size:11.5px;color:var(--ink-soft);background:var(--bg-2);white-space:nowrap}
+.tag:hover{background:var(--bg-3)}
 .tag.on{background:var(--primary);color:#fff;border-color:var(--primary)}
 .tag .ico{width:13px;height:13px;display:flex}
 .tag .ct{opacity:.55;font-size:11px}
@@ -89,8 +89,8 @@ body.dark .tag.on{border-color:var(--primary)}body.dark .av{background:#33363C}b
 .detailcol{display:none}.split .detailcol{display:flex;flex:1;min-width:0;flex-direction:column;overflow:hidden}
 
 /* polished list (canonical row, matches real app) */
-.ltable{border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden;background:var(--bg-card);box-shadow:var(--shadow)}
-.lhead{display:grid;gap:14px;padding:11px 18px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:var(--bg-2);border-bottom:1px solid var(--line)}
+.ltable{border:0;border-radius:var(--r-card);overflow:hidden;background:transparent}
+.lhead{display:grid;gap:14px;padding:9px 18px;font-size:11px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);background:transparent;border-bottom:1px solid var(--line)}
 .lrow{display:grid;gap:14px;align-items:center;padding:0 18px;height:64px;border-bottom:1px solid var(--line-soft);cursor:pointer}
 .lrow:last-child{border-bottom:0}.lrow:hover{background:var(--bg-2)}.lrow.sel{background:var(--sel);box-shadow:inset 3px 0 0 var(--accent)}
 .lprimary{display:flex;align-items:center;gap:13px;min-width:0}
@@ -109,7 +109,7 @@ body.dark .tag.on{border-color:var(--primary)}body.dark .av{background:#33363C}b
 .daygrp .dh{display:flex;align-items:center;padding:16px 4px 8px;font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);font-weight:600}.daygrp .dh .r{margin-left:auto;text-transform:none;letter-spacing:0;font-weight:400}
 /* split-left = the SAME connected list (continuous container + hairline dividers), never floating cards */
 .split .listcol .lhead{display:none}
-.split .listcol .ltable{border:1px solid var(--line);border-radius:var(--r-card);overflow:hidden;background:var(--bg-card);box-shadow:var(--shadow)}
+.split .listcol .ltable{border:0;border-radius:0;overflow:hidden;background:transparent}
 .split .listcol .lrow{grid-template-columns:1fr!important;height:auto;min-height:58px;padding:13px 14px;border:0;border-bottom:1px solid var(--line-soft);border-radius:0;margin:0;background:none}
 .split .listcol .lrow .lprimary{gap:11px}.split .listcol .lrow .lp-tx .sub{margin-top:2px}
 .split .listcol .lrow:last-child{border-bottom:0}
@@ -119,7 +119,7 @@ body.dark .tag.on{border-color:var(--primary)}body.dark .av{background:#33363C}b
 
 /* grid cards (simplified) */
 .grid{display:grid;grid-template-columns:repeat(auto-fill,minmax(212px,1fr));gap:14px}
-.gcard{border:1px solid var(--line);background:var(--bg-card);border-radius:var(--r-card);padding:15px;display:flex;flex-direction:column;min-height:172px;cursor:pointer;position:relative;box-shadow:var(--shadow)}
+.gcard{border:1px solid var(--line-soft);background:var(--bg-card);border-radius:var(--r-card);padding:15px;display:flex;flex-direction:column;min-height:172px;cursor:pointer;position:relative}
 .gcard:hover{border-color:rgba(16,17,20,.18)}.gcard.sel{border-color:var(--accent);box-shadow:0 0 0 1px var(--accent)}
 .gcard .star{position:absolute;top:13px;right:13px;color:#b6b8bf;opacity:0;transition:opacity .12s}.gcard:hover .star{opacity:1}.gcard .star.on{opacity:1;color:var(--pending)}
 .gtop{display:flex;align-items:center;gap:11px}
@@ -148,17 +148,17 @@ body.dark .tag.on{border-color:var(--primary)}body.dark .av{background:#33363C}b
 .sec{margin-bottom:20px}.sec h4{font-size:11px;letter-spacing:.05em;text-transform:uppercase;color:var(--muted);margin:0 0 9px;font-weight:600}
 .kv{display:grid;grid-template-columns:130px 1fr;gap:9px 16px}.kv .k{color:var(--muted);font-size:12.5px}
 .chip{display:inline-flex;align-items:center;gap:7px;border:1px solid var(--line);border-radius:var(--r-pill);padding:4px 11px;font-size:12.5px;margin:0 6px 6px 0;background:var(--bg-card)}
-.code{border:1px solid var(--line);border-radius:12px;background:var(--bg-2);color:var(--ink-soft);padding:13px;white-space:pre;overflow:auto;font-size:12px;line-height:1.6}
-.outbox{border:1px solid var(--line);border-radius:12px;background:var(--bg-2);padding:14px;color:var(--ink-soft)}
-.box{border:1px solid var(--line);border-radius:12px;background:var(--bg-card);padding:12px;margin-bottom:9px}.box.row{display:flex;align-items:center;gap:11px}
-.flow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;border:1px solid var(--line);border-radius:14px;background:var(--bg-card);padding:18px}.flow .cap{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:10px;text-align:center}
+.code{border:0;border-radius:12px;background:var(--bg-2);color:var(--ink-soft);padding:13px;white-space:pre;overflow:auto;font-size:12px;line-height:1.6}
+.outbox{border:0;border-radius:12px;background:var(--bg-2);padding:14px;color:var(--ink-soft)}
+.box{border:1px solid var(--line-soft);border-radius:12px;background:var(--bg-2);padding:12px;margin-bottom:9px}.box.row{display:flex;align-items:center;gap:11px}
+.flow{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px;border:0;border-radius:14px;background:var(--bg-2);padding:18px}.flow .cap{font-size:11px;text-transform:uppercase;letter-spacing:.05em;color:var(--muted);margin-bottom:10px;text-align:center}
 .fnode{border:1px solid var(--line);border-radius:10px;padding:9px;margin:7px 10px;display:flex;align-items:center;gap:7px;justify-content:center;font-size:12.5px}.fnode.w{border-color:var(--ink);flex-direction:column}
 .files{display:flex;gap:14px}.files .ft{flex:0 0 180px;border:1px solid var(--line);border-radius:12px;overflow:hidden;align-self:flex-start}.files .ft .fr{padding:8px 11px;border-bottom:1px solid var(--line-soft);font-size:12.5px;display:flex;gap:8px;align-items:center;cursor:pointer}.files .ft .fr:last-child{border:0}.files .ft .fr.on{background:var(--bg-2)}.files .ft .fr svg{width:13px;opacity:.6}.files .fv{flex:1;min-width:0}
 .tl .st{display:flex;gap:10px;align-items:flex-start;padding:9px 0;border-bottom:1px solid var(--line-soft)}.tl .st:last-child{border:0}
 
 /* overview */
 .pad{padding:0 28px 26px}.tiles{display:grid;grid-template-columns:repeat(4,1fr);gap:14px}.tile{border:1px solid var(--line);background:var(--bg-card);border-radius:var(--r-card);padding:16px;position:relative;overflow:hidden;min-height:130px}.tile .v,.tile .l,.tile .c{position:relative;z-index:1}.tile .v{font-size:26px;font-weight:600;letter-spacing:-.02em}.tile .l{font-weight:500;margin-top:4px}.tile .c{color:var(--muted);font-size:12.5px}
-.cards2{display:grid;grid-template-columns:1.4fr 1fr;gap:14px;margin-top:14px}.panel{border:1px solid var(--line);background:var(--bg-card);border-radius:var(--r-card);padding:16px}.panel h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between}.panel h3 a{color:var(--muted);font-size:12.5px}
+.cards2{display:grid;grid-template-columns:1.4fr 1fr;gap:22px;margin-top:18px}.panel{border:0;background:transparent;padding:0}.panel h3{margin:0 0 12px;font-size:15px;display:flex;justify-content:space-between}.panel h3 a{color:var(--muted);font-size:12.5px}
 .statebox{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:10px;text-align:center;color:var(--muted);padding:50px}.statebox .g{width:52px;height:52px;border-radius:16px;background:var(--bg-2);display:flex;align-items:center;justify-content:center}.statebox h3{margin:0;color:var(--ink);font-size:17px}
 
 /* emily */
@@ -179,7 +179,7 @@ body.dark .tag.on{border-color:var(--primary)}body.dark .av{background:#33363C}b
 .ehist{padding:6px 10px;border-bottom:1px solid var(--line);flex:0 0 auto}.ehist.open{max-height:184px;overflow:auto}.ehist .ehrow{display:none}.ehist.open .ehrow{display:flex}.ehlab{width:100%;font-size:10.5px;text-transform:uppercase;letter-spacing:.04em;color:var(--muted);padding:5px 4px;font-weight:600;display:flex;align-items:center;gap:7px}.ehchev{transition:transform .15s;opacity:.6;flex:0 0 auto}.ehist.open .ehchev{transform:rotate(90deg)}.ehn{margin-left:auto;background:var(--bg-3);color:var(--muted);font-size:10.5px;border-radius:9px;padding:0 6px;letter-spacing:0}
 .ehrow{display:flex;width:100%;align-items:center;gap:8px;padding:7px 8px;border-radius:9px;text-align:left;color:var(--ink-soft)}.ehrow:hover{background:var(--bg-2)}.ehrow svg{opacity:.55;flex:0 0 auto}.ehrow .tt{flex:1;font-size:12.5px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.ehrow .mm{color:var(--muted);font-size:11px;flex:0 0 auto}
 .bcrumb{display:flex;align-items:center;gap:8px;font-size:12.5px;margin-bottom:12px;color:var(--muted)}.bcrumb .bl{color:var(--accent)}.bcrumb .bl:hover{text-decoration:underline}
-.fileview{height:360px;overflow:auto;border:1px solid var(--line);border-radius:12px;background:var(--bg-2);padding:14px;color:var(--ink-soft)}
+.fileview{height:360px;overflow:auto;border:0;border-radius:12px;background:var(--bg-2);padding:14px;color:var(--ink-soft)}
 .dbtabs{display:flex;gap:2px;margin-bottom:10px}.dbtabs button{padding:4px 11px;border-radius:7px;font-size:12px;color:var(--muted)}.dbtabs button.on{background:var(--bg-card);color:var(--ink);border:1px solid var(--line);font-weight:500}
 .dbtable{background:var(--bg-card);border:1px solid var(--line);border-radius:10px;overflow:hidden}.dbtable table{width:100%;border-collapse:collapse;font-size:12.5px}
 .dbtable th{text-align:left;padding:8px 12px;background:var(--bg-2);color:var(--muted);font-weight:600;font-size:10.5px;text-transform:uppercase;letter-spacing:.03em;border-bottom:1px solid var(--line)}
@@ -187,7 +187,7 @@ body.dark .tag.on{border-color:var(--primary)}body.dark .av{background:#33363C}b
 .dbmeta{margin-top:10px;color:var(--muted);font-size:11.5px}
 /* emily panel controls + modes (consistent affordance with nav) */
 .paneltog{color:var(--muted);padding:6px;border-radius:8px;flex:0 0 auto;display:flex}.paneltog:hover{background:var(--bg-2);color:var(--ink)}
-.ectrls{margin-left:8px;display:flex;gap:2px;position:relative}
+.ectrls{margin-left:8px;display:flex;gap:2px;position:relative}.ectrls.lead{margin-left:0;margin-right:6px}
 .emily.wide{width:min(560px,44vw);flex-basis:min(560px,44vw)}
 .app.efull .center{display:none}.emily.full{flex:1 1 auto;width:auto}
 .emily.col{align-items:center;padding-top:14px;gap:12px}.emily.col .ed{display:block;width:26px;height:26px;border-radius:50%;background:var(--info);flex:0 0 auto}.emily.col .paneltog{border:1px solid var(--line);border-radius:9px;background:var(--bg-2);width:36px;height:36px;align-items:center;justify-content:center}
@@ -207,6 +207,12 @@ body.dark .tag.on{border-color:var(--primary)}body.dark .av{background:#33363C}b
 .setbody{flex:1;min-width:0;overflow:auto;padding:22px 26px}.setbody h2{font-size:18px;font-weight:600;margin:0 0 3px}.setbody .sd{color:var(--muted);margin:0 0 18px}
 .seg{display:inline-flex;border:1px solid var(--line);border-radius:9px;padding:2px;background:var(--bg-card)}.seg button{padding:5px 12px;border-radius:7px;color:var(--muted);font-size:12.5px}.seg button.on{background:var(--bg-2);color:var(--ink);font-weight:500}
 .settabs{flex-wrap:nowrap;overflow-x:auto}.settabs .dtab{padding:6px 9px;gap:6px;font-size:12.5px}
+/* modal (worker sharing) */
+.modalw{position:fixed;inset:0;background:rgba(16,17,20,.4);display:none;align-items:center;justify-content:center;z-index:100;padding:20px}.modalw.on{display:flex}
+.modal{background:var(--bg-card);border-radius:16px;width:460px;max-width:94vw;box-shadow:0 24px 70px rgba(0,0,0,.3);overflow:hidden;border:1px solid var(--line)}
+.modal-h{display:flex;align-items:center;gap:10px;padding:15px 18px;border-bottom:1px solid var(--line)}.modal-h .nm{font-weight:600;font-size:15px;flex:1}
+.modal-b{padding:16px 18px}.modal-f{display:flex;justify-content:flex-end;gap:8px;padding:12px 18px;border-top:1px solid var(--line)}
+.vrow{display:flex;align-items:flex-start;gap:11px;padding:11px;border-radius:11px;cursor:pointer}.vrow:hover{background:var(--bg-2)}.vrow.on{background:var(--sel)}.vrow .rdot{width:17px;height:17px;border-radius:50%;border:2px solid var(--line);flex:0 0 auto;margin-top:1px}.vrow.on .rdot{border-color:var(--accent);box-shadow:inset 0 0 0 3px var(--bg-card),inset 0 0 0 6px var(--accent)}.vrow .nm{font-weight:500}.vrow .sub{color:var(--muted);font-size:12px;margin-top:2px}
 </style></head>
 <body>
 <div class="banner"><b>FINAL — to spec</b> (mock data; real brand logos). One Collection model · search + multi-select tag bar on every list · list+grid everywhere · folders=Brain only · canonical tabs · 30/70 · Connections=one list, Type is a tag. &nbsp; View as: <button id="rAdmin" onclick="setRole('admin')" style="font-weight:700;color:#fff">Admin</button> / <button id="rMember" onclick="setRole('member')">Member</button></div>
@@ -221,6 +227,7 @@ body.dark .tag.on{border-color:var(--primary)}body.dark .av{background:#33363C}b
   <main class="center"><div class="cscroll" id="center"></div></main>
   <aside class="emily" id="emily"></aside>
 </div>
+<div class="modalw" id="modalw" onclick="if(event.target===this)closeShare()"></div>
 <script>
 /* === real brand logos (SimpleIcons, CC0) === */
 const BRAND={"github": {"d": "M12 .297c-6.63 0-12 5.373-12 12 0 5.303 3.438 9.8 8.205 11.385.6.113.82-.258.82-.577 0-.285-.01-1.04-.015-2.04-3.338.724-4.042-1.61-4.042-1.61C4.422 18.07 3.633 17.7 3.633 17.7c-1.087-.744.084-.729.084-.729 1.205.084 1.838 1.236 1.838 1.236 1.07 1.835 2.809 1.305 3.495.998.108-.776.417-1.305.76-1.605-2.665-.3-5.466-1.332-5.466-5.93 0-1.31.465-2.38 1.235-3.22-.135-.303-.54-1.523.105-3.176 0 0 1.005-.322 3.3 1.23.96-.267 1.98-.399 3-.405 1.02.006 2.04.138 3 .405 2.28-1.552 3.285-1.23 3.285-1.23.645 1.653.24 2.873.12 3.176.765.84 1.23 1.91 1.23 3.22 0 4.61-2.805 5.625-5.475 5.92.42.36.81 1.096.81 2.22 0 1.606-.015 2.896-.015 3.286 0 .315.21.69.825.57C20.565 22.092 24 17.592 24 12.297c0-6.627-5.373-12-12-12", "c": "#181717"}, "gmail": {"d": "M24 5.457v13.909c0 .904-.732 1.636-1.636 1.636h-3.819V11.73L12 16.64l-6.545-4.91v9.273H1.636A1.636 1.636 0 0 1 0 19.366V5.457c0-2.023 2.309-3.178 3.927-1.964L5.455 4.64 12 9.548l6.545-4.91 1.528-1.145C21.69 2.28 24 3.434 24 5.457z", "c": "#EA4335"}, "slack": {"d": "M5.042 15.165a2.528 2.528 0 0 1-2.52 2.523A2.528 2.528 0 0 1 0 15.165a2.527 2.527 0 0 1 2.522-2.52h2.52v2.52zM6.313 15.165a2.527 2.527 0 0 1 2.521-2.52 2.527 2.527 0 0 1 2.521 2.52v6.313A2.528 2.528 0 0 1 8.834 24a2.528 2.528 0 0 1-2.521-2.522v-6.313zM8.834 5.042a2.528 2.528 0 0 1-2.521-2.52A2.528 2.528 0 0 1 8.834 0a2.528 2.528 0 0 1 2.521 2.522v2.52H8.834zM8.834 6.313a2.528 2.528 0 0 1 2.521 2.521 2.528 2.528 0 0 1-2.521 2.521H2.522A2.528 2.528 0 0 1 0 8.834a2.528 2.528 0 0 1 2.522-2.521h6.312zM18.956 8.834a2.528 2.528 0 0 1 2.522-2.521A2.528 2.528 0 0 1 24 8.834a2.528 2.528 0 0 1-2.522 2.521h-2.522V8.834zM17.688 8.834a2.528 2.528 0 0 1-2.523 2.521 2.527 2.527 0 0 1-2.52-2.521V2.522A2.527 2.527 0 0 1 15.165 0a2.528 2.528 0 0 1 2.523 2.522v6.312zM15.165 18.956a2.528 2.528 0 0 1 2.523 2.522A2.528 2.528 0 0 1 15.165 24a2.527 2.527 0 0 1-2.52-2.522v-2.522h2.52zM15.165 17.688a2.527 2.527 0 0 1-2.52-2.523 2.526 2.526 0 0 1 2.52-2.52h6.313A2.527 2.527 0 0 1 24 15.165a2.528 2.528 0 0 1-2.522 2.523h-6.313z", "c": "#4A154B"}, "googlecalendar": {"d": "M18.316 5.684H24v12.632h-5.684V5.684zM5.684 24h12.632v-5.684H5.684V24zM18.316 5.684V0H1.895A1.894 1.894 0 0 0 0 1.895v16.421h5.684V5.684h12.632zm-7.207 6.25v-.065c.272-.144.5-.349.687-.617s.279-.595.279-.982c0-.379-.099-.72-.3-1.025a2.05 2.05 0 0 0-.832-.714 2.703 2.703 0 0 0-1.197-.257c-.6 0-1.094.156-1.481.467-.386.311-.65.671-.793 1.078l1.085.452c.086-.249.224-.461.413-.633.189-.172.445-.257.767-.257.33 0 .602.088.816.264a.86.86 0 0 1 .322.703c0 .33-.12.589-.36.778-.24.19-.535.284-.886.284h-.567v1.085h.633c.407 0 .748.109 1.02.327.272.218.407.499.407.843 0 .336-.129.614-.387.832s-.565.327-.924.327c-.351 0-.651-.103-.897-.311-.248-.208-.422-.502-.521-.881l-1.096.452c.178.616.505 1.082.977 1.401.472.319.984.478 1.538.477a2.84 2.84 0 0 0 1.293-.291c.382-.193.684-.458.902-.794.218-.336.327-.72.327-1.149 0-.429-.115-.797-.344-1.105a2.067 2.067 0 0 0-.881-.689zm2.093-1.931l.602.913L15 10.045v5.744h1.187V8.446h-.827l-2.158 1.557zM22.105 0h-3.289v5.184H24V1.895A1.894 1.894 0 0 0 22.105 0zm-3.289 23.5l4.684-4.684h-4.684V23.5zM0 22.105C0 23.152.848 24 1.895 24h3.289v-5.184H0v3.289z", "c": "#4285F4"}, "googledrive": {"d": "M12.01 1.485c-2.082 0-3.754.02-3.743.047.01.02 1.708 3.001 3.774 6.62l3.76 6.574h3.76c2.081 0 3.753-.02 3.742-.047-.005-.02-1.708-3.001-3.775-6.62l-3.76-6.574zm-4.76 1.73a789.828 789.861 0 0 0-3.63 6.319L0 15.868l1.89 3.298 1.885 3.297 3.62-6.335 3.618-6.33-1.88-3.287C8.1 4.704 7.255 3.22 7.25 3.214zm2.259 12.653-.203.348c-.114.198-.96 1.672-1.88 3.287a423.93 423.948 0 0 1-1.698 2.97c-.01.026 3.24.042 7.222.042h7.244l1.796-3.157c.992-1.734 1.85-3.23 1.906-3.323l.104-.167h-7.249z", "c": "#1FA463"}, "hubspot": {"d": "M18.164 7.93V5.084a2.198 2.198 0 001.267-1.978v-.067A2.2 2.2 0 0017.238.845h-.067a2.2 2.2 0 00-2.193 2.193v.067a2.196 2.196 0 001.252 1.973l.013.006v2.852a6.22 6.22 0 00-2.969 1.31l.012-.01-7.828-6.095A2.497 2.497 0 104.3 4.656l-.012.006 7.697 5.991a6.176 6.176 0 00-1.038 3.446c0 1.343.425 2.588 1.147 3.607l-.013-.02-2.342 2.343a1.968 1.968 0 00-.58-.095h-.002a2.033 2.033 0 102.033 2.033 1.978 1.978 0 00-.1-.595l.005.014 2.317-2.317a6.247 6.247 0 104.782-11.134l-.036-.005zm-.964 9.378a3.206 3.206 0 113.215-3.207v.002a3.206 3.206 0 01-3.207 3.207z", "c": "#FF7A59"}, "notion": {"d": "M4.459 4.208c.746.606 1.026.56 2.428.466l13.215-.793c.28 0 .047-.28-.046-.326L17.86 1.968c-.42-.326-.981-.7-2.055-.607L3.01 2.295c-.466.046-.56.28-.374.466zm.793 3.08v13.904c0 .747.373 1.027 1.214.98l14.523-.84c.841-.046.935-.56.935-1.167V6.354c0-.606-.233-.933-.748-.887l-15.177.887c-.56.047-.747.327-.747.933zm14.337.745c.093.42 0 .84-.42.888l-.7.14v10.264c-.608.327-1.168.514-1.635.514-.748 0-.935-.234-1.495-.933l-4.577-7.186v6.952L12.21 19s0 .84-1.168.84l-3.222.186c-.093-.186 0-.653.327-.746l.84-.233V9.854L7.822 9.76c-.094-.42.14-1.026.793-1.073l3.456-.233 4.764 7.279v-6.44l-1.215-.139c-.093-.514.28-.887.747-.933zM1.936 1.035l13.31-.98c1.634-.14 2.055-.047 3.082.7l4.249 2.986c.7.513.934.653.934 1.213v16.378c0 1.026-.373 1.634-1.68 1.726l-15.458.934c-.98.047-1.448-.093-1.962-.747l-3.129-4.06c-.56-.747-.793-1.306-.793-1.96V2.667c0-.839.374-1.54 1.447-1.632z", "c": "#000000"}, "linear": {"d": "M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z", "c": "#5E6AD2"}, "stripe": {"d": "M13.976 9.15c-2.172-.806-3.356-1.426-3.356-2.409 0-.831.683-1.305 1.901-1.305 2.227 0 4.515.858 6.09 1.631l.89-5.494C18.252.975 15.697 0 12.165 0 9.667 0 7.589.654 6.104 1.872 4.56 3.147 3.757 4.992 3.757 7.218c0 4.039 2.467 5.76 6.476 7.219 2.585.92 3.445 1.574 3.445 2.583 0 .98-.84 1.545-2.354 1.545-1.875 0-4.965-.921-6.99-2.109l-.9 5.555C5.175 22.99 8.385 24 11.714 24c2.641 0 4.843-.624 6.328-1.813 1.664-1.305 2.525-3.236 2.525-5.732 0-4.128-2.524-5.851-6.594-7.305h.003z", "c": "#635BFF"}};
@@ -279,10 +286,11 @@ const PILL={ok:['ok','ok'],run:['run','running'],err:['err','failed'],warn:['war
 function pill(st,label){const p=PILL[st]||['idle',st];return `<span class="pill ${p[0]}"><span class="dot"></span>${label||p[1]}</span>`;}
 
 /* ===== state ===== */
-let cur='overview',sel=null,view='grid',tab=0,srcTab=0,role='admin',navc=false,emc=false,lc=false,activeTags={},setSel=null,setSub=0,brainSub=null,brainFile=null,wmenu=false,ewide=false,efull=false,emode='chat',histOpen=false,emsgs=[],typing=false;
+let cur='overview',sel=null,view='grid',tab=0,srcTab=0,role='admin',navc=false,emc=false,lc=false,activeTags={},setSel=null,setSub=0,brainSub=null,brainFile=null,wmenu=false,ewide=false,efull=false,emode='chat',histOpen=false,emsgs=[],typing=false,shareOpen=false,shareVis=1;
 function setRole(r){role=r;document.getElementById('rAdmin').style.cssText=r==='admin'?'font-weight:700;color:#fff':'';document.getElementById('rMember').style.cssText=r==='member'?'font-weight:700;color:#fff':'';if(cur==='worker')cur='workers';render();}
 function tog(w){if(w==='nav')navc=!navc;else{if(efull){efull=false;emode='chat';}else{emc=!emc;ewide=false;}}render();}
 function toggleWide(){if(efull){efull=false;ewide=false;emode='chat';}else{ewide=!ewide;}render();}
+function toggleFull(){if(efull){efull=false;}else{efull=true;ewide=false;}render();}
 function togHist(e){if(e)e.stopPropagation();histOpen=!histOpen;render();}
 function newWorker(){efull=true;ewide=false;emc=false;emode='create';histOpen=false;render();}
 function emilyReply(){typing=false;emsgs.push({role:'emily',text:"On it — give me a moment to pull that together."});render();}
@@ -295,6 +303,17 @@ function open1(id){sel=id;tab=0;brainSub=null;brainFile=null;wmenu=false;setSub=
 function closeD(){sel=null;lc=false;brainSub=null;brainFile=null;wmenu=false;render();}
 function setTab(i){tab=i;srcTab=0;setSub=0;brainSub=null;brainFile=null;wmenu=false;render();}
 function togWmenu(e){if(e)e.stopPropagation();wmenu=!wmenu;render();}
+function openShare(){shareOpen=true;wmenu=false;render();}
+function closeShare(){shareOpen=false;render();}
+function setShareVis(v){shareVis=v;render();}
+function renderModal(){
+ const w=document.getElementById('modalw');
+ if(!shareOpen){w.className='modalw';w.innerHTML='';return;}
+ const wk=(WORKERS.find(x=>x.id===sel)||WORKERS[0]);
+ const vis=[['Private','Only you can see and run it','<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>'],['Workspace','Everyone in Floom can view, give feedback & fork; admins can edit','<path d="M16 11a4 4 0 10-8 0M3 21a7 7 0 0118 0"/>']];
+ w.className='modalw on';
+ w.innerHTML=`<div class="modal"><div class="modal-h"><span class="logo">${sv('<circle cx="18" cy="5" r="3"/><circle cx="6" cy="12" r="3"/><circle cx="18" cy="19" r="3"/><path d="M8.6 13.5l6.8 4M15.4 6.5l-6.8 4"/>',17)}</span><span class="nm">Share &ldquo;${wk.nm}&rdquo;</span><button class="x" onclick="closeShare()">${sv('<path d="M6 6l12 12M18 6L6 18"/>',16)}</button></div><div class="modal-b"><div class="sec"><h4>Who can access</h4>${vis.map((v,i)=>`<div class="vrow ${i===shareVis?'on':''}" onclick="setShareVis(${i})"><span class="rdot"></span><span class="logo" style="width:30px;height:30px">${sv(v[2],16)}</span><div><div class="nm">${v[0]}</div><div class="sub">${v[1]}</div></div></div>`).join('')}</div><div class="sec"><h4>Public link</h4><div class="box row"><span class="mono" style="flex:1;font-size:12px">workers.floom.dev/s/wk_8f3a2c</span><button class="btn sm">Copy</button></div><div class="cell m" style="margin-top:7px">Read-only view of the latest run. Off until you copy.</div></div></div><div class="modal-f"><button class="btn" onclick="closeShare()">Cancel</button><button class="btn primary" onclick="closeShare()">Done</button></div></div>`;
+}
 function setSetTab(i){setSel=i;setSub=0;render();}
 function toggleTheme(){document.body.classList.toggle('dark');const d=document.body.classList.contains('dark');document.getElementById('themeIco').innerHTML=d?'<circle cx="12" cy="12" r="4.5"/><path d="M12 2v2M12 20v2M2 12h2M20 12h2M5 5l1.4 1.4M17.6 17.6L19 19M19 5l-1.4 1.4M6.4 17.6L5 19"/>':'<path d="M21 12.8A9 9 0 1111.2 3a7 7 0 009.8 9.8z"/>';}
 function setSubTab(i){setSub=i;render();}
@@ -312,11 +331,11 @@ function renderNav(){document.getElementById('nav-items').innerHTML=NAV.map(([k,
 function renderEmily(){
  const e=document.getElementById('emily');
  if(emc){e.innerHTML=`<button class="paneltog" onclick="tog('emily')" title="Open Emily">${sv('<path d="M15 18l-6-6 6-6"/>',17)}</button><span class="ed" title="Emily"></span>`;return;}
- const big=ewide||efull;
- const expandIco=big?'<path d="M14 10l6-6M20 4v5h-5M10 14l-6 6M4 20v-5h5"/>':'<path d="M14 10l6-6M21 9V3h-6M10 14l-6 6M3 15v6h6"/>';
- const ctrls=`<button class="paneltog" onclick="togHist(event)" title="Recent chats">${sv(I.clock,16)}</button><button class="paneltog" onclick="toggleWide()" title="${big?'Shrink':'Expand'}">${sv(expandIco,16)}</button>`;
+ const wideIco=ewide?'<path d="M14 10l6-6M20 4v5h-5M10 14l-6 6M4 20v-5h5"/>':'<path d="M14 10l6-6M21 9V3h-6M10 14l-6 6M3 15v6h6"/>';
+ const fullIco=efull?'<path d="M9 3v3a2 2 0 01-2 2H4M20 8h-3a2 2 0 01-2-2V3M15 21v-3a2 2 0 012-2h3M4 16h3a2 2 0 012 2v3"/>':'<path d="M8 3H5a2 2 0 00-2 2v3M16 3h3a2 2 0 012 2v3M21 16v3a2 2 0 01-2 2h-3M3 16v3a2 2 0 002 2h3"/>';
+ const sizeCtrls=`<button class="paneltog" onclick="tog('emily')" title="Collapse">${sv('<path d="M9 6l6 6-6 6"/>',16)}</button><button class="paneltog" onclick="toggleWide()" title="${ewide?'Narrow':'Widen'}">${sv(wideIco,16)}</button><button class="paneltog" onclick="toggleFull()" title="${efull?'Exit full screen':'Full screen'}">${sv(fullIco,16)}</button>`;
  const hist=histOpen?`<div class="popover ehpop"><button onclick="newEmilyChat()"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M12 5v14M5 12h14"/></svg><span style="flex:1">New chat</span></button><div style="border-top:1px solid var(--line);margin:4px 0"></div>${[['Create a Stripe alert worker','2h'],['Why did OpenDraft fail?','Yesterday'],['Summarise this week','3d']].map(([t,m])=>`<button onclick="togHist()"><svg viewBox="0 0 24 24" width="14" height="14" fill="none" stroke="currentColor" stroke-width="1.8"><path d="M4 5h16M4 12h16M4 19h10"/></svg><span style="flex:1;white-space:nowrap;overflow:hidden;text-overflow:ellipsis">${t}</span><span class="cell m">${m}</span></button>`).join('')}<div style="border-top:1px solid var(--line);margin-top:4px;padding-top:4px"><button onclick="togHist()" style="color:var(--accent)">View all chats</button></div></div>`:'';
- const hdr=`<div class="eh"><button class="paneltog ecollapse" onclick="tog('emily')" title="Collapse">${sv('<path d="M9 6l6 6-6 6"/>',16)}</button><span class="ed"></span><div class="t">Emily<small>Chief of Staff</small></div><span class="online"><span class="dot"></span>Online</span><div class="ectrls">${ctrls}${hist}</div></div>`;
+ const hdr=`<div class="eh"><div class="ectrls lead">${sizeCtrls}</div><span class="ed"></span><div class="t">Emily</div><span class="online"><span class="dot"></span>Online</span><div class="ectrls"><button class="paneltog" onclick="togHist(event)" title="Recent chats">${sv(I.clock,16)}</button>${hist}</div></div>`;
  const body=emode==='create'
   ?`<div class="ebody"><div class="ecreate"><div class="big"></div><h3>Hire a new worker</h3><p>Tell me the job in plain English. I'll draft the worker, wire the tools and brain, then open it for your review.</p><div class="ebanner">${sv('<path d="M21 15a2 2 0 01-2 2H7l-4 4V5a2 2 0 012-2h14a2 2 0 012 2z"/>',13)} Your previous chat is saved in Recent chats.</div><div class="sugg">${['Summarise my Granola meetings → HubSpot daily','Send me a GitHub PR digest at 9am','Score new CRM contacts against a job brief'].map(s=>`<button onclick="suggest('Create me: '+this.textContent)">${s}</button>`).join('')}</div></div></div>`
   :((emsgs.length||typing)?`<div class="ebody chat">${emsgs.map(m=>`<div class="emsg ${m.role}">${m.role==='emily'?'<span class="edb"></span>':''}<div class="bub">${m.text}</div></div>`).join('')}${typing?'<div class="emsg emily"><span class="edb"></span><div class="bub typing"><span></span><span></span><span></span></div></div>':''}</div>`:`<div class="ebody"><div class="eempty"><div class="big"></div><h3>I am Emily, your Chief of Staff</h3><p>Ask me to create workers, check runs, or manage connections.</p><div class="sugg"><button onclick="suggest(this.textContent)">What workers do I have?</button><button onclick="suggest(this.textContent)">Create a Stripe alert worker</button><button onclick="suggest(this.textContent)">Show me yesterday's runs</button></div></div></div>`);
@@ -351,7 +370,7 @@ function workerDetail(w){
  const TAB=[['Overview','doc'],['History','clock',10],['Source','code'],['Config','sett']];
  const visPill=`<span class="vpill">${sv('<rect x="5" y="11" width="14" height="9" rx="2"/><path d="M8 11V8a4 4 0 018 0v3"/>',11)} ${w.vis==='mine'?'Private':'Shared'}</span>`;
  const ovItems=locked?[['Versions','clock'],['Request edit access','key'],['Give feedback','assistant']]:[['Versions','clock'],['Share','connections'],['Duplicate','doc'],['Give feedback','assistant'],['Delete','archive']];
- const overflow=`<div class="ovf"><button class="x" onclick="togWmenu(event)">${sv('<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',18)}</button>${wmenu?`<div class="popover">${ovItems.map(([l,ic])=>`<button class="${l==='Delete'?'del':''}" onclick="togWmenu()">${sv(I[ic]||I.doc,14)}${l}</button>`).join('')}</div>`:''}</div>`;
+ const overflow=`<div class="ovf"><button class="x" onclick="togWmenu(event)">${sv('<circle cx="5" cy="12" r="1.6"/><circle cx="12" cy="12" r="1.6"/><circle cx="19" cy="12" r="1.6"/>',18)}</button>${wmenu?`<div class="popover">${ovItems.map(([l,ic])=>`<button class="${l==='Delete'?'del':''}" onclick="${l==='Share'?'openShare()':'togWmenu()'}">${sv(I[ic]||I.doc,14)}${l}</button>`).join('')}</div>`:''}</div>`;
  const acts=locked?`<button class="btn primary sm">${sv(I.assistant,13)} Feedback</button><button class="btn sm">Duplicate</button>${overflow}`:`<button class="btn primary sm">${sv('<path d="M7 5v14l11-7z"/>',13)} Run</button><button class="btn sm">Edit</button>${overflow}`;
  const sub=`${visPill}${locked?'<span class="vpill" style="color:var(--warning);border-color:#f3cabf">View only</span>':''}<span class="desc">${w.d}</span>`;
  const head=detailHead(av(w.nm,42),w.nm,sub,acts);
@@ -477,7 +496,7 @@ function render(){
  document.getElementById('nav').className='nav'+(navc?' col':'');
  document.getElementById('app').classList.toggle('efull',efull);
  document.getElementById('emily').className='emily'+(emc?' col':'')+(ewide&&!efull&&!emc?' wide':'')+(efull?' full':'');
- renderNav();renderEmily();
+ renderNav();renderEmily();renderModal();
  const sb=document.getElementById('settBtn');if(sb)sb.classList.toggle('on',cur==='settings');
  if(cur==='worker')cur='workers';
  if(COLLECTIONS[cur]){renderCollection(COLLECTIONS[cur]());return;}
