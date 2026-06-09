@@ -107,7 +107,7 @@ Local Python CLI (NOT published to PyPI):
 |---|---|
 | Frontend | Next.js 16, React 19, Tailwind, shadcn/ui |
 | Backend | FastAPI 0.111, Pydantic 2.7, SQLite |
-| Sandbox | Python subprocess (local) + E2B (sandboxed) |
+| Worker runtime | Pure-script: E2B microVMs. Agent: AgentDriver in the API process (trusted platform-controlled bundles by policy). |
 | LLM | OpenAI Python SDK 1.35.3, default `gpt-5-mini` |
 | Integrations | Composio v3 API |
 | Scheduler | croniter |
