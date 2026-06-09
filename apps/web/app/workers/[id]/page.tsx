@@ -2849,7 +2849,10 @@ function RunSection({
             <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 text-xs text-amber-800 rounded-[var(--radius-button)]">
               <Plug className="w-3.5 h-3.5 mt-0.5 shrink-0" />
               <div className="space-y-1.5">
-                <p className="font-medium">Connect required tools to run</p>
+                <p className="font-medium">Connect and test required tools</p>
+                <p className="text-amber-700">
+                  This worker uses {missingConnections.map(humanizeOptionLabel).join(", ")} tools. Connect the missing account, then run the worker from this tab.
+                </p>
                 <div className="flex flex-wrap gap-1.5">
                   {missingConnections.map((s) => (
                     <Link
@@ -2857,9 +2860,15 @@ function RunSection({
                       href={`/connections/connect/${encodeURIComponent(s)}?return_to=/workers/${encodeURIComponent(worker.id)}`}
                       className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-100 px-2 py-0.5 font-medium capitalize hover:bg-amber-200"
                     >
-                      {s} →
+                      Connect {humanizeOptionLabel(s)} →
                     </Link>
                   ))}
+                  <Link
+                    href="/connections"
+                    className="inline-flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-0.5 font-medium text-amber-800 hover:bg-amber-100"
+                  >
+                    Test connections →
+                  </Link>
                 </div>
               </div>
             </div>
@@ -2899,7 +2908,7 @@ function RunSection({
               : isPaused
               ? "Paused — turn on to run"
               : missingConnections.length > 0
-              ? `Connect ${missingConnections[0]} first`
+              ? `Connect ${humanizeOptionLabel(missingConnections[0])} to run`
               : worker.status === "missing_secret"
               ? "Add missing secret first"
               : hasValidationErrors
