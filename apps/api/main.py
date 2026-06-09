@@ -6428,6 +6428,8 @@ def list_workers(
                 system=bool((w.get("manifest") or {}).get("system_worker", False)),
                 archived=is_archived,
                 archive_reason=_sanitize_operator_text(w.get("archive_reason")),
+                created_at=w.get("created_at"),
+                updated_at=w.get("updated_at"),
                 tags=w.get("tags") or [],
                 folder=w.get("folder"),
                 status=status,

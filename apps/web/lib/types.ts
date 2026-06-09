@@ -283,6 +283,8 @@ export interface WorkerSummary {
   system?: boolean;
   archived?: boolean;
   archive_reason?: string;
+  created_at?: string;
+  updated_at?: string | null;
   tags: string[];
   folder?: string;
   status: WorkerStatus;

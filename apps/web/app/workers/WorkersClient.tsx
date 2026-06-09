@@ -144,7 +144,7 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
     return () => {
       cancelled = true;
     };
-  }, [tab]); // eslint-disable-line react-hooks/exhaustive-deps
+  }, [tab]);
 
   const toggleFavorite = useCallback((id: string) => {
     setFavorites((prev) => {
@@ -231,20 +231,19 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
       }
       return pool;
     }
-    let pool = workers;
+    let pool = tab === "all" ? sortWorkersByRecentActivity(workers) : workers;
     if (tab === "starred") {
-      pool = pool.filter((w) => favorites.has(w.id));
+      pool = sortWorkersByRecentActivity(pool.filter((w) => favorites.has(w.id)));
     } else if (tab === "recent") {
-      pool = sortWorkersByRecentActivity(pool.filter((w) => w.recent_stats?.last_run_at)).slice(0, 10);
+      pool = sortWorkersByRecentActivity(pool)
+        .filter((w) => w.recent_stats?.last_run_at || w.created_at || w.updated_at)
+        .slice(0, 10);
     } else if (folderFilter) {
       pool = pool.filter(
         (w) =>
           w.folder === folderFilter ||
           (w.folder || "").startsWith(`${folderFilter}/`)
       );
-    }
-    if (tab === "all" && !searchLower && !folderFilter) {
-      pool = sortWorkersByRecentActivity(pool);
     }
     if (searchLower) {
       // Tag matching is folded into the search box (Federico 2026-05-29): the
@@ -379,7 +378,7 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
             <TabsTrigger value="starred" aria-label="Starred workers" title="Starred">
               <Star />
             </TabsTrigger>
-            <TabsTrigger value="recent" aria-label="Recently run workers" title="Recent">
+            <TabsTrigger value="recent" aria-label="Recent workers" title="Recent">
               <Clock />
             </TabsTrigger>
             <TabsTrigger value="archived" aria-label="Archived workers" title="Archived">
@@ -487,7 +486,7 @@ export default function WorkersClient({ initialWorkers }: { initialWorkers: Work
               {tab === "starred"
                 ? "Nothing starred yet. Click the star on any worker card to pin it here."
                 : tab === "recent"
-                ? "No workers run yet."
+                ? "No recent workers yet."
                 : tab === "archived"
                 ? "No archived workers."
                 : searchLower

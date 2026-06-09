@@ -700,28 +700,46 @@ function runCardFromResult(
 ): RunCard | null {
   const result = asRecord(event.result);
   const normalizedTool = event.toolName ? normalizeToolName(event.toolName) : "";
-  const isRun = event.card?.kind === "run" || normalizedTool === "workers.run";
+  const run = asRecord(result?.run);
+  const isRun =
+    event.card?.kind === "run" ||
+    event.card?.kind === "run-detail" ||
+    normalizedTool === "workers.run" ||
+    normalizedTool === "runs.get";
   const resource = event.resource?.kind === "run" ? event.resource : null;
-  const runId = optionalString(result?.run_id) ?? optionalString(resource?.run_id);
+  const runId =
+    optionalString(result?.run_id) ??
+    optionalString(run?.id) ??
+    optionalString(resource?.run_id);
   if (!isRun || !runId) return null;
 
   const preview = "preview" in existing ? existing.preview : undefined;
   const workerId =
     optionalString(resource?.worker_id) ??
+    optionalString(run?.worker_id) ??
     optionalString(asRecord(preview)?.id);
-  const workerName = optionalString(resource?.worker_name) ?? workerId ?? "Worker run";
+  const workerName =
+    optionalString(resource?.worker_name) ??
+    optionalString(run?.worker_name) ??
+    workerId ??
+    "Worker run";
+  const actions = event.actions ?? [
+    { id: "open_run", method: "GET" as const, href: `/runs/${runId}`, label: "View run" },
+  ];
+  const logLines = Array.isArray(run?.logs) ? run.logs.length : undefined;
 
   return {
     kind: "run",
     callId: existing.callId,
     card_id: existing.card_id,
     status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "running")),
-    actions: event.actions,
+    actions,
     streams: event.streams,
     toolName: normalizedTool || event.toolName,
     runId,
     workerId,
     workerName,
+    ...(logLines !== undefined ? { logLines } : {}),
   };
 }
 

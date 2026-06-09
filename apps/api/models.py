@@ -1805,6 +1805,8 @@ class WorkerSummary(BaseModel):
     system: Optional[bool] = None
     archived: bool = False
     archive_reason: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     folder: Optional[str] = None
     status: WorkerStatus

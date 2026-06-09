@@ -208,4 +208,42 @@ describe("Emily chat tool cards", () => {
     if (card?.kind !== "run") throw new Error("expected run card");
     expect(shouldAutoOpenRunDetails(card)).toBe(false);
   });
+
+  it("materializes runs.get results with nested run payloads into a run card", () => {
+    const call: ChatSSEEvent = {
+      type: "tool-call",
+      callId: "call_get_run",
+      toolName: "runs__get",
+      args: { run_id: "run_456" },
+      args_preview: { run_id: "run_456" },
+    };
+    const result: ChatSSEEvent = {
+      type: "tool-result",
+      callId: "call_get_run",
+      toolName: "runs__get",
+      isError: false,
+      result: {
+        ok: true,
+        run: {
+          id: "run_456",
+          worker_id: "canopy-crm-sync",
+          worker_name: "Canopy CRM Sync",
+          logs: [{ level: "info", message: "Done", timestamp: "2026-06-09T00:04:00Z" }],
+        },
+      },
+      card: { kind: "run", status: "completed" },
+    };
+
+    const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), result, "assistant_1");
+    const card = toolCards(messages)[0]?.card;
+
+    expect(card?.kind).toBe("run");
+    if (card?.kind !== "run") throw new Error("expected run card");
+    expect(card.status).toBe("completed");
+    expect(card.runId).toBe("run_456");
+    expect(card.workerId).toBe("canopy-crm-sync");
+    expect(card.workerName).toBe("Canopy CRM Sync");
+    expect(card.logLines).toBe(1);
+    expect(card.actions).toEqual([{ id: "open_run", method: "GET", href: "/runs/run_456", label: "View run" }]);
+  });
 });

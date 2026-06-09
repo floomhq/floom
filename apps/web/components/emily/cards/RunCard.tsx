@@ -69,7 +69,7 @@ export function RunCard({ card }: { card: RunCardType }) {
               href={action.href}
               className="inline-flex h-7 items-center rounded-md border border-border bg-background px-2.5 text-xs font-normal text-foreground hover:bg-accent transition-colors"
             >
-              {action.label ?? action.id}
+              {action.label ?? (action.id === "open_run" ? "View run" : action.id)}
             </a>
           ))}
         </div>

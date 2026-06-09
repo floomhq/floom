@@ -7,7 +7,7 @@ import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 
 import { EmilyAvatar } from "./EmilyAvatar";
 import { MarkdownText } from "./MarkdownText";
@@ -164,14 +164,16 @@ function EmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
 
 interface EmilyChatCoreProps {
   fullPage?: boolean;
+  onOpenRunDetail?: () => void;
 }
 
 const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
 
-function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
+function EmilyChatCore({ fullPage = false, onOpenRunDetail }: EmilyChatCoreProps) {
   const { messages, conversationId, isStreaming, isHydrating, error, sendMessage, newSession } =
     useChatStream();
   const router = useRouter();
+  const pathname = usePathname();
   const [input, setInput] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
@@ -271,11 +273,12 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
         if (!runId) continue;
         if (openedRunDetailsRef.current.has(runId)) continue;
         openedRunDetailsRef.current.add(runId);
-        router.push(href);
+        onOpenRunDetail?.();
+        if (pathname !== href) router.push(href);
         return;
       }
     }
-  }, [messages, router, fullPage, isHydrating]);
+  }, [messages, router, fullPage, isHydrating, onOpenRunDetail, pathname]);
 
   const handleSubmit = useCallback(() => {
     const text = input.trim();
@@ -459,7 +462,7 @@ export function EmilyDock({ className }: { className?: string }) {
 
       {/* Chat content — ALWAYS mounted so useChatStream state survives collapse */}
       <div className={cn("flex-1 min-h-0 overflow-hidden", !open && "hidden")}>
-        <EmilyChatCore />
+        <EmilyChatCore onOpenRunDetail={() => setOpen(false)} />
       </div>
     </div>
   );
