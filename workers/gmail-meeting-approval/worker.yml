@@ -23,21 +23,19 @@ trigger:
   type: "manual"
 limits:
   max_tool_iterations: 30
-  max_output_tokens: 4096
-  max_total_tokens: 50000
   timeout_seconds: 600
+connections:
+  - app: "gmail"
+    allowed_tools:
+      - "GMAIL_FETCH_EMAILS"
+      - "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID"
+  - app: "googlecalendar"
+    allowed_tools:
+      - "GOOGLECALENDAR_CREATE_EVENT"
 exec:
   entry: "SKILL.md"
   runtime: "skill"
   runner: "e2b"
-  connections:
-    - app: "gmail"
-      allowed_tools:
-        - "GMAIL_FETCH_EMAILS"
-        - "GMAIL_FETCH_MESSAGE_BY_MESSAGE_ID"
-    - app: "googlecalendar"
-      allowed_tools:
-        - "GOOGLECALENDAR_CREATE_EVENT"
   inputs: []
   outputs:
     - name: "result"
