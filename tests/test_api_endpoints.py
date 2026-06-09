@@ -19,6 +19,7 @@ import time
 import shutil
 import unittest
 import uuid as _uuid_mod
+from concurrent.futures import ThreadPoolExecutor
 from pathlib import Path
 from unittest.mock import patch
 
@@ -132,6 +133,22 @@ class TestMcpRunContract(unittest.TestCase):
 
         self.assertEqual(r.status_code, 400, r.text)
         self.assertIn("exec.runner: local is not supported", r.text)
+
+    def test_duplicate_worker_create_race_returns_conflict(self):
+        name = _unique_name("race-create")
+        payload = {"worker_yml": _make_worker_yml(name), "run_py": _RUN_PY}
+        start = threading.Barrier(2)
+
+        def post_worker() -> int:
+            start.wait(timeout=5)
+            local_client = TestClient(app_module.app, raise_server_exceptions=False)
+            return local_client.post("/workers", json=payload).status_code
+
+        with ThreadPoolExecutor(max_workers=2) as pool:
+            statuses = sorted(pool.map(lambda _idx: post_worker(), range(2)))
+
+        self.assertEqual(statuses, [200, 409])
+        client.delete(f"/workers/{name}")
 
     def test_run_detail_exposes_output_and_outputs_alias(self):
         from models import WorkerResult
