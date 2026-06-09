@@ -20677,7 +20677,7 @@ async def _mcp_dispatch(
 
     # --- workspace ---
     if name == "workspace.chat":
-        data, s = await _api_call("POST", "/chat", request, body={"message": a["message"], "conversation_id": a.get("conversation_id")})
+        data, s = await _api_call("POST", "/chat", request, body={"message": a["message"], "source": "mcp", "conversation_id": a.get("conversation_id")})
         return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
     if name == "workspace.instructions.get":
         data, s = await _api_call("GET", "/workspace", request)
