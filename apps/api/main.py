@@ -4004,7 +4004,18 @@ def _worker_hidden_from_api(worker_id: str) -> bool:
         return True
     tracked_ids = _tracked_worker_ids()
     if worker_id in tracked_ids:
-        return worker_id not in PUBLIC_STOCK_WORKER_IDS
+        if worker_id in PUBLIC_STOCK_WORKER_IDS:
+            return False
+        # Git-tracked workers that have a DB owner are user workers — always visible.
+        # Only pure engine/stock workers (no DB owner) are hidden from the user API.
+        from db import get_repositories
+        try:
+            owner = get_repositories().workers.get_owner(worker_id=worker_id)
+            if owner:
+                return False
+        except Exception:
+            pass
+        return True
     return False
 
 
