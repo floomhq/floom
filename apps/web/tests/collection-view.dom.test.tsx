@@ -180,6 +180,22 @@ describe("CollectionView — split detail (§8e)", () => {
     expect(screen.queryByRole("tab", { name: "About" })).not.toBeInTheDocument();
   });
 
+  it("+Add opens the create panel in the detail pane; ✕ closes it (§5)", async () => {
+    const user = userEvent.setup();
+    render(
+      <Harness
+        config={makeConfig({
+          add: { label: "Add", panel: { title: "Create thing", render: () => <div>create form</div> } },
+        })}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: "Add" }));
+    expect(screen.getByText("Create thing")).toBeInTheDocument();
+    expect(screen.getByText("create form")).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "Close detail" }));
+    expect(screen.queryByText("create form")).not.toBeInTheDocument();
+  });
+
   it("clears selection and toasts when ?sel points at a missing item", () => {
     const onInvalidSel = vi.fn();
     render(

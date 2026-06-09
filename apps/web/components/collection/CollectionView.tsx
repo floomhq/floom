@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search, LayoutGrid, List as ListIcon, Plus, ChevronsRight } from "lucide-react";
+import { Search, LayoutGrid, List as ListIcon, Plus, ChevronsRight, X } from "lucide-react";
 import {
   type CollectionConfig,
   type CollectionState,
@@ -27,6 +27,7 @@ const PAGE_X = 28;
 
 export function CollectionView<T>({ config, state, onChange, onInvalidSel }: CollectionViewProps<T>) {
   const [listCollapsed, setListCollapsed] = useState(false);
+  const [creating, setCreating] = useState(false); // +Add opens in the detail pane
   const gridEnabled = config.view?.grid ?? false;
 
   const filtered = useMemo(
@@ -55,10 +56,12 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
   const setQuery = (q: string) => patch({ q });
   const open = (id: string) => {
     setListCollapsed(false);
+    setCreating(false);
     patch({ sel: id, tab: null });
   };
   const close = () => {
     setListCollapsed(false);
+    setCreating(false);
     patch({ sel: null, tab: null });
   };
   const toggleTagValue = (family: TagFamilyKey, value: string) => {
@@ -176,7 +179,19 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
   );
 
   const addButton = config.add && (
-    <button type="button" className="c-addbtn" onClick={config.add.onSelect}>
+    <button
+      type="button"
+      className="c-addbtn"
+      onClick={() => {
+        if (config.add!.panel) {
+          patch({ sel: null, tab: null });
+          setListCollapsed(false);
+          setCreating(true);
+        } else {
+          config.add!.onSelect?.();
+        }
+      }}
+    >
       <Plus size={14} /> {config.add.label}
     </button>
   );
@@ -227,7 +242,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
     >
       {header}
 
-      {!isOpen && (
+      {!isOpen && !creating && (
         <>
           <div className="c-toolbar" style={{ padding: `14px ${PAGE_X}px 0` }}>
             {searchBox()}
@@ -256,7 +271,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
         </>
       )}
 
-      {isOpen && detail && (
+      {((isOpen && detail) || creating) && (
         <div className={`c-body c-split ${listCollapsed ? "lc" : ""}`} style={{ marginTop: 14 }}>
           <div className="c-listcol">
             <div className="c-sliver">
@@ -276,14 +291,34 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
             </div>
           </div>
           <div className="c-detailcol">
-            <DetailPane
-              header={detail.header}
-              tabs={detail.tabs}
-              activeTab={activeTabKey}
-              onTab={(key) => patch({ tab: key })}
-              onClose={close}
-              onCollapse={() => setListCollapsed((v) => !v)}
-            />
+            {creating && config.add?.panel ? (
+              <>
+                <div className="c-dhead">
+                  <div className="c-dh-main">
+                    <div className="c-dh-title">
+                      <span className="nm">{config.add.panel.title}</span>
+                    </div>
+                  </div>
+                  <div className="c-dh-act">
+                    <button type="button" className="x" aria-label="Close detail" onClick={close}>
+                      <X size={16} />
+                    </button>
+                  </div>
+                </div>
+                <div className="c-dbody">{config.add.panel.render(close)}</div>
+              </>
+            ) : (
+              detail && (
+                <DetailPane
+                  header={detail.header}
+                  tabs={detail.tabs}
+                  activeTab={activeTabKey}
+                  onTab={(key) => patch({ tab: key })}
+                  onClose={close}
+                  onCollapse={() => setListCollapsed((v) => !v)}
+                />
+              )
+            )}
           </div>
         </div>
       )}
