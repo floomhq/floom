@@ -4139,6 +4139,24 @@ def _stock_workers_from_filesystem(*, use_cache: bool = True) -> List[Dict[str, 
     ]
 
 
+def _db_worker_owners() -> Dict[str, str]:
+    """Map every DB worker id to its owner_id in one query.
+
+    Used to keep the shared-filesystem fallback from leaking another member's
+    runtime-created worker: a worker on disk that has a DB owner who is not the
+    requesting user belongs to them and must never be surfaced.
+    """
+    from db import get_db
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT id, owner_id FROM workers WHERE owner_id IS NOT NULL"
+            ).fetchall()
+        return {str(r[0]): str(r[1]) for r in rows if r[0] and r[1]}
+    except sqlite3.OperationalError:
+        return {}
+
+
 def _list_visible_workers(
     *,
     user_id: str,
@@ -4158,10 +4176,22 @@ def _list_visible_workers(
     for worker in _stock_workers_from_filesystem(use_cache=use_cache):
         visible.setdefault(worker["id"], worker)
     if _shared_filesystem_fallback_allowed():
+        # Owner-scope the fallback so it never leaks another member's runtime
+        # worker. Only unowned on-disk workers (true first-run orphans) and the
+        # requesting user's own workers are surfaced here; curated shipped
+        # templates already came in via _stock_workers_from_filesystem() above.
+        # This keeps single-operator first-run UX intact (you still see all your
+        # own + shipped workers) while making worker visibility consistent with
+        # the per-member run/secret isolation.
+        _owners = _db_worker_owners()
         for worker in discover_workers(use_cache=use_cache):
             worker_id = str(worker.get("id") or "")
-            if worker_id and not _worker_hidden_from_api(worker_id, _owned):
-                visible.setdefault(worker_id, worker)
+            if not worker_id or _worker_hidden_from_api(worker_id, _owned):
+                continue
+            owner = _owners.get(worker_id)
+            if owner is not None and owner != user_id:
+                continue  # belongs to another member — do not surface
+            visible.setdefault(worker_id, worker)
     return list(visible.values())
 
 
