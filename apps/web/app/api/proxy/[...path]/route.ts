@@ -5,9 +5,12 @@ import { NextRequest, NextResponse } from "next/server";
 // was returning empty 504 -> the UI showed an empty error toast.
 export const maxDuration = 60;
 
-const API_BASE =
-  process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
 const API_SECRET = process.env.FLOOM_API_SECRET || "";
+
+function getApiBase(): string | null {
+  const apiBase = process.env.FLOOM_API_BASE?.trim();
+  return apiBase ? apiBase : null;
+}
 
 async function handler(
   req: NextRequest,
@@ -25,9 +28,19 @@ async function handler(
       ? req.nextUrl.pathname.slice(markerIndex + proxyMarker.length) || "/"
       : "/" + path.map(encodeURIComponent).join("/");
 
+  const apiBase = getApiBase();
+  if (!apiBase) {
+    return new NextResponse(
+      JSON.stringify({
+        detail: "FLOOM_API_BASE is required for /api/proxy. Set it to the API origin for this deployment.",
+      }),
+      { status: 503, headers: { "content-type": "application/json" } },
+    );
+  }
+
   // Preserve query string
   const search = req.nextUrl.search;
-  const upstreamUrl = `${API_BASE}${upstreamPath}${search}`;
+  const upstreamUrl = `${apiBase}${upstreamPath}${search}`;
   const isConnectionCallback = upstreamPath === "/connections/callback";
 
   // Forward relevant request headers, injecting the secret
