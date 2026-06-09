@@ -3068,6 +3068,12 @@ def rollback_worker(
     with get_db() as conn:
         _persist_discovered_workers(conn, this_worker_list, user_id=auth.user_id)
 
+    try:
+        from worker_registry import WORKERS_DIR as _WD
+        _embed_files_in_skill_version(worker_id, _WD / worker_id)
+    except Exception:
+        logger.warning("Failed to embed files in DB after rollback for worker %s", worker_id, exc_info=True)
+
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
 
@@ -3756,8 +3762,8 @@ def _persist_discovered_workers(
         sv_name = manifest.get("name") or worker_id.replace("_", "-")
         sv_version = manifest.get("version") or "0.1.0"
         existing_sv = conn.execute(
-            "SELECT manifest_json FROM skill_versions WHERE name = ? AND version = ?",
-            (sv_name, sv_version),
+            "SELECT manifest_json FROM skill_versions WHERE id = ?",
+            (skill_version_id,),
         ).fetchone()
         manifest_to_store = manifest
         if existing_sv:
@@ -4386,14 +4392,29 @@ def _should_ignore_worker_file(rel_path: str) -> bool:
     return False
 
 
+_SENSITIVE_FILE_NAMES = frozenset({".env", ".env.local", ".env.production", ".env.development"})
+_SENSITIVE_FILE_SUFFIXES = frozenset({".pem", ".key", ".p12", ".pfx", ".crt", ".cer", ".p8", ".der", ".ppk"})
+
+
+def _should_embed_file(rel_path: str) -> bool:
+    if _should_ignore_worker_file(rel_path):
+        return False
+    name = Path(rel_path).name
+    if name in _SENSITIVE_FILE_NAMES or name.startswith(".env"):
+        return False
+    if Path(rel_path).suffix.lower() in _SENSITIVE_FILE_SUFFIXES:
+        return False
+    return True
+
+
 def _embed_files_in_skill_version(worker_id: str, worker_dir: Path) -> None:
     """Store all text worker files into manifest_json._files so they survive container redeploys."""
     files: dict = {}
     for fpath in sorted(worker_dir.rglob("*")):
-        if not fpath.is_file():
+        if fpath.is_symlink() or not fpath.is_file():
             continue
         rel = fpath.relative_to(worker_dir).as_posix()
-        if _should_ignore_worker_file(rel):
+        if not _should_embed_file(rel):
             continue
         try:
             files[rel] = fpath.read_text(encoding="utf-8")
@@ -4421,8 +4442,9 @@ def rematerialize_worker_from_db(worker_id: str) -> bool:
     """Write worker files from manifest_json._files back to WORKERS_DIR.
 
     Returns True if files were written, False if no _files stored in DB.
-    Called automatically before runs when the worker dir is missing.
+    Uses an atomic temp-dir swap so a partial failure never leaves a corrupt dir.
     """
+    import shutil as _shutil
     from worker_registry import WORKERS_DIR
     with get_db() as conn:
         row = conn.execute(
@@ -4437,11 +4459,24 @@ def rematerialize_worker_from_db(worker_id: str) -> bool:
     if not files:
         return False
     worker_dir = WORKERS_DIR / worker_id
-    worker_dir.mkdir(parents=True, exist_ok=True)
-    for rel_path, content in files.items():
-        dest = worker_dir / rel_path
-        dest.parent.mkdir(parents=True, exist_ok=True)
-        dest.write_text(content, encoding="utf-8")
+    tmp_dir = Path(tempfile.mkdtemp(prefix=f".rmat.{worker_id}.", dir=str(WORKERS_DIR)))
+    try:
+        resolved_tmp = tmp_dir.resolve()
+        for rel_path, content in files.items():
+            dest = (tmp_dir / rel_path).resolve()
+            try:
+                dest.relative_to(resolved_tmp)
+            except ValueError:
+                logger.warning("Skipping path traversal in _files for worker %s: %s", worker_id, rel_path)
+                continue
+            dest.parent.mkdir(parents=True, exist_ok=True)
+            dest.write_text(content, encoding="utf-8")
+        if worker_dir.exists():
+            _shutil.rmtree(worker_dir)
+        tmp_dir.rename(worker_dir)
+    except Exception:
+        _shutil.rmtree(tmp_dir, ignore_errors=True)
+        raise
     logger.info("Re-materialized %d files for worker %s from DB", len(files), worker_id)
     return True
 
@@ -9709,6 +9744,10 @@ def create_worker(
         _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
         os.replace(staging_dir, target_dir)
         target_committed = True
+        try:
+            _embed_files_in_skill_version(worker_id, target_dir)
+        except Exception:
+            logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
         invalidate_worker_cache()
         detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
         # Commit new worker files to the workspace git repo
@@ -9889,6 +9928,11 @@ async def create_worker_from_bundle(
             shutil.rmtree(target_dir, ignore_errors=True)
             invalidate_worker_cache()
             raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    try:
+        _embed_files_in_skill_version(worker_id, target_dir)
+    except Exception:
+        logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
 
     return _build_worker_detail(
         worker_id,
