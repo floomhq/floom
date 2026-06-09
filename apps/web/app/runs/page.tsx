@@ -1,8 +1,8 @@
 // S44: RSC — fetch initial runs + workers list on the server.
 // RunsClient handles filtering, pagination, and export interactivity.
 import { Suspense } from "react";
-import { fetchRuns, fetchWorkerList } from "@/lib/server-api";
-import RunsClient from "./RunsClient";
+import { fetchRuns } from "@/lib/server-api";
+import RunsCollection from "./RunsCollection";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export const revalidate = 10;
@@ -17,16 +17,12 @@ export default async function RunsPage() {
 
 async function RunsFetcher() {
   let initialRuns: import("@/lib/types").RunSummary[] = [];
-  let initialWorkers: import("@/lib/types").WorkerSummary[] = [];
   try {
-    [initialRuns, initialWorkers] = await Promise.all([
-      fetchRuns({ limit: 20, offset: 0 }),
-      fetchWorkerList(),
-    ]);
+    initialRuns = await fetchRuns({ limit: 200, offset: 0 });
   } catch {
-    // Fall through — RunsClient will fetch on the client side
+    // Fall through — RunsCollection will fetch on the client side
   }
-  return <RunsClient initialRuns={initialRuns} initialWorkers={initialWorkers} />;
+  return <RunsCollection initialRuns={initialRuns} />;
 }
 
 // FL8: full-page Runs skeleton — header + Export action, the worker-filter +
