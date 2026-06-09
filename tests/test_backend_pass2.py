@@ -111,6 +111,42 @@ def test_mcp_tools_alias_crud_and_emily_metadata(monkeypatch, tmp_path):
     rpc_tools = rpc_list.json()["result"]["tools"]
     assert tool_name in {item["name"] for item in rpc_tools}
 
+    forwarded_chat_bodies = []
+
+    async def fake_api_call(method, path, request, *, body=None, params=None):
+        forwarded_chat_bodies.append((method, path, body))
+        return {"reply": "chat ok"}, 200
+
+    monkeypatch.setattr(main, "_api_call", fake_api_call)
+    rpc_chat = client.post(
+        "/mcp-tools/serve",
+        headers=_headers("user-a"),
+        json={
+            "jsonrpc": "2.0",
+            "id": 2,
+            "method": "tools/call",
+            "params": {
+                "name": "workspace.chat",
+                "arguments": {
+                    "message": "hello from mcp",
+                    "conversation_id": "mcp-thread",
+                },
+            },
+        },
+    )
+    assert rpc_chat.status_code == 200, rpc_chat.text
+    assert forwarded_chat_bodies == [
+        (
+            "POST",
+            "/chat",
+            {
+                "message": "hello from mcp",
+                "source": "mcp",
+                "conversation_id": "mcp-thread",
+            },
+        )
+    ]
+
     updated = client.put(
         f"/mcp/tools/{tool['id']}",
         headers=_headers("user-a"),
