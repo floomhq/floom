@@ -459,6 +459,7 @@ class SqliteWorkerRepository:
             # already-parsed dict via a thin wrapper to avoid the duplicate parse.
             records.append(_worker_record_from_row(row))
             if config is not None:
+                _mj = json.loads(row["manifest_json"] or "{}")
                 cache[wid] = {
                     "config": config,
                     "grants": _json_load(row["grants_json"], {}),
@@ -466,7 +467,7 @@ class SqliteWorkerRepository:
                     "enabled": bool(row["enabled"]),
                     "owner_id": row["owner_id"],
                     "bundle_path": row["bundle_path"],
-                    "manifest_json": json.loads(row["manifest_json"] or "{}"),
+                    "manifest_json": {k: v for k, v in _mj.items() if k != "_files"},
                 }
             else:
                 cache[wid] = None
@@ -1016,6 +1017,7 @@ class SqliteWorkerRepository:
             cron_timezone=row["cron_timezone"],
             bundle_path=row["bundle_path"],
         )
+        _mj = json.loads(row["manifest_json"] or "{}")
         return {
             "config": config,
             "grants": _json_load(row["grants_json"], {}),
@@ -1023,7 +1025,7 @@ class SqliteWorkerRepository:
             "enabled": bool(row["enabled"]),
             "owner_id": row["owner_id"],
             "bundle_path": row["bundle_path"],
-            "manifest_json": json.loads(row["manifest_json"] or "{}"),
+            "manifest_json": {k: v for k, v in _mj.items() if k != "_files"},
         }
 
     def upsert_webhook_secret_hash(

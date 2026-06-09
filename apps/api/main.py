@@ -18768,6 +18768,9 @@ def system_overview(
     active_workers_count = sum(1 for row in workers if not _overview_worker_paused(row))
     paused_workers_count = max(0, len(workers) - active_workers_count)
     worker_names = {row["id"]: row.get("name") or row["id"] for row in workers if row.get("id")}
+    # Pre-built once to avoid N+1 _get_db_worker() calls when filtering run lists
+    # by worker visibility (set lookup vs one SELECT per row).
+    _visible_worker_ids: set = {w["id"] for w in workers if w.get("id")}
 
     # G5 FIX 3: the headline success rate must reflect the partner's ACTIVE,
     # real workers — not legacy/paused/example/system churn that drags the
@@ -18839,7 +18842,7 @@ def system_overview(
             trigger_source=row.get("trigger_source") or "manual",
         )
         for row in recent_rows
-        if _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+        if row.get("worker_id") in _visible_worker_ids
     ][:10]
 
     scheduled_today: List[OverviewScheduledItem] = []
@@ -18884,13 +18887,13 @@ def system_overview(
     # worker is no longer API-visible so the cluster + its link cannot 404.
     failure_runs = [
         row for row in failure_runs
-        if _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+        if row.get("worker_id") in _visible_worker_ids
     ]
     visible_terminal_runs = [
         row for row in runs_14d_rows
         if str(row.get("status") or "").lower()
         in {"completed", "approved", "success", "succeeded", "failed", "error", "cancelled", "rejected", "timeout"}
-        and _run_visible_to_api(row, user_id=auth.user_id, repos=repos)
+        and row.get("worker_id") in _visible_worker_ids
     ]
     attention_items.extend(
         _overview_consecutive_failure_items(
