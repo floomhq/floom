@@ -4274,7 +4274,17 @@ def _get_visible_worker(
         if archived is not None:
             return archived
         return None
-    if _shared_filesystem_fallback_allowed() or worker_id in PUBLIC_STOCK_WORKER_IDS:
+    if worker_id in PUBLIC_STOCK_WORKER_IDS:
+        return get_worker(worker_id)
+    if _shared_filesystem_fallback_allowed():
+        # Owner-scope the filesystem fallback so one member cannot fetch — and,
+        # via the endpoints that gate on this (run/edit/delete/files), act on —
+        # another member's runtime worker. Unowned on-disk workers (true
+        # first-run orphans) stay reachable; a worker owned by a different user
+        # returns None (404).
+        owner = _db_worker_owners().get(worker_id)
+        if owner is not None and owner != user_id:
+            return None
         return get_worker(worker_id)
     return None
 
@@ -8023,6 +8033,11 @@ def delete_worker(
     - skill_version is preserved if other workers share it.
     """
     _require_worker_write_workspace_context(request)
+    # Owner-gate: a member must not be able to delete (or no-op-204 against)
+    # another member's worker. _get_visible_worker is now owner-scoped, so this
+    # returns 404 for a worker the caller can't see — consistent with GET/run/edit.
+    if _get_visible_worker(_canonical_worker_id(worker_id), user_id=auth.user_id, repos=repos) is None:
+        raise HTTPException(status_code=404, detail="Worker not found")
     _delete_worker_impl(worker_id, auth.user_id, repos)
     # 204 No Content — FastAPI returns empty body automatically for status_code=204
     return None
