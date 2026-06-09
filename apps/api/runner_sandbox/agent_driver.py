@@ -248,6 +248,23 @@ class AgentDriver(SandboxDriver):
                 timeout=timeout_seconds,
             )
         except asyncio.TimeoutError:
+            # Clean up any pending agent-tool approval that was waiting when the
+            # outer timeout fired. The inner polling loop never got a chance to
+            # call repos.approvals.reject(), so do it here.
+            if user_id:
+                try:
+                    from db import get_repositories as _get_repos
+                    _repos_t = _get_repos()
+                    _apr = _repos_t.approvals.get_by_run_id(run_id=run_id)
+                    if _apr and _apr.get("status") == "pending":
+                        _repos_t.approvals.reject(
+                            owner_id=user_id,
+                            run_id=run_id,
+                            decided_at=datetime.now(timezone.utc).isoformat(),
+                            reason=f"Run timed out after {timeout_seconds}s",
+                        )
+                except Exception:
+                    pass
             return WorkerResult(
                 status="error",
                 error=f"Agent run exceeded timeout of {timeout_seconds}s",
@@ -1848,6 +1865,23 @@ class AgentDriver(SandboxDriver):
 
             if _time.monotonic() >= deadline:
                 log_fn(f"Approval timed out after {timeout_seconds}s: {label}", "warning")
+                try:
+                    repos.runs.update_status(
+                        user_id=user_id,
+                        run_id=run_id,
+                        status=RunStatus.RUNNING.value,
+                    )
+                except Exception:
+                    pass
+                try:
+                    repos.approvals.reject(
+                        owner_id=user_id,
+                        run_id=run_id,
+                        decided_at=datetime.now(timezone.utc).isoformat(),
+                        reason=f"Timed out after {timeout_seconds}s — no decision received",
+                    )
+                except Exception:
+                    pass
                 return {
                     "ok": False,
                     "approved": False,
@@ -1858,6 +1892,23 @@ class AgentDriver(SandboxDriver):
             # Check cancel flag so a cancelled run doesn't spin forever
             if self._cancel_requested(run_id):
                 log_fn("request_approval: run cancelled while waiting for approval", "info")
+                try:
+                    repos.runs.update_status(
+                        user_id=user_id,
+                        run_id=run_id,
+                        status=RunStatus.RUNNING.value,
+                    )
+                except Exception:
+                    pass
+                try:
+                    repos.approvals.reject(
+                        owner_id=user_id,
+                        run_id=run_id,
+                        decided_at=datetime.now(timezone.utc).isoformat(),
+                        reason="Run cancelled while awaiting approval",
+                    )
+                except Exception:
+                    pass
                 return {
                     "ok": False,
                     "approved": False,
