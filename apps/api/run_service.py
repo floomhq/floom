@@ -3119,6 +3119,65 @@ def fail_interrupted_runs_on_startup(
     return reap_abandoned_runs(repos=repos)
 
 
+_PENDING_APPROVAL_RESTART_ERROR = (
+    "Run interrupted: server restarted while awaiting operator approval. "
+    "Re-run the worker to restart."
+)
+
+
+def reap_abandoned_pending_approval_runs(
+    *,
+    repos: Repositories | None = None,
+) -> int:
+    """Fail all runs stuck in pending_approval on process startup.
+
+    pending_approval runs have an in-process polling loop in agent_driver that
+    dies when the server restarts. Unlike running runs (which use a
+    timeout+grace window to avoid false positives), ALL pending_approval rows
+    at boot are definitively abandoned — there is no live loop to resume them.
+
+    Also rejects their pending approval records so they disappear from the
+    Approvals UI immediately.
+    """
+    repos_obj = _repos(repos)
+    now = datetime.now(timezone.utc).isoformat()
+    failed = repos_obj.runs.fail_all_pending_approval(
+        error=_PENDING_APPROVAL_RESTART_ERROR,
+        error_code="approval_loop_killed",
+    )
+    for item in failed:
+        run_id = str(item.get("run_id") or item.get("id") or "")
+        user_id = str(item.get("user_id") or "")
+        if not run_id or not user_id:
+            continue
+        try:
+            repos_obj.approvals.reject(
+                owner_id=user_id,
+                run_id=run_id,
+                decided_at=now,
+                reason="Server restarted — approval polling loop killed",
+            )
+        except Exception as exc:
+            logger.warning("Failed to reject approval for interrupted run %s: %s", run_id, exc)
+        try:
+            repos_obj.runs.add_log(
+                user_id=user_id,
+                run_id=run_id,
+                level="error",
+                message=_PENDING_APPROVAL_RESTART_ERROR,
+                timestamp=now,
+                trace_id=None,
+            )
+        except Exception as exc:
+            logger.warning("Failed to add log for interrupted pending-approval run %s: %s", run_id, exc)
+    if failed:
+        logger.warning(
+            "Reaped %d abandoned pending_approval run(s) on startup",
+            len(failed),
+        )
+    return len(failed)
+
+
 def re_enqueue_queued_runs_on_startup(
     *,
     repos: Repositories | None = None,

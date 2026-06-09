@@ -196,6 +196,7 @@ def _git_author(auth: "AuthContext") -> tuple[str, str]:
 from run_service import (
     create_run,
     fail_interrupted_runs_on_startup,
+    reap_abandoned_pending_approval_runs,
     re_enqueue_queued_runs_on_startup,
     get_worker_config_for_run,
     start_run,
@@ -310,6 +311,7 @@ async def lifespan(app: FastAPI):
         bootstrap_user_id = _bootstrap_user_id()
         _reload_workers_for_user(bootstrap_user_id)
         fail_interrupted_runs_on_startup(user_id=bootstrap_user_id)
+        reap_abandoned_pending_approval_runs()
         re_enqueue_queued_runs_on_startup()
         start_drain_loop()
         start_run_reaper_loop()
@@ -11025,7 +11027,7 @@ def clear_runs(
     }
 
 
-_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "pending_approval"})
+_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed"})
 
 
 @app.post("/runs/{run_id}/cancel", response_model=ActionResponse)
