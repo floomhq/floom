@@ -242,6 +242,10 @@ class TestWorkerVersionsAPI:
         monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
         monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(workspace))
         monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+        monkeypatch.setenv("FLOOM_SECRET", "dev")
+        monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
+        monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+        monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
 
         import importlib, main as _main_mod
         importlib.reload(_main_mod)

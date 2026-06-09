@@ -244,7 +244,7 @@ def test_base_persona_state_and_reset_to_default(client_and_main):
 
     # The reset is captured in version history.
     versions = client.get("/workspace/base/versions").json()
-    assert any("workspace base: reset to default" in v["message"] for v in versions)
+    assert any("workspace base: reset-to-default" in v["message"] for v in versions)
 
 
 def test_endpoint_requires_auth(client_and_main):

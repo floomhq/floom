@@ -13,6 +13,7 @@ import json
 import logging
 import os
 import re
+import sqlite3
 import subprocess
 import threading
 import uuid
@@ -464,11 +465,13 @@ class AgentDriver(SandboxDriver):
             if total_tokens > 0:
                 transcript.append({"type": "usage", "total_tokens": total_tokens})
             self._persist_transcript(output_dir, transcript, artifacts)
-            # Output-schema enforcement is now centralized at the common
-            # completion gate in run_service.execute_run (one path for all three
-            # drivers). The driver returns success with the outputs; the gate
-            # validates declared type/columns/required-keys and FAILS the run on
-            # a mismatch. See run_service.py (_validate_output_schema call).
+            missing_outputs = self._missing_required_outputs(config, outputs)
+            if missing_outputs:
+                return WorkerResult(
+                    status="failed",
+                    error=f"Output schema violation: Missing declared output '{missing_outputs[0]}'",
+                    artifacts=artifacts,
+                )
             # Persist any edits the run made to writeable:true packs back to the
             # local store before returning success (mirrors e2b_driver).
             self._persist_writeable_contexts(
@@ -721,6 +724,7 @@ class AgentDriver(SandboxDriver):
 
     def _cancel_requested(self, run_id: str) -> bool:
         """Check if the run's cancel_requested flag is set in the DB."""
+        global _CANCEL_FLAG_DB_READ_ERRORS_TOTAL
         try:
             from db import get_db
             with get_db() as conn:
@@ -728,8 +732,18 @@ class AgentDriver(SandboxDriver):
                     "SELECT cancel_requested FROM runs WHERE id = ?", (run_id,)
                 ).fetchone()
             return bool(row and row["cancel_requested"])
+        except sqlite3.OperationalError as exc:
+            if "no such table: runs" in str(exc).lower():
+                return False
+            with _CANCEL_FLAG_DB_READ_ERRORS_LOCK:
+                _CANCEL_FLAG_DB_READ_ERRORS_TOTAL += 1
+            logger.warning(
+                "Cancel flag read failed for run %s; treating as cancelled",
+                run_id,
+                exc_info=True,
+            )
+            return True
         except Exception:
-            global _CANCEL_FLAG_DB_READ_ERRORS_TOTAL
             with _CANCEL_FLAG_DB_READ_ERRORS_LOCK:
                 _CANCEL_FLAG_DB_READ_ERRORS_TOTAL += 1
             logger.warning(
