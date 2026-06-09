@@ -37,6 +37,7 @@ def client_and_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("FLOOM_SECRET", "test-secret-wsagent")
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
+    monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
@@ -98,8 +99,10 @@ def test_endpoint_returns_prompt_and_tools(client_and_main):
     assert "You manage the workspace." in body["system_prompt"]
     assert "{{WORKSPACE_PREAMBLE}}" not in body["system_prompt"]
     assert "Workspace snapshot" in body["system_prompt"]
-    assert "Secret names: OPENAI_API_KEY" in body["system_prompt"]
-    assert body["system_prompt"].index(body["base_persona"]) < body["system_prompt"].index("## Worker authoring rules")
+    assert "OPENAI_API_KEY" in body["system_prompt"]
+    assert "E2B_API_KEY" in body["system_prompt"]
+    assert "## Worker authoring rules" not in body["system_prompt"]
+    assert "## Workeros worker.yml format" not in body["system_prompt"]
     assert body["settings"] == {
         "brain_read": True,
         "brain_write": False,
@@ -203,6 +206,7 @@ def test_base_persona_and_workspace_instructions_are_separate_editable_layers(cl
     assert "You manage the workspace." in prompt
     assert prompt.index("custom Workeros operator") < prompt.index("Prefer verified workspace facts.")
     assert prompt.index("Prefer verified workspace facts.") < prompt.index("You manage the workspace.")
+    assert "## Worker authoring rules" not in prompt
 
     base_versions = client.get("/workspace/base/versions").json()
     custom_versions = client.get("/workspace/versions").json()
@@ -282,3 +286,47 @@ def test_bare_greeting_identity_guard_leaves_specific_requests_alone():
     reply = "Two things need attention."
 
     assert chat_service._ensure_bare_greeting_identity("Run the first worker", reply) == reply
+
+
+def test_worker_authoring_rules_are_gated_by_message_intent(client_and_main):
+    _client, _main = client_and_main
+    import chat_service
+
+    casual = chat_service.build_system_prompt_for_source("federico", "web", message="hi")
+    authoring = chat_service.build_system_prompt_for_source(
+        "federico",
+        "web",
+        message="Create a worker that summarizes Gmail every morning",
+    )
+
+    assert "## Worker authoring rules" not in casual
+    assert "## Worker authoring rules" in authoring
+
+    sample_skill = (
+        "# Workspace Agent\n\n"
+        "## Workeros worker.yml format\n"
+        "YAML authoring rules here.\n\n"
+        "## Workspace-management tools\n"
+        "Tool list here.\n"
+    )
+    casual_skill = chat_service._workspace_agent_skill_for_intent(
+        sample_skill,
+        include_authoring_rules=False,
+    )
+    authoring_skill = chat_service._workspace_agent_skill_for_intent(
+        sample_skill,
+        include_authoring_rules=True,
+    )
+    assert "## Workeros worker.yml format" not in casual_skill
+    assert "## Workspace-management tools" in casual_skill
+    assert "## Workeros worker.yml format" in authoring_skill
+
+
+def test_emily_persona_investigation_mode_blocks_partial_status_dumps():
+    import chat_service
+
+    persona = chat_service.EMILY_BASE_PERSONA
+    assert "Investigate first" in persona
+    assert "say \"keep going\"" in persona
+    assert "serial partial" in persona
+    assert "status dumps" in persona

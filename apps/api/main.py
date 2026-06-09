@@ -3553,7 +3553,7 @@ def _bootstrap_user_id() -> str:
     return configured or "federico"
 
 
-_BOOTSTRAP_SECRETS_TO_SEED: tuple[str, ...] = ("OPENAI_API_KEY",)
+_BOOTSTRAP_SECRETS_TO_SEED: tuple[str, ...] = ("OPENAI_API_KEY", "E2B_API_KEY")
 
 
 def _seed_bootstrap_secrets(user_id: str, repos: Repositories) -> int:

@@ -27,6 +27,7 @@ def _load_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_SECRET", "bootstrap-secret")
     monkeypatch.setenv("OPENAI_API_KEY", "sk-bootstrap-openai")
+    monkeypatch.setenv("E2B_API_KEY", "e2b-bootstrap-key")
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(artifacts_dir))
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))
@@ -63,3 +64,8 @@ def test_bootstrap_seeds_openai_secret_into_db(monkeypatch, tmp_path):
         assert row is not None
         assert row["value"] == "sk-bootstrap-openai"
         assert "OPENAI_API_KEY" in main._available_secret_names_for_user(bootstrap_user_id, repos)
+
+        e2b_row = repos.secrets.get(user_id=bootstrap_user_id, name="E2B_API_KEY")
+        assert e2b_row is not None
+        assert e2b_row["value"] == "e2b-bootstrap-key"
+        assert "E2B_API_KEY" in main._available_secret_names_for_user(bootstrap_user_id, repos)
