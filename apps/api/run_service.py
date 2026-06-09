@@ -3288,6 +3288,16 @@ def execute_run(
                 log_fn(conn_err, level="error")
                 return
 
+        # Re-materialize worker files from DB if the dir is missing (e.g. after
+        # a container redeploy with no persistent volume).
+        try:
+            if not (WORKERS_DIR / worker_id).is_dir():
+                import main as _main
+                if _main.rematerialize_worker_from_db(worker_id):
+                    log_fn("Re-materialized worker files from DB", level="info")
+        except Exception as _rmat_exc:
+            logger.warning("Worker re-materialization failed for %s: %s", worker_id, _rmat_exc)
+
         bundle_snapshot_path = _snapshot_worker_bundle(run_id, worker_id, config)
         if owner_id:
             repos_obj.runs.set_bundle_snapshot_path(
