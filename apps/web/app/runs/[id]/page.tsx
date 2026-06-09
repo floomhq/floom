@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { CheckCircle, XCircle } from "lucide-react";
 import Link from "next/link";
@@ -153,7 +153,14 @@ function ApprovalDecisionCard({
 export default function RunDetailPage() {
   const { id } = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const runId = id as string;
+  const initialTab = (() => {
+    const value = searchParams.get("tab") || "";
+    return ["output", "inputs", "transcript", "tool-calls", "approval", "files", "logs", "raw", "metadata"].includes(value)
+      ? value
+      : "output";
+  })();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [approval, setApproval] = useState<ApprovalRow | null>(null);
   const [approvalLoadError, setApprovalLoadError] = useState<string | null>(null);
@@ -250,6 +257,7 @@ export default function RunDetailPage() {
       <RunDetailSplitPane
         run={run}
         parts={parts}
+        initialTab={initialTab}
         streamConnected={connected}
         streamError={error}
         streamUnavailable={streamUnavailable}

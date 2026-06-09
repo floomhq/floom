@@ -18866,6 +18866,8 @@ def system_workspace_agent(
     return {
         "agent_id": info["agent_id"],
         "model": info["model"],
+        "base_persona": info.get("base_persona"),
+        "worker_authoring_rules": info.get("worker_authoring_rules"),
         "system_prompt": info["system_prompt"],
         "tools": info["tools"],
         "settings": info.get("settings") or {},

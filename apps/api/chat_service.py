@@ -87,7 +87,9 @@ immediately. I don't hold the reply until every tool has settled.
 to people outside this workspace will ask for your approval first. That's what
 the approval queue is for.
 
-## Worker authoring rules
+"""
+
+WORKER_AUTHORING_RULES = """## Worker authoring rules
 
 When I create or update a worker I follow these rules exactly. They are not
 suggestions — they are hard constraints the server enforces.
@@ -749,7 +751,7 @@ def _tool_actions(tool_name: str, resource: Optional[Dict[str, Any]], status: st
 
 
 def _action_required_reason(tool_name: str, result: Any, resource: Optional[Dict[str, Any]]) -> Optional[str]:
-    if isinstance(resource, dict) and resource.get("approval_id"):
+    if isinstance(resource, dict) and resource.get("approval_id") and tool_name != "approvals__list_pending":
         return "approval_required"
     if isinstance(result, dict):
         code = str(result.get("error_code") or result.get("error") or "")
@@ -758,8 +760,6 @@ def _action_required_reason(tool_name: str, result: Any, resource: Optional[Dict
             return "missing_connection"
         if "missing_secret" in lowered or ("secret" in lowered and not result.get("ok", True)):
             return "missing_secret"
-    if tool_name == "approvals__list_pending" and isinstance(result, dict) and int(result.get("count") or 0) > 0:
-        return "approval_required"
     return None
 
 
@@ -789,11 +789,30 @@ def build_tool_event_metadata(
         and args.get("id")
     ):
         resource["worker_id"] = str(args["id"])
+    approval_actions: List[Dict[str, Any]] = []
     if tool_name == "approvals__list_pending" and isinstance(result, dict):
         approvals = result.get("approvals") if isinstance(result.get("approvals"), list) else []
         if approvals:
             first = approvals[0]
             if isinstance(first, dict):
+                base = _APPROVALS_BASE_URL.rstrip("/")
+                for approval in approvals:
+                    if not isinstance(approval, dict):
+                        continue
+                    approval_id = str(approval.get("id") or "").strip()
+                    run_id = str(approval.get("run_id") or "").strip()
+                    owner_id = str(approval.get("owner_id") or "").strip()
+                    if not approval_id or not run_id or not owner_id:
+                        continue
+                    token = _approval_public_token({"id": approval_id, "run_id": run_id, "owner_id": owner_id})
+                    approval_actions.append(
+                        {
+                            "id": f"open_review_{approval_id}",
+                            "label": "Open review",
+                            "method": "GET",
+                            "href": f"{base}/approvals/review?id={approval_id}&token={token}",
+                        }
+                    )
                 resource = {
                     "kind": "approval",
                     "approval_id": first.get("id"),
@@ -801,7 +820,7 @@ def build_tool_event_metadata(
                     "worker_id": first.get("worker_id"),
                     "count": result.get("count") or len(approvals),
                 }
-                status = "action_required"
+                status = "pending_approval"
     reason = _action_required_reason(tool_name, result, resource)
     if reason:
         status = "action_required"
@@ -820,14 +839,17 @@ def build_tool_event_metadata(
                 secret_name = str(args.get("name") or "")
             resource = {"kind": "secret", "name": secret_name or None, "status": "missing"}
     card_id = f"card_{call_id}" if not str(call_id).startswith("card_") else str(call_id)
+    title = _tool_title(tool_name, args_preview)
+    if tool_name == "approvals__list_pending" and approval_actions and status == "pending_approval":
+        title = "Pending approvals"
     card = {
         "id": card_id,
         "kind": _card_kind_for_tool(tool_name),
-        "title": _tool_title(tool_name, args_preview),
+        "title": title,
         "status": status,
     }
     streams = _tool_streams(resource)
-    actions = _tool_actions(tool_name, resource, status)
+    actions = approval_actions or _tool_actions(tool_name, resource, status)
     return {
         "protocol": CHAT_EVENT_PROTOCOL_VERSION,
         "version": CHAT_EVENT_VERSION,
@@ -3138,20 +3160,18 @@ def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str
                 """,
                 (user_id,),
             ).fetchall()
-        base = _APPROVALS_BASE_URL.rstrip("/")
         result = []
         for row in rows:
             approval_id = row["id"]
-            token = _approval_public_token(row)
             result.append({
                 "id": approval_id,
+                "owner_id": row["owner_id"],
                 "worker_id": row["worker_id"],
                 "worker_name": row["worker_name"] or row["worker_id"],
                 "run_id": row["run_id"],
                 "label": row["label"],
                 "preview": (row["preview"] or "")[:200] or None,
                 "created_at": row["created_at"],
-                "link": f"{base}/approvals/review?id={approval_id}&token={token}",
             })
         return {"ok": True, "approvals": result, "count": len(result)}
     except Exception as exc:
@@ -3464,7 +3484,7 @@ def _build_workspace_preamble(user_id: str) -> str:
 
 
 def _build_system_prompt(user_id: str) -> str:
-    """Build the full system prompt: editable base + workspace custom + SKILL.md."""
+    """Build the full system prompt: persona + workspace notes + rules + SKILL.md."""
     base_persona = get_workspace_base_persona()
     workspace_content = get_workspace_md()
     preamble = _build_workspace_preamble(user_id)
@@ -3478,7 +3498,9 @@ def _build_system_prompt(user_id: str) -> str:
         if workspace_content.strip()
         else ""
     )
-    return "\n\n".join(part for part in [base_persona, custom, skill_md] if part)
+    return "\n\n".join(
+        part for part in [base_persona, custom, WORKER_AUTHORING_RULES, skill_md] if part
+    )
 
 
 # Per-call environment notes. The engine persona is shared and
@@ -3590,6 +3612,8 @@ def workspace_agent_info(user_id: str) -> Dict[str, Any]:
     return {
         "agent_id": WORKSPACE_AGENT_ID,
         "model": os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL,
+        "base_persona": get_workspace_base_persona(),
+        "worker_authoring_rules": WORKER_AUTHORING_RULES,
         "system_prompt": _build_system_prompt(user_id),
         "tools": workspace_agent_tool_metadata(user_id),
         "settings": settings,

@@ -662,6 +662,8 @@ export interface WorkspaceAgentTool {
 export interface WorkspaceAgentInfo {
   agent_id: string;
   model: string;
+  base_persona?: string;
+  worker_authoring_rules?: string;
   system_prompt: string;
   tools: WorkspaceAgentTool[];
   settings?: {
