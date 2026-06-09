@@ -147,6 +147,47 @@ def test_tool_event_metadata_keeps_legacy_safe_args_and_card_resource(booted):
     assert metadata["actions"][0] == {"id": "open_run", "method": "GET", "href": "/runs/run_123"}
 
 
+def test_worker_list_tool_metadata_uses_renderable_worker_list_card(booted):
+    chat_service = booted["chat_service"]
+    metadata = chat_service.build_tool_event_metadata(
+        "workers__list_all",
+        "call_workers",
+        args={},
+        result={
+            "ok": True,
+            "workers": [
+                {"id": "research_brief", "title": "Research Brief", "enabled": True},
+            ],
+            "count": 1,
+        },
+        phase="result",
+    )
+
+    assert metadata["card"]["kind"] == "worker-list"
+    assert metadata["card"]["status"] == "completed"
+    assert metadata["resource"] is None
+
+
+def test_worker_run_tool_metadata_uses_renderable_run_card(booted):
+    chat_service = booted["chat_service"]
+    metadata = chat_service.build_tool_event_metadata(
+        "workers__run",
+        "call_run",
+        args={"id": "research_brief"},
+        result={"ok": True, "run_id": "run_123"},
+        phase="result",
+    )
+
+    assert metadata["card"]["kind"] == "run"
+    assert metadata["card"]["status"] == "running"
+    assert metadata["resource"] == {
+        "kind": "run",
+        "worker_id": "research_brief",
+        "run_id": "run_123",
+    }
+    assert metadata["streams"]["parts"] == "/runs/run_123/stream"
+
+
 def test_tool_result_preview_does_not_expose_file_content(booted):
     chat_service = booted["chat_service"]
     raw_content = "private file body that must not stream"
