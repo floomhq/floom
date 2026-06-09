@@ -61,6 +61,11 @@ if not os.environ.get("WORKEROS_API_ENV_FILE") and not os.environ.get("FLOOM_API
 # 2) Force single-tenant local deploy mode for the suite.
 os.environ.setdefault("WORKEROS_DEPLOY", "local")
 
+# 2b) Run-creation tests use tiny temp DB/artifact dirs and must not depend on
+#     the host runner's free disk. Dedicated disk-guard tests set their own
+#     threshold and still exercise production behavior.
+os.environ.setdefault("WORKEROS_MIN_FREE_DISK_BYTES", "0")
+
 # 3) Ensure the prod FLOOM_SECRET from /root/.config/workeros/api.env can never
 #    be injected. Presence of this key (even empty) blocks load_dotenv's
 #    override=False from setting the real prod value. Empty => local dev mode.
@@ -138,6 +143,7 @@ _VOLATILE_ENV_KEYS = (
     "WORKEROS_ENABLE_USER_HEADER_SCOPE",
     "WORKEROS_PRECLEAR_BACKUP_DIR",
     "WORKEROS_RATE_LIMIT_DEV",
+    "WORKEROS_MIN_FREE_DISK_BYTES",
     "WORKEROS_API_ENV_FILE",
     "FLOOM_API_ENV_FILE",
     "COMPOSIO_API_KEY",
