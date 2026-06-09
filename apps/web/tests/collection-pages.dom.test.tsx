@@ -1,0 +1,122 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen } from "@testing-library/react";
+
+// Render the REAL page components (not the generic engine) with mocked data, to
+// prove they mount + render rows without client-side crashes. This is the layer
+// that build/tsc can't verify. Live/responsive checks still need a backend.
+
+vi.mock("next/navigation", () => ({
+  useSearchParams: () => new URLSearchParams(),
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  usePathname: () => "/",
+}));
+
+const worker = {
+  id: "w1",
+  name: "Weekly Update",
+  description: "Turns notes into an update",
+  tags: ["operations"],
+  status: "healthy",
+  trigger_type: "manual",
+  runner: "e2b",
+  triggers: [],
+  triggers_spec: [],
+  connections: ["github"],
+  recent_stats: { last_run_at: "2026-06-08T00:00:00Z", runs_7d: 3 },
+  visibility: "workspace",
+};
+const run = {
+  id: "r1",
+  worker_id: "w1",
+  worker_name: "Weekly Update",
+  status: "completed",
+  trigger_source: "manual",
+  created_at: "2026-06-09T08:00:00Z",
+  duration_ms: 1200,
+};
+const connection = {
+  id: "c1",
+  app_name: "github",
+  status: "active",
+  created_at: "2026-01-01",
+  updated_at: "2026-01-01",
+  display_name: "GitHub",
+  account_label: "octocat",
+  scopes: ["repo"],
+};
+const folder = {
+  name: "Company facts",
+  file_count: 3,
+  total_size_bytes: 4096,
+  updated_at: "2026-06-08T00:00:00Z",
+  writeable: true,
+  worker_count: 2,
+  visibility: "workspace",
+};
+const approval = {
+  id: "a1",
+  run_id: "rr1",
+  worker_id: "w1",
+  worker_name: "Reverse Match CRM",
+  status: "pending",
+  label: "wants to update 5 CRM records",
+  created_at: "2026-06-09T06:00:00Z",
+  decision_input_json: '{"items":[1,2,3,4,5]}',
+};
+
+vi.mock("@/lib/api", () => ({
+  api: {
+    workers: {
+      list: vi.fn().mockResolvedValue([worker]),
+      get: vi.fn().mockResolvedValue({ ...worker, config: { inputs: [], outputs: [], contexts: [] }, files: [], recent_runs: [] }),
+    },
+    runs: { list: vi.fn().mockResolvedValue([run]), get: vi.fn().mockResolvedValue(run) },
+    connections: { list: vi.fn().mockResolvedValue([connection]), delete: vi.fn(), test: vi.fn() },
+    secrets: { list: vi.fn().mockResolvedValue([]) },
+    contexts: { list: vi.fn().mockResolvedValue([folder]), get: vi.fn().mockResolvedValue({ ...folder, files: [], used_by: [] }), delete: vi.fn() },
+    approvals: { list: vi.fn().mockResolvedValue([approval]) },
+  },
+}));
+
+// Quiet the approvals cross-tab sync hook (uses storage/timers).
+vi.mock("@/lib/useApprovalsSync", () => ({
+  notifyApprovalsChanged: vi.fn(),
+  useApprovalsListSync: vi.fn(),
+}));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+});
+
+describe("page components render with data (no client crash)", () => {
+  it("WorkersCollection renders the worker", async () => {
+    const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
+    render(<WorkersCollection initialWorkers={[worker as never]} />);
+    expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
+  });
+
+  it("RunsCollection renders the run + Export action", async () => {
+    const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
+    render(<RunsCollection initialRuns={[run as never]} />);
+    expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
+    expect(screen.getByText("Export CSV")).toBeInTheDocument();
+  });
+
+  it("ConnectionsCollection renders the connection", async () => {
+    const { default: ConnectionsCollection } = await import("@/app/connections/ConnectionsCollection");
+    render(<ConnectionsCollection initialConnections={[connection as never]} />);
+    expect(await screen.findByText("GitHub")).toBeInTheDocument();
+  });
+
+  it("BrainCollection renders the folder", async () => {
+    const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
+    render(<BrainCollection initialFolders={[folder as never]} />);
+    expect(await screen.findByText("Company facts")).toBeInTheDocument();
+  });
+
+  it("ApprovalsCollection fetches + renders the approval", async () => {
+    const { default: ApprovalsCollection } = await import("@/app/approvals/ApprovalsCollection");
+    render(<ApprovalsCollection />);
+    expect(await screen.findByText("Reverse Match CRM")).toBeInTheDocument();
+  });
+});
