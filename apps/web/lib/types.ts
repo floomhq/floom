@@ -270,6 +270,8 @@ export interface TimeseriesDay {
 export interface WorkerSummary {
   id: string;
   name: string;
+  created_at?: string | null;
+  updated_at?: string | null;
   description?: string;
   long_description?: string;
   use_cases?: string[];
