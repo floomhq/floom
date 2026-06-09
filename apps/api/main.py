@@ -3856,7 +3856,7 @@ def _persist_discovered_workers(
                     worker_id=worker_id,
                     name=w["name"],
                     manifest_json=manifest,
-                    bundle_path=str((WORKERS_DIR / worker_id).resolve()),
+                    bundle_path=f"workers/{worker_id}",
                     skill_version_id=skill_version_id,
                     trigger_type=(
                         primary_trigger_type
@@ -13476,10 +13476,13 @@ def list_secrets(
     workers = _list_visible_workers(user_id=auth.user_id, repos=repos, use_cache=True)
     platform_available = _available_secret_names_for_user(auth.user_id, repos) - set(db_secrets)
 
-    # (a) All secrets declared by any worker.yml
+    # Build worker configs once — avoids N×M get_worker_config_for_run() calls
+    # (one per worker per secret) that would otherwise hit the DB on every secret.
+    worker_configs: dict[str, Any] = {}
     worker_secret_names: set[str] = set()
     for w in workers:
         config = get_worker_config_for_run(w["id"])
+        worker_configs[w["id"]] = config
         if config:
             worker_secret_names.update(config.secrets)
 
@@ -13497,11 +13500,11 @@ def list_secrets(
             status = SecretStatus.SET
         else:
             status = SecretStatus.SET if value else SecretStatus.MISSING
-        used_by = []
-        for w in workers:
-            config = get_worker_config_for_run(w["id"])
-            if config and name in config.secrets:
-                used_by.append(w["name"])
+        used_by = [
+            w["name"]
+            for w in workers
+            if worker_configs.get(w["id"]) and name in worker_configs[w["id"]].secrets
+        ]
         result.append(
             SecretItem(
                 name=name,

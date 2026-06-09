@@ -94,7 +94,7 @@ def _resolve_connections(
                     """
                     SELECT composio_connection_id, status
                     FROM composio_connections
-                    WHERE app_name = ? AND user_id = ?
+                    WHERE app_name = ? AND user_id = ? AND status = 'active'
                     ORDER BY updated_at DESC
                     LIMIT 1
                     """,
@@ -105,14 +105,14 @@ def _resolve_connections(
                     """
                     SELECT composio_connection_id, status
                     FROM composio_connections
-                    WHERE app_name = ?
+                    WHERE app_name = ? AND status = 'active'
                     ORDER BY updated_at DESC
                     LIMIT 1
                     """,
                     (app_name.lower(),),
                 )
             row = cursor.fetchone()
-            if row and row["status"] == "active":
+            if row:
                 connection_ids[app_name.lower()] = row["composio_connection_id"]
             else:
                 missing.append(app_name)
