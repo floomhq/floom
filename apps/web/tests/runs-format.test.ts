@@ -5,7 +5,9 @@ import {
   formatTrigger,
   runStatusPill,
   dayLabel,
+  runsToCsvRows,
 } from "@/lib/runs/format";
+import type { RunSummary } from "@/lib/types";
 
 describe("formatDuration", () => {
   it("formats ms / s / m+s and missing", () => {
@@ -34,6 +36,33 @@ describe("runStatusPill", () => {
     expect(runStatusPill("running").tone).toBe("run");
     expect(runStatusPill("queued").tone).toBe("idle");
     expect(runStatusPill("pending_approval").tone).toBe("warn");
+  });
+});
+
+describe("runsToCsvRows", () => {
+  it("flattens runs into stable CSV columns", () => {
+    const runs = [
+      {
+        id: "r1",
+        worker_id: "w1",
+        worker_name: "Weekly",
+        status: "completed",
+        trigger_source: "manual",
+        created_at: "2026-06-09T08:00:00Z",
+        duration_ms: 1200,
+      },
+    ] as RunSummary[];
+    const rows = runsToCsvRows(runs);
+    expect(rows[0]).toMatchObject({
+      id: "r1",
+      worker_id: "w1",
+      worker_name: "Weekly",
+      status: "completed",
+      trigger_source: "manual",
+      duration_ms: 1200,
+      started_at: "",
+      completed_at: "",
+    });
   });
 });
 

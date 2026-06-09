@@ -3,11 +3,14 @@
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import Papa from "papaparse";
+import { Download } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatRelative } from "@/lib/formatters";
-import type { RunSummary, RunDetail } from "@/lib/types";
+import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection, Avatar } from "@/components/collection";
+import { contentTagOptions } from "@/lib/workers/derive";
 import {
   formatDuration,
   formatTrigger,
@@ -15,6 +18,7 @@ import {
   runStatusPill,
   dayLabel,
   runSortTime,
+  runsToCsvRows,
 } from "@/lib/runs/format";
 
 const detailCache = new Map<string, RunDetail>();
@@ -141,6 +145,7 @@ function CostTab({ r }: { r: RunSummary }) {
 
 export default function RunsCollection({ initialRuns }: { initialRuns: RunSummary[] }) {
   const [runs, setRuns] = useState<RunSummary[]>(initialRuns);
+  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [now] = useState(() => Date.now());
 
   const refresh = () =>
@@ -151,12 +156,45 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
 
   useEffect(() => {
     void refresh();
+    // Content tags are inherited from the parent worker (SPEC §11).
+    api.workers.list().then(setWorkers).catch(() => {});
   }, []);
+
+  // worker_id → its content tags, for tag filtering + the shared vocabulary.
+  const workerTags = useMemo(() => {
+    const m: Record<string, string[]> = {};
+    for (const w of workers) m[w.id] = w.tags ?? [];
+    return m;
+  }, [workers]);
 
   const sorted = useMemo(
     () => [...runs].sort((a, b) => runSortTime(b) - runSortTime(a)),
     [runs],
   );
+
+  // Export CSV — fetch all pages (not just the loaded window), then download.
+  const exportCSV = async () => {
+    const PAGE = 500;
+    let all: RunSummary[] = [];
+    try {
+      for (let offset = 0; ; offset += PAGE) {
+        const page = await api.runs.list({ limit: PAGE, offset });
+        all = [...all, ...page];
+        if (page.length < PAGE) break;
+      }
+    } catch {
+      all = runs;
+    }
+    const csv = Papa.unparse(runsToCsvRows(all));
+    const blob = new Blob([csv], { type: "text/csv" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `workeros-runs-${new Date().toISOString().slice(0, 10)}.csv`;
+    a.click();
+    URL.revokeObjectURL(url);
+    toast.success(`Exported ${all.length} runs`);
+  };
 
   const cancel = async (r: RunSummary) => {
     try {
@@ -179,6 +217,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
         smart: now - runSortTime(r) <= 14 * 86400000 ? ["recent"] : [],
         status: [r.status],
         trigger: [triggerKey(r.trigger_source)],
+        content: workerTags[r.worker_id] ?? [],
       }) as Partial<Record<TagFamilyKey, string[]>>,
     tags: {
       smart: [{ value: "recent", label: "Recent" }],
@@ -193,6 +232,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
         { value: "manual", label: "manual" },
         { value: "webhook", label: "webhook" },
       ],
+      content: contentTagOptions(workers),
     },
     counts: [
       { value: sorted.length, label: "runs" },
@@ -200,6 +240,11 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       { value: sorted.filter((r) => r.status === "running").length, label: "running" },
     ],
     view: { default: "list", grid: true },
+    toolbarActions: (
+      <button type="button" className="c-vpill" style={{ padding: "9px 12px" }} onClick={() => void exportCSV()}>
+        <Download size={14} /> Export CSV
+      </button>
+    ),
     group: (r) => dayLabel(r.created_at ?? r.started_at, now),
     columns: {
       template: "1.6fr 1fr .8fr 1fr 130px 40px",
