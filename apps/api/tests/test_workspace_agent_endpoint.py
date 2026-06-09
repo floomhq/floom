@@ -46,6 +46,7 @@ def client_and_main(monkeypatch, tmp_path):
     monkeypatch.setenv("SLACK_BOT_TOKEN", "")
     monkeypatch.setenv("SLACK_ALLOWED_TEAM_IDS", "")
     monkeypatch.setenv("WORKEROS_CHAT_MODEL", "gpt-5-mini")
+    monkeypatch.setenv("E2B_API_KEY", "e2b-super-secret-value")
 
     for name in [
         "main", "db", "db._legacy_sqlite", "db.sqlite", "db.factory",
@@ -127,6 +128,7 @@ def test_endpoint_does_not_leak_secret_values(client_and_main):
     body = client.get("/system/workspace-agent").json()
     blob = body["system_prompt"] + str(body["tools"])
     assert "sk-super-secret-value" not in blob
+    assert "e2b-super-secret-value" not in blob
 
 
 def test_endpoint_reports_model_and_slack_readiness(client_and_main, monkeypatch):
