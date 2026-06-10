@@ -1,7 +1,7 @@
 import { cn } from "@/lib/utils";
 
 /**
- * EmilyAvatar -- the Workeros Emily identity mark.
+ * EmilyAvatar -- the WorkerOS Emily identity mark.
  * Solid blue accent circle. No letter, no text-in-circle.
  */
 export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
