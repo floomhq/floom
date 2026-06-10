@@ -1814,6 +1814,24 @@ MIGRATIONS: list[Migration] = [
     """,
     # -- migration 62: repair webhook-secret FK after workers table rebuild ----
     _migrate_worker_webhook_secrets_fk,
+    # -- migration 63: worker_feedback (lightweight comments per worker) --------
+    # SPEC §12: anyone who can SEE a worker can leave feedback (a short comment)
+    # on it, surfaced to the owner. author_id/author_name capture who wrote it so
+    # the owner knows the source; rows cascade-delete with the worker. Mirrors the
+    # worker_alerts FK pattern.
+    """
+    CREATE TABLE IF NOT EXISTS worker_feedback (
+        id          TEXT PRIMARY KEY,
+        worker_id   TEXT NOT NULL,
+        author_id   TEXT NOT NULL,
+        author_name TEXT,
+        content     TEXT NOT NULL,
+        created_at  TEXT NOT NULL,
+        FOREIGN KEY(worker_id) REFERENCES workers(id) ON DELETE CASCADE
+    );
+    CREATE INDEX IF NOT EXISTS idx_worker_feedback_worker_id
+        ON worker_feedback(worker_id, created_at);
+    """,
 ]
 
 
