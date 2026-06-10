@@ -414,6 +414,12 @@ function ConfigTab({ w }: { w: WorkerSummary }) {
   const [pausedOverride, setPausedOverride] = useState<boolean | null>(null);
   const [pauseBusy, setPauseBusy] = useState(false);
   if (!d) return <Loading />;
+  const editable = can("edit", w);
+  const saveMeta = (fields: { title?: string; description?: string }) => {
+    api.workers.editMeta(w.id, fields).catch((err) => {
+      toast.error((err as Error).message || "Could not save changes.");
+    });
+  };
   const isPaused = pausedOverride ?? d.enabled === false;
   const togglePause = async () => {
     const next = !isPaused;
@@ -429,6 +435,34 @@ function ConfigTab({ w }: { w: WorkerSummary }) {
   };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      {/* #785: edit display name + description (save on blur). */}
+      <section>
+        <h4 style={h4}>Details</h4>
+        <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+          <input
+            className="c-srch"
+            style={{ maxWidth: "none" }}
+            aria-label="Worker name"
+            defaultValue={d.name ?? w.name}
+            disabled={!editable}
+            onBlur={(e) => {
+              const v = e.target.value.trim();
+              if (v && v !== (d.name ?? w.name)) saveMeta({ title: v });
+            }}
+          />
+          <textarea
+            className="c-srch"
+            style={{ maxWidth: "none", minHeight: 56, resize: "vertical", paddingTop: 8 }}
+            aria-label="Worker description"
+            defaultValue={d.description ?? ""}
+            disabled={!editable}
+            onBlur={(e) => {
+              const v = e.target.value.trim();
+              if (v !== (d.description ?? "")) saveMeta({ description: v });
+            }}
+          />
+        </div>
+      </section>
       <section>
         <h4 style={h4}>Tools</h4>
         <ToolsTab w={w} />

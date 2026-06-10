@@ -8316,6 +8316,22 @@ def update_worker(
         )
         new_raw_secret = generate_webhook_secret(worker_id, repos=repos)
 
+    # #785: rename (title) / edit description — persist to worker.yml then
+    # re-sync the DB (single source of truth = the manifest on disk).
+    yml_fields: Dict[str, Any] = {}
+    if payload.title is not None:
+        yml_fields["title"] = payload.title
+    if payload.description is not None:
+        yml_fields["description"] = payload.description
+    if yml_fields and _set_worker_yml_top_level(worker_id, yml_fields):
+        invalidate_worker_cache()
+        _discovered = [w for w in discover_workers() if w["id"] == worker_id]
+        if _discovered:
+            with get_db() as conn:
+                _persist_discovered_workers(conn, _discovered, user_id=auth.user_id)
+        author_name, author_email = _git_author(auth)
+        _git_commit_worker(worker_id, message=f"worker {worker_id}: edit metadata", author_name=author_name, author_email=author_email)
+
     if updates:
         repos.workers.update(user_id=auth.user_id, worker_id=worker_id, **updates)
         invalidate_worker_cache()

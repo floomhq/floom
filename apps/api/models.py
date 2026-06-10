@@ -1627,6 +1627,8 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
 class WorkerUpdateRequest(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
+    title: Optional[str] = None  # #785: display name (worker id/slug is unchanged)
+    description: Optional[str] = None  # #785: one-line description
     trigger_type: Optional[Literal["manual", "schedule", "cron", "webhook"]] = None
     cron_expr: Optional[str] = None
     cron_timezone: Optional[str] = None

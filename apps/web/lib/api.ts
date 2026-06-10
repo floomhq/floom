@@ -297,6 +297,12 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ worker_yml, run_py, ...(skill_md !== undefined ? { skill_md } : {}) }),
       }),
+    // #785: rename (title) / edit description without rewriting the whole YAML.
+    editMeta: (id: string, fields: { title?: string; description?: string }) =>
+      fetchJson<import("./types").WorkerDetail>(`/workers/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify(fields),
+      }),
     suggest: (id: string, newDescription: string) =>
       fetchJson<import("./types").WorkerSuggestResponse>(`/workers/${id}/suggest`, {
         method: "POST",
