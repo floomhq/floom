@@ -95,7 +95,7 @@ def admin_client(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
     with TestClient(main.app, raise_server_exceptions=True, base_url="https://testserver") as c:
-        resp = c.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
+        resp = c.post("/auth/setup", json={"username": "admin", "password": "trombone-hunter7"})
         assert resp.status_code == 201
         yield c  # session cookie is set in the client jar
 
@@ -192,7 +192,7 @@ def test_setup_required_returns_false_after_setup(admin_client):
 
 
 def test_login_correct_creds(admin_client):
-    resp = admin_client.post("/auth/login", json={"username": "admin", "password": "adminpass123"})
+    resp = admin_client.post("/auth/login", json={"username": "admin", "password": "trombone-hunter7"})
     assert resp.status_code == 200
     assert "wos_session" in resp.cookies
     assert "Secure" in resp.headers["set-cookie"]
@@ -315,7 +315,7 @@ def test_member_cannot_list_users(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
     with TestClient(main.app, base_url="https://testserver") as c:
-        c.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
+        c.post("/auth/setup", json={"username": "admin", "password": "trombone-hunter7"})
         c.post("/users", json={"username": "bob", "password": "bobpass123-long", "role": "member"})
         c.post("/auth/logout")
         c.cookies.clear()
@@ -370,7 +370,7 @@ def test_member_sees_workspace_workers(monkeypatch, tmp_path):
     main = load_main(monkeypatch, tmp_path)
     with TestClient(main.app, base_url="https://testserver") as c:
         # Admin creates a workspace-visible worker
-        c.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
+        c.post("/auth/setup", json={"username": "admin", "password": "trombone-hunter7"})
         c.post("/users", json={"username": "bob", "password": "bobpass123-long", "role": "member"})
 
         # Create worker as admin
@@ -397,7 +397,7 @@ def test_member_cannot_see_private_worker_of_other_user(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
     with TestClient(main.app, base_url="https://testserver") as c:
-        c.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
+        c.post("/auth/setup", json={"username": "admin", "password": "trombone-hunter7"})
         c.post("/users", json={"username": "bob", "password": "bobpass123-long", "role": "member"})
 
         # Admin creates private worker (default visibility)
@@ -418,7 +418,7 @@ def test_admin_sees_all_workers(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
     with TestClient(main.app, base_url="https://testserver") as c:
-        c.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
+        c.post("/auth/setup", json={"username": "admin", "password": "trombone-hunter7"})
         me = c.get("/auth/me").json()
         assert me["role"] == "admin"
         # Admin calling /workers should use admin-mode (all workers)
@@ -435,14 +435,14 @@ def test_disabled_user_session_rejected(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
     with TestClient(main.app, base_url="https://testserver") as c:
-        c.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
-        c.post("/users", json={"username": "frank", "password": "frankpass123", "role": "member"})
+        c.post("/auth/setup", json={"username": "admin", "password": "trombone-hunter7"})
+        c.post("/users", json={"username": "frank", "password": "velvet-canyon-9", "role": "member"})
         users = c.get("/users").json()
         frank = next(u for u in users if u["username"] == "frank")
 
         # Frank logs in â€” gets a session
         c2 = TestClient(main.app, base_url="https://testserver")
-        c2.post("/auth/login", json={"username": "frank", "password": "frankpass123"})
+        c2.post("/auth/login", json={"username": "frank", "password": "velvet-canyon-9"})
 
         # Admin disables frank
         c.patch(f"/users/{frank['id']}", json={"disabled": True})
@@ -456,19 +456,19 @@ def test_disabled_user_pat_rejected(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
     with TestClient(main.app, base_url="https://testserver") as c:
-        c.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
-        c.post("/users", json={"username": "grace", "password": "gracepass123", "role": "member"})
+        c.post("/auth/setup", json={"username": "admin", "password": "trombone-hunter7"})
+        c.post("/users", json={"username": "grace", "password": "marble-lantern-3", "role": "member"})
 
         # Grace gets a PAT
         c.post("/auth/logout")
         c.cookies.clear()
-        c.post("/auth/login", json={"username": "grace", "password": "gracepass123"})
+        c.post("/auth/login", json={"username": "grace", "password": "marble-lantern-3"})
         token_resp = c.post("/auth/tokens", json={"name": "my-pat"})
         raw_token = token_resp.json()["token"]
         # Admin disables grace (look up grace's ID from the users list)
         c.post("/auth/logout")
         c.cookies.clear()
-        c.post("/auth/login", json={"username": "admin", "password": "adminpass123"})
+        c.post("/auth/login", json={"username": "admin", "password": "trombone-hunter7"})
         users = c.get("/users").json()
         grace = next(u for u in users if u["username"] == "grace")
         c.patch(f"/users/{grace['id']}", json={"disabled": True})
@@ -485,6 +485,6 @@ def test_disabled_user_pat_rejected(monkeypatch, tmp_path):
 
 
 def test_duplicate_username_rejected(admin_client):
-    admin_client.post("/users", json={"username": "henry", "password": "henrypass123", "role": "member"})
-    resp = admin_client.post("/users", json={"username": "henry", "password": "henrypass123", "role": "member"})
+    admin_client.post("/users", json={"username": "henry", "password": "copper-meadow-8", "role": "member"})
+    resp = admin_client.post("/users", json={"username": "henry", "password": "copper-meadow-8", "role": "member"})
     assert resp.status_code == 409

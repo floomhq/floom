@@ -20437,16 +20437,58 @@ _SESSION_TTL_SECONDS = 7 * 24 * 3600  # 7 days
 _MAGIC_LINK_FALLBACK_SECRET: str = pysecrets.token_hex(32)
 
 # #850: 12+ characters per NIST SP 800-63B (length over composition rules —
-# complexity requirements are intentionally omitted). Applies to new/changed
-# passwords only; existing shorter passwords keep working at login.
+# arbitrary complexity requirements are intentionally omitted). 800-63B does
+# call for rejecting commonly-used passwords, repetitive/sequential strings,
+# and context-specific words (the username), so those checks are below.
+# Applies to new/changed passwords only; existing shorter passwords keep
+# working at login.
 _MIN_PASSWORD_LENGTH = 12
 
+# Starter blocklist: common breach-corpus passwords that pass the 12-char
+# minimum. Compared lowercase.
+_COMMON_PASSWORDS = frozenset({
+    "password1234",
+    "password12345",
+    "password123456",
+    "passwordpassword",
+    "123456789012",
+    "1234567890123",
+    "12345678901234",
+    "qwertyuiop123",
+    "qwerty123456",
+    "1q2w3e4r5t6y",
+    "abc123456789",
+    "iloveyou1234",
+    "administrator",
+    "adminpassword",
+    "welcome123456",
+    "letmein123456",
+    "passw0rd1234",
+})
 
-def _validate_new_password(password: str | None) -> None:
+
+def _is_sequential_password(lowered: str) -> bool:
+    """True when every step is the same/next character (e.g. 123456789012,
+    abcdefghijkl, aaaaaaaaaaaa)."""
+    return all(0 <= ord(b) - ord(a) <= 1 for a, b in zip(lowered, lowered[1:]))
+
+
+def _validate_new_password(password: str | None, *, username: str | None = None) -> None:
     if not password or len(password) < _MIN_PASSWORD_LENGTH:
         raise HTTPException(
             status_code=422,
             detail=f"password must be at least {_MIN_PASSWORD_LENGTH} characters",
+        )
+    lowered = password.lower()
+    if lowered in _COMMON_PASSWORDS or _is_sequential_password(lowered):
+        raise HTTPException(
+            status_code=422,
+            detail="password is too common or predictable; choose something less guessable",
+        )
+    if username and len(username) >= 4 and username.lower() in lowered:
+        raise HTTPException(
+            status_code=422,
+            detail="password must not contain your username",
         )
 
 
@@ -20600,7 +20642,7 @@ def auth_setup(
     if not username:
         raise HTTPException(status_code=422, detail="username required")
     password = payload.password
-    _validate_new_password(password)
+    _validate_new_password(password, username=username)
     user_id = str(_uuid_mod.uuid4())
     pw_hash = _bcrypt_hash(password)
     row = user_repo.create(
@@ -20830,7 +20872,7 @@ def create_user(
         raise HTTPException(status_code=422, detail="username required")
     if payload.role not in ("admin", "member"):
         raise HTTPException(status_code=422, detail="role must be admin or member")
-    _validate_new_password(payload.password)
+    _validate_new_password(payload.password, username=username)
     if user_repo.get_by_username(username=username) is not None:
         raise HTTPException(status_code=409, detail="username already taken")
     user_id = str(_uuid_mod.uuid4())
@@ -20865,7 +20907,11 @@ def update_user(
     if payload.disabled is not None:
         updates["disabled"] = 1 if payload.disabled else 0
     if payload.password is not None:
-        _validate_new_password(payload.password)
+        existing_user = user_repo.get(user_id=uid)
+        _validate_new_password(
+            payload.password,
+            username=(existing_user or {}).get("username"),
+        )
         updates["password_hash"] = _bcrypt_hash(payload.password)
     row = user_repo.update(user_id=uid, **updates)
     if row is None:

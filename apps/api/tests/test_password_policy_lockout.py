@@ -64,6 +64,25 @@ def test_setup_accepts_12_char_password(monkeypatch, tmp_path):
     assert resp.status_code == 201
 
 
+def test_common_and_predictable_passwords_rejected(monkeypatch, tmp_path):
+    """NIST 800-63B: reject commonly-used, repetitive/sequential, and
+    context-specific (username) passwords — not composition rules."""
+    main = _load_main(monkeypatch, tmp_path)
+    with _client(main) as client:
+        for bad in (
+            "password123456",   # common breach-corpus password
+            "123456789012",     # sequential digits
+            "abcdefghijklm",    # sequential letters
+            "aaaaaaaaaaaa",     # single repeated character
+            "xx-alice-pass99",  # contains the username
+        ):
+            resp = client.post("/auth/setup", json={"username": "alice", "password": bad})
+            assert resp.status_code == 422, f"{bad!r} was accepted: {resp.text}"
+
+        ok = client.post("/auth/setup", json={"username": "alice", "password": GOOD_PASSWORD})
+        assert ok.status_code == 201, ok.text
+
+
 def test_user_create_and_update_enforce_min_length(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path)
     with _client(main) as client:
