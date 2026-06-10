@@ -31,10 +31,14 @@ import type {
   GenericToolCard,
   MsgPart,
   CardStatus,
+  ToolCard,
+  WorkerListCard,
 } from "./emily-chat-types";
 import {
   getToolCardTitle,
   isInternalToolName,
+  normalizeToolName,
+  workerRowsFromResult,
 } from "./useChatStream";
 
 type TimelineItem =
@@ -64,6 +68,39 @@ function toGenericCard(row: ConversationToolCardRow): GenericToolCard {
       ? { actions: row.actions as GenericToolCard["actions"] }
       : {}),
   };
+}
+
+/**
+ * #842 RCA: rehydration always produced a static GenericToolCard ("Listed
+ * your workers" + checkmark) and ignored the persisted result_preview, so the
+ * interactive WorkerListCard disappeared after navigation/refresh. This
+ * rebuilds the specialised card from result_preview using the same row mapper
+ * the live SSE path uses.
+ */
+function toWorkerListCard(row: ConversationToolCardRow): WorkerListCard | null {
+  const normalized = row.toolName ? normalizeToolName(row.toolName) : "";
+  const persistedKind = (row.card as { kind?: unknown } | null)?.kind;
+  if (persistedKind !== "worker-list" && normalized !== "workers.list_all") {
+    return null;
+  }
+  const workers = workerRowsFromResult(row.result_preview);
+  if (!workers) return null;
+  const callId = row.callId || row.id;
+  return {
+    kind: "worker-list",
+    callId,
+    card_id: row.id || callId,
+    status: normalizeStatus(row.status),
+    workers,
+    ...(row.streams ? { streams: row.streams } : {}),
+    ...(row.actions && row.actions.length
+      ? { actions: row.actions as WorkerListCard["actions"] }
+      : {}),
+  };
+}
+
+function toCard(row: ConversationToolCardRow): ToolCard {
+  return toWorkerListCard(row) ?? toGenericCard(row);
 }
 
 export function rehydrateConversation(detail: ConversationDetail): ChatMessage[] {
@@ -107,7 +144,7 @@ export function rehydrateConversation(detail: ConversationDetail): ChatMessage[]
       // role === "tool": represented by its persisted card; skip.
     } else {
       // tool card → append to the active assistant turn (open one if needed)
-      const part: MsgPart = { type: "tool-card", card: toGenericCard(item.row) };
+      const part: MsgPart = { type: "tool-card", card: toCard(item.row) };
       if (!activeAssistant) {
         activeAssistant = {
           id: `a-rehydrate-${item.row.id}`,
