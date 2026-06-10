@@ -55,8 +55,6 @@ import type {
   RunDetail,
   ContextSummary,
   WorkerConnectionSpec,
-  WorkerComposioConnection,
-  WorkerContextSpec,
   WorkerMcpConnection,
   VersionSummary,
 } from "@/lib/types";
@@ -197,6 +195,15 @@ const SETUP_NAV = NAV_ITEMS.filter((item) => item.group === "setup");
 // dedicated content fields (run_py_content / skill_md_content / manifest_yaml).
 // Build a WorkerFile[] from those fields so the Source tab actually renders.
 import { patchInputDefault, patchRetryBlock, patchNotifyBlock } from "@/lib/yaml-utils";
+import {
+  contextSpecName,
+  contextSpecWritable,
+  connectionSpecApp,
+  connectionSpecAllowedTools,
+  patchBrainContexts,
+  patchWorkerConnections,
+  setComposioAllowlist,
+} from "@/lib/worker-manifest";
 
 function deriveSourceFiles(worker: WorkerDetail | null): WorkerFile[] {
   if (!worker) return [];
@@ -237,33 +244,6 @@ function textSourceFiles(files: EditableSourceFile[]): { path: string; content: 
     .map((f) => ({ path: f.path, content: f.content }));
 }
 
-function contextSpecName(spec: WorkerContextSpec): string {
-  if (typeof spec === "string") return spec;
-  return spec.name;
-}
-
-function contextSpecWritable(spec: WorkerContextSpec): boolean {
-  return typeof spec === "object" && spec.writeable === true;
-}
-
-function connectionSpecApp(spec: WorkerConnectionSpec): string | null {
-  if (typeof spec === "string") return spec;
-  if ("composio" in spec && spec.composio?.app) return spec.composio.app;
-  if ("app" in spec && spec.app) return spec.app;
-  return null;
-}
-
-function connectionSpecAllowedTools(spec: WorkerConnectionSpec): string[] | null {
-  if (typeof spec === "string") return null;
-  if ("composio" in spec && spec.composio?.allowed_tools?.length) {
-    return spec.composio.allowed_tools;
-  }
-  if ("app" in spec && spec.allowed_tools?.length) {
-    return spec.allowed_tools;
-  }
-  return null;
-}
-
 function isRequiredRunInputMissing(input: WorkerInput, value: unknown): boolean {
   if (!input.required) return false;
   if (value === null || value === undefined) return true;
@@ -283,79 +263,6 @@ function requiredRunInputErrors(
     }
   }
   return errors;
-}
-
-function replaceTopLevelYamlBlock(yaml: string, key: string, replacement: string): string {
-  const lines = yaml.split("\n");
-  const start = lines.findIndex((line) => new RegExp(`^${key}:\\s*(?:$|\\[)`).test(line));
-  if (start === -1) return `${yaml.trimEnd()}\n\n${replacement}\n`;
-
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^[A-Za-z_][\w_-]*:\s*/.test(lines[i])) {
-      end = i;
-      break;
-    }
-  }
-  return [...lines.slice(0, start), ...replacement.split("\n"), ...lines.slice(end)].join("\n");
-}
-
-function patchBrainContexts(yaml: string, contexts: WorkerContextSpec[]): string {
-  const block = dumpYaml(
-    { contexts: contexts.length > 0 ? contexts : [] },
-    { noRefs: true, lineWidth: -1, sortKeys: false },
-  ).trimEnd();
-  return replaceTopLevelYamlBlock(yaml, "contexts", block);
-}
-
-// Mirror of patchBrainContexts for the connections block. Persists the worker's
-// connection specs (Composio app slugs + allowed_tools, MCP specs) back into
-// worker.yml via the same top-level-block replacement the Brain toggle uses.
-function patchWorkerConnections(yaml: string, connections: WorkerConnectionSpec[]): string {
-  const block = dumpYaml(
-    { connections: connections.length > 0 ? connections : [] },
-    { noRefs: true, lineWidth: -1, sortKeys: false },
-  ).trimEnd();
-  return replaceTopLevelYamlBlock(yaml, "connections", block);
-}
-
-// Produce a new connections list where the Composio entry for `slug` has its
-// allowlist set to `tools`, or cleared when `tools` is null.
-//
-// Empty-allowlist semantics (backend models.py declared_composio_connections +
-// main.py composio_execute gate, line ~9768): `allowed_tools is None` (the key
-// absent) means FULL app access; an explicit list — INCLUDING an empty [] —
-// RESTRICTS to exactly that set (an empty list blocks every tool). So clearing
-// the restriction MUST drop the key entirely (tools === null), never emit [].
-function setComposioAllowlist(
-  connections: WorkerConnectionSpec[],
-  slug: string,
-  tools: string[] | null,
-): WorkerConnectionSpec[] {
-  const slugKey = slug.toLowerCase();
-  let matched = false;
-  const next = connections.map((spec): WorkerConnectionSpec => {
-    const specApp = connectionSpecApp(spec);
-    if (!specApp || specApp.toLowerCase() !== slugKey) return spec;
-    matched = true;
-    // Preserve any extra composio fields (scope/scopes) when present.
-    const existingComposio =
-      typeof spec === "object" && "composio" in spec ? spec.composio : undefined;
-    const base: WorkerComposioConnection = {
-      ...(existingComposio ?? {}),
-      app: existingComposio?.app ?? specApp,
-    };
-    if (tools && tools.length > 0) {
-      base.allowed_tools = tools;
-    } else {
-      delete base.allowed_tools;
-    }
-    return { composio: base };
-  });
-  // A bare-string declaration that we never matched as object means the slug
-  // wasn't present at all; nothing to do.
-  if (!matched) return connections;
-  return next;
 }
 
 // ---------------------------------------------------------------------------

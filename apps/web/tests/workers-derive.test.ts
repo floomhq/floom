@@ -6,6 +6,7 @@ import {
   isRecent,
   workerSmartTags,
   contentTagOptions,
+  orderedSourceFiles,
 } from "@/lib/workers/derive";
 import type { WorkerSummary } from "@/lib/types";
 
@@ -61,6 +62,27 @@ describe("isRecent / workerSmartTags", () => {
       { starred: true, now },
     );
     expect(tags.sort()).toEqual(["archived", "recent", "starred"]);
+  });
+});
+
+describe("orderedSourceFiles (Source sub-tabs)", () => {
+  it("orders canonical files first, then extras, dropping no-content files", () => {
+    const files = [
+      { path: "run.py", content: "x" },
+      { path: "lib/helper.py", content: "y" },
+      { path: "worker.yml", content: "z" },
+      { path: "icon.png", content: null }, // binary / no content → dropped
+      { path: "SKILL.md", content: "s" },
+    ];
+    expect(orderedSourceFiles(files).map((f) => f.path)).toEqual([
+      "worker.yml",
+      "SKILL.md",
+      "run.py",
+      "lib/helper.py",
+    ]);
+  });
+  it("returns [] when nothing has content", () => {
+    expect(orderedSourceFiles([{ path: "a.bin", content: null }])).toEqual([]);
   });
 });
 

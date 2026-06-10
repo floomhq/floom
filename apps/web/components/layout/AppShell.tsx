@@ -1,12 +1,28 @@
 "use client";
 
+import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
 import { Ambient } from "@/components/Ambient";
 import { CommandPalette } from "@/components/CommandPalette";
 import { IconSprite } from "@/components/IconSprite";
 import { Toaster } from "@/components/ui/sonner";
 import { Sidebar } from "@/components/layout/sidebar";
-import { EmilyDock } from "@/components/emily/EmilyChat";
+import { EmilyDock, EmilyMobileSheet } from "@/components/emily/EmilyChat";
+
+// Render exactly one Emily surface so only one chat instance mounts: the
+// desktop dock (≥768px) or the mobile bottom-sheet (<768px). Defaults to
+// desktop to match SSR (no hydration mismatch), corrected on mount.
+function useIsDesktop(): boolean {
+  const [isDesktop, setIsDesktop] = useState(true);
+  useEffect(() => {
+    const mq = window.matchMedia("(min-width: 768px)");
+    const sync = () => setIsDesktop(mq.matches);
+    sync();
+    mq.addEventListener("change", sync);
+    return () => mq.removeEventListener("change", sync);
+  }, []);
+  return isDesktop;
+}
 
 // Public, shareable "skill card" pages render full-bleed without the app
 // sidebar / command palette. /w and /s are standalone public share pages.
@@ -19,6 +35,7 @@ const noDockPrefixes = ["/chat"];
 
 export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
+  const isDesktop = useIsDesktop();
   const standalone = standalonePrefixes.some(
     (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
   );
@@ -61,7 +78,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex flex-col min-h-full">{children}</div>
       </main>
       {/* Emily dock: fixed-height right rail — scrolls internally, never bleeds to body */}
-      <EmilyDock className="hidden md:flex" />
+      {isDesktop ? <EmilyDock /> : <EmilyMobileSheet />}
       <CommandPalette />
       <Toaster position="bottom-right" closeButton />
     </>
