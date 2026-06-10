@@ -619,6 +619,43 @@ def _post_slack_thread_reply(*, channel: str, thread_ts: str, text: str, bot_tok
         raise RuntimeError(f"Slack post failed: {error}")
 
 
+def _post_slack_thread_reply_blocks(
+    *,
+    channel: str,
+    thread_ts: str,
+    text: str,
+    blocks: List[Dict[str, Any]],
+    bot_token: Optional[str] = None,
+) -> None:
+    """Post a Block Kit message to a Slack thread. ``text`` is the fallback."""
+    bot_token = (bot_token or os.environ.get("SLACK_BOT_TOKEN", "")).strip()
+    if not bot_token:
+        raise RuntimeError("SLACK_BOT_TOKEN is not configured")
+    response = requests.post(
+        "https://slack.com/api/chat.postMessage",
+        headers={
+            "Authorization": f"Bearer {bot_token}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+        json={
+            "channel": channel,
+            "thread_ts": thread_ts,
+            "text": text or "(No reply)",
+            "blocks": blocks,
+            "unfurl_links": False,
+            "unfurl_media": False,
+        },
+        timeout=15,
+    )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise RuntimeError(f"Slack post failed with HTTP {response.status_code}") from exc
+    if not response.ok or not payload.get("ok"):
+        error = str(payload.get("error") or f"HTTP {response.status_code}")
+        raise RuntimeError(f"Slack post failed: {error}")
+
+
 def _set_slack_assistant_status(*, channel: str, thread_ts: str, status: str, bot_token: Optional[str] = None) -> None:
     bot_token = (bot_token or os.environ.get("SLACK_BOT_TOKEN", "")).strip()
     if not bot_token:
@@ -680,6 +717,32 @@ def _slack_claim_url(token: str) -> str:
         or "https://workers.floom.dev"
     ).rstrip("/")
     return f"{base}/settings?slack_claim={urllib.parse.quote(token)}"
+
+
+def _slack_short_claim_url(token: str) -> str:
+    """Return the short /c/{token} redirect URL for use in outbound messages."""
+    base = (
+        os.environ.get("WORKERS_FRONTEND_URL")
+        or os.environ.get("WORKEROS_PUBLIC_URL")
+        or "https://workers.floom.dev"
+    ).rstrip("/")
+    return f"{base}/c/{urllib.parse.quote(token)}"
+
+
+def _slack_claim_button_block(token: str, label: str = "Link your account") -> dict:
+    """Return a Slack Block Kit actions block with a button that opens the claim URL."""
+    short_url = _slack_short_claim_url(token)
+    return {
+        "type": "actions",
+        "elements": [
+            {
+                "type": "button",
+                "text": {"type": "plain_text", "text": label, "emoji": False},
+                "url": short_url,
+                "action_id": "workeros_claim_link",
+            }
+        ],
+    }
 
 
 def _slack_legacy_single_user_mode() -> bool:
@@ -759,7 +822,7 @@ def _slack_create_claim(team_id: str, slack_user_id: str, profile_name: str = ""
     from db import get_db, now_iso
     if not team_id or not slack_user_id:
         raise ValueError("Slack team_id and slack_user_id are required")
-    token = pysecrets.token_urlsafe(24)
+    token = pysecrets.token_urlsafe(12)  # 96-bit, 16 urlsafe chars
     now_ts = now_iso()
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
     with get_db() as conn:
@@ -913,10 +976,7 @@ def claim_slack_sender(
             _post_slack_dm(
                 slack_user_id=slack_user_id,
                 team_id=team_id,
-                text=(
-                    "Your Emily account link for this Slack identity has been transferred "
-                    "to a new account. If this was not you, please re-link by sending me a DM."
-                ),
+                text="Heads up: your Emily account link was just claimed by someone else. If that wasn't you, send me a DM to re-link.",
                 bot_token=_slack_bot_token_for_team(team_id),
             )
         except Exception:
@@ -1147,27 +1207,46 @@ async def _handle_slack_app_mention(
     # Check if the mentioning user is already linked so we can personalise the reply.
     user_id = _slack_binding_user_id(team_id, slack_sender_id)
     if user_id:
-        pointer_text = "I work best in DMs. Send me a direct message!"
+        try:
+            _post_slack_thread_reply(
+                channel=channel,
+                thread_ts=thread_ts,
+                text="I work in DMs. Message me directly and I'm all yours.",
+                bot_token=bot_token,
+            )
+        except Exception:
+            logger.exception("Slack app_mention pointer reply failed (bound user)")
     else:
         try:
             claim = _slack_create_claim(team_id, slack_sender_id)
-            pointer_text = (
-                "I work best in DMs. Send me a direct message!\n\n"
-                f"To link your account first: {claim['claim_url']}"
+            _post_slack_thread_reply_blocks(
+                channel=channel,
+                thread_ts=thread_ts,
+                text="I work in DMs. Link your account and message me directly.",
+                blocks=[
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": "I work in DMs. <{url}|Link your account> and message me directly.".format(
+                                url=_slack_short_claim_url(claim["claim_token"])
+                            ),
+                        },
+                    }
+                ],
+                bot_token=bot_token,
             )
         except Exception:
-            logger.exception("Slack mention claim creation failed (best-effort)")
-            pointer_text = "I work best in DMs. Send me a direct message!"
-
-    try:
-        _post_slack_thread_reply(
-            channel=channel,
-            thread_ts=thread_ts,
-            text=pointer_text,
-            bot_token=bot_token,
-        )
-    except Exception:
-        logger.exception("Slack app_mention pointer reply failed")
+            logger.exception("Slack app_mention pointer reply failed (unbound user)")
+            try:
+                _post_slack_thread_reply(
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    text="I work in DMs. Message me directly and I'm all yours.",
+                    bot_token=bot_token,
+                )
+            except Exception:
+                logger.exception("Slack app_mention fallback reply failed")
 
 
 async def _handle_slack_assistant_thread_started(*, event: Dict[str, Any], bot_token: Optional[str] = None) -> None:
@@ -1181,10 +1260,7 @@ async def _handle_slack_assistant_thread_started(*, event: Dict[str, Any], bot_t
         _post_slack_thread_reply(
             channel=channel,
             thread_ts=thread_ts,
-            text=(
-                "I'm Emily, your personal Chief-of-Staff. I route tasks to a "
-                "swarm of always-on agents and workers. DM me or @mention me."
-            ),
+            text="Hi, I'm Emily. Tell me what you need and I'll get your workers on it.",
             bot_token=bot_token,
         )
     except Exception:
@@ -1219,17 +1295,24 @@ async def _handle_slack_direct_message(
             from main import _bootstrap_user_id
             user_id = (os.environ.get("SLACK_WORKEROS_USER_ID") or _bootstrap_user_id()).strip() or _bootstrap_user_id()
         else:
-            # Unbound sender: reply with a claim link and stop.
+            # Unbound sender: reply with a claim link (Button) and stop.
             try:
                 claim = _slack_create_claim(team_id, slack_sender_id)
-                _post_slack_thread_reply(
+                _post_slack_thread_reply_blocks(
                     channel=channel,
                     thread_ts=thread_ts,
-                    text=(
-                        "To use Emily, link your Slack identity to your Workeros workspace first.\n\n"
-                        f"{claim['claim_url']}\n\n"
-                        "This link expires in 24 hours."
-                    ),
+                    text="Hi! I'm Emily. Link your account and we're good to go. (valid 24h)",
+                    blocks=[
+                        {
+                            "type": "section",
+                            "text": {
+                                "type": "mrkdwn",
+                                "text": "Hi! I'm Emily. <{url}|Link your account> and we're good to go. (valid 24h)".format(
+                                    url=_slack_short_claim_url(claim["claim_token"])
+                                ),
+                            },
+                        }
+                    ],
                     bot_token=bot_token,
                 )
             except Exception:
@@ -1276,7 +1359,7 @@ async def _handle_slack_direct_message(
                 _post_slack_thread_reply(
                     channel=channel,
                     thread_ts=thread_ts,
-                    text="I could not complete that request. The failure was logged for the workspace operator.",
+                    text="Something went wrong on my end. Try again in a moment.",
                     bot_token=bot_token,
                 )
             except Exception:
@@ -1382,20 +1465,27 @@ def _slack_interactivity_response_from_form(form: Dict[str, str]) -> Response:
     if not user_id:
         try:
             claim = _slack_create_claim(team_id, slack_user_id)
+            short_url = _slack_short_claim_url(claim["claim_token"])
             return JSONResponse({
                 "response_type": "ephemeral",
                 "replace_original": False,
-                "text": (
-                    "Link your Slack identity to Workeros before approving or rejecting runs.\n"
-                    f"{claim['claim_url']}"
-                ),
+                "text": f"Link your account before approving runs: <{short_url}|Link your account> (valid 24h)",
+                "blocks": [
+                    {
+                        "type": "section",
+                        "text": {
+                            "type": "mrkdwn",
+                            "text": f"Link your account before approving runs: <{short_url}|Link your account> (valid 24h)",
+                        },
+                    }
+                ],
             })
         except Exception:
             logger.exception("Slack interactivity claim creation failed (best-effort)")
             return JSONResponse({
                 "response_type": "ephemeral",
                 "replace_original": False,
-                "text": "Please link your Slack identity to Workeros first (send Emily a DM).",
+                "text": "Link your account before approving runs. Send Emily a DM to get started.",
             })
 
     if action_id == "workeros_approval_dismiss":

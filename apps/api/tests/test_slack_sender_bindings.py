@@ -175,6 +175,7 @@ def test_unbound_dm_sender_gets_claim_link_no_agent_run(monkeypatch, tmp_path):
     monkeypatch.setattr(_common_mod, "collect_agent_reply", _boom_collect)
     monkeypatch.setattr(_slack_mod, "collect_agent_reply", _boom_collect)
     monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply", lambda **kw: posts.append(kw))
+    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply_blocks", lambda **kw: posts.append(kw))
 
     body = _dm_event_body(slack_user_id="U_UNBOUND")
     with TestClient(main.app) as client:
@@ -189,9 +190,10 @@ def test_unbound_dm_sender_gets_claim_link_no_agent_run(monkeypatch, tmp_path):
     # Background task ran synchronously in TestClient.
     assert agent_calls == [], "agent must NOT be invoked for unbound sender"
     assert posts, "claim-link message must be posted"
-    claim_text = posts[0]["text"]
-    assert "slack_claim=" in claim_text
-    assert "24 hours" in claim_text
+    # text or blocks should contain the short /c/{token} URL with expiry
+    combined = posts[0].get("text", "") + str(posts[0].get("blocks", ""))
+    assert "/c/" in combined, "claim link must use short /c/{token} URL"
+    assert "24h" in combined
 
 
 # ---------------------------------------------------------------------------
@@ -393,13 +395,16 @@ def test_mention_includes_claim_link_for_unbound_mentioner(monkeypatch, tmp_path
     posts: list = []
     monkeypatch.setattr(_slack_mod, "collect_agent_reply", lambda **kw: "nope")
     monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply", lambda **kw: posts.append(kw))
+    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply_blocks", lambda **kw: posts.append(kw))
 
     body = _mention_event_body(slack_user_id="U_UNBOUND_MENTION")
     with TestClient(main.app) as client:
         client.post("/slack/events", content=body, headers=_slack_sig_headers(body))
 
     assert posts
-    assert "slack_claim=" in posts[0]["text"]
+    # Mention reply to unbound user should contain the short claim URL in text or blocks
+    combined = posts[0].get("text", "") + str(posts[0].get("blocks", ""))
+    assert "/c/" in combined
 
 
 def test_mention_no_claim_link_for_already_bound_mentioner(monkeypatch, tmp_path):
@@ -447,8 +452,10 @@ def test_interactivity_unbound_clicker_gets_claim_link(monkeypatch, tmp_path):
     assert resp.status_code == 200
     body = resp.json()
     # Must return an ephemeral claim-link prompt, NOT a confirmation of approval.
-    assert "slack_claim=" in body.get("text", ""), (
-        "unbound clicker must receive a claim link, not an approval confirmation"
+    # The short /c/{token} URL should appear in text or blocks.
+    full_text = body.get("text", "") + str(body.get("blocks", ""))
+    assert "/c/" in full_text, (
+        "unbound clicker must receive a short claim link, not an approval confirmation"
     )
     assert "Approved" not in body.get("text", "")
 
