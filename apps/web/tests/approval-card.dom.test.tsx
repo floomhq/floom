@@ -59,7 +59,8 @@ describe("ApprovalCard", () => {
   it("Approve dispatches via the kind-aware API and flips to Approved", async () => {
     render(<ApprovalCard card={card()} />);
     fireEvent.click(screen.getByText("Approve"));
-    await waitFor(() => expect(approveAgentTool).toHaveBeenCalledWith("ap_1"));
+    // #769: approveApproval forwards (id, editedOutput, comment) — no comment typed here.
+    await waitFor(() => expect(approveAgentTool).toHaveBeenCalledWith("ap_1", undefined, undefined));
     await waitFor(() => expect(screen.getByText("Approved")).toBeTruthy());
   });
 
