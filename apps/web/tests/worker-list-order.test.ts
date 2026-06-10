@@ -1,4 +1,6 @@
 import { describe, expect, it } from "vitest";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import { hasWorkerActivity, sortWorkersByRecentActivity } from "@/lib/worker-list-order";
 import type { WorkerSummary } from "@/lib/types";
 
@@ -55,5 +57,25 @@ describe("worker list order", () => {
       "newly-created",
       "older-run",
     ]);
+  });
+});
+
+describe("WorkersCollection wiring", () => {
+  it("WorkersCollection imports sortWorkersByRecentActivity from worker-list-order", () => {
+    const src = readFileSync(
+      resolve(__dirname, "../app/workers/WorkersCollection.tsx"),
+      "utf8",
+    );
+    // Verify the import is present
+    expect(src).toMatch(/import\s.*sortWorkersByRecentActivity.*from\s+["']@\/lib\/worker-list-order["']/);
+  });
+
+  it("WorkersCollection passes sortWorkersByRecentActivity(visible) as items in the Collection config", () => {
+    const src = readFileSync(
+      resolve(__dirname, "../app/workers/WorkersCollection.tsx"),
+      "utf8",
+    );
+    // The All-tab base list must go through the sort function
+    expect(src).toMatch(/items:\s*sortWorkersByRecentActivity\s*\(\s*visible\s*\)/);
   });
 });

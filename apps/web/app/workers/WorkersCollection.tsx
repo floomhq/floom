@@ -28,6 +28,7 @@ import {
   orderedSourceFiles,
 } from "@/lib/workers/derive";
 import { getFavorites, saveFavorites } from "@/lib/workers/favorites";
+import { sortWorkersByRecentActivity } from "@/lib/worker-list-order";
 
 function rel(ts?: string | null): string {
   if (!ts) return "—";
@@ -349,7 +350,7 @@ export default function WorkersCollection({
   const config: CollectionConfig<WorkerSummary> = {
     title: "Workers",
     subtitle: "Your AI workers.",
-    items: visible,
+    items: sortWorkersByRecentActivity(visible),
     idOf: (w) => w.id,
     searchOf: (w) => `${w.name} ${w.description ?? ""} ${(w.tags ?? []).join(" ")}`,
     tagsOf: (w) =>
