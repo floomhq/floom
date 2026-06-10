@@ -3719,9 +3719,12 @@ def _build_system_prompt(user_id: str, *, include_authoring_rules: bool = False)
         skill_md,
         include_authoring_rules=include_authoring_rules,
     )
+    # Workspace instructions are user data. Wrap them in a clearly delimited
+    # block so they cannot masquerade as system rules (prompt-injection hygiene).
     custom = (
-        "## Workspace custom instructions\n\n"
-        f"{workspace_content.strip()}"
+        "<!-- Workspace instructions (set by the user): -->\n"
+        f"{workspace_content.strip()}\n"
+        "<!-- end workspace instructions -->"
         if workspace_content.strip()
         else ""
     )
@@ -3812,19 +3815,144 @@ def _environment_note(source: str) -> str:
     return ENVIRONMENT_NOTES.get(source, ENVIRONMENT_NOTES["web"])
 
 
+_CAPABILITIES_SNAPSHOT_LIMIT = 5  # max notable workers listed by name
+
+
+def _build_capabilities_snapshot(user_id: str) -> str:
+    """Assemble a compact (<150 words) factual capabilities block for the acting user.
+
+    Includes: active connection names; worker count + up to 5 notable enabled
+    workers by name; brain packs attached; whether approvals are required;
+    actor role (admin/member) and what that limits.
+
+    Reuses existing DB helpers — does NOT invent new queries.  Never raises;
+    returns a safe fallback on any error.
+    """
+    try:
+        from db import get_repositories, derive_workspace_id
+
+        repos = get_repositories()
+
+        # --- connections ---
+        active_connections: list[str] = []
+        try:
+            for c in repos.connections.list(user_id=user_id):
+                if (c.get("status") or "") == "active":
+                    app_name = c.get("app_name") or "connection"
+                    account = c.get("display_name") or c.get("account_label")
+                    label = f"{app_name} ({account})" if account else str(app_name)
+                    active_connections.append(label)
+        except Exception:
+            pass
+
+        # --- workers ---
+        worker_count = 0
+        notable_workers: list[str] = []
+        try:
+            all_workers = repos.workers.list(user_id=user_id)
+            non_system = [
+                w for w in all_workers
+                if not (w.get("manifest") or {}).get("system_worker")
+                and not (w.get("manifest") or {}).get("is_example")
+            ]
+            worker_count = len(non_system)
+            enabled = [w for w in non_system if w.get("enabled")]
+            notable_workers = [
+                w["name"] for w in enabled[:_CAPABILITIES_SNAPSHOT_LIMIT] if w.get("name")
+            ]
+        except Exception:
+            pass
+
+        # --- brain packs ---
+        brain_packs: list[str] = []
+        try:
+            brain_packs = _owner_brain_pack_names(user_id)
+        except Exception:
+            pass
+
+        # --- pending approvals ---
+        pending_approvals = 0
+        try:
+            with get_db() as _conn:
+                _row = _conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM approvals WHERE owner_id = ? AND status = 'pending'",
+                    (user_id,),
+                ).fetchone()
+            pending_approvals = int(_row["cnt"] or 0) if _row else 0
+        except Exception:
+            pass
+
+        # --- actor role ---
+        actor_role = "owner"  # default for OS single-tenant
+        try:
+            workspace_id = derive_workspace_id(user_id)
+            members_repo = repos.members  # type: ignore[union-attr]
+            if members_repo is not None:
+                member_row = members_repo.get(
+                    workspace_id=workspace_id, user_id=user_id
+                )
+                if member_row:
+                    actor_role = member_row.get("role") or "member"
+        except Exception:
+            pass
+
+        # --- format ---
+        conn_str = ", ".join(active_connections) if active_connections else "none"
+        worker_str: str
+        if notable_workers:
+            worker_str = f"{worker_count} total; enabled: {', '.join(notable_workers)}"
+            if worker_count > len(notable_workers):
+                worker_str += " + more"
+        else:
+            worker_str = str(worker_count)
+        brain_str = ", ".join(brain_packs) if brain_packs else "none"
+        approvals_note = (
+            f"{pending_approvals} pending" if pending_approvals > 0 else "none pending"
+        )
+        role_note = (
+            "full access (owner/admin)"
+            if actor_role in {"owner", "admin"}
+            else "read + run own workers only (member)"
+        )
+
+        return (
+            "## What you can do here (capabilities snapshot)\n"
+            f"- Connections: {conn_str}\n"
+            f"- Workers: {worker_str}\n"
+            f"- Brain packs: {brain_str}\n"
+            f"- Approvals: {approvals_note}\n"
+            f"- Actor role: {actor_role} — {role_note}"
+        )
+    except Exception as exc:
+        logger.warning("Failed to build capabilities snapshot: %s", exc)
+        return "## What you can do here (capabilities snapshot)\n(unavailable)"
+
+
 def build_system_prompt_for_source(user_id: str, source: str = "web", message: str = "") -> str:
-    """Shared workspace-agent prompt plus global communication rules and a
-    per-surface environment block.
+    """Shared workspace-agent prompt plus global communication rules, a
+    per-surface environment block, and a live workspace capabilities snapshot.
+
+    Layer order (INCREMENT 2):
+      base (persona + workspace instructions + skill.md with preamble)
+      + GLOBAL_COMMUNICATION_RULES
+      + environment note (per source)
+      + capabilities snapshot (assembled fresh; compact, factual, actor-scoped)
 
     The editable base persona and workspace.md custom instructions are identical
     for every source.  The appended global rules + environment note differ by
-    surface (whatsapp / slack / web / mcp / cli).
+    surface (whatsapp / slack / web / mcp / cli).  The capabilities snapshot
+    tells Emily what she ACTUALLY has available so she can answer "what can you
+    do here?" from facts rather than generic marketing.
     """
     base = _build_system_prompt(
         user_id,
         include_authoring_rules=_is_worker_authoring_intent(message),
     )
-    return f"{base}\n\n{GLOBAL_COMMUNICATION_RULES}\n\n{_environment_note(source)}"
+    snapshot = _build_capabilities_snapshot(user_id)
+    return (
+        f"{base}\n\n{GLOBAL_COMMUNICATION_RULES}\n\n{_environment_note(source)}"
+        f"\n\n{snapshot}"
+    )
 
 
 def workspace_agent_tool_metadata(user_id: str) -> List[Dict[str, str]]:
