@@ -1,4 +1,6 @@
 import os
+import shlex
+import subprocess
 import sys
 import tarfile
 import types
@@ -568,6 +570,96 @@ def test_uploads_git_context_by_cloning_into_sandbox(tmp_path, monkeypatch):
     )]
     assert "/home/user/worker/context/external-notes" in sandbox.files.dirs
     assert not sandbox.files._files
+
+
+def test_uploads_git_context_clones_real_repo_into_context_dir(tmp_path, monkeypatch):
+    repo = tmp_path / "brain-pack-repo"
+    repo.mkdir()
+    (repo / "README.md").write_text("hello from git brain pack\n", encoding="utf-8")
+    (repo / "notes").mkdir()
+    (repo / "notes" / "facts.md").write_text("fact from cloned pack\n", encoding="utf-8")
+    subprocess.run(["git", "init", str(repo)], check=True, capture_output=True, text=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.email", "test@example.com"], check=True)
+    subprocess.run(["git", "-C", str(repo), "config", "user.name", "Test User"], check=True)
+    subprocess.run(["git", "-C", str(repo), "add", "."], check=True)
+    subprocess.run(["git", "-C", str(repo), "commit", "-m", "seed brain pack"], check=True, capture_output=True, text=True)
+
+    contexts_root = tmp_path / "contexts"
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+    monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
+
+    class _HostMappedFiles:
+        def __init__(self, root: Path):
+            self.root = root
+            self.dirs: set[str] = set()
+            self._files: dict[str, bytes] = {}
+
+        def host_path(self, sandbox_path: str) -> Path:
+            return self.root / sandbox_path.removeprefix("/")
+
+        def make_dir(self, sandbox_path: str):
+            self.dirs.add(sandbox_path)
+            self.host_path(sandbox_path).mkdir(parents=True, exist_ok=True)
+
+    class _RealGitCloneCommands:
+        def __init__(self, files: _HostMappedFiles):
+            self.files = files
+            self.run_calls = []
+
+        def run(self, command: str, **kwargs):
+            self.run_calls.append((command, kwargs))
+            tokens = shlex.split(command)
+            assert tokens[:4] == ["git", "clone", "--depth", "1"]
+            assert len(tokens) == 6
+            repo_url = tokens[4]
+            sandbox_target = tokens[5]
+            result = subprocess.run(
+                ["git", "clone", "--depth", "1", repo_url, str(self.files.host_path(sandbox_target))],
+                capture_output=True,
+                text=True,
+                timeout=30,
+            )
+            return types.SimpleNamespace(
+                exit_code=result.returncode,
+                stdout=result.stdout,
+                stderr=result.stderr,
+            )
+
+    class _HostMappedSandbox:
+        def __init__(self, root: Path):
+            self.files = _HostMappedFiles(root)
+            self.commands = _RealGitCloneCommands(self.files)
+
+    sandbox = _HostMappedSandbox(tmp_path / "sandbox")
+    config = WorkerConfig(
+        id="git-context-real-clone-test",
+        name="Git Context Real Clone Test",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(type="python311", command="python run.py", mode="pure-script"),
+        contexts=[{
+            "name": "hello-world",
+            "source": f"git+{repo.as_uri()}",
+        }],
+        outputs=[],
+    )
+
+    err = E2BSandboxDriver()._upload_contexts_to_sandbox(
+        sandbox=sandbox,
+        workdir="/home/user/worker",
+        config=config,
+        made_dirs={"/home/user/worker"},
+        log_fn=lambda *_args, **_kwargs: None,
+    )
+
+    assert err is None
+    context_dir = tmp_path / "sandbox" / "home" / "user" / "worker" / "context" / "hello-world"
+    assert (context_dir / "README.md").read_text(encoding="utf-8") == "hello from git brain pack\n"
+    assert (context_dir / "notes" / "facts.md").read_text(encoding="utf-8") == "fact from cloned pack\n"
+    assert (context_dir / ".git").is_dir()
+    assert sandbox.commands.run_calls == [(
+        f"git clone --depth 1 {repo.as_uri()} /home/user/worker/context/hello-world",
+        {"timeout": 180},
+    )]
 
 
 def _tar_bytes(entries: dict[str, bytes]) -> bytes:
