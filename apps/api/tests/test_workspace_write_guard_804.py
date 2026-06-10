@@ -153,3 +153,45 @@ def test_run_token_put_allowed(app_main, client, path):
     resp = client.put(path, content="# authored by a worker",
                       headers={"content-type": "text/markdown"})
     assert resp.status_code == 204, resp.text
+
+
+# ---------------------------------------------------------------------------
+# The OTHER three routes that write the same files must be guarded too — a
+# member must not be able to RESET or ROLLBACK workspace instructions. The guard
+# runs before any git work, so a member is rejected regardless of sha validity.
+# ---------------------------------------------------------------------------
+
+@pytest.mark.parametrize("method,path", [
+    ("delete", "/workspace/base"),
+    ("post", "/workspace/rollback/deadbeef"),
+    ("post", "/workspace/base/rollback/deadbeef"),
+])
+def test_member_sibling_writes_forbidden(app_main, client, method, path):
+    _as_role(app_main, user_id="bob", role="member", auth_method="session")
+    resp = getattr(client, method)(path)
+    assert resp.status_code == 403, resp.text
+
+
+@pytest.mark.parametrize("method,path", [
+    ("delete", "/workspace/base"),
+    ("post", "/workspace/rollback/deadbeef"),
+    ("post", "/workspace/base/rollback/deadbeef"),
+])
+def test_admin_sibling_writes_pass_guard(app_main, client, method, path):
+    """Admin must clear the guard. DELETE resets -> 204; rollbacks with a bogus
+    sha 404 AFTER the guard — the point is it's never a 403 for an admin."""
+    _as_role(app_main, user_id="alice", role="admin")
+    resp = getattr(client, method)(path)
+    assert resp.status_code != 403, resp.text
+
+
+@pytest.mark.parametrize("method,path", [
+    ("delete", "/workspace/base"),
+    ("post", "/workspace/rollback/deadbeef"),
+    ("post", "/workspace/base/rollback/deadbeef"),
+])
+def test_run_token_sibling_writes_pass_guard(app_main, client, method, path):
+    _as_role(app_main, user_id="federico", role="member", auth_method="run_token",
+             run_token_payload={"user_id": "federico"})
+    resp = getattr(client, method)(path)
+    assert resp.status_code != 403, resp.text
