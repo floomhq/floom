@@ -19787,6 +19787,19 @@ def _api_call_response_data(resp: Any) -> Any:
         return {"detail": "Internal server error"}
 
 
+# Auth headers forwarded by the internal MCP proxy. #851: x-api-key was
+# missing, so any internal path authenticating via x-api-key saw the proxied
+# request as unauthenticated.
+_API_CALL_AUTH_HEADERS = frozenset({
+    "x-floom-secret",
+    "x-floom-token",
+    "x-api-key",
+    "authorization",
+    "cookie",
+    "x-workeros-workspace",
+})
+
+
 async def _api_call(
     method: str,
     path: str,
@@ -19796,8 +19809,7 @@ async def _api_call(
     params: dict | None = None,
 ) -> tuple[Any, int]:
     import httpx
-    _AUTH_HEADERS = {"x-floom-secret", "x-floom-token", "authorization", "cookie", "x-workeros-workspace"}
-    auth_headers = {k: v for k, v in request.headers.items() if k.lower() in _AUTH_HEADERS}
+    auth_headers = {k: v for k, v in request.headers.items() if k.lower() in _API_CALL_AUTH_HEADERS}
     if "x-workeros-workspace" not in auth_headers:
         auth_headers["x-workeros-workspace"] = DEFAULT_WORKSPACE_ID
     clean_params = {k: str(v) for k, v in (params or {}).items() if v is not None}
