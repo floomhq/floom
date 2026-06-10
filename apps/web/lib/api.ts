@@ -840,6 +840,8 @@ export const api = {
         method: "PATCH",
         body: JSON.stringify({ name }),
       }),
+    remove: (id: string) => // #805 — delete a workspace (default is protected server-side)
+      fetchJson<null>(`/workspaces/${encodeURIComponent(id)}`, { method: "DELETE" }),
     // Duplicate a workspace into a new "<name> (copy)" sibling. On the
     // single-tenant OSS instance, workers/knowledge live in a shared pool, so
     // this mints a new workspace that surfaces the same pool (use Export/Import

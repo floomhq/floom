@@ -133,6 +133,23 @@ def rename_local_workspace(owner_user_id: str, workspace_id: str, name: str) -> 
     return get_local_workspace(owner_user_id, workspace_id)
 
 
+def delete_local_workspace(owner_user_id: str, workspace_id: str) -> bool:
+    """#805: delete a workspace. The default workspace can't be deleted.
+
+    OSS keeps workers/knowledge in a shared pool (see duplicate semantics), so
+    this removes the workspace entry only — it does not delete worker data.
+    Returns True if a row was removed, False if not found.
+    """
+    if workspace_id == DEFAULT_WORKSPACE_ID:
+        raise ValueError("the default workspace cannot be deleted")
+    with get_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM local_workspaces WHERE owner_user_id = ? AND id = ?",
+            (owner_user_id, workspace_id),
+        )
+    return cur.rowcount > 0
+
+
 def requested_local_workspace_id(request: Request) -> str | None:
     header_value = request.headers.get(ACTIVE_WORKSPACE_HEADER)
     query_value = request.query_params.get("workspace_id")

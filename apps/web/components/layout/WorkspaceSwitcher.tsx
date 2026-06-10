@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, ChevronsUpDown, Copy, Download, Link2, Pencil, Plus, Settings2, Upload, Users } from "lucide-react";
+import { Check, ChevronsUpDown, Copy, Download, Link2, Pencil, Plus, Settings2, Trash2, Upload, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
@@ -52,6 +52,8 @@ export function WorkspaceSwitcher() {
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameName, setRenameName] = useState("");
   const [renaming, setRenaming] = useState(false);
+  const [deleteOpen, setDeleteOpen] = useState(false);
+  const [deleting, setDeleting] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -130,6 +132,21 @@ export function WorkspaceSwitcher() {
       setError((err as Error).message || "Failed to rename workspace");
     } finally {
       setRenaming(false);
+    }
+  }
+
+  // #805: delete the active workspace, then fall back to the default.
+  async function handleDelete() {
+    if (!state || state.activeId === "local-default") return;
+    setDeleting(true);
+    try {
+      await api.workspace.remove(state.activeId);
+      await api.workspace.select("local-default");
+      setActiveWorkspaceId("local-default");
+      window.location.reload();
+    } catch (err) {
+      setError((err as Error).message || "Failed to delete workspace");
+      setDeleting(false);
     }
   }
 
@@ -314,6 +331,17 @@ export function WorkspaceSwitcher() {
               <Pencil className="size-4" />
               Rename workspace
             </DropdownMenuItem>
+            {/* #805: delete is offered only for non-default workspaces. */}
+            {state.activeId !== "local-default" && (
+              <DropdownMenuItem
+                closeOnClick={false}
+                onClick={() => setDeleteOpen(true)}
+                className="flex items-center gap-2 text-[var(--warning)] focus:bg-[var(--active-nav-bg)] focus:text-[var(--warning)]"
+              >
+                <Trash2 className="size-4" />
+                Delete workspace
+              </DropdownMenuItem>
+            )}
             {/* G10 (Federico 2026-06-03): Members lives in the workspace cluster,
                 peer to "New workspace". One model both products: on the OS it
                 shows you as Owner; Cloud shows real members. */}
@@ -488,6 +516,32 @@ export function WorkspaceSwitcher() {
             </Button>
             <Button type="button" onClick={handleRename} disabled={!renameName.trim() || renaming}>
               {renaming ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* #805: confirm before deleting a workspace (in-house modal, never confirm()). */}
+      <Dialog open={deleteOpen} onOpenChange={setDeleteOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Delete workspace?</DialogTitle>
+            <DialogDescription>
+              This removes the workspace entry. Workers and knowledge live in a shared pool
+              on this instance and are not deleted. You&apos;ll switch back to the default workspace.
+            </DialogDescription>
+          </DialogHeader>
+          <DialogFooter>
+            <Button variant="ghost" type="button" onClick={() => setDeleteOpen(false)} disabled={deleting}>
+              Cancel
+            </Button>
+            <Button
+              type="button"
+              onClick={handleDelete}
+              disabled={deleting}
+              style={{ background: "var(--warning)", color: "#fff" }}
+            >
+              {deleting ? "Deleting..." : "Delete"}
             </Button>
           </DialogFooter>
         </DialogContent>

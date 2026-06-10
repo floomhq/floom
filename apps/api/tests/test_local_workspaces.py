@@ -191,6 +191,21 @@ def test_rename_workspace(client_and_db):
     assert client.patch(f"/workspaces/{wid}", json={"name": ""}).status_code == 422
 
 
+def test_delete_workspace(client_and_db):
+    # #805: DELETE removes a workspace; the default is protected.
+    client, _db = client_and_db
+    wid = client.post("/workspaces", json={"name": "Throwaway"}).json()["id"]
+
+    assert client.delete(f"/workspaces/{wid}").status_code == 204
+    ids = {w["id"] for w in client.get("/workspaces").json()["workspaces"]}
+    assert wid not in ids
+    assert "local-default" in ids
+
+    # Default can't be deleted (400); unknown id 404.
+    assert client.delete("/workspaces/local-default").status_code == 400
+    assert client.delete("/workspaces/ws_unknown").status_code == 404
+
+
 def test_local_workspace_contexts_are_isolated(client_and_db):
     client, _db = client_and_db
     created = client.post("/workspaces", json={"name": "Isolated"})

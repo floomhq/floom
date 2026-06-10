@@ -69,6 +69,7 @@ from auth.context import current_auth_context, current_auth_user_id, set_current
 from auth.local_workspaces import (
     DEFAULT_WORKSPACE_ID,
     create_local_workspace,
+    delete_local_workspace,
     get_local_workspace,
     list_local_workspaces,
     local_workspace_base_user_id,
@@ -760,6 +761,22 @@ def rename_workspace(
     if updated is None:
         raise HTTPException(status_code=404, detail="workspace not found")
     return _local_workspace_out(updated)
+
+
+@app.delete("/workspaces/{workspace_id}", status_code=204)
+def delete_workspace(
+    workspace_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> None:
+    """#805: delete a local OSS workspace (owner-scoped; default is protected)."""
+    _require_local_workspace_mode()
+    base_user_id = local_workspace_base_user_id(auth.user_id)
+    try:
+        removed = delete_local_workspace(base_user_id, workspace_id)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
+    if not removed:
+        raise HTTPException(status_code=404, detail="workspace not found")
 
 
 @app.post("/workspaces/{workspace_id}/select", response_model=LocalWorkspaceOut)
