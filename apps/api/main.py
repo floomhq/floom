@@ -20779,6 +20779,7 @@ async def reset_workspace_base_persona(
         get_workspace_base_persona,
     )
 
+    _require_workspace_write(auth)  # #804
     was_custom = base_persona_is_custom()
     clear_workspace_base_persona()
     if was_custom:
@@ -20847,6 +20848,7 @@ async def rollback_workspace_base_persona(
 ) -> PlainTextResponse:
     """Restore workspace.base.md to its state at a given git commit SHA."""
     from chat_service import WORKSPACE_BASE_PERSONA_PATH, set_workspace_base_persona
+    _require_workspace_write(auth)  # #804
     workspace = _git_workspace()
     try:
         rel = WORKSPACE_BASE_PERSONA_PATH.relative_to(workspace).as_posix()
@@ -20936,6 +20938,7 @@ async def rollback_workspace_instructions(
 ) -> PlainTextResponse:
     """Restore workspace.md to its state at a given git commit SHA."""
     from chat_service import WORKSPACE_MD_PATH, set_workspace_md
+    _require_workspace_write(auth)  # #804
     workspace = _git_workspace()
     try:
         rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
