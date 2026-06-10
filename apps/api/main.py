@@ -414,6 +414,11 @@ RATE_LIMIT_RULES = [
     (re.compile(r"^/workers$"), (20, 60.0)),
     (re.compile(r"^/connections/connect/[^/]+$"), (10, 60.0)),
     (re.compile(r"^/connections$"), (20, 60.0)),
+    # #839: the MCP serve endpoint grants workspace-wide capability from a
+    # single secret; the 60/min default was generous enough for secret
+    # brute-forcing and runs.watch connection-pinning. 10/min matches the
+    # other sensitive endpoints above.
+    (re.compile(r"^/mcp-tools/serve$"), (10, 60.0)),
 ]
 
 
