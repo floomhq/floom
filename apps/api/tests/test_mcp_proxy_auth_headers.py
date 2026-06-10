@@ -29,7 +29,11 @@ if str(API_DIR) not in sys.path:
 def _load_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
+    # suite files leak a module-level FLOOM_SECRET; with a secret set, the
+    # global auth check 401s the unauthenticated proxied echo request
+    monkeypatch.delenv("FLOOM_SECRET", raising=False)
     for name in list(sys.modules):
         if name == "main" or name == "db" or name.startswith("db.") or name == "auth" or name.startswith("auth."):
             sys.modules.pop(name, None)
