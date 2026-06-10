@@ -22,20 +22,37 @@
 - `runner_sandbox/__init__.py` returns `AgentDriver` for `.md`/agent workers and `E2BSandboxDriver` for `.py`, `.sh`, and `.js` script workers.
 - The `runner_local.py` module that existed in earlier commits was renamed to `runner_utils.py` in PR R. Its `run_worker_local` executor function was deleted in PR #28. The remaining contents are pure utility helpers (path constants, validation functions, context builders) consumed by the E2B driver to prepare the per-run payload.
 - E2B sandboxes are Firecracker microVMs hosted by E2B. They do not share a Python interpreter, filesystem, network namespace, or environment variables with the API service.
-- AgentDriver runs the OpenAI Agents SDK loop on the API host with access to the worker bundle, MCP/Composio clients, and workspace context. Treat agent workers as trusted platform-controlled code, not as sandbox-isolated user scripts.
+- AgentDriver runs the OpenAI Agents SDK loop in the API process. Its file tools
+  operate on host-staged worker, input, output, and context paths, and its
+  MCP/Composio clients are created by the API process. The `run_command` tool
+  follows the configured E2B runner, but that does not move the AgentDriver loop
+  or its other tools into the microVM.
 
 **Verified in-sandbox isolation** (from `docs/launch-readiness/MORNING-REPORT.md` + `docs/audits/security-edge-2026-05-26.md`): a malicious bundle running `os.environ` dump inside an E2B sandbox returns only sandbox metadata. `FLOOM_SECRET`, `OPENAI_API_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_WEBHOOK_SIGNING_KEY`, `E2B_API_KEY` are all absent from `os.environ` inside the sandbox.
 
-**Also absent from `secrets.json`** as of the 2026-05-26 fix. Earlier code (`run_service.py` pre-fix at lines 340-341) unioned every key in `/root/.config/workeros/api.env` into the secrets dict serialized into the sandbox payload, leaking platform credentials to any pure-script worker that read `secrets.json`. The fix adds a `_PLATFORM_SECRET_NAMES` denylist so platform infra credentials can NEVER appear in the sandbox payload, regardless of whether a worker.yml or the secrets DB tries to declare one of those names. See `tests/test_sandbox_secrets_isolation.py` for the regression.
+**Also absent from `secrets.json`** as of the 2026-05-26 fix. Earlier code (`run_service.py` pre-fix at lines 340-341) unioned every key in `/root/.config/workeros/api.env` into the secrets dict serialized into the sandbox payload, leaking platform credentials to any pure-script worker that read `secrets.json`. The fix adds a `_PLATFORM_SECRET_NAMES` denylist so the names in that denylist cannot appear in the worker-secret payload, regardless of whether a worker.yml or the secrets DB tries to declare them. `OPENAI_API_KEY` is intentionally not denylisted in this single-tenant version and can be passed when declared. See `tests/test_sandbox_secrets_isolation.py` for the regression.
 
-This means attacks like:
+For pure-script workers, this means attacks like:
 - Worker reaches localhost FastAPI to read `/secrets`
 - Worker reads `os.environ` and exfiltrates platform secrets
 - Worker introspects `sys.modules` to find the FastAPI app and inject routes
 - Worker mutates env vars seen by subsequent workers
 - Worker writes to API service files
 
-**do not apply to Workeros.** They require workers to share a Python interpreter with the API. They don't. If a security audit produces these findings, the audit was run against the wrong infrastructure (typically a clone of the repo with a hand-spun `uvicorn main:app` instance and no E2B credentials).
+**do not apply to the pure-script Workeros path.** Pure-script workers do not
+share a Python interpreter with the API. If a security audit produces these
+findings for a `.py`/`.sh`/`.js` worker, the audit was run against the wrong
+infrastructure (typically a clone of the repo with a hand-spun
+`uvicorn main:app` instance and no E2B credentials).
+
+Agent workers have a different trust model. `.md`/`mode: agent` workers run
+through AgentDriver in the API process and are therefore not isolated from the
+API host by an E2B microVM. The current single-tenant deployment policy permits
+only platform-controlled, trusted agent bundles on this path. That is an
+operational policy and trust precondition, not a code-enforced sandbox boundary:
+the runtime does not independently prove that an agent bundle is trustworthy.
+Untrusted or marketplace agent bundles require a separate isolation design
+before they can use this execution path.
 
 ## API authentication
 
@@ -52,9 +69,13 @@ Every response includes: HSTS (max-age 31536000), X-Frame-Options DENY, Content-
 ## How to run a real audit
 
 1. Hit `https://workers-api.floom.dev` (not localhost) with the production `x-floom-secret`.
-2. Test that workers can NOT do what they shouldn't by submitting a malicious bundle and verifying the result. The E2B sandbox isolates them.
-3. If you want to test the API surface (auth, rate limit, input validation, path traversal, etc.), point your tools at `workers-api.floom.dev`.
-4. Read this file before filing any "workers can compromise the platform" finding.
+2. Test pure-script isolation with a malicious `.py`/`.sh`/`.js` bundle. The
+   E2B sandbox isolates that execution path.
+3. Test agent workers against their actual boundary: trusted in-process
+   AgentDriver execution, host-side file tools, configured MCP/Composio access,
+   declared-secret handling, approvals, cancellation, and resource limits.
+4. If you want to test the API surface (auth, rate limit, input validation, path traversal, etc.), point your tools at `workers-api.floom.dev`.
+5. Read this file before filing any "workers can compromise the platform" finding.
 
 ## How to operate
 
