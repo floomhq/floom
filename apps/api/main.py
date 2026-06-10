@@ -20271,6 +20271,20 @@ def _validate_new_password(password: str | None) -> None:
         )
 
 
+def _prune_expired_sessions(session_repo) -> None:
+    # #849 RCA: SqliteUserSessionRepository.prune_expired existed but was never
+    # called, so expired sessions accumulated forever. Called on every
+    # session-creating endpoint (setup/login/magic-link) — those already hit
+    # the DB, and pruning is one indexed DELETE. Best-effort: a prune failure
+    # must never block a login.
+    from datetime import datetime, timezone as _tz
+
+    try:
+        session_repo.prune_expired(now_iso=datetime.now(_tz.utc).isoformat())
+    except Exception:
+        logger.warning("session prune failed (non-fatal)", exc_info=True)
+
+
 # #850: per-username lockout after repeated failed logins. The 5/min per-IP
 # rate limit does not stop distributed credential-stuffing; this does. Keyed
 # by username only (an attacker rotating IPs still locks out), which trades a
@@ -20428,6 +20442,7 @@ def auth_setup(
     except Exception:
         logger.warning("claim-on-setup failed (non-fatal)", exc_info=True)
     # Auto-login: issue a session cookie so the browser is immediately logged in
+    _prune_expired_sessions(session_repo)  # #849
     session_id = _secrets_mod.token_urlsafe(32)
     from datetime import datetime, timedelta, timezone as _tz
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
@@ -20460,6 +20475,7 @@ def auth_login(
     if user.get("disabled"):
         raise HTTPException(status_code=403, detail="account disabled")
     _clear_failed_logins(username)
+    _prune_expired_sessions(session_repo)  # #849
     session_id = _secrets_mod.token_urlsafe(32)
     from datetime import datetime, timedelta, timezone as _tz
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
@@ -20570,6 +20586,7 @@ def auth_consume_magic_link(
         raise HTTPException(status_code=404, detail="User not found")
     if user.get("disabled"):
         raise HTTPException(status_code=403, detail="Account disabled")
+    _prune_expired_sessions(session_repo)  # #849
     from datetime import datetime, timedelta, timezone as _tz
     session_id = pysecrets.token_urlsafe(32)
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
