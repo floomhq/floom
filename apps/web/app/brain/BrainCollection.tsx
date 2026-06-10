@@ -15,33 +15,44 @@ import { formatBytes, writeKey } from "@/lib/brain/format";
 
 const detailCache = new Map<string, ContextDetail>();
 
-function useContextDetail(name: string): ContextDetail | undefined {
+function useContextDetail(name: string): [ContextDetail | undefined, () => Promise<void>] {
   const [d, setD] = useState<ContextDetail | undefined>(detailCache.get(name));
-  useEffect(() => {
-    if (detailCache.has(name)) {
+  const load = (force = false): Promise<void> => {
+    if (!force && detailCache.has(name)) {
       setD(detailCache.get(name));
-      return;
+      return Promise.resolve();
     }
-    let alive = true;
-    api.contexts
+    return api.contexts
       .get(name)
       .then((cd) => {
         detailCache.set(name, cd);
-        if (alive) setD(cd);
+        setD(cd);
       })
       .catch(() => {});
+  };
+  useEffect(() => {
+    let alive = true;
+    if (detailCache.has(name)) {
+      setD(detailCache.get(name));
+    } else {
+      api.contexts.get(name).then((cd) => {
+        detailCache.set(name, cd);
+        if (alive) setD(cd);
+      }).catch(() => {});
+    }
     return () => {
       alive = false;
     };
   }, [name]);
-  return d;
+  // #770: reload re-fetches and refreshes the cache (used after move/rename).
+  return [d, () => load(true)];
 }
 
 // Rule #5: Brain shares the EXACT inline file-open pattern with Run outputs —
 // breadcrumb `{folder} / file`, Back, Download; images render as images; text
 // loads inline via readTextFile; .db gets the honest #777 fallback.
 function FilesTab({ folder }: { folder: ContextSummary }) {
-  const d = useContextDetail(folder.name);
+  const [d, reload] = useContextDetail(folder.name);
   if (!d) return <div style={muted}>Loading…</div>;
   const files = (d.files ?? [])
     .filter((f) => !f.deleted)
@@ -59,6 +70,12 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
       rootLabel={folder.name}
       emptyLabel="This folder is empty."
       loadText={(f) => api.contexts.readTextFile(folder.name, f.id)}
+      // #770: rename a file (move within the same directory), then refresh.
+      onRename={async (file, newName) => {
+        const dir = file.id.includes("/") ? file.id.slice(0, file.id.lastIndexOf("/") + 1) : "";
+        await api.contexts.moveFile(folder.name, file.id, `${dir}${newName}`);
+        await reload();
+      }}
     />
   );
 }
@@ -102,7 +119,7 @@ function NewFolderForm({ onCreated }: { onCreated: () => void | Promise<void> })
 }
 
 function UsedByTab({ folder }: { folder: ContextSummary }) {
-  const d = useContextDetail(folder.name);
+  const [d] = useContextDetail(folder.name);
   if (!d) return <div style={muted}>Loading…</div>;
   const used = d.used_by ?? [];
   return (

@@ -29,17 +29,39 @@ export function InlineFileOpen({
   rootLabel,
   emptyLabel = "No files.",
   loadText,
+  onRename,
 }: {
   files: InlineFile[];
   rootLabel: string;
   emptyLabel?: string;
   /** Text-content loader (Brain: readTextFile). Omitted → download-only fallback. */
   loadText?: (file: InlineFile) => Promise<string>;
+  /** #770: when provided, each row offers an inline rename (never a native prompt). */
+  onRename?: (file: InlineFile, newName: string) => Promise<void>;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [text, setText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
+  const [renamingId, setRenamingId] = useState<string | null>(null);
+  const [renameValue, setRenameValue] = useState("");
+  const [renameBusy, setRenameBusy] = useState(false);
   const open = files.find((f) => f.id === openId) ?? null;
+
+  const baseName = (path: string) => (path.includes("/") ? path.slice(path.lastIndexOf("/") + 1) : path);
+  const submitRename = async (file: InlineFile) => {
+    const next = renameValue.trim();
+    if (!onRename || !next || next === baseName(file.name)) {
+      setRenamingId(null);
+      return;
+    }
+    setRenameBusy(true);
+    try {
+      await onRename(file, next);
+      setRenamingId(null);
+    } finally {
+      setRenameBusy(false);
+    }
+  };
 
   const canLoadText = !!loadText && !!open && !open.binary && !isImageFile(open.name);
   useEffect(() => {
@@ -130,42 +152,79 @@ export function InlineFileOpen({
 
   return (
     <div className="c-ltable">
-      {files.map((f) => (
-        <button
-          key={f.id}
-          type="button"
-          className="c-lrow"
-          style={{ gridTemplateColumns: "1fr auto" }}
-          onClick={() => setOpenId(f.id)}
-        >
-          <div className="c-lprimary">
-            <div className="c-lp-tx">
-              <div className="nm" style={{ fontFamily: "var(--font-mono)" }}>
-                {f.name}
+      {files.map((f) => {
+        const renaming = renamingId === f.id;
+        return (
+          <div
+            key={f.id}
+            className="c-lrow"
+            style={{ gridTemplateColumns: "1fr auto", alignItems: "center", display: "grid" }}
+          >
+            <div className="c-lprimary">
+              <div className="c-lp-tx" style={{ width: "100%" }}>
+                {renaming ? (
+                  <input
+                    className="c-srch"
+                    autoFocus
+                    style={{ maxWidth: 260, fontFamily: "var(--font-mono)" }}
+                    value={renameValue}
+                    disabled={renameBusy}
+                    onChange={(e) => setRenameValue(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void submitRename(f);
+                      if (e.key === "Escape") setRenamingId(null);
+                    }}
+                    onBlur={() => void submitRename(f)}
+                  />
+                ) : (
+                  <button
+                    type="button"
+                    className="nm"
+                    style={{ fontFamily: "var(--font-mono)", background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left" }}
+                    onClick={() => setOpenId(f.id)}
+                  >
+                    {f.name}
+                  </button>
+                )}
+                {f.tags && f.tags.length > 0 ? (
+                  <div style={{ display: "flex", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
+                    {f.tags.map((t) => (
+                      <span
+                        key={t}
+                        style={{
+                          fontSize: 10.5,
+                          padding: "1px 7px",
+                          borderRadius: "var(--r-pill, 9999px)",
+                          background: "var(--bg-2)",
+                          color: "var(--muted-foreground)",
+                        }}
+                      >
+                        {t}
+                      </span>
+                    ))}
+                  </div>
+                ) : null}
               </div>
-              {f.tags && f.tags.length > 0 ? (
-                <div style={{ display: "flex", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
-                  {f.tags.map((t) => (
-                    <span
-                      key={t}
-                      style={{
-                        fontSize: 10.5,
-                        padding: "1px 7px",
-                        borderRadius: "var(--r-pill, 9999px)",
-                        background: "var(--bg-2)",
-                        color: "var(--muted-foreground)",
-                      }}
-                    >
-                      {t}
-                    </span>
-                  ))}
-                </div>
-              ) : null}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+              {onRename && !renaming && (
+                <button
+                  type="button"
+                  className="c-vpill"
+                  style={{ padding: "2px 8px", fontSize: 11 }}
+                  onClick={() => {
+                    setRenameValue(baseName(f.name));
+                    setRenamingId(f.id);
+                  }}
+                >
+                  Rename
+                </button>
+              )}
+              <span className="c-cell m">{sizeLabel(f.sizeBytes)}</span>
             </div>
           </div>
-          <span className="c-cell m">{sizeLabel(f.sizeBytes)}</span>
-        </button>
-      ))}
+        );
+      })}
     </div>
   );
 }
