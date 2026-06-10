@@ -72,7 +72,7 @@ const STEPS = [
   },
   {
     t: "Watch it draft the worker",
-    p: "Tools, schedule, approval rules and your company brain — assembled for review, not for blind trust.",
+    p: "Tools, schedule, approval rules and your company brain, assembled for review.",
   },
   {
     t: "Approve and let it run",
@@ -255,14 +255,16 @@ const APP_WORKERS = [
   { av: "PB", nm: "Pipeline Brief", d: "Weekly pipeline summary posted in #sales.", st: "ok" as const, meta: "3d ago", tools: [<SheetsLogo key="sh" />, <SlackLogo key="s" />] },
 ];
 
-export function AppFrame() {
+export function AppFrame({ standalone = false }: { standalone?: boolean }) {
   return (
     <section id="product" className="pb-32">
-      <SectionHead
-        title="The cockpit behind every worker."
-        sub="What you see when you sign in: the team, the runs, the approvals waiting on you."
-      />
-      <RevealUp delay={0.1} className="mt-9">
+      {!standalone && (
+        <SectionHead
+          title="The cockpit behind every worker."
+          sub="What you see when you sign in: the team, the runs, the approvals waiting on you."
+        />
+      )}
+      <RevealUp delay={0.1} className={standalone ? "" : "mt-9"}>
         <div className="overflow-hidden rounded-[16px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
           <div className="flex">
             {/* sidebar */}
@@ -329,96 +331,179 @@ export function AppFrame() {
   );
 }
 
-/* ================= BUILT IN — upgraded ================= */
+/* ================= BUILT IN — mirrored scrollytelling ================= */
+
+const TRUST = [
+  {
+    t: "Approval before anything ships",
+    p: "Emails, CRM updates, posts: the worker drafts, you approve. In Slack, WhatsApp, or the app.",
+  },
+  {
+    t: "Knows your company",
+    p: "Drop in SOPs, pricing, tone docs. Every brief comes pre-loaded, and you can audit which file each run used.",
+  },
+  {
+    t: "Every run on the record",
+    p: "Trigger, tools, context, output: auditable per run. Your tokens stay yours, revocable any time.",
+  },
+];
+
+function VisApproval() {
+  return (
+    <div className="w-full max-w-[380px] overflow-hidden rounded-[14px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+      <div className="flex items-center gap-2 border-b border-border-soft px-3.5 py-2 text-[11.5px] text-muted-foreground">
+        <span className="[&_svg]:h-3.5 [&_svg]:w-3.5"><SlackLogo /></span>
+        <span className="font-semibold text-foreground"># sales</span>
+        <span className="ml-auto font-mono text-[10px]">2:14 PM</span>
+      </div>
+      <div className="flex gap-2.5 px-3.5 py-3">
+        <span className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[8px] text-[10px] font-semibold text-white" style={{ background: "var(--v2-accent)" }}>MA</span>
+        <div className="min-w-0">
+          <div className="text-[12px] font-semibold">Maya <span className="ml-1 rounded-[3px] bg-secondary px-1 py-px text-[8.5px] font-bold uppercase tracking-wide text-muted-foreground">worker</span></div>
+          <p className="mt-0.5 text-[12px] leading-relaxed text-foreground/85">Drafted the Acme follow-up with pricing from the brain. Send?</p>
+          <div className="mt-2 flex gap-1.5">
+            <span className="rounded-[8px] px-2.5 py-1 text-[11px] font-medium text-white" style={{ background: "var(--v2-accent)" }}>Approve &amp; send</span>
+            <span className="rounded-[8px] border border-border bg-card px-2.5 py-1 text-[11px]">Edit</span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function VisBrain() {
+  const files = [
+    { ext: "PDF", tint: "#E5533D", name: "ICP brief", x: "6%", y: "6%" },
+    { ext: "XLS", tint: "#2F8F5B", name: "Pricing", x: "62%", y: "2%" },
+    { ext: "MD", tint: "#6B7280", name: "Tone guide", x: "10%", y: "72%" },
+    { ext: "URL", tint: "#3E6FE0", name: "Style guide", x: "64%", y: "70%" },
+  ];
+  return (
+    <div className="relative h-[260px] w-full max-w-[380px]">
+      {/* connection lines */}
+      <svg className="absolute inset-0 h-full w-full" aria-hidden>
+        {[["20%","18%"],["76%","14%"],["24%","82%"],["78%","80%"]].map(([x, y], i) => (
+          <line key={i} x1="50%" y1="50%" x2={x} y2={y} stroke="var(--border-default)" strokeWidth="1" />
+        ))}
+        {[["20%","18%"],["76%","14%"],["24%","82%"],["78%","80%"]].map(([x, y], i) => (
+          <circle key={`d${i}`} cx={x} cy={y} r="2.5" fill="var(--v2-accent)" />
+        ))}
+      </svg>
+      {/* center brain node */}
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2">
+        <motion.div
+          animate={{ scale: [1, 1.05, 1] }}
+          transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+          className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-card"
+          style={{ boxShadow: "0 0 0 1px var(--border-default)" }}
+        >
+          <Brain className="h-7 w-7" style={{ color: "var(--v2-accent)" }} strokeWidth={1.6} />
+        </motion.div>
+        <div className="mt-2 text-center text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Company brain</div>
+      </div>
+      {/* file chips */}
+      {files.map((f, i) => (
+        <motion.div
+          key={f.name}
+          animate={{ y: [0, -3, 0] }}
+          transition={{ duration: 3 + i * 0.6, repeat: Infinity, ease: "easeInOut", delay: i * 0.4 }}
+          className="absolute flex items-center gap-2 rounded-[10px] bg-card px-2.5 py-1.5"
+          style={{ left: f.x, top: f.y, boxShadow: "0 0 0 1px var(--border-soft)" }}
+        >
+          <span className="flex h-[18px] w-[26px] items-center justify-center rounded-[5px] border border-border bg-[var(--bg-app)] font-mono text-[8px] font-bold" style={{ color: f.tint }}>{f.ext}</span>
+          <span className="text-[11px] font-medium">{f.name}</span>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
+function VisRecord() {
+  return (
+    <div className="w-full max-w-[380px] overflow-hidden rounded-[14px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+      <div className="flex items-center justify-between border-b border-border-soft px-3.5 py-2.5">
+        <span className="text-[12.5px] font-semibold">Run #1042</span>
+        <StatusPill tone="success">Completed</StatusPill>
+      </div>
+      {[
+        { t: "17:00:04", n: "Read Google Calendar · 3 events", pill: <StatusPill tone="success">ok</StatusPill> },
+        { t: "17:00:07", n: "Loaded brain: tone, pricing, CRM rules", pill: <StatusPill tone="success">ok</StatusPill> },
+        { t: "17:00:09", n: "Drafted email + HubSpot note", pill: <StatusPill tone="success">ok</StatusPill> },
+        { t: "17:00:11", n: "Send to sarah@acme.com", pill: <StatusPill tone="warning">held</StatusPill> },
+      ].map((r, i) => (
+        <div key={i} className="flex items-center gap-2.5 border-b border-border-soft px-3.5 py-2 text-[11.5px] last:border-0">
+          <span className="font-mono text-[10px] text-muted-foreground">{r.t}</span>
+          <span className="min-w-0 flex-1 truncate text-foreground/80">{r.n}</span>
+          {r.pill}
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function BuiltIn() {
+  const [active, setActive] = useState(0);
+  const refs = useRef<Array<HTMLDivElement | null>>([]);
+
+  useEffect(() => {
+    const io = new IntersectionObserver(
+      (es) => {
+        es.forEach((e) => {
+          if (e.isIntersecting) setActive(Number((e.target as HTMLElement).dataset.trust));
+        });
+      },
+      { rootMargin: "-45% 0px -45% 0px" },
+    );
+    refs.current.forEach((r) => r && io.observe(r));
+    return () => io.disconnect();
+  }, []);
+
+  const VIS = [VisApproval, VisBrain, VisRecord];
+
   return (
     <section id="built" className="pb-32">
-      <SectionHead
-        title="Safe to hand over real work."
-        sub="Delegation needs receipts. These are in the product from day one."
-      />
-      <div className="mt-9 grid gap-3.5 md:grid-cols-2">
-        {/* approval — the trust beat, wide card with a real Slack moment */}
-        <RevealUp className="md:col-span-2">
-          <div className="grid overflow-hidden rounded-[16px] bg-card md:grid-cols-[1fr_1.1fr]" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
-            <div className="flex flex-col justify-center p-6">
-              <div className="mb-1.5 text-[16px] font-semibold">Approval before anything ships</div>
-              <p className="max-w-[360px] text-[13px] leading-relaxed text-muted-foreground">
-                Emails, CRM updates, posts — the worker drafts, you approve. In Slack, WhatsApp, or the app.
-                Nothing leaves the building without a human yes.
+      <SectionHead title="Safe to hand over real work." />
+      <div className="mt-10 grid gap-14 md:grid-cols-[1fr_1.05fr]">
+        {/* headings LEFT (mirror of how-it-works) */}
+        <div className="flex flex-col justify-center">
+          {TRUST.map((s, i) => (
+            <div
+              key={s.t}
+              data-trust={i}
+              ref={(el) => { refs.current[i] = el; }}
+              className="flex min-h-[200px] cursor-default flex-col justify-center py-3 md:min-h-[160px]"
+              onMouseEnter={() => setActive(i)}
+            >
+              <h3 className={`text-[27px] font-semibold tracking-[-0.022em] transition-colors duration-300 ${active === i ? "text-foreground" : "text-muted-foreground/50"}`}>
+                {s.t}
+              </h3>
+              <p className={`mt-2 max-w-[380px] text-[14px] leading-relaxed text-muted-foreground transition-opacity duration-300 ${active === i ? "opacity-100" : "opacity-45"}`}>
+                {s.p}
               </p>
             </div>
-            <div className="border-t border-border-soft bg-secondary/60 p-5 md:border-l md:border-t-0">
-              <div className="overflow-hidden rounded-[12px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-soft)" }}>
-                <div className="flex items-center gap-2 border-b border-border-soft px-3.5 py-2 text-[11.5px] text-muted-foreground">
-                  <span className="[&_svg]:h-3.5 [&_svg]:w-3.5"><SlackLogo /></span>
-                  <span className="font-semibold text-foreground"># sales</span>
-                  <span className="ml-auto font-mono text-[10px]">2:14 PM</span>
-                </div>
-                <div className="flex gap-2.5 px-3.5 py-3">
-                  <span className="flex h-[26px] w-[26px] shrink-0 items-center justify-center rounded-[8px] text-[10px] font-semibold text-white" style={{ background: "var(--v2-accent)" }}>MA</span>
-                  <div className="min-w-0">
-                    <div className="text-[12px] font-semibold">Maya <span className="ml-1 rounded-[3px] bg-secondary px-1 py-px text-[8.5px] font-bold uppercase tracking-wide text-muted-foreground">worker</span></div>
-                    <p className="mt-0.5 text-[12px] leading-relaxed text-foreground/85">Drafted the Acme follow-up with pricing from the brain. Send?</p>
-                    <div className="mt-2 flex gap-1.5">
-                      <span className="rounded-[8px] px-2.5 py-1 text-[11px] font-medium text-white" style={{ background: "var(--v2-accent)" }}>Approve &amp; send</span>
-                      <span className="rounded-[8px] border border-border bg-card px-2.5 py-1 text-[11px]">Edit</span>
-                    </div>
-                  </div>
-                </div>
-              </div>
-            </div>
+          ))}
+        </div>
+        {/* panel RIGHT */}
+        <div className="hidden md:sticky md:top-20 md:block md:h-[480px]">
+          <div className="flex h-full items-center justify-center rounded-[20px] bg-secondary/70 p-8">
+            <AnimatePresence mode="wait">
+              {VIS.map((V, i) =>
+                active === i ? (
+                  <motion.div
+                    key={i}
+                    initial={{ opacity: 0, y: 10 }}
+                    animate={{ opacity: 1, y: 0 }}
+                    exit={{ opacity: 0, y: -8 }}
+                    transition={{ duration: 0.32, ease: EASE }}
+                    style={{ display: "flex", justifyContent: "center", width: "100%" }}
+                  >
+                    <V />
+                  </motion.div>
+                ) : null,
+              )}
+            </AnimatePresence>
           </div>
-        </RevealUp>
-
-        {/* brain */}
-        <RevealUp delay={0.05}>
-          <div className="flex h-full flex-col overflow-hidden rounded-[16px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
-            <div className="flex min-h-[160px] flex-col justify-center gap-1.5 border-b border-border-soft bg-secondary/60 p-5">
-              {[
-                { ext: "PDF", tint: "#E5533D", name: "ICP brief", meta: "used in 14 runs" },
-                { ext: "XLS", tint: "#2F8F5B", name: "Pricing tiers", meta: "used in 32 runs" },
-                { ext: "MD", tint: "#6B7280", name: "Tone guide", meta: "used in every email" },
-              ].map((f) => (
-                <div key={f.name} className="flex items-center gap-2.5 rounded-[10px] bg-card px-3 py-2" style={{ boxShadow: "0 0 0 1px var(--border-soft)" }}>
-                  <span className="flex h-[22px] w-[30px] items-center justify-center rounded-[6px] border border-border bg-[var(--bg-app)] font-mono text-[9px] font-bold" style={{ color: f.tint }}>{f.ext}</span>
-                  <span className="min-w-0 flex-1 truncate text-[12px] font-medium">{f.name}</span>
-                  <span className="font-mono text-[10px] text-muted-foreground">{f.meta}</span>
-                </div>
-              ))}
-            </div>
-            <div className="p-5">
-              <div className="mb-1 text-[14.5px] font-semibold">Knows your company</div>
-              <p className="text-[12.5px] leading-relaxed text-muted-foreground">Drop in SOPs, pricing, tone docs. Every brief comes pre-loaded — and you can audit which file each run actually used.</p>
-            </div>
-          </div>
-        </RevealUp>
-
-        {/* observable */}
-        <RevealUp delay={0.1}>
-          <div className="flex h-full flex-col overflow-hidden rounded-[16px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
-            <div className="flex min-h-[160px] flex-col justify-center border-b border-border-soft bg-secondary/60 p-5">
-              <div className="overflow-hidden rounded-[10px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-soft)" }}>
-                {[
-                  { t: "17:00:04", n: "Read Google Calendar · 3 events", pill: <StatusPill tone="success">ok</StatusPill> },
-                  { t: "17:00:09", n: "Drafted email from brain context", pill: <StatusPill tone="success">ok</StatusPill> },
-                  { t: "17:00:11", n: "Send to sarah@acme.com", pill: <StatusPill tone="warning">held</StatusPill> },
-                ].map((r, i) => (
-                  <div key={i} className="flex items-center gap-2.5 border-b border-border-soft px-3 py-2 text-[11.5px] last:border-0">
-                    <span className="font-mono text-[10px] text-muted-foreground">{r.t}</span>
-                    <span className="min-w-0 flex-1 truncate text-foreground/80">{r.n}</span>
-                    {r.pill}
-                  </div>
-                ))}
-              </div>
-            </div>
-            <div className="p-5">
-              <div className="mb-1 text-[14.5px] font-semibold">Every run on the record</div>
-              <p className="text-[12.5px] leading-relaxed text-muted-foreground">Trigger, tools, context, output — auditable per run. Your OAuth tokens stay yours; revoke at the source any time.</p>
-            </div>
-          </div>
-        </RevealUp>
+        </div>
       </div>
     </section>
   );
@@ -443,8 +528,8 @@ export function V2Footer() {
             <p className="mt-3 text-[11px] text-muted-foreground">Backed by Founders Inc</p>
           </div>
           {[
-            { h: "Product", links: [["Templates", "/v2/templates"], ["How it works", "#how"], ["Built in", "#built"], ["Sign in", "/login"]] },
-            { h: "Resources", links: [["Docs", "https://github.com/floomhq/workeros#readme"], ["GitHub", "https://github.com/floomhq/workeros"], ["Floom Skills", "https://skills.floom.dev"], ["Floom", "https://floom.dev"]] },
+            { h: "Product", links: [["Product", "/v2/product"], ["Templates", "/v2/templates"], ["Docs", "/v2/docs"], ["Sign in", "/login"]] },
+            { h: "Resources", links: [["GitHub", "https://github.com/floomhq/workeros"], ["Floom Skills", "https://skills.floom.dev"], ["Floom", "https://floom.dev"]] },
             { h: "Company", links: [["LinkedIn", "https://www.linkedin.com/company/floomhq/"], ["X", "https://x.com/floomhq"], ["Terms", "/terms"], ["Privacy", "/privacy"]] },
           ].map((col) => (
             <div key={col.h}>

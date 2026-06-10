@@ -76,13 +76,21 @@ function Mirror({ text, matches }: { text: string; matches: Match[] }) {
   return <>{out}</>;
 }
 
+const PILLS: Array<{ label: string; prompt: string }> = [
+  { label: "Pipeline report", prompt: "Every Monday 9am, pull last week's pipeline from HubSpot and post a summary in #sales" },
+  { label: "Post-call follow-up", prompt: "After every call, draft a follow-up email using my CRM notes" },
+  { label: "Lead research", prompt: "Each morning, research 5 new inbound leads before my first meeting" },
+];
+
 export function V2Composer({
   slim = false,
   channels = false,
+  pills = false,
   placeholder = "Every Monday, summarise last week's pipeline in #sales…",
 }: {
   slim?: boolean;
   channels?: boolean;
+  pills?: boolean;
   placeholder?: string;
 }) {
   const [value, setValue] = useState("");
@@ -155,6 +163,23 @@ export function V2Composer({
         </div>
       </motion.form>
 
+      {pills && (
+        <div className="mt-4 flex flex-wrap items-center justify-center gap-2">
+          {PILLS.map((p) => (
+            <motion.button
+              key={p.label}
+              type="button"
+              onClick={() => setValue(p.prompt)}
+              whileHover={{ y: -1 }}
+              whileTap={{ scale: 0.97 }}
+              className="rounded-full border border-border bg-card px-3 py-1.5 text-[12px] font-medium text-foreground/75 transition-colors hover:border-[var(--v2-accent)] hover:text-foreground"
+            >
+              {p.label}
+            </motion.button>
+          ))}
+        </div>
+      )}
+
       {channels && (
         <div className="mt-4 flex flex-wrap items-center justify-center gap-2 text-[12px] text-muted-foreground">
           <span>or hire straight from</span>
@@ -177,7 +202,7 @@ export function V2Composer({
             <span className="flex h-3.5 w-3.5 items-center justify-center rounded-[4px] bg-primary font-mono text-[7px] font-bold text-primary-foreground">&gt;_</span>
             MCP
           </a>
-          <span className="text-muted-foreground/70">— no dashboard needed</span>
+          <span className="text-muted-foreground/70">· no dashboard needed</span>
         </div>
       )}
     </div>

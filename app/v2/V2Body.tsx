@@ -14,15 +14,21 @@ import { Moon, Sun } from "lucide-react";
 import { TemplateRow } from "@/components/landing-ref/TemplateRow";
 import { getTemplate } from "@/components/landing-ref/data";
 import {
+  CalendlyLogo,
+  DiscordLogo,
   GCalLogo,
+  GitHubSVG,
   GmailLogo,
   HubSpotLogo,
+  IntercomLogo,
   NotionLogo,
+  SalesforceLogo,
   SheetsLogo,
   SlackLogo,
+  WhatsAppLogo,
 } from "@/components/landing-icons";
 import { V2Composer } from "./V2Composer";
-import { AppFrame, BuiltIn, HowItWorks, RevealUp, SectionHead, V2Footer } from "./V2Sections";
+import { BuiltIn, HowItWorks, RevealUp, SectionHead, V2Footer } from "./V2Sections";
 import "./theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -34,6 +40,10 @@ function Mark({ size = 22 }: { size?: number }) {
       <path d="M30 22 h20 l22 22 a3 3 0 0 1 0 4 l-22 22 h-20 a6 6 0 0 1 -6 -6 v-36 a6 6 0 0 1 6 -6 z" fill="var(--primary-text)" />
     </svg>
   );
+}
+
+function GitHubMark() {
+  return <span className="text-foreground [&_svg]:h-[17px] [&_svg]:w-[17px]"><GitHubSVG /></span>;
 }
 
 function LogoTile({ children }: { children: React.ReactNode }) {
@@ -67,8 +77,8 @@ export function V2Body() {
           <div className="hidden gap-0.5 text-[13px] text-muted-foreground md:flex">
             <a href="#how" className="rounded-[10px] px-3 py-1.5 hover:bg-secondary hover:text-foreground">How it works</a>
             <Link href="/v2/templates" className="rounded-[10px] px-3 py-1.5 hover:bg-secondary hover:text-foreground">Templates</Link>
-            <a href="#built" className="rounded-[10px] px-3 py-1.5 hover:bg-secondary hover:text-foreground">Built in</a>
-            <a href="https://github.com/floomhq/workeros#readme" className="rounded-[10px] px-3 py-1.5 hover:bg-secondary hover:text-foreground">Docs</a>
+            <Link href="/v2/product" className="rounded-[10px] px-3 py-1.5 hover:bg-secondary hover:text-foreground">Product</Link>
+            <Link href="/v2/docs" className="rounded-[10px] px-3 py-1.5 hover:bg-secondary hover:text-foreground">Docs</Link>
           </div>
           <div className="flex items-center gap-2">
             <button
@@ -106,29 +116,35 @@ export function V2Body() {
             transition={{ duration: 0.55, delay: 0.18, ease: EASE }}
             className="mt-9"
           >
-            <V2Composer channels />
+            <V2Composer channels pills />
           </motion.div>
         </section>
 
-        {/* works-with */}
+        {/* works-with: full-width band */}
         <motion.section
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.6, delay: 0.34 }}
-          className="flex items-center justify-center gap-2.5 pb-24 pt-8 text-[12px] text-muted-foreground"
+          className="relative left-1/2 w-screen -translate-x-1/2 border-y border-border-soft py-6 mb-24 mt-8"
         >
-          <LogoTile><GmailLogo /></LogoTile>
-          <LogoTile><SlackLogo /></LogoTile>
-          <LogoTile><HubSpotLogo /></LogoTile>
-          <LogoTile><NotionLogo /></LogoTile>
-          <LogoTile><GCalLogo /></LogoTile>
-          <LogoTile><SheetsLogo /></LogoTile>
-          <span className="ml-1">1,000+ tools via Composio</span>
+          <div className="mb-3.5 text-center text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Works with 1,000+ tools</div>
+          <div className="flex flex-wrap items-center justify-center gap-3 px-6">
+            <LogoTile><GmailLogo /></LogoTile>
+            <LogoTile><SlackLogo /></LogoTile>
+            <LogoTile><HubSpotLogo /></LogoTile>
+            <LogoTile><NotionLogo /></LogoTile>
+            <LogoTile><GCalLogo /></LogoTile>
+            <LogoTile><SheetsLogo /></LogoTile>
+            <LogoTile><GitHubMark /></LogoTile>
+            <LogoTile><SalesforceLogo /></LogoTile>
+            <LogoTile><IntercomLogo /></LogoTile>
+            <LogoTile><WhatsAppLogo /></LogoTile>
+            <LogoTile><DiscordLogo /></LogoTile>
+            <LogoTile><CalendlyLogo /></LogoTile>
+          </div>
         </motion.section>
 
         <HowItWorks />
-
-        <AppFrame />
 
         {/* templates */}
         <section id="tpl" className="pb-32">

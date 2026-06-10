@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { V2Body } from "./V2Body";
 
 export const metadata: Metadata = {
-  title: "Workeros — v2 preview",
+  title: "Workeros · v2 preview",
   description: "Landing preview on the FINAL wireframe design system.",
   robots: { index: false, follow: false },
 };
