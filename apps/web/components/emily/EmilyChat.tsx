@@ -1,12 +1,11 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ChevronRight, ChevronLeft, ChevronDown, Maximize2, PenSquare, Download } from "lucide-react";
+import { AlertTriangle, ChevronRight, ChevronLeft, ChevronDown, Maximize2, Minimize2, PenSquare, Download, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-import Link from "next/link";
 import { useRouter } from "next/navigation";
 
 import { EmilyAvatar } from "./EmilyAvatar";
@@ -20,21 +19,107 @@ import {
   useChatStream,
 } from "@/lib/useChatStream";
 import { exportConversationMarkdown } from "@/lib/emily-chat-export";
+import { api } from "@/lib/api";
+import type { ConversationSummary } from "@/lib/types";
 import type { AttachedFile, ChatMessage } from "@/lib/emily-chat-types";
 
 // ── Chat controls (New chat + Export) ─────────────────────────────────────────
+
+// Recent chats — browse + reopen past Emily conversations (SPEC §12). Backed by
+// GET /conversations (BACKEND-MAP: WORKS).
+function RecentChats({
+  activeConversationId,
+  onLoadConversation,
+}: {
+  activeConversationId: string | null;
+  onLoadConversation: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<ConversationSummary[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    api.conversations
+      .list(20)
+      .then((rows) => alive && setItems(rows))
+      .catch(() => alive && setItems([]));
+    return () => {
+      alive = false;
+    };
+  }, [open]);
+
+  return (
+    <div className="relative">
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+        onClick={() => setOpen((v) => !v)}
+        title="Recent chats"
+        aria-label="Recent chats"
+        aria-expanded={open}
+      >
+        <History className="size-3.5" />
+        <span className="hidden sm:inline">Recent</span>
+      </Button>
+      {open && (
+        <div
+          role="menu"
+          onMouseLeave={() => setOpen(false)}
+          className="absolute right-0 top-full z-30 mt-1 max-h-72 w-64 overflow-auto rounded-[12px] border border-border bg-[var(--bg-card)] p-1 shadow-[var(--shadow-pop)]"
+        >
+          {items === null && <div className="px-2 py-3 text-xs text-muted-foreground">Loading…</div>}
+          {items?.length === 0 && (
+            <div className="px-2 py-3 text-xs text-muted-foreground">No past chats yet.</div>
+          )}
+          {items?.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onLoadConversation(c.id);
+              }}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-xs hover:bg-[var(--bg-2)]",
+                c.id === activeConversationId && "bg-[var(--bg-2)]"
+              )}
+            >
+              <span className="flex-1 truncate text-[var(--ink-soft)]">
+                {c.title?.trim() || "Untitled chat"}
+              </span>
+              {c.message_count != null && (
+                <span className="shrink-0 text-[10.5px] text-muted-foreground">{c.message_count}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ChatControls({
   onNew,
   onExport,
   canExport,
+  activeConversationId,
+  onLoadConversation,
 }: {
   onNew: () => void;
   onExport: () => void;
   canExport: boolean;
+  activeConversationId: string | null;
+  onLoadConversation: (id: string) => void;
 }) {
   return (
     <div className="flex items-center gap-1">
+      <RecentChats
+        activeConversationId={activeConversationId}
+        onLoadConversation={onLoadConversation}
+      />
       <Button
         size="sm"
         variant="ghost"
@@ -169,8 +254,16 @@ interface EmilyChatCoreProps {
 const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
 
 function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
-  const { messages, conversationId, isStreaming, isHydrating, error, sendMessage, newSession } =
-    useChatStream();
+  const {
+    messages,
+    conversationId,
+    isStreaming,
+    isHydrating,
+    error,
+    sendMessage,
+    newSession,
+    loadConversation,
+  } = useChatStream();
   const router = useRouter();
   const [input, setInput] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -318,6 +411,12 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
           }}
           onExport={handleExport}
           canExport={hasMessages}
+          activeConversationId={conversationId}
+          onLoadConversation={(id) => {
+            loadConversation(id);
+            isNearBottomRef.current = true;
+            setShowScrollButton(false);
+          }}
         />
       </div>
 
@@ -393,25 +492,39 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
 
 // ── Dock component (right-side persistent rail) ───────────────────────────────
 
+// Emily dock width progression (SPEC §12): collapsed ↔ rail ↔ wide ↔ full-screen
+// overlay, via the expand control + collapse button.
+type DockMode = "collapsed" | "rail" | "wide" | "full";
+
+const DOCK_WIDTH: Record<DockMode, string> = {
+  collapsed: "w-12",
+  rail: "w-full md:w-[380px] md:max-w-[30vw]",
+  wide: "w-full md:w-[640px] md:max-w-[52vw]",
+  full: "fixed inset-0 z-50 w-full", // full-screen overlay
+};
+
 export function EmilyDock({ className }: { className?: string }) {
-  const [open, setOpen] = useState(true);
+  const [mode, setMode] = useState<DockMode>("rail");
+  const open = mode !== "collapsed";
+  const cycleExpand = () =>
+    setMode((m) => (m === "rail" ? "wide" : m === "wide" ? "full" : "rail"));
 
   return (
     <div
       className={cn(
-        "flex h-full flex-col border-l border-border bg-background shrink-0",
-        // Width collapses to 48px strip when closed; full rail when open
-        open ? "w-full md:w-[380px] md:max-w-[30vw]" : "w-12",
+        "flex h-full flex-col bg-background shrink-0",
+        mode !== "full" && "border-l border-border",
+        DOCK_WIDTH[mode],
         className
       )}
-      aria-label={open ? "Emily dock" : "Emily dock (collapsed)"}
+      aria-label={open ? `Emily dock (${mode})` : "Emily dock (collapsed)"}
     >
-      {/* Collapsed strip — shown only when closed */}
+      {/* Collapsed strip — shown only when collapsed */}
       {!open && (
         <div className="flex flex-col items-center justify-start pt-4 gap-3">
           <button
             type="button"
-            onClick={() => setOpen(true)}
+            onClick={() => setMode("rail")}
             className="flex flex-col items-center gap-1.5 group"
             title="Open Emily"
             aria-label="Open Emily"
@@ -436,19 +549,21 @@ export function EmilyDock({ className }: { className?: string }) {
           >
             Online
           </Badge>
-          <Link
-            href="/chat"
-            title="Full-page chat"
-            aria-label="Open full-page Emily chat"
-            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          >
-            <Maximize2 className="size-3.5" />
-          </Link>
           <Button
             size="sm"
             variant="ghost"
             className="size-7 p-0"
-            onClick={() => setOpen(false)}
+            onClick={cycleExpand}
+            title={mode === "full" ? "Shrink Emily" : "Expand Emily"}
+            aria-label={mode === "full" ? "Shrink Emily" : "Expand Emily"}
+          >
+            {mode === "full" ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="size-7 p-0"
+            onClick={() => setMode("collapsed")}
             title="Collapse Emily"
             aria-label="Collapse Emily"
           >

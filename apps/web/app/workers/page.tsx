@@ -2,7 +2,7 @@
 // Interactive shell (search, tabs, favorites) lives in WorkersClient below.
 import { Suspense } from "react";
 import { fetchWorkerList } from "@/lib/server-api";
-import WorkersClient from "./WorkersClient";
+import WorkersCollection from "./WorkersCollection";
 import WorkersLoadingSkeleton from "./WorkersLoadingSkeleton";
 
 export const revalidate = 30;
@@ -23,5 +23,5 @@ async function WorkersFetcher() {
     // API unavailable: render empty state; client can retry via its own fetch
     workers = [];
   }
-  return <WorkersClient initialWorkers={workers} />;
+  return <WorkersCollection initialWorkers={workers} />;
 }
