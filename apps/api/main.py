@@ -19153,7 +19153,7 @@ class ChatRequest(BaseModel):
 
     message: str
     conversation_id: Optional[str] = None
-    source: Literal["web", "slack", "mcp", "whatsapp"] = "web"
+    source: Literal["web", "slack", "mcp", "whatsapp", "cli"] = "web"
 
 
 class ConversationSummary(BaseModel):
