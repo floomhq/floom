@@ -729,24 +729,48 @@ function runCardFromResult(
   existing: ToolCard
 ): RunCard | null {
   const result = asRecord(event.result);
+  const nestedRun = asRecord(result?.run);
   const normalizedTool = event.toolName ? normalizeToolName(event.toolName) : "";
-  const isRun = event.card?.kind === "run" || normalizedTool === "workers.run";
+  const isRun =
+    event.card?.kind === "run" ||
+    normalizedTool === "workers.run" ||
+    normalizedTool === "runs.get";
   const resource = event.resource?.kind === "run" ? event.resource : null;
-  const runId = optionalString(result?.run_id) ?? optionalString(resource?.run_id);
+  const runId =
+    optionalString(result?.run_id) ??
+    optionalString(nestedRun?.run_id) ??
+    optionalString(nestedRun?.id) ??
+    optionalString(resource?.run_id);
   if (!isRun || !runId) return null;
 
   const preview = "preview" in existing ? existing.preview : undefined;
   const workerId =
     optionalString(resource?.worker_id) ??
+    optionalString(nestedRun?.worker_id) ??
     optionalString(asRecord(preview)?.id);
   const workerName = optionalString(resource?.worker_name) ?? workerId ?? "Worker run";
+  const actions =
+    event.actions && event.actions.length > 0
+      ? event.actions
+      : existing.actions && existing.actions.length > 0
+        ? existing.actions
+        : normalizedTool === "runs.get"
+          ? [
+              {
+                id: "open_run",
+                label: "View run",
+                method: "GET" as const,
+                href: `/runs/${runId}?tab=logs`,
+              },
+            ]
+          : event.actions;
 
   return {
     kind: "run",
     callId: existing.callId,
     card_id: existing.card_id,
     status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "running")),
-    actions: event.actions,
+    actions,
     streams: event.streams,
     toolName: normalizedTool || event.toolName,
     runId,

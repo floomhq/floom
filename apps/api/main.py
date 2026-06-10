@@ -6524,14 +6524,19 @@ def scan_context_for_secrets(
     )
 
 
-@app.get("/workers", response_model=List[WorkerSummary])
+class WorkerListSummary(WorkerSummary):
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+@app.get("/workers", response_model=List[WorkerListSummary])
 def list_workers(
     include_system: bool = False,
     include_archived: bool = False,
     shape: str = "full",
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
-) -> List[WorkerSummary]:
+) -> List[WorkerListSummary]:
     """List workers.
 
     ?shape=list           — trimmed payload (~15 KB for 18 workers) for the web UI list view.
@@ -6569,7 +6574,7 @@ def list_workers(
     )
     available_secret_names = _available_secret_names_for_user(worker_user_id, repos)
     available_conn_slugs = _available_connection_slugs_for_user(worker_user_id, repos)
-    result: List[WorkerSummary] = []
+    result: List[WorkerListSummary] = []
     for w in workers:
         last_run_row = _get_last_run_for_worker(w["id"], user_id=worker_user_id, repos=repos)
         last_run = _make_run_summary(last_run_row) if last_run_row else None
@@ -6630,9 +6635,11 @@ def list_workers(
                     continue
 
         result.append(
-            WorkerSummary(
+            WorkerListSummary(
                 id=w["id"],
                 name=w["name"],
+                created_at=w.get("created_at"),
+                updated_at=w.get("updated_at"),
                 description=w.get("description"),
                 # S44 Win 3: omit detail-only fields in list shape.
                 long_description=None if list_shape else w.get("long_description"),

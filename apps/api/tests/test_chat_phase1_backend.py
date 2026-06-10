@@ -144,7 +144,12 @@ def test_tool_event_metadata_keeps_legacy_safe_args_and_card_resource(booted):
     }
     assert metadata["resource"] == {"kind": "run", "worker_id": "worker-author", "run_id": "run_123"}
     assert metadata["streams"]["events"] == "/runs/run_123/events"
-    assert metadata["actions"][0] == {"id": "open_run", "method": "GET", "href": "/runs/run_123"}
+    assert metadata["actions"][0] == {
+        "id": "open_run",
+        "label": "View run",
+        "method": "GET",
+        "href": "/runs/run_123?tab=logs",
+    }
 
 
 def test_worker_list_tool_metadata_uses_renderable_worker_list_card(booted):
@@ -186,6 +191,38 @@ def test_worker_run_tool_metadata_uses_renderable_run_card(booted):
         "run_id": "run_123",
     }
     assert metadata["streams"]["parts"] == "/runs/run_123/stream"
+
+
+def test_runs_get_metadata_serializes_nested_run_resource_and_view_action(booted):
+    chat_service = booted["chat_service"]
+    metadata = chat_service.build_tool_event_metadata(
+        "runs__get",
+        "call_run_details",
+        args={"run_id": "run_123"},
+        result={
+            "ok": True,
+            "run": {
+                "id": "run_123",
+                "worker_id": "research_brief",
+                "status": "completed",
+            },
+        },
+        phase="result",
+    )
+
+    assert metadata["card"]["kind"] == "run"
+    assert metadata["card"]["status"] == "completed"
+    assert metadata["resource"] == {
+        "kind": "run",
+        "worker_id": "research_brief",
+        "run_id": "run_123",
+    }
+    assert metadata["actions"][0] == {
+        "id": "open_run",
+        "label": "View run",
+        "method": "GET",
+        "href": "/runs/run_123?tab=logs",
+    }
 
 
 def test_tool_result_preview_does_not_expose_file_content(booted):
@@ -447,6 +484,9 @@ def test_workers_run_uses_start_run_queue_path(booted, monkeypatch):
     def fake_start_run(run_id, worker_id, inputs, **kwargs):
         started.append((run_id, worker_id, dict(inputs)))
 
+    # Bypass the #748 ownership guard: the tool checks _worker_can_view which
+    # queries the DB; in this unit test there is no persisted worker row.
+    monkeypatch.setattr(chat_service, "_worker_can_view", lambda conn, wid, uid: True)
     monkeypatch.setattr(run_service, "create_run", fake_create_run)
     monkeypatch.setattr(run_service, "start_run", fake_start_run)
 
