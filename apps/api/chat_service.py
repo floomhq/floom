@@ -1421,8 +1421,18 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
     tools = [
         _make_tool(
             "workers__list_all",
-            "List all workers in the workspace (name, id, trigger, last run status).",
-            {"type": "object", "properties": {}, "required": []},
+            "List the user's workers (name, id, trigger, last run status). "
+            "System and example workers are hidden unless include_system is true.",
+            {
+                "type": "object",
+                "properties": {
+                    "include_system": {
+                        "type": "boolean",
+                        "description": "Also include system/example workers (hidden by default).",
+                    }
+                },
+                "required": [],
+            },
             _tool_workers_list_all,
         ),
         _make_tool(
@@ -1821,12 +1831,19 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
                         + "ORDER BY w.name",
                         (user_id,),
                     ).fetchall()
+    # #841 RCA: every row was returned, so "what workers do I have?" dumped
+    # system and example workers into the chat card with no distinction. The
+    # flags were already computed but never used to filter. Hidden rows are
+    # surfaced as a count (plus include_system=true to opt back in) so Emily
+    # can mention they exist without listing them.
+    include_system = bool(args.get("include_system"))
+    hidden_system = 0
     for row in rows:
         try:
             manifest = json.loads(row["manifest_json"] or "{}") if row["manifest_json"] else {}
         except Exception:
             manifest = {}
-        result.append({
+        entry = {
             "id": row["id"],
             "name": row["name"],
             "title": manifest.get("title") or row["name"],
@@ -1834,8 +1851,15 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
             "enabled": bool(row["enabled"]),
             "system_worker": manifest.get("system_worker", False),
             "is_example": manifest.get("is_example", False),
-        })
-    return {"ok": True, "workers": result, "count": len(result)}
+        }
+        if (entry["system_worker"] or entry["is_example"]) and not include_system:
+            hidden_system += 1
+            continue
+        result.append(entry)
+    out = {"ok": True, "workers": result, "count": len(result)}
+    if hidden_system:
+        out["hidden_system_count"] = hidden_system
+    return out
 
 
 def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
