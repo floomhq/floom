@@ -46,11 +46,10 @@ export function isViewOnly(item: HasPermissions | null | undefined): boolean {
 
 /**
  * Feedback is a first-class capability for anyone who can view an asset they
- * don't own (SPEC §12). NOTE: the backend endpoint is missing
- * (`GET /workers/{id}/feedback` → 404, BACKEND-MAP) — surfaces gated on this
- * must mark the action as backend-dependent, not silently fake it.
+ * don't own (SPEC §12). The backend now serves `GET/POST /workers/{id}/feedback`
+ * (migration 63 + FeedbackRepository), so the UI is live.
  */
-export const FEEDBACK_BACKEND_AVAILABLE = false;
+export const FEEDBACK_BACKEND_AVAILABLE = true;
 
 export function canLeaveFeedback(item: HasPermissions | null | undefined): boolean {
   return can("view", item) && !item?.permissions?.is_owner;

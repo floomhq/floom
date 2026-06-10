@@ -17,8 +17,9 @@ import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import { CodeBlock } from "@/components/file-viewer/code-block";
 import { WorkerBrainEditor } from "@/components/worker/WorkerBrainEditor";
 import { WorkerToolsEditor } from "@/components/worker/WorkerToolsEditor";
+import { WorkerFeedbackPanel } from "@/components/worker/WorkerFeedbackPanel";
 import { patchBrainContexts, patchWorkerConnections } from "@/lib/worker-manifest";
-import { can, isViewOnly, canLeaveFeedback, visibilityLabel } from "@/lib/permissions";
+import { can, isViewOnly, canLeaveFeedback, visibilityLabel, FEEDBACK_BACKEND_AVAILABLE } from "@/lib/permissions";
 import {
   isSystemWorker,
   workerStatusPill,
@@ -308,6 +309,13 @@ function SettingsTab({ w }: { w: WorkerSummary }) {
   );
 }
 
+function FeedbackTab({ w }: { w: WorkerSummary }) {
+  // Anyone who can see the worker may comment (SPEC §12); owner/admin moderate.
+  return (
+    <WorkerFeedbackPanel workerId={w.id} canLeave={canLeaveFeedback(w)} canModerate={can("edit", w)} />
+  );
+}
+
 export default function WorkersCollection({
   initialWorkers,
 }: {
@@ -405,16 +413,10 @@ export default function WorkersCollection({
               Run
             </Link>
           )}
-          {editable ? (
+          {editable && (
             <Link href={`/workers/${w.id}?edit=1`} className="c-vpill" style={pillBtn}>
               Edit
             </Link>
-          ) : (
-            canLeaveFeedback(w) && (
-              <Link href={`/workers/${w.id}#feedback`} className="c-vpill" style={pillBtn}>
-                Feedback
-              </Link>
-            )
           )}
           <Link href={`/workers/${w.id}`} className="c-vpill" style={pillBtn}>
             Open full page →
@@ -448,6 +450,9 @@ export default function WorkersCollection({
           { key: "Settings", label: "Settings", render: () => <SettingsTab w={w} /> },
           { key: "Brain", label: "Brain", render: () => <BrainTab w={w} /> },
           { key: "Tools", label: "Tools", render: () => <ToolsTab w={w} /> },
+          ...(FEEDBACK_BACKEND_AVAILABLE
+            ? [{ key: "Feedback", label: "Feedback", render: () => <FeedbackTab w={w} /> }]
+            : []),
         ],
       };
     },
