@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Monitor, Sun, Moon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { api } from "@/lib/api";
 
 // S29z: explicit three-button toggle group for /settings#appearance.
 // The cycling ThemeModeButton stays in the sidebar (compact). Here we
@@ -44,6 +45,19 @@ export function ThemeModeToggleGroup() {
       if (detail?.mode) setMode(detail.mode);
     };
     window.addEventListener(SYNC_EVENT, onSync);
+    // #773: hydrate from the server (source of truth across devices). If the
+    // stored theme differs from the local one, apply it — keeps localStorage in
+    // sync for the no-flash inline script next load.
+    api.settings
+      .get()
+      .then((s) => {
+        const t = s.theme;
+        if ((t === "system" || t === "day" || t === "night") && t !== readMode()) {
+          setMode(t);
+          applyMode(t);
+        }
+      })
+      .catch(() => {});
     return () => window.removeEventListener(SYNC_EVENT, onSync);
   }, []);
 
@@ -59,6 +73,8 @@ export function ThemeModeToggleGroup() {
             onClick={() => {
               setMode(opt.value);
               applyMode(opt.value);
+              // #773: persist server-side (best-effort; local already applied).
+              api.settings.set("theme", opt.value).catch(() => {});
             }}
             className={cn(
               "inline-flex items-center gap-1.5 px-3 h-8 text-sm transition-colors",

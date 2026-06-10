@@ -203,6 +203,15 @@ export const api = {
     }
     return res.json() as Promise<import("./types").CurrentUser>;
   },
+  // #773: per-user settings (theme, etc.) persisted server-side.
+  settings: {
+    get: () => fetchJson<Record<string, string>>("/me/settings"),
+    set: (key: string, value: string) =>
+      fetchJson<null>(`/me/settings/${encodeURIComponent(key)}`, {
+        method: "PUT",
+        body: JSON.stringify({ value }),
+      }),
+  },
   workers: {
     // S44 Win 3: use list shape (~15 KB vs 47 KB full) for the web UI.
     // CLI consumers that call GET /workers directly get full payload (no ?shape=list).
