@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { ArrowLeft, Download } from "lucide-react";
 import { isImageFile } from "@/lib/runs/trace";
 
@@ -13,6 +13,8 @@ export interface InlineFile {
   /** Download / image source URL. */
   url: string;
   sizeBytes?: number;
+  /** Known-binary (e.g. .db) — never text-loaded; shows the download fallback. */
+  binary?: boolean;
 }
 
 function sizeLabel(bytes?: number): string {
@@ -24,13 +26,34 @@ export function InlineFileOpen({
   files,
   rootLabel,
   emptyLabel = "No files.",
+  loadText,
 }: {
   files: InlineFile[];
   rootLabel: string;
   emptyLabel?: string;
+  /** Text-content loader (Brain: readTextFile). Omitted → download-only fallback. */
+  loadText?: (file: InlineFile) => Promise<string>;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
+  const [text, setText] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
   const open = files.find((f) => f.id === openId) ?? null;
+
+  const canLoadText = !!loadText && !!open && !open.binary && !isImageFile(open.name);
+  useEffect(() => {
+    setText(null);
+    if (!canLoadText || !open || !loadText) return;
+    let alive = true;
+    setLoading(true);
+    loadText(open)
+      .then((t) => alive && setText(t))
+      .catch(() => alive && setText("(could not read file)"))
+      .finally(() => alive && setLoading(false));
+    return () => {
+      alive = false;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [openId]);
 
   if (files.length === 0) {
     return <div style={{ color: "var(--muted-foreground)", padding: 14 }}>{emptyLabel}</div>;
@@ -70,10 +93,33 @@ export function InlineFileOpen({
             alt={open.name}
             style={{ maxWidth: "100%", borderRadius: "var(--r-card, 16px)", display: "block" }}
           />
+        ) : canLoadText ? (
+          loading ? (
+            <div style={{ color: "var(--muted-foreground)", padding: 14 }}>Loading…</div>
+          ) : (
+            <pre
+              style={{
+                border: "1px solid var(--line)",
+                borderRadius: 12,
+                background: "var(--bg-2)",
+                color: "var(--ink-soft)",
+                padding: 13,
+                whiteSpace: "pre-wrap",
+                overflow: "auto",
+                fontSize: 12,
+                fontFamily: "var(--font-mono)",
+                maxHeight: 420,
+              }}
+            >
+              {text ?? ""}
+            </pre>
+          )
         ) : (
           <div style={{ color: "var(--muted-foreground)", padding: 14 }}>
-            {/* TODO(#815/#777): inline text/markdown/SQLite preview; download for now. */}
-            Preview isn&apos;t available inline yet — use Download to open this file.
+            {/* TODO(#777): SQLite .db table viewer; TODO(#815): richer artifact preview. */}
+            {open.binary && open.name.endsWith(".db")
+              ? "SQLite database — an inline table viewer is coming (#777). Use Download for now."
+              : "Preview isn't available inline yet — use Download to open this file."}
           </div>
         )}
       </div>
