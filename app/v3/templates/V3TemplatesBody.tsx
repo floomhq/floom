@@ -9,7 +9,7 @@
 import { useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
-import { ArrowLeft, ArrowRight, Search } from "lucide-react";
+import { ArrowRight, Search } from "lucide-react";
 import {
   GCalLogo,
   GmailLogo,
@@ -20,6 +20,7 @@ import {
 } from "@/components/landing-icons";
 import { TEMPLATES, type Category, type Template } from "@/components/landing-ref/data";
 import { V2Composer } from "../../v2/V2Composer";
+import { Hl, V3Shell } from "../V3Shell";
 import "../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -87,15 +88,8 @@ export function V3TemplatesBody() {
   }, [cat, q]);
 
   return (
-    <div className="theme-v3 min-h-screen text-[13.5px]" style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}>
-      <div className="mx-auto max-w-[1000px] px-7 pb-28">
-        {/* slim nav */}
-        <nav className="flex h-[60px] items-center justify-between">
-          <Link href="/v3" className="flex items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-3.5 w-3.5" /> Back
-          </Link>
-          <Link href="/login" className="rounded-[10px] border border-border bg-card px-3 py-1.5 text-[12.5px] font-medium hover:bg-secondary">Sign in</Link>
-        </nav>
+    <V3Shell active="templates">
+
 
         {/* head */}
         <div className="pb-9 pt-14 text-center">
@@ -105,7 +99,7 @@ export function V3TemplatesBody() {
             transition={{ duration: 0.55, ease: EASE }}
             className="text-[40px] font-semibold leading-[1.05] tracking-[-0.028em]"
           >
-            Pick a worker. Hire it. Done.
+            Pick a <Hl>worker</Hl>. Hire it. Done.
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 10 }}
@@ -173,7 +167,6 @@ export function V3TemplatesBody() {
             <V2Composer slim placeholder="Describe the job…" />
           </div>
         </div>
-      </div>
-    </div>
+    </V3Shell>
   );
 }

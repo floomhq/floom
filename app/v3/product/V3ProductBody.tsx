@@ -9,7 +9,7 @@
 
 import Link from "next/link";
 import { motion } from "motion/react";
-import { ArrowLeft, Brain, Check } from "lucide-react";
+import { Brain, Check } from "lucide-react";
 import { AppFrame } from "../../v2/V2Sections";
 import {
   GCalLogo,
@@ -19,6 +19,7 @@ import {
   SheetsLogo,
   SlackLogo,
 } from "@/components/landing-icons";
+import { Hl, V3Shell } from "../V3Shell";
 import "../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -189,14 +190,8 @@ function Beat({
 
 export function V3ProductBody() {
   return (
-    <div className="theme-v3 min-h-screen text-[13.5px]" style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}>
-      <div className="mx-auto max-w-[1000px] px-7 pb-20">
-        <nav className="flex h-[64px] items-center justify-between">
-          <Link href="/v3" className="flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground">
-            <ArrowLeft className="h-3.5 w-3.5" /> Back
-          </Link>
-          <Link href="/login" className="rounded-[10px] px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">Sign in</Link>
-        </nav>
+    <V3Shell active="product">
+
 
         {/* hero */}
         <div className="pb-14 pt-20 text-center">
@@ -206,7 +201,7 @@ export function V3ProductBody() {
             transition={{ duration: 0.55, ease: EASE }}
             className="text-[48px] font-semibold leading-[1.03] tracking-[-0.032em]"
           >
-            The cockpit behind every worker.
+            The <Hl>cockpit</Hl> behind every worker.
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 10 }}
@@ -266,7 +261,6 @@ export function V3ProductBody() {
             See it with your own worker
           </Link>
         </Reveal>
-      </div>
-    </div>
+    </V3Shell>
   );
 }

@@ -7,8 +7,8 @@
 
 import Link from "next/link";
 import { motion } from "motion/react";
-import { ArrowLeft } from "lucide-react";
 import { SlackLogo, WhatsAppLogo } from "@/components/landing-icons";
+import { Hl, V3Shell } from "../V3Shell";
 import "../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -55,14 +55,8 @@ function H2({ id, children }: { id: string; children: React.ReactNode }) {
 
 export function V3DocsBody() {
   return (
-    <div className="theme-v3 min-h-screen text-[13.5px]" style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}>
-      <div className="mx-auto max-w-[1000px] px-7 pb-28">
-        <nav className="flex h-[60px] items-center justify-between">
-          <Link href="/v3" className="flex items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground">
-            <ArrowLeft className="h-3.5 w-3.5" /> Back
-          </Link>
-          <Link href="/login" className="rounded-[10px] border border-border bg-card px-3 py-1.5 text-[12.5px] font-medium hover:bg-secondary">Sign in</Link>
-        </nav>
+    <V3Shell active="docs">
+
 
         <motion.div
           initial={{ opacity: 0, y: 10 }}
@@ -72,7 +66,7 @@ export function V3DocsBody() {
         >
           <h1 className="text-[36px] font-semibold tracking-[-0.028em]">Docs</h1>
           <p className="mt-2 max-w-[480px] text-[14px] text-muted-foreground">
-            Everything you need to hire your first worker and keep it on the record.
+            Everything you need to hire your first <Hl>worker</Hl> and keep it on the record.
           </p>
         </motion.div>
 
@@ -169,7 +163,6 @@ export function V3DocsBody() {
             </div>
           </div>
         </div>
-      </div>
-    </div>
+    </V3Shell>
   );
 }
