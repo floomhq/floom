@@ -28,16 +28,17 @@ export function approvalKind(approval: Pick<ApprovalRow, "decision_input_json">)
 }
 
 /** Approve, routing by kind (mirrors app/approvals/page.tsx:576-582). */
-export async function approveApproval(approval: ApprovalRow): Promise<void> {
+export async function approveApproval(approval: ApprovalRow, comment?: string): Promise<void> {
+  const note = comment?.trim() || undefined; // #769: optional approve-time note
   switch (approvalKind(approval)) {
     case "destructive_delete":
-      await api.approvals.approveAction(approval.id);
+      await api.approvals.approveAction(approval.id, undefined, note);
       return;
     case "agent_tool":
-      await api.approvals.approveAgentTool(approval.id);
+      await api.approvals.approveAgentTool(approval.id, undefined, note);
       return;
     default:
-      await api.runs.approve(approval.run_id);
+      await api.runs.approve(approval.run_id, undefined, undefined, note);
   }
 }
 

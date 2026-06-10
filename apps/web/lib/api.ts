@@ -339,11 +339,12 @@ export const api = {
     approve: (
       id: string,
       editedOutput?: Record<string, unknown>,
-      annotations?: import("./types").ApprovalAnnotations | null
+      annotations?: import("./types").ApprovalAnnotations | null,
+      comment?: string | null
     ) =>
       fetchJson<import("./types").ActionResponse>(`/runs/${id}/approve`, {
         method: "POST",
-        body: JSON.stringify({ edited_output: editedOutput ?? null, annotations: annotations ?? null }),
+        body: JSON.stringify({ edited_output: editedOutput ?? null, annotations: annotations ?? null, comment: comment ?? null }),
       }),
     reject: (
       id: string,
@@ -374,13 +375,14 @@ export const api = {
     count: () => fetchJson<{ pending: number }>("/approvals/count"),
     approveAction: (
       approvalId: string,
-      annotations?: import("./types").ApprovalAnnotations | null
+      annotations?: import("./types").ApprovalAnnotations | null,
+      comment?: string | null
     ) =>
       fetchJson<{ status: string; executed: string; detail: string }>(
         `/approvals/${approvalId}/approve-action`,
         {
           method: "POST",
-          body: JSON.stringify({ annotations: annotations ?? null }),
+          body: JSON.stringify({ annotations: annotations ?? null, comment: comment ?? null }),
         }
       ),
     rejectAction: (
@@ -395,12 +397,12 @@ export const api = {
           body: JSON.stringify({ reason, annotations: annotations ?? null }),
         }
       ),
-    approveAgentTool: (approvalId: string, editedOutput?: Record<string, unknown>) =>
+    approveAgentTool: (approvalId: string, editedOutput?: Record<string, unknown>, comment?: string | null) =>
       fetchJson<import("./types").ActionResponse>(
         `/approvals/${approvalId}/approve`,
         {
           method: "POST",
-          body: JSON.stringify({ edited_output: editedOutput ?? null }),
+          body: JSON.stringify({ edited_output: editedOutput ?? null, comment: comment ?? null }),
         }
       ),
     rejectAgentTool: (approvalId: string, reason?: string) =>

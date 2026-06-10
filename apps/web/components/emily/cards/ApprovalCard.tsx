@@ -40,10 +40,8 @@ export function ApprovalCard({ card }: { card: ApprovalCardType }) {
         return;
       }
       if (decision) {
-        // TODO(#769): plain-text comment on APPROVE — backend only stores a
-        // reason on reject today. The box stays usable; the comment rides along
-        // once #769 lands.
-        await approveApproval(row);
+        // #769: the comment now rides along on approve (persisted in reason).
+        await approveApproval(row, comment.trim() || undefined);
       } else {
         await rejectApproval(row, comment.trim() || undefined);
       }
@@ -94,7 +92,7 @@ export function ApprovalCard({ card }: { card: ApprovalCardType }) {
         <div className="space-y-2 px-3.5 pb-3">
           <input
             className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
-            placeholder="Add a comment (sent with reject; approve comments land with #769)"
+            placeholder="Add a comment (sent with your decision)"
             value={comment}
             onChange={(e) => setComment(e.target.value)}
             disabled={busy}

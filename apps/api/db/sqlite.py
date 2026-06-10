@@ -2562,12 +2562,15 @@ class SqliteApprovalRepository:
         edited_output_json: str | None = None,
         follow_up_run_id: str | None = None,
         annotations_json: str | None = None,
+        comment: str | None = None,
     ) -> dict[str, Any] | None:
         # approval_id filter prevents bulk-approving all pending rows for a run
         # when multiple sequential request_approval() calls are in flight.
+        # #769: an approve-time note rides in the existing `reason` column (the
+        # decision note is shared by approve/reject); COALESCE preserves it if absent.
         id_clause = "AND id = ?" if approval_id is not None else ""
         params: tuple[Any, ...] = (
-            decided_at, edited_output_json, follow_up_run_id, annotations_json,
+            decided_at, edited_output_json, follow_up_run_id, annotations_json, comment,
             run_id, owner_id,
             *((approval_id,) if approval_id is not None else ()),
         )
@@ -2579,7 +2582,8 @@ class SqliteApprovalRepository:
                     decided_at = ?,
                     edited_output_json = ?,
                     follow_up_run_id = ?,
-                    annotations_json = COALESCE(?, annotations_json)
+                    annotations_json = COALESCE(?, annotations_json),
+                    reason = COALESCE(?, reason)
                 WHERE run_id = ? AND owner_id = ? AND status = 'pending'
                 {id_clause}
                 """,

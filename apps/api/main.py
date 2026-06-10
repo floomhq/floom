@@ -11684,6 +11684,7 @@ def _annotations_json_or_none(raw: Any) -> Optional[str]:
 class ApproveRequest(BaseModel):
     edited_output: Optional[Dict[str, Any]] = None
     annotations: Optional[Dict[str, Any]] = None
+    comment: Optional[str] = None  # #769: optional approve-time note (stored in reason)
 
 
 class RejectRequest(BaseModel):
@@ -11925,6 +11926,7 @@ class PublicApprovalDecisionRequest(BaseModel):
     reason: str | None = None
     edited_output: Dict[str, Any] | None = None
     annotations: Dict[str, Any] | None = None
+    comment: str | None = None  # #769: approve-time note from the standalone page
 
 
 @app.get("/approvals/public/{approval_id}")
@@ -11988,13 +11990,13 @@ def approve_public_approval(
     if decision_input.get("kind") == "agent_tool":
         return approve_agent_tool_approval(
             approval_id,
-            ApproveRequest(edited_output=body.edited_output, annotations=body.annotations),
+            ApproveRequest(edited_output=body.edited_output, annotations=body.annotations, comment=body.comment),
             auth,
             repos,
         )
     return approve_run(
         str(approval["run_id"]),
-        ApproveRequest(edited_output=body.edited_output, annotations=body.annotations),
+        ApproveRequest(edited_output=body.edited_output, annotations=body.annotations, comment=body.comment),
         auth,
         repos,
     )
@@ -12205,6 +12207,7 @@ def approve_run(
         edited_output_json=edited_output_json,
         follow_up_run_id=follow_up_run_id,
         annotations_json=annotations_json,
+        comment=(body.comment or None),
     )
 
     # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
@@ -12351,6 +12354,7 @@ def _execute_destructive_delete(path: str, owner_id: str, repos: Repositories) -
 
 class ApproveActionRequest(BaseModel):
     annotations: Optional[Dict[str, Any]] = None
+    comment: Optional[str] = None  # #769: approve-time note
 
 
 @app.post("/approvals/{approval_id}/approve-action")
@@ -12381,6 +12385,7 @@ def approve_destructive_action(
         run_id=approval["run_id"],
         decided_at=now_iso(),
         annotations_json=annotations_json,
+        comment=(body.comment or None),
     )
 
     _sse_publish(approval["run_id"], {
@@ -12437,12 +12442,15 @@ def approve_agent_tool_approval(
     """
     approval = _load_typed_approval(approval_id, auth.user_id, "agent_tool", repos)
     edited_output_json = json.dumps(body.edited_output) if body.edited_output is not None else None
+    annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
     repos.approvals.approve(
         owner_id=auth.user_id,
         run_id=approval["run_id"],
         approval_id=approval_id,
         decided_at=now_iso(),
         edited_output_json=edited_output_json,
+        annotations_json=annotations_json,
+        comment=(body.comment or None),
     )
 
     _sse_publish(approval["run_id"], {

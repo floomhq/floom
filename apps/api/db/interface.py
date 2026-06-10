@@ -319,6 +319,7 @@ class ApprovalRepository(Protocol):
         edited_output_json: str | None = None,
         follow_up_run_id: str | None = None,
         annotations_json: str | None = None,
+        comment: str | None = None,
     ) -> RowDict | None: ...
 
     def reject(
