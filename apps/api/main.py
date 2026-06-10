@@ -9986,6 +9986,10 @@ def _create_worker_from_parsed_payload(
             _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
             os.replace(staging_dir, target_dir)
             target_committed = True
+            try:
+                _embed_files_in_skill_version(worker_id, target_dir)
+            except Exception:
+                logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
             invalidate_worker_cache()
             detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
             # Commit new worker files to the workspace git repo.
@@ -10055,75 +10059,14 @@ def create_worker(
             worker_yml = _rewrite_worker_yml_id(worker_yml, worker_id)
     _reject_raw_local_runner_on_create(worker_yml)
     worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
-
-    target_dir = WORKERS_DIR / worker_id
-    if target_dir.exists():
-        raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
-    try:
-        if repos.workers.get_any(worker_id=worker_id) is not None:
-            raise HTTPException(status_code=409, detail=f"Worker {worker_id!r} already exists")
-    except HTTPException:
-        raise
-    except Exception:
-        logger.warning("worker existence lookup failed for %s", worker_id, exc_info=True)
-
-    staging_dir = Path(tempfile.mkdtemp(prefix=f".{worker_id}.", dir=str(WORKERS_DIR.parent)))
-    worker_record: Optional[Dict[str, Any]] = None
-    skill_version_id: Optional[str] = None
-    create_complete = False
-    target_committed = False
-    try:
-        _write_worker_bundle_files(
-            staging_dir,
-            worker_yml=worker_yml,
-            run_py=payload.run_py,
-            skill_md=payload.skill_md,
-            config=config,
-        )
-        worker_record = _worker_record_from_worker_yml(worker_id, worker_yml)
-        skill_version_id = _skill_version_id(worker_id, worker_record.get("manifest") or {})
-        invalidate_worker_cache()
-        with get_db() as conn:
-            _persist_discovered_workers(conn, [worker_record], user_id=auth.user_id)
-        _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
-        os.replace(staging_dir, target_dir)
-        target_committed = True
-        try:
-            _embed_files_in_skill_version(worker_id, target_dir)
-        except Exception:
-            logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
-        invalidate_worker_cache()
-        detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
-        # Commit new worker files to the workspace git repo
-        author_name, author_email = _git_author(auth)
-        worker_name = (config.name if config else None) or worker_id
-        _git_commit_worker(worker_id, message=f"worker: create {worker_name}", author_name=author_name, author_email=author_email)
-        create_complete = True
-        return detail
-    except sqlite3.IntegrityError as exc:
-        raise HTTPException(
-            status_code=409,
-            detail=(
-                f"Worker {worker_id!r} already exists or conflicts with a previous version. "
-                "Delete the old worker first, then recreate."
-            ),
-        ) from exc
-    except RuntimeError as exc:
-        raise HTTPException(status_code=502, detail=str(exc)) from exc
-    except HTTPException:
-        raise
-    except Exception as exc:
-        raise HTTPException(status_code=500, detail=f"Failed to create worker {worker_id!r}: {exc}") from exc
-    finally:
-        if not create_complete:
-            _cleanup_worker_create_state(
-                worker_id=worker_id,
-                user_id=auth.user_id,
-                repos=repos,
-                staging_dir=staging_dir,
-                target_dir=target_dir if target_committed else None,
-                skill_version_id=skill_version_id,
-            )
+    return _create_worker_from_parsed_payload(
+        worker_id=worker_id,
+        worker_yml=worker_yml,
+        payload=payload,
+        config=config,
+        auth=auth,
+        repos=repos,
+    )
 
 
 # ---------------------------------------------------------------------------
