@@ -1,6 +1,6 @@
 export const metadata = {
-  title: "Terms — Workeros",
-  description: "Terms for using this Workeros instance.",
+  title: "Terms — WorkerOS",
+  description: "Terms for using this WorkerOS instance.",
 };
 
 export default function TermsPage() {
@@ -15,7 +15,7 @@ export default function TermsPage() {
 
       <div className="space-y-4 text-sm leading-relaxed">
         <p>
-          Workeros is open-source software provided as-is, without warranty of
+          WorkerOS is open-source software provided as-is, without warranty of
           any kind. This instance is operated by its deployer for their own use.
         </p>
 
