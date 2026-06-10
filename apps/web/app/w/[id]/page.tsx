@@ -2,7 +2,7 @@
 // app sidebar / command palette (AppShell standalonePrefixes includes "/w").
 // The worker is resolved server-side via a signed HMAC token and the API
 // returns a strict allow-list (PublicWorker) — never secrets, source, or run
-// history. v6: ONE fixed-height Workeros-native card that flips to a top
+// history. v6: ONE fixed-height WorkerOS-native card that flips to a top
 // tab-bar file view (see WorkerShareCard). noindex.
 import Link from "next/link";
 import type { Metadata } from "next";
@@ -63,7 +63,7 @@ export default async function PublicWorkerPage({
         <p className="text-xs text-[var(--ink-soft)]">
           Built with{" "}
           <Link href="/" className="font-medium text-[var(--ink)] no-underline hover:underline">
-            Workeros
+            WorkerOS
           </Link>{" "}
           — AI workers that use your tools and run on a schedule, webhook, or on demand.
         </p>

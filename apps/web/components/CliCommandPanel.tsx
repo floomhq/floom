@@ -78,7 +78,7 @@ const CLI_COMMANDS: { name: string; description: string }[] = [
   { name: "workeros secrets delete <key>", description: "Delete a secret." },
   { name: "workeros connections list", description: "List saved app and MCP connections." },
   { name: "workeros connections import-mcp-config <path>", description: "Import MCP servers from a client config JSON." },
-  { name: "workeros mcp install --target <client>", description: "Install the Workeros MCP server into a client config (claude, cursor, vscode, windsurf, generic)." },
+  { name: "workeros mcp install --target <client>", description: "Install the WorkerOS MCP server into a client config (claude, cursor, vscode, windsurf, generic)." },
   { name: "workeros doctor", description: "Check CLI setup: API, auth, MCP, runs endpoint." },
 ];
 
