@@ -30,6 +30,8 @@ export interface ShareModalProps {
   onSetVisibility: (v: AssetVisibility) => Promise<void> | void;
   /** BUILT: create/return the standalone share URL. */
   getShareLink: () => Promise<string>;
+  /** #766 BUILT: revoke the public link. When provided, the toggle is live. */
+  onRevokeShareLink?: () => Promise<void>;
 }
 
 export function ShareModal({
@@ -39,9 +41,27 @@ export function ShareModal({
   visibility,
   onSetVisibility,
   getShareLink,
+  onRevokeShareLink,
 }: ShareModalProps) {
   const [busy, setBusy] = useState(false);
   const [link, setLink] = useState<string | null>(null);
+
+  // #766: toggle the public link on (create) / off (revoke).
+  const toggleLink = async (on: boolean) => {
+    setBusy(true);
+    try {
+      if (on) {
+        await ensureLink();
+      } else if (onRevokeShareLink) {
+        await onRevokeShareLink();
+        setLink(null);
+      }
+    } catch {
+      toast.error("Could not update the public link.");
+    } finally {
+      setBusy(false);
+    }
+  };
 
   const ensureLink = async (): Promise<string | null> => {
     if (link) return link;
@@ -124,14 +144,26 @@ export function ShareModal({
           <p className="text-xs text-muted-foreground">{shareSummary(visibility)}</p>
         </div>
 
-        {/* Public link toggle (#766) — view & duplicate. Backend pending. */}
-        <label
-          className="flex items-center justify-between text-sm opacity-60"
-          title={`Per-asset public links are coming soon (#${SHARE_GAPS.publicLinkToggle})`}
-        >
-          <span>Anyone with the link can view &amp; duplicate</span>
-          <input type="checkbox" disabled />
-        </label>
+        {/* Public link toggle (#766) — view & duplicate. */}
+        {onRevokeShareLink ? (
+          <label className="flex items-center justify-between text-sm">
+            <span>Anyone with the link can view &amp; duplicate</span>
+            <input
+              type="checkbox"
+              checked={link != null}
+              disabled={busy}
+              onChange={(e) => void toggleLink(e.target.checked)}
+            />
+          </label>
+        ) : (
+          <label
+            className="flex items-center justify-between text-sm opacity-60"
+            title={`Per-asset public links are coming soon (#${SHARE_GAPS.publicLinkToggle})`}
+          >
+            <span>Anyone with the link can view &amp; duplicate</span>
+            <input type="checkbox" disabled />
+          </label>
+        )}
 
         <div className="flex items-center gap-2 pt-1">
           <button type="button" className="c-vpill" style={{ padding: "7px 12px" }} onClick={() => void copy()}>

@@ -7469,6 +7469,24 @@ def import_worker_from_share(
     return {"worker_id": new_id, "url": f"/workers/{new_id}"}
 
 
+def _revoke_standalone_share_link(
+    *,
+    entity_type: str,
+    entity_id: str,
+    owner_id: str,
+    file_path: str = "",
+) -> bool:
+    """#766: delete a standalone share link so its token immediately 404s. Idempotent."""
+    _ensure_standalone_share_links_table()
+    with get_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM standalone_share_links "
+            "WHERE entity_type = ? AND entity_id = ? AND file_path = ? AND owner_id = ?",
+            (entity_type, entity_id, file_path or "", owner_id),
+        )
+    return cur.rowcount > 0
+
+
 @app.post("/workers/{worker_id}/share-link")
 def create_worker_share_link(
     worker_id: str,
@@ -7483,6 +7501,26 @@ def create_worker_share_link(
     if not perms.can_share:
         raise HTTPException(status_code=403, detail="You cannot share this worker")
     return _create_or_get_standalone_share_link(
+        entity_type="worker",
+        entity_id=str(worker["id"]),
+        owner_id=str(worker.get("owner_id") or auth.user_id),
+    )
+
+
+@app.delete("/workers/{worker_id}/share-link", status_code=204)
+def revoke_worker_share_link(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    perms = _worker_permissions(worker, user_id=auth.user_id, repos=repos)
+    if not perms.can_share:
+        raise HTTPException(status_code=403, detail="You cannot share this worker")
+    _revoke_standalone_share_link(
         entity_type="worker",
         entity_id=str(worker["id"]),
         owner_id=str(worker.get("owner_id") or auth.user_id),
@@ -7507,6 +7545,23 @@ def create_brain_pack_share_link(
     )
 
 
+@app.delete("/contexts/{name}/share-link", status_code=204)
+def revoke_brain_pack_share_link(
+    name: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    summary = _context_summary(safe_name, _metadata, repos=repos, user_id=auth.user_id)
+    if not summary.permissions.can_share:
+        raise HTTPException(status_code=403, detail="You cannot share this brain pack")
+    _revoke_standalone_share_link(
+        entity_type="brain_pack",
+        entity_id=safe_name,
+        owner_id=auth.user_id,
+    )
+
+
 @app.post("/contexts/{name}/files/{file_path:path}/share-link")
 def create_brain_file_share_link(
     name: str,
@@ -7522,6 +7577,26 @@ def create_brain_file_share_link(
     target = _safe_context_file_or_400(safe_name, rel)
     _assert_context_file_shareable(rel, target)
     return _create_or_get_standalone_share_link(
+        entity_type="brain_file",
+        entity_id=safe_name,
+        file_path=rel,
+        owner_id=auth.user_id,
+    )
+
+
+@app.delete("/contexts/{name}/files/{file_path:path}/share-link", status_code=204)
+def revoke_brain_file_share_link(
+    name: str,
+    file_path: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    summary = _context_summary(safe_name, _metadata, repos=repos, user_id=auth.user_id)
+    if not summary.permissions.can_share:
+        raise HTTPException(status_code=403, detail="You cannot share this brain file")
+    rel = _context_file_path_or_400(file_path)
+    _revoke_standalone_share_link(
         entity_type="brain_file",
         entity_id=safe_name,
         file_path=rel,

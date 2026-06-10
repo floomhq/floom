@@ -224,6 +224,8 @@ export const api = {
       fetchJson<import("./types").StandaloneShareLink>(`/workers/${encodeURIComponent(id)}/share-link`, {
         method: "POST",
       }),
+    revokeShareLink: (id: string) =>
+      fetchJson<null>(`/workers/${encodeURIComponent(id)}/share-link`, { method: "DELETE" }),
     importFromShare: (token: string) =>
       fetchJson<{ worker_id: string; url: string }>("/workers/import-from-share", {
         method: "POST",

@@ -40,6 +40,9 @@ export function ShareWorkerButton({
         setVisibility(v);
       }}
       getShareLink={async () => (await api.workers.shareLink(workerId)).url}
+      onRevokeShareLink={async () => {
+        await api.workers.revokeShareLink(workerId);
+      }}
     />
   );
 
