@@ -103,6 +103,7 @@ TWO groups with labels: **Workspace · {name}** (System, Channels, Assistant, Me
 
 ### Emily rail
 **DO NOT hand-build the chat UI.** Federico's call: Emily will be prompt-kit-native React. The wireframe defines only: placement (right rail), collapse/widen/full behavior, 56px header (avatar + green dot + fullscreen + ⋯ menu with New chat/Export/Recent chats), composer (paperclip + input + send), suggestion chips, create-worker mode ("Describe the job in one sentence…", banner: "Your previous chat is still running — find it in Recent chats"). Backend: SSE `POST /chat`, conversations list/reopen, `POST /workers/new/from-prompt` ALL BUILT; recent-chats wiring #775, export #776, attachments #778.
+**Chat internals (#825):** tool calls render with the EXISTING collapsible `ai-elements/tool.tsx` (click → inputs/outputs/status — same component as run details; EmilyChat's flat `tool-card` parts get replaced); approvals appear INLINE in the thread (card + comment + Approve/Reject via existing API); Emily's answers link to app pages as real router hrefs (generalize `getAutoOpenRunDetailsHref`). NO DOM access / page driving — links only.
 
 ## 5. Modals & standalone pages (all in Design index)
 
