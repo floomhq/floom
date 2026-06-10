@@ -5,7 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { api } from "@/lib/api";
+import { api, apiProxyPath } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
@@ -22,7 +22,7 @@ import {
   Play, Plug, Pencil, ClipboardCheck, ChevronRight, ChevronDown,
   Copy, Code2, Clock, Plug2, ListChecks, History,
   Trash2, ArrowLeft, BookOpen, Save, X, Archive, ArchiveRestore, MoreVertical,
-  Brain as BrainIcon, Settings2, Plus, RotateCcw, Search, Check,
+  Brain as BrainIcon, Settings2, Plus, RotateCcw, Search, Check, KeyRound,
 } from "lucide-react";
 import { dump as dumpYaml, load as loadYaml } from "js-yaml";
 import { VersionDiffPanel } from "@/components/VersionDiffPanel";
@@ -55,8 +55,6 @@ import type {
   RunDetail,
   ContextSummary,
   WorkerConnectionSpec,
-  WorkerComposioConnection,
-  WorkerContextSpec,
   WorkerMcpConnection,
   VersionSummary,
 } from "@/lib/types";
@@ -94,6 +92,7 @@ import { useRunStream } from "@/lib/useRunStream";
 type Section = "about" | "run" | "settings" | "brain" | "code" | "connections" | "runs" | "versions";
 
 const VALID_SECTIONS: Section[] = ["about", "run", "settings", "brain", "code", "connections", "runs", "versions"];
+const LIVE_CONNECTION_STATUSES = new Set(["active", "valid", "connected"]);
 
 function isValidSection(s: string): s is Section {
   return VALID_SECTIONS.includes(s as Section);
@@ -179,6 +178,8 @@ const NAV_ITEMS: NavItem[] = [
   // back-compat (see HASH_TO_SECTION).
   { id: "connections", label: "Tools", icon: <Plug2 className="w-4 h-4" />, group: "setup" },
 ];
+const PRIMARY_NAV = NAV_ITEMS.filter((item) => item.group === "view");
+const SETUP_NAV = NAV_ITEMS.filter((item) => item.group === "setup");
 // Note: "Versions" is intentionally NOT a tab. Worker config-version history is
 // surfaced via a header "Versions" dropdown → dialog (VersionsSection), to match
 // the inline Versions dropdown on Agent (/assistant) and Brain (/contexts) and
@@ -194,6 +195,15 @@ const NAV_ITEMS: NavItem[] = [
 // dedicated content fields (run_py_content / skill_md_content / manifest_yaml).
 // Build a WorkerFile[] from those fields so the Source tab actually renders.
 import { patchInputDefault, patchRetryBlock, patchNotifyBlock } from "@/lib/yaml-utils";
+import {
+  contextSpecName,
+  contextSpecWritable,
+  connectionSpecApp,
+  connectionSpecAllowedTools,
+  patchBrainContexts,
+  patchWorkerConnections,
+  setComposioAllowlist,
+} from "@/lib/worker-manifest";
 
 function deriveSourceFiles(worker: WorkerDetail | null): WorkerFile[] {
   if (!worker) return [];
@@ -234,104 +244,25 @@ function textSourceFiles(files: EditableSourceFile[]): { path: string; content: 
     .map((f) => ({ path: f.path, content: f.content }));
 }
 
-function contextSpecName(spec: WorkerContextSpec): string {
-  if (typeof spec === "string") return spec;
-  return spec.name;
+function isRequiredRunInputMissing(input: WorkerInput, value: unknown): boolean {
+  if (!input.required) return false;
+  if (value === null || value === undefined) return true;
+  if (typeof value === "string") return value.trim().length === 0;
+  if (Array.isArray(value)) return value.length === 0;
+  return false;
 }
 
-function contextSpecWritable(spec: WorkerContextSpec): boolean {
-  return typeof spec === "object" && spec.writeable === true;
-}
-
-function connectionSpecApp(spec: WorkerConnectionSpec): string | null {
-  if (typeof spec === "string") return spec;
-  if ("composio" in spec && spec.composio?.app) return spec.composio.app;
-  if ("app" in spec && spec.app) return spec.app;
-  return null;
-}
-
-function connectionSpecAllowedTools(spec: WorkerConnectionSpec): string[] | null {
-  if (typeof spec === "string") return null;
-  if ("composio" in spec && spec.composio?.allowed_tools?.length) {
-    return spec.composio.allowed_tools;
-  }
-  if ("app" in spec && spec.allowed_tools?.length) {
-    return spec.allowed_tools;
-  }
-  return null;
-}
-
-function replaceTopLevelYamlBlock(yaml: string, key: string, replacement: string): string {
-  const lines = yaml.split("\n");
-  const start = lines.findIndex((line) => new RegExp(`^${key}:\\s*(?:$|\\[)`).test(line));
-  if (start === -1) return `${yaml.trimEnd()}\n\n${replacement}\n`;
-
-  let end = lines.length;
-  for (let i = start + 1; i < lines.length; i += 1) {
-    if (/^[A-Za-z_][\w_-]*:\s*/.test(lines[i])) {
-      end = i;
-      break;
+function requiredRunInputErrors(
+  inputDefs: WorkerInput[] = [],
+  values: Record<string, unknown>,
+): Record<string, string> {
+  const errors: Record<string, string> = {};
+  for (const input of inputDefs) {
+    if (isRequiredRunInputMissing(input, values[input.name])) {
+      errors[input.name] = "Required";
     }
   }
-  return [...lines.slice(0, start), ...replacement.split("\n"), ...lines.slice(end)].join("\n");
-}
-
-function patchBrainContexts(yaml: string, contexts: WorkerContextSpec[]): string {
-  const block = dumpYaml(
-    { contexts: contexts.length > 0 ? contexts : [] },
-    { noRefs: true, lineWidth: -1, sortKeys: false },
-  ).trimEnd();
-  return replaceTopLevelYamlBlock(yaml, "contexts", block);
-}
-
-// Mirror of patchBrainContexts for the connections block. Persists the worker's
-// connection specs (Composio app slugs + allowed_tools, MCP specs) back into
-// worker.yml via the same top-level-block replacement the Brain toggle uses.
-function patchWorkerConnections(yaml: string, connections: WorkerConnectionSpec[]): string {
-  const block = dumpYaml(
-    { connections: connections.length > 0 ? connections : [] },
-    { noRefs: true, lineWidth: -1, sortKeys: false },
-  ).trimEnd();
-  return replaceTopLevelYamlBlock(yaml, "connections", block);
-}
-
-// Produce a new connections list where the Composio entry for `slug` has its
-// allowlist set to `tools`, or cleared when `tools` is null.
-//
-// Empty-allowlist semantics (backend models.py declared_composio_connections +
-// main.py composio_execute gate, line ~9768): `allowed_tools is None` (the key
-// absent) means FULL app access; an explicit list — INCLUDING an empty [] —
-// RESTRICTS to exactly that set (an empty list blocks every tool). So clearing
-// the restriction MUST drop the key entirely (tools === null), never emit [].
-function setComposioAllowlist(
-  connections: WorkerConnectionSpec[],
-  slug: string,
-  tools: string[] | null,
-): WorkerConnectionSpec[] {
-  const slugKey = slug.toLowerCase();
-  let matched = false;
-  const next = connections.map((spec): WorkerConnectionSpec => {
-    const specApp = connectionSpecApp(spec);
-    if (!specApp || specApp.toLowerCase() !== slugKey) return spec;
-    matched = true;
-    // Preserve any extra composio fields (scope/scopes) when present.
-    const existingComposio =
-      typeof spec === "object" && "composio" in spec ? spec.composio : undefined;
-    const base: WorkerComposioConnection = {
-      ...(existingComposio ?? {}),
-      app: existingComposio?.app ?? specApp,
-    };
-    if (tools && tools.length > 0) {
-      base.allowed_tools = tools;
-    } else {
-      delete base.allowed_tools;
-    }
-    return { composio: base };
-  });
-  // A bare-string declaration that we never matched as object means the slug
-  // wasn't present at all; nothing to do.
-  if (!matched) return connections;
-  return next;
+  return errors;
 }
 
 // ---------------------------------------------------------------------------
@@ -663,6 +594,11 @@ export default function WorkerDetailPage() {
 
   async function handleRun() {
     if (!worker) return;
+    const validationErrors = requiredRunInputErrors(worker.config.inputs, inputs);
+    if (Object.keys(validationErrors).length > 0) {
+      toast.error("Fill required inputs before running");
+      return;
+    }
     setRunning(true);
     try {
       const result = await api.workers.run(worker.id, inputs);
@@ -728,7 +664,14 @@ export default function WorkerDetailPage() {
     // into a real uploaded file so the worker is one-click runnable — no manual
     // upload required (G5 FIX 4). Fields with no usable inline content fall back
     // to the prior behaviour (operator must upload a file).
-    const fileUploads: Array<{ name: string; content: string; mediaType: string; ext: string }> = [];
+    const fileUploads: Array<{
+      name: string;
+      content: string;
+      mediaType: string;
+      ext: string;
+      accepts?: string[];
+      maxSizeMb?: number;
+    }> = [];
     let unfillableFileFields = false;
     for (const [key, value] of Object.entries(exampleInput)) {
       const fileInp = fileInputsByName.get(key);
@@ -763,7 +706,14 @@ export default function WorkerDetailPage() {
             unfillableFileFields = true;
             continue;
           }
-          fileUploads.push({ name: key, content: value, mediaType, ext });
+          fileUploads.push({
+            name: key,
+            content: value,
+            mediaType,
+            ext,
+            accepts,
+            maxSizeMb: (fileInp as WorkerInput & { max_size_mb?: number }).max_size_mb,
+          });
         } else if (value != null) {
           unfillableFileFields = true;
         }
@@ -777,13 +727,15 @@ export default function WorkerDetailPage() {
 
     let uploadedFileFields = 0;
     let uploadFailed = false;
-    for (const { name, content, mediaType, ext } of fileUploads) {
+    for (const { name, content, mediaType, ext, accepts, maxSizeMb } of fileUploads) {
       try {
         const fileName = `sample-${name}.${ext}`;
         const blob = new Blob([content], { type: mediaType });
         const form = new FormData();
         form.append("file", blob, fileName);
-        const resp = await fetch("/api/proxy/uploads", { method: "POST", body: form });
+        if (maxSizeMb) form.append("max_size_mb", String(maxSizeMb));
+        if (accepts?.length) form.append("accepts", JSON.stringify(accepts));
+        const resp = await fetch(apiProxyPath("/uploads"), { method: "POST", body: form });
         if (!resp.ok) {
           uploadFailed = true;
           continue;
@@ -1515,7 +1467,9 @@ export default function WorkerDetailPage() {
     return [connection.mcp];
   });
   const activeConnectionSlugs = new Set(
-    connections.filter((c) => c.status === "active").map((c) => c.app_name.toLowerCase())
+    connections
+      .filter((c) => LIVE_CONNECTION_STATUSES.has(String(c.status || "").toLowerCase()))
+      .map((c) => c.app_name.toLowerCase())
   );
   const missingConnections = requiredConnections.filter(
     (slug) => !activeConnectionSlugs.has(slug.toLowerCase())
@@ -1524,7 +1478,14 @@ export default function WorkerDetailPage() {
   // it would only 409. Treat it like a connection block: disabled + a clear
   // "paused" label so the click is never a dead end.
   const isPaused = worker.enabled === false && !worker.archived;
-  const canRun = !running && missingConnections.length === 0 && !isPaused;
+  const isMissingSecretForRun = worker.status === "missing_secret";
+  const inputValidationErrors = requiredRunInputErrors(worker.config.inputs, inputs);
+  const canRun =
+    !running &&
+    missingConnections.length === 0 &&
+    !isPaused &&
+    !isMissingSecretForRun &&
+    Object.keys(inputValidationErrors).length === 0;
   // canApplySample: allowed when the worker declares any input. File-only
   // workers are now fillable too — applyExampleInput synthesizes a real upload
   // from the inline example_input content (G5 FIX 4), so a non-technical user
@@ -1595,7 +1556,7 @@ export default function WorkerDetailPage() {
                 doesn't have to hunt for where to add the secret. */}
             {worker.status === "missing_secret" && (
               <Link
-                href="/secrets"
+                href={`/connections/secrets?return_to=/workers/${encodeURIComponent(worker.id)}`}
                 className="inline-flex items-center gap-1 rounded-[var(--radius-button)] px-2 py-0.5 text-[11px] font-medium text-amber-700 underline-offset-2 hover:underline dark:text-amber-300"
               >
                 Add secret →
@@ -1921,41 +1882,51 @@ export default function WorkerDetailPage() {
           flex-column <Tabs> root (not the `w-fit` list) — the overflow chain
           didn't reliably reach the list and the last tab (History) clipped with
           no scroll. Wrapping the `w-fit` list directly restores the swipe. */}
-      <Tabs value={activeSection} onValueChange={(v) => setSection(v as Section)}>
-        <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
-          {/* E2: the shared TabsList is h-8 (32px) — below the 44px touch
-              minimum. Bump the bar (and via h-full each trigger) to ≥44px on
-              mobile only; desktop keeps the tight 32px height. */}
+      {/* #539: 4 primary view tabs + "..." overflow for setup tabs (Settings,
+          Brain, Tools). Reduces 7 competing top-level choices to 4 + overflow. */}
+      <div className="-mx-4 flex items-center gap-1 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
+        <Tabs value={SETUP_NAV.some((n) => n.id === activeSection) ? "" : activeSection} onValueChange={(v) => setSection(v as Section)}>
           <TabsList className="h-11 min-h-11 sm:h-8 sm:min-h-0">
-            {NAV_ITEMS.map((item, i) => {
-              // Divider at the view→setup group boundary: extra gap + a hairline
-              // rule so the 7 tabs read as two short clusters in one row. Every
-              // tab stays one click away; this is purely visual rhythm.
-              const startsNewGroup = i > 0 && NAV_ITEMS[i - 1].group !== item.group;
-              return (
-                <Fragment key={item.id}>
-                  {startsNewGroup && (
-                    <span
-                      aria-hidden
-                      className="mx-1 h-4 w-px shrink-0 self-center bg-border"
-                    />
-                  )}
-                  <TabsTrigger value={item.id}>
-                    {item.icon}
-                    <span>{item.label}</span>
-                    {item.id === "settings" && triggersCount > 1 && (
-                      <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
-                    )}
-                    {item.id === "runs" && runsCount > 0 && (
-                      <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{runsCount}</span>
-                    )}
-                  </TabsTrigger>
-                </Fragment>
-              );
-            })}
+            {PRIMARY_NAV.map((item) => (
+              <TabsTrigger key={item.id} value={item.id}>
+                {item.icon}
+                <span>{item.label}</span>
+                {item.id === "runs" && runsCount > 0 && (
+                  <span className="ml-1 text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{runsCount}</span>
+                )}
+              </TabsTrigger>
+            ))}
           </TabsList>
-        </div>
-      </Tabs>
+        </Tabs>
+        <DropdownMenu>
+          <DropdownMenuTrigger
+            type="button"
+            className={`inline-flex h-8 shrink-0 items-center gap-1 rounded-[var(--radius-button)] border px-2.5 text-xs transition-colors ${
+              SETUP_NAV.some((n) => n.id === activeSection)
+                ? "border-border bg-muted font-medium text-foreground"
+                : "border-transparent text-muted-foreground hover:bg-muted hover:text-foreground"
+            }`}
+          >
+            <MoreVertical className="w-3.5 h-3.5" />
+            {SETUP_NAV.find((n) => n.id === activeSection)?.label ?? "More"}
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            {SETUP_NAV.map((item) => (
+              <DropdownMenuItem
+                key={item.id}
+                onClick={() => setSection(item.id as Section)}
+                className={activeSection === item.id ? "bg-muted" : ""}
+              >
+                {item.icon}
+                <span className="ml-2">{item.label}</span>
+                {item.id === "settings" && triggersCount > 1 && (
+                  <span className="ml-auto text-[10px] bg-muted-foreground/20 text-muted-foreground rounded px-1">{triggersCount}</span>
+                )}
+              </DropdownMenuItem>
+            ))}
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
 
       {/* Section content */}
       <div>
@@ -1980,6 +1951,8 @@ export default function WorkerDetailPage() {
               parts={activeRunStream.parts}
               streamConnected={activeRunStream.connected}
               streamError={activeRunStream.error}
+              streamUnavailable={activeRunStream.streamUnavailable}
+              onRefresh={activeRunStream.refresh}
               onBack={() => {
                 setActiveRunId(null);
                 setActiveRun(null);
@@ -2013,6 +1986,7 @@ export default function WorkerDetailPage() {
               running={running}
               missingConnections={missingConnections}
               canRun={canRun}
+              validationErrors={inputValidationErrors}
               canApplySample={canApplySample}
               onInputChange={(name, value) => setInputs((prev) => ({ ...prev, [name]: value }))}
               onFileUploaded={(name, sha256, fileName) => {
@@ -2545,7 +2519,7 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
           This worker requires{" "}
           <span className="font-mono font-semibold">{requiredSecrets.join(", ")}</span>{" "}
           to run.{" "}
-          <Link href="/secrets" className="underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-200">
+          <Link href={`/connections/secrets?return_to=/workers/${encodeURIComponent(worker.id)}`} className="underline underline-offset-2 hover:text-amber-900 dark:hover:text-amber-200">
             Add it in Secrets →
           </Link>
         </p>
@@ -2611,6 +2585,7 @@ function RunSection({
   running,
   missingConnections,
   canRun,
+  validationErrors,
   canApplySample,
   onInputChange,
   onFileUploaded,
@@ -2624,6 +2599,7 @@ function RunSection({
   running: boolean;
   missingConnections: string[];
   canRun: boolean;
+  validationErrors: Record<string, string>;
   canApplySample: boolean;
   onInputChange: (name: string, value: unknown) => void;
   onFileUploaded: (name: string, sha256: string, fileName: string) => void;
@@ -2635,6 +2611,7 @@ function RunSection({
   // didn't notice it. Moved to a compact action bar at the top with a
   // trash icon to clear all inputs in one click.
   const hasInputs = worker.config.inputs.length > 0;
+  const hasValidationErrors = Object.keys(validationErrors).length > 0;
   // P2: a paused worker offers no live Run — the button is disabled with a
   // clear "turn on to run" label instead of a dead-end click that only 409s.
   const isPaused = worker.enabled === false && !worker.archived;
@@ -2705,13 +2682,14 @@ function RunSection({
                   value={(inputs[inp.name] as string) || ""}
                   onChange={(e) => onInputChange(inp.name, e.target.value)}
                   className="min-h-[100px] border-border"
+                  aria-invalid={Boolean(validationErrors[inp.name])}
                 />
               ) : inp.type === "select" ? (
                 <Select
                   value={(inputs[inp.name] as string) || (inp.default as string) || ""}
                   onValueChange={(val) => onInputChange(inp.name, val)}
                 >
-                  <SelectTrigger className="border-border w-full">
+                  <SelectTrigger className="border-border w-full" aria-invalid={Boolean(validationErrors[inp.name])}>
                     <SelectValue placeholder={inp.placeholder || "Select an option"} />
                   </SelectTrigger>
                   <SelectContent>
@@ -2732,6 +2710,7 @@ function RunSection({
                     checked={inputs[inp.name] === true || inputs[inp.name] === "true"}
                     onChange={(e) => onInputChange(inp.name, e.target.checked)}
                     className="w-4 h-4 rounded border-border accent-black cursor-pointer"
+                    aria-invalid={Boolean(validationErrors[inp.name])}
                   />
                   <label htmlFor={`inp-${inp.name}`} className="text-sm text-muted-foreground cursor-pointer select-none">
                     {inp.placeholder || inp.label}
@@ -2759,7 +2738,11 @@ function RunSection({
                   value={(inputs[inp.name] as string) || ""}
                   onChange={(e) => onInputChange(inp.name, e.target.value)}
                   className="border-border"
+                  aria-invalid={Boolean(validationErrors[inp.name])}
                 />
+              )}
+              {validationErrors[inp.name] && (
+                <p className="text-xs text-red-600">{validationErrors[inp.name]}</p>
               )}
             </div>
           ))}
@@ -2772,22 +2755,55 @@ function RunSection({
           {missingConnections.length > 0 && (
             <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 text-xs text-amber-800 rounded-[var(--radius-button)]">
               <Plug className="w-3.5 h-3.5 mt-0.5 shrink-0" />
-              <div>
-                <p className="font-medium">Connection required</p>
-                <p>
-                  Connect{" "}
-                  {missingConnections.map((s, i) => (
-                    <span key={s}>
-                      <span className="font-medium capitalize">{s}</span>
-                      {i < missingConnections.length - 1 ? ", " : ""}
-                    </span>
-                  ))}{" "}
-                  in{" "}
-                  <Link href="/connections" className="underline hover:text-amber-900">
-                    Connections
-                  </Link>{" "}
-                  before running.
+              <div className="space-y-1.5">
+                <p className="font-medium">Connect and test required tools</p>
+                <p className="text-amber-700">
+                  This worker uses {missingConnections.map(humanizeOptionLabel).join(", ")} tools. Connect the missing account, then run the worker from this tab.
                 </p>
+                <div className="flex flex-wrap gap-1.5">
+                  {missingConnections.map((s) => (
+                    <Link
+                      key={s}
+                      href={`/connections/connect/${encodeURIComponent(s)}?return_to=/workers/${encodeURIComponent(worker.id)}`}
+                      className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-100 px-2 py-0.5 font-medium capitalize hover:bg-amber-200"
+                    >
+                      Connect {humanizeOptionLabel(s)} →
+                    </Link>
+                  ))}
+                  <Link
+                    href="/connections"
+                    className="inline-flex items-center gap-1 rounded border border-amber-300 bg-white px-2 py-0.5 font-medium text-amber-800 hover:bg-amber-100"
+                  >
+                    Test connections →
+                  </Link>
+                </div>
+              </div>
+            </div>
+          )}
+
+          {worker.status === "missing_secret" && (
+            <div className="flex items-start gap-2 p-3 bg-amber-50 border border-amber-200 text-xs text-amber-800 rounded-[var(--radius-button)]">
+              <KeyRound className="w-3.5 h-3.5 mt-0.5 shrink-0" />
+              <div className="space-y-1.5">
+                <p className="font-medium">Add required secrets to run</p>
+                {worker.missing_secrets && worker.missing_secrets.length > 0 ? (
+                  <div className="flex flex-wrap gap-1.5">
+                    {worker.missing_secrets.map((s) => (
+                      <Link
+                        key={s}
+                        href={`/connections/secrets?prefill=${encodeURIComponent(s)}&return_to=/workers/${encodeURIComponent(worker.id)}`}
+                        className="inline-flex items-center gap-1 rounded border border-amber-300 bg-amber-100 px-2 py-0.5 font-mono hover:bg-amber-200"
+                      >
+                        {s} →
+                      </Link>
+                    ))}
+                  </div>
+                ) : (
+                  <p>
+                    <Link href={`/connections/secrets?return_to=/workers/${encodeURIComponent(worker.id)}`} className="underline hover:text-amber-900">Add the missing secret</Link>{" "}
+                    before running.
+                  </p>
+                )}
               </div>
             </div>
           )}
@@ -2799,7 +2815,11 @@ function RunSection({
               : isPaused
               ? "Paused — turn on to run"
               : missingConnections.length > 0
-              ? `Connect ${missingConnections[0]} first`
+              ? `Connect ${humanizeOptionLabel(missingConnections[0])} to run`
+              : worker.status === "missing_secret"
+              ? "Add missing secret first"
+              : hasValidationErrors
+              ? "Fill required inputs"
               : "Run worker"}
           </Button>
       </div>
@@ -3738,7 +3758,7 @@ function VersionsSection({
       setVersions(fresh);
       setExpandedId(null);
       setExpandedFiles(null);
-      toast.success(`Rolled back to version ${v.version_number}`);
+      toast.success(`Rolled back to commit ${v.sha}`);
     } catch (e: unknown) {
       toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
     } finally {
@@ -3767,37 +3787,10 @@ function VersionsSection({
     );
   }
 
-  function changeSourceLabel(src: string): string {
-    if (src === "user") return "Manual save";
-    if (src === "ai") return "AI edit";
-    if (src === "api") return "API";
-    if (src.startsWith("rollback:")) return "Rollback";
-    return src;
-  }
-
-  function changeSourceBadge(src: string) {
-    const label = changeSourceLabel(src);
-    const isRollback = src.startsWith("rollback:");
-    const isAi = src === "ai";
-    return (
-      <span
-        className={`inline-flex items-center rounded px-1.5 py-0.5 text-[10px] font-medium border ${
-          isRollback
-            ? "border-amber-500/30 bg-amber-500/10 text-amber-700 dark:text-amber-400"
-            : isAi
-            ? "border-violet-500/30 bg-violet-500/10 text-violet-700 dark:text-violet-400"
-            : "border-border bg-muted text-muted-foreground"
-        }`}
-      >
-        {label}
-      </span>
-    );
-  }
-
   return (
     <div className="space-y-3">
       <p className="text-xs text-muted-foreground">
-        {versions.length} version{versions.length !== 1 ? "s" : ""} · newest first · click a version to preview
+        {versions.length} commit{versions.length !== 1 ? "s" : ""} · newest first · click a commit to preview
       </p>
       <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden divide-y divide-[var(--border-default)]">
         {versions.map((v, idx) => (
@@ -3807,18 +3800,18 @@ function VersionsSection({
               onClick={() => { if (idx !== 0) void handleExpand(v); }}
             >
               <div className="flex items-center gap-3 min-w-0">
-                <span className="text-xs font-mono text-muted-foreground w-6 shrink-0 text-right">
-                  v{v.version_number}
+                <span className="text-xs font-mono text-muted-foreground shrink-0">
+                  {v.sha}
                 </span>
                 <div className="min-w-0 flex flex-col gap-0.5">
                   <div className="flex items-center gap-2">
-                    {changeSourceBadge(v.change_source)}
+                    <span className="truncate text-xs text-foreground max-w-[200px]" title={v.message}>{v.message}</span>
                     {idx === 0 && (
-                      <span className="text-[10px] text-muted-foreground font-medium">(current)</span>
+                      <span className="text-[10px] text-muted-foreground font-medium shrink-0">(current)</span>
                     )}
                   </div>
                   <span className="text-xs text-muted-foreground">
-                    {formatRelative(v.created_at)}
+                    {v.author} · {formatRelative(v.timestamp)}
                   </span>
                 </div>
               </div>
@@ -3830,7 +3823,7 @@ function VersionsSection({
             </div>
             {expandedId === v.id && expandedFiles && (
               <VersionDiffPanel
-                versionNumber={v.version_number}
+                versionSha={v.sha}
                 versionFiles={expandedFiles}
                 currentFiles={currentFiles}
                 isRestoring={rollingBack === v.id}

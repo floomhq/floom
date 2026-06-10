@@ -7,6 +7,7 @@ import { Label } from "@/components/ui/label";
 import { Button } from "@/components/ui/button";
 import { toast } from "sonner";
 import { cn } from "@/lib/utils";
+import { getPublicApiBase } from "@/lib/api-base";
 import { CronBuilder } from "@/components/CronBuilder";
 import { humanizeCron } from "@/lib/humanize-cron";
 import { ConnectionEventPicker } from "@/components/ConnectionEventPicker";
@@ -341,7 +342,7 @@ function TriggerRowEditor({
             Your webhook URL will be shown after the worker is created. It includes a unique token for authentication.
           </p>
           <div className="rounded border border-line bg-card p-2 font-mono text-xs text-muted-foreground">
-            https://workers-api.floom.dev/webhooks/&lt;worker-id&gt;?token=...
+            {`${getPublicApiBase()}/webhooks/<worker-id>?token=...`}
           </div>
         </div>
       )}

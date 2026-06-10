@@ -16,7 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiProxyPath, getActiveWorkspaceId } from "@/lib/api";
-import type { AttachedFile, ChatMessage, ToolCard } from "./emily-chat-types";
+import type { AttachedFile, ChatMessage } from "./emily-chat-types";
 import {
   CONVERSATION_STORAGE_KEY,
   readStoredConversationId,
@@ -35,6 +35,8 @@ export interface ChatStreamState {
   sendMessage: (text: string, files?: AttachedFile[]) => void;
   /** Reset to a fresh conversation. The previous one stays retrievable server-side. */
   newSession: () => void;
+  /** Load a past conversation into the live stream (Emily history rail). */
+  loadConversation: (id: string) => void;
 }
 
 export function useChatStream(): ChatStreamState {
@@ -119,14 +121,136 @@ export function useChatStream(): ChatStreamState {
     };
   }, []);
 
+  // #591: Subscribe to the underlying run SSE stream for tool cards stuck in
+  // "running" status. When workers.run triggers a run, the backend intentionally
+  // leaves the card at status="running" because the run executes asynchronously.
+  // Without this effect, the "Starting worker run" spinner stays forever because
+  // no code ever connected the card to the run's completion event.
+  //
+  // Strategy: track subscribed card_ids in a ref (avoids re-creating sources on
+  // every render). For each unsubscribed running card that has a stream URL,
+  // open an EventSource. On a "finish" part, flip the card to completed/failed.
+  // On stream error, fall back to a one-shot REST poll of the run status.
+  const subscribedCardIds = useRef<Set<string>>(new Set());
+  useEffect(() => {
+    const newSources: { cardId: string; source: EventSource }[] = [];
+
+    for (const msg of messages) {
+      if (msg.role !== "assistant" || !msg.parts) continue;
+      for (const part of msg.parts) {
+        if (part.type !== "tool-card") continue;
+        const card = part.card;
+        if (card.status !== "running") continue;
+        if (!card.streams?.parts) continue;
+        if (subscribedCardIds.current.has(card.card_id)) continue;
+
+        const cardId = card.card_id;
+        const streamPath = card.streams.parts;
+        // Extract run_id for fallback REST poll: path is /runs/{id}/stream
+        const runId = streamPath.match(/\/runs\/([^/]+)\//)?.[1];
+
+        subscribedCardIds.current.add(cardId);
+
+        const source = new EventSource(apiProxyPath(streamPath, true));
+        newSources.push({ cardId, source });
+
+        const applyFinalStatus = (finalStatus: "completed" | "failed") => {
+          subscribedCardIds.current.delete(cardId);
+          setMessages((prev) =>
+            prev.map((m) => {
+              if (m.role !== "assistant" || !m.parts) return m;
+              return {
+                ...m,
+                parts: m.parts.map((p) => {
+                  if (p.type !== "tool-card" || p.card.card_id !== cardId) return p;
+                  const tc = p.card as GenericToolCard;
+                  return {
+                    type: "tool-card" as const,
+                    card: {
+                      ...p.card,
+                      status: finalStatus,
+                      ...("toolName" in tc
+                        ? { title: getToolCardTitle(tc.toolName, finalStatus) }
+                        : {}),
+                    } as ToolCard,
+                  };
+                }),
+              };
+            })
+          );
+        };
+
+        source.addEventListener("part", (event) => {
+          try {
+            const data = JSON.parse((event as MessageEvent).data) as { type?: string; status?: string };
+            if (data.type === "finish") {
+              source.close();
+              applyFinalStatus(data.status === "completed" ? "completed" : "failed");
+            }
+          } catch { /* ignore malformed SSE frames */ }
+        });
+
+        source.onerror = () => {
+          source.close();
+          // Fallback: one-shot REST poll to get final run status
+          if (!runId) return;
+          void fetch(apiProxyPath(`/runs/${runId}`))
+            .then((r) => r.ok ? r.json() : null)
+            .then((run: { status?: string } | null) => {
+              if (!run) return;
+              if (run.status === "completed" || run.status === "failed") {
+                applyFinalStatus(run.status as "completed" | "failed");
+              }
+            })
+            .catch(() => { /* network error — leave card as-is */ });
+        };
+      }
+    }
+
+    return () => {
+      for (const { cardId, source } of newSources) {
+        source.close();
+        subscribedCardIds.current.delete(cardId);
+      }
+    };
+  }, [messages]);
+
   const newSession = useCallback(() => {
     abortRef.current?.abort();
     clearStoredConversationId();
+    subscribedCardIds.current.clear();
     setMessages([]);
     setConversationId(null);
     setError(null);
     setIsStreaming(false);
   }, []);
+
+  // Load a past conversation into this instance (same-instance switch; the
+  // storage event only syncs OTHER tabs, so we hydrate directly here).
+  const loadConversation = useCallback(
+    (id: string) => {
+      if (!id || id === conversationId) return;
+      abortRef.current?.abort();
+      subscribedCardIds.current.clear();
+      setIsStreaming(false);
+      setError(null);
+      setIsHydrating(true);
+      (async () => {
+        try {
+          const detail = await api.conversations.get(id);
+          const hydrated = rehydrateConversation(detail);
+          setMessages(hydrated);
+          setConversationId(id);
+          writeStoredConversationId(id);
+        } catch {
+          setError("Could not load that conversation.");
+        } finally {
+          setIsHydrating(false);
+        }
+      })();
+    },
+    [conversationId],
+  );
 
   const sendMessage = useCallback(
     (text: string, files?: AttachedFile[]) => {
@@ -233,7 +357,11 @@ export function useChatStream(): ChatStreamState {
               // Fold event into messages
               setMessages((prev) => reduceSSEEvent(prev, event, assistantMsgId));
 
-              if (event.type === "finish" || event.type === "error") {
+              if (event.type === "error") {
+                setError(sseErrorMessage(event));
+                break;
+              }
+              if (event.type === "finish") {
                 break;
               }
             }
@@ -282,6 +410,7 @@ export function useChatStream(): ChatStreamState {
     error,
     sendMessage,
     newSession,
+    loadConversation,
   };
 }
 
@@ -290,9 +419,13 @@ export function useChatStream(): ChatStreamState {
 // Exported for unit testing.
 
 import type {
+  CardStatus,
   ChatSSEEvent,
+  RunCard,
   MsgPart,
   GenericToolCard,
+  ToolCard,
+  WorkerListCard,
 } from "./emily-chat-types";
 
 type ToolLabel = {
@@ -509,6 +642,130 @@ export function getToolCardTitle(toolName: string, status: ToolCard["status"]): 
   return fallbackToolLabel(toolName, done);
 }
 
+function normalizeCardStatus(status: unknown): CardStatus {
+  if (status === "succeeded") return "completed";
+  if (typeof status === "string") return status as CardStatus;
+  return "completed";
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return value && typeof value === "object" && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
+
+function optionalString(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value : undefined;
+}
+
+function sseErrorMessage(event: Extract<ChatSSEEvent, { type: "error" }>): string {
+  const message =
+    optionalString(event.error) ??
+    optionalString((event as { message?: unknown }).message) ??
+    optionalString((event as { detail?: unknown }).detail);
+  return message ?? "Emily could not complete that request.";
+}
+
+function appendAssistantError(
+  prev: ChatMessage[],
+  assistantMsgId: string,
+  message: string
+): ChatMessage[] {
+  const errorPart: MsgPart = { type: "text", text: message, streaming: false };
+  const existing = prev.find((m) => m.id === assistantMsgId);
+  if (existing && existing.role === "assistant") {
+    return prev.map((m) =>
+      m.id === assistantMsgId && m.role === "assistant"
+        ? { ...m, parts: [...(m.parts ?? []), errorPart] }
+        : m
+    );
+  }
+  return [
+    ...prev,
+    {
+      id: assistantMsgId,
+      role: "assistant",
+      parts: [errorPart],
+    },
+  ];
+}
+
+function workerListCardFromResult(
+  event: Extract<ChatSSEEvent, { type: "tool-result" }>,
+  existing: ToolCard
+): WorkerListCard | null {
+  const result = asRecord(event.result);
+  const workers = result?.workers;
+  const normalizedTool = event.toolName ? normalizeToolName(event.toolName) : "";
+  const isWorkerList =
+    event.card?.kind === "worker-list" || normalizedTool === "workers.list_all";
+  if (!isWorkerList || !Array.isArray(workers)) return null;
+
+  return {
+    kind: "worker-list",
+    callId: existing.callId,
+    card_id: existing.card_id,
+    status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "completed")),
+    actions: event.actions,
+    streams: event.streams,
+    workers: workers.reduce<WorkerListCard["workers"]>((acc, worker) => {
+      const row = asRecord(worker);
+      const id = optionalString(row?.id);
+      if (!id) return acc;
+      const trigger = optionalString(row?.trigger);
+      acc.push({
+        id,
+        name: optionalString(row?.title) ?? optionalString(row?.name) ?? id,
+        ...(trigger ? { trigger } : {}),
+        enabled: row?.enabled === undefined ? true : Boolean(row.enabled),
+      });
+      return acc;
+    }, []),
+  };
+}
+
+function runCardFromResult(
+  event: Extract<ChatSSEEvent, { type: "tool-result" }>,
+  existing: ToolCard
+): RunCard | null {
+  const result = asRecord(event.result);
+  const normalizedTool = event.toolName ? normalizeToolName(event.toolName) : "";
+  const isRun = event.card?.kind === "run" || normalizedTool === "workers.run";
+  const resource = event.resource?.kind === "run" ? event.resource : null;
+  const runId = optionalString(result?.run_id) ?? optionalString(resource?.run_id);
+  if (!isRun || !runId) return null;
+
+  const preview = "preview" in existing ? existing.preview : undefined;
+  const workerId =
+    optionalString(resource?.worker_id) ??
+    optionalString(asRecord(preview)?.id);
+  const workerName = optionalString(resource?.worker_name) ?? workerId ?? "Worker run";
+
+  return {
+    kind: "run",
+    callId: existing.callId,
+    card_id: existing.card_id,
+    status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "running")),
+    actions: event.actions,
+    streams: event.streams,
+    toolName: normalizedTool || event.toolName,
+    runId,
+    workerId,
+    workerName,
+  };
+}
+
+function toolCardFromResult(
+  event: Extract<ChatSSEEvent, { type: "tool-result" }>,
+  existing: ToolCard
+): ToolCard | null {
+  return workerListCardFromResult(event, existing) ?? runCardFromResult(event, existing);
+}
+
+function toolCardToolName(card: ToolCard): string | null {
+  return "toolName" in card && typeof card.toolName === "string" ? card.toolName : null;
+}
+
 /**
  * Extract the effective card_id from any tool event.
  * The live backend puts id in event.card.id; the enriched v2 protocol also
@@ -582,13 +839,13 @@ export function reduceSSEEvent(
       // Use card metadata from the event if available, otherwise synthesise.
       const cardId = resolveCardId(event) ?? event.callId;
       const cardMeta = event.card;
-      const status = cardMeta?.status ?? "running";
+      const status = normalizeCardStatus(cardMeta?.status ?? "running");
       const card: GenericToolCard = {
         kind: "generic",
         callId: event.callId,
         card_id: cardId,
         toolName: event.toolName,
-        title: getToolCardTitle(event.toolName, status),
+        title: event.card?.title ?? getToolCardTitle(event.toolName, status),
         preview: event.args_preview as Record<string, unknown> | undefined,
         status,
         ...(event.resource ? {} : {}),
@@ -616,18 +873,21 @@ export function reduceSSEEvent(
       const cardId = resolveCardId(event);
       if (!cardId) return prev;
 
-      const newStatus = event.type === "tool-progress" ? event.status : undefined;
+      const newStatus = event.type === "tool-progress" ? normalizeCardStatus(event.status) : undefined;
 
       return prev.map((m) => {
         if (m.role !== "assistant" || !m.parts) return m;
         const updatedParts = m.parts.map((p) => {
           if (p.type !== "tool-card" || p.card.card_id !== cardId) return p;
+          const toolName = toolCardToolName(p.card);
           const updatedCard: ToolCard = {
             ...p.card,
             ...(newStatus !== undefined ? { status: newStatus } : {}),
-            ...(newStatus !== undefined && "toolName" in p.card
-              ? { title: getToolCardTitle(p.card.toolName, newStatus) }
-              : {}),
+            ...(event.type === "tool-progress" && event.label
+              ? { title: event.label }
+              : newStatus !== undefined && toolName
+                ? { title: getToolCardTitle(toolName, newStatus) }
+                : {}),
             ...(event.actions ? { actions: event.actions } : {}),
             ...(event.type === "tool-resource" && event.streams
               ? { streams: event.streams }
@@ -648,13 +908,18 @@ export function reduceSSEEvent(
         if (m.role !== "assistant" || !m.parts) return m;
         const updatedParts = m.parts.map((p) => {
           if (p.type !== "tool-card" || p.card.card_id !== cardId) return p;
+          const specializedCard = toolCardFromResult(event, p.card);
+          if (specializedCard) return { type: "tool-card" as const, card: specializedCard };
           const status = event.card?.status ?? (event.isError ? "failed" : "completed");
+          const toolName = toolCardToolName(p.card);
           const updatedCard: ToolCard = {
             ...p.card,
-            status,
-            ...("toolName" in p.card
-              ? { title: getToolCardTitle(p.card.toolName, status) }
-              : {}),
+            status: normalizeCardStatus(status),
+            ...(event.card?.title
+              ? { title: event.card.title }
+              : toolName
+                ? { title: getToolCardTitle(toolName, normalizeCardStatus(status)) }
+                : {}),
             ...(event.actions ? { actions: event.actions } : {}),
             ...(event.streams ? { streams: event.streams } : {}),
           } as ToolCard;
@@ -677,13 +942,14 @@ export function reduceSSEEvent(
               (c) => c.id === p.card.card_id || c.callId === p.card.callId
             );
             if (reconciled) {
+              const toolName = toolCardToolName(p.card);
               return {
                 type: "tool-card" as const,
                 card: {
                   ...p.card,
-                  status: reconciled.status,
-                  ...("toolName" in p.card
-                    ? { title: getToolCardTitle(p.card.toolName, reconciled.status) }
+                  status: normalizeCardStatus(reconciled.status),
+                  ...(toolName
+                    ? { title: getToolCardTitle(toolName, normalizeCardStatus(reconciled.status)) }
                     : {}),
                 } as ToolCard,
               };
@@ -696,9 +962,22 @@ export function reduceSSEEvent(
     }
 
     case "error":
-      return prev;
+      return appendAssistantError(prev, assistantMsgId, sseErrorMessage(event));
 
     default:
       return prev;
   }
+}
+
+export function shouldAutoOpenRunDetails(card: ToolCard): card is RunCard {
+  return (
+    card.kind === "run" &&
+    normalizeToolName(card.toolName || "") === "runs.get" &&
+    card.status === "completed" &&
+    Boolean(card.runId)
+  );
+}
+
+export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
+  return shouldAutoOpenRunDetails(card) ? `/runs/${card.runId}?tab=logs` : null;
 }

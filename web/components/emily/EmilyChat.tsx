@@ -1,35 +1,125 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { ChevronRight, ChevronLeft, Maximize2, PenSquare, Download } from "lucide-react";
+import { AlertTriangle, ChevronRight, ChevronLeft, ChevronDown, Maximize2, Minimize2, PenSquare, Download, History } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
 import { cn } from "@/lib/utils";
-import Link from "next/link";
+import { useRouter } from "next/navigation";
 
 import { EmilyAvatar } from "./EmilyAvatar";
 import { MarkdownText } from "./MarkdownText";
 import { PromptInput } from "./PromptInput";
 import { FileChip } from "./FileChip";
 import { ToolCardRenderer } from "./cards/ToolCardRenderer";
-import { useChatStream } from "@/lib/useChatStream";
+import {
+  getAutoOpenRunDetailsHref,
+  shouldAutoOpenRunDetails,
+  useChatStream,
+} from "@/lib/useChatStream";
 import { exportConversationMarkdown } from "@/lib/emily-chat-export";
+import { api } from "@/lib/api";
+import type { ConversationSummary } from "@/lib/types";
 import type { AttachedFile, ChatMessage } from "@/lib/emily-chat-types";
 
 // ── Chat controls (New chat + Export) ─────────────────────────────────────────
+
+// Recent chats — browse + reopen past Emily conversations (SPEC §12). Backed by
+// GET /conversations (BACKEND-MAP: WORKS).
+function RecentChats({
+  activeConversationId,
+  onLoadConversation,
+}: {
+  activeConversationId: string | null;
+  onLoadConversation: (id: string) => void;
+}) {
+  const [open, setOpen] = useState(false);
+  const [items, setItems] = useState<ConversationSummary[] | null>(null);
+
+  useEffect(() => {
+    if (!open) return;
+    let alive = true;
+    api.conversations
+      .list(20)
+      .then((rows) => alive && setItems(rows))
+      .catch(() => alive && setItems([]));
+    return () => {
+      alive = false;
+    };
+  }, [open]);
+
+  return (
+    <div className="relative">
+      <Button
+        size="sm"
+        variant="ghost"
+        className="h-7 gap-1.5 px-2 text-xs text-muted-foreground hover:text-foreground"
+        onClick={() => setOpen((v) => !v)}
+        title="Recent chats"
+        aria-label="Recent chats"
+        aria-expanded={open}
+      >
+        <History className="size-3.5" />
+        <span className="hidden sm:inline">Recent</span>
+      </Button>
+      {open && (
+        <div
+          role="menu"
+          onMouseLeave={() => setOpen(false)}
+          className="absolute right-0 top-full z-30 mt-1 max-h-72 w-64 overflow-auto rounded-[12px] border border-border bg-[var(--bg-card)] p-1 shadow-[var(--shadow-pop)]"
+        >
+          {items === null && <div className="px-2 py-3 text-xs text-muted-foreground">Loading…</div>}
+          {items?.length === 0 && (
+            <div className="px-2 py-3 text-xs text-muted-foreground">No past chats yet.</div>
+          )}
+          {items?.map((c) => (
+            <button
+              key={c.id}
+              type="button"
+              role="menuitem"
+              onClick={() => {
+                setOpen(false);
+                onLoadConversation(c.id);
+              }}
+              className={cn(
+                "flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-xs hover:bg-[var(--bg-2)]",
+                c.id === activeConversationId && "bg-[var(--bg-2)]"
+              )}
+            >
+              <span className="flex-1 truncate text-[var(--ink-soft)]">
+                {c.title?.trim() || "Untitled chat"}
+              </span>
+              {c.message_count != null && (
+                <span className="shrink-0 text-[10.5px] text-muted-foreground">{c.message_count}</span>
+              )}
+            </button>
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
 
 function ChatControls({
   onNew,
   onExport,
   canExport,
+  activeConversationId,
+  onLoadConversation,
 }: {
   onNew: () => void;
   onExport: () => void;
   canExport: boolean;
+  activeConversationId: string | null;
+  onLoadConversation: (id: string) => void;
 }) {
   return (
     <div className="flex items-center gap-1">
+      <RecentChats
+        activeConversationId={activeConversationId}
+        onLoadConversation={onLoadConversation}
+      />
       <Button
         size="sm"
         variant="ghost"
@@ -161,17 +251,124 @@ interface EmilyChatCoreProps {
   fullPage?: boolean;
 }
 
+const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
+
 function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
-  const { messages, conversationId, isStreaming, isHydrating, sendMessage, newSession } =
-    useChatStream();
+  const {
+    messages,
+    conversationId,
+    isStreaming,
+    isHydrating,
+    error,
+    sendMessage,
+    newSession,
+    loadConversation,
+  } = useChatStream();
+  const router = useRouter();
   const [input, setInput] = useState("");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
+  const scrollContainerRef = useRef<HTMLDivElement>(null);
+  // Start true so the first message load scrolls to bottom automatically.
+  const isNearBottomRef = useRef(true);
+  const [showScrollButton, setShowScrollButton] = useState(false);
+  const openedRunDetailsRef = useRef(new Set<string>());
+  const runDetailsNavReadyRef = useRef(false);
 
-  // Auto-scroll on new messages
+  // Track whether the user is near the bottom of the scroll container.
+  // We use a ref (not state) so the scroll handler doesn't trigger re-renders.
+  const handleScroll = useCallback(() => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    // Tight threshold: even a small scroll up (> 20px from bottom) disengages
+    // auto-scroll immediately. A large threshold like 120px caused fighting
+    // because small scrolls still read as "near bottom" and got overridden.
+    const nearBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 20;
+    isNearBottomRef.current = nearBottom;
+    setShowScrollButton(!nearBottom);
+  }, []);
+
+  // Scroll the container to the very bottom. Uses direct scrollTop manipulation
+  // (not scrollIntoView) so it is instant and synchronous — no smooth animation
+  // that would fight the user's own scroll gesture during streaming.
+  const scrollToBottom = useCallback((smooth = false) => {
+    const el = scrollContainerRef.current;
+    if (!el) return;
+    if (smooth) {
+      el.scrollTo({ top: el.scrollHeight, behavior: "smooth" });
+    } else {
+      el.scrollTop = el.scrollHeight;
+    }
+    isNearBottomRef.current = true;
+    setShowScrollButton(false);
+  }, []);
+
+  // Auto-scroll when streaming — ONLY if the user is already near the bottom.
+  // If they've scrolled up to read history, stop and show the jump button.
+  // Uses instant scroll (no smooth animation) so it never fights user input.
   useEffect(() => {
-    bottomRef.current?.scrollIntoView({ behavior: "smooth" });
+    if (isNearBottomRef.current) {
+      const el = scrollContainerRef.current;
+      if (el) el.scrollTop = el.scrollHeight;
+    }
   }, [messages, isStreaming]);
+
+  // Always jump to bottom when the USER sends a new message so Emily's reply
+  // is immediately visible — regardless of current scroll position.
+  const prevLengthRef = useRef(messages.length);
+  useEffect(() => {
+    const grew = messages.length > prevLengthRef.current;
+    prevLengthRef.current = messages.length;
+    if (grew && messages[messages.length - 1]?.role === "user") {
+      runDetailsNavReadyRef.current = true;
+      scrollToBottom();
+    }
+  }, [messages, scrollToBottom]);
+
+  // Refresh the workers page whenever Emily completes a create/update/delete
+  // so the user sees the new worker immediately without a manual refresh.
+  const seenCardIds = useRef(new Set<string>());
+  useEffect(() => {
+    for (const msg of messages) {
+      if (msg.role !== "assistant" || !msg.parts) continue;
+      for (const part of msg.parts) {
+        if (part.type !== "tool-card") continue;
+        const card = part.card;
+        const cardId = card.card_id;
+        if (seenCardIds.current.has(cardId)) continue;
+        if (
+          "toolName" in card &&
+          typeof card.toolName === "string" &&
+          WORKER_MUTATION_TOOLS.has(card.toolName) &&
+          (card.status === "completed" || card.status === "failed")
+        ) {
+          seenCardIds.current.add(cardId);
+          router.refresh();
+        }
+      }
+    }
+  }, [messages, router]);
+
+  useEffect(() => {
+    if (!runDetailsNavReadyRef.current || isHydrating) return;
+    if (fullPage) return;
+    for (const msg of messages) {
+      if (msg.role !== "assistant" || !msg.parts) continue;
+      for (const part of msg.parts) {
+        if (part.type !== "tool-card") continue;
+        const card = part.card;
+        if (!shouldAutoOpenRunDetails(card)) continue;
+        const href = getAutoOpenRunDetailsHref(card);
+        if (!href) continue;
+        const runId = card.runId;
+        if (!runId) continue;
+        if (openedRunDetailsRef.current.has(runId)) continue;
+        openedRunDetailsRef.current.add(runId);
+        router.push(href);
+        return;
+      }
+    }
+  }, [messages, router, fullPage, isHydrating]);
 
   const handleSubmit = useCallback(() => {
     const text = input.trim();
@@ -186,6 +383,13 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
   }, [messages, conversationId]);
 
   const hasMessages = messages.length > 0;
+  const errorAlreadyVisible = Boolean(
+    error &&
+      messages.some((message) =>
+        message.role === "assistant" &&
+        message.parts?.some((part) => part.type === "text" && part.text === error)
+      )
+  );
 
   return (
     <div className={cn("flex flex-col h-full", fullPage && "max-w-2xl mx-auto w-full")}>
@@ -196,11 +400,32 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
           fullPage ? "px-6 py-2" : "px-3 py-1.5"
         )}
       >
-        <ChatControls onNew={newSession} onExport={handleExport} canExport={hasMessages} />
+        <ChatControls
+          onNew={() => {
+            newSession();
+            // Reset scroll state for the fresh conversation
+            isNearBottomRef.current = true;
+            setShowScrollButton(false);
+            openedRunDetailsRef.current.clear();
+            runDetailsNavReadyRef.current = false;
+          }}
+          onExport={handleExport}
+          canExport={hasMessages}
+          activeConversationId={conversationId}
+          onLoadConversation={(id) => {
+            loadConversation(id);
+            isNearBottomRef.current = true;
+            setShowScrollButton(false);
+          }}
+        />
       </div>
 
       {/* Message list */}
-      <div className="flex-1 overflow-y-auto">
+      <div
+        ref={scrollContainerRef}
+        className="relative flex-1 overflow-y-auto"
+        onScroll={handleScroll}
+      >
         {!hasMessages ? (
           isHydrating ? (
             <div className="flex h-full items-center justify-center px-6 text-center">
@@ -214,14 +439,39 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
             {messages.map((msg) => (
               <MessageRow key={msg.id} msg={msg} />
             ))}
+            {error && !errorAlreadyVisible && (
+              <div className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-3 text-xs text-destructive">
+                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
+                <p className="leading-relaxed">{error}</p>
+              </div>
+            )}
             {isStreaming && <TypingIndicator />}
             <div ref={bottomRef} />
           </div>
+        )}
+
+        {/* Scroll-to-bottom button — visible when user has scrolled up and
+            Emily is still typing. Matches ChatGPT / Claude UX. */}
+        {showScrollButton && (
+          <button
+            type="button"
+            onClick={() => scrollToBottom(true)}
+            aria-label="Scroll to bottom"
+            className="sticky bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground shadow-md hover:text-foreground hover:shadow-lg transition-all"
+          >
+            <ChevronDown className="size-3.5" />
+            Scroll to bottom
+          </button>
         )}
       </div>
 
       {/* Input */}
       <div className={cn("shrink-0", fullPage ? "px-6 pb-6 pt-3" : "px-3 pb-3 pt-0")}>
+        {error && (
+          <div className="mb-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
+            {error}
+          </div>
+        )}
         <Separator className="mb-3" />
         <PromptInput
           value={input}
@@ -242,25 +492,39 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
 
 // ── Dock component (right-side persistent rail) ───────────────────────────────
 
+// Emily dock width progression (SPEC §12): collapsed ↔ rail ↔ wide ↔ full-screen
+// overlay, via the expand control + collapse button.
+type DockMode = "collapsed" | "rail" | "wide" | "full";
+
+const DOCK_WIDTH: Record<DockMode, string> = {
+  collapsed: "w-12",
+  rail: "w-full md:w-[380px] md:max-w-[30vw]",
+  wide: "w-full md:w-[640px] md:max-w-[52vw]",
+  full: "fixed inset-0 z-50 w-full", // full-screen overlay
+};
+
 export function EmilyDock({ className }: { className?: string }) {
-  const [open, setOpen] = useState(true);
+  const [mode, setMode] = useState<DockMode>("rail");
+  const open = mode !== "collapsed";
+  const cycleExpand = () =>
+    setMode((m) => (m === "rail" ? "wide" : m === "wide" ? "full" : "rail"));
 
   return (
     <div
       className={cn(
-        "flex h-full flex-col border-l border-border bg-background shrink-0",
-        // Width collapses to 48px strip when closed; full rail when open
-        open ? "w-full md:w-[380px] md:max-w-[30vw]" : "w-12",
+        "flex h-full flex-col bg-background shrink-0",
+        mode !== "full" && "border-l border-border",
+        DOCK_WIDTH[mode],
         className
       )}
-      aria-label={open ? "Emily dock" : "Emily dock (collapsed)"}
+      aria-label={open ? `Emily dock (${mode})` : "Emily dock (collapsed)"}
     >
-      {/* Collapsed strip — shown only when closed */}
+      {/* Collapsed strip — shown only when collapsed */}
       {!open && (
         <div className="flex flex-col items-center justify-start pt-4 gap-3">
           <button
             type="button"
-            onClick={() => setOpen(true)}
+            onClick={() => setMode("rail")}
             className="flex flex-col items-center gap-1.5 group"
             title="Open Emily"
             aria-label="Open Emily"
@@ -273,7 +537,7 @@ export function EmilyDock({ className }: { className?: string }) {
 
       {/* Full header — shown only when open */}
       {open && (
-        <div className="flex h-12 shrink-0 items-center gap-2.5 border-b border-border px-4">
+        <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-border px-4">
           <EmilyAvatar size="sm" />
           <div className="flex-1 min-w-0">
             <p className="text-sm font-semibold leading-none truncate">Emily</p>
@@ -285,19 +549,21 @@ export function EmilyDock({ className }: { className?: string }) {
           >
             Online
           </Badge>
-          <Link
-            href="/chat"
-            title="Full-page chat"
-            aria-label="Open full-page Emily chat"
-            className="inline-flex size-7 items-center justify-center rounded-md text-muted-foreground hover:text-foreground hover:bg-accent transition-colors"
-          >
-            <Maximize2 className="size-3.5" />
-          </Link>
           <Button
             size="sm"
             variant="ghost"
             className="size-7 p-0"
-            onClick={() => setOpen(false)}
+            onClick={cycleExpand}
+            title={mode === "full" ? "Shrink Emily" : "Expand Emily"}
+            aria-label={mode === "full" ? "Shrink Emily" : "Expand Emily"}
+          >
+            {mode === "full" ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+          </Button>
+          <Button
+            size="sm"
+            variant="ghost"
+            className="size-7 p-0"
+            onClick={() => setMode("collapsed")}
             title="Collapse Emily"
             aria-label="Collapse Emily"
           >
@@ -311,6 +577,59 @@ export function EmilyDock({ className }: { className?: string }) {
         <EmilyChatCore />
       </div>
     </div>
+  );
+}
+
+// ── Mobile bottom-sheet (SPEC §8c: Emily becomes a bottom sheet on mobile) ────
+
+export function EmilyMobileSheet() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      {!open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Open Emily"
+          className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-full bg-background shadow-lg border border-border"
+        >
+          <EmilyAvatar size="sm" />
+        </button>
+      )}
+      {open && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end" role="dialog" aria-label="Emily">
+          <button
+            type="button"
+            aria-label="Close Emily"
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setOpen(false)}
+          />
+          <div className="relative flex h-[85vh] flex-col rounded-t-2xl border-t border-border bg-background">
+            <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-border px-4">
+              <EmilyAvatar size="sm" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold leading-none truncate">Emily</p>
+                <p className="text-[11px] text-muted-foreground leading-none mt-0.5">Chief of Staff</p>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="size-7 p-0"
+                onClick={() => setOpen(false)}
+                title="Close Emily"
+                aria-label="Close Emily"
+              >
+                <ChevronDown className="size-4" />
+              </Button>
+            </div>
+            {/* Mounted only while open → no second background chat instance */}
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <EmilyChatCore />
+            </div>
+          </div>
+        </div>
+      )}
+    </>
   );
 }
 

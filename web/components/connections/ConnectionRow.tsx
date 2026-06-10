@@ -1,6 +1,6 @@
 "use client";
 
-import { RefreshCw, Trash2, Zap, MoreHorizontal } from "lucide-react";
+import { RefreshCw, Trash2, Zap, MoreHorizontal, ChevronRight, ExternalLink } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
 import {
@@ -9,6 +9,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import {
+  Tooltip,
+  TooltipContent,
+  TooltipProvider,
+  TooltipTrigger,
+} from "@/components/ui/tooltip";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "./BrandLogo";
 import { formatTimestamp, type ConnectionView } from "./connection-data";
@@ -104,10 +110,13 @@ export function ConnectionRow({
   testing,
   highlighted,
   lastUsedLoading,
+  expanded,
+  usedByCount,
   onDelete,
   onReconnect,
   onRefresh,
   onTest,
+  onToggle,
 }: {
   connection: ConnectionView;
   deleting?: boolean;
@@ -117,10 +126,16 @@ export function ConnectionRow({
   highlighted?: boolean;
   /** N13: true while the last-used async fetch is still in flight — show skeleton instead of "—" */
   lastUsedLoading?: boolean;
+  /** Whether this row is expanded to show extra detail */
+  expanded?: boolean;
+  /** How many workers use this connection */
+  usedByCount?: number;
   onDelete: (connection: ConnectionView) => void;
   onReconnect: (slug: string) => void;
   onRefresh: (connection: ConnectionView) => void;
   onTest: (connection: ConnectionView) => void;
+  /** Called when the row header is clicked to toggle expansion */
+  onToggle?: () => void;
 }) {
   const isConnecting = connection.status === "initiated";
 
@@ -128,133 +143,212 @@ export function ConnectionRow({
     <div
       id={`connection-${connection.id}`}
       className={cn(
-        "relative grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(0,1.5fr)_minmax(0,1fr)_120px_140px_auto] gap-3 md:gap-4 items-center px-3 py-2.5 border-b border-[var(--border-default)] last:border-b-0 hover:bg-[var(--active-nav-bg)] transition-colors",
+        "relative border-b border-[var(--border-default)] last:border-b-0 transition-colors",
         highlighted &&
           "bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] ring-1 ring-inset ring-[color-mix(in_srgb,var(--positive)_40%,transparent)]"
       )}
     >
-      {/* Logo */}
-      <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-card)]">
-        <BrandLogo icon={connection.icon} className="size-4" />
-      </div>
-
-      {/* Name + account label */}
-      <div className="min-w-0">
-        <p className="text-sm font-medium truncate text-foreground">{connection.displayName}</p>
-        <p className="text-xs text-muted-foreground truncate">
-          {connection.accountLabel}
-        </p>
-      </div>
-
-      {/* Scopes count (desktop only).
-          E3 fix: scopes are now captured from Composio (data.scope string).
-          Show the real granted-scope count. When not yet loaded (no sweep has
-          run for this row), show an honest "—" placeholder with an inline
-          refresh that triggers a re-check — NOT a fake "default scopes" label. */}
-      <span className="hidden md:inline-flex items-center gap-1 text-xs text-muted-foreground truncate">
-        {connection.scopes.length > 0 ? (
-          <span title={connection.scopes.join(", ")}>
-            {`${connection.scopes.length} scope${connection.scopes.length === 1 ? "" : "s"}`}
-          </span>
-        ) : connection.status === "expired" ||
-          connection.status === "failed" ||
-          connection.lastCheckStatus === "expired" ||
-          connection.lastCheckStatus === "failed" ? (
-          // P2-6 (audit 2026-05-29): for expired/failed rows the inline
-          // refresh glyph read as a stuck loader ("— ↻") and could never load
-          // scopes anyway (the connection is dead). Show a clean dash only;
-          // the path back is Reconnect, not a scope re-check.
-          <span className="text-muted-foreground/50">—</span>
-        ) : (
-          <>
-            <span className="text-muted-foreground/50">—</span>
-            <button
-              type="button"
-              className="inline-flex items-center text-muted-foreground/40 hover:text-muted-foreground transition-colors"
-              title="Refresh to load granted scopes"
-              onClick={() => onTest(connection)}
-            >
-              <RefreshCw className="size-3" />
-            </button>
-          </>
+      {/* Clickable main row */}
+      <div
+        role={onToggle ? "button" : undefined}
+        tabIndex={onToggle ? 0 : undefined}
+        onClick={onToggle}
+        onKeyDown={onToggle ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); } } : undefined}
+        className={cn(
+          "grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(0,1.5fr)_minmax(0,1fr)_120px_140px_auto] gap-3 md:gap-4 items-center px-3 py-2.5",
+          onToggle && "cursor-pointer hover:bg-[var(--active-nav-bg)] transition-colors select-none",
+          !onToggle && "hover:bg-[var(--active-nav-bg)] transition-colors"
         )}
-      </span>
+      >
+        {/* Logo */}
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-card)]">
+          <BrandLogo icon={connection.icon} className="size-4" />
+        </div>
 
-      {/* Last used (desktop only) — N13: show skeleton while async data loads */}
-      <span className="hidden md:inline text-xs text-muted-foreground truncate">
-        {lastUsedLoading
-          ? <Skeleton className="h-3 w-16 rounded" />
-          : connection.lastUsedAt
-          ? `Used ${formatTimestamp(connection.lastUsedAt)}`
-          : <span className="text-muted-foreground/50">—</span>}
-      </span>
+        {/* Name + account label */}
+        <div className="min-w-0 flex items-center gap-1.5">
+          {onToggle && (
+            <ChevronRight
+              className={cn(
+                "size-3.5 shrink-0 text-muted-foreground/50 transition-transform",
+                expanded && "rotate-90"
+              )}
+            />
+          )}
+          <div className="min-w-0">
+            <p className="text-sm font-medium truncate text-foreground">{connection.displayName}</p>
+            <p className="text-xs text-muted-foreground truncate">
+              {connection.accountLabel}
+            </p>
+          </div>
+        </div>
 
-      {/* Status pill (desktop only — mobile shows in row above) */}
-      <span className="hidden md:inline">
-        <StatusPill status={connection.status} />
-      </span>
-
-      {/* S29w (score walk): was Reconnect + 3 icon-buttons (Test/Refresh/
-          Disconnect) = 4 actions per row. Now Reconnect (only when needed) + a
-          single overflow menu containing Test / Refresh / Disconnect. Row reads
-          as one primary action with secondary options behind a click.
-          E1 fix: Reconnect appears ONLY when the connection is broken
-          (expired / failed / needs-reauth / inactive). An active connection
-          never shows Reconnect — even when last_check_status is "active"
-          rather than "valid" (GitHub reports the former). Active = healthy;
-          only the overflow menu is offered. */}
-      <div className="flex shrink-0 items-center justify-end gap-1 md:pr-1">
-        {connection.status !== "active" &&
-          (connection.status === "expired" ||
+        {/* Scopes count (desktop only). #507: show scopes in a proper Tooltip
+            instead of the native browser title attribute which truncates and has
+            no styling. */}
+        <span
+          className="hidden md:inline-flex items-center gap-1 text-xs text-muted-foreground truncate"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {connection.scopes.length > 0 ? (
+            <TooltipProvider>
+              <Tooltip>
+                <TooltipTrigger className="underline-offset-2 hover:underline cursor-default">
+                  {`${connection.scopes.length} scope${connection.scopes.length === 1 ? "" : "s"}`}
+                </TooltipTrigger>
+                <TooltipContent side="bottom" align="start" className="max-w-xs">
+                  <ul className="space-y-0.5 text-left">
+                    {connection.scopes.map((scope) => (
+                      <li key={scope} className="font-mono text-[11px]">{scope}</li>
+                    ))}
+                  </ul>
+                </TooltipContent>
+              </Tooltip>
+            </TooltipProvider>
+          ) : connection.status === "expired" ||
             connection.status === "failed" ||
             connection.lastCheckStatus === "expired" ||
-            connection.lastCheckStatus === "failed") && (
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="h-7 px-2 text-xs"
-            onClick={() => onReconnect(connection.app_name)}
-            disabled={reconnecting}
-            title={reconnecting ? "Opening" : "Reconnect"}
-          >
-            <RefreshCw className={cn("size-3", reconnecting && "animate-spin")} />
-            <span className="hidden sm:inline">{reconnecting ? "Opening" : "Reconnect"}</span>
-          </Button>
-        )}
-        <DropdownMenu>
-          <DropdownMenuTrigger
-            className="inline-flex h-7 w-7 items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
-            title="More"
-            aria-label={`More actions for ${connection.displayName}`}
-          >
-            <MoreHorizontal className="size-3.5" />
-          </DropdownMenuTrigger>
-          <DropdownMenuContent align="end">
-            <DropdownMenuItem onClick={() => onTest(connection)} disabled={testing}>
-              <Zap className="size-3.5" />
-              {testing ? "Testing..." : "Test connection"}
-            </DropdownMenuItem>
-            <DropdownMenuItem onClick={() => onRefresh(connection)} disabled={refreshing}>
-              <RefreshCw className={cn("size-3.5", refreshing && "animate-spin")} />
-              {refreshing ? "Refreshing..." : "Refresh status"}
-            </DropdownMenuItem>
-            <DropdownMenuItem
-              onClick={() => onDelete(connection)}
-              disabled={deleting}
-              variant="destructive"
+            connection.lastCheckStatus === "failed" ? (
+            // P2-6 (audit 2026-05-29): for expired/failed rows the inline
+            // refresh glyph read as a stuck loader ("— ↻") and could never load
+            // scopes anyway (the connection is dead). Show a clean dash only;
+            // the path back is Reconnect, not a scope re-check.
+            <span className="text-muted-foreground/50">—</span>
+          ) : (
+            <>
+              <span className="text-muted-foreground/50">—</span>
+              <button
+                type="button"
+                className="inline-flex items-center text-muted-foreground/40 hover:text-muted-foreground transition-colors"
+                title="Refresh to load granted scopes"
+                onClick={() => onTest(connection)}
+              >
+                <RefreshCw className="size-3" />
+              </button>
+            </>
+          )}
+        </span>
+
+        {/* Last used (desktop only) — N13: show skeleton while async data loads */}
+        <span className="hidden md:inline text-xs text-muted-foreground truncate">
+          {lastUsedLoading
+            ? <Skeleton className="h-3 w-16 rounded" />
+            : connection.lastUsedAt
+            ? `Used ${formatTimestamp(connection.lastUsedAt)}`
+            : <span className="text-muted-foreground/50">—</span>}
+        </span>
+
+        {/* Status pill (desktop only — mobile shows in row above) */}
+        <span className="hidden md:inline">
+          <StatusPill status={connection.status} />
+        </span>
+
+        {/* S29w (score walk): was Reconnect + 3 icon-buttons (Test/Refresh/
+            Disconnect) = 4 actions per row. Now Reconnect (only when needed) + a
+            single overflow menu containing Test / Refresh / Disconnect. Row reads
+            as one primary action with secondary options behind a click.
+            E1 fix: Reconnect appears ONLY when the connection is broken
+            (expired / failed / needs-reauth / inactive). An active connection
+            never shows Reconnect — even when last_check_status is "active"
+            rather than "valid" (GitHub reports the former). Active = healthy;
+            only the overflow menu is offered. */}
+        <div
+          className="flex shrink-0 items-center justify-end gap-1 md:pr-1"
+          onClick={(e) => e.stopPropagation()}
+        >
+          {connection.status !== "active" &&
+            (connection.status === "expired" ||
+              connection.status === "failed" ||
+              connection.lastCheckStatus === "expired" ||
+              connection.lastCheckStatus === "failed") && (
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 px-2 text-xs"
+              onClick={() => onReconnect(connection.app_name)}
+              disabled={reconnecting}
+              title={reconnecting ? "Opening" : "Reconnect"}
             >
-              <Trash2 className="size-3.5" />
-              {deleting ? "Disconnecting..." : "Disconnect"}
-            </DropdownMenuItem>
-          </DropdownMenuContent>
-        </DropdownMenu>
+              <RefreshCw className={cn("size-3", reconnecting && "animate-spin")} />
+              <span className="hidden sm:inline">{reconnecting ? "Opening" : "Reconnect"}</span>
+            </Button>
+          )}
+          <DropdownMenu>
+            <DropdownMenuTrigger
+              className="inline-flex h-7 w-7 items-center justify-center hover:bg-muted text-muted-foreground hover:text-foreground transition-colors"
+              title="More"
+              aria-label={`More actions for ${connection.displayName}`}
+            >
+              <MoreHorizontal className="size-3.5" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end">
+              <DropdownMenuItem onClick={() => onTest(connection)} disabled={testing || refreshing}>
+                <Zap className={cn("size-3.5", testing && "animate-pulse")} />
+                {testing ? "Checking..." : "Check connection"}
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => onDelete(connection)}
+                disabled={deleting}
+                variant="destructive"
+              >
+                <Trash2 className="size-3.5" />
+                {deleting ? "Disconnecting..." : "Disconnect"}
+              </DropdownMenuItem>
+            </DropdownMenuContent>
+          </DropdownMenu>
+        </div>
+
+        {/* Mobile: status pill on row 2 if needed */}
+        <span className="col-span-3 md:hidden inline-flex">
+          <StatusPill status={connection.status} />
+        </span>
       </div>
 
-      {/* Mobile: status pill on row 2 if needed */}
-      <span className="col-span-3 md:hidden inline-flex">
-        <StatusPill status={connection.status} />
-      </span>
+      {/* Expanded peek — same background, no box, just additional content */}
+      {expanded && (
+        <div className="border-t border-[var(--border-default)] bg-[color-mix(in_srgb,var(--active-nav-bg)_60%,transparent)] px-3 py-3 md:pl-[64px]">
+          <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
+            <span className="text-[var(--ink-soft)]">
+              {connection.accountLabel}
+            </span>
+            <span className="text-[var(--ink-soft)]">
+              {connection.scopes.length > 0
+                ? `${connection.scopes.length} scope${connection.scopes.length === 1 ? "" : "s"}`
+                : "No scopes"}
+            </span>
+            <StatusPill status={connection.status} />
+            {usedByCount !== undefined && (
+              <span className="text-[var(--ink-soft)]">
+                Used by {usedByCount} worker{usedByCount === 1 ? "" : "s"}
+              </span>
+            )}
+          </div>
+          <div className="mt-3 flex items-center gap-2">
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 px-3 text-xs"
+              onClick={() => onTest(connection)}
+              disabled={testing}
+            >
+              <Zap className={cn("size-3", testing && "animate-pulse")} />
+              {testing ? "Testing..." : "Test"}
+            </Button>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              className="h-7 px-3 text-xs"
+              onClick={() => { window.location.href = `/connections/${connection.id}`; }}
+            >
+              <ExternalLink className="size-3" />
+              Open
+            </Button>
+          </div>
+        </div>
+      )}
 
       {/* Indeterminate progress bar along the bottom edge while OAuth resolves */}
       {isConnecting && <ConnectingProgressBar />}

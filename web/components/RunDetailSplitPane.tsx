@@ -26,14 +26,17 @@ import {
   exportStateText,
 } from "@/lib/run-format";
 import { stripCitationTokens } from "@/lib/strip-citations";
-import type { LogEntry, RunDetail, RunPart, TranscriptRow } from "@/lib/types";
+import type { LogEntry, RunDetail, RunPart, TranscriptRow, ToolCallEntry, ApprovalEntry } from "@/lib/types";
 
 type Props = {
   run: RunDetail;
   parts?: RunPart[];
   streamConnected?: boolean;
   streamError?: string | null;
+  streamUnavailable?: boolean;
+  onRefresh?: () => void;
   inline?: boolean;
+  initialTab?: string;
   onBack?: () => void;
   onReplay?: () => void;
   onCancel?: () => void;
@@ -44,7 +47,10 @@ export function RunDetailSplitPane({
   parts = [],
   streamConnected = false,
   streamError,
+  streamUnavailable = false,
+  onRefresh,
   inline = false,
+  initialTab = "output",
   onBack,
   onReplay,
   onCancel,
@@ -52,6 +58,8 @@ export function RunDetailSplitPane({
   const transcriptParts = parts.length > 0 ? parts : partsFromRun(run);
   const timeline = buildTimeline(run, transcriptParts);
   const isActive = run.status === "running" || run.status === "queued";
+  const latest = latestStatus(run, transcriptParts);
+  const displayStatus = streamUnavailable && isActive ? "unknown" : latest;
 
   return (
     <div className={cn("space-y-6", inline && "min-h-[280px]")}>
@@ -77,7 +85,7 @@ export function RunDetailSplitPane({
             >
               {run.worker_name || run.worker_id}
             </Link>
-            <RunStatusBadge status={latestStatus(run, transcriptParts)} />
+            <RunStatusBadge status={displayStatus} />
             {streamConnected && <span className="text-xs text-pending">Streaming</span>}
             {streamError && <span className="text-xs text-error">{streamError}</span>}
           </div>
@@ -108,6 +116,12 @@ export function RunDetailSplitPane({
                 <span>{formatDuration(run.duration_ms)}</span>
               </>
             )}
+            {run.total_tokens != null && (
+              <>
+                <span className="text-muted-foreground/60">·</span>
+                <span>{run.total_tokens.toLocaleString()} tokens</span>
+              </>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">
@@ -120,10 +134,12 @@ export function RunDetailSplitPane({
               Edit worker
             </Button>
           </Link>
-          <Button variant="outline" size="sm" onClick={onReplay}>
-            <RotateCcw className="size-3.5 mr-1.5" />
-            Re-run
-          </Button>
+          {run.can_replay !== false && (
+            <Button variant="outline" size="sm" onClick={onReplay}>
+              <RotateCcw className="size-3.5 mr-1.5" />
+              Re-run
+            </Button>
+          )}
           <a href={api.runs.downloadUrl(run.id)} download>
             <Button variant="outline" size="sm">
               <Download className="size-3.5 mr-1.5" />
@@ -139,7 +155,24 @@ export function RunDetailSplitPane({
         </div>
       </div>
 
-      <RunMetricsStrip run={run} parts={transcriptParts} />
+      {streamUnavailable && isActive && (
+        <div className="flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-card)] border border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3">
+          <div className="min-w-0">
+            <p className="text-sm font-medium text-[var(--ink)]">Run status connection lost</p>
+            <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+              {streamError || "The stream dropped before a terminal event arrived. Refresh to check the backend."}
+            </p>
+          </div>
+          {onRefresh && (
+            <Button variant="outline" size="sm" onClick={onRefresh}>
+              <RotateCcw className="size-3.5 mr-1.5" />
+              Refresh status
+            </Button>
+          )}
+        </div>
+      )}
+
+      <RunMetricsStrip run={run} status={displayStatus} />
 
       {/* R4: the split pane was unbounded — long transcripts/logs grew the
           whole page so it scrolled "into infinity". Cap the pane at a
@@ -163,13 +196,20 @@ export function RunDetailSplitPane({
 
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* v6: lead with the rendered OUTPUT (the generic viewer). The
-              transcript/logs/files/raw/metadata are secondary tabs, not a
-              vertical scroll-pile. Output is the default tab. */}
-          <Tabs defaultValue="output" className="flex h-full min-h-0 flex-col">
+          transcript/logs/files/raw/metadata are secondary tabs, not a
+          vertical scroll-pile. The caller chooses the default tab. */}
+          <Tabs defaultValue={initialTab} className="flex h-full min-h-0 flex-col">
             <div className="shrink-0 border-b border-border px-3 py-2">
               <TabsList variant="line">
                 <TabsTrigger value="output">Output</TabsTrigger>
+                <TabsTrigger value="inputs">Inputs</TabsTrigger>
                 <TabsTrigger value="transcript">Steps</TabsTrigger>
+                {(run.tool_calls?.length ?? 0) > 0 && (
+                  <TabsTrigger value="tool-calls">Tool calls</TabsTrigger>
+                )}
+                {run.approval_trail && (
+                  <TabsTrigger value="approval">Approval</TabsTrigger>
+                )}
                 <TabsTrigger value="files">Files</TabsTrigger>
                 <TabsTrigger value="logs">Logs</TabsTrigger>
                 <TabsTrigger value="raw">Raw</TabsTrigger>
@@ -183,8 +223,17 @@ export function RunDetailSplitPane({
             <TabsContent value="output" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <OutputView run={run} />
             </TabsContent>
+            <TabsContent value="inputs" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
+              <InputsView run={run} />
+            </TabsContent>
             <TabsContent value="transcript" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <TranscriptView run={run} parts={transcriptParts} />
+            </TabsContent>
+            <TabsContent value="tool-calls" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
+              <ToolCallsView calls={run.tool_calls ?? []} />
+            </TabsContent>
+            <TabsContent value="approval" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
+              <ApprovalView approval={run.approval_trail ?? null} />
             </TabsContent>
             <TabsContent value="files" className="min-h-0 min-w-0 flex-1 overflow-auto p-4">
               <FilesView run={run} />
@@ -226,12 +275,14 @@ function OperatorLogs({ run }: { run: RunDetail }) {
   );
 }
 
-function RunMetricsStrip({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
+function RunMetricsStrip({ run, status }: { run: RunDetail; status: string }) {
+  const durationValue =
+    run.duration_ms != null ? formatDuration(run.duration_ms) : status === "unknown" ? "Unknown" : "Running";
   return (
     <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--border-default)] text-sm sm:grid-cols-2 lg:grid-cols-5">
-      <RunMetric label="Status" value={statusLabel(latestStatus(run, parts))} />
+      <RunMetric label="Status" value={statusLabel(status)} />
       <RunMetric label="Started" value={run.started_at ? formatAbsolute(run.started_at) : "Not started"} />
-      <RunMetric label="Duration" value={run.duration_ms != null ? formatDuration(run.duration_ms) : "Running"} />
+      <RunMetric label="Duration" value={durationValue} />
       <RunMetric label="Output" value={`${outputItemCount(run)} item${outputItemCount(run) === 1 ? "" : "s"}`} />
       <RunMetric label="Files" value={`${run.artifacts.length} file${run.artifacts.length === 1 ? "" : "s"}`} />
     </dl>
@@ -700,6 +751,123 @@ function RawView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
           </pre>
         )}
       </section>
+    </div>
+  );
+}
+
+function InputsView({ run }: { run: RunDetail }) {
+  const entries = Object.entries(run.input || {});
+  if (entries.length === 0) {
+    return <p className="text-sm text-muted-foreground">No inputs were provided for this run.</p>;
+  }
+  return (
+    <div className="space-y-3">
+      {entries.map(([key, value]) => (
+        <div key={key} className="space-y-1">
+          <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{key}</p>
+          {typeof value === "string" ? (
+            <p className="text-sm text-foreground whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-border bg-muted/30 px-3 py-2">
+              {value || <span className="italic text-muted-foreground">empty</span>}
+            </p>
+          ) : (
+            <pre className="text-xs text-foreground whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-border bg-muted/30 px-3 py-2">
+              {JSON.stringify(value, null, 2)}
+            </pre>
+          )}
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ToolCallsView({ calls }: { calls: ToolCallEntry[] }) {
+  if (calls.length === 0) {
+    return <p className="text-sm text-muted-foreground">No tool calls recorded for this run.</p>;
+  }
+  return (
+    <div className="space-y-3">
+      {calls.map((call) => (
+        <div key={call.id} className="rounded-[var(--radius-button)] border border-border overflow-hidden">
+          <div className="flex items-center gap-2 bg-muted/40 px-3 py-2 border-b border-border">
+            <span className="font-mono text-xs font-medium text-foreground">{call.name}</span>
+            {call.error && (
+              <span className="ml-auto text-xs text-destructive">error</span>
+            )}
+          </div>
+          <div className="grid grid-cols-2 divide-x divide-border">
+            <div className="p-3">
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">Arguments</p>
+              <pre className="text-xs text-foreground whitespace-pre-wrap break-words leading-5">
+                {JSON.stringify(call.arguments, null, 2)}
+              </pre>
+            </div>
+            <div className="p-3">
+              <p className="mb-1 text-[10px] font-medium uppercase tracking-wide text-muted-foreground">
+                {call.error ? "Error" : "Result"}
+              </p>
+              <pre className="text-xs text-foreground whitespace-pre-wrap break-words leading-5">
+                {call.error
+                  ? call.error
+                  : typeof call.result === "string"
+                  ? call.result
+                  : JSON.stringify(call.result, null, 2)}
+              </pre>
+            </div>
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+function ApprovalView({ approval }: { approval: ApprovalEntry | null }) {
+  if (!approval) {
+    return <p className="text-sm text-muted-foreground">No approval required for this run.</p>;
+  }
+  const statusColor =
+    approval.status === "approved"
+      ? "text-emerald-600"
+      : approval.status === "rejected"
+      ? "text-destructive"
+      : "text-amber-600";
+  return (
+    <div className="space-y-4 max-w-lg">
+      <div className="rounded-[var(--radius-button)] border border-border p-4 space-y-3">
+        <div className="flex items-center justify-between">
+          <span className="text-sm font-medium">{approval.label || "Approval checkpoint"}</span>
+          <span className={cn("text-xs font-medium capitalize", statusColor)}>{approval.status}</span>
+        </div>
+        {approval.preview && (
+          <pre className="text-xs text-foreground whitespace-pre-wrap break-words rounded border border-border bg-muted/30 px-3 py-2">
+            {approval.preview}
+          </pre>
+        )}
+        <div className="grid grid-cols-2 gap-2 text-xs text-muted-foreground">
+          <div>
+            <span className="font-medium">Requested</span>
+            <p>{formatAbsolute(approval.created_at)}</p>
+          </div>
+          {approval.decided_at && (
+            <div>
+              <span className="font-medium">Decided</span>
+              <p>{formatAbsolute(approval.decided_at)}</p>
+            </div>
+          )}
+        </div>
+        {approval.reason && (
+          <p className="text-xs text-muted-foreground border-t border-border pt-2">
+            <span className="font-medium">Reason: </span>{approval.reason}
+          </p>
+        )}
+        {approval.follow_up_run_id && (
+          <p className="text-xs">
+            <span className="text-muted-foreground">Follow-up run: </span>
+            <Link href={`/runs/${approval.follow_up_run_id}`} className="text-primary hover:underline font-mono">
+              {approval.follow_up_run_id}
+            </Link>
+          </p>
+        )}
+      </div>
     </div>
   );
 }

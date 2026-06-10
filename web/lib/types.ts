@@ -57,7 +57,7 @@ export interface TriggerSpec {
     filters?: Record<string, unknown>;
   };
 }
-export type RunStatus = "queued" | "running" | "completed" | "failed" | "pending_approval";
+export type RunStatus = "queued" | "running" | "completed" | "failed" | "cancelled" | "pending_approval";
 export type LogLevel = "debug" | "info" | "warning" | "error" | "critical";
 export type SecretStatus = "set" | "missing";
 
@@ -71,6 +71,8 @@ export interface WorkerInput {
   options?: string[];
   default?: string | number | boolean | string[] | null;
   accept_csv?: boolean;
+  accepts?: string[];
+  max_size_mb?: number;
 }
 
 export interface WorkerOutput {
@@ -199,13 +201,32 @@ export type RunPart =
   | { type: "step-start"; stepNumber: number }
   // Backend (run_service.py) also emits a "pending_approval" finish status when
   // a HITL run parks for approval — it is a parked state, not a failure (G5 P3).
-  | { type: "finish"; status: "completed" | "failed" | "timeout" | "pending_approval"; error?: string };
+  | { type: "finish"; status: "completed" | "failed" | "cancelled" | "timeout" | "pending_approval"; error?: string };
 
 export interface OutputField {
   name: string;
   type: string;  // "markdown" | "json" | "csv" | "text" | "file"
   label: string;
   value: string | number | boolean | Record<string, unknown> | unknown[] | null;
+}
+
+export interface ToolCallEntry {
+  id: string;
+  name: string;
+  arguments: Record<string, unknown>;
+  result?: unknown;
+  error?: string;
+}
+
+export interface ApprovalEntry {
+  id: string;
+  status: string;
+  label?: string;
+  preview?: string;
+  created_at: string;
+  decided_at?: string;
+  reason?: string;
+  follow_up_run_id?: string;
 }
 
 export interface RunDetail {
@@ -221,6 +242,10 @@ export interface RunDetail {
   logs: LogEntry[];
   artifacts: Artifact[];
   transcript: TranscriptRow[];
+  tool_calls?: ToolCallEntry[];
+  approval_trail?: ApprovalEntry;
+  can_replay?: boolean;
+  total_tokens?: number;
   error?: string;
   started_at?: string;
   completed_at?: string;
@@ -269,6 +294,8 @@ export interface WorkerSummary {
   recent_stats?: RecentStats | null;
   timeseries?: TimeseriesDay[] | null;
   connections: string[];  // Composio app slugs declared in worker.yml
+  missing_secrets?: string[];      // #556: required secrets not yet configured
+  missing_connections?: string[];  // #556: required connections not yet configured
   inputs?: WorkerInput[];
   runtime?: string;       // exec.runtime ("skill", "python311", "node22", …)
   public_link?: string;   // owner-only signed share link to /w/<id>?token=
@@ -328,6 +355,8 @@ export interface WorkerDetail {
   webhook_url?: string;
   files: WorkerFile[];
   triggers_spec: TriggerSpec[];
+  missing_secrets?: string[];      // #556: required secrets not yet configured
+  missing_connections?: string[];  // #556: required connections not yet configured
   // Owner-only signed share link to the standalone public worker page
   // (/w/<id>?token=<hmac>). Only present on the owner's authenticated fetch.
   public_link?: string;
@@ -339,6 +368,17 @@ export interface WorkerDetail {
   owner_id?: string | null;
   visibility?: AssetVisibility;
   permissions?: AssetPermissions;
+}
+
+// A feedback comment left on a worker (SPEC §12). Anyone who can SEE the worker
+// can leave one; surfaced to the owner.
+export interface WorkerFeedback {
+  id: string;
+  worker_id: string;
+  author_id: string;
+  author_name?: string | null;
+  content: string;
+  created_at: string;
 }
 
 // Read-only allow-list projection of a worker returned by
@@ -448,6 +488,8 @@ export interface ContextSummary {
   system?: boolean;
   /** True when the operator cannot edit or delete this pack. */
   read_only?: boolean;
+  /** Sensitive packs are never committed to git or pushed to GitHub. Default: true. */
+  sensitive?: boolean;
   // Members STEP 4: ownership + per-asset visibility + computed permissions.
   owner_id?: string | null;
   visibility?: AssetVisibility;
@@ -477,6 +519,7 @@ export interface ContextFileItem {
   metadata?: Record<string, string | number | boolean | null | undefined>;
   has_secret_warning?: boolean;
   secret_warnings?: SecretWarning[];
+  deleted?: boolean;
 }
 
 export interface ContextDetail extends ContextSummary {
@@ -630,6 +673,8 @@ export interface WorkspaceAgentTool {
 export interface WorkspaceAgentInfo {
   agent_id: string;
   model: string;
+  base_persona?: string;
+  worker_authoring_rules?: string;
   system_prompt: string;
   tools: WorkspaceAgentTool[];
   settings?: {
@@ -965,17 +1010,37 @@ export interface CatalogToolItem {
 }
 
 export interface VersionSummary {
-  id: string;
+  id: string;       // 7-char git SHA
+  sha: string;      // same 7-char git SHA
+  message: string;  // commit message
+  author: string;   // git author name
+  timestamp: string; // ISO 8601 commit date
   asset_type: string;
   asset_id: string;
-  version_number: number;
-  change_source: string;
-  created_at: string;
 }
 
 export interface VersionFile {
   path: string;
   content: string;
+}
+
+export interface GitWorkspaceStatus {
+  connected: boolean;
+  github_username?: string | null;
+  repo_full_name?: string | null;
+  repo_url?: string | null;
+  connected_at?: string | null;
+  last_pushed_at?: string | null;
+  secrets_loaded?: number;
+}
+
+export interface GitRepoItem {
+  full_name: string;
+  name: string;
+  url: string;
+  private: boolean;
+  description?: string | null;
+  pushed_at?: string | null;
 }
 
 export interface VersionDetail {

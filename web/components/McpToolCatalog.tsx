@@ -1,6 +1,7 @@
 "use client";
 
 import { useMemo, useState } from "react";
+import Link from "next/link";
 import { ChevronDown } from "lucide-react";
 
 // V5: the MCP/CLI tool catalog rendered in Settings -> API access. There is no
@@ -162,9 +163,9 @@ export function McpToolCatalog() {
         <p className="mt-0.5 text-sm text-muted-foreground">
           Every tool the Workeros MCP server exposes to connected agents. Custom MCP
           tools you add live under{" "}
-          <a href="/connections/mcp" className="font-medium text-foreground underline underline-offset-2">
+          <Link href="/connections/mcp" className="font-medium text-foreground underline underline-offset-2">
             Connections &rarr; MCP
-          </a>
+          </Link>
           .
         </p>
       </div>
