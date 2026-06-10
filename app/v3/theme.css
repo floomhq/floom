@@ -157,3 +157,57 @@
 
   }
 }
+
+
+/* explicit user override: .light beats the system media query */
+.theme-v3.theme-v3.light {
+
+  /* source tokens */
+  --bg-app: #FBFBFC;
+  --bg-card: #FFFFFF;
+  --text-primary: #16171A;
+  --text-muted: #6B7280;
+  --border-default: rgba(16, 17, 20, 0.09);
+  --border-soft: rgba(16, 17, 20, 0.055);
+  --primary: #16171A;
+  --primary-text: #FFFFFF;
+  --warning: #E5533D;
+  --pending: #C98A1A;
+  --radius-card: 16px;
+  --radius-button: 10px;
+  --shadow-card: none;
+  --active-nav-bg: #F3F4F6;
+
+  /* literals globals.css does not derive */
+  --bg-2: #F3F4F6;
+  --bg-3: #ECEDF0;
+  --paper-2: #F6F7F8;
+  --line-strong: rgba(16, 17, 20, 0.16);
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-pop: 0 12px 32px rgba(16, 17, 20, 0.10), 0 0 0 1px var(--border-default);
+  --shadow-btn: none;
+
+  /* spec accent (blue) for selection + highlights */
+  --v3-accent: #3E6FE0;
+  --v3-sel: #EEF3FE;
+
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+.theme-v3.theme-v3.light,
+.theme-v3.theme-v3.light.light {
+  --bg: var(--bg-app);
+  --background: var(--bg-app);
+  --foreground: var(--text-primary);
+  --card: var(--bg-card);
+  --secondary: var(--bg-2);
+  --muted-foreground: var(--text-muted);
+  --border: var(--border-default);
+}
+
+/* alias the v2 accent vars so v2 components reused inside theme-v3 resolve */
+.theme-v3.theme-v3 {
+  --v2-accent: var(--v3-accent);
+  --v2-sel: var(--v3-sel);
+}

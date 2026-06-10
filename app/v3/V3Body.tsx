@@ -18,8 +18,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
-import { Check } from "lucide-react";
-import { StatusPill } from "@/components/landing-ref/StatusPill";
+import { Check, Moon, Sun } from "lucide-react";
 import {
   GCalLogo,
   GmailLogo,
@@ -49,15 +48,11 @@ function Mark({ size = 22 }: { size?: number }) {
 const BEATS = [
   {
     t: "Describe the job",
-    p: "One sentence, plain English. Workeros recognises your tools as you type.",
+    p: "One sentence, plain English. Workeros recognises your tools as you type and drafts the worker.",
   },
   {
-    t: "It drafts the worker",
-    p: "Tools, schedule, and your company brain, assembled for your review.",
-  },
-  {
-    t: "You approve",
-    p: "Nothing ships without your yes. In Slack, WhatsApp, or here.",
+    t: "Approve the draft",
+    p: "The finished work comes to you first. Nothing ships without your yes, in Slack, WhatsApp, or here.",
   },
   {
     t: "It runs, on the record",
@@ -69,57 +64,64 @@ const BEATS = [
 
 function BeatDescribe() {
   return (
-    <div className="w-full max-w-[420px] rounded-[16px] bg-card p-5">
-      <div className="text-[15px] leading-relaxed">
+    <div className="w-full max-w-[460px] rounded-[18px] bg-card p-6">
+      <div className="text-[16px] leading-relaxed">
         Summarise my <span className="v3-hl">Granola</span> meetings and post action items to{" "}
         <span className="v3-hl">HubSpot</span> daily
         <motion.span
           aria-hidden
           animate={{ opacity: [1, 0.1, 1] }}
           transition={{ duration: 1.05, repeat: Infinity }}
-          className="ml-px inline-block h-[15px] w-[1.5px] translate-y-[2px] bg-foreground"
+          className="ml-px inline-block h-[16px] w-[1.5px] translate-y-[2px] bg-foreground"
         />
       </div>
-    </div>
-  );
-}
-
-function BeatDraft() {
-  return (
-    <div className="w-full max-w-[420px] rounded-[16px] bg-card p-5">
-      <div className="flex items-center justify-between">
-        <span className="text-[14px] font-medium">Meeting Digest</span>
-        <StatusPill tone="pending">Draft</StatusPill>
-      </div>
-      <div className="mt-4 space-y-2.5 text-[13px] text-muted-foreground">
-        {["Reads Granola and Calendar", "Writes HubSpot notes", "Uses your tone guide", "Daily at 5:00 PM"].map((line, i) => (
-          <motion.div
-            key={line}
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ delay: 0.15 + i * 0.12, duration: 0.4 }}
-            className="flex items-center gap-2.5"
-          >
-            <Check className="h-3.5 w-3.5" style={{ color: "var(--v3-accent)" }} />
-            {line}
-          </motion.div>
-        ))}
-      </div>
+      <motion.div
+        initial={{ opacity: 0, y: 6 }}
+        animate={{ opacity: 1, y: 0 }}
+        transition={{ delay: 0.5, duration: 0.4 }}
+        className="mt-5 flex items-center justify-between border-t border-border-soft pt-4"
+      >
+        <span className="text-[12px] text-muted-foreground">Recognised: Granola, HubSpot</span>
+        <span className="rounded-[10px] px-4 py-2 text-[13px] font-medium text-white" style={{ background: "var(--v3-accent)" }}>Hire</span>
+      </motion.div>
     </div>
   );
 }
 
 function BeatApprove() {
   return (
-    <div className="w-full max-w-[420px] rounded-[16px] bg-card p-5">
+    <div className="w-full max-w-[460px] rounded-[18px] bg-card p-6">
       <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Email draft · to Sarah at Acme</div>
-      <div className="mt-2.5 text-[14.5px] font-medium">Next steps from today&apos;s call</div>
-      <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
-        Hi Sarah, thanks for the call today. Based on what you shared, I&apos;d suggest starting with the onboarding workflow…
+      <div className="mt-3 text-[17px] font-medium tracking-[-0.01em]">Next steps from today&apos;s call</div>
+      <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
+        Hi Sarah, thanks for the call today. Based on what you shared, I&apos;d suggest starting with the onboarding workflow and the CRM cleanup before renewals…
       </p>
-      <div className="mt-4 flex gap-2">
-        <span className="rounded-[10px] px-3.5 py-1.5 text-[12.5px] font-medium text-white" style={{ background: "var(--v3-accent)" }}>Approve</span>
-        <span className="rounded-[10px] border border-border bg-card px-3.5 py-1.5 text-[12.5px]">Edit</span>
+      <motion.div
+        initial={{ opacity: 0 }}
+        animate={{ opacity: 1 }}
+        transition={{ delay: 0.3, duration: 0.4 }}
+        className="mt-3 text-[11.5px] text-muted-foreground"
+      >
+        Built from your tone guide and pricing sheet
+      </motion.div>
+      <div className="mt-5 flex gap-2">
+        <motion.span
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.45, duration: 0.35 }}
+          className="rounded-[10px] px-4 py-2 text-[13px] font-medium text-white"
+          style={{ background: "var(--v3-accent)" }}
+        >
+          Approve
+        </motion.span>
+        <motion.span
+          initial={{ opacity: 0, y: 6 }}
+          animate={{ opacity: 1, y: 0 }}
+          transition={{ delay: 0.55, duration: 0.35 }}
+          className="rounded-[10px] border border-border bg-card px-4 py-2 text-[13px]"
+        >
+          Edit
+        </motion.span>
       </div>
     </div>
   );
@@ -127,7 +129,7 @@ function BeatApprove() {
 
 function BeatRecord() {
   return (
-    <div className="w-full max-w-[420px] rounded-[16px] bg-card p-5">
+    <div className="w-full max-w-[460px] rounded-[18px] bg-card p-6">
       <div className="flex items-center justify-between">
         <span className="text-[14px] font-medium">This week</span>
         <span className="font-mono text-[10.5px] text-muted-foreground">5 runs</span>
@@ -178,7 +180,7 @@ function Story() {
     return () => io.disconnect();
   }, []);
 
-  const VIS = [BeatDescribe, BeatDraft, BeatApprove, BeatRecord];
+  const VIS = [BeatDescribe, BeatApprove, BeatRecord];
 
   return (
     <section className="pb-40">
@@ -189,32 +191,32 @@ function Story() {
               key={b.t}
               data-beat={i}
               ref={(el) => { refs.current[i] = el; }}
-              className="flex min-h-[180px] cursor-default flex-col justify-center py-3 md:min-h-[150px]"
+              className="flex min-h-[200px] cursor-default flex-col justify-center py-4 md:min-h-[190px]"
               onMouseEnter={() => setActive(i)}
             >
-              <h3 className={`text-[28px] font-semibold tracking-[-0.022em] transition-colors duration-300 ${active === i ? "text-foreground" : "text-foreground md:text-muted-foreground/40"}`}>
+              <h3 className={`text-[34px] font-semibold tracking-[-0.025em] transition-colors duration-300 ${active === i ? "text-foreground" : "text-foreground md:text-muted-foreground/40"}`}>
                 {b.t}
               </h3>
               <p className={`mt-2 max-w-[360px] text-[14px] leading-relaxed text-muted-foreground transition-opacity duration-300 ${active === i ? "opacity-100" : "opacity-100 md:opacity-40"}`}>
                 {b.p}
               </p>
               <div className="mt-5 flex justify-center rounded-[18px] bg-secondary/70 p-6 md:hidden">
-                {i === 0 ? <BeatDescribe /> : i === 1 ? <BeatDraft /> : i === 2 ? <BeatApprove /> : <BeatRecord />}
+                {i === 0 ? <BeatDescribe /> : i === 1 ? <BeatApprove /> : <BeatRecord />}
               </div>
             </div>
           ))}
         </div>
-        <div className="hidden md:sticky md:top-24 md:block md:h-[460px]">
+        <div className="hidden md:sticky md:top-20 md:block md:h-[520px]">
           <div className="flex h-full items-center justify-center rounded-[22px] bg-secondary/70 p-9">
             <AnimatePresence mode="wait">
               {VIS.map((V, i) =>
                 active === i ? (
                   <motion.div
                     key={i}
-                    initial={{ opacity: 0, y: 8 }}
-                    animate={{ opacity: 1, y: 0 }}
-                    exit={{ opacity: 0, y: -6 }}
-                    transition={{ duration: 0.3, ease: EASE }}
+                    initial={{ opacity: 0, y: 14, scale: 0.97 }}
+                    animate={{ opacity: 1, y: 0, scale: 1 }}
+                    exit={{ opacity: 0, y: -10, scale: 0.98 }}
+                    transition={{ duration: 0.35, ease: EASE }}
                     style={{ display: "flex", justifyContent: "center", width: "100%" }}
                   >
                     <V />
@@ -259,7 +261,7 @@ function Templates() {
             transition={{ duration: 0.45, delay: i * 0.07, ease: EASE }}
           >
             <Link
-              href="/v2/templates"
+              href="/v3/templates"
               className="flex h-full flex-col rounded-[16px] bg-card p-6 transition-colors hover:bg-secondary/70"
             >
               <div className="text-[15px] font-medium">{t.nm}</div>
@@ -276,7 +278,7 @@ function Templates() {
         transition={{ duration: 0.5, delay: 0.2 }}
         className="mt-5 text-[13px]"
       >
-        <Link href="/v2/templates" className="text-muted-foreground transition-colors hover:text-foreground">
+        <Link href="/v3/templates" className="text-muted-foreground transition-colors hover:text-foreground">
           All templates →
         </Link>
       </motion.div>
@@ -294,8 +296,11 @@ const PILLS = [
 
 export function V3Body() {
   const [fill, setFill] = useState<{ text: string; n: number } | null>(null);
+  // null = follow system; true/false = explicit override
+  const [dark, setDark] = useState<boolean | null>(null);
+  const isDark = dark ?? (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches);
   return (
-    <div className="theme-v3 min-h-screen text-[13.5px]" style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}>
+    <div className={`theme-v3 min-h-screen text-[13.5px] ${dark === true ? "dark" : dark === false ? "light" : ""}`} style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}>
       <div className="mx-auto max-w-[1000px] px-7">
 
         {/* nav: mark, name, sign in. that's it */}
@@ -305,9 +310,18 @@ export function V3Body() {
             Workeros
           </Link>
           <div className="flex items-center gap-0.5 text-[13px] text-muted-foreground">
-            <Link href="/v2/templates" className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">Templates</Link>
-            <Link href="/v2/docs" className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">Docs</Link>
-            <Link href="/login" className="ml-1 rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">Sign in</Link>
+            <Link href="/v3/product" className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">Product</Link>
+            <Link href="/v3/templates" className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">Templates</Link>
+            <Link href="/v3/docs" className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">Docs</Link>
+            <button
+              type="button"
+              aria-label="Toggle theme"
+              onClick={() => setDark(!isDark)}
+              className="ml-1 flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors hover:bg-secondary hover:text-foreground"
+            >
+              {isDark ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
+            </button>
+            <Link href="/login" className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">Sign in</Link>
           </div>
         </nav>
 
@@ -363,7 +377,7 @@ export function V3Body() {
             Works without the dashboard too:{" "}
             <Link href="/login?install=slack" className="text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline">Slack</Link>,{" "}
             <Link href="/login?install=whatsapp" className="text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline">WhatsApp</Link>, or any{" "}
-            <Link href="/v2/docs#mcp" className="text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline">MCP agent</Link>.
+            <Link href="/v3/docs#mcp" className="text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline">MCP agent</Link>.
           </motion.p>
         </section>
 
@@ -417,8 +431,8 @@ export function V3Body() {
         <div className="mx-auto flex max-w-[1000px] items-center justify-between px-7 py-6 text-[12px] text-muted-foreground">
           <span>Workeros by Floom · Backed by Founders Inc</span>
           <span className="flex gap-4">
-            <Link href="/v2/templates" className="hover:text-foreground">Templates</Link>
-            <Link href="/v2/docs" className="hover:text-foreground">Docs</Link>
+            <Link href="/v3/templates" className="hover:text-foreground">Templates</Link>
+            <Link href="/v3/docs" className="hover:text-foreground">Docs</Link>
             <Link href="/privacy" className="hover:text-foreground">Privacy</Link>
             <Link href="/terms" className="hover:text-foreground">Terms</Link>
           </span>
