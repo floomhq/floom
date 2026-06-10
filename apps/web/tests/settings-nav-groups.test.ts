@@ -6,14 +6,15 @@ import {
   groupLabel,
 } from "@/lib/settings/nav-groups";
 
+// §4 two-group settings nav — this model is what app/settings/page.tsx renders
+// its TabsList from, so these assertions guard the live strip.
+
 describe("Settings nav groups (§4)", () => {
-  it("Workspace group is System·Channels·Assistant·Members·Version history·Danger", () => {
+  it("Workspace group is System·Git·Channels·Danger", () => {
     expect(settingsGroup("workspace").map((i) => i.label)).toEqual([
       "System",
+      "Git",
       "Channels",
-      "Assistant",
-      "Members",
-      "Version history",
       "Danger",
     ]);
   });
@@ -22,13 +23,14 @@ describe("Settings nav groups (§4)", () => {
     expect(settingsGroup("account").map((i) => i.label)).toEqual(["Developer", "Appearance"]);
   });
 
-  it("count strip is '6 workspace · 2 account'", () => {
-    expect(settingsCounts()).toBe("6 workspace · 2 account");
+  it("count strip reflects the live groups", () => {
+    expect(settingsCounts()).toBe("4 workspace · 2 account");
   });
 
-  it("group labels carry the name", () => {
+  it("group labels carry the name when known", () => {
     expect(groupLabel("workspace", "Floom")).toBe("Workspace · Floom");
     expect(groupLabel("account", "vivek@floom.dev")).toBe("Account · vivek@floom.dev");
+    expect(groupLabel("workspace")).toBe("Workspace");
   });
 
   it("every item has a unique key", () => {
@@ -36,8 +38,7 @@ describe("Settings nav groups (§4)", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it("admin-only items are server-gated (system/assistant/members/danger)", () => {
-    const admin = SETTINGS_NAV.filter((i) => i.adminOnly).map((i) => i.key).sort();
-    expect(admin).toEqual(["assistant", "danger", "members", "system"]);
+  it("Danger is the only UI-hidden admin item (server enforces the rest)", () => {
+    expect(SETTINGS_NAV.filter((i) => i.adminOnly).map((i) => i.key)).toEqual(["danger"]);
   });
 });
