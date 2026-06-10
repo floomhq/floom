@@ -243,6 +243,8 @@ function SettingsContent() {
   const [clearing, setClearing] = useState(false);
   const [claimedWhatsAppToken, setClaimedWhatsAppToken] = useState<string | null>(null);
   const [waClaimBanner, setWaClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
+  const [claimedSlackToken, setClaimedSlackToken] = useState<string | null>(null);
+  const [slackClaimBanner, setSlackClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
   const [fromInstallChannel, setFromInstallChannel] = useState<string | null>(null);
   // SPEC §6: the Danger zone is admin-only. Default to shown so single-tenant
   // (no role) and admins never lose it; hide once we learn the viewer is a member.
@@ -306,6 +308,37 @@ function SettingsContent() {
       }
     })();
   }, [claimedWhatsAppToken, searchParams]);
+
+  useEffect(() => {
+    const token = (searchParams.get("slack_claim") || "").trim();
+    if (!token || token === claimedSlackToken) return;
+    setClaimedSlackToken(token);
+    void (async () => {
+      try {
+        await api.slack.claim(token);
+        toast.success("Slack identity linked to this workspace");
+        setSlackClaimBanner({ ok: true, message: "Slack identity linked to this workspace." });
+      } catch (e: unknown) {
+        const raw = e instanceof Error ? e.message : "";
+        const friendly =
+          raw === "Slack claim not found"
+            ? "This link was not found or the identity is already linked."
+            : raw === "Slack claim expired"
+              ? "This link has expired. Send Emily a DM in Slack to get a new one."
+              : raw || "Failed to link Slack identity.";
+        toast.error(friendly);
+        setSlackClaimBanner({ ok: false, message: friendly });
+      } finally {
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete("slack_claim");
+        const qs = params.size ? `?${params.toString()}` : "";
+        const hash = typeof window !== "undefined" ? window.location.hash : "";
+        const path = typeof window !== "undefined" ? window.location.pathname : "/settings";
+        window.history.replaceState(null, "", `${path}${qs}${hash}`);
+        setSearch(window.location.search);
+      }
+    })();
+  }, [claimedSlackToken, searchParams]);
 
   // #552: consume ?from_install=<channel> placed by the login page after an
   // install-param sign-in, route to the relevant tab, show a banner.

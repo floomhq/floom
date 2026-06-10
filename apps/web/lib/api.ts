@@ -757,6 +757,16 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ return_to }),
       }),
+    // Consume a Slack claim token (from ?slack_claim=) and bind the Slack
+    // sender identity to the authenticated Workeros user.
+    claim: (token: string) =>
+      fetchJson<{ ok: boolean; slack_team_id: string; slack_user_id: string; user_id: string }>(
+        "/slack/bindings/claim",
+        {
+          method: "POST",
+          body: JSON.stringify({ token }),
+        }
+      ),
   },
   workspace: {
     // Download the whole workspace as a .zip template. Returns the Blob so the

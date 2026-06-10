@@ -1832,6 +1832,30 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_worker_feedback_worker_id
         ON worker_feedback(worker_id, created_at);
     """,
+    # -- migration 64: Slack per-user sender bindings (claim-link DM identity) --
+    # Mirrors whatsapp_sender_bindings (migration 57). PK is (slack_team_id,
+    # slack_user_id) so the same Slack user in two different workspaces can have
+    # independent bindings. claim_token is UNIQUE to support fast single-use
+    # lookup and invalidation.
+    """
+    CREATE TABLE IF NOT EXISTS slack_sender_bindings (
+        slack_team_id   TEXT NOT NULL,
+        slack_user_id   TEXT NOT NULL,
+        user_id         TEXT,
+        profile_name    TEXT,
+        status          TEXT NOT NULL DEFAULT 'pending',
+        claim_token     TEXT UNIQUE,
+        claim_expires_at TEXT,
+        created_at      TEXT NOT NULL,
+        updated_at      TEXT NOT NULL,
+        last_seen_at    TEXT,
+        PRIMARY KEY (slack_team_id, slack_user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_slack_sender_bindings_user_id
+        ON slack_sender_bindings(user_id);
+    CREATE INDEX IF NOT EXISTS idx_slack_sender_bindings_claim_token
+        ON slack_sender_bindings(claim_token);
+    """,
 ]
 
 

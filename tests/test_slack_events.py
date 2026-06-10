@@ -103,7 +103,22 @@ def test_slack_commands_help_uses_signed_form_without_api_secret(monkeypatch, tm
 
 
 def test_slack_interactivity_dismisses_signed_approval_action(monkeypatch, tmp_path):
+    """Dismiss requires a bound identity. The clicker (U123) is pre-bound here."""
     main = _load_api(monkeypatch, tmp_path)
+    import channels.slack as _slack_mod
+
+    # Bind the clicker so the action is permitted.
+    with main.get_db() as conn:
+        now = main.now_iso()
+        conn.execute(
+            """
+            INSERT INTO slack_sender_bindings
+                (slack_team_id, slack_user_id, user_id, profile_name, status, created_at, updated_at)
+            VALUES ('T123', 'U123', 'bound-user-1', 'Bound User', 'active', ?, ?)
+            """,
+            (now, now),
+        )
+
     payload = {
         "team": {"id": "T123"},
         "user": {"id": "U123"},
@@ -126,21 +141,23 @@ def test_slack_interactivity_dismisses_signed_approval_action(monkeypatch, tmp_p
     }
 
 
-def test_slack_app_mention_queues_workspace_agent_reply(monkeypatch, tmp_path):
+def test_slack_app_mention_returns_pointer_reply_not_agent(monkeypatch, tmp_path):
+    """Channel @mentions return a 'DM me' pointer. The agent is never invoked."""
     main = _load_api(monkeypatch, tmp_path)
     import channels.slack as _slack_mod
-    calls = []
+    import channels.common as _common_mod
+    agent_calls = []
     posts = []
 
-    async def fake_collect(*, message, user_id, conversation_id, **kwargs):
-        calls.append((message, user_id, conversation_id))
-        return "workspace reply"
+    async def boom_collect(**_kwargs):
+        agent_calls.append(_kwargs)
+        return "should not happen"
 
     def fake_post(*, channel, thread_ts, text, bot_token=None):
         posts.append((channel, thread_ts, text, bot_token))
 
-    monkeypatch.setattr(main, "_collect_workspace_agent_reply_for_slack", fake_collect)
-    monkeypatch.setattr(_slack_mod, "collect_agent_reply", fake_collect)
+    monkeypatch.setattr(_common_mod, "collect_agent_reply", boom_collect)
+    monkeypatch.setattr(_slack_mod, "collect_agent_reply", boom_collect)
     monkeypatch.setattr(main, "_post_slack_thread_reply", fake_post)
     monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply", fake_post)
 
@@ -165,14 +182,16 @@ def test_slack_app_mention_queues_workspace_agent_reply(monkeypatch, tmp_path):
 
     assert response.status_code == 200, response.text
     assert response.json() == {"ok": True, "status": "queued"}
-    assert calls == [("summarize failed runs", "slack-test-user", "slack:C123:1710000000.000001")]
-    assert posts == [("C123", "1710000000.000001", "workspace reply", "xoxb-test-token")]
+    assert agent_calls == [], "agent must NOT be invoked from channel mention"
+    assert posts, "a pointer reply must be posted"
+    reply_text = posts[0][2]
+    assert "DM" in reply_text or "direct message" in reply_text.lower()
 
 
 def test_slack_app_mention_uses_team_install_bot_token(monkeypatch, tmp_path):
+    """Mention pointer reply uses the per-team bot token from the installation row."""
     main = _load_api(monkeypatch, tmp_path)
     import channels.slack as _slack_mod
-    calls = []
     posts = []
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
     monkeypatch.setenv("SLACK_BOT_TOKEN_T123", "xoxb-team-token")
@@ -189,10 +208,6 @@ def test_slack_app_mention_uses_team_install_bot_token(monkeypatch, tmp_path):
         installed_by_user_id="slack-test-user",
     )
 
-    async def fake_collect(*, message, user_id, conversation_id, **kwargs):
-        calls.append((message, user_id, conversation_id))
-        return "team reply"
-
     def fake_post(*, channel, thread_ts, text, bot_token=None):
         posts.append({
             "channel": channel,
@@ -201,8 +216,6 @@ def test_slack_app_mention_uses_team_install_bot_token(monkeypatch, tmp_path):
             "bot_token": bot_token,
         })
 
-    monkeypatch.setattr(main, "_collect_workspace_agent_reply_for_slack", fake_collect)
-    monkeypatch.setattr(_slack_mod, "collect_agent_reply", fake_collect)
     monkeypatch.setattr(main, "_post_slack_thread_reply", fake_post)
     monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply", fake_post)
 
@@ -226,23 +239,18 @@ def test_slack_app_mention_uses_team_install_bot_token(monkeypatch, tmp_path):
         response = client.post("/slack/events", data=body, headers=_slack_headers(body))
 
     assert response.status_code == 200, response.text
-    assert calls == [("inspect workspace", "slack-test-user", "slack:C123:1710000000.000002")]
-    assert posts[0]["bot_token"] == "xoxb-team-token"
+    assert posts, "a pointer reply must be posted"
+    assert posts[0]["bot_token"] == "xoxb-team-token", "must use per-team token"
 
 
 def test_slack_app_mention_deduplicates_event_id(monkeypatch, tmp_path):
+    """Duplicate event_ids are deduped — the pointer reply is sent only once."""
     main = _load_api(monkeypatch, tmp_path)
     import channels.slack as _slack_mod
-    calls = []
+    posts = []
 
-    async def fake_collect(*, message, user_id, conversation_id, **kwargs):
-        calls.append(message)
-        return "workspace reply"
-
-    monkeypatch.setattr(main, "_collect_workspace_agent_reply_for_slack", fake_collect)
-    monkeypatch.setattr(_slack_mod, "collect_agent_reply", fake_collect)
-    monkeypatch.setattr(main, "_post_slack_thread_reply", lambda **kwargs: None)
-    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply", lambda **kwargs: None)
+    monkeypatch.setattr(main, "_post_slack_thread_reply", lambda **kwargs: posts.append(kwargs))
+    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply", lambda **kwargs: posts.append(kwargs))
 
     body = json.dumps(
         {
@@ -266,4 +274,4 @@ def test_slack_app_mention_deduplicates_event_id(monkeypatch, tmp_path):
     assert first.status_code == 200, first.text
     assert second.status_code == 200, second.text
     assert second.json() == {"ok": True, "duplicate": True}
-    assert calls == ["summarize failed runs"]
+    assert len(posts) == 1, "pointer reply must be sent exactly once despite duplicate event"
