@@ -1,4 +1,4 @@
-# Workeros App UI v4 — Implementation Spec
+# WorkerOS App UI v4 — Implementation Spec
 
 **For:** Vivek (implementation, app → main)
 **Source of truth:** `docs/design/final.html` — the interactive wireframe. Open it, click everything. Every screen, modal and flow in this spec exists there (top banner → **Design index** catalogs all of them). Where this doc and the wireframe disagree, the wireframe wins; where the wireframe and the backend disagree, the backend wins and the gap has a `frontend-parity:` issue.
@@ -89,12 +89,12 @@ Calm: grey "N items · waiting" pills, no amber. Detail tabs Request / Items / R
 - Share approval = BUILT (`public_link`, public approve/reject routes). Standalone approval page: calm header w/ tool logo, proposed action, kv, comment, Approve/Reject.
 
 ### Connections
-One list, Type is a tag (Connection/MCP/Key — secrets unified is #786). Status pills from health sweep (BUILT). Detail per type w/ Test (BUILT)/Reconnect/Remove/Activity (BUILT)/account-info (BUILT). OAuth connect modal: Workeros mark ⇢ app logo, "requested access" list, note that exact scopes are confirmed on the provider's consent screen (Composio can't expose them pre-auth). MCP live tool enumeration #789; last-used-at #802.
+One list, Type is a tag (Connection/MCP/Key — secrets unified is #786). Status pills from health sweep (BUILT). Detail per type w/ Test (BUILT)/Reconnect/Remove/Activity (BUILT)/account-info (BUILT). OAuth connect modal: WorkerOS mark ⇢ app logo, "requested access" list, note that exact scopes are confirmed on the provider's consent screen (Composio can't expose them pre-auth). MCP live tool enumeration #789; last-used-at #802.
 
 ### Settings
 TWO groups with labels: **Workspace · {name}** (System, Channels, Assistant, Members, Version history, Danger) and **Account · {user}** (Developer, Appearance). Counts "6 workspace · 2 account".
 - System: workspace kv (rename/region/tz are #791) + **Cursor-style toggle rows** (iOS switch, title+desc left): approval-default / auto-pause / failure-emails (#794) + model defaults & limits & spend cap (#797).
-- Channels: Slack (status BUILT) · Email (**"Not connected"** — no email channel exists yet, #787/#799) · WhatsApp (status #781/#801) · "Install Workeros in your agent" (multi-agent grid: Claude/Cursor/Codex/VS Code/Windsurf/Cline + MCP config + PAT mint BUILT; rotate #784).
+- Channels: Slack (status BUILT) · Email (**"Not connected"** — no email channel exists yet, #787/#799) · WhatsApp (status #781/#801) · "Install WorkerOS in your agent" (multi-agent grid: Claude/Cursor/Codex/VS Code/Windsurf/Cline + MCP config + PAT mint BUILT; rotate #784).
 - Assistant: Base / Workspace instructions / Final prompt (all BUILT incl. composed prompt + versions + rollback). **SECURITY: server-side member guard on PUT /workspace[/base] is missing — #804. Do not ship member UI before that lands.**
 - Members: list/invite/role/remove/transfer — ALL BUILT.
 - Version history: combined workspace changelog in global list style (per-asset endpoints BUILT; merged timeline #772).
@@ -108,15 +108,21 @@ TWO groups with labels: **Workspace · {name}** (System, Channels, Assistant, Me
 
 **Modals:** Share (Drive pattern: invite input → people list → General access custom dropdown [Private|Workspace] → Public-link toggle "view & duplicate" → footer Copy link / **Open** / Done — works for worker, brain folder, system prompt, run, approval, workspace; grants #767, access-list #768, link toggle #766) · Run-with-inputs · Edit worker · OAuth consent · Slack install · WhatsApp QR · Agent install · Confirm (generic, used for every destructive/stub action) · Diff · Tool/Brain picker.
 
-**Standalone (recipient-facing, top Workeros bar + centered card + footer):**
+**Standalone (recipient-facing, top WorkerOS bar + centered card + footer):**
 - Worker share page: name, shared-by, tool logos (top-right ONLY — no duplicates), what-it-does kv, latest result, **Duplicate to my workspace** (import-from-share BUILT) + **Download as skill** (#816) + Sign in.
 - **Run share page**: result, files, steps w/ timings, links back to the worker (#765 for backend).
 - Approval page: calm "Waiting for your review" + tool logo + preview + comment + Approve/Reject (public routes BUILT).
 - **Channel-first onboarding** (#817): landing → "Start in Slack / Start in WhatsApp", dashboard optional. New flow, design in wireframe, backend issue filed (depends #762/#733/#800).
 
+## 5a2. Sign-in + workspace creation (Federico 2026-06-10)
+
+- **Sign-in page is split** (Design index → "Sign-in page"): LEFT = dark product-proof panel (mark, "Hire AI workers.", a real-looking "This week" artifact card — show what they get, never a bare form); RIGHT = form (email magic-link primary, GitHub/Google secondary, "your first sign-in creates one"). Industry pattern; no boring centered card.
+- **New workspace modal**: ONE company field — typing it fetches the company logo automatically (favicon/logo service) and prefills the workspace name; name stays overridable (one company can run several workspaces). Smooth, not bulky: two fields + live logo preview, nothing else. Backend: workspace create BUILT; storing company domain + logo needs a field (extend #791).
+- **Casing: it's "WorkerOS"**, never "Workeros", in every user-visible string (#824). Package/identifiers stay lowercase.
+
 ## 5b. Landing ↔ App continuity (Federico 2026-06-10)
 
-- **One design system.** Landing and app share the tokens in §1 (palette, radii, flat border system). Theme: day/night/system exists on the landing exactly like in the app, same storage key, carried across the transition (#820).
+- **One design system.** Landing and app share the tokens in §1 (palette, radii, flat border system). Theme: day/night/system exists on the landing exactly like in the app, same storage key, carried across the transition (#820 — theme toggle half SHIPPED in PR #160, `floom-theme` key is canonical).
 - **Sign-in as late as possible.** The landing's "Works without the dashboard too: Slack, WhatsApp, or any MCP agent" row routes to the INSTALL FLOWS directly (Slack install / WhatsApp QR / MCP config) — never to sign-in (#819). Full anonymous provisioning is #817; #552 (install-after-sign-in) is the interim inverse.
 - **Session-aware CTA.** Already authenticated → landing nav says "Dashboard", not "Sign in" (#821).
 
