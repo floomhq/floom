@@ -669,6 +669,277 @@ def _frontend_base_url() -> str:
 
 
 # ---------------------------------------------------------------------------
+# Slack per-user sender bindings (claim-link DM identity)
+# Mirrors the WhatsApp binding pattern in channels/whatsapp.py.
+# ---------------------------------------------------------------------------
+
+def _slack_claim_url(token: str) -> str:
+    base = (
+        os.environ.get("WORKERS_FRONTEND_URL")
+        or os.environ.get("WORKEROS_PUBLIC_URL")
+        or "https://workers.floom.dev"
+    ).rstrip("/")
+    return f"{base}/settings?slack_claim={urllib.parse.quote(token)}"
+
+
+def _slack_legacy_single_user_mode() -> bool:
+    """True only when SLACK_LEGACY_SINGLE_USER=1 (default OFF).
+
+    When ON the old SLACK_WORKEROS_USER_ID env var is used as a fallback for
+    DMs from unbound senders instead of sending a claim link. Leave OFF in all
+    new installs.
+    """
+    value = os.environ.get("SLACK_LEGACY_SINGLE_USER", "0").strip().lower()
+    return value in {"1", "true", "yes", "on"}
+
+
+def _slack_binding_user_id(team_id: str, slack_user_id: str) -> Optional[str]:
+    """Return the Workeros user_id for a bound (team_id, slack_user_id) pair, or None.
+
+    Also updates last_seen_at on a hit so the binding stays warm.
+    """
+    from db import get_db, now_iso
+    if not team_id or not slack_user_id:
+        return None
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT user_id
+                FROM slack_sender_bindings
+                WHERE slack_team_id = ? AND slack_user_id = ?
+                  AND status = 'active' AND user_id IS NOT NULL
+                """,
+                (team_id, slack_user_id),
+            ).fetchone()
+            if row and row["user_id"]:
+                # Validate the bound user still exists in the users table.
+                # In single-user (legacy) mode the users table is empty and we
+                # skip this check — a missing user does not invalidate bindings
+                # on installs that pre-date multi-member auth.
+                try:
+                    user_count_row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+                    user_count = user_count_row[0] if user_count_row else 0
+                except Exception:
+                    user_count = 0
+
+                if user_count > 0:
+                    user_exists_row = conn.execute(
+                        "SELECT 1 FROM users WHERE id = ? LIMIT 1",
+                        (str(row["user_id"]),),
+                    ).fetchone()
+                    if not user_exists_row:
+                        logger.warning(
+                            "Slack binding for %s/%s points to deleted user %s; resetting to pending",
+                            team_id, slack_user_id, row["user_id"],
+                        )
+                        conn.execute(
+                            """
+                            UPDATE slack_sender_bindings
+                            SET status = 'pending', user_id = NULL, updated_at = ?
+                            WHERE slack_team_id = ? AND slack_user_id = ?
+                            """,
+                            (now_iso(), team_id, slack_user_id),
+                        )
+                        return None
+                conn.execute(
+                    """
+                    UPDATE slack_sender_bindings
+                    SET last_seen_at = ?, updated_at = ?
+                    WHERE slack_team_id = ? AND slack_user_id = ?
+                    """,
+                    (now_iso(), now_iso(), team_id, slack_user_id),
+                )
+                return str(row["user_id"])
+    except Exception:
+        logger.exception("Slack sender binding lookup failed for %s/%s", team_id, slack_user_id)
+    return None
+
+
+def _slack_create_claim(team_id: str, slack_user_id: str, profile_name: str = "") -> Dict[str, str]:
+    """Issue a new claim token for an unbound (team_id, slack_user_id) pair.
+
+    Hardening:
+    - Any prior PENDING claim for this sender is invalidated (replaced).
+    - Active bindings are NOT replaced — caller must check before calling.
+    - Tokens are single-use (consumed and cleared in /slack/bindings/claim).
+    - 24-byte urlsafe token gives 192 bits of entropy.
+    """
+    from db import get_db, now_iso
+    if not team_id or not slack_user_id:
+        raise ValueError("Slack team_id and slack_user_id are required")
+    token = pysecrets.token_urlsafe(24)
+    now_ts = now_iso()
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO slack_sender_bindings
+                (slack_team_id, slack_user_id, user_id, profile_name, status,
+                 claim_token, claim_expires_at, created_at, updated_at, last_seen_at)
+            VALUES (?, ?, NULL, ?, 'pending', ?, ?, ?, ?, ?)
+            ON CONFLICT(slack_team_id, slack_user_id) DO UPDATE SET
+                profile_name = excluded.profile_name,
+                status = CASE
+                    WHEN slack_sender_bindings.status = 'active'
+                    THEN slack_sender_bindings.status
+                    ELSE 'pending'
+                END,
+                claim_token = CASE
+                    WHEN slack_sender_bindings.status = 'active'
+                    THEN slack_sender_bindings.claim_token
+                    ELSE excluded.claim_token
+                END,
+                claim_expires_at = CASE
+                    WHEN slack_sender_bindings.status = 'active'
+                    THEN slack_sender_bindings.claim_expires_at
+                    ELSE excluded.claim_expires_at
+                END,
+                updated_at = excluded.updated_at,
+                last_seen_at = excluded.last_seen_at
+            """,
+            (team_id, slack_user_id, profile_name or None, token, expires_at, now_ts, now_ts, now_ts),
+        )
+        row = conn.execute(
+            """
+            SELECT claim_token, claim_expires_at, status
+            FROM slack_sender_bindings
+            WHERE slack_team_id = ? AND slack_user_id = ?
+            """,
+            (team_id, slack_user_id),
+        ).fetchone()
+    claim_token = str(row["claim_token"] or token) if row else token
+    return {
+        "slack_team_id": team_id,
+        "slack_user_id": slack_user_id,
+        "claim_token": claim_token,
+        "claim_url": _slack_claim_url(claim_token),
+        "claim_expires_at": str(row["claim_expires_at"] if row else expires_at),
+        "status": str(row["status"] if row else "pending"),
+    }
+
+
+def _post_slack_dm(*, slack_user_id: str, team_id: str, text: str, bot_token: Optional[str] = None) -> None:
+    """Open a DM channel and post a message to the given Slack user (best-effort).
+
+    Used to notify an old binding owner when their binding is replaced.
+    """
+    token = (bot_token or _slack_bot_token_for_team(team_id)).strip()
+    if not token or not slack_user_id:
+        return
+    try:
+        resp = requests.post(
+            "https://slack.com/api/conversations.open",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+            json={"users": slack_user_id},
+            timeout=10,
+        )
+        channel_id = (resp.json() or {}).get("channel", {}).get("id") if resp.ok else None
+        if not channel_id:
+            return
+        requests.post(
+            "https://slack.com/api/chat.postMessage",
+            headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json; charset=utf-8"},
+            json={"channel": channel_id, "text": text, "unfurl_links": False},
+            timeout=10,
+        )
+    except Exception:
+        logger.exception("Slack DM notification to old binding owner failed (best-effort)")
+
+
+# ---------------------------------------------------------------------------
+# Slack binding claim route
+# ---------------------------------------------------------------------------
+
+class SlackClaimRequest(BaseModel):
+    token: str
+
+
+@slack_router.post("/slack/bindings/claim")
+def claim_slack_sender(
+    payload: SlackClaimRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, Any]:
+    """Consume a Slack claim token and bind the (team_id, slack_user_id) to the
+    authenticated Workeros user.
+
+    Hardening:
+    - Token is single-use: cleared (set to NULL) after successful claim.
+    - Expired tokens are rejected (410).
+    - If the binding was previously active (another user), notify the old owner
+      via Slack DM, then rebind.
+    - Pending tokens from a different binding for the same user are NOT affected
+      (cross-user claim isolation).
+    """
+    from db import get_db, now_iso
+    token = (payload.token or "").strip()
+    if not token:
+        raise HTTPException(status_code=400, detail="token is required")
+    now_dt = datetime.now(timezone.utc)
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT slack_team_id, slack_user_id, status, claim_expires_at, user_id
+            FROM slack_sender_bindings
+            WHERE claim_token = ?
+            """,
+            (token,),
+        ).fetchone()
+        if not row:
+            raise HTTPException(status_code=404, detail="Slack claim not found")
+        # Single-use: already consumed tokens are gone (claim_token NULL or
+        # status=active with a different token means it was claimed by someone else).
+        # We reject active rows too — only pending rows with a valid token are claimable.
+        if row["status"] == "active":
+            raise HTTPException(status_code=404, detail="Slack claim not found")
+        try:
+            expires = datetime.fromisoformat(str(row["claim_expires_at"]))
+            if expires.tzinfo is None:
+                expires = expires.replace(tzinfo=timezone.utc)
+        except Exception:
+            expires = now_dt - timedelta(seconds=1)
+        if expires < now_dt:
+            raise HTTPException(status_code=410, detail="Slack claim expired")
+
+        old_user_id = row["user_id"]
+        team_id = str(row["slack_team_id"])
+        slack_user_id = str(row["slack_user_id"])
+
+        # Mark active, bind to this user, and clear the token (single-use).
+        conn.execute(
+            """
+            UPDATE slack_sender_bindings
+            SET user_id = ?, status = 'active', claim_token = NULL,
+                claim_expires_at = NULL, updated_at = ?
+            WHERE claim_token = ?
+            """,
+            (auth.user_id, now_iso(), token),
+        )
+
+    # Notify the previous owner if the binding was already active for a different user.
+    if old_user_id and old_user_id != auth.user_id:
+        try:
+            _post_slack_dm(
+                slack_user_id=slack_user_id,
+                team_id=team_id,
+                text=(
+                    "Your Emily account link for this Slack identity has been transferred "
+                    "to a new account. If this was not you, please re-link by sending me a DM."
+                ),
+                bot_token=_slack_bot_token_for_team(team_id),
+            )
+        except Exception:
+            logger.exception("Slack rebind notification failed (best-effort)")
+
+    return {
+        "ok": True,
+        "slack_team_id": team_id,
+        "slack_user_id": slack_user_id,
+        "user_id": auth.user_id,
+    }
+
+
+# ---------------------------------------------------------------------------
 # Workspace user / approval helpers
 # ---------------------------------------------------------------------------
 
@@ -808,41 +1079,46 @@ def _slack_pending_approvals_response(rows: List[Dict[str, Any]]) -> Dict[str, A
 async def _handle_slack_app_mention(
     *,
     event: Dict[str, Any],
-    prompt: str,
-    user_id: str,
+    team_id: str,
+    slack_sender_id: str,
     bot_token: Optional[str] = None,
 ) -> None:
+    """Handle a channel @mention.
+
+    Emily works in DMs only. Mentions receive a short friendly pointer.
+    If the mentioning user is unbound, include a claim link so they can connect.
+    No agent is run from channel mentions.
+    """
     channel = str(event.get("channel") or "")
     thread_ts = str(event.get("thread_ts") or event.get("ts") or "")
     if not channel or not thread_ts:
         logger.warning("Slack app_mention missing channel/thread timestamp")
         return
-    conversation_id = f"slack:{channel}:{thread_ts}"
-    msg_ts = str(event.get("ts") or thread_ts)
-    _slack_reaction("add", channel=channel, ts=msg_ts, emoji="eyes", bot_token=bot_token)
+
+    # Check if the mentioning user is already linked so we can personalise the reply.
+    user_id = _slack_binding_user_id(team_id, slack_sender_id)
+    if user_id:
+        pointer_text = "I work best in DMs. Send me a direct message!"
+    else:
+        try:
+            claim = _slack_create_claim(team_id, slack_sender_id)
+            pointer_text = (
+                "I work best in DMs. Send me a direct message!\n\n"
+                f"To link your account first: {claim['claim_url']}"
+            )
+        except Exception:
+            logger.exception("Slack mention claim creation failed (best-effort)")
+            pointer_text = "I work best in DMs. Send me a direct message!"
+
     try:
-        reply = await collect_agent_reply(
-            message=prompt,
-            user_id=user_id,
-            conversation_id=conversation_id,
+        _post_slack_thread_reply(
+            channel=channel,
+            thread_ts=thread_ts,
+            text=pointer_text,
+            bot_token=bot_token,
         )
-        _slack_reaction("remove", channel=channel, ts=msg_ts, emoji="eyes", bot_token=bot_token)
-        _slack_reaction("add", channel=channel, ts=msg_ts, emoji="white_check_mark", bot_token=bot_token)
-        _post_slack_thread_reply(channel=channel, thread_ts=thread_ts, text=reply, bot_token=bot_token)
     except Exception:
-        logger.exception("Slack app_mention processing failed")
-        _slack_reaction("remove", channel=channel, ts=msg_ts, emoji="eyes", bot_token=bot_token)
-        _slack_reaction("add", channel=channel, ts=msg_ts, emoji="x", bot_token=bot_token)
-        if os.environ.get("SLACK_POST_ERRORS_TO_THREAD", "1").strip().lower() not in {"0", "false", "no", "off"}:
-            try:
-                _post_slack_thread_reply(
-                    channel=channel,
-                    thread_ts=thread_ts,
-                    text="I could not complete that request. The failure was logged for the workspace operator.",
-                    bot_token=bot_token,
-                )
-            except Exception:
-                logger.exception("Slack error reply failed")
+        logger.exception("Slack app_mention pointer reply failed")
 
 
 async def _handle_slack_assistant_thread_started(*, event: Dict[str, Any], bot_token: Optional[str] = None) -> None:
@@ -870,14 +1146,47 @@ async def _handle_slack_direct_message(
     *,
     event: Dict[str, Any],
     prompt: str,
-    user_id: str,
+    team_id: str,
+    slack_sender_id: str,
     bot_token: Optional[str] = None,
 ) -> None:
+    """Handle an inbound Slack DM.
+
+    Resolves the sender's Workeros user_id via the claim-link binding.
+    Unbound senders receive a claim link and no agent is run.
+    Bound senders run as their linked user.
+    """
     channel = str(event.get("channel") or "")
     thread_ts = str(event.get("thread_ts") or event.get("ts") or "")
     if not channel or not thread_ts:
         logger.warning("Slack direct message missing channel/thread timestamp")
         return
+
+    # Per-user identity resolution.
+    user_id = _slack_binding_user_id(team_id, slack_sender_id)
+    if not user_id:
+        # Check legacy single-user fallback (default OFF).
+        if _slack_legacy_single_user_mode():
+            from main import _bootstrap_user_id
+            user_id = (os.environ.get("SLACK_WORKEROS_USER_ID") or _bootstrap_user_id()).strip() or _bootstrap_user_id()
+        else:
+            # Unbound sender: reply with a claim link and stop.
+            try:
+                claim = _slack_create_claim(team_id, slack_sender_id)
+                _post_slack_thread_reply(
+                    channel=channel,
+                    thread_ts=thread_ts,
+                    text=(
+                        "To use Emily, link your Slack identity to your Workeros workspace first.\n\n"
+                        f"{claim['claim_url']}\n\n"
+                        "This link expires in 24 hours."
+                    ),
+                    bot_token=bot_token,
+                )
+            except Exception:
+                logger.exception("Slack unbound sender claim prompt failed")
+            return
+
     conversation_id = f"slack-assistant:{channel}:{thread_ts}"
     # Generate a short-lived sign-in URL and surface it in the system prompt so
     # Emily can share it when the user asks about signing in or getting started.
@@ -1017,7 +1326,28 @@ def _slack_interactivity_response_from_form(form: Dict[str, str]) -> Response:
     run_id = _approval_action_run_id(str(action.get("value") or ""))
     slack_user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
     slack_user_id = str(slack_user.get("id") or "unknown")
-    user_id = _slack_workspace_user_id()
+
+    # Resolve the clicker's Workeros user_id from their binding.
+    # Unbound clickers get an ephemeral claim-link prompt and no action is taken.
+    user_id = _slack_binding_user_id(team_id, slack_user_id) if slack_user_id != "unknown" else None
+    if not user_id:
+        try:
+            claim = _slack_create_claim(team_id, slack_user_id)
+            return JSONResponse({
+                "response_type": "ephemeral",
+                "replace_original": False,
+                "text": (
+                    "Link your Slack identity to Workeros before approving or rejecting runs.\n"
+                    f"{claim['claim_url']}"
+                ),
+            })
+        except Exception:
+            logger.exception("Slack interactivity claim creation failed (best-effort)")
+            return JSONResponse({
+                "response_type": "ephemeral",
+                "replace_original": False,
+                "text": "Please link your Slack identity to Workeros first (send Emily a DM).",
+            })
 
     if action_id == "workeros_approval_dismiss":
         return JSONResponse({
@@ -1140,12 +1470,13 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
         prompt = _clean_slack_agent_prompt(str(event.get("text") or ""), None)
         if not prompt:
             return JSONResponse({"ok": True, "ignored": "empty_prompt"})
-        user_id = (os.environ.get("SLACK_WORKEROS_USER_ID") or _bootstrap_user_id()).strip() or _bootstrap_user_id()
+        slack_sender_id = str(event.get("user") or "")
         background_tasks.add_task(
             _handle_slack_direct_message,
             event=event,
             prompt=prompt,
-            user_id=user_id,
+            team_id=team_id,
+            slack_sender_id=slack_sender_id,
             bot_token=bot_token,
         )
         return JSONResponse({"ok": True, "status": "queued"})
@@ -1160,12 +1491,12 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
     if not prompt:
         return JSONResponse({"ok": True, "ignored": "empty_prompt"})
 
-    user_id = (os.environ.get("SLACK_WORKEROS_USER_ID") or _bootstrap_user_id()).strip() or _bootstrap_user_id()
+    slack_sender_id = str(event.get("user") or "")
     background_tasks.add_task(
         _handle_slack_app_mention,
         event=event,
-        prompt=prompt,
-        user_id=user_id,
+        team_id=team_id,
+        slack_sender_id=slack_sender_id,
         bot_token=bot_token,
     )
     return JSONResponse({"ok": True, "status": "queued"})
@@ -1229,7 +1560,12 @@ async def slack_commands(request: Request, background_tasks: BackgroundTasks) ->
 
 @slack_router.post("/slack/interactivity")
 async def slack_interactivity(request: Request) -> Response:
-    """Receive Slack Block Kit action payloads."""
+    """Receive Slack Block Kit action payloads.
+
+    Delegates to _slack_interactivity_response_from_form which resolves the
+    clicker's Workeros user_id via per-user binding. Unbound clickers receive
+    an ephemeral claim-link message and no action is taken.
+    """
     if not _slack_events_enabled():
         raise HTTPException(status_code=503, detail="Slack integration is disabled")
     signing_secret = os.environ.get("SLACK_SIGNING_SECRET", "").strip()
@@ -1244,67 +1580,4 @@ async def slack_interactivity(request: Request) -> Response:
         raise HTTPException(status_code=401, detail="Invalid Slack signature")
 
     form = _parse_slack_form_body(body)
-    raw_payload = form.get("payload") or ""
-    try:
-        payload = json.loads(raw_payload)
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid Slack interaction payload") from exc
-
-    team = payload.get("team") if isinstance(payload.get("team"), dict) else {}
-    team_id = str(team.get("id") or payload.get("team_id") or "")
-    allowed_team_ids = _slack_allowed_team_ids()
-    if allowed_team_ids and team_id not in allowed_team_ids:
-        raise HTTPException(status_code=403, detail="Slack team is not allowed")
-
-    actions = payload.get("actions")
-    action = actions[0] if isinstance(actions, list) and actions else {}
-    if not isinstance(action, dict):
-        return JSONResponse({"replace_original": False, "text": "No Slack action found."})
-
-    action_id = str(action.get("action_id") or "")
-    run_id = _approval_action_run_id(str(action.get("value") or ""))
-    slack_user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
-    slack_user_id = str(slack_user.get("id") or "unknown")
-    user_id = _slack_workspace_user_id()
-
-    if action_id == "workeros_approval_dismiss":
-        return JSONResponse({
-            "replace_original": True,
-            "text": f"Dismissed approval `{run_id}`.",
-        })
-
-    if action_id not in {"workeros_approval_approve", "workeros_approval_reject"}:
-        return JSONResponse({
-            "replace_original": False,
-            "text": f"Unsupported Slack action: {action_id or 'unknown'}",
-        })
-    if not run_id:
-        return JSONResponse({
-            "replace_original": False,
-            "text": "Missing run_id for Slack approval action.",
-        })
-
-    from db import get_repositories
-    repos = get_repositories()
-    try:
-        if action_id == "workeros_approval_approve":
-            result = _approve_pending_run_for_slack(run_id=run_id, user_id=user_id, repos=repos)
-            return JSONResponse({
-                "replace_original": True,
-                "text": f"Approved `{run_id}` from Slack. Follow-up run: `{result.run_id}`.",
-            })
-        _reject_pending_run_for_slack(
-            run_id=run_id,
-            user_id=user_id,
-            repos=repos,
-            reason=f"Rejected from Slack by {slack_user_id}",
-        )
-        return JSONResponse({
-            "replace_original": True,
-            "text": f"Rejected `{run_id}` from Slack.",
-        })
-    except HTTPException as exc:
-        return JSONResponse({
-            "replace_original": False,
-            "text": f"Could not apply Slack approval action: {exc.detail}",
-        })
+    return _slack_interactivity_response_from_form(form)
