@@ -3,12 +3,13 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Folder, FileText, Database } from "lucide-react";
+import { Folder } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatRelative } from "@/lib/formatters";
-import type { ContextSummary, ContextDetail, ContextFileItem } from "@/lib/types";
+import type { ContextSummary, ContextDetail } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
+import { InlineFileOpen } from "@/components/file-viewer/InlineFileOpen";
 import { visibilityLabel } from "@/lib/permissions";
 import { formatBytes, writeKey } from "@/lib/brain/format";
 
@@ -36,86 +37,28 @@ function useContextDetail(name: string): ContextDetail | undefined {
   return d;
 }
 
-function FileIcon({ file }: { file: ContextFileItem }) {
-  const Icon = file.path.endsWith(".db") ? Database : FileText;
-  return (
-    <span className="c-logo">
-      <Icon size={15} />
-    </span>
-  );
-}
-
+// Rule #5: Brain shares the EXACT inline file-open pattern with Run outputs —
+// breadcrumb `{folder} / file`, Back, Download; images render as images; text
+// loads inline via readTextFile; .db gets the honest #777 fallback.
 function FilesTab({ folder }: { folder: ContextSummary }) {
   const d = useContextDetail(folder.name);
-  const [open, setOpen] = useState<string | null>(null);
-  const [content, setContent] = useState<string>("");
-  const [loadingFile, setLoadingFile] = useState(false);
-
   if (!d) return <div style={muted}>Loading…</div>;
-  const files = (d.files ?? []).filter((f) => !f.deleted);
-
-  const openFile = async (f: ContextFileItem) => {
-    if (open === f.path) {
-      setOpen(null);
-      return;
-    }
-    setOpen(f.path);
-    if (f.is_binary) {
-      setContent("");
-      return;
-    }
-    setLoadingFile(true);
-    try {
-      setContent(await api.contexts.readTextFile(folder.name, f.path));
-    } catch {
-      setContent("(could not read file)");
-    } finally {
-      setLoadingFile(false);
-    }
-  };
-
+  const files = (d.files ?? [])
+    .filter((f) => !f.deleted)
+    .map((f) => ({
+      id: f.path,
+      name: f.path,
+      url: api.contexts.fileUrl(folder.name, f.path),
+      sizeBytes: f.size,
+      binary: f.is_binary,
+    }));
   return (
-    <div className="c-ltable">
-      {files.map((f) => (
-        <div key={f.path}>
-          <button
-            type="button"
-            className="c-lrow"
-            style={{ gridTemplateColumns: "1fr auto auto", gap: 12, width: "100%" }}
-            onClick={() => void openFile(f)}
-          >
-            <div className="c-lprimary">
-              <FileIcon file={f} />
-              <div className="c-lp-tx">
-                <div className="nm" style={{ fontFamily: "var(--font-mono)" }}>
-                  {f.path}
-                </div>
-              </div>
-            </div>
-            <span className="c-cell m">{formatBytes(f.size)}</span>
-            <span className="c-cell m">{formatRelative(f.updated_at)}</span>
-          </button>
-          {open === f.path && (
-            <div style={{ padding: "0 14px 14px" }}>
-              {f.is_binary ? (
-                <div style={muted}>
-                  {f.path.endsWith(".db") ? "SQLite database" : "Binary file"} — open it on the{" "}
-                  <Link href={`/contexts?pack=${encodeURIComponent(folder.name)}`} style={{ color: "var(--accent)" }}>
-                    full Brain page
-                  </Link>
-                  .
-                </div>
-              ) : loadingFile ? (
-                <div style={muted}>Loading…</div>
-              ) : (
-                <pre style={code}>{content}</pre>
-              )}
-            </div>
-          )}
-        </div>
-      ))}
-      {files.length === 0 && <div style={{ ...muted, padding: 14 }}>This folder is empty.</div>}
-    </div>
+    <InlineFileOpen
+      files={files}
+      rootLabel={folder.name}
+      emptyLabel="This folder is empty."
+      loadText={(f) => api.contexts.readTextFile(folder.name, f.id)}
+    />
   );
 }
 
@@ -300,15 +243,3 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
 }
 
 const muted: React.CSSProperties = { color: "var(--muted-foreground)" };
-const code: React.CSSProperties = {
-  border: "1px solid var(--line)",
-  borderRadius: 12,
-  background: "var(--bg-2)",
-  color: "var(--ink-soft)",
-  padding: 13,
-  whiteSpace: "pre-wrap",
-  overflow: "auto",
-  fontSize: 12,
-  fontFamily: "var(--font-mono)",
-  maxHeight: 420,
-};

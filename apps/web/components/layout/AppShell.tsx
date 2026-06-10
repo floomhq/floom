@@ -7,6 +7,7 @@ import { CommandPalette } from "@/components/CommandPalette";
 import { IconSprite } from "@/components/IconSprite";
 import { Toaster } from "@/components/ui/sonner";
 import { Sidebar } from "@/components/layout/sidebar";
+import { DeepLinkRouter } from "@/components/layout/DeepLinkRouter";
 import { EmilyDock, EmilyMobileSheet } from "@/components/emily/EmilyChat";
 
 // Render exactly one Emily surface so only one chat instance mounts: the
@@ -60,6 +61,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <>
         <IconSprite />
         <Ambient />
+        <DeepLinkRouter />
         <Sidebar />
         <main className="relative z-10 flex-1 min-w-0 min-h-screen">{children}</main>
         <CommandPalette />
@@ -72,6 +74,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
     <>
       <IconSprite />
       <Ambient />
+      <DeepLinkRouter />
       <Sidebar />
       {/* Main content between sidebar and Emily dock — scrolls in its own container */}
       <main className="relative z-10 flex-1 min-w-0 h-full overflow-y-auto">

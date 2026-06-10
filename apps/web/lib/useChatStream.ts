@@ -1005,3 +1005,27 @@ export function shouldAutoOpenRunDetails(card: ToolCard): card is RunCard {
 export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
   return shouldAutoOpenRunDetails(card) ? `/runs/${card.runId}?tab=logs` : null;
 }
+
+// #825: Emily's answers link to app pages as REAL router hrefs (no DOM access /
+// page driving — links only). Generalizes getAutoOpenRunDetailsHref across every
+// card kind to its in-app route, or null when there's nothing concrete to open.
+export function getCardHref(card: ToolCard): string | null {
+  switch (card.kind) {
+    case "worker-create":
+      return card.workerId ? `/workers/${card.workerId}` : null;
+    case "run":
+      return card.runId ? `/runs/${card.runId}` : null;
+    case "artifact":
+      return card.runId ? `/runs/${card.runId}?tab=Output` : null;
+    case "approval":
+      return card.approvalId ? `/approvals?sel=${card.approvalId}` : "/approvals";
+    case "connect-service":
+      return "/connections";
+    case "worker-list":
+      return "/workers";
+    case "runs-list":
+      return "/runs";
+    default:
+      return null;
+  }
+}
