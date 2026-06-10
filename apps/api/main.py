@@ -8226,8 +8226,23 @@ def delete_worker(
     # Owner-gate: a member must not be able to delete (or no-op-204 against)
     # another member's worker. _get_visible_worker is now owner-scoped, so this
     # returns 404 for a worker the caller can't see — consistent with GET/run/edit.
-    if _get_visible_worker(_canonical_worker_id(worker_id), user_id=auth.user_id, repos=repos) is None:
-        raise HTTPException(status_code=404, detail="Worker not found")
+    #
+    # Exception: filesystem-only orphans (no DB row) have no owner to protect.
+    # When WORKEROS_ENABLE_USER_HEADER_SCOPE=1, _shared_filesystem_fallback_allowed()
+    # is False, so _get_visible_worker returns None for orphan dirs — blocking
+    # _delete_worker_impl's orphan-reap path (issue #810). We must fall through
+    # to _delete_worker_impl when the worker has no DB row at all; only deny when
+    # a DB row exists but isn't visible to the caller (owned by someone else).
+    canonical_id = _canonical_worker_id(worker_id)
+    if _get_visible_worker(canonical_id, user_id=auth.user_id, repos=repos) is None:
+        # Check whether any DB row exists for this worker_id regardless of ownership.
+        # _db_worker_owners() reads the raw workers table and maps id → owner_id.
+        # If the id appears there, a real DB-backed worker exists that the caller
+        # cannot see — that is the ownership-protection case; raise 404.
+        # If the id does not appear, it is a true orphan (directory without DB row);
+        # let _delete_worker_impl handle it (it will rmtree the dir and return 204).
+        if canonical_id in _db_worker_owners():
+            raise HTTPException(status_code=404, detail="Worker not found")
     _delete_worker_impl(worker_id, auth.user_id, repos)
     # 204 No Content — FastAPI returns empty body automatically for status_code=204
     return None
