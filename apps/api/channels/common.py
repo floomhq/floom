@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import asyncio
 import logging
+import os
 from typing import Optional
 
 logger = logging.getLogger(__name__)
@@ -94,6 +95,52 @@ def notify_pending_approval_via_whatsapp(
         logger.exception(
             "WhatsApp approval notify: unexpected error for owner %s run %s", owner_id, run_id
         )
+
+
+def bound_user_is_valid(user_id: str) -> bool:
+    """Return True if ``user_id`` should be treated as an existing, valid binding owner.
+
+    A binding is valid when ANY of the following holds:
+
+    1. The ``users`` table contains a row for ``user_id`` (normal multi-member case).
+    2. ``user_id`` equals the bootstrap/legacy owner id
+       (``WORKEROS_USER_ID`` env var, defaulting to ``"federico"``).  Legacy
+       single-user installs bind under this id, which pre-dates the ``users``
+       table.  Resetting that binding when there is no matching users row would
+       disconnect a valid owner — exactly the bug this helper fixes.
+    3. The ``users`` table is absent or empty (pure dev / pre-auth mode); treat
+       every binding as valid to avoid false resets on fresh installs.
+
+    Non-fatal: any DB error returns True (proceed optimistically, same as the
+    per-channel catch blocks).
+    """
+    try:
+        # Resolve bootstrap id without importing main (avoids circular import).
+        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+        if user_id == bootstrap_id:
+            return True
+
+        from db import get_db as _get_db  # lazy — avoids circular import at module level
+
+        with _get_db() as conn:
+            try:
+                count_row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
+                user_count = count_row[0] if count_row else 0
+            except Exception:
+                # Table may not exist yet on a fresh dev install.
+                return True
+
+            if user_count == 0:
+                # Pre-auth / dev mode — no accounts registered; all bindings valid.
+                return True
+
+            exists = conn.execute(
+                "SELECT 1 FROM users WHERE id = ? LIMIT 1", (user_id,)
+            ).fetchone()
+            return exists is not None
+    except Exception:
+        logger.exception("bound_user_is_valid check failed for %r; proceeding optimistically", user_id)
+        return True
 
 
 async def collect_agent_reply(
