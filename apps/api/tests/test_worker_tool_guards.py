@@ -300,3 +300,121 @@ def test_shared_visibility_alias_allows_member_get(env):
     result = cs._tool_workers_get({"id": "alias-shared-a"}, user_id="bob")
     assert result["ok"] is True
     assert result["worker"]["id"] == "alias-shared-a"
+
+
+# ---------------------------------------------------------------------------
+# F) List/run parity — a user must never see a worker they cannot run/get.
+#    Regression for the worker-list-run-parity bug: workers__list_all was
+#    showing workspace-visible workers to non-members (no membership check),
+#    while workers__run/get correctly required active membership, causing
+#    "Worker not found" on workers that appeared in the list.
+# ---------------------------------------------------------------------------
+
+def test_list_does_not_show_workspace_worker_to_non_member(env, monkeypatch):
+    """workers__list_all must NOT include another user's workspace worker
+    when the caller is not an active member of that workspace."""
+    db = env["db"]
+    cs = env["chat_service"]
+
+    # alice owns a workspace-visible worker; carol is NOT a member.
+    _create_worker_direct(db, "ws-worker-parity", owner_id="alice",
+                          workspace_id="ws-parity", visibility="workspace")
+
+    result = cs._tool_workers_list_all({}, user_id="carol")
+    listed_ids = {w["id"] for w in result["workers"]}
+    assert "ws-worker-parity" not in listed_ids, (
+        "carol is not a member of ws-parity and must not see ws-worker-parity in the list"
+    )
+
+
+def test_list_shows_workspace_worker_to_active_member(env):
+    """workers__list_all MUST include another user's workspace worker when
+    the caller is an active member of that workspace."""
+    db = env["db"]
+    cs = env["chat_service"]
+
+    _create_worker_direct(db, "ws-worker-member", owner_id="alice",
+                          workspace_id="ws-member-parity", visibility="workspace")
+    _add_workspace_member(db, workspace_id="ws-member-parity", user_id="bob", role="member")
+
+    result = cs._tool_workers_list_all({}, user_id="bob")
+    listed_ids = {w["id"] for w in result["workers"]}
+    assert "ws-worker-member" in listed_ids, (
+        "bob is an active member of ws-member-parity and must see ws-worker-member in the list"
+    )
+
+
+def test_list_run_parity_member_can_get_every_listed_worker(env, monkeypatch):
+    """Property test: every worker in workers__list_all must be gettable
+    by the same user (no list/run gap)."""
+    db = env["db"]
+    cs = env["chat_service"]
+
+    # alice owns a private worker in ws-a.
+    _create_worker_direct(db, "alice-private", owner_id="alice",
+                          workspace_id="ws-a", visibility="private")
+    # alice owns a workspace worker in ws-shared.
+    _create_worker_direct(db, "alice-shared", owner_id="alice",
+                          workspace_id="ws-shared", visibility="workspace")
+    # bob owns his own private worker.
+    _create_worker_direct(db, "bob-private", owner_id="bob",
+                          workspace_id="ws-a", visibility="private")
+
+    # bob is a member of ws-shared only.
+    _add_workspace_member(db, workspace_id="ws-shared", user_id="bob", role="member")
+
+    listed = cs._tool_workers_list_all({}, user_id="bob")
+    for w in listed["workers"]:
+        get_result = cs._tool_workers_get({"id": w["id"]}, user_id="bob")
+        assert get_result["ok"] is True, (
+            f"Worker {w['id']} appeared in bob's list but get returned: {get_result['error']}"
+        )
+
+
+def test_non_member_cannot_run_workspace_worker_not_in_list(env, monkeypatch):
+    """A user who cannot see a workspace worker in the list also cannot run it
+    (defence-in-depth: even if they guess the ID directly)."""
+    db = env["db"]
+    cs = env["chat_service"]
+
+    _create_worker_direct(db, "guessed-worker", owner_id="alice",
+                          workspace_id="ws-guess", visibility="workspace")
+    # carol is NOT a member of ws-guess.
+
+    monkeypatch.setattr("run_service.create_run", lambda *a, **kw: "run-x", raising=False)
+    monkeypatch.setattr("run_service.start_run", lambda *a, **kw: None, raising=False)
+
+    run_result = cs._tool_workers_run({"id": "guessed-worker"}, user_id="carol")
+    assert run_result["ok"] is False
+    assert "not found" in run_result["error"].lower()
+
+
+def test_stock_worker_always_listed_and_runnable_for_member(env, monkeypatch):
+    """Stock/public workers must appear in any user's list and be runnable,
+    even when the DB row has a different owner and no workspace membership."""
+    from main import PUBLIC_STOCK_WORKER_IDS
+    if not PUBLIC_STOCK_WORKER_IDS:
+        return  # nothing to test if list is empty
+
+    db = env["db"]
+    cs = env["chat_service"]
+
+    # Seed the first public stock worker in the DB with a different owner and
+    # a workspace the calling user is NOT a member of.
+    stock_id = next(iter(sorted(PUBLIC_STOCK_WORKER_IDS)))
+    _create_worker_direct(db, stock_id, owner_id="alice",
+                          workspace_id="ws-stock", visibility="workspace")
+    # emily-test is NOT a member of ws-stock.
+
+    listed = cs._tool_workers_list_all({}, user_id="emily-test")
+    listed_ids = {w["id"] for w in listed["workers"]}
+    assert stock_id in listed_ids, (
+        f"Stock worker {stock_id} must always appear in any user's list"
+    )
+
+    # Also verify _worker_can_view returns True for it.
+    from db import get_db as _get_db
+    with _get_db() as conn:
+        assert cs._worker_can_view(conn, stock_id, "emily-test") is True, (
+            f"Stock worker {stock_id} must always be viewable/runnable"
+        )
