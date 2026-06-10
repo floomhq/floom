@@ -3141,7 +3141,16 @@ def _tool_contexts_write(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         return {"ok": False, "error": str(exc)}
 
 
-_APPROVALS_BASE_URL = os.environ.get("WORKEROS_PUBLIC_URL", "https://workers.floom.dev")
+# Public frontend base for user-facing deep links (e.g. the approval review page).
+# Honour the same host the rest of the engine uses: WORKEROS_PUBLIC_URL is the
+# explicit override; otherwise fall back to WORKERS_FRONTEND_URL (used by
+# main._frontend_base_url and the email/alert links) so a self-hosted deployment
+# that sets one host gets correct links everywhere, not a hardcoded floom.dev.
+_APPROVALS_BASE_URL = (
+    os.environ.get("WORKEROS_PUBLIC_URL")
+    or os.environ.get("WORKERS_FRONTEND_URL")
+    or "https://workers.floom.dev"
+).rstrip("/")
 
 
 def _approval_public_token(row: Any) -> str:
@@ -3169,6 +3178,14 @@ def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str
         result = []
         for row in rows:
             approval_id = row["id"]
+            # Authoritative, tokenised deep link on the configured public host so
+            # Emily surfaces a working link instead of inventing a floom.dev URL.
+            review_url = None
+            if approval_id and row["run_id"] and row["owner_id"]:
+                token = _approval_public_token(
+                    {"id": approval_id, "run_id": row["run_id"], "owner_id": row["owner_id"]}
+                )
+                review_url = f"{_APPROVALS_BASE_URL}/approvals/review?id={approval_id}&token={token}"
             result.append({
                 "id": approval_id,
                 "owner_id": row["owner_id"],
@@ -3178,6 +3195,7 @@ def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str
                 "label": row["label"],
                 "preview": (row["preview"] or "")[:200] or None,
                 "created_at": row["created_at"],
+                "review_url": review_url,
             })
         return {"ok": True, "approvals": result, "count": len(result)}
     except Exception as exc:
@@ -3518,15 +3536,16 @@ ENVIRONMENT_NOTES: Dict[str, str] = {
         "## Current environment: Slack\n"
         "You are currently being reached in Slack (a chat). Keep replies short and "
         "chat-shaped. The person is DMing you or mentioned you in a channel. When "
-        "something needs the screen, give a workers.floom.dev link they can tap.\n"
+        "something needs the screen, give them the link the tool hands you so they "
+        "can tap through (never invent a host).\n"
         "Use Slack mrkdwn: *bold* for emphasis, and triple-backtick YAML, JSON, "
         "and code blocks."
     ),
     "whatsapp": (
         "## Current environment: WhatsApp\n"
         "You are reached on WhatsApp, a personal text chat. Keep it short and "
-        "conversational. When something needs the screen, give a workers.floom.dev "
-        "link they can tap."
+        "conversational. When something needs the screen, give them the link the "
+        "tool hands you so they can tap through (never invent a host)."
     ),
     "mcp": (
         "## Current environment: MCP (another AI agent)\n"
