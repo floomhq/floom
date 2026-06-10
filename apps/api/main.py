@@ -16856,7 +16856,8 @@ def _mcp_watch_timeout_seconds(raw: Any) -> float:
     """Clamp a client-supplied timeout_ms to [1s, 30s] (#834)."""
     try:
         requested = int(raw) if raw is not None else _MCP_WATCH_MAX_TIMEOUT_MS
-    except (TypeError, ValueError):
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: JSON `1e999` parses to float('inf'); int(inf) raises.
         requested = _MCP_WATCH_MAX_TIMEOUT_MS
     return min(max(requested, 1000), _MCP_WATCH_MAX_TIMEOUT_MS) / 1000.0
 
@@ -16972,6 +16973,17 @@ def _mcp_call_contexts_write(arguments: Dict[str, Any], auth: AuthContext, repos
 async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     auth = _workspace_agent_mcp_auth_context()
     repos = get_repositories()
+    # #833/#838/#840: this surface dispatches a subset of the same tools as
+    # /mcp-tools/serve and must enforce the same per-tool gates and audit
+    # trail — otherwise the serve-side gating is bypassable via /api/mcp
+    # (e.g. connections.add_mcp callable here while disabled there).
+    logger.info(
+        "mcp tools/call (workspace-agent): tool=%r user=%s role=%s",
+        tool_name, auth.user_id, auth.role,
+    )
+    denied = _mcp_access_error(tool_name, auth)
+    if denied is not None:
+        return _mcp_tool_error(denied)
     try:
         if tool_name in {_WORKSPACE_AGENT_MCP_TOOL_NAME, _WORKSPACE_AGENT_MCP_LEGACY_TOOL_NAME, "workspace.chat"}:
             return await _mcp_call_workspace_agent(arguments)
@@ -17055,7 +17067,14 @@ async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Option
             },
         )
     if method == "tools/list":
-        return _mcp_result(request_id, {"tools": _workeros_remote_mcp_tool_definitions()})
+        # #833/#838/#840: advertise only what tools/call would accept for this
+        # auth context — same predicate as /mcp-tools/serve.
+        auth = _workspace_agent_mcp_auth_context()
+        tools = [
+            t for t in _workeros_remote_mcp_tool_definitions()
+            if _mcp_access_error(t["name"], auth) is None
+        ]
+        return _mcp_result(request_id, {"tools": tools})
     if method != "tools/call":
         return _mcp_error(request_id, -32601, f"Unsupported MCP method: {method or 'unknown'}")
 
