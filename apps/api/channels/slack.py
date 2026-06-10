@@ -940,6 +940,64 @@ def claim_slack_sender(
 
 
 # ---------------------------------------------------------------------------
+# My Slack binding — status + unlink
+# ---------------------------------------------------------------------------
+
+@slack_router.get("/slack/bindings/me")
+def get_slack_binding_me(auth: AuthContext = Depends(get_auth_context)) -> Dict[str, Any]:
+    """Return the caller's active Slack sender binding, if any.
+
+    Returns:
+        { "linked": true, "slack_user_id": ..., "slack_team_id": ...,
+          "profile_name": ..., "linked_at": ... }
+        or
+        { "linked": false }
+    """
+    from db import get_db
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT slack_team_id, slack_user_id, profile_name, updated_at, last_seen_at
+            FROM slack_sender_bindings
+            WHERE user_id = ? AND status = 'active'
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (auth.user_id,),
+        ).fetchone()
+    if not row:
+        return {"linked": False}
+    return {
+        "linked": True,
+        "slack_user_id": row["slack_user_id"],
+        "slack_team_id": row["slack_team_id"],
+        "profile_name": row["profile_name"] or None,
+        "linked_at": row["updated_at"],
+        "last_seen_at": row["last_seen_at"] or None,
+    }
+
+
+@slack_router.delete("/slack/bindings/me")
+def delete_slack_binding_me(auth: AuthContext = Depends(get_auth_context)) -> Dict[str, Any]:
+    """Unlink the caller's active Slack sender binding.
+
+    Returns the number of rows unlinked.  Safe to call when not linked.
+    """
+    from db import get_db, now_iso
+    with get_db() as conn:
+        result = conn.execute(
+            """
+            UPDATE slack_sender_bindings
+            SET user_id = NULL, status = 'unlinked', updated_at = ?
+            WHERE user_id = ? AND status = 'active'
+            """,
+            (now_iso(), auth.user_id),
+        )
+        unlinked = result.rowcount
+    return {"ok": True, "unlinked": unlinked}
+
+
+# ---------------------------------------------------------------------------
 # Workspace user / approval helpers
 # ---------------------------------------------------------------------------
 
