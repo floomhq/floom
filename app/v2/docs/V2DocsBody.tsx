@@ -22,6 +22,21 @@ const TOC = [
   ["faq", "FAQ"],
 ] as const;
 
+function CopyLine({ text }: { text: string }) {
+  return (
+    <span className="flex items-center justify-between gap-3">
+      <span>$ {text}</span>
+      <button
+        type="button"
+        onClick={() => navigator.clipboard?.writeText(text)}
+        className="shrink-0 rounded-[7px] border border-border bg-card px-2 py-0.5 font-sans text-[10.5px] font-medium text-muted-foreground hover:text-foreground"
+      >
+        Copy
+      </button>
+    </span>
+  );
+}
+
 function Code({ children }: { children: React.ReactNode }) {
   return (
     <pre className="overflow-x-auto rounded-[10px] bg-secondary px-4 py-3 font-mono text-[12px] leading-relaxed text-foreground/85" style={{ boxShadow: "0 0 0 1px var(--border-soft)" }}>
@@ -120,7 +135,10 @@ export function V2DocsBody() {
             <p className="mb-3 text-[13.5px] leading-relaxed text-muted-foreground">
               Workeros speaks MCP. Add it to Claude Code, Cursor, Codex, or any client and drive workers from where you already work.
             </p>
-            <Code>$ claude mcp add workeros -- npx -y @floomhq/workeros-mcp</Code>
+            <Code>
+              <CopyLine text="npx -y @floomhq/workeros mcp install --target claude" />
+            </Code>
+            <p className="mt-2 text-[12px] text-muted-foreground">Targets: claude, cursor, vscode. Ships the `workeros-mcp` stdio server from the `@floomhq/workeros` package.</p>
             <p className="mt-3 text-[12.5px] text-muted-foreground">
               Then: &quot;run client-follow-up for the Acme call&quot; from your agent. The run lands on the record like any other.
             </p>
@@ -141,7 +159,7 @@ export function V2DocsBody() {
                 ["Which models does it use?", "Any. Bring your own keys or use the defaults. Model choice is per worker."],
                 ["Where do my tokens live?", "Encrypted at rest, used only for the workers you build. Revoke at the source any time."],
                 ["Can my team share workers?", "Yes. Workspaces share workers, brain, and the run record."],
-                ["What does it cost?", "Free to start. Pay for what your workers run."],
+                ["What does it cost?", "Workeros Cloud is in early access. Pricing is being finalised with the first teams."],
               ].map(([q, a]) => (
                 <div key={q}>
                   <div className="text-[13.5px] font-semibold">{q}</div>

@@ -108,3 +108,20 @@
 .theme-v2.dark svg path[fill="#181717"] {
   fill: #ECEDEF;
 }
+
+
+/* integrations marquee */
+@keyframes v2-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.v2-marquee-track {
+  display: flex;
+  width: max-content;
+  gap: 14px;
+  animation: v2-marquee 42s linear infinite;
+}
+.v2-marquee:hover .v2-marquee-track { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .v2-marquee-track { animation: none; }
+}

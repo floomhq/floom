@@ -11,9 +11,9 @@ import Link from "next/link";
 import { motion } from "motion/react";
 import { ArrowLeft, ArrowRight, Search } from "lucide-react";
 import { CATEGORIES, TEMPLATES, type Category, type Template } from "@/components/landing-ref/data";
-import { ToolLogoChip } from "@/components/landing-ref/logos";
 import { StatusPill } from "@/components/landing-ref/StatusPill";
 import { V2Composer } from "../V2Composer";
+import { V2ToolChip } from "../V2Sections";
 import "../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -42,7 +42,7 @@ function Card({ t, i }: { t: Template; i: number }) {
       </div>
       <div className="mt-3 flex flex-wrap gap-1.5">
         {t.tools.slice(0, 4).map((tool) => (
-          <ToolLogoChip key={tool} tool={tool} size="sm" surface="app" />
+          <V2ToolChip key={tool} tool={tool} />
         ))}
       </div>
       <div className="mt-auto flex items-center justify-between border-t border-border-soft pt-3.5">

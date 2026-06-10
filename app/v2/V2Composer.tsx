@@ -196,7 +196,7 @@ export function V2Composer({
             <span className="[&_svg]:h-3 [&_svg]:w-3"><WhatsAppLogo /></span>WhatsApp
           </a>
           <a
-            href="/login?install=cli"
+            href="/v2/docs#mcp"
             className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 font-mono text-[11px] font-medium text-foreground/80 transition-colors hover:border-[var(--v2-accent)] hover:text-foreground"
           >
             <span className="flex h-3.5 w-3.5 items-center justify-center rounded-[4px] bg-primary font-mono text-[7px] font-bold text-primary-foreground">&gt;_</span>

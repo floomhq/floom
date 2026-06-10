@@ -32,6 +32,30 @@ import {
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
+/* flat v2 tool chip: squircle tile + label, hairline, no shadows */
+const TOOL_LOGOS: Record<string, React.ReactNode> = {
+  gmail: <GmailLogo />,
+  slack: <SlackLogo />,
+  hubspot: <HubSpotLogo />,
+  notion: <NotionLogo />,
+  calendar: <GCalLogo />,
+  "google calendar": <GCalLogo />,
+  sheets: <SheetsLogo />,
+  "google sheets": <SheetsLogo />,
+  github: <span className="text-foreground"><GitHubSVG /></span>,
+  whatsapp: <WhatsAppLogo />,
+};
+
+export function V2ToolChip({ tool }: { tool: string }) {
+  const logo = TOOL_LOGOS[tool.toLowerCase()];
+  return (
+    <span className="inline-flex h-6 items-center gap-1.5 rounded-[7px] border border-border-soft bg-[var(--bg-app)] px-1.5 pr-2 text-[11px] font-medium text-foreground/75">
+      {logo && <span className="flex h-3 w-3 items-center justify-center [&_svg]:h-3 [&_svg]:w-3">{logo}</span>}
+      {tool}
+    </span>
+  );
+}
+
 export function RevealUp({
   children,
   delay = 0,
@@ -82,7 +106,7 @@ const STEPS = [
 
 function VisComposer() {
   return (
-    <div className="w-full max-w-[400px] rounded-[14px] bg-card p-4" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+    <div className="w-full max-w-[440px] rounded-[14px] bg-card p-4" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
       <div className="text-[13.5px] leading-relaxed">
         Summarise my <span className="v2-hl">Granola</span> meetings and post action items to{" "}
         <span className="v2-hl">HubSpot</span> daily
@@ -105,7 +129,7 @@ function VisComposer() {
 
 function VisDraft() {
   return (
-    <div className="w-full max-w-[400px] overflow-hidden rounded-[14px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+    <div className="w-full max-w-[440px] overflow-hidden rounded-[14px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
       <div className="flex items-center gap-2.5 border-b border-border-soft px-4 py-3">
         <span className="flex h-[26px] w-[26px] items-center justify-center rounded-[8px] border border-border bg-secondary text-[10.5px] font-semibold text-foreground/80">MD</span>
         <span className="text-[13px] font-semibold">Meeting Digest Worker</span>
@@ -138,7 +162,7 @@ function VisDraft() {
 
 function VisRuns() {
   return (
-    <div className="w-full max-w-[400px] overflow-hidden rounded-[14px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+    <div className="w-full max-w-[440px] overflow-hidden rounded-[14px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
       <div className="flex items-center justify-between border-b border-border-soft px-4 py-3">
         <span className="text-[13px] font-semibold">Runs</span>
         <span className="font-mono text-[10.5px] text-muted-foreground">last 3 days</span>
@@ -222,12 +246,16 @@ export function HowItWorks() {
               className="flex min-h-[200px] cursor-default flex-col justify-center py-3 md:min-h-[160px]"
               onMouseEnter={() => setActive(i)}
             >
-              <h3 className={`text-[27px] font-semibold tracking-[-0.022em] transition-colors duration-300 ${active === i ? "text-foreground" : "text-muted-foreground/50"}`}>
+              <h3 className={`text-[29px] font-semibold tracking-[-0.022em] transition-colors duration-300 ${active === i ? "text-foreground" : "text-muted-foreground/50"}`}>
                 {s.t}
               </h3>
               <p className={`mt-2 max-w-[380px] text-[14px] leading-relaxed text-muted-foreground transition-opacity duration-300 ${active === i ? "opacity-100" : "opacity-45"}`}>
                 {s.p}
               </p>
+              {/* mobile inline visual */}
+              <div className="mt-5 flex justify-center rounded-[16px] bg-secondary/70 p-5 md:hidden">
+                {i === 0 ? <VisComposer /> : i === 1 ? <VisDraft /> : <VisRuns />}
+              </div>
             </div>
           ))}
         </div>
@@ -480,6 +508,10 @@ export function BuiltIn() {
               <p className={`mt-2 max-w-[380px] text-[14px] leading-relaxed text-muted-foreground transition-opacity duration-300 ${active === i ? "opacity-100" : "opacity-45"}`}>
                 {s.p}
               </p>
+              {/* mobile inline visual */}
+              <div className="mt-5 flex justify-center rounded-[16px] bg-secondary/70 p-5 md:hidden">
+                {i === 0 ? <VisApproval /> : i === 1 ? <VisBrain /> : <VisRecord />}
+              </div>
             </div>
           ))}
         </div>
@@ -504,6 +536,97 @@ export function BuiltIn() {
             </AnimatePresence>
           </div>
         </div>
+      </div>
+    </section>
+  );
+}
+
+/* ================= TEMPLATES SHOWCASE (landing) ================= */
+
+type ShowTpl = {
+  av: string;
+  nm: string;
+  cat: string;
+  d: string;
+  tools: string[];
+  runs: string;
+  featured?: boolean;
+};
+
+const SHOW: ShowTpl[] = [
+  { av: "CF", nm: "Client Follow-up", cat: "Sales", d: "Drafts follow-up emails after every call, adds the CRM note, creates the next-step task.", tools: ["calendar", "gmail", "hubspot"], runs: "2,140 runs", featured: true },
+  { av: "MR", nm: "Monday Report", cat: "Ops", d: "Pipeline summary in #sales, Mondays 9:00.", tools: ["sheets", "slack"], runs: "1,080 runs" },
+  { av: "LR", nm: "Lead Research", cat: "Sales", d: "5 inbound leads briefed before your first meeting.", tools: ["hubspot", "gmail"], runs: "960 runs" },
+  { av: "CW", nm: "Competitor Watch", cat: "Founder", d: "Weekly digest of competitor changes.", tools: ["notion", "slack"], runs: "740 runs" },
+  { av: "GD", nm: "GitHub Digest", cat: "Eng", d: "Unread PRs and issues, 9:00 daily.", tools: ["github", "slack"], runs: "1,420 runs" },
+];
+
+export function TemplatesShowcase() {
+  const featured = SHOW.find((t) => t.featured)!;
+  const rest = SHOW.filter((t) => !t.featured);
+  return (
+    <section id="tpl" className="pb-32">
+      <SectionHead title="Or hire a proven worker." sub="Templates tuned for the recurring jobs teams hand over first." />
+      <div className="mt-9 grid gap-3.5 md:grid-cols-3">
+        {/* featured: spans 2 cols, includes a live output preview */}
+        <RevealUp className="md:col-span-2">
+          <div className="grid h-full overflow-hidden rounded-[16px] bg-card sm:grid-cols-2" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+            <div className="flex flex-col p-5">
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-border bg-secondary text-[11px] font-semibold text-foreground/80">{featured.av}</span>
+                <div>
+                  <div className="text-[14.5px] font-semibold leading-tight">{featured.nm}</div>
+                  <div className="text-[10.5px] font-medium uppercase tracking-[0.1em] text-muted-foreground">{featured.cat}</div>
+                </div>
+                <span className="ml-auto"><StatusPill tone="success">Most hired</StatusPill></span>
+              </div>
+              <p className="mt-3 text-[13px] leading-relaxed text-muted-foreground">{featured.d}</p>
+              <div className="mt-3 flex flex-wrap gap-1.5">
+                {featured.tools.map((t) => <V2ToolChip key={t} tool={t} />)}
+              </div>
+              <div className="mt-auto flex items-center justify-between border-t border-border-soft pt-3.5">
+                <span className="font-mono text-[10.5px] text-muted-foreground">{featured.runs}</span>
+                <span className="text-[12.5px] font-medium" style={{ color: "var(--v2-accent)" }}>Hire this worker →</span>
+              </div>
+            </div>
+            {/* output preview */}
+            <div className="border-t border-border-soft bg-secondary/60 p-4 sm:border-l sm:border-t-0">
+              <div className="rounded-[12px] bg-card p-3.5" style={{ boxShadow: "0 0 0 1px var(--border-soft)" }}>
+                <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
+                  <span className="[&_svg]:h-3 [&_svg]:w-3"><GmailLogo /></span> Email draft · just produced
+                </div>
+                <div className="mt-2 text-[12.5px] font-semibold">Next steps from today&apos;s call</div>
+                <p className="mt-1 text-[11.5px] leading-relaxed text-muted-foreground">Hi Sarah, thanks for the call today. Based on what you shared, I&apos;d suggest starting with the onboarding workflow…</p>
+                <div className="mt-2.5 flex items-center justify-between border-t border-border-soft pt-2">
+                  <StatusPill tone="warning">Held for approval</StatusPill>
+                  <span className="font-mono text-[9.5px] text-muted-foreground">Run #1042</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </RevealUp>
+        {/* rest: compact cards */}
+        {rest.map((t, i) => (
+          <RevealUp key={t.nm} delay={0.05 + i * 0.05}>
+            <motion.div whileHover={{ y: -2 }} className="flex h-full flex-col rounded-[16px] bg-card p-5" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+              <div className="flex items-center gap-2.5">
+                <span className="flex h-[28px] w-[28px] items-center justify-center rounded-[8px] border border-border bg-secondary text-[10.5px] font-semibold text-foreground/80">{t.av}</span>
+                <div>
+                  <div className="text-[13.5px] font-semibold leading-tight">{t.nm}</div>
+                  <div className="text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground">{t.cat}</div>
+                </div>
+              </div>
+              <p className="mt-2.5 text-[12.5px] leading-relaxed text-muted-foreground">{t.d}</p>
+              <div className="mt-2.5 flex flex-wrap gap-1.5">
+                {t.tools.map((tl) => <V2ToolChip key={tl} tool={tl} />)}
+              </div>
+              <div className="mt-auto flex items-center justify-between border-t border-border-soft pt-3">
+                <span className="font-mono text-[10px] text-muted-foreground">{t.runs}</span>
+                <span className="text-[12px] font-medium" style={{ color: "var(--v2-accent)" }}>Hire →</span>
+              </div>
+            </motion.div>
+          </RevealUp>
+        ))}
       </div>
     </section>
   );

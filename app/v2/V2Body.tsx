@@ -11,8 +11,6 @@ import { useState } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
 import { Moon, Sun } from "lucide-react";
-import { TemplateRow } from "@/components/landing-ref/TemplateRow";
-import { getTemplate } from "@/components/landing-ref/data";
 import {
   CalendlyLogo,
   DiscordLogo,
@@ -28,7 +26,7 @@ import {
   WhatsAppLogo,
 } from "@/components/landing-icons";
 import { V2Composer } from "./V2Composer";
-import { BuiltIn, HowItWorks, RevealUp, SectionHead, V2Footer } from "./V2Sections";
+import { BuiltIn, HowItWorks, RevealUp, SectionHead, TemplatesShowcase, V2Footer } from "./V2Sections";
 import "./theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -60,8 +58,6 @@ function LogoTile({ children }: { children: React.ReactNode }) {
 
 export function V2Body() {
   const [dark, setDark] = useState(false);
-  const tplSlugs = ["client-follow-up-worker", "monday-report-worker", "lead-research-worker", "competitor-watch-worker", "recruiting-bd-worker"];
-  const templates = tplSlugs.map((s) => getTemplate(s)!).filter(Boolean);
 
   return (
     <div className={`theme-v2 min-h-screen text-[13.5px] ${dark ? "dark" : ""}`} style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}>
@@ -93,12 +89,12 @@ export function V2Body() {
         </nav>
 
         {/* hero */}
-        <section className="pb-10 pt-24 text-center">
+        <section className="pb-14 pt-36 text-center">
           <motion.h1
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: EASE }}
-            className="text-[54px] font-semibold leading-[1.03] tracking-[-0.03em]"
+            className="text-[63px] font-semibold leading-[1.02] tracking-[-0.033em]"
           >
             Hire AI workers.
           </motion.h1>
@@ -106,7 +102,7 @@ export function V2Body() {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55, delay: 0.08, ease: EASE }}
-            className="mx-auto mt-4 max-w-[430px] text-[15px] text-muted-foreground"
+            className="mx-auto mt-5 max-w-[440px] text-[16px] text-muted-foreground"
           >
             Describe the job. Workeros runs it and asks before anything ships.
           </motion.p>
@@ -116,8 +112,19 @@ export function V2Body() {
             transition={{ duration: 0.55, delay: 0.18, ease: EASE }}
             className="mt-9"
           >
-            <V2Composer channels pills />
+            <V2Composer pills />
           </motion.div>
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.5, delay: 0.4 }}
+            className="mx-auto mt-7 text-[12.5px] text-muted-foreground"
+          >
+            Also works straight from{" "}
+            <Link href="/login?install=slack" className="font-medium text-foreground/75 underline-offset-4 hover:underline">Slack</Link>,{" "}
+            <Link href="/login?install=whatsapp" className="font-medium text-foreground/75 underline-offset-4 hover:underline">WhatsApp</Link>, or any{" "}
+            <Link href="/v2/docs#mcp" className="font-medium text-foreground/75 underline-offset-4 hover:underline">MCP agent</Link>. No dashboard needed.
+          </motion.p>
         </section>
 
         {/* works-with: full-width band */}
@@ -127,41 +134,37 @@ export function V2Body() {
           transition={{ duration: 0.6, delay: 0.34 }}
           className="relative left-1/2 w-screen -translate-x-1/2 border-y border-border-soft py-6 mb-24 mt-8"
         >
-          <div className="mb-3.5 text-center text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Works with 1,000+ tools</div>
-          <div className="flex flex-wrap items-center justify-center gap-3 px-6">
-            <LogoTile><GmailLogo /></LogoTile>
-            <LogoTile><SlackLogo /></LogoTile>
-            <LogoTile><HubSpotLogo /></LogoTile>
-            <LogoTile><NotionLogo /></LogoTile>
-            <LogoTile><GCalLogo /></LogoTile>
-            <LogoTile><SheetsLogo /></LogoTile>
-            <LogoTile><GitHubMark /></LogoTile>
-            <LogoTile><SalesforceLogo /></LogoTile>
-            <LogoTile><IntercomLogo /></LogoTile>
-            <LogoTile><WhatsAppLogo /></LogoTile>
-            <LogoTile><DiscordLogo /></LogoTile>
-            <LogoTile><CalendlyLogo /></LogoTile>
+          <div className="mb-4 text-center text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Works with 1,000+ tools</div>
+          <div className="v2-marquee overflow-hidden" style={{ maskImage: "linear-gradient(90deg, transparent, #000 12%, #000 88%, transparent)" }}>
+            <div className="v2-marquee-track">
+              {[0, 1].map((dup) => (
+                <div key={dup} className="flex shrink-0 items-center gap-3.5 pr-3.5" aria-hidden={dup === 1}>
+                  <LogoTile><GmailLogo /></LogoTile>
+                  <LogoTile><SlackLogo /></LogoTile>
+                  <LogoTile><HubSpotLogo /></LogoTile>
+                  <LogoTile><NotionLogo /></LogoTile>
+                  <LogoTile><GCalLogo /></LogoTile>
+                  <LogoTile><SheetsLogo /></LogoTile>
+                  <LogoTile><GitHubMark /></LogoTile>
+                  <LogoTile><SalesforceLogo /></LogoTile>
+                  <LogoTile><IntercomLogo /></LogoTile>
+                  <LogoTile><WhatsAppLogo /></LogoTile>
+                  <LogoTile><DiscordLogo /></LogoTile>
+                  <LogoTile><CalendlyLogo /></LogoTile>
+                </div>
+              ))}
+            </div>
           </div>
         </motion.section>
 
         <HowItWorks />
 
-        {/* templates */}
-        <section id="tpl" className="pb-32">
-          <SectionHead title="Or start from a template." sub="Ready-made workers for the recurring jobs your team already does." />
-          <div className="mt-8 flex flex-col gap-2.5">
-            {templates.map((t, i) => (
-              <RevealUp key={t.slug} delay={i * 0.05}>
-                <TemplateRow t={t} />
-              </RevealUp>
-            ))}
-          </div>
-          <RevealUp delay={0.1} className="mt-4 text-[13px]">
-            <Link href="/v2/templates" className="font-medium transition-colors" style={{ color: "var(--v2-accent)" }}>
-              Browse all templates →
-            </Link>
-          </RevealUp>
-        </section>
+        <TemplatesShowcase />
+        <RevealUp className="-mt-24 pb-32 text-[13px]">
+          <Link href="/v2/templates" className="font-medium transition-colors" style={{ color: "var(--v2-accent)" }}>
+            Browse all templates →
+          </Link>
+        </RevealUp>
 
         <BuiltIn />
 
