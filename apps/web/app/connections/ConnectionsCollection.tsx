@@ -2,10 +2,10 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { Server, KeyRound } from "lucide-react";
+import { AlertTriangle, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ConnectionItem, SecretItem } from "@/lib/types";
+import type { ConnectionItem, SecretItem, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { BrandLogo } from "@/components/connections/BrandLogo";
@@ -15,6 +15,85 @@ import {
   TYPE_LABEL,
   toUnified,
 } from "@/lib/connections/unify";
+
+// ---------------------------------------------------------------------------
+// #813 — Setup required callout
+// Computes which connection slugs are needed by workers but not yet connected.
+// missing_connections is populated by the backend (#556) on WorkerSummary.
+// ---------------------------------------------------------------------------
+
+function computeMissingBySlug(
+  workers: WorkerSummary[],
+  connections: ConnectionItem[],
+): Map<string, string[]> {
+  // Build the set of connected app slugs (lower-cased, composio kind only)
+  const connected = new Set(
+    connections
+      .filter((c) => !c.kind || c.kind === "composio")
+      .map((c) => c.app_name.toLowerCase()),
+  );
+
+  // Aggregate: slug -> worker names that still need it
+  const missing = new Map<string, string[]>();
+  for (const worker of workers) {
+    for (const slug of worker.missing_connections ?? []) {
+      const key = slug.toLowerCase();
+      if (!connected.has(key)) {
+        if (!missing.has(key)) missing.set(key, []);
+        missing.get(key)!.push(worker.name);
+      }
+    }
+  }
+  return missing;
+}
+
+function SetupRequiredCallout({ missingBySlug }: { missingBySlug: Map<string, string[]> }) {
+  if (missingBySlug.size === 0) return null;
+  const slugs = Array.from(missingBySlug.keys());
+  const totalWorkers = new Set(Array.from(missingBySlug.values()).flat()).size;
+  return (
+    <div
+      className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200"
+      role="alert"
+    >
+      <AlertTriangle className="mt-0.5 size-4 shrink-0" />
+      <div className="min-w-0">
+        <span className="font-medium">Setup required — </span>
+        {totalWorkers} worker{totalWorkers !== 1 ? "s" : ""} need{totalWorkers === 1 ? "s" : ""}{" "}
+        {slugs.length === 1 ? (
+          <Link
+            href={`/connections/connect/${encodeURIComponent(slugs[0])}?return_to=${encodeURIComponent("/connections")}`}
+            className="font-medium underline underline-offset-2"
+          >
+            {slugs[0]}
+          </Link>
+        ) : (
+          <>
+            {slugs.slice(0, -1).map((slug, i) => (
+              <span key={slug}>
+                <Link
+                  href={`/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent("/connections")}`}
+                  className="font-medium underline underline-offset-2"
+                >
+                  {slug}
+                </Link>
+                {i < slugs.length - 2 ? ", " : ""}
+              </span>
+            ))}
+            {" and "}
+            <Link
+              href={`/connections/connect/${encodeURIComponent(slugs[slugs.length - 1])}?return_to=${encodeURIComponent("/connections")}`}
+              className="font-medium underline underline-offset-2"
+            >
+              {slugs[slugs.length - 1]}
+            </Link>
+          </>
+        )}
+        .
+      </div>
+    </div>
+  );
+}
 
 function Logo({ item }: { item: UnifiedConn }) {
   if (item.kind === "connection" && item.connection) {
@@ -51,11 +130,17 @@ export default function ConnectionsCollection({
 }) {
   const [connections, setConnections] = useState<ConnectionItem[]>(initialConnections);
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
+  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
 
   const refresh = async () => {
-    const [c, s] = await Promise.allSettled([api.connections.list(), api.secrets.list()]);
+    const [c, s, w] = await Promise.allSettled([
+      api.connections.list(),
+      api.secrets.list(),
+      api.workers.list(),
+    ]);
     if (c.status === "fulfilled") setConnections(c.value);
     if (s.status === "fulfilled") setSecrets(s.value);
+    if (w.status === "fulfilled") setWorkers(w.value);
   };
 
   useEffect(() => {
@@ -63,6 +148,12 @@ export default function ConnectionsCollection({
   }, []);
 
   const items = useMemo(() => toUnified(connections, secrets), [connections, secrets]);
+
+  // #813: compute which slugs workers need but haven't been connected yet
+  const missingBySlug = useMemo(
+    () => computeMissingBySlug(workers, connections),
+    [workers, connections],
+  );
 
   const remove = async (item: UnifiedConn) => {
     try {
@@ -367,7 +458,12 @@ export default function ConnectionsCollection({
     },
   };
 
-  return <Collection config={config} />;
+  return (
+    <>
+      <SetupRequiredCallout missingBySlug={missingBySlug} />
+      <Collection config={config} />
+    </>
+  );
 }
 
 const pad: React.CSSProperties = { color: "var(--muted-foreground)", padding: "8px 2px" };
