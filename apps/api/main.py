@@ -1518,6 +1518,7 @@ async def auth_middleware(request: Request, call_next):
             or path.startswith("/workers/public/")
             or path.startswith("/workers/short-links/")
             or path.startswith("/s/")
+            or path.startswith("/c/")
             or path.startswith("/workspace/template/")
             or path == "/cli-auth/devices"
             or path.startswith("/cli-auth/poll/")
@@ -16316,6 +16317,12 @@ from channels.whatsapp import (
     _handle_whatsapp_message,
 )
 app.include_router(whatsapp_router)
+
+# ---------------------------------------------------------------------------
+# Claim short-link redirect — GET /c/{token}
+# ---------------------------------------------------------------------------
+from channels.shortlink import shortlink_router
+app.include_router(shortlink_router)
 
 # Backward-compat alias: tests and langdock reference this name on ``main``
 async def _collect_workspace_agent_reply_for_slack(
