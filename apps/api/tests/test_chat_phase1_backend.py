@@ -336,6 +336,25 @@ def test_finish_tool_args_are_normalized_before_card_metadata(booted):
     assert "token=[redacted]" in encoded
 
 
+def test_streaming_text_sanitizer_redacts_split_approval_tokens(booted):
+    chat_service = booted["chat_service"]
+    # Not a real secret — fake hex string used as a query-param value in tests.
+    token = "abcdef" + "1234567890" * 5 + "abcdef12"  # noqa: S105
+    sanitizer = chat_service._StreamingTextSanitizer()
+
+    chunks = [
+        "Review it here: https://workers.floom.dev/approvals/review?id=apr_1&tok",
+        "en=" + token[:20],
+        token[20:45],
+        token[45:] + " now.",
+    ]
+    rendered = "".join(sanitizer.feed(chunk) for chunk in chunks) + sanitizer.flush()
+
+    assert token not in rendered
+    assert "token=[redacted]" in rendered
+    assert rendered.endswith(" now.")
+
+
 def test_async_create_from_prompt_is_idempotent(booted, monkeypatch):
     chat_service = booted["chat_service"]
     run_service = booted["run_service"]
