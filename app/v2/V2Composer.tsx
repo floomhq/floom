@@ -119,9 +119,7 @@ export function V2Composer({
         transition={{ type: "spring", stiffness: 140, damping: 22 }}
         className="rounded-[16px] bg-card p-3.5 text-left"
         style={{
-          boxShadow: focused
-            ? "0 0 0 1.5px var(--v2-accent)"
-            : "0 0 0 1px var(--border-default)",
+          boxShadow: focused ? "0 0 0 1.5px var(--v2-accent)" : "none",
           transition: "box-shadow 180ms cubic-bezier(0.22,1,0.36,1)",
         }}
       >
@@ -172,7 +170,7 @@ export function V2Composer({
               onClick={() => setValue(p.prompt)}
               whileHover={{ y: -1 }}
               whileTap={{ scale: 0.97 }}
-              className="rounded-full border border-border bg-card px-3 py-1.5 text-[12px] font-medium text-foreground/75 transition-colors hover:border-[var(--v2-accent)] hover:text-foreground"
+              className="rounded-full bg-secondary px-3.5 py-1.5 text-[12px] font-medium text-foreground/75 transition-colors hover:bg-[var(--bg-3)] hover:text-foreground"
             >
               {p.label}
             </motion.button>
@@ -185,19 +183,19 @@ export function V2Composer({
           <span>or hire straight from</span>
           <a
             href="/login?install=slack"
-            className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 font-medium text-foreground/80 transition-colors hover:border-[var(--v2-accent)] hover:text-foreground"
+            className="flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 font-medium text-foreground/80 transition-colors hover:bg-[var(--bg-3)] hover:text-foreground"
           >
             <span className="[&_svg]:h-3 [&_svg]:w-3"><SlackLogo /></span>Slack
           </a>
           <a
             href="/login?install=whatsapp"
-            className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 font-medium text-foreground/80 transition-colors hover:border-[var(--v2-accent)] hover:text-foreground"
+            className="flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 font-medium text-foreground/80 transition-colors hover:bg-[var(--bg-3)] hover:text-foreground"
           >
             <span className="[&_svg]:h-3 [&_svg]:w-3"><WhatsAppLogo /></span>WhatsApp
           </a>
           <a
             href="/v2/docs#mcp"
-            className="flex items-center gap-1.5 rounded-full border border-border bg-card px-2.5 py-1 font-mono text-[11px] font-medium text-foreground/80 transition-colors hover:border-[var(--v2-accent)] hover:text-foreground"
+            className="flex items-center gap-1.5 rounded-full bg-secondary px-2.5 py-1 font-mono text-[11px] font-medium text-foreground/80 transition-colors hover:bg-[var(--bg-3)] hover:text-foreground"
           >
             <span className="flex h-3.5 w-3.5 items-center justify-center rounded-[4px] bg-primary font-mono text-[7px] font-bold text-primary-foreground">&gt;_</span>
             MCP

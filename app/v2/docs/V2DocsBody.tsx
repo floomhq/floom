@@ -39,7 +39,7 @@ function CopyLine({ text }: { text: string }) {
 
 function Code({ children }: { children: React.ReactNode }) {
   return (
-    <pre className="overflow-x-auto rounded-[10px] bg-secondary px-4 py-3 font-mono text-[12px] leading-relaxed text-foreground/85" style={{ boxShadow: "0 0 0 1px var(--border-soft)" }}>
+    <pre className="overflow-x-auto rounded-[10px] bg-secondary px-4 py-3 font-mono text-[12px] leading-relaxed text-foreground/85">
       {children}
     </pre>
   );
@@ -105,7 +105,7 @@ export function V2DocsBody() {
               You never have to open the dashboard. Install Workeros where your team already talks and hire, approve, and redirect from there.
             </p>
             <div className="mt-4 flex flex-col gap-2.5">
-              <div className="flex items-center gap-3 rounded-[12px] bg-card px-4 py-3" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+              <div className="flex items-center gap-3 rounded-[12px] bg-card px-4 py-3 transition-colors hover:bg-secondary/60">
                 <span className="[&_svg]:h-4 [&_svg]:w-4"><SlackLogo /></span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium">Slack</div>
@@ -113,7 +113,7 @@ export function V2DocsBody() {
                 </div>
                 <Link href="/login?install=slack" className="rounded-[8px] border border-border bg-card px-2.5 py-1 text-[12px] font-medium hover:bg-secondary">Install</Link>
               </div>
-              <div className="flex items-center gap-3 rounded-[12px] bg-card px-4 py-3" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+              <div className="flex items-center gap-3 rounded-[12px] bg-card px-4 py-3 transition-colors hover:bg-secondary/60">
                 <span className="[&_svg]:h-4 [&_svg]:w-4"><WhatsAppLogo /></span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium">WhatsApp</div>
@@ -121,7 +121,7 @@ export function V2DocsBody() {
                 </div>
                 <Link href="/login?install=whatsapp" className="rounded-[8px] border border-border bg-card px-2.5 py-1 text-[12px] font-medium hover:bg-secondary">Install</Link>
               </div>
-              <div className="flex items-center gap-3 rounded-[12px] bg-card px-4 py-3" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+              <div className="flex items-center gap-3 rounded-[12px] bg-card px-4 py-3 transition-colors hover:bg-secondary/60">
                 <span className="flex h-4 w-4 items-center justify-center rounded-[4px] bg-primary font-mono text-[7.5px] font-bold text-primary-foreground">&gt;_</span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium">CLI</div>

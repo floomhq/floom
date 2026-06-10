@@ -95,7 +95,7 @@
 /* flat spec: the composer carries inline JS shadows the token override can't
    reach — force flat. Focus ring handled by the border color below. */
 .theme-v2 form[class*="rounded-[18px]"] {
-  box-shadow: 0 0 0 1px var(--border-default) !important;
+  box-shadow: none !important;
   border-color: transparent !important;
 }
 .theme-v2 form[class*="rounded-[18px]"]:focus-within {
@@ -125,3 +125,8 @@
 @media (prefers-reduced-motion: reduce) {
   .v2-marquee-track { animation: none; }
 }
+
+
+/* v3 border system (wireframe update): flat surfaces, fills over rings.
+   Cards/tiles/inputs/lists: no borders. Dividers + secondary buttons keep
+   hairlines. Selection/focus = accent ring. */

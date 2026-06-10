@@ -49,7 +49,7 @@ const TOOL_LOGOS: Record<string, React.ReactNode> = {
 export function V2ToolChip({ tool }: { tool: string }) {
   const logo = TOOL_LOGOS[tool.toLowerCase()];
   return (
-    <span className="inline-flex h-6 items-center gap-1.5 rounded-[7px] border border-border-soft bg-[var(--bg-app)] px-1.5 pr-2 text-[11px] font-medium text-foreground/75">
+    <span className="inline-flex h-6 items-center gap-1.5 rounded-[7px] bg-secondary px-1.5 pr-2 text-[11px] font-medium text-foreground/75">
       {logo && <span className="flex h-3 w-3 items-center justify-center [&_svg]:h-3 [&_svg]:w-3">{logo}</span>}
       {tool}
     </span>
@@ -106,7 +106,7 @@ const STEPS = [
 
 function VisComposer() {
   return (
-    <div className="w-full max-w-[440px] rounded-[14px] bg-card p-4" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+    <div className="w-full max-w-[440px] rounded-[14px] bg-card p-4">
       <div className="text-[13.5px] leading-relaxed">
         Summarise my <span className="v2-hl">Granola</span> meetings and post action items to{" "}
         <span className="v2-hl">HubSpot</span> daily
@@ -129,9 +129,9 @@ function VisComposer() {
 
 function VisDraft() {
   return (
-    <div className="w-full max-w-[440px] overflow-hidden rounded-[14px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+    <div className="w-full max-w-[440px] overflow-hidden rounded-[14px] bg-card">
       <div className="flex items-center gap-2.5 border-b border-border-soft px-4 py-3">
-        <span className="flex h-[26px] w-[26px] items-center justify-center rounded-[8px] border border-border bg-secondary text-[10.5px] font-semibold text-foreground/80">MD</span>
+        <span className="flex h-[26px] w-[26px] items-center justify-center rounded-[8px] bg-[var(--bg-3)] text-[10.5px] font-semibold text-foreground/80">MD</span>
         <span className="text-[13px] font-semibold">Meeting Digest Worker</span>
         <span className="ml-auto"><StatusPill tone="pending">Draft</StatusPill></span>
       </div>
@@ -162,7 +162,7 @@ function VisDraft() {
 
 function VisRuns() {
   return (
-    <div className="w-full max-w-[440px] overflow-hidden rounded-[14px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+    <div className="w-full max-w-[440px] overflow-hidden rounded-[14px] bg-card">
       <div className="flex items-center justify-between border-b border-border-soft px-4 py-3">
         <span className="text-[13px] font-semibold">Runs</span>
         <span className="font-mono text-[10.5px] text-muted-foreground">last 3 days</span>
@@ -179,7 +179,7 @@ function VisRuns() {
           transition={{ delay: 0.12 + i * 0.09, duration: 0.35, ease: EASE }}
           className="flex h-[58px] items-center gap-3 border-b border-border-soft px-4 last:border-0"
         >
-          <span className="flex h-[28px] w-[28px] items-center justify-center rounded-[8px] border border-border bg-secondary text-[10.5px] font-semibold text-foreground/80">MD</span>
+          <span className="flex h-[28px] w-[28px] items-center justify-center rounded-[8px] bg-[var(--bg-3)] text-[10.5px] font-semibold text-foreground/80">MD</span>
           <div className="min-w-0 flex-1">
             <div className="truncate text-[12.5px] font-medium">{r.t}</div>
             <div className="truncate text-[11.5px] text-muted-foreground">{r.s}</div>
@@ -293,7 +293,7 @@ export function AppFrame({ standalone = false }: { standalone?: boolean }) {
         />
       )}
       <RevealUp delay={0.1} className={standalone ? "" : "mt-9"}>
-        <div className="overflow-hidden rounded-[16px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+        <div className="overflow-hidden rounded-[16px] bg-card">
           <div className="flex">
             {/* sidebar */}
             <div className="hidden w-[190px] shrink-0 flex-col border-r border-border-soft bg-[var(--bg-app)] py-3 sm:flex">
@@ -330,10 +330,10 @@ export function AppFrame({ standalone = false }: { standalone?: boolean }) {
                     whileInView={{ opacity: 1, y: 0 }}
                     viewport={{ once: true }}
                     transition={{ delay: i * 0.06, duration: 0.4, ease: EASE }}
-                    className="rounded-[12px] border border-border-soft bg-[var(--bg-app)] p-3.5"
+                    className="rounded-[12px] bg-[var(--bg-app)] p-3.5 transition-colors hover:bg-secondary"
                   >
                     <div className="flex items-center gap-2.5">
-                      <span className="flex h-[28px] w-[28px] items-center justify-center rounded-[8px] border border-border bg-secondary text-[10.5px] font-semibold text-foreground/80">{w.av}</span>
+                      <span className="flex h-[28px] w-[28px] items-center justify-center rounded-[8px] bg-[var(--bg-3)] text-[10.5px] font-semibold text-foreground/80">{w.av}</span>
                       <span className="truncate text-[13px] font-medium">{w.nm}</span>
                       <span className="ml-auto">
                         <StatusPill tone={w.st === "ok" ? "success" : w.st === "warn" ? "warning" : "default"}>
@@ -344,7 +344,7 @@ export function AppFrame({ standalone = false }: { standalone?: boolean }) {
                     <p className="mt-2 line-clamp-2 text-[12px] leading-relaxed text-muted-foreground">{w.d}</p>
                     <div className="mt-2.5 flex items-center gap-1.5">
                       {w.tools.map((t, j) => (
-                        <span key={j} className="flex h-[20px] w-[20px] items-center justify-center rounded-[6px] border border-border-soft bg-card [&_svg]:h-[11px] [&_svg]:w-[11px]">{t}</span>
+                        <span key={j} className="flex h-[20px] w-[20px] items-center justify-center rounded-[6px] bg-secondary [&_svg]:h-[11px] [&_svg]:w-[11px]">{t}</span>
                       ))}
                       <span className="ml-auto font-mono text-[10px] text-muted-foreground">{w.meta}</span>
                     </div>
@@ -378,7 +378,7 @@ const TRUST = [
 
 function VisApproval() {
   return (
-    <div className="w-full max-w-[380px] overflow-hidden rounded-[14px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+    <div className="w-full max-w-[380px] overflow-hidden rounded-[14px] bg-card">
       <div className="flex items-center gap-2 border-b border-border-soft px-3.5 py-2 text-[11.5px] text-muted-foreground">
         <span className="[&_svg]:h-3.5 [&_svg]:w-3.5"><SlackLogo /></span>
         <span className="font-semibold text-foreground"># sales</span>
@@ -423,7 +423,7 @@ function VisBrain() {
           animate={{ scale: [1, 1.05, 1] }}
           transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
           className="flex h-[72px] w-[72px] items-center justify-center rounded-full bg-card"
-          style={{ boxShadow: "0 0 0 1px var(--border-default)" }}
+         
         >
           <Brain className="h-7 w-7" style={{ color: "var(--v2-accent)" }} strokeWidth={1.6} />
         </motion.div>
@@ -436,9 +436,9 @@ function VisBrain() {
           animate={{ y: [0, -3, 0] }}
           transition={{ duration: 3 + i * 0.6, repeat: Infinity, ease: "easeInOut", delay: i * 0.4 }}
           className="absolute flex items-center gap-2 rounded-[10px] bg-card px-2.5 py-1.5"
-          style={{ left: f.x, top: f.y, boxShadow: "0 0 0 1px var(--border-soft)" }}
+          style={{ left: f.x, top: f.y }}
         >
-          <span className="flex h-[18px] w-[26px] items-center justify-center rounded-[5px] border border-border bg-[var(--bg-app)] font-mono text-[8px] font-bold" style={{ color: f.tint }}>{f.ext}</span>
+          <span className="flex h-[18px] w-[26px] items-center justify-center rounded-[5px] bg-secondary font-mono text-[8px] font-bold" style={{ color: f.tint }}>{f.ext}</span>
           <span className="text-[11px] font-medium">{f.name}</span>
         </motion.div>
       ))}
@@ -448,7 +448,7 @@ function VisBrain() {
 
 function VisRecord() {
   return (
-    <div className="w-full max-w-[380px] overflow-hidden rounded-[14px] bg-card" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+    <div className="w-full max-w-[380px] overflow-hidden rounded-[14px] bg-card">
       <div className="flex items-center justify-between border-b border-border-soft px-3.5 py-2.5">
         <span className="text-[12.5px] font-semibold">Run #1042</span>
         <StatusPill tone="success">Completed</StatusPill>
@@ -570,10 +570,10 @@ export function TemplatesShowcase() {
       <div className="mt-9 grid gap-3.5 md:grid-cols-3">
         {/* featured: spans 2 cols, includes a live output preview */}
         <RevealUp className="md:col-span-2">
-          <div className="grid h-full overflow-hidden rounded-[16px] bg-card sm:grid-cols-2" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+          <div className="grid h-full overflow-hidden rounded-[16px] bg-card sm:grid-cols-2">
             <div className="flex flex-col p-5">
               <div className="flex items-center gap-2.5">
-                <span className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] border border-border bg-secondary text-[11px] font-semibold text-foreground/80">{featured.av}</span>
+                <span className="flex h-[30px] w-[30px] items-center justify-center rounded-[8px] bg-[var(--bg-3)] text-[11px] font-semibold text-foreground/80">{featured.av}</span>
                 <div>
                   <div className="text-[14.5px] font-semibold leading-tight">{featured.nm}</div>
                   <div className="text-[10.5px] font-medium uppercase tracking-[0.1em] text-muted-foreground">{featured.cat}</div>
@@ -591,7 +591,7 @@ export function TemplatesShowcase() {
             </div>
             {/* output preview */}
             <div className="border-t border-border-soft bg-secondary/60 p-4 sm:border-l sm:border-t-0">
-              <div className="rounded-[12px] bg-card p-3.5" style={{ boxShadow: "0 0 0 1px var(--border-soft)" }}>
+              <div className="rounded-[12px] bg-card p-3.5">
                 <div className="flex items-center gap-1.5 text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground">
                   <span className="[&_svg]:h-3 [&_svg]:w-3"><GmailLogo /></span> Email draft · just produced
                 </div>
@@ -608,9 +608,9 @@ export function TemplatesShowcase() {
         {/* rest: compact cards */}
         {rest.map((t, i) => (
           <RevealUp key={t.nm} delay={0.05 + i * 0.05}>
-            <motion.div whileHover={{ y: -2 }} className="flex h-full flex-col rounded-[16px] bg-card p-5" style={{ boxShadow: "0 0 0 1px var(--border-default)" }}>
+            <div className="flex h-full flex-col rounded-[16px] bg-card p-5 transition-colors hover:bg-secondary/60">
               <div className="flex items-center gap-2.5">
-                <span className="flex h-[28px] w-[28px] items-center justify-center rounded-[8px] border border-border bg-secondary text-[10.5px] font-semibold text-foreground/80">{t.av}</span>
+                <span className="flex h-[28px] w-[28px] items-center justify-center rounded-[8px] bg-[var(--bg-3)] text-[10.5px] font-semibold text-foreground/80">{t.av}</span>
                 <div>
                   <div className="text-[13.5px] font-semibold leading-tight">{t.nm}</div>
                   <div className="text-[10px] font-medium uppercase tracking-[0.1em] text-muted-foreground">{t.cat}</div>
@@ -624,7 +624,7 @@ export function TemplatesShowcase() {
                 <span className="font-mono text-[10px] text-muted-foreground">{t.runs}</span>
                 <span className="text-[12px] font-medium" style={{ color: "var(--v2-accent)" }}>Hire →</span>
               </div>
-            </motion.div>
+            </div>
           </RevealUp>
         ))}
       </div>

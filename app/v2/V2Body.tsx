@@ -49,7 +49,7 @@ function LogoTile({ children }: { children: React.ReactNode }) {
     <motion.span
       whileHover={{ y: -2 }}
       transition={{ type: "spring", stiffness: 320, damping: 20 }}
-      className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[8px] border border-border-soft bg-card [&_svg]:h-[17px] [&_svg]:w-[17px]"
+      className="flex h-[30px] w-[30px] shrink-0 items-center justify-center rounded-[8px] bg-secondary [&_svg]:h-[17px] [&_svg]:w-[17px]"
     >
       {children}
     </motion.span>
