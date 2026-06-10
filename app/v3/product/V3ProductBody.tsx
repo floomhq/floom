@@ -10,18 +10,14 @@ import Link from "next/link";
 import { motion } from "motion/react";
 import { ArrowLeft } from "lucide-react";
 import { AppFrame, RevealUp, SectionHead } from "../../v2/V2Sections";
-import { V2Composer } from "../../v2/V2Composer";
 import "../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 const SURFACES = [
-  { t: "Workers", p: "The team roster. Status, last run, what needs you." },
   { t: "Runs", p: "Every execution on the record: trigger, tools, context, output." },
   { t: "Approvals", p: "The queue of things waiting for your yes." },
   { t: "Brain", p: "The files your company knows by heart. Auditable per run." },
-  { t: "Connections", p: "Your tools, your tokens. Revoke at the source any time." },
-  { t: "Assistant", p: "Ask anything about your workers, runs, or company data." },
 ];
 
 export function V3ProductBody() {
@@ -56,14 +52,13 @@ export function V3ProductBody() {
 
         <AppFrame standalone />
 
-        {/* surfaces */}
-        <section className="pb-28">
-          <SectionHead title="Every surface, one purpose." />
-          <div className="mt-8 grid gap-x-10 gap-y-7 sm:grid-cols-2 lg:grid-cols-3">
+        {/* three captions, attached to the frame */}
+        <section className="-mt-12 pb-28">
+          <div className="grid gap-x-10 gap-y-6 sm:grid-cols-3">
             {SURFACES.map((s, i) => (
               <RevealUp key={s.t} delay={i * 0.04}>
                 <div className="border-t border-border pt-4">
-                  <div className="text-[14.5px] font-semibold">{s.t}</div>
+                  <div className="text-[14px] font-medium">{s.t}</div>
                   <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">{s.p}</p>
                 </div>
               </RevealUp>
@@ -71,10 +66,15 @@ export function V3ProductBody() {
           </div>
         </section>
 
-        <section className="text-center">
-          <SectionHead title="See it with your own worker." />
-          <RevealUp delay={0.08} className="mt-7">
-            <V2Composer slim placeholder="Describe the job…" />
+        <section className="pb-8 text-center">
+          <RevealUp>
+            <Link
+              href="/login"
+              className="inline-flex items-center rounded-[12px] px-6 py-3 text-[14.5px] font-medium text-white"
+              style={{ background: "var(--v2-accent)" }}
+            >
+              See it with your own worker
+            </Link>
           </RevealUp>
         </section>
       </div>

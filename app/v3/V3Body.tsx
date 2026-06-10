@@ -200,7 +200,7 @@ function Story() {
               <p className={`mt-2 max-w-[360px] text-[14px] leading-relaxed text-muted-foreground transition-opacity duration-300 ${active === i ? "opacity-100" : "opacity-100 md:opacity-40"}`}>
                 {b.p}
               </p>
-              <div className="mt-5 flex justify-center rounded-[18px] bg-secondary/70 p-6 md:hidden">
+              <div className="mt-5 flex origin-top justify-center rounded-[18px] bg-secondary/70 p-4 md:hidden [&>div]:scale-[0.92]">
                 {i === 0 ? <BeatDescribe /> : i === 1 ? <BeatApprove /> : <BeatRecord />}
               </div>
             </div>
