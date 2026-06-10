@@ -9,10 +9,23 @@
  * ONE word per page. Discipline: never more than one per page.
  */
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
-import { Moon, Sun } from "lucide-react";
+import { Monitor, Moon, Sun } from "lucide-react";
 import "./theme.css";
+
+/* theme mode: same contract as the app's ThemeModeButton (key, values, cycle
+   order) so a choice made on the landing carries into the app and back. */
+type ThemeMode = "system" | "day" | "night";
+const THEME_KEY = "floom-theme";
+const MODE_ORDER: ThemeMode[] = ["system", "day", "night"];
+const MODE_LABELS: Record<ThemeMode, string> = { system: "System", day: "Light", night: "Dark" };
+
+function readMode(): ThemeMode {
+  if (typeof window === "undefined") return "system";
+  const stored = window.localStorage.getItem(THEME_KEY);
+  return stored === "day" || stored === "night" || stored === "system" ? stored : "system";
+}
 
 export function Hl({ children }: { children: React.ReactNode }) {
   return <span className="v3-hl">{children}</span>;
@@ -40,13 +53,21 @@ export function V3Shell({
   active?: "product" | "templates" | "docs";
   children: React.ReactNode;
 }) {
-  const [dark, setDark] = useState<boolean | null>(null);
-  const isDark =
-    dark ?? (typeof window !== "undefined" && window.matchMedia?.("(prefers-color-scheme: dark)").matches);
+  const [mode, setMode] = useState<ThemeMode>("system");
+
+  useEffect(() => {
+    setMode(readMode());
+  }, []);
+
+  function cycleMode() {
+    const next = MODE_ORDER[(MODE_ORDER.indexOf(mode) + 1) % MODE_ORDER.length];
+    setMode(next);
+    window.localStorage.setItem(THEME_KEY, next);
+  }
 
   return (
     <div
-      className={`theme-v3 flex min-h-screen flex-col text-[13.5px] ${dark === true ? "dark" : dark === false ? "light" : ""}`}
+      className={`theme-v3 flex min-h-screen flex-col text-[13.5px] ${mode === "night" ? "dark" : mode === "day" ? "light" : ""}`}
       style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
     >
       <div className="mx-auto w-full max-w-[1000px] flex-1 px-7 pb-24">
@@ -67,11 +88,12 @@ export function V3Shell({
             ))}
             <button
               type="button"
-              aria-label="Toggle theme"
-              onClick={() => setDark(!isDark)}
+              aria-label={`Theme: ${MODE_LABELS[mode]}. Click to switch.`}
+              title={`Theme: ${MODE_LABELS[mode]}`}
+              onClick={cycleMode}
               className="ml-1 flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors hover:bg-secondary hover:text-foreground"
             >
-              {isDark ? <Moon className="h-3.5 w-3.5" /> : <Sun className="h-3.5 w-3.5" />}
+              {mode === "night" ? <Moon className="h-3.5 w-3.5" /> : mode === "day" ? <Sun className="h-3.5 w-3.5" /> : <Monitor className="h-3.5 w-3.5" />}
             </button>
             <Link href="/login" className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">
               Sign in
