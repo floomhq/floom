@@ -44,6 +44,7 @@ export function WorkerToolsEditor({ connections, editable, busy, onChange }: Wor
                 </div>
                 {editable && (
                   <input
+                    key={(tools ?? []).join(",")}
                     className="c-srch"
                     aria-label={`${app} allowed tools`}
                     style={{ maxWidth: 360, padding: "6px 10px" }}
