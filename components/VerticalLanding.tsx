@@ -1,9 +1,6 @@
 "use client";
 import "../app/landing.css";
 import "../app/vertical.css";
-import { useEffect } from "react";
-import Link from "next/link";
-import { ThemeModeButton } from "./ThemeModeButton";
 import { WaitlistCTA } from "./WaitlistCTA";
 import { VERTICALS } from "@/lib/verticals";
 import type { Vertical } from "@/lib/verticals";
@@ -13,13 +10,10 @@ import {
   ClockIcon,
   FileTextIcon,
   FolderIcon,
-  GitHubSVG,
   MailIcon,
   PlugIcon,
   ShieldIcon,
 } from "./landing-icons";
-
-const SIGN_IN_HREF = "/login";
 
 /* Local glyphs not in landing-icons (mirrors LandingBody's hero mock). */
 const HashIcon = () => (
@@ -47,42 +41,6 @@ const RailDMIcon = () => (
     <path d="M4 5h16v11H8l-4 3z" />
   </svg>
 );
-
-/* Nav scroll docking, same behavior as the main landing. */
-function useNavScroll() {
-  useEffect(() => {
-    const navEl = document.getElementById("lnNav");
-    if (!navEl) return;
-    const nav = navEl;
-    let lastY = window.scrollY || 0;
-    let ticking = false;
-    const TOP = 10,
-      DELTA = 6;
-    function apply() {
-      ticking = false;
-      const y = window.scrollY || 0;
-      const docked = y > TOP;
-      nav.classList.toggle("docked", docked);
-      if (!docked) {
-        nav.classList.remove("ln-hide");
-      } else if (Math.abs(y - lastY) > DELTA) {
-        if (y > lastY) nav.classList.add("ln-hide");
-        else nav.classList.remove("ln-hide");
-      }
-      lastY = y;
-    }
-    function onScroll() {
-      if (!ticking) {
-        ticking = true;
-        requestAnimationFrame(apply);
-      }
-    }
-    apply();
-    window.addEventListener("scroll", onScroll, { passive: true });
-    nav.addEventListener("focusin", () => nav.classList.remove("ln-hide"));
-    return () => window.removeEventListener("scroll", onScroll);
-  }, []);
-}
 
 /* The hero demo: a Slack exchange for THIS team, returning finished work +
    one action held for approval. Same designed-mock spine as the homepage. */
@@ -163,39 +121,9 @@ function SlackThreadMock({ v }: { v: Vertical }) {
 
 export function VerticalLanding({ slug }: { slug: string }) {
   const v: Vertical = VERTICALS[slug];
-  useNavScroll();
 
   return (
-    <>
-      <nav className="ln-nav" id="lnNav" aria-label="Main navigation">
-        <Link href="/" className="ln-brand">
-          <span className="ln-mark" aria-hidden="true" />
-          Floom{" "}
-          <span style={{ color: "var(--ink-mute)", fontWeight: 450, marginLeft: 4 }}>
-            / workeros
-          </span>
-        </Link>
-        <div className="ln-right">
-          <Link href="/templates" className="ln-link">
-            Templates
-          </Link>
-          <a
-            href="https://github.com/floomhq/workeros"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="ln-gh-link"
-            aria-label="GitHub"
-          >
-            <GitHubSVG />
-          </a>
-          <ThemeModeButton />
-          <a href={SIGN_IN_HREF} className="ln-cta">
-            Sign in
-          </a>
-        </div>
-      </nav>
-
-      <main id="flm-main">
+    <main id="flm-main">
         {/* HERO — department outcome + a Slack demo for that team */}
         <section className="lp1 ln-hero-section">
           <div className="ln-hero ln-rise ln-rise-1">
@@ -338,59 +266,6 @@ export function VerticalLanding({ slug }: { slug: string }) {
           </div>
         </section>
       </main>
-
-      <footer className="ln-footer">
-        <div className="ln-footer-in">
-          <div className="ln-footer-brand">
-            Workeros
-            <span className="cp">© 2026 · Built with care in San Francisco</span>
-          </div>
-          <div className="ln-footer-col">
-            <h3>Product</h3>
-            <a href={SIGN_IN_HREF}>Sign in</a>
-            <a
-              href="https://github.com/floomhq/workeros"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              Docs
-            </a>
-            <a
-              href="https://github.com/floomhq/workeros"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              GitHub
-            </a>
-          </div>
-          <div className="ln-footer-col">
-            <h3>For your team</h3>
-            <Link href="/marketing">Marketing</Link>
-            <Link href="/sales">Sales</Link>
-            <Link href="/recruiting">Recruiting</Link>
-            <Link href="/support">Support</Link>
-          </div>
-          <div className="ln-footer-col">
-            <h3>Legal</h3>
-            <Link href="/terms">Terms</Link>
-            <Link href="/privacy">Privacy</Link>
-          </div>
-          <div className="ln-footer-col">
-            <h3>Connect</h3>
-            <a
-              href="https://www.linkedin.com/company/floomhq/"
-              target="_blank"
-              rel="noopener noreferrer"
-            >
-              LinkedIn
-            </a>
-            <a href="https://x.com/floomhq" target="_blank" rel="noopener noreferrer">
-              X
-            </a>
-          </div>
-        </div>
-      </footer>
-    </>
   );
 }
 
