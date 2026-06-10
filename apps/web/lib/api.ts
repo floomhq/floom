@@ -203,13 +203,6 @@ export const api = {
     }
     return res.json() as Promise<import("./types").CurrentUser>;
   },
-  whatsapp: {
-    claim: (token: string) =>
-      fetchJson<{ ok: boolean; wa_id: string; user_id: string }>("/whatsapp/bindings/claim", {
-        method: "POST",
-        body: JSON.stringify({ token }),
-      }),
-  },
   workers: {
     // S44 Win 3: use list shape (~15 KB vs 47 KB full) for the web UI.
     // CLI consumers that call GET /workers directly get full payload (no ?shape=list).
@@ -752,11 +745,38 @@ export const api = {
       fetchJson<import("./types").SlackSetupStatus>("/slack/setup/status", {
         cache: "no-store",
       }),
-    installUrl: (return_to = "/assistant") =>
+    installUrl: (return_to = "/settings#channels") =>
       fetchJson<import("./types").SlackInstallUrlResponse>("/slack/oauth/install", {
         method: "POST",
         body: JSON.stringify({ return_to }),
       }),
+    // Consume a Slack claim token (from ?slack_claim=) and bind the Slack
+    // sender identity to the authenticated Workeros user.
+    claim: (token: string) =>
+      fetchJson<{ ok: boolean; slack_team_id: string; slack_user_id: string; user_id: string }>(
+        "/slack/bindings/claim",
+        {
+          method: "POST",
+          body: JSON.stringify({ token }),
+        }
+      ),
+    // My binding status (linked as which Slack user) and unlink.
+    bindingMe: () =>
+      fetchJson<import("./types").SlackBindingMe>("/slack/bindings/me"),
+    unlink: () =>
+      fetchJson<{ ok: boolean; unlinked: number }>("/slack/bindings/me", { method: "DELETE" }),
+  },
+  // My WhatsApp binding status and unlink.
+  whatsapp: {
+    claim: (token: string) =>
+      fetchJson<{ ok: boolean; wa_id: string; user_id: string; workspace_id: string }>(
+        "/whatsapp/bindings/claim",
+        { method: "POST", body: JSON.stringify({ token }) }
+      ),
+    bindingMe: () =>
+      fetchJson<import("./types").WhatsAppBindingMe>("/whatsapp/bindings/me"),
+    unlink: () =>
+      fetchJson<{ ok: boolean; unlinked: number }>("/whatsapp/bindings/me", { method: "DELETE" }),
   },
   workspace: {
     // Download the whole workspace as a .zip template. Returns the Blob so the

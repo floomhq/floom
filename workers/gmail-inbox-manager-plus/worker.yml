@@ -1,0 +1,98 @@
+schema_version: '0.3'
+is_example: false
+name: gmail-inbox-manager-plus
+title: Gmail Inbox Manager+ (drafts replies)
+description: Daily Gmail cleaner that applies inbox rules, archives low-value messages, labels matching mail, drafts replies in Federico's voice, and writes a markdown digest.
+long_description: |
+  Fetches unread and recent Gmail messages, applies local rule definitions, performs safe batch label updates through the Workeros Composio proxy, drafts replies (as Gmail drafts, never sent) for messages that warrant one using Federico's brain context, and writes a daily inbox digest. Drafting uses Gemini and activates when GEMINI_API_KEY (or OPENAI_API_KEY) is available as a worker secret; without a key, sorting still runs and drafting is skipped.
+
+  Modes:
+  - test (default): read-only. No archiving, marking read, labels, Gmail drafts, or state writes. Shows the digest plus proposed reply drafts inline for review.
+  - live: applies rules and creates Gmail drafts for replies. Never sends mail.
+use_cases:
+- Archive or mark routine inbox messages as read before the workday starts.
+- Separate important unread mail from FYI messages in a daily digest.
+- Draft on-brand replies (left as Gmail drafts) for emails that need a personal response.
+example_input:
+  mode: test
+  max_emails: 8
+example_output: |
+  # Inbox Digest - Monday, June 1, 2026
+how_it_works: |
+  Gmail unread/recent search
+    -> match optional inbox rules (archive / mark read / label)
+    -> classify remaining as important vs FYI
+    -> draft replies in Federico's voice (Gemini); in live mode save Gmail drafts (never send)
+folder: Operations/Inbox
+tags:
+- gmail
+- inbox
+- email
+- operations
+version: 0.2.3
+entrypoint: SKILL.md
+targets:
+- generic
+limits:
+  max_tool_iterations: 12
+  max_output_tokens: 12000
+  max_total_tokens: 50000
+  timeout_seconds: 300
+exec:
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  entry: run.py
+  inputs:
+  - name: mode
+    kind: scalar
+    type: select
+    required: false
+    default: test
+    enum:
+    - test
+    - live
+    label: Mode
+    description: test = read-only preview (no changes, no drafts saved). live = apply rules and save Gmail drafts (never sends).
+  - name: max_emails
+    kind: scalar
+    type: string
+    required: false
+    default: "0"
+    label: Max emails
+    placeholder: "0 = no limit"
+    description: Cap how many fetched messages to process this run.
+  - name: draft_replies
+    kind: scalar
+    type: select
+    required: false
+    default: "true"
+    enum:
+    - "true"
+    - "false"
+    label: Draft replies
+    description: Whether to draft replies for emails that warrant one.
+  outputs:
+  - name: summary
+    kind: file
+    media_type: text/markdown
+    path: out/summary.md
+    required: true
+    label: Daily inbox digest
+capabilities:
+  network:
+    egress: true
+approvals:
+  required: false
+trigger:
+  type: manual
+connections:
+- app: gmail
+  allowed_tools:
+  - GMAIL_FETCH_EMAILS
+  - GMAIL_LIST_LABELS
+  - GMAIL_BATCH_MODIFY_MESSAGES
+  - GMAIL_CREATE_EMAIL_DRAFT
+contexts:
+- name: federico-ops
+  writeable: false

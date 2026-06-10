@@ -1754,13 +1754,73 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
         if is_admin:
             rows = conn.execute(base_select + "ORDER BY w.name").fetchall()
         else:
-            rows = conn.execute(
-                base_select
-                + "WHERE w.owner_id = ? "
-                + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
-                + "ORDER BY w.name",
-                (user_id,),
-            ).fetchall()
+            # Mirror _worker_can_view exactly: a member sees their own workers,
+            # stock/public workers (always accessible regardless of ownership),
+            # plus workspace-visible workers they are an active member of.
+            # The workspace_members table may be absent in single-user OSS
+            # (no multi-member); check for its existence before using it.
+            from main import PUBLIC_STOCK_WORKER_IDS, PROTECTED_STOCK_WORKER_IDS
+            all_stock_ids = list(PUBLIC_STOCK_WORKER_IDS | PROTECTED_STOCK_WORKER_IDS)
+            try:
+                has_members_table = bool(conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_members' LIMIT 1"
+                ).fetchone())
+            except Exception:
+                has_members_table = False
+
+            if has_members_table:
+                # Show own workers and workspace-visible workers where the user
+                # is an active workspace member — matching _worker_can_view.
+                rows = conn.execute(
+                    base_select
+                    + "LEFT JOIN workspace_members wm "
+                    + "  ON wm.workspace_id = COALESCE(w.workspace_id, 'local-default') "
+                    + "  AND wm.user_id = ? AND wm.status = 'active' "
+                    + "WHERE w.owner_id = ? "
+                    + "OR (COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                    + "    AND wm.user_id IS NOT NULL) "
+                    + "ORDER BY w.name",
+                    (user_id, user_id),
+                ).fetchall()
+                # Also include stock/public workers not already captured above
+                # (e.g. stock worker owned by another user in a workspace the
+                # member doesn't belong to — stock workers are always runnable
+                # by everyone, matching _worker_can_view's stock-first check).
+                if all_stock_ids:
+                    seen_ids = {r["id"] for r in rows}
+                    missing_stock = [sid for sid in all_stock_ids if sid not in seen_ids]
+                    if missing_stock:
+                        placeholders = ",".join("?" * len(missing_stock))
+                        stock_rows = conn.execute(
+                            base_select
+                            + f"WHERE w.id IN ({placeholders}) ORDER BY w.name",
+                            missing_stock,
+                        ).fetchall()
+                        rows = list(rows) + stock_rows
+            else:
+                # Single-user OSS: no workspace_members table.
+                # In single-user mode everyone is effectively in every workspace,
+                # so workspace-visible workers are accessible to all users —
+                # matching _worker_can_view's _shared_filesystem_fallback_allowed
+                # path. Show own + workspace-visible + stock workers.
+                if all_stock_ids:
+                    placeholders = ",".join("?" * len(all_stock_ids))
+                    rows = conn.execute(
+                        base_select
+                        + f"WHERE w.owner_id = ? "
+                        + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                        + f"OR w.id IN ({placeholders}) "
+                        + "ORDER BY w.name",
+                        [user_id] + all_stock_ids,
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        base_select
+                        + "WHERE w.owner_id = ? "
+                        + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                        + "ORDER BY w.name",
+                        (user_id,),
+                    ).fetchall()
     for row in rows:
         try:
             manifest = json.loads(row["manifest_json"] or "{}") if row["manifest_json"] else {}
@@ -1787,14 +1847,48 @@ def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
 
     "shared" is accepted as an alias for "workspace" in case a cloud-side
     migration ever writes that value; the canonical OS value is "workspace".
-    Returns False when the worker row does not exist (the caller should then
-    return a generic "not found" so as not to leak existence).
+
+    File-based stock/example workers (PUBLIC_STOCK_WORKER_IDS,
+    PROTECTED_STOCK_WORKER_IDS) do NOT have a DB row; they are shared
+    read-execute resources accessible to every user.  When no row exists the
+    guard therefore falls back to the same logic used by _get_visible_worker in
+    main.py: stock workers are always accessible; in single-user / dev mode
+    (filesystem-fallback allowed) unowned on-disk workers are accessible; only
+    truly unknown IDs are blocked.  This preserves the pre-#750 behaviour for
+    owner/stock access while keeping the cross-user private-worker guard intact.
+
+    If the DB schema is not yet initialised (e.g. unit tests that stub the DB
+    at a higher level and don't run migrations), the OperationalError is caught
+    and the function returns True — the downstream run path will surface any
+    real "not found" error using its own resolution logic.
     """
-    row = conn.execute(
-        "SELECT owner_id, workspace_id, visibility FROM workers WHERE id = ? LIMIT 1",
-        (worker_id,),
-    ).fetchone()
+    import sqlite3 as _sqlite3
+    # Stock/public workers are always accessible regardless of DB state.
+    # Check this first so a DB row with a different owner_id or restrictive
+    # visibility on a stock worker never blocks a valid user.
+    from main import (
+        PUBLIC_STOCK_WORKER_IDS,
+        PROTECTED_STOCK_WORKER_IDS,
+        _shared_filesystem_fallback_allowed,
+    )
+    if worker_id in PUBLIC_STOCK_WORKER_IDS or worker_id in PROTECTED_STOCK_WORKER_IDS:
+        return True
+    try:
+        row = conn.execute(
+            "SELECT owner_id, workspace_id, visibility FROM workers WHERE id = ? LIMIT 1",
+            (worker_id,),
+        ).fetchone()
+    except _sqlite3.OperationalError:
+        # DB not initialised or workers table absent — let the run path decide.
+        return True
     if row is None:
+        # No DB row — worker is either an unregistered filesystem worker or unknown.
+        if _shared_filesystem_fallback_allowed():
+            # Single-user / dev mode: unowned on-disk workers are always
+            # accessible.  The run path itself will return "not found" if the
+            # file doesn't actually exist.
+            return True
+        # Unknown worker ID in a multi-user deployment — block it.
         return False
     if row["owner_id"] == user_id:
         return True
@@ -3687,9 +3781,12 @@ def _build_system_prompt(user_id: str, *, include_authoring_rules: bool = False)
         skill_md,
         include_authoring_rules=include_authoring_rules,
     )
+    # Workspace instructions are user data. Wrap them in a clearly delimited
+    # block so they cannot masquerade as system rules (prompt-injection hygiene).
     custom = (
-        "## Workspace custom instructions\n\n"
-        f"{workspace_content.strip()}"
+        "<!-- Workspace instructions (set by the user): -->\n"
+        f"{workspace_content.strip()}\n"
+        "<!-- end workspace instructions -->"
         if workspace_content.strip()
         else ""
     )
@@ -3699,37 +3796,58 @@ def _build_system_prompt(user_id: str, *, include_authoring_rules: bool = False)
     )
 
 
-# Per-call environment notes. The engine persona is shared and
-# identical everywhere; only this short, env-aware context is injected per call
-# so the assistant knows HOW it is being reached and adapts shape accordingly.
-# Keep these short, a few lines. Do NOT move personality here.
+# ---------------------------------------------------------------------------
+# Surface-aware communication profiles
+#
+# Structure: GLOBAL_COMMUNICATION_RULES (applied to every call) +
+# ENVIRONMENT_NOTES (per-surface block, keyed by source).  Both are appended
+# to the shared Emily persona so the model knows HOW it is being reached and
+# adapts reply shape accordingly.  Keep each block short (<=80 words).
+# Do NOT move personality here — persona lives in EMILY_BASE_PERSONA.
+# ---------------------------------------------------------------------------
+
+GLOBAL_COMMUNICATION_RULES: str = (
+    "## Communication rules (all surfaces)\n"
+    "Be user-friendly and concise. Every sentence earns its place. "
+    "Be honest about limits — if you don't know, say so and call a tool or ask. "
+    "Never use robotic legalese, hedging walls, or filler phrases. "
+    "No double spaces. When giving links, use the shortest accurate URL the tool returns. "
+    "Never invent host names or run IDs."
+)
+
 ENVIRONMENT_NOTES: Dict[str, str] = {
-    "slack": (
-        "## Current environment: Slack\n"
-        "You are currently being reached in Slack (a chat). Keep replies short and "
-        "chat-shaped. The person is DMing you or mentioned you in a channel. When "
-        "something needs the screen, give them the link the tool hands you so they "
-        "can tap through (never invent a host).\n"
-        "Use Slack mrkdwn: *bold* for emphasis, and triple-backtick YAML, JSON, "
-        "and code blocks."
-    ),
     "whatsapp": (
         "## Current environment: WhatsApp\n"
-        "You are reached on WhatsApp, a personal text chat. Keep it short and "
-        "conversational. When something needs the screen, give a workers.floom.dev "
-        "link they can tap. For investigations, do the read-only checking first "
-        "and send one findings message."
+        "You are talking on WhatsApp on a phone. "
+        "Reply in 1-3 short paragraphs, plain text only: "
+        "no markdown headers, tables, or code blocks; use simple dashes for lists. "
+        "Keep links short. The reader is on the go."
     ),
-    "mcp": (
-        "## Current environment: MCP (another AI agent)\n"
-        "You are currently being driven by another AI agent via MCP, not a human. Be "
-        "precise and structured, skip the warm small-talk and onboarding pleasantries, "
-        "return clean actionable results the calling agent can use."
+    "slack": (
+        "## Current environment: Slack\n"
+        "You are talking in Slack. Use Slack mrkdwn (*bold* for emphasis, "
+        "triple-backtick for code/YAML/JSON). Keep replies tight. "
+        "Reference channels and users with Slack conventions. "
+        "Threaded context carries forward — no need to repeat prior context. "
+        "When something needs the screen, give the exact link the tool returns."
     ),
     "web": (
-        "## Current environment: Workeros web assistant\n"
-        "You are in the Workeros web assistant. The person can click links and see the "
-        "dashboard alongside this chat."
+        "## Current environment: Workeros web app\n"
+        "You are in the Workeros web app. Rich markdown is fine; "
+        "tool results render as cards; longer structured answers are OK when asked. "
+        "The person can see the dashboard alongside this chat."
+    ),
+    "mcp": (
+        "## Current environment: MCP (programmatic caller)\n"
+        "You are being called via MCP, likely by another AI agent. "
+        "Be terse and structured. No pleasantries or onboarding text. "
+        "Return clean, actionable results the calling agent can use directly."
+    ),
+    "cli": (
+        "## Current environment: CLI / API (programmatic caller)\n"
+        "You are being called via the CLI or a direct API client. "
+        "Be terse and structured. No pleasantries. "
+        "Return clean, actionable results suitable for scripting or piping."
     ),
 }
 
@@ -3759,18 +3877,144 @@ def _environment_note(source: str) -> str:
     return ENVIRONMENT_NOTES.get(source, ENVIRONMENT_NOTES["web"])
 
 
+_CAPABILITIES_SNAPSHOT_LIMIT = 5  # max notable workers listed by name
+
+
+def _build_capabilities_snapshot(user_id: str) -> str:
+    """Assemble a compact (<150 words) factual capabilities block for the acting user.
+
+    Includes: active connection names; worker count + up to 5 notable enabled
+    workers by name; brain packs attached; whether approvals are required;
+    actor role (admin/member) and what that limits.
+
+    Reuses existing DB helpers — does NOT invent new queries.  Never raises;
+    returns a safe fallback on any error.
+    """
+    try:
+        from db import get_repositories, derive_workspace_id
+
+        repos = get_repositories()
+
+        # --- connections ---
+        active_connections: list[str] = []
+        try:
+            for c in repos.connections.list(user_id=user_id):
+                if (c.get("status") or "") == "active":
+                    app_name = c.get("app_name") or "connection"
+                    account = c.get("display_name") or c.get("account_label")
+                    label = f"{app_name} ({account})" if account else str(app_name)
+                    active_connections.append(label)
+        except Exception:
+            pass
+
+        # --- workers ---
+        worker_count = 0
+        notable_workers: list[str] = []
+        try:
+            all_workers = repos.workers.list(user_id=user_id)
+            non_system = [
+                w for w in all_workers
+                if not (w.get("manifest") or {}).get("system_worker")
+                and not (w.get("manifest") or {}).get("is_example")
+            ]
+            worker_count = len(non_system)
+            enabled = [w for w in non_system if w.get("enabled")]
+            notable_workers = [
+                w["name"] for w in enabled[:_CAPABILITIES_SNAPSHOT_LIMIT] if w.get("name")
+            ]
+        except Exception:
+            pass
+
+        # --- brain packs ---
+        brain_packs: list[str] = []
+        try:
+            brain_packs = _owner_brain_pack_names(user_id)
+        except Exception:
+            pass
+
+        # --- pending approvals ---
+        pending_approvals = 0
+        try:
+            with get_db() as _conn:
+                _row = _conn.execute(
+                    "SELECT COUNT(*) AS cnt FROM approvals WHERE owner_id = ? AND status = 'pending'",
+                    (user_id,),
+                ).fetchone()
+            pending_approvals = int(_row["cnt"] or 0) if _row else 0
+        except Exception:
+            pass
+
+        # --- actor role ---
+        actor_role = "owner"  # default for OS single-tenant
+        try:
+            workspace_id = derive_workspace_id(user_id)
+            members_repo = repos.members  # type: ignore[union-attr]
+            if members_repo is not None:
+                member_row = members_repo.get(
+                    workspace_id=workspace_id, user_id=user_id
+                )
+                if member_row:
+                    actor_role = member_row.get("role") or "member"
+        except Exception:
+            pass
+
+        # --- format ---
+        conn_str = ", ".join(active_connections) if active_connections else "none"
+        worker_str: str
+        if notable_workers:
+            worker_str = f"{worker_count} total; enabled: {', '.join(notable_workers)}"
+            if worker_count > len(notable_workers):
+                worker_str += " + more"
+        else:
+            worker_str = str(worker_count)
+        brain_str = ", ".join(brain_packs) if brain_packs else "none"
+        approvals_note = (
+            f"{pending_approvals} pending" if pending_approvals > 0 else "none pending"
+        )
+        role_note = (
+            "full access (owner/admin)"
+            if actor_role in {"owner", "admin"}
+            else "read + run own workers only (member)"
+        )
+
+        return (
+            "## What you can do here (capabilities snapshot)\n"
+            f"- Connections: {conn_str}\n"
+            f"- Workers: {worker_str}\n"
+            f"- Brain packs: {brain_str}\n"
+            f"- Approvals: {approvals_note}\n"
+            f"- Actor role: {actor_role} — {role_note}"
+        )
+    except Exception as exc:
+        logger.warning("Failed to build capabilities snapshot: %s", exc)
+        return "## What you can do here (capabilities snapshot)\n(unavailable)"
+
+
 def build_system_prompt_for_source(user_id: str, source: str = "web", message: str = "") -> str:
-    """Shared workspace-agent prompt plus a short per-call environment note.
+    """Shared workspace-agent prompt plus global communication rules, a
+    per-surface environment block, and a live workspace capabilities snapshot.
+
+    Layer order (INCREMENT 2):
+      base (persona + workspace instructions + skill.md with preamble)
+      + GLOBAL_COMMUNICATION_RULES
+      + environment note (per source)
+      + capabilities snapshot (assembled fresh; compact, factual, actor-scoped)
 
     The editable base persona and workspace.md custom instructions are identical
-    for every source. The appended environment note differs by Slack, WhatsApp,
-    MCP, or web.
+    for every source.  The appended global rules + environment note differ by
+    surface (whatsapp / slack / web / mcp / cli).  The capabilities snapshot
+    tells Emily what she ACTUALLY has available so she can answer "what can you
+    do here?" from facts rather than generic marketing.
     """
     base = _build_system_prompt(
         user_id,
         include_authoring_rules=_is_worker_authoring_intent(message),
     )
-    return f"{base}\n\n{_environment_note(source)}"
+    snapshot = _build_capabilities_snapshot(user_id)
+    return (
+        f"{base}\n\n{GLOBAL_COMMUNICATION_RULES}\n\n{_environment_note(source)}"
+        f"\n\n{snapshot}"
+    )
 
 
 def workspace_agent_tool_metadata(user_id: str) -> List[Dict[str, str]]:
@@ -3887,6 +4131,13 @@ async def stream_chat(
         conversation_id = create_conversation(user_id, title=title)
 
     assistant_message_id = f"msg_pending_{uuid.uuid4().hex[:16]}"
+
+    logger.debug(
+        "stream_chat start conversation=%s user=%s surface=%s",
+        conversation_id,
+        user_id,
+        source,
+    )
 
     # Persist user message
     insert_message(conversation_id, "user", message)

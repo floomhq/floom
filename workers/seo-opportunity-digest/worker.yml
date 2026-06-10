@@ -1,0 +1,94 @@
+schema_version: '0.3'
+is_example: false
+paused: true
+name: seo-opportunity-digest
+title: SEO Opportunity Digest — openpaper.dev
+description: Weekly digest of page-2 keywords for openpaper.dev with content briefs queued for Notion.
+long_description: |
+  Pulls 7-day Search Console performance data for openpaper.dev, filters for
+  queries ranking positions 8–20 with meaningful impression volume, scores each
+  by opportunity (impressions × (1 - CTR)), drafts a one-paragraph content
+  brief per keyword, and queues for approval before writing to Notion.
+use_cases:
+  - Find keywords where openpaper.dev is close to page 1 but not ranking yet.
+  - Generate a prioritised weekly content queue automatically.
+  - Approve or reject each brief before it lands in Notion.
+example_input:
+  site_url: sc-domain:openpaper.dev
+  min_impressions: 50
+  top_n: 5
+folder: Growth/SEO
+tags:
+  - seo
+  - search-console
+  - openpaper
+  - content
+version: 0.1.0
+targets:
+  - generic
+exec:
+  mode: pure-script
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  entry: run.py
+  inputs:
+    - name: site_url
+      kind: scalar
+      type: string
+      required: false
+      label: Search Console site URL
+      default: sc-domain:openpaper.dev
+    - name: min_impressions
+      kind: scalar
+      type: integer
+      required: false
+      label: Min weekly impressions
+      default: 50
+    - name: top_n
+      kind: scalar
+      type: integer
+      required: false
+      label: Number of opportunities
+      default: 5
+    - name: decision
+      kind: scalar
+      type: string
+      required: false
+      label: Approval decision (set by system on run 2)
+    - name: approved_output
+      kind: scalar
+      type: string
+      required: false
+      label: Approved output (set by system on run 2)
+  outputs:
+    - name: opportunity_brief
+      kind: scalar
+      type: text
+      required: false
+      label: SEO opportunity briefs
+    - name: phase
+      kind: scalar
+      type: text
+      required: true
+      label: Run phase
+limits:
+  max_tool_iterations: 4
+  max_output_tokens: 4000
+  max_total_tokens: 20000
+  timeout_seconds: 120
+approvals:
+  required: true
+  label: Approve opportunities before queuing in Notion
+trigger:
+  type: schedule
+  cron: "0 9 * * 1"
+connections:
+  - app: google_search_console
+    allowed_tools:
+      - GOOGLE_SEARCH_CONSOLE_GET_SEARCH_ANALYTICS
+      - GOOGLE_SEARCH_CONSOLE_LIST_SITES
+  - app: notion
+    allowed_tools:
+      - NOTION_CREATE_PAGE
+      - NOTION_SEARCH

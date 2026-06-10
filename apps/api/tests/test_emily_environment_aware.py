@@ -1,18 +1,26 @@
-"""Emily environment-awareness: the engine persona stays identical for every
-source, but a SHORT per-call environment note is injected so the assistant knows
-whether it is reached via Slack, MCP, or the web assistant.
+"""Emily surface-aware communication profiles.
 
-These tests assert:
-  - the env note differs by source (slack vs mcp vs web),
-  - the shared persona base is still present in all three,
-  - unknown / unset source falls back to web,
-  - the note is short.
+The engine persona is shared and identical for every surface.  A global
+communication-rules block (GLOBAL_COMMUNICATION_RULES) and a per-surface
+environment note (ENVIRONMENT_NOTES) are both appended so Emily knows WHERE
+she is and adapts reply shape accordingly.
+
+Assertions:
+  - GLOBAL_COMMUNICATION_RULES is present in every assembled prompt.
+  - Environment note differs by surface (whatsapp / slack / web / mcp / cli).
+  - Shared persona base is present in all assembled prompts.
+  - Unknown / unset source falls back to web.
+  - Per-surface blocks contain key formatting cues from the spec.
+  - Channel pipeline helpers (collect_agent_reply) pass the correct source
+    through to stream_chat.
 """
 
 from __future__ import annotations
 
+import asyncio
 import sys
 from pathlib import Path
+from unittest.mock import AsyncMock, patch
 
 import pytest
 
@@ -24,12 +32,13 @@ import chat_service  # noqa: E402
 
 
 PERSONA_MARKER = "SWARM-OF-WORKERS-PERSONA-MARKER"
+ALL_SOURCES = ("whatsapp", "slack", "web", "mcp", "cli")
 
 
 @pytest.fixture
 def fake_persona(monkeypatch):
-    """Stand in for the shared persona base so the test does not depend on disk
-    content. Same value for every source by construction."""
+    """Stand in for the shared persona base so tests do not depend on disk
+    content.  Same value for every source by construction."""
 
     def _fake_build(user_id: str, *, include_authoring_rules: bool = False) -> str:
         return f"# Workspace\n\n{PERSONA_MARKER}\nWarm, proactive, no em dashes."
@@ -39,49 +48,173 @@ def fake_persona(monkeypatch):
 
 
 class TestEnvironmentNote:
-    def test_each_source_has_a_distinct_note(self):
-        slack = chat_service._environment_note("slack")
-        mcp = chat_service._environment_note("mcp")
-        web = chat_service._environment_note("web")
-        assert slack != mcp != web
-        assert slack != web
-        assert "Slack" in slack
-        assert "MCP" in mcp or "another AI agent" in mcp
-        assert "web assistant" in web
+    def test_all_sources_have_distinct_notes(self):
+        notes = {s: chat_service._environment_note(s) for s in ALL_SOURCES}
+        # Every pair is distinct.
+        from itertools import combinations
+        for a, b in combinations(ALL_SOURCES, 2):
+            assert notes[a] != notes[b], f"sources {a!r} and {b!r} share the same note"
 
     def test_unknown_source_falls_back_to_web(self):
         assert chat_service._environment_note("carrier-pigeon") == \
             chat_service._environment_note("web")
 
     def test_notes_are_short(self):
-        # A few lines each; guard against personality creeping in here.
-        for source in ("slack", "mcp", "web"):
+        # Each per-surface block must stay under ~80 words and fit in a few lines.
+        for source in ALL_SOURCES:
             note = chat_service._environment_note(source)
-            assert note.count("\n") <= 4, f"{source} note grew too long"
+            word_count = len(note.split())
+            assert word_count <= 90, f"{source!r} note is too long ({word_count} words)"
+
+    # --- per-surface format cues ---
+
+    def test_whatsapp_note_plain_text_guidance(self):
+        note = chat_service._environment_note("whatsapp")
+        assert "plain text" in note.lower() or "no markdown" in note.lower()
+        assert "WhatsApp" in note
+
+    def test_slack_note_mrkdwn(self):
+        note = chat_service._environment_note("slack")
+        assert "mrkdwn" in note or "*bold*" in note
+        assert "Slack" in note
+
+    def test_web_note_rich_markdown(self):
+        note = chat_service._environment_note("web")
+        assert "markdown" in note.lower() or "web app" in note.lower()
+
+    def test_mcp_note_terse_structured(self):
+        note = chat_service._environment_note("mcp")
+        assert "terse" in note.lower() or "structured" in note.lower() or "programmatic" in note.lower()
+        assert "MCP" in note or "programmatic" in note.lower()
+
+    def test_cli_note_terse_structured(self):
+        note = chat_service._environment_note("cli")
+        assert "terse" in note.lower() or "structured" in note.lower() or "CLI" in note
+        assert "CLI" in note or "cli" in note.lower()
+
+    def test_mcp_and_cli_are_distinct(self):
+        assert chat_service._environment_note("mcp") != chat_service._environment_note("cli")
+
+
+class TestGlobalCommunicationRules:
+    def test_global_rules_exist(self):
+        rules = chat_service.GLOBAL_COMMUNICATION_RULES
+        assert rules, "GLOBAL_COMMUNICATION_RULES must not be empty"
+
+    def test_global_rules_present_in_every_assembled_prompt(self, fake_persona):
+        # Pick a short phrase that must appear in every surface's assembled prompt.
+        # Use a phrase from GLOBAL_COMMUNICATION_RULES itself.
+        rules = chat_service.GLOBAL_COMMUNICATION_RULES
+        # Extract a unique substring that appears only in the global rules.
+        # "Communication rules" is a safe anchor.
+        assert "Communication rules" in rules, (
+            "GLOBAL_COMMUNICATION_RULES header missing — update this test anchor"
+        )
+        for source in ALL_SOURCES:
+            prompt = chat_service.build_system_prompt_for_source("u1", source)
+            assert "Communication rules" in prompt, (
+                f"GLOBAL_COMMUNICATION_RULES missing from assembled prompt for source={source!r}"
+            )
 
 
 class TestBuildSystemPromptForSource:
     def test_persona_present_for_all_sources(self, fake_persona):
-        for source in ("slack", "mcp", "web"):
+        for source in ALL_SOURCES:
             prompt = chat_service.build_system_prompt_for_source("u1", source)
-            assert fake_persona in prompt, f"persona missing for source={source}"
+            assert fake_persona in prompt, f"persona missing for source={source!r}"
 
     def test_env_note_differs_by_source(self, fake_persona):
-        slack = chat_service.build_system_prompt_for_source("u1", "slack")
-        mcp = chat_service.build_system_prompt_for_source("u1", "mcp")
-        web = chat_service.build_system_prompt_for_source("u1", "web")
-
-        # Same persona base in all three.
-        assert fake_persona in slack and fake_persona in mcp and fake_persona in web
-
-        # But the appended environment note is different.
-        assert slack != mcp
-        assert slack != web
-        assert mcp != web
-        assert "Slack" in slack and "Slack" not in mcp and "Slack" not in web
-        assert ("MCP" in mcp or "another AI agent" in mcp) and "another AI agent" not in slack
+        prompts = {s: chat_service.build_system_prompt_for_source("u1", s) for s in ALL_SOURCES}
+        from itertools import combinations
+        for a, b in combinations(ALL_SOURCES, 2):
+            assert prompts[a] != prompts[b], (
+                f"assembled prompts for {a!r} and {b!r} are identical"
+            )
 
     def test_default_source_is_web(self, fake_persona):
-        default = chat_service.build_system_prompt_for_source("u1")
-        web = chat_service.build_system_prompt_for_source("u1", "web")
-        assert default == web
+        assert chat_service.build_system_prompt_for_source("u1") == \
+            chat_service.build_system_prompt_for_source("u1", "web")
+
+    def test_whatsapp_prompt_has_plain_text_guidance(self, fake_persona):
+        prompt = chat_service.build_system_prompt_for_source("u1", "whatsapp")
+        assert "plain text" in prompt.lower() or "no markdown" in prompt.lower()
+
+    def test_slack_prompt_has_mrkdwn(self, fake_persona):
+        prompt = chat_service.build_system_prompt_for_source("u1", "slack")
+        assert "mrkdwn" in prompt or "*bold*" in prompt
+
+    def test_mcp_prompt_has_terse_structured(self, fake_persona):
+        prompt = chat_service.build_system_prompt_for_source("u1", "mcp")
+        assert "terse" in prompt.lower() or "structured" in prompt.lower() or "programmatic" in prompt.lower()
+
+    def test_cli_prompt_has_cli_cue(self, fake_persona):
+        prompt = chat_service.build_system_prompt_for_source("u1", "cli")
+        assert "CLI" in prompt or "cli" in prompt.lower()
+
+
+class TestChannelPipelineSourcePropagation:
+    """The channel helpers must pass the correct source through to stream_chat."""
+
+    def _run_collect(self, source: str) -> str:
+        """Call collect_agent_reply and capture the source arg passed to stream_chat."""
+        from channels.common import collect_agent_reply
+
+        captured: list[str] = []
+
+        async def _fake_stream_chat(
+            *, message, user_id, conversation_id, part_queue, source="web", system_suffix=""
+        ):
+            captured.append(source)
+            # Push minimal finish part so collect_agent_reply exits.
+            await part_queue.put({"type": "text", "text": "ok"})
+            await part_queue.put({"type": "finish", "conversation_id": "c1", "message_id": "m1"})
+
+        with patch("chat_service.stream_chat", side_effect=_fake_stream_chat), \
+             patch("chat_service.strip_em_dashes", side_effect=lambda s: s):
+            asyncio.run(
+                collect_agent_reply(
+                    message="hello",
+                    user_id="u1",
+                    conversation_id="c1",
+                    source=source,
+                )
+            )
+        assert captured, "stream_chat was never called"
+        return captured[0]
+
+    def test_slack_source_propagates(self):
+        assert self._run_collect("slack") == "slack"
+
+    def test_whatsapp_source_propagates(self):
+        assert self._run_collect("whatsapp") == "whatsapp"
+
+    def test_mcp_source_propagates(self):
+        assert self._run_collect("mcp") == "mcp"
+
+    def test_cli_source_propagates(self):
+        assert self._run_collect("cli") == "cli"
+
+    def test_default_source_is_slack(self):
+        """collect_agent_reply default is 'slack' (channel-neutral wrapper default)."""
+        from channels.common import collect_agent_reply
+
+        captured: list[str] = []
+
+        async def _fake_stream_chat(
+            *, message, user_id, conversation_id, part_queue, source="web", system_suffix=""
+        ):
+            captured.append(source)
+            await part_queue.put({"type": "text", "text": "ok"})
+            await part_queue.put({"type": "finish", "conversation_id": "c1", "message_id": "m1"})
+
+        with patch("chat_service.stream_chat", side_effect=_fake_stream_chat), \
+             patch("chat_service.strip_em_dashes", side_effect=lambda s: s):
+            asyncio.run(
+                collect_agent_reply(
+                    message="hello",
+                    user_id="u1",
+                    conversation_id="c1",
+                    # source not passed — uses default
+                )
+            )
+        assert captured[0] == "slack"

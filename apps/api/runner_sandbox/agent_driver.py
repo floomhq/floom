@@ -1835,6 +1835,27 @@ class AgentDriver(SandboxDriver):
         publish_run_part(run_id, {"type": "tool-approval-pending", "approval_id": approval_id, "label": label})
         log_fn(f"Approval requested: {label} (approval_id={approval_id})", "info")
 
+        # Fan-out: notify the run owner over WhatsApp if they have an active binding.
+        try:
+            from channels.common import notify_pending_approval_via_whatsapp
+            _worker_name_agent: str = worker_id
+            try:
+                _w_row_agent = repos.workers.get_any(worker_id=worker_id)
+                _worker_name_agent = (_w_row_agent or {}).get("name") or worker_id
+            except Exception:
+                pass
+            notify_pending_approval_via_whatsapp(
+                owner_id=user_id,
+                run_id=run_id,
+                worker_name=_worker_name_agent,
+                label=label,
+                approval_id=approval_id,
+            )
+        except Exception:
+            logger.warning(
+                "request_approval: WhatsApp notify failed for run %s", run_id, exc_info=True
+            )
+
         # Poll DB every 3 seconds until decided or timeout
         deadline = _time.monotonic() + timeout_seconds
         _poll_interval = 3.0
