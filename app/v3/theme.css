@@ -220,3 +220,15 @@
     fill: #ECEDEF;
   }
 }
+
+/* ambient motion as CSS, not rAF loops: JS infinite animations starve the
+   compositor on low-power devices (and headless verification). */
+@keyframes v3-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.1; } }
+.v3-caret { animation: v3-blink 1.05s ease-in-out infinite; }
+@keyframes v3-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+.v3-breathe { animation: v3-breathe 4s ease-in-out infinite; }
+@keyframes v3-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+.v3-float { animation: v3-float 3.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .v3-caret, .v3-breathe, .v3-float { animation: none; }
+}

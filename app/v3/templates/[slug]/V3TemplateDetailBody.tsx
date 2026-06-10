@@ -114,7 +114,6 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
               </div>
               <div className="mt-3 text-[16px] font-medium tracking-[-0.01em]">{d.exampleRun.email.subject}</div>
               <p className="mt-2 whitespace-pre-line text-[13.5px] leading-relaxed text-muted-foreground">{d.exampleRun.email.body}</p>
-              <p className="mt-2 text-[13.5px] text-muted-foreground">{d.exampleRun.email.signoff}</p>
               <div className="mt-5 flex items-center justify-between border-t border-border-soft pt-4">
                 <span className="text-[12px] text-muted-foreground">{d.exampleRun.approvalQuestion}</span>
                 <span className="flex gap-2">

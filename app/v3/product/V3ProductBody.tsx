@@ -48,10 +48,9 @@ function ApprovalArtifact() {
         <span className="font-medium text-foreground"># sales</span>
         <span className="ml-auto font-mono text-[10px]">2:14 PM</span>
       </div>
-      <div className="mt-4 flex gap-3">
-        <span className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[8px] text-[10.5px] font-semibold text-white" style={{ background: "var(--v3-accent)" }}>MA</span>
+      <div className="mt-4">
         <div className="min-w-0">
-          <div className="text-[13px] font-medium">Maya <span className="ml-1 rounded-[3px] bg-secondary px-1 py-px text-[8.5px] font-semibold uppercase tracking-wide text-muted-foreground">worker</span></div>
+          <div className="text-[13px] font-medium">Client Follow-up Worker</div>
           <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">Drafted the Acme follow-up with pricing from the brain. Send?</p>
           <div className="mt-3.5 flex gap-2">
             <motion.span
@@ -132,26 +131,20 @@ function BrainArtifact() {
         ))}
       </svg>
       <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
-        <motion.div
-          animate={{ scale: [1, 1.04, 1] }}
-          transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
-          className="mx-auto flex h-[76px] w-[76px] items-center justify-center rounded-full bg-card"
-        >
+        <div className="v3-breathe mx-auto flex h-[76px] w-[76px] items-center justify-center rounded-full bg-card">
           <Brain className="h-7 w-7" style={{ color: "var(--v3-accent)" }} strokeWidth={1.6} />
-        </motion.div>
+        </div>
         <div className="mt-2 text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Company brain</div>
       </div>
       {files.map((f, i) => (
-        <motion.div
+        <div
           key={f.name}
-          animate={{ y: [0, -3, 0] }}
-          transition={{ duration: 3 + i * 0.6, repeat: Infinity, ease: "easeInOut", delay: i * 0.4 }}
-          className="absolute flex items-center gap-2 rounded-[10px] bg-card px-3 py-2"
-          style={{ left: f.x, top: f.y }}
+          className="v3-float absolute flex items-center gap-2 rounded-[10px] bg-card px-3 py-2"
+          style={{ left: f.x, top: f.y, animationDuration: `${3 + i * 0.6}s`, animationDelay: `${i * 0.4}s` }}
         >
           <span className="flex h-[18px] w-[28px] items-center justify-center rounded-[5px] bg-secondary font-mono text-[8px] font-bold text-muted-foreground">{f.ext}</span>
           <span className="text-[11.5px] font-medium">{f.name}</span>
-        </motion.div>
+        </div>
       ))}
     </div>
   );

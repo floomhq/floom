@@ -6,6 +6,7 @@
  */
 
 import Link from "next/link";
+import { useState } from "react";
 import { motion } from "motion/react";
 import { SlackLogo, WhatsAppLogo } from "@/components/landing-icons";
 import { Hl, V3Shell } from "../V3Shell";
@@ -42,6 +43,40 @@ function Code({ children }: { children: React.ReactNode }) {
     <pre className="overflow-x-auto rounded-[10px] bg-secondary px-4 py-3 font-mono text-[12px] leading-relaxed text-foreground/85">
       {children}
     </pre>
+  );
+}
+
+const MCP_TARGETS = [
+  ["claude", "Claude Code"],
+  ["cursor", "Cursor"],
+  ["vscode", "VS Code"],
+] as const;
+
+function McpInstall() {
+  const [target, setTarget] = useState<(typeof MCP_TARGETS)[number][0]>("claude");
+  return (
+    <div>
+      <div className="mb-2 flex gap-1.5">
+        {MCP_TARGETS.map(([id, label]) => (
+          <button
+            key={id}
+            type="button"
+            onClick={() => setTarget(id)}
+            className="rounded-full px-3 py-1 text-[12px] font-medium transition-colors"
+            style={
+              target === id
+                ? { background: "var(--v3-sel)", color: "var(--v3-accent)" }
+                : { background: "var(--bg-2)", color: "var(--text-muted)" }
+            }
+          >
+            {label}
+          </button>
+        ))}
+      </div>
+      <Code>
+        <CopyLine text={`npx -y @floomhq/workeros mcp install --target ${target}`} />
+      </Code>
+    </div>
   );
 }
 
@@ -129,10 +164,8 @@ export function V3DocsBody() {
             <p className="mb-3 text-[13.5px] leading-relaxed text-muted-foreground">
               Workeros speaks MCP. Add it to Claude Code, Cursor, Codex, or any client and drive workers from where you already work.
             </p>
-            <Code>
-              <CopyLine text="npx -y @floomhq/workeros mcp install --target claude" />
-            </Code>
-            <p className="mt-2 text-[12px] text-muted-foreground">Targets: claude, cursor, vscode. Ships the `workeros-mcp` stdio server from the `@floomhq/workeros` package.</p>
+            <McpInstall />
+            <p className="mt-2 text-[12px] text-muted-foreground">Ships the `workeros-mcp` stdio server from the `@floomhq/workeros` package.</p>
             <p className="mt-3 text-[12.5px] text-muted-foreground">
               Then: &quot;run client-follow-up for the Acme call&quot; from your agent. The run lands on the record like any other.
             </p>

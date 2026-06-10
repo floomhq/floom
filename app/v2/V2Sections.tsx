@@ -333,7 +333,6 @@ export function AppFrame({ standalone = false }: { standalone?: boolean }) {
                     className="rounded-[12px] bg-[var(--bg-app)] p-3.5 transition-colors hover:bg-secondary"
                   >
                     <div className="flex items-center gap-2.5">
-                      <span className="flex h-[28px] w-[28px] items-center justify-center rounded-[8px] bg-[var(--bg-3)] text-[10.5px] font-semibold text-foreground/80">{w.av}</span>
                       <span className="truncate text-[13px] font-medium">{w.nm}</span>
                       <span className="ml-auto">
                         <StatusPill tone={w.st === "ok" ? "success" : w.st === "warn" ? "warning" : "default"}>

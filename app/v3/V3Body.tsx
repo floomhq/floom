@@ -61,11 +61,9 @@ function BeatDescribe() {
       <div className="text-[16px] leading-relaxed">
         Summarise my <span className="v3-hl">Granola</span> meetings and post action items to{" "}
         <span className="v3-hl">HubSpot</span> daily
-        <motion.span
+        <span
           aria-hidden
-          animate={{ opacity: [1, 0.1, 1] }}
-          transition={{ duration: 1.05, repeat: Infinity }}
-          className="ml-px inline-block h-[16px] w-[1.5px] translate-y-[2px] bg-foreground"
+          className="v3-caret ml-px inline-block h-[16px] w-[1.5px] translate-y-[2px] bg-foreground"
         />
       </div>
       <motion.div
@@ -231,7 +229,7 @@ const TPL_SLUGS = ["client-follow-up-worker", "monday-report-worker", "lead-rese
 function Templates() {
   const templates = TPL_SLUGS.map((sl) => getTemplate(sl)!).filter(Boolean);
   return (
-    <section className="pb-40">
+    <section className="pb-28">
       <motion.h2
         initial={{ opacity: 0, y: 12 }}
         whileInView={{ opacity: 1, y: 0 }}
@@ -351,7 +349,7 @@ export function V3Body() {
         <Templates />
 
         {/* close: headline + one button */}
-        <section className="pb-36 pt-4 text-center">
+        <section className="pb-10 pt-4 text-center">
           <motion.h2
             initial={{ opacity: 0, y: 12 }}
             whileInView={{ opacity: 1, y: 0 }}
