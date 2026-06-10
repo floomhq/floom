@@ -249,11 +249,12 @@ function EmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
 
 interface EmilyChatCoreProps {
   fullPage?: boolean;
+  onOpenRunDetails?: () => void;
 }
 
 const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
 
-function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
+function EmilyChatCore({ fullPage = false, onOpenRunDetails }: EmilyChatCoreProps) {
   const {
     messages,
     conversationId,
@@ -364,11 +365,12 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
         if (!runId) continue;
         if (openedRunDetailsRef.current.has(runId)) continue;
         openedRunDetailsRef.current.add(runId);
+        onOpenRunDetails?.();
         router.push(href);
         return;
       }
     }
-  }, [messages, router, fullPage, isHydrating]);
+  }, [messages, router, fullPage, isHydrating, onOpenRunDetails]);
 
   const handleSubmit = useCallback(() => {
     const text = input.trim();
@@ -508,6 +510,7 @@ export function EmilyDock({ className }: { className?: string }) {
   const open = mode !== "collapsed";
   const cycleExpand = () =>
     setMode((m) => (m === "rail" ? "wide" : m === "wide" ? "full" : "rail"));
+  const collapseForRunDetails = useCallback(() => setMode("collapsed"), []);
 
   return (
     <div
@@ -574,7 +577,7 @@ export function EmilyDock({ className }: { className?: string }) {
 
       {/* Chat content — ALWAYS mounted so useChatStream state survives collapse */}
       <div className={cn("flex-1 min-h-0 overflow-hidden", !open && "hidden")}>
-        <EmilyChatCore />
+        <EmilyChatCore onOpenRunDetails={collapseForRunDetails} />
       </div>
     </div>
   );

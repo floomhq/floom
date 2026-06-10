@@ -1,11 +1,17 @@
 import { describe, expect, it } from "vitest";
-import { sortWorkersByRecentActivity } from "@/lib/worker-list-order";
+import { hasWorkerActivity, sortWorkersByRecentActivity } from "@/lib/worker-list-order";
 import type { WorkerSummary } from "@/lib/types";
 
-function worker(id: string, name: string, lastRunAt?: string | null): WorkerSummary {
+function worker(
+  id: string,
+  name: string,
+  lastRunAt?: string | null,
+  timestamps: Pick<WorkerSummary, "created_at" | "updated_at"> = {}
+): WorkerSummary {
   return {
     id,
     name,
+    ...timestamps,
     tags: [],
     status: "healthy",
     trigger_type: "manual",
@@ -28,5 +34,26 @@ describe("worker list order", () => {
     ]);
 
     expect(ordered.map((w) => w.id)).toEqual(["newer", "older", "never"]);
+  });
+
+  it("uses updated and created timestamps for workers that have never run", () => {
+    const newlyCreated = worker("newly-created", "Newly Created", null, {
+      created_at: "2026-06-09T10:00:00Z",
+    });
+    const ordered = sortWorkersByRecentActivity([
+      worker("older-run", "Older Run", "2026-06-05T10:00:00Z"),
+      newlyCreated,
+      worker("recently-updated", "Recently Updated", null, {
+        created_at: "2026-06-01T10:00:00Z",
+        updated_at: "2026-06-10T10:00:00Z",
+      }),
+    ]);
+
+    expect(hasWorkerActivity(newlyCreated)).toBe(true);
+    expect(ordered.map((w) => w.id)).toEqual([
+      "recently-updated",
+      "newly-created",
+      "older-run",
+    ]);
   });
 });
