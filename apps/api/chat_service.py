@@ -1681,6 +1681,39 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
     return {"ok": True, "workers": result, "count": len(result)}
 
 
+def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
+    """Return True if *user_id* may read *worker_id*.
+
+    Mirrors SqliteAssetAccessRepository._compute:
+      can_view = is_owner OR (visibility in {workspace, shared} AND user is
+      an active workspace member).
+
+    "shared" is accepted as an alias for "workspace" in case a cloud-side
+    migration ever writes that value; the canonical OS value is "workspace".
+    Returns False when the worker row does not exist (the caller should then
+    return a generic "not found" so as not to leak existence).
+    """
+    row = conn.execute(
+        "SELECT owner_id, workspace_id, visibility FROM workers WHERE id = ? LIMIT 1",
+        (worker_id,),
+    ).fetchone()
+    if row is None:
+        return False
+    if row["owner_id"] == user_id:
+        return True
+    visibility = (row["visibility"] or "private").lower()
+    if visibility not in ("workspace", "shared"):
+        return False
+    # Check active membership in the worker's workspace.
+    workspace_id = row["workspace_id"] or "local-default"
+    member_row = conn.execute(
+        "SELECT 1 FROM workspace_members "
+        "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
+        (workspace_id, user_id),
+    ).fetchone()
+    return member_row is not None
+
+
 def _tool_workers_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     from db import get_db as _get_db
     worker_id = str(args.get("id") or "")
@@ -1689,15 +1722,18 @@ def _tool_workers_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     from main import _canonical_worker_id
     worker_id = _canonical_worker_id(worker_id)
     with _get_db() as conn:
+        # Security: enforce ownership/visibility before fetching full details.
+        if not _worker_can_view(conn, worker_id, user_id):
+            return {"ok": False, "error": f"Worker not found: {worker_id}"}
         row = conn.execute(
             """
             SELECT w.id, w.name, w.trigger_type, w.enabled, w.cron_expr,
                    sv.manifest_json
             FROM workers w
             LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
-            WHERE w.owner_id = ? AND w.id = ?
+            WHERE w.id = ?
             """,
-            (user_id, worker_id),
+            (worker_id,),
         ).fetchone()
     if not row:
         return {"ok": False, "error": f"Worker not found: {worker_id}"}
@@ -2717,6 +2753,13 @@ def _tool_workers_run(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         inputs = json.loads(inputs_json) if isinstance(inputs_json, str) else dict(inputs_json or {})
     except json.JSONDecodeError as exc:
         return {"ok": False, "error": f"Invalid inputs_json: {exc}"}
+
+    # Security (#748): actor must own the worker or the worker must be
+    # workspace-visible and the actor an active workspace member.
+    from db import get_db as _get_db
+    with _get_db() as conn:
+        if not _worker_can_view(conn, worker_id, user_id):
+            return {"ok": False, "error": f"Worker not found: {worker_id}"}
 
     # #627: validate required inputs before firing the run. Previously this
     # function called create_run/start_run immediately, launching a run that
