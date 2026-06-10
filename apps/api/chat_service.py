@@ -174,6 +174,11 @@ _SECRET_QUERY_RE = re.compile(
     r"([?&](?:token|key|secret|signature|sig|code)=)([^&\s]+)",
     re.IGNORECASE,
 )
+_SECRET_QUERY_PREFIX_RE = re.compile(
+    r"([?&](?:token|key|secret|signature|sig|code)=)$",
+    re.IGNORECASE,
+)
+_SECRET_QUERY_VALUE_DELIMITERS = frozenset('& \t\r\n"\'<>)]}')
 _current_chat_conversation_id: ContextVar[Optional[str]] = ContextVar(
     "workeros_chat_conversation_id",
     default=None,
@@ -566,6 +571,63 @@ def _looks_sensitive_string(value: str) -> bool:
 
 def _sanitize_preview_text(value: str) -> str:
     return _SECRET_QUERY_RE.sub(r"\1[redacted]", value)
+
+
+class _StreamingTextSanitizer:
+    """Redact sensitive query values without trusting SSE delta boundaries."""
+
+    _TAIL_LENGTH = 24
+
+    def __init__(self) -> None:
+        self._pending = ""
+        self._sensitive_prefix = ""
+        self._redacting_value = False
+
+    def feed(self, value: str) -> str:
+        output: List[str] = []
+
+        for char in str(value or ""):
+            if self._redacting_value:
+                if char not in _SECRET_QUERY_VALUE_DELIMITERS:
+                    continue
+                self._redacting_value = False
+
+            if self._sensitive_prefix:
+                if char in _SECRET_QUERY_VALUE_DELIMITERS:
+                    output.append(self._sensitive_prefix)
+                    self._sensitive_prefix = ""
+                else:
+                    output.append(f"{self._sensitive_prefix}[redacted]")
+                    self._sensitive_prefix = ""
+                    self._redacting_value = True
+                    continue
+
+            self._pending += char
+            prefix_match = _SECRET_QUERY_PREFIX_RE.search(self._pending)
+            if prefix_match:
+                prefix_start = prefix_match.start(1)
+                output.append(_sanitize_preview_text(self._pending[:prefix_start]))
+                self._sensitive_prefix = prefix_match.group(1)
+                self._pending = ""
+                continue
+
+            if len(self._pending) > self._TAIL_LENGTH:
+                flush_length = len(self._pending) - self._TAIL_LENGTH
+                output.append(_sanitize_preview_text(self._pending[:flush_length]))
+                self._pending = self._pending[flush_length:]
+
+        return "".join(output)
+
+    def flush(self) -> str:
+        output = ""
+        if self._sensitive_prefix:
+            output = self._sensitive_prefix
+        if not self._redacting_value:
+            output += _sanitize_preview_text(self._pending)
+        self._pending = ""
+        self._sensitive_prefix = ""
+        self._redacting_value = False
+        return output
 
 
 def _arg_key_tokens(key: str) -> str:
@@ -3942,8 +4004,10 @@ async def stream_chat(
 
     # Buffer assistant text and tool messages for persistence
     assistant_text_parts: List[str] = []
+    stream_text_sanitizer = _StreamingTextSanitizer()
     pending_tool_calls: Dict[str, Dict[str, Any]] = {}  # call_id -> {name, args}
     card_summaries: Dict[str, Dict[str, Any]] = {}
+    received_text_delta = False
 
     # Wire finish tool to emit the reply as a text part
     async def _finish_invoke_inner(_ctx: Any, raw_args: str) -> str:
@@ -3957,7 +4021,7 @@ async def stream_chat(
         )
         final_reply_box["reply"] = reply
         # Emit as text part if the agent didn't stream text deltas
-        if reply and not assistant_text_parts:
+        if reply and not received_text_delta and not assistant_text_parts:
             assistant_text_parts.append(reply)
             await part_queue.put({
                 "type": "text",
@@ -3971,7 +4035,6 @@ async def stream_chat(
     finish_tool.on_invoke_tool = _finish_invoke_inner
 
     final_message_id: Optional[str] = None
-    emitted_text_delta = False
     mcp_servers: List[Any] = []
     conversation_token = _current_chat_conversation_id.set(conversation_id)
 
@@ -4016,7 +4079,10 @@ async def stream_chat(
                 data_type = str(getattr(data, "type", "") or "")
                 delta = getattr(data, "delta", None)
                 if delta and data_type.endswith("output_text.delta"):
-                    text = _sanitize_preview_text(strip_em_dashes(str(delta)))
+                    received_text_delta = True
+                    text = stream_text_sanitizer.feed(strip_em_dashes(str(delta)))
+                    if not text:
+                        continue
                     assistant_text_parts.append(text)
                     part = {"type": "text", "text": text}
                     part.update({
@@ -4024,7 +4090,6 @@ async def stream_chat(
                         "conversation_id": conversation_id,
                         "message_id": assistant_message_id,
                     })
-                    emitted_text_delta = True
                     await part_queue.put(part)
                 continue
 
@@ -4040,7 +4105,7 @@ async def stream_chat(
                     return obj.get(key)
                 return getattr(obj, key, None)
 
-            if name == "message_output_created" and not emitted_text_delta:
+            if name == "message_output_created" and not received_text_delta:
                 content_list = _get(raw_item, "content") or []
                 texts = []
                 for c in content_list:
@@ -4205,6 +4270,17 @@ async def stream_chat(
                 # Persist tool message
                 content_str = json.dumps(safe_result, default=str) if not isinstance(safe_result, str) else safe_result
                 insert_message(conversation_id, "tool", content_str, tool_call_id=call_id)
+
+        flushed_text = stream_text_sanitizer.flush()
+        if flushed_text:
+            assistant_text_parts.append(flushed_text)
+            await part_queue.put({
+                "type": "text",
+                "version": CHAT_EVENT_VERSION,
+                "conversation_id": conversation_id,
+                "message_id": assistant_message_id,
+                "text": flushed_text,
+            })
 
         # Persist full assistant reply
         full_reply = "".join(assistant_text_parts).strip()
