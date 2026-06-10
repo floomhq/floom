@@ -51,7 +51,7 @@ from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Dict, Iterable, List, Literal, Optional, TypedDict
+from typing import Annotated, Any, Dict, Iterable, List, Literal, NotRequired, Optional, TypedDict
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -1937,9 +1937,9 @@ def _health_check_e2b() -> Dict[str, Any]:
 
 
 def _health_check_openai() -> Dict[str, Any]:
-    key = os.environ.get("OPENAI_API_KEY")
+    key = _platform_openai_api_key()
     if not key:
-        return {"ok": False, "error": "OPENAI_API_KEY missing"}
+        return {"ok": False, "error": "PLATFORM_OPENAI_API_KEY missing"}
     response = requests.get(
         "https://api.openai.com/v1/models",
         headers={"Authorization": f"Bearer {key}"},
@@ -2377,18 +2377,23 @@ def _resolve_worker_status(
     return status
 
 
+def _platform_openai_api_key() -> Optional[str]:
+    """The platform's OWN OpenAI key — powers Emily, prompt-to-worker drafting,
+    and codegen. Env-managed and reserved. PLATFORM_OPENAI_API_KEY is canonical;
+    OPENAI_API_KEY is the back-compat fallback so existing single-key deploys keep
+    working. This is NOT a worker key: workers bring their own OPENAI_API_KEY via
+    the secrets DB, and the platform key must never reach a worker sandbox."""
+    return os.environ.get("PLATFORM_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY") or None
+
+
 def _available_secret_names_for_user(user_id: str, repos: Repositories) -> set[str]:
-    names = set(repos.secrets.list_names(user_id=user_id))
-    try:
-        from run_service import _platform_worker_secret_names
-        names.update(
-            name
-            for name in _platform_worker_secret_names()
-            if (os.environ.get(name) or "").strip()
-        )
-    except Exception:
-        pass
-    return names
+    # Owner/user-managed secrets from the DB. OPENAI_API_KEY is a normal user
+    # secret added via Settings -> Secrets, so it shows up here once added.
+    # Platform-infra keys (PLATFORM_OPENAI_API_KEY etc.) are deliberately NOT
+    # included: they power Emily/codegen and must never gate or feed an untrusted
+    # worker sandbox. Keeping this DB-only makes worker-secret behaviour identical
+    # in OSS and cloud — each owner brings their own worker key. See ARCHITECTURE.md.
+    return set(repos.secrets.list_names(user_id=user_id))
 
 
 def _available_connection_slugs_for_user(user_id: str, repos: Repositories) -> set[str]:
@@ -3676,6 +3681,67 @@ def _seed_bootstrap_secrets(user_id: str, repos: Repositories) -> int:
         except Exception:
             logger.warning("Failed to seed bootstrap secret %s", name, exc_info=True)
     return seeded
+
+
+def _claim_bootstrap_assets_for_new_admin(new_admin_id: str, repos: Repositories) -> Dict[str, int]:
+    """First-account setup: transfer the bootstrap (local-default) identity's
+    workers, connections, and secrets to the newly-created admin.
+
+    On an OSS install everything is seeded under the bootstrap user
+    (``_bootstrap_user_id`` / ``WORKEROS_USER_ID``). When the first admin account
+    is created via ``/auth/setup`` it gets a fresh uuid and would otherwise own
+    NOTHING: it can SEE the seed workers (admin listing is role-aware) but cannot
+    RUN them, because a run executes with the worker OWNER's connections/secrets
+    and the owner is the bootstrap id, not the admin. Claiming the bootstrap
+    assets makes the admin the real owner, so the seed workers run with the
+    admin's own connections.
+
+    Idempotent and safe: no-op when admin == bootstrap, or off the local deploy
+    (cloud is multi-tenant and has no single bootstrap owner). Best-effort per
+    table so a missing table/column never breaks setup.
+    """
+    summary: Dict[str, int] = {"workers": 0, "connections": 0, "secrets": 0}
+    if (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() != "local":
+        return summary
+    bootstrap_id = _bootstrap_user_id()
+    if not bootstrap_id or bootstrap_id == new_admin_id:
+        return summary
+    from db import get_db as _get_db
+    with _get_db() as conn:
+        for table, col, key in (
+            ("workers", "owner_id", "workers"),
+            ("composio_connections", "user_id", "connections"),
+        ):
+            try:
+                summary[key] = conn.execute(
+                    f"UPDATE {table} SET {col} = ? WHERE {col} = ?",
+                    (new_admin_id, bootstrap_id),
+                ).rowcount
+            except Exception:
+                logger.warning("claim-on-setup: could not move %s", table, exc_info=True)
+        conn.commit()
+    # Secrets: the value lives outside the metadata row, so copy value-safely via
+    # the repo (don't UPDATE the table). Then seed any env-provided bootstrap
+    # secrets the admin still lacks (e.g. OPENAI_API_KEY from process env).
+    try:
+        for name in repos.secrets.list_names(user_id=bootstrap_id):
+            existing = repos.secrets.get(user_id=new_admin_id, name=name)
+            if existing and existing.get("value"):
+                continue
+            src = repos.secrets.get(user_id=bootstrap_id, name=name)
+            if src and src.get("value"):
+                repos.secrets.set(
+                    user_id=new_admin_id, name=name,
+                    value=src["value"], status=SecretStatus.SET.value,
+                )
+                summary["secrets"] += 1
+    except Exception:
+        logger.warning("claim-on-setup: could not copy secrets", exc_info=True)
+    try:
+        summary["secrets"] += _seed_bootstrap_secrets(new_admin_id, repos)
+    except Exception:
+        pass
+    return summary
 
 
 def _resolve_composio_connection_id(connection_ref: str) -> str:
@@ -7733,7 +7799,7 @@ async def suggest_worker_updates(
         getattr(worker, "manifest_yaml", "") or ""
     )
 
-    api_key = _os.environ.get("OPENAI_API_KEY")
+    api_key = _platform_openai_api_key()
     if not api_key:
         return _WorkerSuggestResponse(has_conflicts=False, suggestions=[])
 
@@ -8739,9 +8805,9 @@ async def draft_worker_from_prompt(
     if len(prompt) > 4000:
         raise HTTPException(status_code=400, detail="prompt must be 4000 characters or fewer")
 
-    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    openai_key = _platform_openai_api_key() or ""
     if not openai_key:
-        raise HTTPException(status_code=503, detail="OPENAI_API_KEY not configured")
+        raise HTTPException(status_code=503, detail="PLATFORM_OPENAI_API_KEY not configured")
     _enforce_draft_rate_limit(request)
 
     # Pre-detect connections for the prompt to give the LLM a hint
@@ -9571,9 +9637,9 @@ async def draft_and_create_worker(
     if len(prompt) > 4000:
         raise HTTPException(status_code=400, detail="prompt must be 4000 characters or fewer")
 
-    openai_key = os.environ.get("OPENAI_API_KEY", "")
+    openai_key = _platform_openai_api_key() or ""
     if not openai_key:
-        raise HTTPException(status_code=503, detail="OPENAI_API_KEY not configured")
+        raise HTTPException(status_code=503, detail="PLATFORM_OPENAI_API_KEY not configured")
     _enforce_draft_rate_limit(request)
 
     from openai import OpenAI
@@ -13935,14 +14001,16 @@ class PlatformSecretSpec(TypedDict):
     required: bool
     default: Optional[str]
     description: Optional[str]
+    fallback: NotRequired[str]
 
 
 PLATFORM_SECRET_SPECS: list[PlatformSecretSpec] = [
     {
-        "name": "OPENAI_API_KEY",
+        "name": "PLATFORM_OPENAI_API_KEY",
         "required": True,
         "default": None,
-        "description": "OpenAI API key, used by the platform for prompt-to-worker drafting and any worker that calls OpenAI",
+        "fallback": "OPENAI_API_KEY",
+        "description": "Platform OpenAI key for Emily and prompt-to-worker drafting/codegen. Falls back to OPENAI_API_KEY for back-compat. Workers bring their OWN OPENAI_API_KEY via Settings -> Secrets (a normal user secret, not a platform secret).",
     },
     {
         "name": "E2B_API_KEY",
@@ -19393,7 +19461,16 @@ def platform_config(auth: AuthContext = Depends(get_auth_context)):
     tabbed settings page both consume this response.
     """
     required_specs = [s for s in (PLATFORM_SECRET_SPECS + INFRA_PATH_SPECS) if s["required"]]
-    missing = [s["name"] for s in required_specs if not os.environ.get(s["name"])]
+
+    def _spec_env_set(s: PlatformSecretSpec) -> bool:
+        # A spec is satisfied if its env var is set, or its back-compat fallback
+        # is (e.g. PLATFORM_OPENAI_API_KEY falls back to OPENAI_API_KEY).
+        if (os.environ.get(s["name"]) or "").strip():
+            return True
+        fb = s.get("fallback")
+        return bool(fb and (os.environ.get(fb) or "").strip())
+
+    missing = [s["name"] for s in required_specs if not _spec_env_set(s)]
     required_count = len(required_specs)
     set_count = required_count - len(missing)
     return PlatformConfig(
@@ -21844,6 +21921,16 @@ def auth_setup(
         password_hash=pw_hash,
         role="admin",
     )
+    # Claim the bootstrap (local-default) identity's seed workers, connections,
+    # and secrets for this first admin, so they OWN the seed data and can run it
+    # (a run uses the owner's connections). Without this the admin owns nothing
+    # and seed workers fail to run despite being visible. Non-fatal.
+    try:
+        _claimed = _claim_bootstrap_assets_for_new_admin(user_id, repos)
+        if any(_claimed.values()):
+            logger.info("claim-on-setup: first admin %s claimed %s", user_id, _claimed)
+    except Exception:
+        logger.warning("claim-on-setup failed (non-fatal)", exc_info=True)
     # Auto-login: issue a session cookie so the browser is immediately logged in
     session_id = _secrets_mod.token_urlsafe(32)
     from datetime import datetime, timedelta, timezone as _tz

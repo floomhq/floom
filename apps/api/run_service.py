@@ -1185,7 +1185,13 @@ def _repair_run_py(
 
     Returns the corrected file, or None if no key / call failed / no change.
     """
-    api_key = secrets.get("OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY")
+    # Codegen prefers the worker owner's own key, then the platform key
+    # (PLATFORM_OPENAI_API_KEY, falling back to OPENAI_API_KEY for back-compat).
+    api_key = (
+        secrets.get("OPENAI_API_KEY")
+        or os.environ.get("PLATFORM_OPENAI_API_KEY")
+        or os.environ.get("OPENAI_API_KEY")
+    )
     if not api_key:
         log_fn("Smoke repair skipped: no OPENAI_API_KEY available", level="warning")
         return None
@@ -2436,6 +2442,11 @@ _PLATFORM_SECRET_NAMES: frozenset[str] = frozenset({
     "COMPOSIO_WEBHOOK_SIGNING_KEY",
     "E2B_API_KEY",
     "FLOOM_DEPLOY_SECRET",
+    # The platform's OWN OpenAI key — Emily/codegen only, never a worker input.
+    # Workers bring their own OPENAI_API_KEY via the secrets DB (which IS allowed
+    # into the sandbox), so OPENAI_API_KEY stays off this denylist; the platform
+    # key lives under a separate reserved name that must never reach a sandbox.
+    "PLATFORM_OPENAI_API_KEY",
     # Platform infra paths / tuning vars — same.
     "WORKERS_FRONTEND_URL",
     "FLOOM_DB",
