@@ -410,7 +410,23 @@ function ToolsTab({ w }: { w: WorkerSummary }) {
 // today these route through the full worker-YAML PUT.)
 function ConfigTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
+  // #788: pause/resume. Optimistic local override of d.enabled.
+  const [pausedOverride, setPausedOverride] = useState<boolean | null>(null);
+  const [pauseBusy, setPauseBusy] = useState(false);
   if (!d) return <Loading />;
+  const isPaused = pausedOverride ?? d.enabled === false;
+  const togglePause = async () => {
+    const next = !isPaused;
+    setPauseBusy(true);
+    try {
+      await (next ? api.workers.pause(w.id) : api.workers.resume(w.id));
+      setPausedOverride(next);
+    } catch (err) {
+      toast.error((err as Error).message || "Could not change worker state.");
+    } finally {
+      setPauseBusy(false);
+    }
+  };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
       <section>
@@ -433,8 +449,20 @@ function ConfigTab({ w }: { w: WorkerSummary }) {
             </>
           )}
           <span style={kvK}>Status</span>
-          {/* TODO(#788): pause/resume toggle — "paused" is enabled:false today. */}
-          <span>{d.enabled === false ? "Paused" : "Enabled"}</span>
+          <span style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {isPaused ? "Paused" : "Enabled"}
+            {can("edit", w) && (
+              <button
+                type="button"
+                className="c-vpill"
+                style={{ padding: "3px 9px" }}
+                disabled={pauseBusy}
+                onClick={() => void togglePause()}
+              >
+                {pauseBusy ? "…" : isPaused ? "Resume" : "Pause"}
+              </button>
+            )}
+          </span>
         </div>
       </section>
       <section>

@@ -7596,6 +7596,76 @@ def _starred_worker_ids(user_id: str) -> set:
         return set()
 
 
+def _yaml_scalar(value: Any) -> str:
+    if isinstance(value, bool):
+        return "true" if value else "false"
+    s = str(value)
+    return '"' + s.replace("\\", "\\\\").replace('"', '\\"') + '"'
+
+
+def _set_worker_yml_top_level(worker_id: str, fields: Dict[str, Any]) -> bool:
+    """Set TOP-LEVEL scalar fields in a worker's worker.yml, preserving the rest.
+
+    Only column-0 `key:` lines are touched (never nested ones like inputs'
+    `  - name:`). Missing keys are appended after the first line. Returns True
+    if the file existed and was written.
+    """
+    from worker_registry import WORKERS_DIR
+    path = WORKERS_DIR / worker_id / "worker.yml"
+    if not path.exists():
+        return False
+    lines = path.read_text(encoding="utf-8").split("\n")
+    remaining = dict(fields)
+    for i, ln in enumerate(lines):
+        for key in list(remaining.keys()):
+            if re.match(rf"^{re.escape(key)}:(\s|$)", ln):
+                lines[i] = f"{key}: {_yaml_scalar(remaining.pop(key))}"
+                break
+    for key, value in remaining.items():
+        lines.insert(1, f"{key}: {_yaml_scalar(value)}")
+    path.write_text("\n".join(lines), encoding="utf-8")
+    return True
+
+
+def _set_worker_enabled(worker_id: str, *, enabled: bool, auth: AuthContext, repos: Repositories) -> None:
+    """#788: pause/resume — persist enabled to worker.yml then re-sync the DB
+    (the scheduler joins on workers.enabled=1, so this stops/starts schedules)."""
+    worker = _get_visible_worker(worker_id, user_id=_worker_access_user_id(auth), repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    _raise_if_protected_worker_mutation(worker_id)
+    _set_worker_yml_top_level(worker_id, {"enabled": enabled})
+    invalidate_worker_cache()
+    discovered = [w for w in discover_workers() if w["id"] == worker_id]
+    if discovered:
+        with get_db() as conn:
+            _persist_discovered_workers(conn, discovered, user_id=auth.user_id)
+    else:
+        # Fallback: no yml (stock/in-DB worker) — flip the DB column directly.
+        repos.workers.update(user_id=auth.user_id, worker_id=worker_id, enabled=enabled)
+    invalidate_worker_cache()
+
+
+@app.post("/workers/{worker_id}/pause", status_code=204)
+def pause_worker(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    """#788: pause a worker (enabled:false) — scheduled/triggered runs stop."""
+    _set_worker_enabled(_canonical_worker_id(worker_id), enabled=False, auth=auth, repos=repos)
+
+
+@app.post("/workers/{worker_id}/resume", status_code=204)
+def resume_worker(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    """#788: resume a paused worker (enabled:true)."""
+    _set_worker_enabled(_canonical_worker_id(worker_id), enabled=True, auth=auth, repos=repos)
+
+
 @app.post("/workers/{worker_id}/star", status_code=204)
 def star_worker(
     worker_id: str,

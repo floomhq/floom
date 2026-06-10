@@ -1148,6 +1148,9 @@ class WorkerContract(BaseModel):
     system_worker: Optional[bool] = None
     archived: bool = False
     archive_reason: Optional[str] = None
+    # #788: paused workers persist as enabled:false (mirrors archived). The
+    # discovery/persist path already honours manifest.enabled is False.
+    enabled: bool = True
     # Visibility: controls who can see and run this worker.
     # "private"   — owner only (default)
     # "workspace" — all workspace members

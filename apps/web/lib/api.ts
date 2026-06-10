@@ -227,6 +227,8 @@ export const api = {
     archive: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/archive`, { method: "POST" }),
     star: (id: string) => fetchJson<null>(`/workers/${encodeURIComponent(id)}/star`, { method: "POST" }), // #782
     unstar: (id: string) => fetchJson<null>(`/workers/${encodeURIComponent(id)}/star`, { method: "DELETE" }),
+    pause: (id: string) => fetchJson<null>(`/workers/${encodeURIComponent(id)}/pause`, { method: "POST" }), // #788
+    resume: (id: string) => fetchJson<null>(`/workers/${encodeURIComponent(id)}/resume`, { method: "POST" }),
     setVisibility: (id: string, visibility: import("./types").AssetVisibility) =>
       fetchJson<import("./types").WorkerDetail>(`/workers/${id}/visibility`, {
         method: "PUT",
