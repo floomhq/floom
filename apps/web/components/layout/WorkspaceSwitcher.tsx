@@ -7,6 +7,7 @@ import { toast } from "sonner";
 
 import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-logo";
 import type { LocalWorkspace } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,6 +49,8 @@ export function WorkspaceSwitcher() {
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
+  const [createCompany, setCreateCompany] = useState("");
+  const [nameTouched, setNameTouched] = useState(false);
   const [creating, setCreating] = useState(false);
   const [renameOpen, setRenameOpen] = useState(false);
   const [renameName, setRenameName] = useState("");
@@ -310,6 +313,8 @@ export function WorkspaceSwitcher() {
             <DropdownMenuItem
               onClick={() => {
                 setCreateName("");
+                setCreateCompany("");
+                setNameTouched(false);
                 setCreateOpen(true);
               }}
               className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
@@ -451,22 +456,61 @@ export function WorkspaceSwitcher() {
               isolated on this local WorkerOS instance.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 py-2">
-            <Label htmlFor="workspace-name">Name</Label>
-            <Input
-              id="workspace-name"
-              value={createName}
-              onChange={(event) => setCreateName(event.target.value)}
-              placeholder="e.g. Side project"
-              maxLength={80}
-              autoFocus
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && createName.trim() && !creating) {
-                  event.preventDefault();
-                  handleCreate();
-                }
-              }}
-            />
+          <div className="space-y-3 py-2">
+            {/* §5a2: ONE company field — derives a logo + prefills the name. */}
+            <div className="space-y-2">
+              <Label htmlFor="workspace-company">Company</Label>
+              <div className="flex items-center gap-2.5">
+                <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md bg-[var(--bg-2)]">
+                  {companyLogoUrl(createCompany) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={companyLogoUrl(createCompany) as string}
+                      alt=""
+                      className="size-5"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
+                      }}
+                    />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      {(createName || createCompany || "?").slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                <Input
+                  id="workspace-company"
+                  value={createCompany}
+                  onChange={(event) => {
+                    const v = event.target.value;
+                    setCreateCompany(v);
+                    if (!nameTouched) setCreateName(prefillWorkspaceName(v));
+                  }}
+                  placeholder="e.g. Acme or acme.com"
+                  maxLength={80}
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="workspace-name">Workspace name</Label>
+              <Input
+                id="workspace-name"
+                value={createName}
+                onChange={(event) => {
+                  setNameTouched(true);
+                  setCreateName(event.target.value);
+                }}
+                placeholder="e.g. Acme"
+                maxLength={80}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && createName.trim() && !creating) {
+                    event.preventDefault();
+                    handleCreate();
+                  }
+                }}
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button
