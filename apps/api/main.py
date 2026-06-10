@@ -2007,7 +2007,22 @@ def healthz():
 
 @app.get("/health")
 def health():
-    """Readiness probe with cached dependency checks."""
+    """Readiness probe — public, minimal.
+
+    #853 RCA: this endpoint returned the full dependency-check payload (disk
+    free space, E2B/OpenAI/Composio status, scheduler thread name) without
+    auth — infrastructure reconnaissance for free. Probes only need the
+    aggregate status; the detailed checks moved to GET /health/details
+    (admin-only).
+    """
+    payload = _run_health_checks()
+    return {"status": payload["status"], "checked_at": payload["checked_at"]}
+
+
+@app.get("/health/details")
+def health_details(auth: AuthContext = Depends(get_auth_context)):
+    """Full dependency checks — admin only (#853)."""
+    _require_admin(auth)
     return _run_health_checks()
 
 
