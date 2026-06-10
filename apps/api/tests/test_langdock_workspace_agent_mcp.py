@@ -215,9 +215,20 @@ def test_langdock_mcp_lists_remote_workeros_control_plane_tools(monkeypatch, tmp
     assert "runs.watch" in names
     assert "secrets.list" in names
     assert "secrets.set" in names
-    assert "connections.add_mcp" in names
+    # #838: connections.add_mcp is gated off by default on every MCP surface;
+    # it is only advertised when WORKEROS_MCP_ENABLE_DESTRUCTIVE=1.
+    assert "connections.add_mcp" not in names
     assert "contexts.read" in names
     assert "contexts.write" in names
+    monkeypatch.setenv("WORKEROS_MCP_ENABLE_DESTRUCTIVE", "1")
+    with TestClient(main.app) as client:
+        opted_in = client.post(
+            "/api/mcp",
+            data=json.dumps(_rpc("tools/list")),
+            headers={"x-api-key": "test-langdock-token", "Content-Type": "application/json"},
+        )
+    opted_names = [tool["name"] for tool in opted_in.json()["result"]["tools"]]
+    assert "connections.add_mcp" in opted_names
     workspace_tool = next(tool for tool in tools if tool["name"] == "ask_workspace_agent")
     assert workspace_tool["inputSchema"]["required"] == ["message"]
     create_tool = next(tool for tool in tools if tool["name"] == "workers.create")

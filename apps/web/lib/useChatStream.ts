@@ -648,13 +648,13 @@ function normalizeCardStatus(status: unknown): CardStatus {
   return "completed";
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
+export function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }
 
-function optionalString(value: unknown): string | undefined {
+export function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
@@ -690,16 +690,42 @@ function appendAssistantError(
   ];
 }
 
+/**
+ * Map a workers.list_all tool result (live SSE or persisted result_preview)
+ * to WorkerListCard rows. Returns null when the value has no workers array.
+ * Shared with rehydration (#842) so a reloaded conversation reconstructs the
+ * same interactive card the live stream produced.
+ */
+export function workerRowsFromResult(
+  result: unknown
+): WorkerListCard["workers"] | null {
+  const workers = asRecord(result)?.workers;
+  if (!Array.isArray(workers)) return null;
+  return workers.reduce<WorkerListCard["workers"]>((acc, worker) => {
+    const row = asRecord(worker);
+    const id = optionalString(row?.id);
+    if (!id) return acc;
+    const trigger = optionalString(row?.trigger);
+    acc.push({
+      id,
+      name: optionalString(row?.title) ?? optionalString(row?.name) ?? id,
+      ...(trigger ? { trigger } : {}),
+      enabled: row?.enabled === undefined ? true : Boolean(row.enabled),
+    });
+    return acc;
+  }, []);
+}
+
 function workerListCardFromResult(
   event: Extract<ChatSSEEvent, { type: "tool-result" }>,
   existing: ToolCard
 ): WorkerListCard | null {
-  const result = asRecord(event.result);
-  const workers = result?.workers;
   const normalizedTool = event.toolName ? normalizeToolName(event.toolName) : "";
   const isWorkerList =
     event.card?.kind === "worker-list" || normalizedTool === "workers.list_all";
-  if (!isWorkerList || !Array.isArray(workers)) return null;
+  if (!isWorkerList) return null;
+  const workers = workerRowsFromResult(event.result);
+  if (!workers) return null;
 
   return {
     kind: "worker-list",
@@ -708,19 +734,7 @@ function workerListCardFromResult(
     status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "completed")),
     actions: event.actions,
     streams: event.streams,
-    workers: workers.reduce<WorkerListCard["workers"]>((acc, worker) => {
-      const row = asRecord(worker);
-      const id = optionalString(row?.id);
-      if (!id) return acc;
-      const trigger = optionalString(row?.trigger);
-      acc.push({
-        id,
-        name: optionalString(row?.title) ?? optionalString(row?.name) ?? id,
-        ...(trigger ? { trigger } : {}),
-        enabled: row?.enabled === undefined ? true : Boolean(row.enabled),
-      });
-      return acc;
-    }, []),
+    workers,
   };
 }
 
