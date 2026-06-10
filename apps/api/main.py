@@ -19925,6 +19925,75 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
 ]
 
 
+# --- #833: scope + exposure controls for the MCP serve surface -------------
+# RCA: /mcp-tools/serve exposed every default tool to any authenticated
+# caller with no per-tool permission check — one leaked secret or member PAT
+# was full workspace-destruction capability (workers.delete, secrets.set,
+# contexts.delete, ...). The REST layer the tools proxy to has its own
+# checks, but the MCP surface itself granted member tokens admin-shaped
+# reach. Three controls, all enforced in tools/list AND tools/call:
+#   1. _MCP_ADMIN_ONLY_TOOLS    — destructive tools require auth.is_admin.
+#   2. WORKEROS_MCP_ENABLED_TOOLS — optional comma-separated allow-list; when
+#      set, only the named default tools are served at all.
+#   3. _MCP_OFF_BY_DEFAULT_TOOLS — tools with remote-takeover potential are
+#      not served unless WORKEROS_MCP_ENABLE_DESTRUCTIVE=1 (#838, #840).
+# Every tools/call is audit-logged with tool, user, and role.
+
+_MCP_ADMIN_ONLY_TOOLS = frozenset({
+    "workers.delete",
+    "workers.reload",
+    "workers.archive",
+    "workers.restore",
+    "workers.rollback",
+    "secrets.set",
+    "secrets.delete",
+    "connections.add_mcp",
+    "connections.delete",
+    "contexts.delete",
+    "contexts.delete_file",
+    "contexts.rollback",
+    "workspace.instructions.set",
+    "workspace.rollback",
+    "approvals.approve",
+    "approvals.reject",
+})
+
+# #838/#840: exposed only when WORKEROS_MCP_ENABLE_DESTRUCTIVE=1.
+_MCP_OFF_BY_DEFAULT_TOOLS: frozenset = frozenset()
+
+
+def _mcp_destructive_tools_enabled() -> bool:
+    return os.environ.get("WORKEROS_MCP_ENABLE_DESTRUCTIVE") == "1"
+
+
+def _mcp_enabled_tool_names() -> set | None:
+    """Parse WORKEROS_MCP_ENABLED_TOOLS; None means 'no allow-list set'."""
+    raw = (os.environ.get("WORKEROS_MCP_ENABLED_TOOLS") or "").strip()
+    if not raw:
+        return None
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def _mcp_tool_served(name: str) -> bool:
+    """Is this default tool exposed at all on this deployment?"""
+    if name in _MCP_OFF_BY_DEFAULT_TOOLS and not _mcp_destructive_tools_enabled():
+        return False
+    allowed = _mcp_enabled_tool_names()
+    if allowed is not None and name not in allowed:
+        return False
+    return True
+
+
+def _mcp_access_error(name: str, auth: AuthContext) -> str | None:
+    """Return an error string if this auth context may not call the tool."""
+    is_default_tool = any(t["name"] == name for t in _MCP_DEFAULT_TOOLS)
+    if is_default_tool and not _mcp_tool_served(name):
+        return f"Tool {name!r} is not enabled on this deployment"
+    if name in _MCP_ADMIN_ONLY_TOOLS and not auth.is_admin:
+        return f"Tool {name!r} requires admin role"
+    return None
+
+
 def _mcp_ok(rpc_id: Any, result: Any) -> dict:
     return {"jsonrpc": "2.0", "id": rpc_id, "result": result}
 
@@ -20280,7 +20349,12 @@ async def _mcp_handle_request(
 
     if method == "tools/list":
         custom = repos.mcp_tools.list(user_id=auth.user_id)
-        tools = list(_MCP_DEFAULT_TOOLS) + [
+        # #833: only advertise tools this deployment serves and this caller
+        # may invoke — same predicate tools/call enforces.
+        tools = [
+            t for t in _MCP_DEFAULT_TOOLS
+            if _mcp_tool_served(t["name"]) and _mcp_access_error(t["name"], auth) is None
+        ] + [
             {"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]}
             for t in custom
         ]
@@ -20289,8 +20363,17 @@ async def _mcp_handle_request(
     if method == "tools/call":
         if request is None:
             return _mcp_err(rpc_id, -32603, "Internal error: request context unavailable")
+        tool_name = params.get("name", "")
+        # #833: audit trail for every MCP tool invocation.
+        logger.info(
+            "mcp tools/call: tool=%r user=%s role=%s auth_method=%s",
+            tool_name, auth.user_id, auth.role, auth.auth_method,
+        )
+        denied = _mcp_access_error(tool_name, auth)
+        if denied is not None:
+            return _mcp_ok(rpc_id, _mcp_content(denied, is_error=True))
         result = await _mcp_dispatch(
-            params.get("name", ""),
+            tool_name,
             params.get("arguments") or {},
             auth,
             repos,
