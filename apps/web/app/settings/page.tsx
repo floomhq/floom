@@ -291,7 +291,7 @@ function SettingsContent() {
           raw === "WhatsApp claim not found"
             ? "This link was not found or the number is already linked."
             : raw === "WhatsApp claim expired"
-              ? "This link has expired. Text the Workeros number again to get a new one."
+              ? "This link has expired. Text the WorkerOS number again to get a new one."
               : raw || "Failed to link WhatsApp.";
         toast.error(friendly);
         setWaClaimBanner({ ok: false, message: friendly });
@@ -572,7 +572,7 @@ function SettingsContent() {
               compact cycle button; here we show all three at once. */}
           <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
           <p className="text-sm text-muted-foreground">
-            Choose how Workeros looks. System follows your operating system.
+            Choose how WorkerOS looks. System follows your operating system.
           </p>
           <ThemeModeToggleGroup />
         </TabsContent>
