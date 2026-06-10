@@ -286,7 +286,7 @@ function WorkerActivity({
             return (
               <Link
                 key={run.run_id}
-                href={`/runs/${run.run_id}`}
+                href={`/runs?sel=${run.run_id}`}
                 className="flex items-center justify-between gap-3 px-2 py-1.5 transition-colors hover:bg-[var(--active-nav-bg)]"
               >
                 <div className="min-w-0">
@@ -357,7 +357,7 @@ function ComingUp({
           {visibleItems.map((item) => (
             <Link
               key={`${item.worker_id}-${item.next_fire_at}`}
-              href={`/workers/${item.worker_id}`}
+              href={`/workers?sel=${item.worker_id}`}
               className="grid grid-cols-[48px_1fr] gap-3 px-2 py-1.5 transition-colors hover:bg-[var(--active-nav-bg)]"
             >
               <span className="text-sm font-medium text-[var(--text-primary)]">
