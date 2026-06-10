@@ -24,7 +24,7 @@ import time
 import uuid
 from contextvars import ContextVar
 from pathlib import Path
-from typing import Any, AsyncIterator, Callable, Dict, List, Optional
+from typing import Any, Callable, Dict, List, Optional
 
 from db import get_db, now_iso
 
@@ -80,8 +80,13 @@ process unless it reveals something you need to act on. No "Let me check...".
 a tool, I do. I only ask when the action is irreversible and the cost of a wrong
 guess is high.
 
-**Acknowledge fast.** On a non-trivial request I say what I'm doing and start
-immediately. I don't hold the reply until every tool has settled.
+**Investigate first.** On lookup, debugging, research, or "find X" requests, I
+use the available read-only tools before replying. I do not send serial partial
+status dumps or ask the operator to say "keep going" while I still have tool
+budget and reversible read-only paths left.
+
+**Report once.** I give one concise final answer with what I found, what is still
+missing, and the exact blocker or next action when there is one.
 
 **Outbound needs a thumbs-up.** Any worker that sends emails, posts, or messages
 to people outside this workspace will ask for your approval first. That's what
@@ -179,6 +184,7 @@ _SECRET_QUERY_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 _SECRET_QUERY_VALUE_DELIMITERS = frozenset('& \t\r\n"\'<>)]}')
+
 _current_chat_conversation_id: ContextVar[Optional[str]] = ContextVar(
     "workeros_chat_conversation_id",
     default=None,
@@ -3657,8 +3663,19 @@ def _build_workspace_preamble(user_id: str) -> str:
         return "## Workspace snapshot\n(unavailable)"
 
 
-def _build_system_prompt(user_id: str) -> str:
-    """Build the full system prompt: persona + workspace notes + rules + SKILL.md."""
+def _workspace_agent_skill_for_intent(skill_md: str, *, include_authoring_rules: bool) -> str:
+    if include_authoring_rules:
+        return skill_md
+    return re.sub(
+        r"\n## Workeros worker\.yml format\n.*?(?=\n## Workspace-management tools\n)",
+        "\n",
+        skill_md,
+        flags=re.DOTALL,
+    )
+
+
+def _build_system_prompt(user_id: str, *, include_authoring_rules: bool = False) -> str:
+    """Build the system prompt, with worker-authoring rules gated by intent."""
     base_persona = get_workspace_base_persona()
     workspace_content = get_workspace_md()
     preamble = _build_workspace_preamble(user_id)
@@ -3666,14 +3683,19 @@ def _build_system_prompt(user_id: str) -> str:
     skill_path = WORKERS_DIR / WORKSPACE_AGENT_ID / "SKILL.md"
     skill_md = skill_path.read_text(encoding='utf-8') if skill_path.is_file() else ""
     skill_md = skill_md.replace("{{WORKSPACE_PREAMBLE}}", preamble)
+    skill_md = _workspace_agent_skill_for_intent(
+        skill_md,
+        include_authoring_rules=include_authoring_rules,
+    )
     custom = (
         "## Workspace custom instructions\n\n"
         f"{workspace_content.strip()}"
         if workspace_content.strip()
         else ""
     )
+    authoring_rules = WORKER_AUTHORING_RULES if include_authoring_rules else ""
     return "\n\n".join(
-        part for part in [base_persona, custom, WORKER_AUTHORING_RULES, skill_md] if part
+        part for part in [base_persona, custom, authoring_rules, skill_md] if part
     )
 
 
@@ -3694,8 +3716,9 @@ ENVIRONMENT_NOTES: Dict[str, str] = {
     "whatsapp": (
         "## Current environment: WhatsApp\n"
         "You are reached on WhatsApp, a personal text chat. Keep it short and "
-        "conversational. When something needs the screen, give them the link the "
-        "tool hands you so they can tap through (never invent a host)."
+        "conversational. When something needs the screen, give a workers.floom.dev "
+        "link they can tap. For investigations, do the read-only checking first "
+        "and send one findings message."
     ),
     "mcp": (
         "## Current environment: MCP (another AI agent)\n"
@@ -3711,19 +3734,42 @@ ENVIRONMENT_NOTES: Dict[str, str] = {
 }
 
 
+_WORKER_AUTHORING_INTENT_RE = re.compile(
+    r"("
+    r"\b(create|build|make|draft|author|generate|write|scaffold|clone|fork)\b.{0,90}\b(worker|agent|automation|worker\.ya?ml)\b"
+    r"|"
+    r"\b(worker|agent|automation|worker\.ya?ml)\b.{0,90}\b(create|build|make|draft|author|generate|write|edit|update|modify|fix|clone|fork)\b"
+    r"|"
+    r"\b(edit|update|modify|fix)\b.{0,90}\bworker\b"
+    r"|"
+    r"\bworkers__(create|create_from_prompt|update)\b"
+    r"|"
+    r"\bworker\.ya?ml\b"
+    r")",
+    re.IGNORECASE | re.DOTALL,
+)
+
+
+def _is_worker_authoring_intent(message: str) -> bool:
+    return bool(_WORKER_AUTHORING_INTENT_RE.search(str(message or "")))
+
+
 def _environment_note(source: str) -> str:
     """Return the short env-aware note for a source, defaulting to web."""
     return ENVIRONMENT_NOTES.get(source, ENVIRONMENT_NOTES["web"])
 
 
-def build_system_prompt_for_source(user_id: str, source: str = "web") -> str:
+def build_system_prompt_for_source(user_id: str, source: str = "web", message: str = "") -> str:
     """Shared workspace-agent prompt plus a short per-call environment note.
 
     The editable base persona and workspace.md custom instructions are identical
     for every source. The appended environment note differs by Slack, WhatsApp,
     MCP, or web.
     """
-    base = _build_system_prompt(user_id)
+    base = _build_system_prompt(
+        user_id,
+        include_authoring_rules=_is_worker_authoring_intent(message),
+    )
     return f"{base}\n\n{_environment_note(source)}"
 
 
@@ -3789,7 +3835,7 @@ def workspace_agent_info(user_id: str) -> Dict[str, Any]:
         "model": os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL,
         "base_persona": get_workspace_base_persona(),
         "worker_authoring_rules": WORKER_AUTHORING_RULES,
-        "system_prompt": _build_system_prompt(user_id),
+        "system_prompt": _build_system_prompt(user_id, include_authoring_rules=False),
         "tools": workspace_agent_tool_metadata(user_id),
         "settings": settings,
         "channels": {
@@ -3820,7 +3866,6 @@ async def stream_chat(
     {"type": "finish", "conversation_id": ..., "message_id": ...}.
     """
     from agents import Agent, ModelSettings, RunConfig, Runner
-    from worker_registry import WORKERS_DIR
 
     # Resolve or create conversation. Caller-supplied thread ids (Slack, MCP,
     # Langdock, custom clients) are mapped to deterministic owner-scoped internal
@@ -3881,7 +3926,7 @@ async def stream_chat(
     else:
         input_messages.append({"role": "user", "content": message})
 
-    system_prompt = build_system_prompt_for_source(user_id, source)
+    system_prompt = build_system_prompt_for_source(user_id, source, message=message)
     if system_suffix:
         system_prompt = f"{system_prompt}\n\n{system_suffix}"
     settings = get_workspace_agent_settings(user_id)

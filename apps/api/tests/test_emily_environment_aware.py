@@ -31,7 +31,7 @@ def fake_persona(monkeypatch):
     """Stand in for the shared persona base so the test does not depend on disk
     content. Same value for every source by construction."""
 
-    def _fake_build(user_id: str) -> str:
+    def _fake_build(user_id: str, *, include_authoring_rules: bool = False) -> str:
         return f"# Workspace\n\n{PERSONA_MARKER}\nWarm, proactive, no em dashes."
 
     monkeypatch.setattr(chat_service, "_build_system_prompt", _fake_build)
