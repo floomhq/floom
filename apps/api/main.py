@@ -20216,13 +20216,18 @@ async def _mcp_dispatch(
         updated = repos.mcp_tools.update(user_id=auth.user_id, tool_id=tool["id"], **updates)
         return _mcp_content(json.dumps(updated, indent=2, default=str))
 
-    # --- custom workspace tools — trigger backing worker, wait, return output ---
+    # --- custom workspace tools — trigger backing worker, wait briefly, return output ---
     custom = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=name)
     if custom:
         worker_id = custom["worker_id"]
         run_id = create_run(worker_id, a, "mcp", user_id=auth.user_id, repos=repos)
         start_run(run_id, worker_id, a, user_id=auth.user_id, repos=repos)
-        deadline = _time.monotonic() + 120
+        # #835 RCA: this loop blocked the HTTP connection for up to 120s per
+        # call — concurrent custom-tool calls exhausted the connection pool.
+        # Fix: wait at most the shared 30s MCP cap so fast tools still return
+        # their output inline; slow runs return the run_id (NOT an error) so
+        # the client polls runs.get / runs.watch for the result.
+        deadline = _time.monotonic() + _mcp_watch_timeout_seconds(None)
         run = None
         while _time.monotonic() < deadline:
             await asyncio.sleep(1.0)
@@ -20230,7 +20235,17 @@ async def _mcp_dispatch(
             if run and run["status"] in ("completed", "failed"):
                 break
         if not run or run["status"] not in ("completed", "failed"):
-            return _mcp_content(f"Tool timed out after 120s (run_id={run_id})", is_error=True)
+            return _mcp_content(
+                json.dumps(
+                    {
+                        "status": "running",
+                        "run_id": run_id,
+                        "detail": "Run still in progress. Poll runs.get or runs.watch with this run_id for the result.",
+                    },
+                    indent=2,
+                ),
+                is_error=False,
+            )
         if run["status"] == "failed":
             return _mcp_content(run.get("error") or "Worker run failed", is_error=True)
         output = run.get("output_json") or run.get("output") or {}
