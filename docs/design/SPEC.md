@@ -1,6 +1,8 @@
 # Workeros UI — Unified System Spec
 
-Status: PROPOSED, 2026-06-08. This is the canonical design spec. Where any other doc
+Status: SUPERSEDED for implementation, 2026-06-10 — build from `APP-UI-V4-SPEC.md` + `final.html` (v4). This doc stays as design-rationale background. Where they disagree, v4 wins.
+
+Original status: PROPOSED, 2026-06-08. This is the canonical design spec. Where any other doc
 (`unified-layout-spec.md`, old mockups) disagrees, THIS wins. Companion artifacts:
 `final.html` (will be rebuilt to this spec), `CURRENT-REALITY.md` (what exists today),
 `ROLES.md` (backend role truth), `before-after.html` (per-page diff).
