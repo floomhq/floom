@@ -49,7 +49,7 @@ export function V3Shell({
       className={`theme-v3 flex min-h-screen flex-col text-[13.5px] ${dark === true ? "dark" : dark === false ? "light" : ""}`}
       style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
     >
-      <div className="mx-auto w-full max-w-[1000px] flex-1 px-7">
+      <div className="mx-auto w-full max-w-[1000px] flex-1 px-7 pb-24">
         <nav className="flex h-[64px] items-center justify-between">
           <Link href="/v3" className="flex items-center gap-2.5 text-[14px] font-semibold">
             <Mark />
