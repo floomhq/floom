@@ -13,6 +13,7 @@ import type {
   RunSummary,
 } from "@/lib/types";
 import { formatVersionRows } from "@/lib/workers/versions";
+import { WORKER_DETAIL_TABS, type WorkerDetailTab } from "@/lib/workers/tabs";
 import { formatDuration } from "@/lib/runs/format";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
@@ -454,6 +455,16 @@ function ConfigTab({ w }: { w: WorkerSummary }) {
   );
 }
 
+// Tab key → its (named) component, keyed by WORKER_DETAIL_TABS so the §4
+// contract test guards the live tab set, not a parallel constant.
+const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }) => React.ReactNode> = {
+  Overview: OverviewTab,
+  History: HistoryTab,
+  Source: SourceTab,
+  Versions: VersionsTab,
+  Config: ConfigTab,
+};
+
 export default function WorkersCollection({
   initialWorkers,
 }: {
@@ -582,14 +593,12 @@ export default function WorkersCollection({
             </>
           ),
         },
-        // SPEC §4: Overview · History · Source · Versions · Config (WORKER_DETAIL_TABS).
-        tabs: [
-          { key: "Overview", label: "Overview", render: () => <OverviewTab w={w} /> },
-          { key: "History", label: "History", render: () => <HistoryTab w={w} /> },
-          { key: "Source", label: "Source", render: () => <SourceTab w={w} /> },
-          { key: "Versions", label: "Versions", render: () => <VersionsTab w={w} /> },
-          { key: "Config", label: "Config", render: () => <ConfigTab w={w} /> },
-        ],
+        // SPEC §4: tabs are DERIVED from WORKER_DETAIL_TABS so the contract test
+        // guards what actually renders (no drift between constant and component).
+        tabs: WORKER_DETAIL_TABS.map((key) => {
+          const Tab = WORKER_TAB_COMPONENT[key];
+          return { key, label: key, render: () => <Tab w={w} /> };
+        }),
       };
     },
     add: {

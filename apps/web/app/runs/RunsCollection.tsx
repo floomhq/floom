@@ -12,6 +12,7 @@ import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection, Avatar } from "@/components/collection";
 import { InlineFileOpen } from "@/components/file-viewer/InlineFileOpen";
 import { traceSteps } from "@/lib/runs/trace";
+import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
 import { contentTagOptions } from "@/lib/workers/derive";
 import {
   formatDuration,
@@ -140,6 +141,15 @@ function RawTab({ r }: { r: RunSummary }) {
   if (!d) return <div style={muted}>Loading…</div>;
   return <pre style={code}>{JSON.stringify(d, null, 2)}</pre>;
 }
+
+// Tab key → its (named) component, keyed by RUN_DETAIL_TABS so the §4 contract
+// test guards the live tab set.
+const RUN_TAB_COMPONENT: Record<RunDetailTab, (props: { r: RunSummary }) => React.ReactNode> = {
+  Output: OutputTab,
+  Trace: TraceTab,
+  Inputs: InputsTab,
+  Raw: RawTab,
+};
 
 export default function RunsCollection({ initialRuns }: { initialRuns: RunSummary[] }) {
   const [runs, setRuns] = useState<RunSummary[]>(initialRuns);
@@ -317,13 +327,12 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
           </>
         ),
       },
-      // SPEC §4: Output · Trace · Inputs · Raw (RUN_DETAIL_TABS).
-      tabs: [
-        { key: "Output", label: "Output", render: () => <OutputTab r={r} /> },
-        { key: "Trace", label: "Trace", render: () => <TraceTab r={r} /> },
-        { key: "Inputs", label: "Inputs", render: () => <InputsTab r={r} /> },
-        { key: "Raw", label: "Raw", render: () => <RawTab r={r} /> },
-      ],
+      // SPEC §4: tabs DERIVED from RUN_DETAIL_TABS so the contract test guards
+      // the live tab set.
+      tabs: RUN_DETAIL_TABS.map((key) => {
+        const Tab = RUN_TAB_COMPONENT[key];
+        return { key, label: key, render: () => <Tab r={r} /> };
+      }),
     }),
     states: {
       empty: { title: "No runs yet", help: "Runs appear here when your workers execute." },
