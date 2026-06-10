@@ -16694,7 +16694,7 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
             "description": "Poll a Workeros run until terminal status or timeout.",
             "inputSchema": _mcp_json_schema({
                 "id": {"type": "string"},
-                "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 600000, "default": 120000},
+                "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 30000, "default": 30000},
             }, ["id"]),
         },
         {
@@ -16844,10 +16844,26 @@ def _mcp_call_runs_get(arguments: Dict[str, Any], auth: AuthContext, repos: Repo
     return _mcp_call_result(data)
 
 
+# #834 RCA: runs.watch accepted timeout_ms up to 600000 (10 minutes) and held
+# the HTTP connection open the whole time, polling internally — ~60 concurrent
+# tools/call requests (the old default rate limit) could pin workers and
+# generate hundreds of internal requests each. Cap all MCP watch/poll waits at
+# 30s; clients needing longer poll runs.get between calls.
+_MCP_WATCH_MAX_TIMEOUT_MS = 30000
+
+
+def _mcp_watch_timeout_seconds(raw: Any) -> float:
+    """Clamp a client-supplied timeout_ms to [1s, 30s] (#834)."""
+    try:
+        requested = int(raw) if raw is not None else _MCP_WATCH_MAX_TIMEOUT_MS
+    except (TypeError, ValueError):
+        requested = _MCP_WATCH_MAX_TIMEOUT_MS
+    return min(max(requested, 1000), _MCP_WATCH_MAX_TIMEOUT_MS) / 1000.0
+
+
 async def _mcp_call_runs_watch(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
     run_id = _mcp_arg(arguments, "id")
-    timeout_ms = min(max(int(arguments.get("timeout_ms") or 120000), 1000), 600000)
-    deadline = time.monotonic() + (timeout_ms / 1000)
+    deadline = time.monotonic() + _mcp_watch_timeout_seconds(arguments.get("timeout_ms"))
     last: Dict[str, Any] = {}
     while True:
         row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
@@ -19852,7 +19868,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "runs.get", "description": "Get a Workeros run by id, including logs, outputs, artifacts, and approval status.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "runs.cancel", "description": "Cancel an in-progress run.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "runs.replay", "description": "Replay a completed or failed run with the same inputs.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "run_id": {"type": "string"}}, "required": ["worker_id", "run_id"]}},
-    {"name": "runs.watch", "description": "Poll a run until it reaches a terminal status. Blocks up to timeout_ms.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "timeout_ms": {"type": "integer", "default": 120000}}, "required": ["id"]}},
+    {"name": "runs.watch", "description": "Poll a run until it reaches a terminal status. Blocks up to timeout_ms (capped at 30s — poll runs.get for longer waits).", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "timeout_ms": {"type": "integer", "default": 30000, "maximum": 30000}}, "required": ["id"]}},
     # --- secrets ---
     {"name": "secrets.list", "description": "List configured secret names and status.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "secrets.set", "description": "Create or update a secret value.", "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"]}},
@@ -20006,7 +20022,7 @@ async def _mcp_dispatch(
         return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
     if name == "runs.watch":
         run_id = a["id"]
-        timeout = min(int(a.get("timeout_ms", 120000)), 600000) / 1000
+        timeout = _mcp_watch_timeout_seconds(a.get("timeout_ms"))  # #834: 30s cap
         deadline = _time.monotonic() + timeout
         run = None
         while _time.monotonic() < deadline:
