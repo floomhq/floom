@@ -5,6 +5,7 @@ import { Ambient } from "@/components/Ambient";
 import { CommandPalette } from "@/components/CommandPalette";
 import { IconSprite } from "@/components/IconSprite";
 import { TelemetryProvider } from "@/components/TelemetryProvider";
+import { EmilyDock } from "@/components/emily/EmilyChat";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -17,6 +18,11 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
     pathname.startsWith("/approvals/review/") ||
     pathname === "/app/approvals/review" ||
     pathname.startsWith("/app/approvals/review/");
+  const isChatPath =
+    pathname === "/chat" ||
+    pathname.startsWith("/chat/") ||
+    pathname === "/app/chat" ||
+    pathname.startsWith("/app/chat/");
 
   if (isLoginPath || isJoinPath) {
     return (
@@ -46,14 +52,29 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
     );
   }
 
+  if (isChatPath) {
+    return (
+      <>
+        <IconSprite />
+        <Ambient />
+        <Sidebar />
+        <main className="relative z-10 flex-1 min-w-0 min-h-screen">{children}</main>
+        <CommandPalette />
+        <TelemetryProvider />
+        <Toaster position="bottom-right" />
+      </>
+    );
+  }
+
   return (
     <>
       <IconSprite />
       <Ambient />
       <Sidebar />
-      <main className="relative z-10 flex-1 min-w-0">
+      <main className="relative z-10 flex-1 min-w-0 h-full overflow-y-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">{children}</div>
       </main>
+      <EmilyDock className="hidden md:flex" />
       <CommandPalette />
       <TelemetryProvider />
       <Toaster position="bottom-right" />

@@ -221,6 +221,36 @@ def test_revoke_invitation_not_found(monkeypatch):
     assert members_db.revoke_invitation(invitation_id="gone", workspace_id="ws_1") is False
 
 
+def test_preview_invitation_route_public(monkeypatch):
+    from fastapi import FastAPI
+    from fastapi.testclient import TestClient
+    from apps.api.routes.members import router
+    import apps.api.db.members as members_db
+
+    monkeypatch.setattr(
+        members_db,
+        "preview_invitation",
+        lambda *, raw_token, workspace_id=None: {
+            "workspace_id": workspace_id or "ws_1",
+            "workspace_name": "Acme",
+            "email": "alice@example.com",
+            "role": "member",
+            "expired": False,
+        },
+    )
+
+    mini_app = FastAPI()
+    mini_app.include_router(router)
+    with TestClient(mini_app) as c:
+        global_resp = c.get("/invites/wsi_test")
+        scoped_resp = c.get("/workspaces/ws_1/invites/wsi_test")
+
+    assert global_resp.status_code == 200
+    assert global_resp.json()["workspace_name"] == "Acme"
+    assert scoped_resp.status_code == 200
+    assert scoped_resp.json()["workspace_id"] == "ws_1"
+
+
 def test_remove_member(monkeypatch):
     import apps.api.db.members as members_db
     client = _make_supabase_client([{"id": "m-1"}])

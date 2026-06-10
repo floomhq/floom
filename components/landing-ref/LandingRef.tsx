@@ -1,4 +1,3 @@
-import { Nav, Footer } from "./Nav";
 import { TemplateCard } from "./TemplateCard";
 import { TemplateRow } from "./TemplateRow";
 import { BrainVisual } from "./BrainVisual";
@@ -13,24 +12,19 @@ import { CapabilityRow } from "./CapabilityRow";
 import { getTemplate } from "./data";
 
 const TEMPLATES_HREF = "/templates";
-const ASK_HREF = "/assistant";
 
 export function LandingRef() {
   return (
-    <div className="min-h-screen bg-background">
-      <Nav />
-      <main>
-        <HeroV3Collage />
-        <PopularTemplates />
-        <OutputSection />
-        <InterfaceMockups />
-        <KnowsYourCompany />
-        <RunsSection />
-        <ConnectionsSection />
-        <FinalCTA />
-      </main>
-      <Footer />
-    </div>
+    <main>
+      <HeroV3Collage />
+      <PopularTemplates />
+      <OutputSection />
+      <InterfaceMockups />
+      <KnowsYourCompany />
+      <RunsSection />
+      <ConnectionsSection />
+      <FinalCTA />
+    </main>
   );
 }
 

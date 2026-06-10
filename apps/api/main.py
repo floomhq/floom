@@ -39,6 +39,7 @@ from fastapi import FastAPI, HTTPException, Query, Request
 from apps.api.cloud_scheduler import start_cloud_scheduler, stop_cloud_scheduler
 from apps.api.cloud_webhooks import verify_webhook_token
 from apps.api._engine import import_engine_module
+import apps.api.startup as cloud_startup
 
 engine_run_service = import_engine_module("run_service")
 from apps.api.routes.auth import router as auth_router
@@ -49,9 +50,6 @@ from apps.api.routes.slack_events import router as slack_events_router
 from apps.api.routes.telemetry import router as telemetry_router
 from apps.api.routes.workspace_agent import router as workspace_agent_router
 from apps.api.routes.workspaces import router as workspaces_router
-
-import apps.api.startup  # noqa: F401
-
 
 engine_main = import_engine_module("main")
 
@@ -86,6 +84,14 @@ async def lifespan(_app: FastAPI):
         # to E2B. The engine only starts this in local mode; cloud must do it
         # explicitly here.
         engine_run_service.start_drain_loop()
+        engine_run_service.re_enqueue_queued_runs_on_startup()
+        recovered = cloud_startup.recover_cloud_runs_on_startup()
+        if recovered:
+            import logging as _logging
+            _logging.getLogger("workeros.cloud").info(
+                "Cloud startup recovery marked %d interrupted run(s) as failed.",
+                recovered,
+            )
     try:
         yield
     finally:

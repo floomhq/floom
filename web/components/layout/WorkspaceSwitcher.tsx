@@ -420,7 +420,7 @@ export function WorkspaceSwitcher() {
                 disabled={duplicating || exporting || sharing || importing}
               >
                 <Link className="size-4" />
-                {sharing ? "Copying link…" : shareCopied ? "Link copied" : "Copy setup link"}
+                {sharing ? "Copying invite link…" : shareCopied ? "Invite link copied" : "Invite someone by link"}
               </DropdownMenuItem>
               <DropdownMenuSeparator />
               <DropdownMenuItem

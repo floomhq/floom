@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 import os
 import sys
 
@@ -22,7 +23,7 @@ if sys.platform == "win32":
 # was already cached (Python caches modules after first import).
 os.environ["WORKEROS_DEPLOY"] = "cloud"
 
-from apps.api._engine import ensure_engine_api_path, configure_cloud_workers_dir
+from apps.api._engine import ensure_engine_api_path, configure_cloud_workers_dir, import_engine_module
 
 # Re-run now that WORKEROS_DEPLOY is definitely "cloud", in case the
 # module-level call in _engine.py ran before WORKEROS_DEPLOY was set.
@@ -53,6 +54,8 @@ import contexts as engine_contexts  # noqa: E402
 import db as engine_db  # noqa: E402
 from db import factory as engine_db_factory  # noqa: E402
 from db.factory import Repositories, register_repositories  # noqa: E402
+
+logger = logging.getLogger("workeros.cloud.startup")
 
 
 def _activate_cloud_deploy() -> None:
@@ -219,6 +222,35 @@ def _override_create_run_for_members() -> None:
 
     _cloud_create_run._workeros_cloud_patched = True  # type: ignore[attr-defined]
     engine_main.create_run = _cloud_create_run
+
+
+def recover_cloud_runs_on_startup() -> int:
+    """Fail stale running runs for every owner that currently has one."""
+    from apps.api.config import get_supabase_service_client
+
+    client = get_supabase_service_client()
+    response = client.table("runs").select("user_id").eq("status", "running").execute()
+    rows = response.data or []
+    owner_ids = sorted(
+        {
+            str(row.get("user_id") or "").strip()
+            for row in rows
+            if isinstance(row, dict) and str(row.get("user_id") or "").strip()
+        }
+    )
+    if not owner_ids:
+        return 0
+
+    engine_run_service = import_engine_module("run_service")
+    total_failed = 0
+    for owner_id in owner_ids:
+        try:
+            total_failed += engine_run_service.fail_interrupted_runs_on_startup(
+                user_id=owner_id,
+            )
+        except Exception as exc:
+            logger.warning("Cloud startup recovery failed for owner %s: %s", owner_id, exc)
+    return total_failed
 
 
 def _override_worker_author_platform_secret() -> None:

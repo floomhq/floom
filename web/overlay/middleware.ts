@@ -61,6 +61,7 @@ function isPublicPath(pathname: string): boolean {
   const path = stripAppBase(pathname);
   if (path === "/favicon.ico") return true;
   if (path === "/login") return true;
+  if (path.startsWith("/invite/")) return true;
   if (path === "/connections/callback") return true;
   if (path === "/privacy" || path === "/terms") return true;
   if (path === "/approvals/review") return true;
@@ -69,6 +70,7 @@ function isPublicPath(pathname: string): boolean {
   if (path.startsWith("/api/auth/")) return true;
   if (path.startsWith("/api/proxy/")) return true;
   if (path === "/api/me") return true;
+  if (path.startsWith("/invites/")) return true;
   return false;
 }
 

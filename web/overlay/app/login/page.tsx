@@ -10,16 +10,24 @@ const API_BASE = process.env.NEXT_PUBLIC_WORKEROS_API_BASE ?? "https://workeros-
 const oauthLoginUrl = (provider: "google" | "github", next = "/app") =>
   `${API_BASE}/auth/login?provider=${provider}&next=${encodeURIComponent(next)}`;
 
+const INSTALL_ROUTES: Record<string, string> = {
+  slack: "/app/install/slack",
+  whatsapp: "/app/install/whatsapp",
+  discord: "/app/install/discord",
+  cli: "/app/install/cli",
+};
+
 export default async function LoginPage({
   searchParams,
 }: {
-  searchParams?: Promise<{ next?: string; mode?: string }>;
+  searchParams?: Promise<{ next?: string; mode?: string; install?: string }>;
 }) {
   // Next 16: searchParams is always a Promise in server components.
   const sp = (await searchParams) ?? {};
-  const next = sp.next ?? "/app";
+  const install = typeof sp.install === "string" ? sp.install.toLowerCase() : "";
+  const next = install && INSTALL_ROUTES[install] ? INSTALL_ROUTES[install] : sp.next ?? "/app";
   const initialMode = sp.mode === "signup" || sp.mode === "signin" ? sp.mode : "magic";
-  const signupHref = `/login?mode=signup&next=${encodeURIComponent(next)}`;
+  const signupHref = `/login?mode=signup&next=${encodeURIComponent(next)}${install ? `&install=${encodeURIComponent(install)}` : ""}`;
 
   return (
     <main className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--ink)] font-sans antialiased">
@@ -39,7 +47,9 @@ export default async function LoginPage({
           <div className="rounded-[var(--radius-card)] border border-[var(--line)] bg-[var(--paper)] shadow-[var(--shadow-pop)] p-8">
             <div className="text-center space-y-1.5 mb-7">
               <h1 className="text-[22px] font-semibold tracking-tight leading-tight">Sign in to Floom</h1>
-              <p className="text-[13px] text-[var(--ink-soft)] leading-relaxed">AI workers that actually run</p>
+              <p className="text-[13px] text-[var(--ink-soft)] leading-relaxed">
+                {install ? `Sign in to install ${install}` : "AI workers that actually run"}
+              </p>
             </div>
 
             <div className="space-y-2.5">

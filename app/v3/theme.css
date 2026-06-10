@@ -1,0 +1,234 @@
+/* v2 preview theme — tokens from the FINAL wireframe spec (localhost:8899).
+   Scoped: overrides the source vars that globals.css derives everything from,
+   so every existing landing-ref component re-skins without modification. */
+
+.theme-v3.theme-v3 {
+  /* source tokens */
+  --bg-app: #FBFBFC;
+  --bg-card: #FFFFFF;
+  --text-primary: #16171A;
+  --text-muted: #6B7280;
+  --border-default: rgba(16, 17, 20, 0.09);
+  --border-soft: rgba(16, 17, 20, 0.055);
+  --primary: #16171A;
+  --primary-text: #FFFFFF;
+  --warning: #E5533D;
+  --pending: #C98A1A;
+  --radius-card: 16px;
+  --radius-button: 10px;
+  --shadow-card: none;
+  --active-nav-bg: #F3F4F6;
+
+  /* literals globals.css does not derive */
+  --bg-2: #F3F4F6;
+  --bg-3: #ECEDF0;
+  --paper-2: #F6F7F8;
+  --line-strong: rgba(16, 17, 20, 0.16);
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-pop: 0 12px 32px rgba(16, 17, 20, 0.10), 0 0 0 1px var(--border-default);
+  --shadow-btn: none;
+
+  /* spec accent (blue) for selection + highlights */
+  --v3-accent: #3E6FE0;
+  --v3-sel: #EEF3FE;
+
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+
+.theme-v3.theme-v3.dark {
+  --bg-app: #191A1D;
+  --bg-card: #212327;
+  --text-primary: #ECEDEF;
+  --text-muted: #9A9EA6;
+  --border-default: rgba(255, 255, 255, 0.10);
+  --border-soft: rgba(255, 255, 255, 0.055);
+  --primary: #ECEDEF;
+  --primary-text: #191A1D;
+  --active-nav-bg: #292B30;
+
+  --bg-2: #292B30;
+  --bg-3: #33363C;
+  --paper-2: #232529;
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--border-default);
+
+  --v3-accent: #5B8DEF;
+  --v3-sel: rgba(91, 141, 239, 0.16);
+}
+
+/* derived chain (globals.css derives these from the source tokens at :root
+   scope; redeclare locally so the scoped override actually cascades) */
+.theme-v3.theme-v3,
+.theme-v3.theme-v3.dark {
+  --bg: var(--bg-app);
+  --paper: var(--bg-app);
+  --ink: var(--text-primary);
+  --ink-soft: var(--text-muted);
+  --line: var(--border-default);
+  --line-soft: var(--border-soft);
+  --background: var(--bg-app);
+  --foreground: var(--text-primary);
+  --card: var(--bg-card);
+  --card-foreground: var(--text-primary);
+  --secondary: var(--bg-2);
+  --secondary-foreground: var(--text-primary);
+  --muted: var(--bg-2);
+  --muted-foreground: var(--text-muted);
+  --border: var(--border-default);
+  --accent: var(--primary);
+  --accent-foreground: var(--primary-text);
+  --primary-foreground: var(--primary-text);
+}
+
+/* spec highlight grammar (prompt tool mentions) */
+.theme-v3 .v3-hl {
+  background: var(--v3-sel);
+  color: var(--v3-accent);
+  border-radius: 4px;
+  padding: 0 3px;
+  font-weight: 500;
+}
+
+
+/* flat spec: the composer carries inline JS shadows the token override can't
+   reach — force flat. Focus ring handled by the border color below. */
+.theme-v3 form[class*="rounded-[18px]"] {
+  box-shadow: none !important;
+  border-color: transparent !important;
+}
+.theme-v3 form[class*="rounded-[18px]"]:focus-within {
+  box-shadow: 0 0 0 1.5px var(--v3-accent) !important;
+}
+
+/* dark mode: monochrome brand marks (Notion/GitHub) get a light fill */
+.theme-v3.dark svg path[fill="#000"],
+.theme-v3.dark svg path[fill="#000000"],
+.theme-v3.dark svg path[fill="#181717"] {
+  fill: #ECEDEF;
+}
+
+
+/* integrations marquee */
+@keyframes v3-marquee {
+  from { transform: translateX(0); }
+  to { transform: translateX(-50%); }
+}
+.v3-marquee-track {
+  display: flex;
+  width: max-content;
+  gap: 14px;
+  animation: v3-marquee 42s linear infinite;
+}
+.v3-marquee:hover .v3-marquee-track { animation-play-state: paused; }
+@media (prefers-reduced-motion: reduce) {
+  .v3-marquee-track { animation: none; }
+}
+
+
+/* v3 border system (wireframe update): flat surfaces, fills over rings.
+   Cards/tiles/inputs/lists: no borders. Dividers + secondary buttons keep
+   hairlines. Selection/focus = accent ring. */
+
+
+/* v3: follow the system, no toggle (configuration stays out of the poster) */
+@media (prefers-color-scheme: dark) {
+  .theme-v3.theme-v3 {
+
+  --bg-app: #191A1D;
+  --bg-card: #212327;
+  --text-primary: #ECEDEF;
+  --text-muted: #9A9EA6;
+  --border-default: rgba(255, 255, 255, 0.10);
+  --border-soft: rgba(255, 255, 255, 0.055);
+  --primary: #ECEDEF;
+  --primary-text: #191A1D;
+  --active-nav-bg: #292B30;
+
+  --bg-2: #292B30;
+  --bg-3: #33363C;
+  --paper-2: #232529;
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--border-default);
+
+  --v3-accent: #5B8DEF;
+  --v3-sel: rgba(91, 141, 239, 0.16);
+
+  }
+}
+
+
+/* explicit user override: .light beats the system media query */
+.theme-v3.theme-v3.light {
+
+  /* source tokens */
+  --bg-app: #FBFBFC;
+  --bg-card: #FFFFFF;
+  --text-primary: #16171A;
+  --text-muted: #6B7280;
+  --border-default: rgba(16, 17, 20, 0.09);
+  --border-soft: rgba(16, 17, 20, 0.055);
+  --primary: #16171A;
+  --primary-text: #FFFFFF;
+  --warning: #E5533D;
+  --pending: #C98A1A;
+  --radius-card: 16px;
+  --radius-button: 10px;
+  --shadow-card: none;
+  --active-nav-bg: #F3F4F6;
+
+  /* literals globals.css does not derive */
+  --bg-2: #F3F4F6;
+  --bg-3: #ECEDF0;
+  --paper-2: #F6F7F8;
+  --line-strong: rgba(16, 17, 20, 0.16);
+  --shadow-sm: none;
+  --shadow-md: none;
+  --shadow-pop: 0 12px 32px rgba(16, 17, 20, 0.10), 0 0 0 1px var(--border-default);
+  --shadow-btn: none;
+
+  /* spec accent (blue) for selection + highlights */
+  --v3-accent: #3E6FE0;
+  --v3-sel: #EEF3FE;
+
+  background: var(--bg-app);
+  color: var(--text-primary);
+}
+.theme-v3.theme-v3.light,
+.theme-v3.theme-v3.light.light {
+  --bg: var(--bg-app);
+  --background: var(--bg-app);
+  --foreground: var(--text-primary);
+  --card: var(--bg-card);
+  --secondary: var(--bg-2);
+  --muted-foreground: var(--text-muted);
+  --border: var(--border-default);
+}
+
+/* alias the v2 accent vars so v2 components reused inside theme-v3 resolve */
+.theme-v3.theme-v3 {
+  --v2-accent: var(--v3-accent);
+  --v2-sel: var(--v3-sel);
+}
+
+/* monochrome brand marks must flip in SYSTEM dark too (not just .dark) */
+@media (prefers-color-scheme: dark) {
+  .theme-v3:not(.light) svg path[fill="#000"],
+  .theme-v3:not(.light) svg path[fill="#000000"],
+  .theme-v3:not(.light) svg path[fill="#181717"] {
+    fill: #ECEDEF;
+  }
+}
+
+/* ambient motion as CSS, not rAF loops: JS infinite animations starve the
+   compositor on low-power devices (and headless verification). */
+@keyframes v3-blink { 0%, 100% { opacity: 1; } 50% { opacity: 0.1; } }
+.v3-caret { animation: v3-blink 1.05s ease-in-out infinite; }
+@keyframes v3-breathe { 0%, 100% { transform: scale(1); } 50% { transform: scale(1.04); } }
+.v3-breathe { animation: v3-breathe 4s ease-in-out infinite; }
+@keyframes v3-float { 0%, 100% { transform: translateY(0); } 50% { transform: translateY(-3px); } }
+.v3-float { animation: v3-float 3.6s ease-in-out infinite; }
+@media (prefers-reduced-motion: reduce) {
+  .v3-caret, .v3-breathe, .v3-float { animation: none; }
+}
