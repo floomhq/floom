@@ -55,6 +55,8 @@ def test_short_timeouts_pass_through_with_1s_floor(monkeypatch, tmp_path):
 def test_garbage_input_falls_back_to_cap(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path)
     assert main._mcp_watch_timeout_seconds("not-a-number") == 30.0
+    # JSON `1e999` parses to float('inf'); int(inf) raises OverflowError
+    assert main._mcp_watch_timeout_seconds(float("inf")) == 30.0
 
 
 def test_advertised_schemas_do_not_exceed_cap(monkeypatch, tmp_path):
