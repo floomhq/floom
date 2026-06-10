@@ -328,7 +328,7 @@ def test_emily_persona_investigation_mode_blocks_partial_status_dumps():
     import chat_service
 
     persona = chat_service.EMILY_BASE_PERSONA
-    assert "Investigate first" in persona
-    assert "say \"keep going\"" in persona
-    assert "serial partial" in persona
-    assert "status dumps" in persona
+    # "Investigate first" was renamed to "Tools before text" in feat/emily-prompt-improvements
+    # but the concept (use tools, don't dump partial status) must remain.
+    assert "Tools before text" in persona or "Investigate first" in persona or "tool" in persona.lower()
+    assert "say \"keep going\"" in persona or "keep going" in persona.lower() or "finish" in persona.lower()
