@@ -187,7 +187,7 @@ function Story() {
               className="flex min-h-[200px] cursor-default flex-col justify-center py-4 md:min-h-[175px]"
               onMouseEnter={() => setActive(i)}
             >
-              <h3 className={`text-[34px] font-semibold tracking-[-0.025em] transition-colors duration-300 ${active === i ? "text-foreground" : "text-foreground md:text-muted-foreground/55"}`}>
+              <h3 className={`text-[26px] font-semibold tracking-[-0.025em] transition-colors sm:text-[34px] duration-300 ${active === i ? "text-foreground" : "text-foreground md:text-muted-foreground/55"}`}>
                 {b.t}
               </h3>
               <p className={`mt-2 max-w-[360px] text-[14px] leading-relaxed text-muted-foreground transition-opacity duration-300 ${active === i ? "opacity-100" : "opacity-100 md:opacity-55"}`}>
@@ -237,13 +237,13 @@ function Templates() {
         whileInView={{ opacity: 1, y: 0 }}
         viewport={{ once: true, amount: 0.4 }}
         transition={{ duration: 0.5, ease: EASE }}
-        className="text-[32px] font-semibold tracking-[-0.025em]"
+        className="text-[26px] font-semibold tracking-[-0.025em] sm:text-[32px]"
       >
         Or start from one that works.
       </motion.h2>
       <div className="mt-9 grid gap-3.5 md:grid-cols-3">
         {templates.map((t, i) => (
-          <V3TemplateCard key={t.slug} t={t} i={i} href="/v3/templates" animate="view" />
+          <V3TemplateCard key={t.slug} t={t} i={i} animate="view" />
         ))}
       </div>
       <motion.div
@@ -276,14 +276,14 @@ export function V3Body() {
 
 
         {/* hero: headline, one line, the jewel, three pills */}
-        <section className="pb-16 pt-40 text-center">
+        <section className="pb-16 pt-24 text-center sm:pt-40">
           <motion.h1
             initial={{ opacity: 0, y: 14 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.6, ease: EASE }}
-            className="text-[64px] font-semibold leading-[1.02] tracking-[-0.034em]"
+            className="text-[42px] font-semibold leading-[1.02] tracking-[-0.034em] sm:text-[64px]"
           >
-            Hire AI <Hl>workers</Hl>.
+            <Hl>Hire</Hl> AI workers.
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 12 }}
@@ -357,7 +357,7 @@ export function V3Body() {
             whileInView={{ opacity: 1, y: 0 }}
             viewport={{ once: true, amount: 0.5 }}
             transition={{ duration: 0.55, ease: EASE }}
-            className="text-[40px] font-semibold tracking-[-0.03em]"
+            className="text-[30px] font-semibold tracking-[-0.03em] sm:text-[40px]"
           >
             Start with one job.
           </motion.h2>

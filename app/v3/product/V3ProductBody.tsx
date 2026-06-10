@@ -175,7 +175,7 @@ function Beat({
   return (
     <section className="grid items-center gap-12 pb-32 md:grid-cols-2 md:gap-16">
       <Reveal className={flip ? "md:order-2" : ""}>
-        <h2 className="text-[34px] font-semibold leading-[1.06] tracking-[-0.025em]">{title}</h2>
+        <h2 className="text-[27px] font-semibold leading-[1.06] tracking-[-0.025em] sm:text-[34px]">{title}</h2>
         <p className="mt-3 max-w-[400px] text-[15px] leading-relaxed text-muted-foreground">{copy}</p>
         <p className="mt-3 max-w-[400px] text-[13px] leading-relaxed text-muted-foreground/80">{detail}</p>
       </Reveal>
@@ -199,7 +199,7 @@ export function V3ProductBody() {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55, ease: EASE }}
-            className="text-[48px] font-semibold leading-[1.03] tracking-[-0.032em]"
+            className="text-[34px] font-semibold leading-[1.03] tracking-[-0.032em] sm:text-[48px]"
           >
             The <Hl>cockpit</Hl> behind every worker.
           </motion.h1>

@@ -47,7 +47,7 @@ export function V3TemplatesBody() {
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55, ease: EASE }}
-            className="text-[40px] font-semibold leading-[1.05] tracking-[-0.028em]"
+            className="text-[30px] font-semibold leading-[1.05] tracking-[-0.028em] sm:text-[40px]"
           >
             Pick a <Hl>worker</Hl>. Hire it. Done.
           </motion.h1>
@@ -98,7 +98,7 @@ export function V3TemplatesBody() {
         {/* grid */}
         <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
           {filtered.map((t, i) => (
-            <V3TemplateCard key={t.slug} t={t} i={i} href="/login" animate="mount" />
+            <V3TemplateCard key={t.slug} t={t} i={i} animate="mount" />
           ))}
         </div>
         {filtered.length === 0 && (

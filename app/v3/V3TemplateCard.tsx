@@ -35,7 +35,7 @@ const MARKS: Record<string, React.ReactNode> = {
 export function V3TemplateCard({
   t,
   i = 0,
-  href = "/login",
+  href,
   animate = "mount",
 }: {
   t: Template;
@@ -52,7 +52,7 @@ export function V3TemplateCard({
   return (
     <motion.div {...anim} transition={{ duration: 0.4, delay: Math.min(i * 0.05, 0.3), ease: EASE }}>
       <Link
-        href={href}
+        href={href ?? `/v3/templates/${t.slug}`}
         className="group flex h-full flex-col rounded-[16px] bg-card p-6 transition-colors hover:bg-secondary/70"
       >
         <div className="flex items-center justify-between gap-3">
