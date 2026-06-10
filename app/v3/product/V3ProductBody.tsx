@@ -1,42 +1,210 @@
 "use client";
 
 /**
- * /v2/product — the cockpit page. The AppFrame moved here from the landing
- * (Federico: "on landing maybe too much, maybe on product"). Adds context
- * sections around it: what each surface is for, then the CTA.
+ * /v3/product — the depth page, rebuilt in the v3 artifact voice.
+ * AppFrame up top, then three full beats (Approvals with the Slack moment,
+ * the run record, the company brain), a quiet connections line, one button.
+ * Alternating sides, one idea per screen, soft panels like the landing story.
  */
 
 import Link from "next/link";
 import { motion } from "motion/react";
-import { ArrowLeft } from "lucide-react";
-import { AppFrame, RevealUp, SectionHead } from "../../v2/V2Sections";
+import { ArrowLeft, Brain, Check } from "lucide-react";
+import { AppFrame } from "../../v2/V2Sections";
+import {
+  GCalLogo,
+  GmailLogo,
+  HubSpotLogo,
+  NotionLogo,
+  SheetsLogo,
+  SlackLogo,
+} from "@/components/landing-icons";
 import "../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
-const SURFACES = [
-  { t: "Runs", p: "Every execution on the record: trigger, tools, context, output." },
-  { t: "Approvals", p: "The queue of things waiting for your yes." },
-  { t: "Brain", p: "The files your company knows by heart. Auditable per run." },
-];
+function Reveal({ children, delay = 0, className }: { children: React.ReactNode; delay?: number; className?: string }) {
+  return (
+    <motion.div
+      initial={{ opacity: 0, y: 16 }}
+      whileInView={{ opacity: 1, y: 0 }}
+      viewport={{ once: true, amount: 0.25, margin: "0px 0px -8% 0px" }}
+      transition={{ duration: 0.55, delay, ease: EASE }}
+      className={className}
+    >
+      {children}
+    </motion.div>
+  );
+}
+
+/* ───────── artifacts ───────── */
+
+function ApprovalArtifact() {
+  return (
+    <div className="w-full max-w-[440px] rounded-[18px] bg-card p-6">
+      <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
+        <span className="[&_svg]:h-3.5 [&_svg]:w-3.5"><SlackLogo /></span>
+        <span className="font-medium text-foreground"># sales</span>
+        <span className="ml-auto font-mono text-[10px]">2:14 PM</span>
+      </div>
+      <div className="mt-4 flex gap-3">
+        <span className="flex h-[28px] w-[28px] shrink-0 items-center justify-center rounded-[8px] text-[10.5px] font-semibold text-white" style={{ background: "var(--v3-accent)" }}>MA</span>
+        <div className="min-w-0">
+          <div className="text-[13px] font-medium">Maya <span className="ml-1 rounded-[3px] bg-secondary px-1 py-px text-[8.5px] font-semibold uppercase tracking-wide text-muted-foreground">worker</span></div>
+          <p className="mt-1 text-[13px] leading-relaxed text-muted-foreground">Drafted the Acme follow-up with pricing from the brain. Send?</p>
+          <div className="mt-3.5 flex gap-2">
+            <motion.span
+              initial={{ opacity: 0, y: 6 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.35, duration: 0.35 }}
+              className="rounded-[10px] px-4 py-2 text-[12.5px] font-medium text-white"
+              style={{ background: "var(--v3-accent)" }}
+            >
+              Approve &amp; send
+            </motion.span>
+            <motion.span
+              initial={{ opacity: 0, y: 6 }}
+              whileInView={{ opacity: 1, y: 0 }}
+              viewport={{ once: true }}
+              transition={{ delay: 0.45, duration: 0.35 }}
+              className="rounded-[10px] border border-border bg-card px-4 py-2 text-[12.5px]"
+            >
+              Edit
+            </motion.span>
+          </div>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function RecordArtifact() {
+  const rows = [
+    ["17:00:04", "Read Google Calendar · 3 events", true],
+    ["17:00:07", "Loaded brain: tone, pricing, CRM rules", true],
+    ["17:00:09", "Drafted email + HubSpot note", true],
+    ["17:00:11", "Send to sarah@acme.com", false],
+  ] as const;
+  return (
+    <div className="w-full max-w-[440px] rounded-[18px] bg-card p-6">
+      <div className="flex items-center justify-between">
+        <span className="text-[14px] font-medium">Run #1042</span>
+        <span className="font-mono text-[10.5px] text-muted-foreground">today, 17:00</span>
+      </div>
+      <div className="mt-4">
+        {rows.map(([t, n, ok], i) => (
+          <motion.div
+            key={i}
+            initial={{ opacity: 0 }}
+            whileInView={{ opacity: 1 }}
+            viewport={{ once: true }}
+            transition={{ delay: 0.15 + i * 0.1, duration: 0.35 }}
+            className="flex items-center gap-3 border-b border-border-soft py-2.5 text-[13px] last:border-0"
+          >
+            <span className="font-mono text-[10px] text-muted-foreground">{t}</span>
+            <span className="flex-1 text-muted-foreground">{n}</span>
+            {ok ? (
+              <Check className="h-3.5 w-3.5 text-muted-foreground/60" />
+            ) : (
+              <span className="rounded-full px-2.5 py-0.5 text-[10.5px] font-medium" style={{ background: "var(--v3-sel)", color: "var(--v3-accent)" }}>held for you</span>
+            )}
+          </motion.div>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+function BrainArtifact() {
+  const files = [
+    { ext: "PDF", name: "ICP brief", x: "4%", y: "8%" },
+    { ext: "XLS", name: "Pricing", x: "62%", y: "2%" },
+    { ext: "MD", name: "Tone guide", x: "8%", y: "74%" },
+    { ext: "URL", name: "Style guide", x: "60%", y: "72%" },
+  ];
+  return (
+    <div className="relative h-[280px] w-full max-w-[440px]">
+      <svg className="absolute inset-0 h-full w-full" aria-hidden>
+        {[["18%", "20%"], ["74%", "14%"], ["22%", "82%"], ["74%", "82%"]].map(([x, y], i) => (
+          <line key={i} x1="50%" y1="50%" x2={x} y2={y} stroke="var(--border-default)" strokeWidth="1" />
+        ))}
+      </svg>
+      <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
+        <motion.div
+          animate={{ scale: [1, 1.04, 1] }}
+          transition={{ duration: 4, repeat: Infinity, ease: "easeInOut" }}
+          className="mx-auto flex h-[76px] w-[76px] items-center justify-center rounded-full bg-card"
+        >
+          <Brain className="h-7 w-7" style={{ color: "var(--v3-accent)" }} strokeWidth={1.6} />
+        </motion.div>
+        <div className="mt-2 text-[10.5px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Company brain</div>
+      </div>
+      {files.map((f, i) => (
+        <motion.div
+          key={f.name}
+          animate={{ y: [0, -3, 0] }}
+          transition={{ duration: 3 + i * 0.6, repeat: Infinity, ease: "easeInOut", delay: i * 0.4 }}
+          className="absolute flex items-center gap-2 rounded-[10px] bg-card px-3 py-2"
+          style={{ left: f.x, top: f.y }}
+        >
+          <span className="flex h-[18px] w-[28px] items-center justify-center rounded-[5px] bg-secondary font-mono text-[8px] font-bold text-muted-foreground">{f.ext}</span>
+          <span className="text-[11.5px] font-medium">{f.name}</span>
+        </motion.div>
+      ))}
+    </div>
+  );
+}
+
+/* ───────── beats ───────── */
+
+function Beat({
+  title,
+  copy,
+  detail,
+  artifact,
+  flip = false,
+}: {
+  title: string;
+  copy: string;
+  detail: string;
+  artifact: React.ReactNode;
+  flip?: boolean;
+}) {
+  return (
+    <section className="grid items-center gap-12 pb-32 md:grid-cols-2 md:gap-16">
+      <Reveal className={flip ? "md:order-2" : ""}>
+        <h2 className="text-[34px] font-semibold leading-[1.06] tracking-[-0.025em]">{title}</h2>
+        <p className="mt-3 max-w-[400px] text-[15px] leading-relaxed text-muted-foreground">{copy}</p>
+        <p className="mt-3 max-w-[400px] text-[13px] leading-relaxed text-muted-foreground/80">{detail}</p>
+      </Reveal>
+      <Reveal delay={0.1} className={flip ? "md:order-1" : ""}>
+        <div className="flex items-center justify-center rounded-[22px] bg-secondary/70 p-8 md:min-h-[380px]">
+          {artifact}
+        </div>
+      </Reveal>
+    </section>
+  );
+}
 
 export function V3ProductBody() {
   return (
     <div className="theme-v3 min-h-screen text-[13.5px]" style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}>
-      <div className="mx-auto max-w-[1000px] px-7 pb-28">
-        <nav className="flex h-[60px] items-center justify-between">
-          <Link href="/v3" className="flex items-center gap-1.5 text-[13px] text-muted-foreground hover:text-foreground">
+      <div className="mx-auto max-w-[1000px] px-7 pb-20">
+        <nav className="flex h-[64px] items-center justify-between">
+          <Link href="/v3" className="flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground">
             <ArrowLeft className="h-3.5 w-3.5" /> Back
           </Link>
-          <Link href="/login" className="rounded-[10px] border border-border bg-card px-3 py-1.5 text-[12.5px] font-medium hover:bg-secondary">Sign in</Link>
+          <Link href="/login" className="rounded-[10px] px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">Sign in</Link>
         </nav>
 
-        <div className="pb-10 pt-14 text-center">
+        {/* hero */}
+        <div className="pb-14 pt-20 text-center">
           <motion.h1
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.55, ease: EASE }}
-            className="text-[44px] font-semibold leading-[1.04] tracking-[-0.03em]"
+            className="text-[48px] font-semibold leading-[1.03] tracking-[-0.032em]"
           >
             The cockpit behind every worker.
           </motion.h1>
@@ -44,39 +212,60 @@ export function V3ProductBody() {
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.5, delay: 0.08, ease: EASE }}
-            className="mx-auto mt-3 max-w-[480px] text-[14.5px] text-muted-foreground"
+            className="mx-auto mt-4 max-w-[460px] text-[15.5px] text-muted-foreground"
           >
             Most days the worker reports in Slack and you never open this. When you do, everything is on the record.
           </motion.p>
         </div>
 
-        <AppFrame standalone />
+        <div className="pb-28">
+          <AppFrame standalone />
+        </div>
 
-        {/* three captions, attached to the frame */}
-        <section className="-mt-12 pb-28">
-          <div className="grid gap-x-10 gap-y-6 sm:grid-cols-3">
-            {SURFACES.map((s, i) => (
-              <RevealUp key={s.t} delay={i * 0.04}>
-                <div className="border-t border-border pt-4">
-                  <div className="text-[15px] font-semibold">{s.t}</div>
-                  <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted-foreground">{s.p}</p>
-                </div>
-              </RevealUp>
+        <Beat
+          title="Nothing ships without your yes."
+          copy="Emails, CRM updates, posts: the worker drafts, you approve. Where you already are."
+          detail="Approval gates are on by default for anything that leaves the building. Relax them per worker once it has earned it."
+          artifact={<ApprovalArtifact />}
+        />
+
+        <Beat
+          flip
+          title="Every run on the record."
+          copy="Trigger, tools, context, output. Each step timestamped, each held action visible."
+          detail="When something looks off, you read the run like a receipt instead of guessing what the model did."
+          artifact={<RecordArtifact />}
+        />
+
+        <Beat
+          title="It knows your company."
+          copy="SOPs, pricing, tone. Drop in files once and every brief comes pre-loaded."
+          detail="Each run logs which files it used, so you can audit the why behind every output."
+          artifact={<BrainArtifact />}
+        />
+
+        {/* connections, one quiet line */}
+        <Reveal className="flex flex-col items-center gap-4 pb-28 text-center">
+          <span className="flex items-center justify-center gap-5 opacity-80">
+            {[<GmailLogo key="g" />, <SlackLogo key="s" />, <HubSpotLogo key="h" />, <NotionLogo key="n" />, <GCalLogo key="c" />, <SheetsLogo key="sh" />].map((logo, i) => (
+              <span key={i} className="flex h-5 w-5 items-center justify-center [&_svg]:h-5 [&_svg]:w-5">{logo}</span>
             ))}
-          </div>
-        </section>
+          </span>
+          <p className="max-w-[420px] text-[13px] text-muted-foreground">
+            Your tools connect with your tokens, and your tokens stay yours. Revoke at the source any time.
+          </p>
+        </Reveal>
 
-        <section className="pb-8 text-center">
-          <RevealUp>
-            <Link
-              href="/login"
-              className="inline-flex items-center rounded-[12px] px-6 py-3 text-[14.5px] font-medium text-white"
-              style={{ background: "var(--v2-accent)" }}
-            >
-              See it with your own worker
-            </Link>
-          </RevealUp>
-        </section>
+        {/* close */}
+        <Reveal className="pb-12 text-center">
+          <Link
+            href="/login"
+            className="inline-flex items-center rounded-[12px] px-6 py-3 text-[14.5px] font-medium text-white"
+            style={{ background: "var(--v3-accent)" }}
+          >
+            See it with your own worker
+          </Link>
+        </Reveal>
       </div>
     </div>
   );
