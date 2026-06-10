@@ -27,9 +27,10 @@ describe("approval fetch and decision surfacing", () => {
   });
 
   it("shows main approvals list fetch failures instead of silently failing", () => {
-    const page = source("app/approvals/page.tsx");
+    // Migrated to the <Collection> model — surfacing now lives in ApprovalsCollection.
+    const page = source("app/approvals/ApprovalsCollection.tsx");
 
-    expect(page).toContain("loadError");
+    expect(page).toContain("setError");
     expect(page).toContain("Could not load approvals.");
     expect(page).not.toContain("catch {\n      // silently fail");
   });
