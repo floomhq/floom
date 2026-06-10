@@ -14,7 +14,7 @@ import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection, Avatar } from "@/components/collection";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
-import { FilesEditor } from "@/components/worker-form/FilesEditor";
+import { CodeBlock } from "@/components/file-viewer/code-block";
 import { WorkerBrainEditor } from "@/components/worker/WorkerBrainEditor";
 import { WorkerToolsEditor } from "@/components/worker/WorkerToolsEditor";
 import { patchBrainContexts, patchWorkerConnections } from "@/lib/worker-manifest";
@@ -24,6 +24,7 @@ import {
   workerStatusPill,
   workerTags,
   contentTagOptions,
+  orderedSourceFiles,
 } from "@/lib/workers/derive";
 import { getFavorites, saveFavorites } from "@/lib/workers/favorites";
 
@@ -201,19 +202,31 @@ function RunsTab({ w }: { w: WorkerSummary }) {
   );
 }
 
+// SPEC §11: Source is file SUB-TABS (worker.yml/SKILL.md/run.py/requirements.txt),
+// NOT a left-sidebar file list.
 function SourceTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
-  const [selectedPath, setSelectedPath] = useState<string | null>(null);
+  const [active, setActive] = useState<string | null>(null);
   if (!d) return <Loading />;
-  const files = d.files ?? [];
-  // Reuse the worker-form file viewer (syntax highlight + preview/raw + list).
+  const ordered = orderedSourceFiles(d.files ?? []);
+  if (ordered.length === 0) return <div style={muted}>No source files.</div>;
+  const file = ordered.find((f) => f.path === active) ?? ordered[0];
   return (
-    <FilesEditor
-      mode="view"
-      files={files}
-      selectedPath={selectedPath ?? files[0]?.path ?? null}
-      onSelect={setSelectedPath}
-    />
+    <div>
+      <div style={{ display: "flex", gap: 2, marginBottom: 12, flexWrap: "wrap" }}>
+        {ordered.map((f) => (
+          <button
+            key={f.path}
+            type="button"
+            className={`c-dtab ${f.path === file.path ? "on" : ""}`}
+            onClick={() => setActive(f.path)}
+          >
+            {f.path}
+          </button>
+        ))}
+      </div>
+      <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} />
+    </div>
   );
 }
 
