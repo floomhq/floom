@@ -3369,12 +3369,22 @@ class SqliteUserSessionRepository:
     """Server-side sessions for cookie-based auth — each session is a random UUID."""
 
     def create(self, *, session_id: str, user_id: str, expires_at: str) -> dict[str, Any]:
+        # #848 RCA: login/magic-link checked user.disabled and then inserted the
+        # session in a separate statement — a user disabled between the two
+        # steps (TOCTOU) could still obtain a valid session. Fix: guard the
+        # INSERT on the user being enabled in the same statement, making the
+        # check and the insert atomic. Raises ValueError when no row inserted.
         created_at = now_iso()
         with get_db() as conn:
-            conn.execute(
-                "INSERT INTO user_sessions (id, user_id, expires_at, created_at) VALUES (?, ?, ?, ?)",
-                (session_id, user_id, expires_at, created_at),
+            cursor = conn.execute(
+                """
+                INSERT INTO user_sessions (id, user_id, expires_at, created_at)
+                SELECT ?, id, ?, ? FROM users WHERE id = ? AND disabled = 0
+                """,
+                (session_id, expires_at, created_at, user_id),
             )
+            if cursor.rowcount == 0:
+                raise ValueError("cannot create session: user is disabled or does not exist")
         return {"id": session_id, "user_id": user_id, "expires_at": expires_at, "created_at": created_at}
 
     def get(self, *, session_id: str) -> dict[str, Any] | None:

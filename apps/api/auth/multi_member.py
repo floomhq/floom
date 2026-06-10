@@ -105,7 +105,21 @@ class MultiMemberAuthProvider:
         if provided is not None:
             provided_text = provided.decode("latin-1", errors="replace").strip()
             if provided_text.startswith(_PAT_PREFIX):
-                return await self._verify_pat(provided_text)
+                # #831 RCA: a wos_-prefixed value was routed to PAT verification
+                # unconditionally, so an instance whose FLOOM_SECRET itself
+                # starts with "wos_" became unreachable via shared-secret auth
+                # (PAT lookup fails -> 401, no fallback). Fix: when PAT
+                # verification rejects the value but it matches the configured
+                # shared secret, fall back to the shared-secret context.
+                try:
+                    return await self._verify_pat(provided_text)
+                except HTTPException:
+                    if self._secret and hmac.compare_digest(
+                        provided_text.encode("latin-1"),
+                        self._secret.encode("latin-1"),
+                    ):
+                        return _local_shared_secret_context(request)
+                    raise
         if self._secret:
             # A secret is configured: enforce it strictly and NEVER fall through
             # to dev mode. A missing or wrong secret must return 401 immediately.
@@ -211,7 +225,10 @@ class MultiMemberAuthProvider:
         except Exception:
             pass
 
-        role = row["role"] or "admin"
+        # #847: a NULL/empty role column must degrade to "member", not "admin" —
+        # the least-privilege default. Tokens are minted with an explicit role,
+        # so this fallback only fires for malformed rows.
+        role = row["role"] or "member"
         return AuthContext(
             user_id=row["user_id"],
             role=role,
