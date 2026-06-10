@@ -28,6 +28,8 @@ import {
   SlackLogo,
 } from "@/components/landing-icons";
 import { V3Composer } from "./V3Composer";
+import { V3TemplateCard } from "./V3TemplateCard";
+import { getTemplate } from "@/components/landing-ref/data";
 import { Hl, V3Shell } from "./V3Shell";
 import "./theme.css";
 
@@ -222,17 +224,14 @@ function Story() {
   );
 }
 
-/* ───────────────── templates: three flat cards ───────────────── */
+/* ───────────────── templates: shared card, real data ───────────────── */
 
-const TPLS = [
-  { nm: "Client Follow-up", d: "Drafts the email after every call. CRM note included.", runs: "2,140 runs" },
-  { nm: "Monday Report", d: "Pipeline summary in #sales, Mondays at 9.", runs: "1,080 runs" },
-  { nm: "Lead Research", d: "Five inbound leads briefed before your first meeting.", runs: "960 runs" },
-];
+const TPL_SLUGS = ["client-follow-up-worker", "monday-report-worker", "lead-research-worker"];
 
 function Templates() {
+  const templates = TPL_SLUGS.map((sl) => getTemplate(sl)!).filter(Boolean);
   return (
-    <section className="pb-24">
+    <section className="pb-40">
       <motion.h2
         initial={{ opacity: 0, y: 12 }}
         whileInView={{ opacity: 1, y: 0 }}
@@ -243,23 +242,8 @@ function Templates() {
         Or start from one that works.
       </motion.h2>
       <div className="mt-9 grid gap-3.5 md:grid-cols-3">
-        {TPLS.map((t, i) => (
-          <motion.div
-            key={t.nm}
-            initial={{ opacity: 0, y: 12 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true, amount: 0.3 }}
-            transition={{ duration: 0.45, delay: i * 0.07, ease: EASE }}
-          >
-            <Link
-              href="/v3/templates"
-              className="flex h-full flex-col rounded-[16px] bg-card p-6 transition-colors hover:bg-secondary/70"
-            >
-              <div className="text-[15px] font-medium">{t.nm}</div>
-              <p className="mt-2 flex-1 text-[13px] leading-relaxed text-muted-foreground">{t.d}</p>
-              <div className="mt-5 font-mono text-[10.5px] text-muted-foreground">{t.runs}</div>
-            </Link>
-          </motion.div>
+        {templates.map((t, i) => (
+          <V3TemplateCard key={t.slug} t={t} i={i} href="/v3/templates" animate="view" />
         ))}
       </div>
       <motion.div
