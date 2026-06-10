@@ -306,6 +306,18 @@ export const api = {
       fetchJson<import("./types").VersionDetail>(`/workers/${id}/versions/${versionId}`),
     rollback: (id: string, versionId: string) =>
       fetchJson<import("./types").WorkerDetail>(`/workers/${id}/rollback/${versionId}`, { method: "POST" }),
+    // Worker feedback (SPEC §12) — anyone who can see the worker can comment.
+    feedback: {
+      list: (id: string) =>
+        fetchJson<import("./types").WorkerFeedback[]>(`/workers/${id}/feedback`),
+      create: (id: string, content: string) =>
+        fetchJson<import("./types").WorkerFeedback>(`/workers/${id}/feedback`, {
+          method: "POST",
+          body: JSON.stringify({ content }),
+        }),
+      remove: (id: string, feedbackId: string) =>
+        fetchJson<void>(`/workers/${id}/feedback/${feedbackId}`, { method: "DELETE" }),
+    },
   },
   runs: {
     list: (params?: {
