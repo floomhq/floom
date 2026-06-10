@@ -7,7 +7,7 @@
 
 ## TL;DR
 
-The API is solid: auth, security headers, rate limiting, secret isolation, E2E runs for all 3 worker types (agent/pure-script/DACH), and sandbox isolation all pass clean. The P1 blocker (`draft-from-prompt` 67% failure rate from unquoted-colon YAML) is **fixed and live** as of PR #33: stricter system prompt + `response_format=json_object` + 3-attempt retry loop. Smoke-tested 5/5 against the live API at 09:33 UTC — all parse cleanly, zero retries needed. The UI walks (prompt-to-worker flow, inline secrets #31, cancel button #32) still need Federico's eyes in browser, Vercel deploy protection blocks automated verification from self-hosted server.
+The API is solid: auth, security headers, rate limiting, secret isolation, E2E runs for all 3 worker types (agent/pure-script/DACH), and E2B isolation for the pure-script path all pass clean. Agent runs use AgentDriver in the API process and were tested as trusted platform-controlled execution, not as sandbox-isolated bundles. The P1 blocker (`draft-from-prompt` 67% failure rate from unquoted-colon YAML) is **fixed and live** as of PR #33: stricter system prompt + `response_format=json_object` + 3-attempt retry loop. Smoke-tested 5/5 against the live API at 09:33 UTC — all parse cleanly, zero retries needed. The UI walks (prompt-to-worker flow, inline secrets #31, cancel button #32) still need Federico's eyes in browser, Vercel deploy protection blocks automated verification from self-hosted server.
 
 **Top 3 things to check first when you wake up:**
 1. **`draft-from-prompt` in browser** — go to workers.floom.dev/workers/new, type a prompt, verify it returns a draft worker without error. The retry fix is live; a red toast should now be rare. If you do see one, journal logs at `journalctl -u workeros-api.service -g "YAML validation failed"` will show which attempt failed.
@@ -42,7 +42,7 @@ The API is solid: auth, security headers, rate limiting, secret isolation, E2E r
 - All cut endpoints return 404: approve, pause, /approvals
 
 ### E2E Worker Runs
-- **research_brief** (agent/skill/E2B): completed in ~16s, 2 artifacts, 5 transcript entries, `brief` markdown output present
+- **research_brief** (agent/skill/AgentDriver in API process): completed in ~16s, 2 artifacts, 5 transcript entries, `brief` markdown output present
 - **csv_enricher** (pure-script/python311/E2B): completed in <8s, `enriched_csv` output with new column
 - **dach_compliance** (pure-script/python311/E2B): completed, 3 output fields (`compliance_report`, `rate_benchmark`, `red_flags` with risk_level=LOW)
 - **Cancel in-flight**: `POST /runs/{id}/cancel` → `status=cancel_requested` (200) → run transitions to `status=failed`, `error="Run cancelled by user"`

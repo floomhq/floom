@@ -56,8 +56,8 @@ PR #33:
 | Path traversal `/uploads` | curl `..%2F..%2Fetc%2Fpasswd` | PASS, 400 |
 | Rate limit | curl burst 220 | PASS, 144 OK + 76 x 429 with `Retry-After: 60` |
 | Security headers | curl `-i` | PASS, HSTS + X-Frame + CSP + Permissions + X-CTO + Referrer all present |
-| E2B sandbox isolation | malicious bundle dumping `os.environ` | PASS, FLOOM_SECRET + OPENAI_API_KEY + COMPOSIO_API_KEY + COMPOSIO_WEBHOOK_SIGNING_KEY + E2B_API_KEY all absent in sandbox |
-| `research_brief` (agent/E2B) | API run | PASS, ~16s, 2 artifacts, 5 transcript entries |
+| E2B pure-script isolation | malicious bundle dumping `os.environ` | PASS, FLOOM_SECRET + OPENAI_API_KEY + COMPOSIO_API_KEY + COMPOSIO_WEBHOOK_SIGNING_KEY + E2B_API_KEY all absent in sandbox |
+| `research_brief` (agent/AgentDriver in API process) | API run | PASS, ~16s, 2 artifacts, 5 transcript entries |
 | `csv_enricher` (pure-script/E2B) | API run | PASS, <8s, enriched column present |
 | `dach_compliance` (pure-script/E2B) | API run | PASS, 3 output fields, risk_level=LOW |
 | Cancel in-flight | POST /runs/{id}/cancel | PASS, run -> failed, error="Run cancelled by user" |
