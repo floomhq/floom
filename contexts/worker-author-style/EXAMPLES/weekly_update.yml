@@ -1,0 +1,46 @@
+# Example: skill-mode worker that turns raw notes into a weekly update.
+# Pattern: 1 input (notes + audience), 1 markdown output, no external connections.
+
+schema_version: '0.3'
+is_example: true
+name: weekly_update
+title: Weekly Update
+description: Turns raw notes into a polished weekly company update using AI.
+long_description: |
+  Converts rough weekly notes into a polished update for internal, investor, or
+  customer audiences. It keeps the structure consistent while adjusting tone and
+  emphasis for the selected audience.
+
+mode: skill
+
+inputs:
+  notes: string
+  audience: "internal" | "investor" | "customer"
+
+use_cases:
+- Turn messy founder notes into an internal Friday update.
+- Prepare an investor-facing progress memo from product and revenue bullets.
+- Rewrite operational updates into a customer-safe changelog style.
+
+how_it_works: |
+  Raw notes + audience
+    -> group bullets by theme
+    -> rewrite for audience tone
+    -> highlight metrics and next steps
+    -> return approval-ready markdown
+
+connections: []
+secrets: []
+triggers:
+  - type: manual
+
+exec:
+  entry: SKILL.md
+  outputs:
+    update_markdown: string
+
+tags:
+- updates
+- reporting
+- markdown
+- operations

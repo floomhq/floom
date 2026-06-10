@@ -1,6 +1,6 @@
 # Security Data Map — Workeros
 
-Last updated: 2026-05-29
+Last updated: 2026-06-09
 
 Where user data lives, how it is protected at rest, and how long it is kept.
 Workeros OS is a single-tenant deployment: one account owner, no third-party
@@ -48,19 +48,47 @@ controls content and lifetime. Disk-level encryption only.
 Holds platform infrastructure secrets: `FLOOM_SECRET`, `OPENAI_API_KEY`,
 `E2B_API_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_WEBHOOK_SIGNING_KEY`,
 `WORKERS_FRONTEND_URL`. File-permission protected (mode 0600 by convention).
-These are NEVER returned by any API endpoint, never logged in cleartext, and
-NEVER injected into worker sandboxes (`_PLATFORM_SECRET_NAMES` denylist in
-`run_service.py`). User-managed secrets added via the secrets API are stored
-in the DB `secrets` table, not here.
+These are NEVER returned by any API endpoint or logged in cleartext.
+`_PLATFORM_SECRET_NAMES` in `run_service.py` excludes its denylisted
+infrastructure names from the resolved worker-secret set used by both runtime
+paths. `OPENAI_API_KEY` is intentionally not denylisted in this single-tenant
+version and can be resolved for a worker that declares it. User-managed secrets
+added via the secrets API are stored in the DB `secrets` table, not here.
 
-## 5. E2B sandboxes (ephemeral)
+## 5. Worker execution topology
 
-Worker code runs in E2B microVMs. Each sandbox receives only:
+Workeros has two execution paths:
+
+- Pure-script workers (`.py`, `.sh`, `.js`, or `runtime.mode: pure-script`) run
+  in E2B microVMs.
+- Agent workers (`.md`, `SKILL.md`, or `runtime.mode: agent`) run through
+  AgentDriver in the API process.
+
+The current single-tenant deployment permits only trusted,
+platform-controlled agent bundles. This is deployment policy, not an enforced
+isolation boundary: AgentDriver does not authenticate the provenance or safety
+of a bundle before running it.
+
+### 5.1 E2B sandboxes for pure-script workers
+
+Pure-script worker code runs in E2B microVMs. Each sandbox receives only:
 `FLOOM_RUN_ID`, `FLOOM_TRACE_ID`, the worker's declared inputs, declared
 context files, and the declared/user secrets resolved through
 `get_secrets_for_worker` (platform infra secrets are filtered out). The
 sandbox `os.environ` does NOT contain any platform secret. Sandboxes are
 destroyed when the run ends; nothing persists in them.
+
+### 5.2 AgentDriver for agent workers
+
+The OpenAI Agents SDK loop runs in the API process. AgentDriver reads
+host-staged worker bundles and contexts, writes host-staged run artifacts, and
+creates configured MCP/Composio clients from the API process. Its
+`run_command` tool follows the configured E2B runner, but the AgentDriver loop,
+file tools, and connection orchestration remain in-process. Worker-secret
+resolution, tool-specific secret forwarding, path validation, tool scoping,
+approval gates, redaction, cancellation, and resource limits reduce specific
+risks; they do not create a process or microVM boundary between AgentDriver and
+the API host.
 
 ## 6. Logs / journald
 
@@ -78,10 +106,10 @@ Browser ──(/api/proxy, server-injected x-floom-secret)──▶ API (FastAPI
                                                             │
                           ┌─────────────────────────────────┼───────────────┐
                           ▼                                 ▼                ▼
-                     SQLite (floom.db)              artifacts/contexts   E2B microVM
-                     workers/runs/secrets/          on server disk       (ephemeral,
-                     connections/conversations/                          declared
-                     contexts/approvals/...                              secrets only)
+                     SQLite (floom.db)              artifacts/contexts   Worker runtime
+                     workers/runs/secrets/          on server disk       pure-script: E2B
+                     connections/conversations/                          agent: API-process
+                     contexts/approvals/...                              AgentDriver
 ```
 
 The browser never receives platform secrets or user secret values; the
