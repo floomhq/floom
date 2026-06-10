@@ -32,7 +32,7 @@ export function FloomMark({ size = 28 }: { size?: number }) {
       viewBox="0 0 100 100"
       xmlns="http://www.w3.org/2000/svg"
       role="img"
-      aria-label="Workeros"
+      aria-label="WorkerOS"
       style={{ borderRadius: "22%" }}
     >
       <rect width="100" height="100" rx="22" fill="var(--primary)" />
@@ -44,10 +44,10 @@ export function FloomMark({ size = 28 }: { size?: number }) {
   );
 }
 
-// C6: Emily avatar — solid Workeros accent blue circle, no glyph.
+// C6: Emily avatar — solid WorkerOS accent blue circle, no glyph.
 // Used as the nav icon for the Assistant item in place of the generic Bot glyph.
 // The accent blue (#59AAF8 / --accent in dark, hardcoded for light) is the
-// Workeros brand blue Federico designated for Emily's identity.
+// WorkerOS brand blue Federico designated for Emily's identity.
 function EmilyDot({ className }: { className?: string }) {
   return (
     <span
@@ -179,7 +179,7 @@ export function Sidebar() {
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--border-soft)] bg-[var(--bg-app)] px-4 md:hidden">
         <Link href="/overview" className="flex items-center gap-2">
           <FloomMark size={22} />
-          <span className="font-semibold text-base tracking-tight">Workeros</span>
+          <span className="font-semibold text-base tracking-tight">WorkerOS</span>
         </Link>
         <div className="flex items-center gap-2">
           <button
@@ -230,7 +230,7 @@ export function Sidebar() {
             <div className="flex items-center justify-between border-b border-[var(--border-soft)] px-5 py-4">
               <Link href="/overview" className="flex items-center gap-2" onClick={() => setOpen(false)}>
                 <FloomMark size={22} />
-                <span className="font-semibold text-base tracking-tight">Workeros</span>
+                <span className="font-semibold text-base tracking-tight">WorkerOS</span>
               </Link>
               <button
                 type="button"
@@ -299,7 +299,7 @@ export function UserProfileFooter({
   const primary = (user as (typeof user & { username?: string | null }) | null)?.username
     || user?.email || user?.display_name || "Local user";
   const userRole = (user as (typeof user & { role?: string }) | null)?.role;
-  const secondary = userRole === "admin" ? "Admin" : userRole === "member" ? "Member" : (user?.email ? "Signed in" : "Workeros");
+  const secondary = userRole === "admin" ? "Admin" : userRole === "member" ? "Member" : (user?.email ? "Signed in" : "WorkerOS");
   const initials = profileInitials(primary);
 
   async function logout() {
