@@ -123,6 +123,16 @@ def _whatsapp_claim_url(token: str) -> str:
     return f"{base}/settings?whatsapp_claim={urllib.parse.quote(token)}"
 
 
+def _whatsapp_short_claim_url(token: str) -> str:
+    """Return the short /c/{token} redirect URL for use in outbound messages."""
+    base = (
+        os.environ.get("WORKERS_FRONTEND_URL")
+        or os.environ.get("WORKEROS_PUBLIC_URL")
+        or "https://workers.floom.dev"
+    ).rstrip("/")
+    return f"{base}/c/{urllib.parse.quote(token)}"
+
+
 def _whatsapp_binding_info(wa_id: str) -> Optional[Tuple[str, str]]:
     """Return (user_id, workspace_id) for an active binding, or None.
 
@@ -174,7 +184,7 @@ def _whatsapp_create_claim(wa_id: str, profile_name: str = "") -> Dict[str, str]
     normalized = _normalize_whatsapp_wa_id(wa_id)
     if not normalized:
         raise ValueError("WhatsApp sender id missing")
-    token = pysecrets.token_urlsafe(24)
+    token = pysecrets.token_urlsafe(12)  # 96-bit, 16 urlsafe chars
     now_ts = now_iso()
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
     with get_db() as conn:
@@ -236,7 +246,7 @@ def _reset_binding_to_pending(wa_id: str) -> Optional[str]:
     normalized = _normalize_whatsapp_wa_id(wa_id)
     if not normalized:
         return None
-    token = pysecrets.token_urlsafe(24)
+    token = pysecrets.token_urlsafe(12)  # 96-bit, 16 urlsafe chars
     expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
     now_ts = now_iso()
     try:
@@ -368,10 +378,7 @@ def claim_whatsapp_sender(
         try:
             send_whatsapp_text(
                 wa_id,
-                (
-                    "Your WhatsApp number has been linked to a different Workeros "
-                    "account.  If this was not you, visit Settings to reclaim it."
-                ),
+                "Heads up: this number was just linked to a different account. If that wasn't you, go to Settings and re-link it.",
             )
         except Exception:
             logger.warning(
@@ -801,13 +808,12 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, pr
     if not binding:
         try:
             claim = _whatsapp_create_claim(normalized_wa_id, profile_name)
+            short_url = _whatsapp_short_claim_url(claim["claim_token"])
             send_whatsapp_text(
                 normalized_wa_id,
                 (
-                    "Link this WhatsApp number to your Workeros workspace before "
-                    "I can access any workers, runs, brain packs, or connections.\n\n"
-                    f"{claim['claim_url']}\n\n"
-                    "This link expires in 24 hours."
+                    f"Hi! I'm Emily. Link this number to your Workeros account and we're good to go: "
+                    f"{short_url} (valid 24h)"
                 ),
             )
         except Exception:
@@ -833,13 +839,15 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, pr
                 claim_url = _reset_binding_to_pending(normalized_wa_id)
                 if claim_url:
                     try:
+                        # claim_url is the full /settings URL; derive the short URL from it.
+                        # Reconstruct the token from the full URL.
+                        _claim_token_stale = claim_url.split("whatsapp_claim=")[-1] if "whatsapp_claim=" in claim_url else ""
+                        _short = _whatsapp_short_claim_url(_claim_token_stale) if _claim_token_stale else claim_url
                         send_whatsapp_text(
                             normalized_wa_id,
                             (
-                                "Your linked account no longer exists.  "
-                                "Please re-link your WhatsApp number:\n\n"
-                                f"{claim_url}\n\n"
-                                "This link expires in 24 hours."
+                                f"Your link needs a refresh. Tap here and you're back in a minute: "
+                                f"{_short} (valid 24h)"
                             ),
                         )
                     except Exception:
@@ -868,13 +876,13 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, pr
             claim_url = _reset_binding_to_pending(normalized_wa_id)
             if claim_url:
                 try:
+                    _claim_token_ws = claim_url.split("whatsapp_claim=")[-1] if "whatsapp_claim=" in claim_url else ""
+                    _short_ws = _whatsapp_short_claim_url(_claim_token_ws) if _claim_token_ws else claim_url
                     send_whatsapp_text(
                         normalized_wa_id,
                         (
-                            "Your linked workspace no longer exists.  "
-                            "Please re-link your WhatsApp number to a new workspace:\n\n"
-                            f"{claim_url}\n\n"
-                            "This link expires in 24 hours."
+                            f"Your link needs a refresh. Tap here and you're back in a minute: "
+                            f"{_short_ws} (valid 24h)"
                         ),
                     )
                 except Exception:
@@ -927,7 +935,7 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, pr
             try:
                 send_whatsapp_text(
                     normalized_wa_id,
-                    "I could not complete that request. The failure was logged for the workspace operator.",
+                    "Something went wrong on my end. Try again in a moment.",
                 )
             except Exception:
                 logger.exception("WhatsApp error reply failed")

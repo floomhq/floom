@@ -275,8 +275,9 @@ def test_unbound_sender_gets_claim_prompt_without_workspace_access(monkeypatch, 
 
     assert sent
     assert sent[0][0] == "491701234567"
-    assert "whatsapp_claim=" in sent[0][1]
-    assert "before I can access any workers" in sent[0][1]
+    # Short claim URL uses /c/{token} path
+    assert "/c/" in sent[0][1]
+    assert "24h" in sent[0][1]
 
 
 def test_bound_senders_route_to_distinct_users(monkeypatch, tmp_path):
@@ -644,9 +645,9 @@ def test_invalid_workspace_resets_binding_and_sends_fresh_claim(monkeypatch, tmp
         )
     )
 
-    # A re-claim link must have been sent.
+    # A re-claim link must have been sent (as a short /c/{token} URL).
     assert sent
-    assert any("whatsapp_claim=" in msg for _, msg in sent)
+    assert any("/c/" in msg for _, msg in sent)
 
     # Binding must now be pending.
     with main.get_db() as conn:
@@ -696,6 +697,80 @@ def test_new_claim_invalidates_prior_pending_token(monkeypatch, tmp_path):
     token2 = row2["claim_token"]
     assert token2 is not None
     assert token2 != token1, "Pending claim token must be rotated on new message"
+
+
+# --------------------------------------------------------------------------- #
+# Short-link redirect GET /c/{token}
+# --------------------------------------------------------------------------- #
+
+def test_shortlink_redirects_to_whatsapp_claim(monkeypatch, tmp_path):
+    """GET /c/{token} resolves a pending WA token to /settings?whatsapp_claim=…."""
+    main = _load_api(monkeypatch, tmp_path)
+    with main.get_db() as conn:
+        now = main.now_iso()
+        expires = "2099-01-01T00:00:00+00:00"
+        conn.execute(
+            """
+            INSERT INTO whatsapp_sender_bindings
+                (wa_id, user_id, profile_name, status, claim_token,
+                 claim_expires_at, created_at, updated_at)
+            VALUES ('4917099999', NULL, 'Test', 'pending', 'shorttest', ?, ?, ?)
+            """,
+            (expires, now, now),
+        )
+    with TestClient(main.app, follow_redirects=False) as client:
+        resp = client.get("/c/shorttest")
+    assert resp.status_code == 302
+    assert "whatsapp_claim=shorttest" in resp.headers["location"]
+
+
+def test_shortlink_redirects_to_slack_claim(monkeypatch, tmp_path):
+    """GET /c/{token} resolves a pending Slack token to /settings?slack_claim=…."""
+    main = _load_api(monkeypatch, tmp_path)
+    with main.get_db() as conn:
+        now = main.now_iso()
+        expires = "2099-01-01T00:00:00+00:00"
+        conn.execute(
+            """
+            INSERT INTO slack_sender_bindings
+                (slack_team_id, slack_user_id, user_id, profile_name, status,
+                 claim_token, claim_expires_at, created_at, updated_at, last_seen_at)
+            VALUES ('T123', 'U999', NULL, 'Test', 'pending', 'slackshort', ?, ?, ?, ?)
+            """,
+            (expires, now, now, now),
+        )
+    with TestClient(main.app, follow_redirects=False) as client:
+        resp = client.get("/c/slackshort")
+    assert resp.status_code == 302
+    assert "slack_claim=slackshort" in resp.headers["location"]
+
+
+def test_shortlink_returns_404_for_unknown_token(monkeypatch, tmp_path):
+    """GET /c/unknown returns 404."""
+    main = _load_api(monkeypatch, tmp_path)
+    with TestClient(main.app) as client:
+        resp = client.get("/c/no-such-token-xyz")
+    assert resp.status_code == 404
+
+
+def test_shortlink_returns_404_for_expired_token(monkeypatch, tmp_path):
+    """GET /c/{token} returns 404 for an expired pending token."""
+    main = _load_api(monkeypatch, tmp_path)
+    with main.get_db() as conn:
+        now = main.now_iso()
+        expired = "2000-01-01T00:00:00+00:00"
+        conn.execute(
+            """
+            INSERT INTO whatsapp_sender_bindings
+                (wa_id, user_id, profile_name, status, claim_token,
+                 claim_expires_at, created_at, updated_at)
+            VALUES ('4917088888', NULL, 'Test', 'pending', 'expiredtok', ?, ?, ?)
+            """,
+            (expired, now, now),
+        )
+    with TestClient(main.app) as client:
+        resp = client.get("/c/expiredtok")
+    assert resp.status_code == 404
 
 
 # --------------------------------------------------------------------------- #
