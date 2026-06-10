@@ -532,6 +532,16 @@ trigger:
         skill_path = self._workers_dir / "skill-md-test" / "SKILL.md"
         assert skill_path.is_file(), "SKILL.md was not created"
         assert skill_path.read_text() == custom_skill, "SKILL.md content does not match provided skill_md"
+        from db import get_db
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT sv.manifest_json FROM skill_versions sv "
+                "JOIN workers w ON w.skill_version_id = sv.id WHERE w.id = ?",
+                ("skill-md-test",),
+            ).fetchone()
+        assert row is not None
+        assert json.loads(row["manifest_json"])["_files"]["SKILL.md"] == custom_skill
 
     @pytest.mark.xfail(
         reason="pending #752: _embed_files_in_skill_version not yet called on create_worker",
