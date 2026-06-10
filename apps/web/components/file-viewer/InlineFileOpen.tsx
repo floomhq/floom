@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { ArrowLeft, Download } from "lucide-react";
+import { ArrowLeft, Download, Folder as FolderIcon } from "lucide-react";
 import { isImageFile } from "@/lib/runs/trace";
 
 // APP-UI-V4-SPEC rule #5 / §4: ONE inline file-open pattern, shared by Brain and
@@ -45,6 +45,7 @@ export function InlineFileOpen({
   const [renamingId, setRenamingId] = useState<string | null>(null);
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
+  const [dir, setDir] = useState(""); // #783: current folder prefix ("" = root)
   const open = files.find((f) => f.id === openId) ?? null;
 
   const baseName = (path: string) => (path.includes("/") ? path.slice(path.lastIndexOf("/") + 1) : path);
@@ -150,10 +151,64 @@ export function InlineFileOpen({
     );
   }
 
+  // #783: fold nested paths into navigable folders at the current `dir` level.
+  const levelFiles = files.filter((f) => f.name.startsWith(dir) && !f.name.slice(dir.length).includes("/"));
+  const folderSet = new Set<string>();
+  for (const f of files) {
+    if (!f.name.startsWith(dir)) continue;
+    const rest = f.name.slice(dir.length);
+    const slash = rest.indexOf("/");
+    if (slash > 0) folderSet.add(rest.slice(0, slash));
+  }
+  const folders = Array.from(folderSet).sort();
+  const crumbs = dir ? dir.replace(/\/$/, "").split("/") : [];
+
   return (
-    <div className="c-ltable">
-      {files.map((f) => {
+    <div>
+      {/* Breadcrumb for nested folders. */}
+      {dir && (
+        <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 12.5 }}>
+          <button type="button" className="c-vpill" style={{ padding: "3px 8px" }} onClick={() => setDir("")}>
+            {rootLabel}
+          </button>
+          {crumbs.map((c, i) => (
+            <span key={i} style={{ color: "var(--muted-foreground)" }}>
+              /{" "}
+              <button
+                type="button"
+                style={{ background: "none", border: 0, cursor: "pointer", color: "var(--ink)", padding: 0 }}
+                onClick={() => setDir(crumbs.slice(0, i + 1).join("/") + "/")}
+              >
+                {c}
+              </button>
+            </span>
+          ))}
+        </div>
+      )}
+      <div className="c-ltable">
+      {folders.map((name) => (
+        <button
+          key={`dir:${name}`}
+          type="button"
+          className="c-lrow"
+          style={{ gridTemplateColumns: "1fr auto" }}
+          onClick={() => setDir(`${dir}${name}/`)}
+        >
+          <div className="c-lprimary">
+            <div className="c-lp-tx">
+              <div className="nm" style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                <FolderIcon size={13} /> {name}
+              </div>
+            </div>
+          </div>
+          <span className="c-cell m">
+            {files.filter((f) => f.name.startsWith(`${dir}${name}/`)).length} files
+          </span>
+        </button>
+      ))}
+      {levelFiles.map((f) => {
         const renaming = renamingId === f.id;
+        const display = f.name.slice(dir.length);
         return (
           <div
             key={f.id}
@@ -183,7 +238,7 @@ export function InlineFileOpen({
                     style={{ fontFamily: "var(--font-mono)", background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left" }}
                     onClick={() => setOpenId(f.id)}
                   >
-                    {f.name}
+                    {display}
                   </button>
                 )}
                 {f.tags && f.tags.length > 0 ? (
@@ -225,6 +280,7 @@ export function InlineFileOpen({
           </div>
         );
       })}
+      </div>
     </div>
   );
 }
