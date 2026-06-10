@@ -714,34 +714,25 @@ def _slack_binding_user_id(team_id: str, slack_user_id: str) -> Optional[str]:
             ).fetchone()
             if row and row["user_id"]:
                 # Validate the bound user still exists in the users table.
-                # In single-user (legacy) mode the users table is empty and we
-                # skip this check — a missing user does not invalidate bindings
-                # on installs that pre-date multi-member auth.
-                try:
-                    user_count_row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
-                    user_count = user_count_row[0] if user_count_row else 0
-                except Exception:
-                    user_count = 0
-
-                if user_count > 0:
-                    user_exists_row = conn.execute(
-                        "SELECT 1 FROM users WHERE id = ? LIMIT 1",
-                        (str(row["user_id"]),),
-                    ).fetchone()
-                    if not user_exists_row:
-                        logger.warning(
-                            "Slack binding for %s/%s points to deleted user %s; resetting to pending",
-                            team_id, slack_user_id, row["user_id"],
-                        )
-                        conn.execute(
-                            """
-                            UPDATE slack_sender_bindings
-                            SET status = 'pending', user_id = NULL, updated_at = ?
-                            WHERE slack_team_id = ? AND slack_user_id = ?
-                            """,
-                            (now_iso(), team_id, slack_user_id),
-                        )
-                        return None
+                # bound_user_is_valid() treats the bootstrap/legacy owner id as
+                # always-valid, and also skips the check when the table is empty
+                # (pre-auth / dev mode) — same guard as the original logic but now
+                # shared and correct for non-empty-table legacy installs.
+                from channels.common import bound_user_is_valid
+                if not bound_user_is_valid(str(row["user_id"])):
+                    logger.warning(
+                        "Slack binding for %s/%s points to deleted user %s; resetting to pending",
+                        team_id, slack_user_id, row["user_id"],
+                    )
+                    conn.execute(
+                        """
+                        UPDATE slack_sender_bindings
+                        SET status = 'pending', user_id = NULL, updated_at = ?
+                        WHERE slack_team_id = ? AND slack_user_id = ?
+                        """,
+                        (now_iso(), team_id, slack_user_id),
+                    )
+                    return None
                 conn.execute(
                     """
                     UPDATE slack_sender_bindings
