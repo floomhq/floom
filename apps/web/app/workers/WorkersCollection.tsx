@@ -4,12 +4,20 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { WorkerSummary, WorkerDetail } from "@/lib/types";
+import type {
+  WorkerSummary,
+  WorkerDetail,
+  WorkerContextSpec,
+  WorkerConnectionSpec,
+} from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection, Avatar } from "@/components/collection";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import { FilesEditor } from "@/components/worker-form/FilesEditor";
+import { WorkerBrainEditor } from "@/components/worker/WorkerBrainEditor";
+import { WorkerToolsEditor } from "@/components/worker/WorkerToolsEditor";
+import { patchBrainContexts, patchWorkerConnections } from "@/lib/worker-manifest";
 import { can, isViewOnly, canLeaveFeedback, visibilityLabel } from "@/lib/permissions";
 import {
   isSystemWorker,
@@ -34,7 +42,7 @@ function rel(ts?: string | null): string {
 // ---- detail (lazy WorkerDetail, cached so tab switches don't refetch) ----
 const detailCache = new Map<string, WorkerDetail>();
 
-function useWorkerDetail(id: string): WorkerDetail | undefined {
+function useWorkerDetail(id: string): [WorkerDetail | undefined, (d: WorkerDetail) => void] {
   const [detail, setDetail] = useState<WorkerDetail | undefined>(detailCache.get(id));
   useEffect(() => {
     if (detailCache.has(id)) {
@@ -53,7 +61,30 @@ function useWorkerDetail(id: string): WorkerDetail | undefined {
       alive = false;
     };
   }, [id]);
-  return detail;
+  const apply = useCallback(
+    (d: WorkerDetail) => {
+      detailCache.set(id, d);
+      setDetail(d);
+    },
+    [id],
+  );
+  return [detail, apply];
+}
+
+/** Build the worker.yml text from a detail (files take precedence). */
+function workerYml(d: WorkerDetail): string {
+  return d.files?.find((f) => f.path === "worker.yml")?.content || d.manifest_yaml || "";
+}
+
+/** Persist a patched worker.yml via updateFiles, returning the saved detail. */
+async function persistYml(d: WorkerDetail, patchedYml: string): Promise<WorkerDetail> {
+  const text = (d.files ?? [])
+    .filter((f) => !f.binary && f.content != null)
+    .map((f) => ({ path: f.path, content: f.content as string }));
+  const files = text.some((f) => f.path === "worker.yml")
+    ? text.map((f) => (f.path === "worker.yml" ? { ...f, content: patchedYml } : f))
+    : [{ path: "worker.yml", content: patchedYml }, ...text];
+  return api.workers.updateFiles(d.id, files);
 }
 
 function Loading() {
@@ -61,7 +92,7 @@ function Loading() {
 }
 
 function AboutTab({ w }: { w: WorkerSummary }) {
-  const d = useWorkerDetail(w.id);
+  const [d] = useWorkerDetail(w.id);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <WorkerAsciiDiagram
@@ -94,7 +125,7 @@ function AboutTab({ w }: { w: WorkerSummary }) {
 }
 
 function RunTab({ w }: { w: WorkerSummary }) {
-  const d = useWorkerDetail(w.id);
+  const [d] = useWorkerDetail(w.id);
   const [inputs, setInputs] = useState<Record<string, string>>({});
   const [running, setRunning] = useState(false);
   if (!d) return <Loading />;
@@ -142,7 +173,7 @@ function RunTab({ w }: { w: WorkerSummary }) {
 }
 
 function RunsTab({ w }: { w: WorkerSummary }) {
-  const d = useWorkerDetail(w.id);
+  const [d] = useWorkerDetail(w.id);
   const runs = d?.recent_runs ?? (w.last_run ? [w.last_run] : []);
   return (
     <div>
@@ -171,7 +202,7 @@ function RunsTab({ w }: { w: WorkerSummary }) {
 }
 
 function SourceTab({ w }: { w: WorkerSummary }) {
-  const d = useWorkerDetail(w.id);
+  const [d] = useWorkerDetail(w.id);
   const [selectedPath, setSelectedPath] = useState<string | null>(null);
   if (!d) return <Loading />;
   const files = d.files ?? [];
@@ -187,53 +218,64 @@ function SourceTab({ w }: { w: WorkerSummary }) {
 }
 
 function BrainTab({ w }: { w: WorkerSummary }) {
-  const d = useWorkerDetail(w.id);
+  const [d, applyDetail] = useWorkerDetail(w.id);
+  const [packs, setPacks] = useState<{ name: string }[]>([]);
+  const [busy, setBusy] = useState(false);
+  useEffect(() => {
+    api.contexts.list().then(setPacks).catch(() => {});
+  }, []);
   if (!d) return <Loading />;
-  const contexts = d.config?.contexts ?? [];
+  const editable = can("edit", d);
+  const save = async (next: WorkerContextSpec[]) => {
+    setBusy(true);
+    try {
+      applyDetail(await persistYml(d, patchBrainContexts(workerYml(d), next)));
+      toast.success("Brain updated");
+    } catch {
+      toast.error("Could not update brain folders.");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <div className="c-ltable">
-      {contexts.map((c, i) => {
-        const name = typeof c === "string" ? c : (c as { name?: string }).name ?? "context";
-        const writeable = typeof c === "object" && (c as { writeable?: boolean }).writeable;
-        return (
-          <div key={i} className="c-lrow" style={{ gridTemplateColumns: "1fr auto" }}>
-            <div className="c-lprimary">
-              <div className="c-lp-tx">
-                <div className="nm">{name}</div>
-              </div>
-            </div>
-            <span className="c-vpill">{writeable ? "Read & write" : "Read only"}</span>
-          </div>
-        );
-      })}
-      {contexts.length === 0 && <div style={{ ...muted, padding: 14 }}>No brain folders attached.</div>}
-    </div>
+    <WorkerBrainEditor
+      contexts={d.config?.contexts ?? []}
+      availablePacks={packs}
+      editable={editable}
+      busy={busy}
+      onChange={(next) => void save(next)}
+    />
   );
 }
 
 function ToolsTab({ w }: { w: WorkerSummary }) {
-  const conns = w.connections ?? [];
+  const [d, applyDetail] = useWorkerDetail(w.id);
+  const [busy, setBusy] = useState(false);
+  if (!d) return <Loading />;
+  const editable = can("edit", d);
+  const save = async (next: WorkerConnectionSpec[]) => {
+    setBusy(true);
+    try {
+      applyDetail(await persistYml(d, patchWorkerConnections(workerYml(d), next)));
+      toast.success("Tools updated");
+    } catch {
+      toast.error("Could not update tools.");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
-    <div className="c-ltable">
-      {conns.map((c) => (
-        <div key={c} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
-          <div className="c-lprimary">
-            <div className="c-lp-tx">
-              <div className="nm" style={{ textTransform: "capitalize" }}>
-                {c}
-              </div>
-              <div className="sub">via connection</div>
-            </div>
-          </div>
-        </div>
-      ))}
-      {conns.length === 0 && <div style={{ ...muted, padding: 14 }}>No tools connected.</div>}
-    </div>
+    <WorkerToolsEditor
+      connections={d.config?.connections ?? []}
+      editable={editable}
+      busy={busy}
+      onChange={(next) => void save(next)}
+    />
   );
 }
 
 function SettingsTab({ w }: { w: WorkerSummary }) {
-  const d = useWorkerDetail(w.id);
+  const [d] = useWorkerDetail(w.id);
   if (!d) return <Loading />;
   return (
     <div style={kv}>
