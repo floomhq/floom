@@ -3361,6 +3361,18 @@ class SqlitePersonalAccessTokenRepository:
             )
         return cursor.rowcount > 0
 
+    def rotate(self, *, token_id: str, user_id: str, token_hash: str) -> dict[str, Any] | None:
+        """Swap a PAT's secret in place — same id/name, new hash, last_used reset."""
+        with get_db() as conn:
+            cursor = conn.execute(
+                "UPDATE personal_access_tokens SET token_hash = ?, last_used_at = NULL "
+                "WHERE id = ? AND user_id = ?",
+                (token_hash, token_id, user_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+        return self._get(token_id=token_id)
+
     def touch_last_used(self, *, token_id: str, last_used_at: str) -> None:
         with get_db() as conn:
             conn.execute(

@@ -21,9 +21,9 @@ import { CliCommandPanel } from "@/components/CliCommandPanel";
 import { GitWorkspacePanel } from "@/components/GitWorkspacePanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { SlackConnect } from "@/components/assistant/SlackConnect";
-import { AlertTriangle, CheckCircle2, Copy, Mail, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Copy, Mail, RotateCw, Trash2 } from "lucide-react";
 
-function PersonalAccessTokensPanel() {
+export function PersonalAccessTokensPanel() {
   const [tokens, setTokens] = useState<PersonalAccessToken[] | null>(null);
   const [newTokenName, setNewTokenName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -67,6 +67,18 @@ function PersonalAccessTokensPanel() {
       await load();
     } catch (err) {
       toast.error((err as Error).message || "Failed to revoke token");
+    }
+  }
+
+  // #784: rotate — issue a new secret for the same token; old one stops working.
+  async function handleRotate(id: string, name: string) {
+    try {
+      const result = await api.tokens.rotate(id);
+      setCreatedToken(result.token);
+      toast.success(`Rotated "${name}" — old token revoked`);
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to rotate token");
     }
   }
 
@@ -133,6 +145,15 @@ function PersonalAccessTokensPanel() {
                   </span>
                 )}
               </div>
+              <button
+                type="button"
+                onClick={() => void handleRotate(t.id, t.name)}
+                className="text-muted-foreground hover:text-foreground"
+                aria-label={`Rotate ${t.name}`}
+                title="Rotate — issue a new secret, revoke the old one"
+              >
+                <RotateCw className="size-3.5" />
+              </button>
               <button
                 type="button"
                 onClick={() => void handleRevoke(t.id, t.name)}

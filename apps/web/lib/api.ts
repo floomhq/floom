@@ -893,6 +893,11 @@ export const api = {
       }),
     revoke: (tokenId: string) =>
       fetchJson<null>(`/auth/tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" }),
+    rotate: (tokenId: string) =>
+      fetchJson<import("./types").PersonalAccessTokenCreate>(
+        `/auth/tokens/${encodeURIComponent(tokenId)}/rotate`,
+        { method: "POST" }
+      ),
   },
   authMe: () => fetchJson<import("./types").AuthMe>("/auth/me"),
   integrations: {
