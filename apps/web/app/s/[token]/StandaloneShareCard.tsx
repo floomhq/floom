@@ -209,7 +209,7 @@ export function StandaloneShareCard({
 
         <div className="px-7 pb-5 pt-3">
           <p className="text-xs text-[var(--ink-faint)]">
-            Shared via <span className="font-medium text-[var(--ink-soft)]">Workeros</span>. Review the visible content before adding it to your workspace.
+            Shared via <span className="font-medium text-[var(--ink-soft)]">WorkerOS</span>. Review the visible content before adding it to your workspace.
           </p>
         </div>
       </div>

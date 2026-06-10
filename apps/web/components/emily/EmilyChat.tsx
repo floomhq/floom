@@ -498,10 +498,11 @@ function EmilyChatCore({ fullPage = false, onOpenRunDetails }: EmilyChatCoreProp
 // overlay, via the expand control + collapse button.
 type DockMode = "collapsed" | "rail" | "wide" | "full";
 
+// Widths per APP-UI-V4-SPEC §2: rail 330px (collapse 46px), widen 560px, full.
 const DOCK_WIDTH: Record<DockMode, string> = {
-  collapsed: "w-12",
-  rail: "w-full md:w-[380px] md:max-w-[30vw]",
-  wide: "w-full md:w-[640px] md:max-w-[52vw]",
+  collapsed: "w-[46px]",
+  rail: "w-full md:w-[330px] md:max-w-[30vw]",
+  wide: "w-full md:w-[560px] md:max-w-[52vw]",
   full: "fixed inset-0 z-50 w-full", // full-screen overlay
 };
 
