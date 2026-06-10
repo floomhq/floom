@@ -43,11 +43,14 @@ function test565ConnectionRowPeekSection(): void {
 }
 
 function test565ConnectionsClientExpandState(): void {
-  const s = src("app/connections/ConnectionsClient.tsx");
-  assert(s.includes("expandedId"), "ConnectionsClient must track expandedId state");
-  assert(s.includes("setExpandedId"), "ConnectionsClient must toggle expandedId on row click");
-  assert(s.includes("usedByCountBySlug"), "ConnectionsClient must compute used-by worker count");
-  assert(s.includes("computeUsedByCount"), "computeUsedByCount helper must be defined");
+  // ConnectionsClient.tsx was replaced by ConnectionsCollection.tsx in the
+  // ui-collection refactor (SPEC §5); used-by counts now come from the API
+  // (`used_by`) and rows link to the /connections/[id] detail pane.
+  const s = src("app/connections/ConnectionsCollection.tsx");
+  assert(s.includes("used_by"), "ConnectionsCollection must surface used-by worker counts");
+  assert(s.includes("Used by"), "ConnectionsCollection must render a Used by row");
+  assert(s.includes("/connections/") && s.includes("href"),
+    "ConnectionsCollection rows must link to the /connections/[id] detail page");
 }
 
 function test565ConnectionDetailPageExists(): void {

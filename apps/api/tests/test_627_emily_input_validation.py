@@ -50,10 +50,16 @@ def _run_tool(args: Dict[str, Any], config: Optional[_FakeConfig]) -> Dict[str, 
     import main as _main
     import run_service as _rs
     import db as _db
+    import chat_service as _cs
 
     from chat_service import _tool_workers_run
 
+    # Patch the ownership/visibility guard so tests exercise the feature logic
+    # without needing a real DB row. The guard ordering is correct security
+    # behaviour (PR #750); tests must supply owned fixtures or mock the guard.
+    # Precedent: PR #758 did the same for test_workers_run_uses_start_run_queue_path.
     with (
+        patch.object(_cs, "_worker_can_view", return_value=True),
         patch.object(_main, "_canonical_worker_id", side_effect=lambda x: x),
         patch.object(_rs, "get_worker_config_for_run", return_value=config),
         patch.object(_rs, "create_run", return_value="run_test_123"),
@@ -118,9 +124,11 @@ def test_627_run_not_created_when_inputs_missing():
     import main as _main
     import run_service as _rs
     import db as _db
+    import chat_service as _cs
     from chat_service import _tool_workers_run
 
     with (
+        patch.object(_cs, "_worker_can_view", return_value=True),
         patch.object(_main, "_canonical_worker_id", side_effect=lambda x: x),
         patch.object(_rs, "get_worker_config_for_run", return_value=config),
         patch.object(_rs, "create_run", return_value="run_test_123") as mock_create,
