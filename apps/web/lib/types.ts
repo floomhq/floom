@@ -899,6 +899,7 @@ export interface ConnectionTestResult {
   status: "valid" | "failed" | "expired";
   reason: string;
   tested_at: string;
+  tools?: string[]; // #789: live-enumerated MCP tool names
 }
 
 export interface ConnectedAccountMetadata {
