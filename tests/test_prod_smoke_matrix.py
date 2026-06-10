@@ -23,7 +23,7 @@ def test_manifest_parser_finds_active_stock_workers():
     specs = mod.load_active_workers()
 
     worker_ids = [spec.worker_id for spec in specs]
-    assert len(worker_ids) == 12
+    assert len(worker_ids) == 11
     assert worker_ids == [
         "weekly_update",
         "research_brief",
@@ -33,11 +33,11 @@ def test_manifest_parser_finds_active_stock_workers():
         "csv_enricher",
         "cv_writeup",
         "reverse_match_crm",
-        "linkedin-post-engagements",
         "node-smoke-test",
         "openblog",
         "opendraft",
     ]
+    assert "linkedin-post-engagements" not in worker_ids
 
     csv_spec = next(spec for spec in specs if spec.worker_id == "csv_enricher")
     assert csv_spec.file_input_name == "csv_file"
@@ -56,6 +56,19 @@ def test_manifest_parser_finds_active_stock_workers():
 
     opendraft_spec = next(spec for spec in specs if spec.worker_id == "opendraft")
     assert opendraft_spec.cancel_after_start is True
+
+
+def test_worker_filter_rejects_archived_or_unknown_workers(tmp_path, monkeypatch):
+    mod = _load_module()
+    monkeypatch.setenv("FLOOM_SECRET", "test-secret")
+    out = tmp_path / "report.md"
+
+    try:
+        mod.main(["--workers", "linkedin-post-engagements", "--output", str(out)])
+    except SystemExit as exc:
+        assert "Unknown or inactive worker(s): linkedin-post-engagements" in str(exc)
+    else:
+        raise AssertionError("expected archived worker filter to exit")
 
 
 def test_render_report_includes_system_health_and_matrix():
