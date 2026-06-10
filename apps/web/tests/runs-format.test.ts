@@ -67,12 +67,14 @@ describe("runsToCsvRows", () => {
 });
 
 describe("dayLabel", () => {
-  const now = Date.parse("2026-06-09T12:00:00Z");
+  // Local-time literals (no Z): dayLabel groups by the viewer's local day, so the
+  // test must parse inputs + now in the same local TZ to be runner-TZ-independent.
+  const now = Date.parse("2026-06-09T12:00:00");
   it("labels today / yesterday / weekday / date", () => {
-    expect(dayLabel("2026-06-09T08:00:00Z", now)).toBe("Today");
-    expect(dayLabel("2026-06-08T23:00:00Z", now)).toBe("Yesterday");
+    expect(dayLabel("2026-06-09T08:00:00", now)).toBe("Today");
+    expect(dayLabel("2026-06-08T23:00:00", now)).toBe("Yesterday");
     expect(dayLabel(undefined, now)).toBe("Unknown date");
     // 8 days ago → month/day form
-    expect(dayLabel("2026-06-01T08:00:00Z", now)).toMatch(/Jun/);
+    expect(dayLabel("2026-06-01T08:00:00", now)).toMatch(/Jun/);
   });
 });
