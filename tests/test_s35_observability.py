@@ -67,8 +67,10 @@ def test_health_runs_dependency_checks_and_uses_cache(monkeypatch, tmp_path):
     monkeypatch.setattr(main, "_health_check_composio", lambda: calls.append("composio") or {"ok": True})
 
     client = TestClient(main.app)
-    first = client.get("/health")
-    second = client.get("/health")
+    # #853: detailed checks moved behind admin auth at /health/details; the
+    # public /health stays minimal (status only).
+    first = client.get("/health/details", headers=AUTH_HEADER)
+    second = client.get("/health/details", headers=AUTH_HEADER)
 
     assert first.status_code == 200, first.text
     assert first.json()["status"] == "ok"
@@ -76,6 +78,10 @@ def test_health_runs_dependency_checks_and_uses_cache(monkeypatch, tmp_path):
     assert first.json()["checks"]["scheduler"]["ok"] is True
     assert second.status_code == 200, second.text
     assert calls == ["db", "disk", "e2b", "openai", "composio"]
+
+    public = client.get("/health")
+    assert public.status_code == 200, public.text
+    assert "checks" not in public.json()
 
 
 def test_health_check_e2b_bounds_sdk_call_without_unsupported_kwargs(monkeypatch, tmp_path):
