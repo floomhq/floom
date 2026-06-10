@@ -46,6 +46,7 @@ def main() -> None:
     parser = argparse.ArgumentParser(description="Generate a WorkerOS PAT")
     parser.add_argument("--name", default="dev", help="Token name (default: dev)")
     parser.add_argument("--email", default=None, help="Target user email (default: first user found)")
+    parser.add_argument("--workspace", default=None, help="Workspace id to scope the token to (default: user's earliest-owned workspace)")
     args = parser.parse_args()
 
     url = os.environ.get("SUPABASE_URL") or os.environ.get("NEXT_PUBLIC_SUPABASE_URL", "")
@@ -72,6 +73,29 @@ def main() -> None:
     user_email = user.get("email", "(unknown)")
     print(f"User: {user_email} ({user_id})")
 
+    # Resolve the workspace to scope the token to. api_tokens.workspace_id is
+    # NOT NULL with a FK to workspaces, so a valid workspace is required.
+    if args.workspace:
+        ws_resp = client.table("workspaces").select("id, name").eq("id", args.workspace).limit(1).execute()
+    else:
+        ws_resp = (
+            client.table("workspaces")
+            .select("id, name")
+            .eq("owner_user_id", user_id)
+            .order("created_at")
+            .limit(1)
+            .execute()
+        )
+    if not ws_resp.data:
+        print(
+            "ERROR: no workspace found to scope the token to. Pass --workspace <id> "
+            "or ensure the user owns a workspace.",
+            file=sys.stderr,
+        )
+        sys.exit(1)
+    workspace_id = ws_resp.data[0]["id"]
+    print(f"Workspace: {ws_resp.data[0].get('name', '(unnamed)')} ({workspace_id})")
+
     # Check existing tokens
     existing = client.table("api_tokens").select("id, name, created_at").eq("user_id", user_id).execute()
     if existing.data:
@@ -80,15 +104,14 @@ def main() -> None:
             print(f"  {t['name']}  (id: {t['id']}, created: {t['created_at']})")
         print("\nRaw values are not stored — generating a new token.")
 
-    # Create a new token
+    # Create a new token. created_at is populated by the DB default.
     raw = _generate_raw_token()
     token_hash = _hash_token(raw)
-    import datetime
     client.table("api_tokens").insert({
         "user_id": user_id,
+        "workspace_id": workspace_id,
         "name": args.name,
         "token_hash": token_hash,
-        "created_at": datetime.datetime.utcnow().isoformat() + "Z",
     }).execute()
 
     print(f"\n{'='*60}")

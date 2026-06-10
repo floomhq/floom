@@ -36,6 +36,7 @@ type Props = {
   streamUnavailable?: boolean;
   onRefresh?: () => void;
   inline?: boolean;
+  initialTab?: string;
   onBack?: () => void;
   onReplay?: () => void;
   onCancel?: () => void;
@@ -49,6 +50,7 @@ export function RunDetailSplitPane({
   streamUnavailable = false,
   onRefresh,
   inline = false,
+  initialTab = "output",
   onBack,
   onReplay,
   onCancel,
@@ -194,9 +196,9 @@ export function RunDetailSplitPane({
 
         <main className="flex min-w-0 flex-1 flex-col overflow-hidden">
           {/* v6: lead with the rendered OUTPUT (the generic viewer). The
-              transcript/logs/files/raw/metadata are secondary tabs, not a
-              vertical scroll-pile. Output is the default tab. */}
-          <Tabs defaultValue="output" className="flex h-full min-h-0 flex-col">
+          transcript/logs/files/raw/metadata are secondary tabs, not a
+          vertical scroll-pile. The caller chooses the default tab. */}
+          <Tabs defaultValue={initialTab} className="flex h-full min-h-0 flex-col">
             <div className="shrink-0 border-b border-border px-3 py-2">
               <TabsList variant="line">
                 <TabsTrigger value="output">Output</TabsTrigger>

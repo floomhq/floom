@@ -7,6 +7,7 @@ import { CheckCircle, ChevronLeft, ChevronRight, Download, FileText, Film, Image
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { notifyApprovalsChanged } from "@/lib/useApprovalsSync";
 import { WorkerosMark } from "@/components/share/ShareCardShell";
 import { GenericOutput } from "@/components/generic-output";
 import { ApprovalActionItems, approvalActionLine } from "@/components/share/ApprovalActionItems";
@@ -703,6 +704,7 @@ function ReviewContent() {
   const [chatFiles, setChatFiles] = useState<{ url: string; name: string }[]>([]);
   const [uploading, setUploading] = useState(false);
   const [dragOver, setDragOver] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // Noindex public approval pages so share links don't appear in search results.
@@ -718,6 +720,7 @@ function ReviewContent() {
   const load = useCallback(async () => {
     setLoading(true);
     try {
+      setLoadError(null);
       if (targetId && token) {
         const approval = await api.approvals.publicGet(targetId, token);
         setRows([approval]);
@@ -731,7 +734,9 @@ function ReviewContent() {
       setRows(nextRows);
       setIndex(0);
     } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Could not load approvals");
+      const message = error instanceof Error ? error.message : "Could not load approvals";
+      setLoadError(message);
+      toast.error(message);
     } finally {
       setLoading(false);
     }
@@ -751,6 +756,7 @@ function ReviewContent() {
     [approval, decisionInput]
   );
   const isDestructiveDelete = decisionInput.kind === "destructive_delete";
+  const isAgentTool = decisionInput.kind === "agent_tool";
 
   useEffect(() => {
     setChatComment("");
@@ -809,17 +815,22 @@ function ReviewContent() {
         await api.approvals.publicApprove(approval.id, token, undefined, annotationsPayload);
       } else if (isDestructiveDelete) {
         await api.approvals.approveAction(approval.id, annotationsPayload);
+      } else if (isAgentTool) {
+        await api.approvals.approveAgentTool(approval.id);
+        toast.success("Approved — run will resume");
       } else {
         await api.runs.approve(approval.run_id, undefined, annotationsPayload);
+        toast.success("Approved");
       }
-      toast.success("Approved");
+      notifyApprovalsChanged();
       removeCurrent();
+      if (!isSignedLink) void load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Approve failed");
     } finally {
       setBusy(null);
     }
-  }, [annotationsPayload, approval, isDestructiveDelete, isSignedLink, removeCurrent, token]);
+  }, [annotationsPayload, approval, isDestructiveDelete, isAgentTool, isSignedLink, load, removeCurrent, token]);
 
   const reject = useCallback(async () => {
     if (!approval) return;
@@ -830,17 +841,21 @@ function ReviewContent() {
         await api.approvals.publicReject(approval.id, token, reason, annotationsPayload);
       } else if (isDestructiveDelete) {
         await api.approvals.rejectAction(approval.id, reason, annotationsPayload);
+      } else if (isAgentTool) {
+        await api.approvals.rejectAgentTool(approval.id, reason);
       } else {
         await api.runs.reject(approval.run_id, reason, annotationsPayload);
       }
       toast.success("Rejected");
+      notifyApprovalsChanged();
       removeCurrent();
+      if (!isSignedLink) void load();
     } catch (error) {
       toast.error(error instanceof Error ? error.message : "Reject failed");
     } finally {
       setBusy(null);
     }
-  }, [annotationsPayload, chatComment, approval, isDestructiveDelete, isSignedLink, removeCurrent, token]);
+  }, [annotationsPayload, chatComment, approval, isDestructiveDelete, isAgentTool, isSignedLink, load, removeCurrent, token]);
 
   return (
     <div className="flex min-h-screen flex-col items-center justify-center bg-[var(--bg)] px-4 py-6">
@@ -904,6 +919,18 @@ function ReviewContent() {
             <div className="space-y-3">
               <div className="h-5 w-3/4 animate-pulse rounded bg-[var(--bg-2)]" />
               <div className="h-20 animate-pulse rounded bg-[var(--bg-2)]" />
+            </div>
+          ) : loadError ? (
+            <div className="flex h-full flex-col justify-center rounded-[var(--radius-button)] border border-red-200 bg-red-50/80 px-4 py-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+              <div className="font-medium">Could not load approvals.</div>
+              <div className="mt-1">{loadError}</div>
+              <button
+                type="button"
+                onClick={() => void load()}
+                className="mt-3 inline-flex h-8 w-fit items-center rounded-[var(--radius-button)] border border-red-200 px-3 text-xs font-medium hover:bg-red-100 dark:border-red-800 dark:hover:bg-red-900/40"
+              >
+                Retry
+              </button>
             </div>
           ) : !approval ? (
             <div className="flex h-full flex-col items-center justify-center py-8 text-center">

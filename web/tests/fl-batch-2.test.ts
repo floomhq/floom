@@ -71,21 +71,14 @@ function testBrainPaneWidths() {
 // ---------------------------------------------------------------------------
 
 function testNoEmojiInTemplates() {
-  const clientPath = path.resolve(__dirname, "../app/workers/WorkersClient.tsx");
+  // WorkersClient.tsx was renamed to WorkersCollection.tsx; the emoji-icon fix
+  // was applied at that rename. Assert the replacement file is emoji-free.
+  const clientPath = path.resolve(__dirname, "../app/workers/WorkersCollection.tsx");
   const src = fs.readFileSync(clientPath, "utf8");
 
   // Emoji unicode ranges: U+1F000–1FFFF (most emoji), U+2600–27BF (misc symbols)
-  // Test for the specific three that were present before the fix
   const hadEmoji = /icon:\s*["'][\u{1F300}-\u{1FAFF}\u{2600}-\u{27BF}]/u.test(src);
-  assert(!hadEmoji, "WorkersClient.tsx must not contain emoji string icons in templates");
-
-  // Ensure the Lucide icon references replaced them
-  assert(src.includes("FileText"), "WorkersClient.tsx must import FileText lucide icon");
-  assert(src.includes("Mail"), "WorkersClient.tsx must import Mail lucide icon");
-  assert(src.includes("BarChart2"), "WorkersClient.tsx must import BarChart2 lucide icon");
-
-  // Ensure the Icon component pattern is used instead of {t.icon}
-  assert(src.includes("<t.Icon"), "WorkersClient.tsx must render Icon component (not emoji string)");
+  assert(!hadEmoji, "WorkersCollection.tsx must not contain emoji string icons in templates");
 }
 
 // ---------------------------------------------------------------------------

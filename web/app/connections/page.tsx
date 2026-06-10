@@ -2,7 +2,7 @@
 // ConnectionsClient handles polling, OAuth flow, and mutations.
 import { Suspense } from "react";
 import { fetchConnections } from "@/lib/server-api";
-import ConnectionsClient from "./ConnectionsClient";
+import ConnectionsCollection from "./ConnectionsCollection";
 import { Skeleton } from "@/components/ui/skeleton";
 
 export const revalidate = 10;
@@ -22,7 +22,7 @@ async function ConnectionsFetcher() {
   } catch {
     // Fall through — client will fetch on mount
   }
-  return <ConnectionsClient initialConnections={initialConnections} />;
+  return <ConnectionsCollection initialConnections={initialConnections} />;
 }
 
 function ConnectionsLoadingSkeleton() {

@@ -347,6 +347,7 @@ def _cloud_persist_worker_files(worker_id: str, files: dict, repos: Any) -> None
     is ephemeral; this ensures files survive restarts.
     """
     import json as _json
+    from apps.api.config import get_supabase_service_client
     updated_worker = repos.workers.get_any(worker_id=worker_id) or {}
     sv_id = (updated_worker.get("skill_version_id") or "").strip()
     if not sv_id:
@@ -411,8 +412,11 @@ async def cloud_create_worker(
         scopes=getattr(auth, "scopes", ()),
     )
 
-    # Engine creates the worker: validates YAML, writes to disk, registers in DB
-    result = await _asyncio.to_thread(engine_main.create_worker, payload, engine_auth, repos)
+    # Engine creates the worker: validates YAML, writes to disk, registers in DB.
+    # Engine's create_worker signature is (payload, request, auth, repos); the
+    # request carries the x-workeros-workspace header the engine now requires for
+    # worker writes (matches cloud_draft_and_create above).
+    result = await _asyncio.to_thread(engine_main.create_worker, payload, request, engine_auth, repos)
 
     # Persist files to Supabase — source of truth in cloud (Railway disk is ephemeral)
     files = _read_worker_files_from_disk(result.id)
@@ -469,15 +473,19 @@ async def cloud_draft_and_create(
 async def cloud_update_worker_files(worker_id: str, request: Request) -> Any:
     """Cloud override for PUT /workers/{id}/files.
 
-    Saves file contents to Supabase manifest_json._files (DB = source of truth),
-    ensures the worker directory exists on disk, then builds and returns WorkerDetail.
+    Delegates to the engine handler — which writes the files atomically, commits
+    a git version so /workers/{id}/versions reflects the edit, and owner-gates
+    the write — then persists file contents to Supabase manifest_json._files so
+    worker code survives Railway restarts.
+
+    Previously this reimplemented the file write and SKIPPED the version commit,
+    which froze /versions at the create baseline (edits never produced a new
+    version). Delegating to engine_main.update_worker_files restores versioning
+    and the member-isolation authz, mirroring cloud_create_worker.
     """
     import asyncio as _asyncio
-    import json as _json
-    from pathlib import Path as _Path
 
     from apps.api.auth.supabase_provider import SupabaseAuthProvider
-    from apps.api.config import get_supabase_service_client
 
     provider = SupabaseAuthProvider()
     try:
@@ -499,41 +507,36 @@ async def cloud_update_worker_files(worker_id: str, request: Request) -> Any:
 
     try:
         import yaml as _yaml
-        manifest = _yaml.safe_load(files["worker.yml"])
+        manifest = _yaml.safe_load(files.get("worker.yml", ""))
         if not isinstance(manifest, dict):
             raise ValueError("worker.yml did not parse to a dict")
     except Exception as exc:
         raise HTTPException(status_code=400, detail=f"Invalid worker.yml: {exc}") from exc
 
     repos = engine_main.get_repositories()
-    worker = repos.workers.get_any(worker_id=worker_id)
-    if not worker:
-        raise HTTPException(status_code=404, detail="Worker not found")
-
-    # --- Write files to disk ---
-    workers_dir_env = (os.environ.get("FLOOM_WORKERS_DIR") or "").strip()
-    workers_dir = _Path(workers_dir_env) if workers_dir_env else _Path("/opt/workeros-cloud/var/workers")
-    worker_dir = workers_dir / worker_id
-    worker_dir.mkdir(parents=True, exist_ok=True)
-    for fname, content in files.items():
-        fpath = worker_dir / fname
-        fpath.parent.mkdir(parents=True, exist_ok=True)
-        fpath.write_text(content, encoding="utf-8")
-
-    # --- Persist to Supabase (source of truth in cloud) ---
-    _cloud_persist_worker_files(worker_id, files, repos)
-
-    # --- Build WorkerDetail response ---
     from auth.context import AuthContext as _AuthContext
     engine_auth = _AuthContext(
         user_id=auth.user_id,
         email=getattr(auth, "email", None),
         scopes=getattr(auth, "scopes", ()),
     )
-    return await _asyncio.to_thread(
-        engine_main._build_worker_detail, worker_id,
-        user_id=auth.user_id, repos=repos
+    payload = engine_main.WorkerFilesUpdateRequest(
+        files=[
+            engine_main.WorkerFilePatch(path=f["path"], content=f["content"])
+            for f in files_list
+            if "path" in f and "content" in f
+        ]
     )
+
+    # Engine writes the files atomically AND commits a git version (so
+    # /versions reflects the edit), with owner-gated authz.
+    result = await _asyncio.to_thread(
+        engine_main.update_worker_files, worker_id, payload, request, engine_auth, repos
+    )
+
+    # Persist file contents to Supabase — source of truth in cloud.
+    _cloud_persist_worker_files(worker_id, files, repos)
+    return result
 
 
 @app.get("/workers/{worker_id}")

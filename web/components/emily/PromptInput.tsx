@@ -46,6 +46,15 @@ export function PromptInput({
     }
   };
 
+  // Re-focus the input after streaming finishes so the user can type
+  // immediately without clicking. The disabled prop removes focus while
+  // the response streams in — restore it as soon as it becomes enabled.
+  useEffect(() => {
+    if (!disabled) {
+      textareaRef.current?.focus();
+    }
+  }, [disabled]);
+
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";

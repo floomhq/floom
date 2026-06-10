@@ -3435,3 +3435,75 @@ class SupabaseAlertRepository(_BaseSupabaseRepository):
             builder = builder.eq("workspace_id", workspace_id)
         response = builder.execute()
         return bool(_response_rows(response))
+
+
+class SupabaseFeedbackRepository(_BaseSupabaseRepository):
+    """Supabase implementation of FeedbackRepository — workspace-scoped.
+
+    Replaces SqliteFeedbackRepository in cloud. Per-worker feedback comments
+    (SPEC §12). The engine's Protocol scopes by worker_id / feedback_id; in
+    cloud we additionally filter by the active workspace_id so tenants are
+    isolated. Without this repo wired in, the feedback routes return 503
+    ("feedback not available") because repos.feedback is None.
+    """
+
+    _cols = "id,workspace_id,worker_id,author_id,author_name,content,created_at"
+
+    def _workspace_id(self) -> str | None:
+        return get_active_workspace_id()
+
+    def add(
+        self,
+        *,
+        feedback_id: str,
+        worker_id: str,
+        author_id: str,
+        author_name: str | None,
+        content: str,
+        created_at: str,
+    ) -> dict[str, Any]:
+        workspace_id = self._workspace_id()
+        if not workspace_id:
+            raise RuntimeError("No active workspace_id — cannot create feedback")
+        row = {
+            "id": feedback_id,
+            "workspace_id": workspace_id,
+            "worker_id": worker_id,
+            "author_id": author_id,
+            "author_name": author_name,
+            "content": content,
+            "created_at": created_at,
+        }
+        self._client.table("worker_feedback").insert(row).execute()
+        return row
+
+    def list(self, *, worker_id: str) -> list[dict[str, Any]]:
+        builder = (
+            self._client.table("worker_feedback")
+            .select(self._cols)
+            .eq("worker_id", worker_id)
+        )
+        workspace_id = self._workspace_id()
+        if workspace_id:
+            builder = builder.eq("workspace_id", workspace_id)
+        return _response_rows(builder.order("created_at").execute())
+
+    def get(self, *, feedback_id: str) -> dict[str, Any] | None:
+        builder = self._client.table("worker_feedback").select("*").eq("id", feedback_id)
+        workspace_id = self._workspace_id()
+        if workspace_id:
+            builder = builder.eq("workspace_id", workspace_id)
+        return _first_row(builder.limit(1).execute())
+
+    def delete(self, *, feedback_id: str, worker_id: str) -> bool:
+        builder = (
+            self._client.table("worker_feedback")
+            .delete()
+            .eq("id", feedback_id)
+            .eq("worker_id", worker_id)
+        )
+        workspace_id = self._workspace_id()
+        if workspace_id:
+            builder = builder.eq("workspace_id", workspace_id)
+        response = builder.execute()
+        return bool(_response_rows(response))

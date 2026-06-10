@@ -1,13 +1,14 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
+import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { CheckCircle, XCircle } from "lucide-react";
 import Link from "next/link";
 import { Skeleton } from "@/components/ui/skeleton";
 import { RunDetailSplitPane } from "@/components/RunDetailSplitPane";
 import { api } from "@/lib/api";
+import { notifyApprovalsChanged } from "@/lib/useApprovalsSync";
 import { useRunStream } from "@/lib/useRunStream";
 import type { ApprovalRow, RunDetail } from "@/lib/types";
 
@@ -34,6 +35,7 @@ function ApprovalDecisionCard({
       }
       const res = await api.runs.approve(approval.run_id, editedOutput);
       toast.success("Approved — follow-up run started");
+      notifyApprovalsChanged();
       onDecision(res.run_id);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Approve failed");
@@ -47,6 +49,7 @@ function ApprovalDecisionCard({
     try {
       await api.runs.reject(approval.run_id, rejectReason || undefined);
       toast.success("Rejected");
+      notifyApprovalsChanged();
       onDecision();
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Reject failed");
@@ -150,9 +153,17 @@ function ApprovalDecisionCard({
 export default function RunDetailPage() {
   const { id } = useParams();
   const router = useRouter();
+  const searchParams = useSearchParams();
   const runId = id as string;
+  const initialTab = (() => {
+    const value = searchParams.get("tab") || "";
+    return ["output", "inputs", "transcript", "tool-calls", "approval", "files", "logs", "raw", "metadata"].includes(value)
+      ? value
+      : "output";
+  })();
   const [run, setRun] = useState<RunDetail | null>(null);
   const [approval, setApproval] = useState<ApprovalRow | null>(null);
+  const [approvalLoadError, setApprovalLoadError] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
   const { parts, fallbackRun, connected, error, finishedPart, streamUnavailable, refresh } = useRunStream(runId);
 
@@ -160,17 +171,21 @@ export default function RunDetailPage() {
     try {
       const detail = await api.runs.get(runId);
       setRun(detail);
+      setApprovalLoadError(null);
       if (detail.status === "pending_approval") {
         // Fetch approval row to show decision card
         try {
           const rows = await api.approvals.list("pending");
           const match = rows.find((r) => r.run_id === runId);
           setApproval(match ?? null);
-        } catch {
-          // ignore
+        } catch (exc) {
+          const message = exc instanceof Error ? exc.message : "Could not load approval";
+          setApproval(null);
+          setApprovalLoadError(message);
         }
       } else {
         setApproval(null);
+        setApprovalLoadError(null);
       }
     } catch (exc) {
       toast.error(exc instanceof Error ? exc.message : "Failed to load run");
@@ -221,7 +236,20 @@ export default function RunDetailPage() {
           }}
         />
       )}
-      {run.status === "pending_approval" && !approval && (
+      {run.status === "pending_approval" && approvalLoadError && (
+        <div className="mb-4 rounded-[var(--radius-card)] border border-red-200 bg-red-50/80 px-5 py-3 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+          <div className="font-medium">Could not load the approval card.</div>
+          <div className="mt-1">{approvalLoadError}</div>
+          <button
+            type="button"
+            onClick={() => void load()}
+            className="mt-2 inline-flex h-8 items-center rounded-[var(--radius-button)] border border-red-200 px-3 text-xs font-medium hover:bg-red-100 dark:border-red-800 dark:hover:bg-red-900/40"
+          >
+            Retry
+          </button>
+        </div>
+      )}
+      {run.status === "pending_approval" && !approval && !approvalLoadError && (
         <div className="mb-4 rounded-[var(--radius-card)] border border-amber-200 dark:border-amber-800 bg-amber-50/50 dark:bg-amber-950/20 px-5 py-3 text-sm text-amber-700 dark:text-amber-400">
           Awaiting approval. <Link href="/approvals" className="underline underline-offset-2">View approvals</Link>
         </div>
@@ -229,6 +257,7 @@ export default function RunDetailPage() {
       <RunDetailSplitPane
         run={run}
         parts={parts}
+        initialTab={initialTab}
         streamConnected={connected}
         streamError={error}
         streamUnavailable={streamUnavailable}

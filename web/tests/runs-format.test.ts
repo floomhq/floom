@@ -1,0 +1,80 @@
+import { describe, it, expect } from "vitest";
+import {
+  formatDuration,
+  triggerKey,
+  formatTrigger,
+  runStatusPill,
+  dayLabel,
+  runsToCsvRows,
+} from "@/lib/runs/format";
+import type { RunSummary } from "@/lib/types";
+
+describe("formatDuration", () => {
+  it("formats ms / s / m+s and missing", () => {
+    expect(formatDuration(undefined)).toBe("—");
+    expect(formatDuration(384)).toBe("384ms");
+    expect(formatDuration(16600)).toBe("16.6s");
+    expect(formatDuration(150000)).toBe("2m 30s");
+  });
+});
+
+describe("triggerKey / formatTrigger", () => {
+  it("normalizes trigger sources", () => {
+    expect(triggerKey(undefined)).toBe("manual");
+    expect(triggerKey("cron")).toBe("scheduled");
+    expect(triggerKey("schedule")).toBe("scheduled");
+    expect(triggerKey("webhook")).toBe("webhook");
+    expect(formatTrigger("cron")).toBe("Scheduled");
+    expect(formatTrigger("manual")).toBe("Manual");
+  });
+});
+
+describe("runStatusPill", () => {
+  it("maps run statuses to tones", () => {
+    expect(runStatusPill("completed").tone).toBe("ok");
+    expect(runStatusPill("failed").tone).toBe("err");
+    expect(runStatusPill("running").tone).toBe("run");
+    expect(runStatusPill("queued").tone).toBe("idle");
+    expect(runStatusPill("pending_approval").tone).toBe("warn");
+  });
+});
+
+describe("runsToCsvRows", () => {
+  it("flattens runs into stable CSV columns", () => {
+    const runs = [
+      {
+        id: "r1",
+        worker_id: "w1",
+        worker_name: "Weekly",
+        status: "completed",
+        trigger_source: "manual",
+        created_at: "2026-06-09T08:00:00Z",
+        duration_ms: 1200,
+      },
+    ] as RunSummary[];
+    const rows = runsToCsvRows(runs);
+    expect(rows[0]).toMatchObject({
+      id: "r1",
+      worker_id: "w1",
+      worker_name: "Weekly",
+      status: "completed",
+      trigger_source: "manual",
+      duration_ms: 1200,
+      started_at: "",
+      completed_at: "",
+    });
+  });
+});
+
+describe("dayLabel", () => {
+  // Local-time literals (no Z): dayLabel groups by the viewer's local day, so the
+  // test must parse inputs + now in the same local TZ to be runner-TZ-independent.
+  const now = Date.parse("2026-06-09T12:00:00");
+  it("labels today / yesterday / weekday / date", () => {
+    expect(dayLabel("2026-06-09T08:00:00", now)).toBe("Today");
+    expect(dayLabel("2026-06-08T23:00:00", now)).toBe("Yesterday");
+    expect(dayLabel(undefined, now)).toBe("Unknown date");
+    // 8 days ago → month/day form
+    expect(dayLabel("2026-06-01T08:00:00", now)).toMatch(/Jun/);
+  });
+});

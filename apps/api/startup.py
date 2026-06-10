@@ -40,6 +40,7 @@ from apps.api.db.supabase_repos import (
     SupabaseAssetAccessRepository,
     SupabaseCliAuthRepository,
     SupabaseConnectionRepository,
+    SupabaseFeedbackRepository,
     SupabaseMcpToolRepository,
     SupabaseRunRepository,
     SupabaseSecretRepository,
@@ -151,6 +152,7 @@ def _cloud_repositories() -> Repositories:
         alerts=SupabaseAlertRepository(),
         asset_access=SupabaseAssetAccessRepository(),
         mcp_tools=SupabaseMcpToolRepository(),
+        feedback=SupabaseFeedbackRepository(),
     )
 
 

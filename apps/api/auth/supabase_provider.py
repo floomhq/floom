@@ -193,6 +193,12 @@ class SupabaseAuthProvider:
         # Also accept PATs sent as "Authorization: Bearer floom_..." — clients
         # like Claude Code write this format from mcp install.
         token = _parse_bearer_token(request.headers.get("authorization"))
+        # Worker-to-worker run token (wrt_): the engine issues it when a worker
+        # whose manifest declares calls: invokes another worker via call_worker.
+        # Cloud-owned auth must accept it or chaining 401s — the engine only
+        # taught its single-tenant MultiMemberAuthProvider about wrt_ tokens.
+        if token.startswith("wrt_"):
+            return await self._verify_worker_call_token(token, request)
         if token.startswith("floom_"):
             return await self._verify_pat(token, request)
         claims = _verify_jwt(token, self._settings.supabase_url)
@@ -208,6 +214,54 @@ class SupabaseAuthProvider:
 
         return await self._resolve_workspace_and_build_context(
             user_id=str(user_id), email=email, scopes=scopes, request=request
+        )
+
+    async def _verify_worker_call_token(self, raw_token: str, request: Request) -> AuthContext:
+        """Verify a worker-to-worker run token (wrt_).
+
+        Mirrors the engine's MultiMemberAuthProvider._verify_worker_call_token,
+        adding cloud workspace scoping: the token carries the caller's user_id
+        but no workspace, so resolve the active workspace (header/cookie, else
+        the user's default) and feed the contextvars the cloud repos read — the
+        target worker only resolves inside the caller's workspace. The engine's
+        create_worker_run still enforces the callable_workers allowlist and call
+        depth from the token payload, so accepting it here is not a privilege
+        grant beyond what the parent run was already issued.
+        """
+        from run_token import validate_worker_call_token
+
+        try:
+            payload = validate_worker_call_token(raw_token)
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail=str(exc))
+        user_id = str(payload.get("user_id") or "")
+        if not user_id:
+            raise HTTPException(status_code=401, detail="invalid run token: missing user_id")
+
+        requested = (request.headers.get(ACTIVE_WORKSPACE_HEADER) or "").strip() or (
+            request.cookies.get(ACTIVE_WORKSPACE_COOKIE) or ""
+        )
+        workspace_id: str | None = None
+        role: str | None = None
+        try:
+            active = workspace_repo.resolve_active_workspace(
+                user_id=user_id, email=None, requested_id=requested,
+            )
+            workspace_id = str(active["id"])
+            if str(active.get("owner_user_id", "")) == str(user_id):
+                role = "admin"
+            else:
+                role = workspace_repo.get_member_role(workspace_id=workspace_id, user_id=user_id)
+        except Exception:
+            workspace_id = None
+        set_active_workspace_id(workspace_id)
+        set_active_member_role(role)
+
+        return AuthContext(
+            user_id=user_id,
+            role=role or "member",
+            auth_method="run_token",
+            run_token_payload=payload,
         )
 
     async def _verify_pat(self, raw: str, request: Request) -> AuthContext:
