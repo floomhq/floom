@@ -424,9 +424,9 @@ def test_unbound_sender_yes_never_intercepted(monkeypatch, tmp_path):
         )
     )
 
-    # Must have sent a claim link, NOT an approval confirmation.
+    # Must have sent a claim link (short /c/{token} URL), NOT an approval confirmation.
     assert sent
-    assert any("whatsapp_claim=" in msg for _, msg in sent)
+    assert any("/c/" in msg for _, msg in sent)
 
 
 def test_yes_with_no_pending_goes_to_agent(monkeypatch, tmp_path):
