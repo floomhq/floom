@@ -72,6 +72,11 @@ def test_recover_cloud_runs_on_startup_fans_out_per_owner(monkeypatch):
 
 def test_cloud_lifespan_runs_startup_recovery(monkeypatch):
     monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    # The advisory-lock path (start_cloud_scheduler, faked via psycopg below) is
+    # only taken when a DB host is configured; without this the lifespan falls
+    # back to the no-DB branch (_ie("scheduler").start_scheduler()), which this
+    # test doesn't patch, so the expected "scheduler" event never fires.
+    monkeypatch.setenv("WORKEROS_CLOUD_DB_HOST", "db.example.com")
     monkeypatch.setitem(
         sys.modules,
         "psycopg",
