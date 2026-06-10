@@ -4292,11 +4292,27 @@ def _visibility_role(role: Optional[str]) -> Optional[str]:
     still see EVERY worker and members still see workers SHARED with them, while
     another member's private worker stays hidden. Outside a request (no auth
     context) the role stays None — legacy owner-scoped behaviour.
+
+    Security: local secret auth deliberately passes role=None via _worker_repo_role
+    to keep workspace scoping intact. If we override that None with the auth
+    context's default role ("admin"), _list_db_workers runs unfiltered and leaks
+    workers across workspaces (issue #809). We must honour the explicit None from
+    _worker_repo_role by skipping the auth-context default for local secret auth.
     """
     if role is not None:
         return role
     ctx = current_auth_context()
-    return ctx.role if ctx is not None else None
+    if ctx is None:
+        return None
+    # Local single-operator secret auth: _worker_repo_role deliberately passes
+    # None so the DB query stays scoped to the requesting user's workspace. Do
+    # NOT upgrade that None to ctx.role ("admin" by default), which would bypass
+    # workspace isolation. All other auth methods (session, PAT, cloud, supabase)
+    # should use their declared role so admins/members see the right workers.
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy == "local" and ctx.auth_method == "secret":
+        return None
+    return ctx.role
 
 
 def _db_worker_owners() -> Dict[str, str]:
