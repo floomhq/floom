@@ -20257,6 +20257,47 @@ _SESSION_TTL_SECONDS = 7 * 24 * 3600  # 7 days
 # Tokens signed with this key are valid only for the lifetime of the process.
 _MAGIC_LINK_FALLBACK_SECRET: str = pysecrets.token_hex(32)
 
+# #850: 12+ characters per NIST SP 800-63B (length over composition rules —
+# complexity requirements are intentionally omitted). Applies to new/changed
+# passwords only; existing shorter passwords keep working at login.
+_MIN_PASSWORD_LENGTH = 12
+
+
+def _validate_new_password(password: str | None) -> None:
+    if not password or len(password) < _MIN_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=422,
+            detail=f"password must be at least {_MIN_PASSWORD_LENGTH} characters",
+        )
+
+
+# #850: per-username lockout after repeated failed logins. The 5/min per-IP
+# rate limit does not stop distributed credential-stuffing; this does. Keyed
+# by username only (an attacker rotating IPs still locks out), which trades a
+# bounded 15-minute targeted-DoS window for brute-force protection.
+_FAILED_LOGIN_WINDOW_SECONDS = 15 * 60
+_FAILED_LOGIN_LOCKOUT_THRESHOLD = 5
+_failed_login_attempts: Dict[str, List[float]] = {}
+_failed_login_lock = threading.Lock()
+
+
+def _login_locked_out(username: str) -> bool:
+    cutoff = time.time() - _FAILED_LOGIN_WINDOW_SECONDS
+    with _failed_login_lock:
+        attempts = [t for t in _failed_login_attempts.get(username, []) if t > cutoff]
+        _failed_login_attempts[username] = attempts
+        return len(attempts) >= _FAILED_LOGIN_LOCKOUT_THRESHOLD
+
+
+def _record_failed_login(username: str) -> None:
+    with _failed_login_lock:
+        _failed_login_attempts.setdefault(username, []).append(time.time())
+
+
+def _clear_failed_logins(username: str) -> None:
+    with _failed_login_lock:
+        _failed_login_attempts.pop(username, None)
+
 
 def _session_cookie_secure() -> bool:
     return os.environ.get("WORKEROS_INSECURE_COOKIES") != "1"
@@ -20366,8 +20407,7 @@ def auth_setup(
     if not username:
         raise HTTPException(status_code=422, detail="username required")
     password = payload.password
-    if not password or len(password) < 6:
-        raise HTTPException(status_code=422, detail="password must be at least 6 characters")
+    _validate_new_password(password)
     user_id = str(_uuid_mod.uuid4())
     pw_hash = _bcrypt_hash(password)
     row = user_repo.create(
@@ -20405,11 +20445,21 @@ def auth_login(
 ) -> dict:
     """Authenticate with username+password; sets a session cookie."""
     user_repo, session_repo, _ = _require_multi_member_repos(repos)
-    user = user_repo.get_by_username(username=payload.username)
+    username = payload.username
+    # #850: per-username lockout — checked before the credential comparison so
+    # a locked account does not keep burning bcrypt work for an attacker.
+    if _login_locked_out(username):
+        raise HTTPException(
+            status_code=429,
+            detail="too many failed login attempts; try again later",
+        )
+    user = user_repo.get_by_username(username=username)
     if user is None or not _bcrypt_verify(payload.password, user.get("password_hash") or ""):
+        _record_failed_login(username)
         raise HTTPException(status_code=401, detail="invalid credentials")
     if user.get("disabled"):
         raise HTTPException(status_code=403, detail="account disabled")
+    _clear_failed_logins(username)
     session_id = _secrets_mod.token_urlsafe(32)
     from datetime import datetime, timedelta, timezone as _tz
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
@@ -20584,8 +20634,7 @@ def create_user(
         raise HTTPException(status_code=422, detail="username required")
     if payload.role not in ("admin", "member"):
         raise HTTPException(status_code=422, detail="role must be admin or member")
-    if not payload.password or len(payload.password) < 6:
-        raise HTTPException(status_code=422, detail="password must be at least 6 characters")
+    _validate_new_password(payload.password)
     if user_repo.get_by_username(username=username) is not None:
         raise HTTPException(status_code=409, detail="username already taken")
     user_id = str(_uuid_mod.uuid4())
@@ -20620,8 +20669,7 @@ def update_user(
     if payload.disabled is not None:
         updates["disabled"] = 1 if payload.disabled else 0
     if payload.password is not None:
-        if len(payload.password) < 6:
-            raise HTTPException(status_code=422, detail="password must be at least 6 characters")
+        _validate_new_password(payload.password)
         updates["password_hash"] = _bcrypt_hash(payload.password)
     row = user_repo.update(user_id=uid, **updates)
     if row is None:
