@@ -851,6 +851,13 @@ export const api = {
       }),
     remove: (id: string) => // #805 — delete a workspace (default is protected server-side)
       fetchJson<null>(`/workspaces/${encodeURIComponent(id)}`, { method: "DELETE" }),
+    // #794/#797: workspace behaviour toggles + model defaults (admin-only PUT).
+    getSettings: () => fetchJson<Record<string, string>>("/workspace/settings"),
+    setSetting: (key: string, value: string) =>
+      fetchJson<null>(`/workspace/settings/${encodeURIComponent(key)}`, {
+        method: "PUT",
+        body: JSON.stringify({ value }),
+      }),
     // Duplicate a workspace into a new "<name> (copy)" sibling. On the
     // single-tenant OSS instance, workers/knowledge live in a shared pool, so
     // this mints a new workspace that surfaces the same pool (use Export/Import

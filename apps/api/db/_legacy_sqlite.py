@@ -1891,6 +1891,16 @@ MIGRATIONS: list[Migration] = [
         PRIMARY KEY (user_id, key)
     );
     """,
+    # -- migration 68: workspace settings KV (#794 toggles, #797 model defaults) -
+    """
+    CREATE TABLE IF NOT EXISTS workspace_settings (
+        workspace_id TEXT NOT NULL,
+        key          TEXT NOT NULL,
+        value        TEXT NOT NULL,
+        updated_at   TEXT NOT NULL,
+        PRIMARY KEY (workspace_id, key)
+    );
+    """,
 ]
 
 

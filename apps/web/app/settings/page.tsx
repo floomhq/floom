@@ -541,6 +541,11 @@ function SettingsContent() {
           </section>
 
           <section className="space-y-3">
+            <h2 className="text-sm font-medium text-muted-foreground">Behaviour</h2>
+            <BehaviourSettings />
+          </section>
+
+          <section className="space-y-3">
             <h2 className="text-sm font-medium text-muted-foreground">Platform configuration</h2>
             <div className="space-y-3">
               {!platformConfig ? (
@@ -705,10 +710,14 @@ function ToggleRow({
   title,
   description,
   disabled,
+  checked,
+  onCheckedChange,
 }: {
   title: string;
   description: string;
   disabled?: boolean;
+  checked?: boolean;
+  onCheckedChange?: (value: boolean) => void;
 }) {
   return (
     <div className="flex items-start justify-between gap-4">
@@ -716,12 +725,67 @@ function ToggleRow({
         <p className="text-sm font-medium">{title}</p>
         <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
       </div>
-      <Switch disabled={disabled} />
+      <Switch disabled={disabled} checked={checked} onCheckedChange={onCheckedChange} />
       {disabled ? (
         <Badge variant="outline" className="text-xs">
           Soon
         </Badge>
       ) : null}
+    </div>
+  );
+}
+
+// #794: workspace behaviour toggles, backed by the workspace-settings KV
+// (admin-only writes — the server enforces #804). Members see them read-only.
+const BEHAVIOUR_TOGGLES: { key: string; title: string; description: string }[] = [
+  {
+    key: "approval_default",
+    title: "Require approval by default",
+    description: "New workers pause for review before taking external actions.",
+  },
+  {
+    key: "auto_pause",
+    title: "Auto-pause on repeated failures",
+    description: "Pause a worker automatically after consecutive failed runs.",
+  },
+  {
+    key: "failure_emails",
+    title: "Email me on run failures",
+    description: "Send a notification when a run ends in error.",
+  },
+];
+
+export function BehaviourSettings() {
+  const [values, setValues] = useState<Record<string, string> | null>(null);
+
+  useEffect(() => {
+    api.workspace
+      .getSettings()
+      .then(setValues)
+      .catch(() => setValues({}));
+  }, []);
+
+  const toggle = (key: string, next: boolean) => {
+    setValues((prev) => ({ ...(prev ?? {}), [key]: next ? "true" : "false" }));
+    api.workspace.setSetting(key, next ? "true" : "false").catch((err) => {
+      toast.error((err as Error).message || "Could not save setting");
+      // Re-sync from the server on failure.
+      api.workspace.getSettings().then(setValues).catch(() => {});
+    });
+  };
+
+  if (values === null) return <Skeleton className="h-24 w-full" />;
+  return (
+    <div className="space-y-4">
+      {BEHAVIOUR_TOGGLES.map((t) => (
+        <ToggleRow
+          key={t.key}
+          title={t.title}
+          description={t.description}
+          checked={values[t.key] === "true"}
+          onCheckedChange={(v) => toggle(t.key, v)}
+        />
+      ))}
     </div>
   );
 }
