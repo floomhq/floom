@@ -125,23 +125,22 @@ function test538MagicLinkEndpointConsume(): void {
 // ---------------------------------------------------------------------------
 
 function test538SlackDmHandlerGeneratesMagicLink(): void {
-  // _handle_slack_direct_message was extracted to channels/slack.py by the channels refactor
+  // _handle_slack_direct_message was extracted to channels/slack.py by the channels refactor.
+  // PR #803 extended the function with claim-link binding; magic link generation now lives
+  // in the bound-user path (~2000 chars into the function body), so we search the full file.
   const s = api("channels/slack.py");
-  const handlerIdx = s.indexOf("async def _handle_slack_direct_message");
-  const snippet = s.slice(handlerIdx, handlerIdx + 1500);
   assert(
-    snippet.includes("_issue_magic_link") && snippet.includes("_frontend_base_url"),
+    s.includes("_issue_magic_link") && s.includes("_frontend_base_url"),
     "_handle_slack_direct_message must generate a magic link URL for the system context",
   );
 }
 
 function test538SlackDmHandlerPassesSystemSuffix(): void {
-  // _handle_slack_direct_message was extracted to channels/slack.py by the channels refactor
+  // _handle_slack_direct_message was extracted to channels/slack.py by the channels refactor.
+  // PR #803 extended the function; system_suffix is passed in the bound-user path.
   const s = api("channels/slack.py");
-  const handlerIdx = s.indexOf("async def _handle_slack_direct_message");
-  const snippet = s.slice(handlerIdx, handlerIdx + 1500);
   assert(
-    snippet.includes("system_suffix"),
+    s.includes("system_suffix"),
     "_handle_slack_direct_message must pass system_suffix to _collect_workspace_agent_reply_for_slack",
   );
 }
