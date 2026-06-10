@@ -192,10 +192,10 @@ function Story() {
               className="flex min-h-[180px] cursor-default flex-col justify-center py-3 md:min-h-[150px]"
               onMouseEnter={() => setActive(i)}
             >
-              <h3 className={`text-[28px] font-semibold tracking-[-0.022em] transition-colors duration-300 ${active === i ? "text-foreground" : "text-muted-foreground/40"}`}>
+              <h3 className={`text-[28px] font-semibold tracking-[-0.022em] transition-colors duration-300 ${active === i ? "text-foreground" : "text-foreground md:text-muted-foreground/40"}`}>
                 {b.t}
               </h3>
-              <p className={`mt-2 max-w-[360px] text-[14px] leading-relaxed text-muted-foreground transition-opacity duration-300 ${active === i ? "opacity-100" : "opacity-0 md:opacity-40"}`}>
+              <p className={`mt-2 max-w-[360px] text-[14px] leading-relaxed text-muted-foreground transition-opacity duration-300 ${active === i ? "opacity-100" : "opacity-100 md:opacity-40"}`}>
                 {b.p}
               </p>
               <div className="mt-5 flex justify-center rounded-[18px] bg-secondary/70 p-6 md:hidden">
@@ -293,6 +293,7 @@ const PILLS = [
 ];
 
 export function V3Body() {
+  const [fill, setFill] = useState<{ text: string; n: number } | null>(null);
   return (
     <div className="theme-v3 min-h-screen text-[13.5px]" style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}>
       <div className="mx-auto max-w-[1000px] px-7">
@@ -303,9 +304,11 @@ export function V3Body() {
             <Mark />
             Workeros
           </Link>
-          <Link href="/login" className="rounded-[10px] px-3 py-1.5 text-[13px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
-            Sign in
-          </Link>
+          <div className="flex items-center gap-0.5 text-[13px] text-muted-foreground">
+            <Link href="/v2/templates" className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">Templates</Link>
+            <Link href="/v2/docs" className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">Docs</Link>
+            <Link href="/login" className="ml-1 rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">Sign in</Link>
+          </div>
         </nav>
 
         {/* hero: headline, one line, the jewel, three pills */}
@@ -332,7 +335,7 @@ export function V3Body() {
             transition={{ duration: 0.55, delay: 0.18, ease: EASE }}
             className="mt-11"
           >
-            <V3Composer />
+            <V3Composer fillSignal={fill} />
           </motion.div>
           <motion.div
             initial={{ opacity: 0 }}
@@ -341,11 +344,27 @@ export function V3Body() {
             className="mt-6 flex flex-wrap items-center justify-center gap-2"
           >
             {PILLS.map((p) => (
-              <span key={p.label} className="cursor-default rounded-full bg-secondary px-3.5 py-1.5 text-[12px] font-medium text-foreground/70">
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => setFill((f) => ({ text: p.prompt, n: (f?.n ?? 0) + 1 }))}
+                className="rounded-full bg-secondary px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 transition-colors hover:bg-[var(--bg-3)] hover:text-foreground"
+              >
                 {p.label}
-              </span>
+              </button>
             ))}
           </motion.div>
+          <motion.p
+            initial={{ opacity: 0 }}
+            animate={{ opacity: 1 }}
+            transition={{ duration: 0.5, delay: 0.46 }}
+            className="mx-auto mt-9 text-[12.5px] text-muted-foreground"
+          >
+            Works without the dashboard too:{" "}
+            <Link href="/login?install=slack" className="text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline">Slack</Link>,{" "}
+            <Link href="/login?install=whatsapp" className="text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline">WhatsApp</Link>, or any{" "}
+            <Link href="/v2/docs#mcp" className="text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline">MCP agent</Link>.
+          </motion.p>
         </section>
 
         {/* six marks, still */}
@@ -373,7 +392,7 @@ export function V3Body() {
             transition={{ duration: 0.55, ease: EASE }}
             className="text-[40px] font-semibold tracking-[-0.03em]"
           >
-            The first one takes a minute.
+            Start with one job.
           </motion.h2>
           <motion.div
             initial={{ opacity: 0, y: 10 }}

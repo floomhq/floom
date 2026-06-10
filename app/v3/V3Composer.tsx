@@ -7,7 +7,7 @@
  * as you type. No channel row, no extra chrome.
  */
 
-import { useMemo, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { ArrowUp } from "lucide-react";
@@ -74,13 +74,20 @@ function Mirror({ text, matches }: { text: string; matches: Match[] }) {
 
 export function V3Composer({
   placeholder = "Every Monday, summarise last week's pipeline in #sales…",
+  fillSignal,
 }: {
   placeholder?: string;
+  /** parent-driven fill: { text, n } where n changes per click */
+  fillSignal?: { text: string; n: number } | null;
 }) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
   const router = useRouter();
   const matches = useMemo(() => detectMatches(value), [value]);
+
+  useEffect(() => {
+    if (fillSignal && fillSignal.text) setValue(fillSignal.text);
+  }, [fillSignal]);
 
   function submit() {
     const v = value.trim();

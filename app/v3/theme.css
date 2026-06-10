@@ -130,3 +130,30 @@
 /* v3 border system (wireframe update): flat surfaces, fills over rings.
    Cards/tiles/inputs/lists: no borders. Dividers + secondary buttons keep
    hairlines. Selection/focus = accent ring. */
+
+
+/* v3: follow the system, no toggle (configuration stays out of the poster) */
+@media (prefers-color-scheme: dark) {
+  .theme-v3.theme-v3 {
+
+  --bg-app: #191A1D;
+  --bg-card: #212327;
+  --text-primary: #ECEDEF;
+  --text-muted: #9A9EA6;
+  --border-default: rgba(255, 255, 255, 0.10);
+  --border-soft: rgba(255, 255, 255, 0.055);
+  --primary: #ECEDEF;
+  --primary-text: #191A1D;
+  --active-nav-bg: #292B30;
+
+  --bg-2: #292B30;
+  --bg-3: #33363C;
+  --paper-2: #232529;
+  --line-strong: rgba(255, 255, 255, 0.18);
+  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--border-default);
+
+  --v3-accent: #5B8DEF;
+  --v3-sel: rgba(91, 141, 239, 0.16);
+
+  }
+}
