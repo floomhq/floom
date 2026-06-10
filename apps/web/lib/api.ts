@@ -216,6 +216,8 @@ export const api = {
     sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
     restore: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
     archive: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/archive`, { method: "POST" }),
+    star: (id: string) => fetchJson<null>(`/workers/${encodeURIComponent(id)}/star`, { method: "POST" }), // #782
+    unstar: (id: string) => fetchJson<null>(`/workers/${encodeURIComponent(id)}/star`, { method: "DELETE" }),
     setVisibility: (id: string, visibility: import("./types").AssetVisibility) =>
       fetchJson<import("./types").WorkerDetail>(`/workers/${id}/visibility`, {
         method: "PUT",

@@ -1868,6 +1868,19 @@ MIGRATIONS: list[Migration] = [
     SET workspace_id = 'local-default'
     WHERE status = 'active' AND workspace_id IS NULL;
     """,
+    # -- migration 66: per-user worker stars (#782) ----------------------------
+    # Replaces the client-side localStorage "favorites" with durable state so
+    # the Starred smart-tag survives across devices/sessions.
+    """
+    CREATE TABLE IF NOT EXISTS worker_stars (
+        user_id    TEXT NOT NULL,
+        worker_id  TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, worker_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_worker_stars_user
+        ON worker_stars(user_id);
+    """,
 ]
 
 
