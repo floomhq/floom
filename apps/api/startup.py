@@ -32,6 +32,7 @@ from apps.api.auth.supabase_provider import SupabaseAuthProvider
 from apps.api.auth.workspace_context import get_active_workspace_id
 from apps.api.cloud_workspace_agent import apply_cloud_workspace_agent_overrides
 from apps.api.cloud_webhooks import apply_engine_overrides
+from apps.api.cloud_whatsapp import apply_cloud_whatsapp_overrides
 from apps.api.config import get_cloud_settings
 from apps.api.db._secret_crypto import ensure_secret_crypto_ready
 from apps.api.db.supabase_repos import (
@@ -862,6 +863,7 @@ def register_cloud_components() -> None:
     register_repositories("cloud", _cloud_repositories)
     apply_engine_overrides()
     apply_cloud_workspace_agent_overrides()
+    apply_cloud_whatsapp_overrides()
     _register_contexts_scope_resolver()
     _register_git_workspace_resolver()
     _register_secrets_key_resolver()
