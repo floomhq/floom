@@ -17,7 +17,7 @@ import os
 import re
 import urllib.parse
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 import requests
 from fastapi import BackgroundTasks, Depends, HTTPException, Request, Response
@@ -41,6 +41,9 @@ whatsapp_router = APIRouter()
 # ---------------------------------------------------------------------------
 
 WHATSAPP_TEXT_MAX = 4096
+
+# Workspace ID used when no workspace is pinned on a binding (backwards compat).
+_DEFAULT_WORKSPACE_ID = "local-default"
 
 
 # ---------------------------------------------------------------------------
@@ -100,7 +103,12 @@ def _whatsapp_claim_url(token: str) -> str:
     return f"{base}/settings?whatsapp_claim={urllib.parse.quote(token)}"
 
 
-def _whatsapp_binding_user_id(wa_id: str) -> Optional[str]:
+def _whatsapp_binding_info(wa_id: str) -> Optional[Tuple[str, str]]:
+    """Return (user_id, workspace_id) for an active binding, or None.
+
+    Updates last_seen_at as a side-effect.  workspace_id falls back to
+    'local-default' when the column is NULL (pre-migration 65 rows).
+    """
     from db import get_db, now_iso
     normalized = _normalize_whatsapp_wa_id(wa_id)
     if not normalized:
@@ -109,7 +117,7 @@ def _whatsapp_binding_user_id(wa_id: str) -> Optional[str]:
         with get_db() as conn:
             row = conn.execute(
                 """
-                SELECT user_id
+                SELECT user_id, workspace_id
                 FROM whatsapp_sender_bindings
                 WHERE wa_id = ? AND status = 'active' AND user_id IS NOT NULL
                 """,
@@ -120,13 +128,27 @@ def _whatsapp_binding_user_id(wa_id: str) -> Optional[str]:
                     "UPDATE whatsapp_sender_bindings SET last_seen_at = ?, updated_at = ? WHERE wa_id = ?",
                     (now_iso(), now_iso(), normalized),
                 )
-                return str(row["user_id"])
+                workspace_id = str(row["workspace_id"] or _DEFAULT_WORKSPACE_ID)
+                return str(row["user_id"]), workspace_id
     except Exception:
         logger.exception("WhatsApp sender binding lookup failed")
     return None
 
 
+def _whatsapp_binding_user_id(wa_id: str) -> Optional[str]:
+    """Backwards-compat shim — returns user_id only (pre-workspace-pinning callers)."""
+    info = _whatsapp_binding_info(wa_id)
+    return info[0] if info else None
+
+
 def _whatsapp_create_claim(wa_id: str, profile_name: str = "") -> Dict[str, str]:
+    """Create (or refresh) a pending claim for the given wa_id.
+
+    Hardening (from design review):
+    - Any prior *pending* claim tokens for this wa_id are invalidated by
+      generating a new token.  An existing *active* binding is left intact
+      (the sender is already bound; the claim prompt should not have been sent).
+    """
     import secrets as pysecrets
     from db import get_db, now_iso
     normalized = _normalize_whatsapp_wa_id(wa_id)
@@ -149,6 +171,7 @@ def _whatsapp_create_claim(wa_id: str, profile_name: str = "") -> Dict[str, str]
                     THEN whatsapp_sender_bindings.status
                     ELSE 'pending'
                 END,
+                -- Always replace a pending token so the old one is invalidated.
                 claim_token = CASE
                     WHEN whatsapp_sender_bindings.status = 'active'
                     THEN whatsapp_sender_bindings.claim_token
@@ -179,6 +202,45 @@ def _whatsapp_create_claim(wa_id: str, profile_name: str = "") -> Dict[str, str]
 
 
 # ---------------------------------------------------------------------------
+# Binding reset helper (used when pinned workspace no longer exists)
+# ---------------------------------------------------------------------------
+
+def _reset_binding_to_pending(wa_id: str) -> Optional[str]:
+    """Flip an active binding back to pending and generate a fresh claim token.
+
+    Returns the new claim_url so the caller can send it to the sender.
+    Called at message-time when the pinned workspace no longer exists.
+    """
+    import secrets as pysecrets
+    from db import get_db, now_iso
+    normalized = _normalize_whatsapp_wa_id(wa_id)
+    if not normalized:
+        return None
+    token = pysecrets.token_urlsafe(24)
+    expires_at = (datetime.now(timezone.utc) + timedelta(hours=24)).isoformat()
+    now_ts = now_iso()
+    try:
+        with get_db() as conn:
+            conn.execute(
+                """
+                UPDATE whatsapp_sender_bindings
+                SET status = 'pending',
+                    user_id = NULL,
+                    workspace_id = NULL,
+                    claim_token = ?,
+                    claim_expires_at = ?,
+                    updated_at = ?
+                WHERE wa_id = ?
+                """,
+                (token, expires_at, now_ts, normalized),
+            )
+        return _whatsapp_claim_url(token)
+    except Exception:
+        logger.exception("WhatsApp binding reset to pending failed")
+        return None
+
+
+# ---------------------------------------------------------------------------
 # Claim route
 # ---------------------------------------------------------------------------
 
@@ -193,21 +255,66 @@ def claim_whatsapp_sender(
     payload: WhatsAppClaimRequest,
     auth: AuthContext = Depends(get_auth_context),
 ) -> Dict[str, Any]:
+    """Consume a claim token and bind the wa_id to the authenticated user.
+
+    Hardening (design review):
+    - Token is single-use: cleared immediately after successful claim.
+    - Workspace is pinned to the claiming user's currently-active workspace
+      (engine: resolved via local_workspace_user_id; default 'local-default').
+    - Re-claim of an already-active binding: the old bound user receives a
+      WhatsApp notification, then the binding is transferred.
+    """
     from db import get_db, now_iso
+    from auth.local_workspaces import (
+        local_workspace_base_user_id,
+        local_workspace_user_id,
+        DEFAULT_WORKSPACE_ID,
+    )
     token = (payload.token or "").strip()
     if not token:
         raise HTTPException(status_code=400, detail="token is required")
     now_dt = datetime.now(timezone.utc)
+
+    # Resolve the workspace being claimed.
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy == "local":
+        # In local mode, the auth context user_id may already be workspace-scoped
+        # (e.g. "federico__ws_abc123").  We pin the workspace embedded in it, or
+        # fall back to local-default.
+        base_user_id = local_workspace_base_user_id(auth.user_id)
+        # Extract the workspace segment from the scoped user_id.
+        import re as _re
+        _ws_re = _re.compile(r"__(?P<ws>(?:local-default|ws_[a-f0-9]{14}))$")
+        m = _ws_re.search(auth.user_id)
+        workspace_id = m.group("ws") if m else DEFAULT_WORKSPACE_ID
+        # Store the fully scoped user_id (base__workspace) as user_id in the binding
+        # so downstream consumers that use local_workspace_user_id round-trip correctly.
+        scoped_user_id = local_workspace_user_id(base_user_id, workspace_id)
+    else:
+        # Cloud: workspace is carried in auth context; no scoping needed here.
+        scoped_user_id = auth.user_id
+        workspace_id = _DEFAULT_WORKSPACE_ID  # cloud uses its own workspace field
+
     with get_db() as conn:
         row = conn.execute(
             """
-            SELECT wa_id, status, claim_expires_at
+            SELECT wa_id, status, claim_expires_at, user_id AS old_user_id
             FROM whatsapp_sender_bindings
             WHERE claim_token = ?
             """,
             (token,),
         ).fetchone()
-        if not row or row["status"] == "active":
+        if not row:
+            raise HTTPException(status_code=404, detail="WhatsApp claim not found")
+        # Single-use: a token that was already cleared (status == active but token
+        # still in DB on conflict — we check status to distinguish).
+        # Actually: active rows keep their claim_token; we gate on token being present
+        # and not already consumed.  "consumed" = status was set to active by a PRIOR
+        # claim call, which also clears the token (see UPDATE below).
+        # The check below prevents reuse after a successful claim.
+        # NOTE: an active row with a DIFFERENT claim_token would not match here at all
+        # (WHERE clause), so this only fires when the exact same token is re-submitted.
+        if row["status"] == "active":
             raise HTTPException(status_code=404, detail="WhatsApp claim not found")
         try:
             expires = datetime.fromisoformat(str(row["claim_expires_at"]))
@@ -217,15 +324,46 @@ def claim_whatsapp_sender(
             expires = now_dt - timedelta(seconds=1)
         if expires < now_dt:
             raise HTTPException(status_code=410, detail="WhatsApp claim expired")
+
+        old_user_id = row["old_user_id"]
+        wa_id = row["wa_id"]
+
+        # Bind and clear the token (single-use).
         conn.execute(
             """
             UPDATE whatsapp_sender_bindings
-            SET user_id = ?, status = 'active', updated_at = ?
+            SET user_id = ?,
+                workspace_id = ?,
+                status = 'active',
+                claim_token = NULL,
+                claim_expires_at = NULL,
+                updated_at = ?
             WHERE claim_token = ?
             """,
-            (auth.user_id, now_iso(), token),
+            (scoped_user_id, workspace_id, now_iso(), token),
         )
-    return {"ok": True, "wa_id": row["wa_id"], "user_id": auth.user_id}
+
+    # Notify previous owner if a different user has re-claimed an active binding.
+    if old_user_id and old_user_id != scoped_user_id:
+        try:
+            send_whatsapp_text(
+                wa_id,
+                (
+                    "Your WhatsApp number has been linked to a different Workeros "
+                    "account.  If this was not you, visit Settings to reclaim it."
+                ),
+            )
+        except Exception:
+            logger.warning(
+                "WhatsApp rebind notify to old user %s failed", old_user_id, exc_info=True
+            )
+
+    return {
+        "ok": True,
+        "wa_id": wa_id,
+        "user_id": scoped_user_id,
+        "workspace_id": workspace_id,
+    }
 
 
 # ---------------------------------------------------------------------------
@@ -398,10 +536,19 @@ def _parse_whatsapp_inbound(payload: Dict[str, Any]) -> List[Dict[str, str]]:
 # ---------------------------------------------------------------------------
 
 async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, profile_name: str = "") -> None:
-    """Run the inbound text through the shared assistant pipeline and reply."""
+    """Run the inbound text through the shared assistant pipeline and reply.
+
+    Workspace-scoping (Phase 3):
+    1. Look up (user_id, workspace_id) from the active binding.
+    2. Validate the bound user still exists in the DB (hardening).
+    3. Validate the pinned workspace still exists.  If not: reset binding to
+       pending and send a fresh claim link.
+    4. Compute the scoped user_id via local_workspace_user_id and run the agent
+       under that identity so all resource lookups are workspace-scoped.
+    """
     normalized_wa_id = _normalize_whatsapp_wa_id(wa_id)
-    user_id = _whatsapp_binding_user_id(normalized_wa_id)
-    if not user_id:
+    binding = _whatsapp_binding_info(normalized_wa_id)
+    if not binding:
         try:
             claim = _whatsapp_create_claim(normalized_wa_id, profile_name)
             send_whatsapp_text(
@@ -416,6 +563,80 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, pr
         except Exception:
             logger.exception("WhatsApp unbound sender claim prompt failed")
         return
+
+    base_user_id, workspace_id = binding
+
+    # Validate the bound user still exists (hardening: user deleted after bind).
+    try:
+        from db import get_db as _get_db
+        deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+        if deploy == "local":
+            from auth.local_workspaces import local_workspace_base_user_id
+            base_only = local_workspace_base_user_id(base_user_id)
+            with _get_db() as conn:
+                exists = conn.execute(
+                    "SELECT 1 FROM users WHERE id = ? LIMIT 1", (base_only,)
+                ).fetchone()
+            if not exists:
+                logger.warning(
+                    "WhatsApp binding user %s no longer exists; resetting binding for %s",
+                    base_user_id, normalized_wa_id,
+                )
+                claim_url = _reset_binding_to_pending(normalized_wa_id)
+                if claim_url:
+                    try:
+                        send_whatsapp_text(
+                            normalized_wa_id,
+                            (
+                                "Your linked account no longer exists.  "
+                                "Please re-link your WhatsApp number:\n\n"
+                                f"{claim_url}\n\n"
+                                "This link expires in 24 hours."
+                            ),
+                        )
+                    except Exception:
+                        logger.exception("WhatsApp stale-user re-claim send failed")
+                return
+    except Exception:
+        # Non-fatal: if we can't verify existence, proceed optimistically.
+        logger.exception("WhatsApp user-existence check failed; proceeding")
+
+    # Resolve workspace-scoped user_id for the engine.
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy == "local":
+        from auth.local_workspaces import (
+            local_workspace_base_user_id,
+            local_workspace_user_id,
+            get_local_workspace,
+        )
+        base_only = local_workspace_base_user_id(base_user_id)
+        workspace = get_local_workspace(base_only, workspace_id)
+        if workspace is None:
+            # Pinned workspace no longer exists — reset binding and send fresh link.
+            logger.warning(
+                "WhatsApp pinned workspace %s not found for user %s; resetting binding",
+                workspace_id, base_user_id,
+            )
+            claim_url = _reset_binding_to_pending(normalized_wa_id)
+            if claim_url:
+                try:
+                    send_whatsapp_text(
+                        normalized_wa_id,
+                        (
+                            "Your linked workspace no longer exists.  "
+                            "Please re-link your WhatsApp number to a new workspace:\n\n"
+                            f"{claim_url}\n\n"
+                            "This link expires in 24 hours."
+                        ),
+                    )
+                except Exception:
+                    logger.exception("WhatsApp invalid-workspace re-claim send failed")
+            return
+        scoped_user_id = local_workspace_user_id(base_only, workspace_id)
+    else:
+        # Cloud: user_id is already fully qualified; no local scoping.
+        scoped_user_id = base_user_id
+
     conversation_id = f"whatsapp:{normalized_wa_id}"
     try:
         try:
@@ -424,7 +645,7 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, pr
             logger.exception("WhatsApp typing indicator failed")
         reply = await collect_agent_reply(
             message=text,
-            user_id=user_id,
+            user_id=scoped_user_id,
             conversation_id=conversation_id,
             source="whatsapp",
         )

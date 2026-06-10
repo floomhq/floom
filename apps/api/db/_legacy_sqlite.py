@@ -1856,6 +1856,18 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_slack_sender_bindings_claim_token
         ON slack_sender_bindings(claim_token);
     """,
+    # -- migration 65: pin workspace_id on WhatsApp sender bindings -----------
+    # Adds workspace_id (nullable for backward compat — NULL = 'local-default').
+    # Backfills existing active rows to 'local-default' so the live Federico
+    # binding keeps working without any manual intervention.
+    """
+    ALTER TABLE whatsapp_sender_bindings ADD COLUMN workspace_id TEXT;
+    CREATE INDEX IF NOT EXISTS idx_whatsapp_sender_bindings_workspace_id
+        ON whatsapp_sender_bindings(workspace_id);
+    UPDATE whatsapp_sender_bindings
+    SET workspace_id = 'local-default'
+    WHERE status = 'active' AND workspace_id IS NULL;
+    """,
 ]
 
 
@@ -1883,7 +1895,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50, 65} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",
