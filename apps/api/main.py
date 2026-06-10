@@ -19768,6 +19768,25 @@ def _enc(s: str) -> str:
     return quote(str(s), safe="")
 
 
+def _api_call_response_data(resp: Any) -> Any:
+    """Parse an internal proxy response for MCP clients.
+
+    #836 RCA: a non-JSON internal response (HTML error page, stack trace,
+    proxy timeout page) used to be forwarded verbatim as {"detail": resp.text}
+    — leaking server internals to external MCP clients. The raw body is now
+    logged server-side and the client gets a generic message.
+    """
+    try:
+        return resp.json()
+    except Exception:
+        logger.warning(
+            "MCP proxy: non-JSON internal response (status %s): %.300s",
+            getattr(resp, "status_code", "?"),
+            getattr(resp, "text", ""),
+        )
+        return {"detail": "Internal server error"}
+
+
 async def _api_call(
     method: str,
     path: str,
@@ -19787,11 +19806,7 @@ async def _api_call(
         base_url="http://asgi",
     ) as client:
         resp = await client.request(method, path, headers=auth_headers, json=body, params=clean_params)
-    try:
-        data = resp.json()
-    except Exception:
-        data = {"detail": resp.text}
-    return data, resp.status_code
+    return _api_call_response_data(resp), resp.status_code
 
 
 _MCP_DEFAULT_TOOLS: List[dict] = [
