@@ -370,6 +370,17 @@ export interface WorkerDetail {
   permissions?: AssetPermissions;
 }
 
+// A feedback comment left on a worker (SPEC §12). Anyone who can SEE the worker
+// can leave one; surfaced to the owner.
+export interface WorkerFeedback {
+  id: string;
+  worker_id: string;
+  author_id: string;
+  author_name?: string | null;
+  content: string;
+  created_at: string;
+}
+
 // Read-only allow-list projection of a worker returned by
 // GET /workers/public/{id}?token=. Strictly a subset of WorkerDetail: no
 // secrets, source files, run history, owner id, or webhook url.
