@@ -58,7 +58,7 @@ def _load_api(monkeypatch, tmp_path):
 
 
 def _setup_bootstrap_user(monkeypatch, main, client) -> str:
-    response = client.post("/auth/setup", json={"username": "admin", "password": "adminpass123"})
+    response = client.post("/auth/setup", json={"username": "admin", "password": "trombone-hunter7"})
     assert response.status_code == 201, response.text
     user_id = response.json()["id"]
     monkeypatch.setenv("WORKEROS_USER_ID", user_id)
