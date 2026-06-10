@@ -12,6 +12,7 @@ from .interface import (
     AssetAccessRepository,
     CliAuthRepository,
     ConnectionRepository,
+    FeedbackRepository,
     McpToolRepository,
     PersonalAccessTokenRepository,
     RunRepository,
@@ -27,6 +28,7 @@ from .sqlite import (
     SqliteAssetAccessRepository,
     SqliteCliAuthRepository,
     SqliteConnectionRepository,
+    SqliteFeedbackRepository,
     SqliteMcpToolRepository,
     SqlitePersonalAccessTokenRepository,
     SqliteRunRepository,
@@ -57,6 +59,9 @@ class Repositories(NamedTuple):
     users: Optional[UserRepository] = None
     tokens: Optional[PersonalAccessTokenRepository] = None
     sessions: Optional[UserSessionRepository] = None
+    # Worker feedback (migration 63). Optional with default for backwards compat
+    # so a downstream factory predating it keeps constructing Repositories(...).
+    feedback: Optional[FeedbackRepository] = None
 
 
 def _local_repositories() -> Repositories:
@@ -74,6 +79,7 @@ def _local_repositories() -> Repositories:
         users=SqliteUserRepository(),
         tokens=SqlitePersonalAccessTokenRepository(),
         sessions=SqliteUserSessionRepository(),
+        feedback=SqliteFeedbackRepository(),
     )
 
 

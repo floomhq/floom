@@ -506,3 +506,24 @@ class AlertRepository(Protocol):
     def get(self, *, alert_id: str) -> RowDict | None: ...
 
     def delete(self, *, alert_id: str, worker_id: str) -> bool: ...
+
+
+class FeedbackRepository(Protocol):
+    """Lightweight per-worker feedback comments (SPEC §12)."""
+
+    def add(
+        self,
+        *,
+        feedback_id: str,
+        worker_id: str,
+        author_id: str,
+        author_name: str | None,
+        content: str,
+        created_at: str,
+    ) -> RowDict: ...
+
+    def list(self, *, worker_id: str) -> list[RowDict]: ...
+
+    def get(self, *, feedback_id: str) -> RowDict | None: ...
+
+    def delete(self, *, feedback_id: str, worker_id: str) -> bool: ...
