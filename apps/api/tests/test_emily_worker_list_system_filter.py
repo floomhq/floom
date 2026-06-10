@@ -49,6 +49,9 @@ def _seed_db(path: Path) -> None:
 
 
 def _load_chat_service(monkeypatch, db_path: Path):
+    # set BOTH: some suite files leak a module-level WORKEROS_DB, which takes
+    # priority over FLOOM_DB in db/sqlite.py's path resolution
+    monkeypatch.setenv("WORKEROS_DB", str(db_path))
     monkeypatch.setenv("FLOOM_DB", str(db_path))
     for name in list(sys.modules):
         if name in ("chat_service",) or name == "db" or name.startswith("db."):
