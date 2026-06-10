@@ -341,6 +341,7 @@ def _cloud_persist_worker_files(worker_id: str, files: dict, repos: Any) -> None
     is ephemeral; this ensures files survive restarts.
     """
     import json as _json
+    from apps.api.config import get_supabase_service_client
     updated_worker = repos.workers.get_any(worker_id=worker_id) or {}
     sv_id = (updated_worker.get("skill_version_id") or "").strip()
     if not sv_id:
@@ -405,8 +406,11 @@ async def cloud_create_worker(
         scopes=getattr(auth, "scopes", ()),
     )
 
-    # Engine creates the worker: validates YAML, writes to disk, registers in DB
-    result = await _asyncio.to_thread(engine_main.create_worker, payload, engine_auth, repos)
+    # Engine creates the worker: validates YAML, writes to disk, registers in DB.
+    # Engine's create_worker signature is (payload, request, auth, repos); the
+    # request carries the x-workeros-workspace header the engine now requires for
+    # worker writes (matches cloud_draft_and_create above).
+    result = await _asyncio.to_thread(engine_main.create_worker, payload, request, engine_auth, repos)
 
     # Persist files to Supabase — source of truth in cloud (Railway disk is ephemeral)
     files = _read_worker_files_from_disk(result.id)
