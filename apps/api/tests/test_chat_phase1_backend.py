@@ -484,6 +484,9 @@ def test_workers_run_uses_start_run_queue_path(booted, monkeypatch):
     def fake_start_run(run_id, worker_id, inputs, **kwargs):
         started.append((run_id, worker_id, dict(inputs)))
 
+    # Bypass the #748 ownership guard: the tool checks _worker_can_view which
+    # queries the DB; in this unit test there is no persisted worker row.
+    monkeypatch.setattr(chat_service, "_worker_can_view", lambda conn, wid, uid: True)
     monkeypatch.setattr(run_service, "create_run", fake_create_run)
     monkeypatch.setattr(run_service, "start_run", fake_start_run)
 
