@@ -202,12 +202,12 @@ export function Sidebar() {
         </div>
       </header>
 
-      <aside className="sticky top-0 z-20 hidden h-screen w-60 flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] md:flex">
+      <aside className="sticky top-0 z-20 hidden h-screen w-[228px] flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] md:flex">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
         <div className="px-5 pt-6 pb-8">
           <Link href="/overview" className="flex items-center gap-2">
             <FloomMark size={22} />
-            <span className="font-semibold text-base tracking-tight">Workeros</span>
+            <span className="font-semibold text-base tracking-tight">WorkerOS</span>
           </Link>
         </div>
         <SidebarPrimaryActions />
