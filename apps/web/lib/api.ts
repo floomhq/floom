@@ -542,6 +542,12 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
         { method: "DELETE" }
       ),
+    // #770: move/rename a brain file (content + tags preserved).
+    moveFile: (name: string, path: string, to: string) =>
+      fetchJson<import("./types").ContextDetail>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/move`,
+        { method: "POST", body: JSON.stringify({ to }) }
+      ),
     shareFileLink: (name: string, path: string) =>
       fetchJson<import("./types").StandaloneShareLink>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/share-link`,

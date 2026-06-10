@@ -6428,6 +6428,65 @@ def delete_context_file(
     return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
 
 
+class ContextMoveRequest(BaseModel):
+    to: str  # destination relative path (rename or move into a subfolder)
+
+
+@app.post("/contexts/{name}/files/{file_path:path}/move", response_model=ContextDetail)
+def move_context_file(
+    name: str,
+    file_path: str,
+    body: ContextMoveRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ContextDetail:
+    """#770: move/rename a brain file, preserving its content + tags.
+
+    Copy-then-delete (FS has no transactional rename across our metadata store);
+    refuses to overwrite an existing destination.
+    """
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    src_rel = _context_file_path_or_400(file_path)
+    dst_rel = _context_file_path_or_400(body.to)
+    if src_rel == dst_rel:
+        raise HTTPException(status_code=400, detail="Source and destination are the same")
+    src = _safe_context_file_or_400(safe_name, src_rel)
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="Context file not found")
+    dst = _safe_context_file_or_400(safe_name, dst_rel)
+    if dst.exists():
+        raise HTTPException(status_code=409, detail="A file already exists at the destination")
+
+    pack_meta = load_context_metadata().get(safe_name, {})
+    src_meta = context_file_metadata(context_dir(safe_name), src, pack_meta)
+    data = src.read_bytes()
+    _write_context_file(
+        safe_name, dst_rel, data,
+        user_id=auth.user_id,
+        tags=src_meta.get("tags"),
+        file_metadata=src_meta.get("metadata"),
+    )
+
+    src.unlink()
+    for parent in src.parents:
+        if parent == context_dir(safe_name):
+            break
+        try:
+            parent.rmdir()
+        except OSError:
+            break
+    set_context_file_metadata(safe_name, src_rel, tags=[], file_metadata={}, owner_id=auth.user_id)
+
+    author_name, author_email = _git_author(auth)
+    _git_commit_context(
+        safe_name,
+        message=f"context {safe_name}: move {src_rel} -> {dst_rel}",
+        author_name=author_name,
+        author_email=author_email,
+    )
+    return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
+
+
 @app.post("/contexts/{name}/upload", response_model=ContextUploadResponse)
 async def upload_context_files(
     name: str,
