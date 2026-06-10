@@ -2674,6 +2674,56 @@ class SqliteAlertRepository:
         return cursor.rowcount > 0
 
 
+class SqliteFeedbackRepository:
+    """SQLite implementation of FeedbackRepository (per-worker feedback comments)."""
+
+    _cols = "id, worker_id, author_id, author_name, content, created_at"
+
+    def add(
+        self,
+        *,
+        feedback_id: str,
+        worker_id: str,
+        author_id: str,
+        author_name: str | None,
+        content: str,
+        created_at: str,
+    ) -> dict[str, Any]:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO worker_feedback (id, worker_id, author_id, author_name, content, created_at)
+                VALUES (?, ?, ?, ?, ?, ?)
+                """,
+                (feedback_id, worker_id, author_id, author_name, content, created_at),
+            )
+        return self.get(feedback_id=feedback_id) or {}
+
+    def list(self, *, worker_id: str) -> list[dict[str, Any]]:
+        with get_db() as conn:
+            rows = conn.execute(
+                f"SELECT {self._cols} FROM worker_feedback WHERE worker_id = ? ORDER BY created_at",
+                (worker_id,),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def get(self, *, feedback_id: str) -> dict[str, Any] | None:
+        with get_db() as conn:
+            row = conn.execute(
+                f"SELECT {self._cols} FROM worker_feedback WHERE id = ?",
+                (feedback_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def delete(self, *, feedback_id: str, worker_id: str) -> bool:
+        with get_db() as conn:
+            cursor = conn.execute(
+                "DELETE FROM worker_feedback WHERE id = ? AND worker_id = ?",
+                (feedback_id, worker_id),
+            )
+        return cursor.rowcount > 0
+
+
 class SqliteMcpToolRepository:
     _cols = "id, user_id, name, description, input_schema, worker_id, created_at, updated_at"
 

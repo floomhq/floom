@@ -148,6 +148,8 @@ from models import (
     TimeseriesDay,
     WorkerAlert,
     WorkerAlertCreate,
+    WorkerFeedback,
+    WorkerFeedbackCreate,
     WorkerStats,
     WorkspaceStats,
     UnsafeMCPUrlError,
@@ -2719,6 +2721,89 @@ def delete_worker_alert(
     deleted = repos.alerts.delete(alert_id=alert_id, worker_id=worker_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Alert not found")
+
+
+# ---------------------------------------------------------------------------
+# Worker feedback: anyone who can SEE a worker can leave a comment, surfaced to
+# the owner (SPEC §12). GET/POST /workers/{id}/feedback, DELETE one.
+# ---------------------------------------------------------------------------
+
+def _feedback_to_model(row: Dict[str, Any]) -> WorkerFeedback:
+    return WorkerFeedback(
+        id=row["id"],
+        worker_id=row["worker_id"],
+        author_id=row["author_id"],
+        author_name=row.get("author_name"),
+        content=row["content"],
+        created_at=row["created_at"],
+    )
+
+
+@app.post("/workers/{worker_id}/feedback", response_model=WorkerFeedback, status_code=201)
+def create_worker_feedback(
+    worker_id: str,
+    body: WorkerFeedbackCreate,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerFeedback:
+    """Leave feedback on a worker. Anyone who can SEE the worker may comment (SPEC §12)."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    if repos.feedback is None:
+        raise HTTPException(status_code=503, detail="feedback not available")
+    content = (body.content or "").strip()
+    if not content:
+        raise HTTPException(status_code=400, detail="Feedback content is required.")
+    row = repos.feedback.add(
+        feedback_id=f"fdbk_{_uuid_mod.uuid4().hex[:12]}",
+        worker_id=worker_id,
+        author_id=auth.user_id,
+        author_name=auth.username or auth.email,
+        content=content,
+        created_at=now_iso(),
+    )
+    return _feedback_to_model(row)
+
+
+@app.get("/workers/{worker_id}/feedback", response_model=List[WorkerFeedback])
+def list_worker_feedback(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[WorkerFeedback]:
+    """List feedback on a worker (oldest first). Visible to anyone who can see the worker."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    if repos.feedback is None:
+        return []
+    return [_feedback_to_model(r) for r in repos.feedback.list(worker_id=worker_id)]
+
+
+@app.delete("/workers/{worker_id}/feedback/{feedback_id}", status_code=204)
+def delete_worker_feedback(
+    worker_id: str,
+    feedback_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    """Delete a feedback comment. The author, the worker owner, or an admin may remove it."""
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    if repos.feedback is None:
+        raise HTTPException(status_code=503, detail="feedback not available")
+    row = repos.feedback.get(feedback_id=feedback_id)
+    if not row or row.get("worker_id") != worker_id:
+        raise HTTPException(status_code=404, detail="Feedback not found")
+    owner_id = worker.get("owner_id")
+    is_author = row.get("author_id") == auth.user_id
+    is_worker_owner = bool(owner_id) and owner_id == auth.user_id
+    if not (is_author or is_worker_owner or auth.is_admin):
+        raise HTTPException(status_code=403, detail="Not allowed to delete this feedback.")
+    repos.feedback.delete(feedback_id=feedback_id, worker_id=worker_id)
+    return None
 
 
 # ---------------------------------------------------------------------------
