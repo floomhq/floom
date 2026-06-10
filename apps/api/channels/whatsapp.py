@@ -5,6 +5,26 @@ All route paths are identical to those previously defined directly on the
 ``app.include_router(whatsapp_router)``.
 
 Lazy imports are used for anything from main.py to avoid circular imports.
+
+## Approval reply grammar (Phase 4)
+
+When a bound sender has one or more pending approvals, the handler intercepts
+messages that match:
+
+    (yes|approve)[ <suffix>]   — approve
+    (no|reject)[ <suffix>]     — reject
+
+Detection is conservative: the keyword must appear at the very START of the
+message (after stripping whitespace), and interception only occurs when the
+sender has at least one pending approval.  A message like "yes please do X"
+is intercepted only if it starts with the exact keyword "yes" followed by
+nothing or a short hex suffix.
+
+When ``<suffix>`` is given it identifies the approval by the last 6 chars of
+the approval_id (``approval_id[-6:]``).  When omitted:
+  - exactly 1 pending: that one is resolved.
+  - more than 1 pending: a disambiguation reply lists all pending approvals
+    with their suffixes and leaves all unchanged.
 """
 
 from __future__ import annotations
@@ -478,6 +498,175 @@ def _send_whatsapp_typing_indicator(message_id: str) -> None:
 
 
 # ---------------------------------------------------------------------------
+# Approval helpers (WhatsApp reply-to-approve, Phase 4)
+# ---------------------------------------------------------------------------
+
+# Regex: optional whitespace, keyword, optional whitespace + 4-8 hex chars suffix.
+# Anchored to start-of-string only; full-match check in the caller.
+_APPROVAL_KEYWORD_RE = re.compile(
+    r"^(?P<keyword>yes|approve|no|reject)\s*(?P<suffix>[0-9a-f]{4,8})?$",
+    re.IGNORECASE,
+)
+
+
+def _parse_approval_reply(text: str) -> Optional[Dict[str, Any]]:
+    """Return {decision: 'approved'|'rejected', suffix: str|None} or None.
+
+    Only matches if the entire trimmed message is a keyword (+ optional suffix).
+    This is intentionally conservative so normal sentences starting with 'yes'
+    are never silently eaten when no approvals are pending.
+    """
+    stripped = (text or "").strip()
+    m = _APPROVAL_KEYWORD_RE.fullmatch(stripped)
+    if not m:
+        return None
+    keyword = m.group("keyword").lower()
+    suffix = (m.group("suffix") or "").lower() or None
+    decision = "approved" if keyword in ("yes", "approve") else "rejected"
+    return {"decision": decision, "suffix": suffix}
+
+
+def _approve_pending_run_for_whatsapp(*, run_id: str, user_id: str, repos: Any) -> Any:
+    """Approve a pending run as the bound WhatsApp user.
+
+    Reuses the same canonical approve_run path as Slack so the approval
+    decision, follow-up run, and SSE broadcast go through a single code path.
+    """
+    from main import approve_run, ApproveRequest
+    from auth import AuthContext
+    return approve_run(
+        run_id,
+        ApproveRequest(),
+        AuthContext(user_id=user_id, email=None, scopes=("whatsapp",)),
+        repos,
+    )
+
+
+def _reject_pending_run_for_whatsapp(*, run_id: str, user_id: str, repos: Any, reason: str) -> Any:
+    """Reject a pending run as the bound WhatsApp user."""
+    from main import reject_run, RejectRequest
+    from auth import AuthContext
+    return reject_run(
+        run_id,
+        RejectRequest(reason=reason),
+        AuthContext(user_id=user_id, email=None, scopes=("whatsapp",)),
+        repos,
+    )
+
+
+async def _maybe_handle_approval_reply(
+    *,
+    wa_id: str,
+    text: str,
+    scoped_user_id: str,
+) -> Optional[str]:
+    """Detect and process an approval reply from a bound sender.
+
+    Returns a reply text to send back if the message was an approval command,
+    or None if it was not (caller should proceed to the normal agent pipeline).
+
+    Safety rules:
+    - Only intercept when the sender has >= 1 pending approval (conservative).
+    - Owner must be the bound user (scoped_user_id) — enforced by the canonical
+      approve/reject path which checks run visibility + ownership.
+    - Ambiguous (multiple pending, no suffix) → list pending approvals with
+      their id-suffixes; do NOT approve anything.
+    - Already-resolved or not-found approval → graceful "no longer pending" reply.
+    """
+    parsed = _parse_approval_reply(text)
+    if parsed is None:
+        return None
+
+    try:
+        from db import get_repositories
+        repos = get_repositories()
+        pending = repos.approvals.list_pending(owner_id=scoped_user_id)
+    except Exception:
+        logger.exception("WhatsApp approval reply: could not load pending approvals")
+        return None
+
+    if not pending:
+        # No pending approvals for this user — do NOT intercept; pass to agent.
+        return None
+
+    decision = parsed["decision"]
+    suffix = parsed["suffix"]
+
+    # Resolve which approval row to act on.
+    target: Optional[Dict[str, Any]] = None
+    if suffix:
+        # Match by last-N chars of approval_id (case-insensitive hex).
+        for row in pending:
+            approval_id = str(row.get("id") or "")
+            if approval_id.lower().endswith(suffix):
+                target = row
+                break
+        if target is None:
+            # Suffix given but didn't match any pending approval.
+            lines = [
+                f"• {str(row.get('worker_name') or row.get('worker_id') or 'Worker')}: "
+                f"{str(row.get('label') or 'Approval requested')} "
+                f"[...{str(row.get('id') or '')[-6:]}]"
+                for row in pending
+            ]
+            return (
+                f"No pending approval matches that ID. Pending ({len(pending)}):\n"
+                + "\n".join(lines)
+                + "\n\nReply *yes <id>* or *no <id>* to decide."
+            )
+    elif len(pending) == 1:
+        target = pending[0]
+    else:
+        # Multiple pending, no suffix → list them and ask for disambiguation.
+        lines = [
+            f"• {str(row.get('worker_name') or row.get('worker_id') or 'Worker')}: "
+            f"{str(row.get('label') or 'Approval requested')} "
+            f"[...{str(row.get('id') or '')[-6:]}]"
+            for row in pending
+        ]
+        return (
+            f"You have {len(pending)} pending approvals:\n"
+            + "\n".join(lines)
+            + "\n\nReply *yes <id>* or *no <id>* to decide, "
+            + "e.g. *yes " + str(pending[0].get("id") or "")[-6:] + "*"
+        )
+
+    run_id = str(target.get("run_id") or "")
+    worker_name = str(target.get("worker_name") or target.get("worker_id") or "Worker")
+    label = str(target.get("label") or "Approval requested")
+
+    try:
+        if decision == "approved":
+            result = _approve_pending_run_for_whatsapp(
+                run_id=run_id, user_id=scoped_user_id, repos=repos
+            )
+            follow_up = getattr(result, "run_id", None) or (result.get("run_id") if isinstance(result, dict) else None)
+            suffix_info = f" Follow-up run: `{follow_up}`." if follow_up else ""
+            return f"Approved *{worker_name}* — {label}.{suffix_info}"
+        else:
+            _reject_pending_run_for_whatsapp(
+                run_id=run_id,
+                user_id=scoped_user_id,
+                repos=repos,
+                reason=f"Rejected via WhatsApp by {wa_id}",
+            )
+            return f"Rejected *{worker_name}* — {label}."
+    except Exception as exc:
+        detail = getattr(exc, "detail", None) or str(exc)
+        if "not awaiting approval" in str(detail).lower() or "already decided" in str(detail).lower():
+            return f"That approval is no longer pending (already resolved: {worker_name} — {label})."
+        if "not found" in str(detail).lower():
+            return f"That approval is no longer pending."
+        logger.exception(
+            "WhatsApp approval reply: %s failed for run %s user %s",
+            decision,
+            run_id,
+            scoped_user_id,
+        )
+        return f"Could not process approval: {detail}"
+
+
+# ---------------------------------------------------------------------------
 # Inbound payload parsing
 # ---------------------------------------------------------------------------
 
@@ -636,6 +825,29 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, pr
     else:
         # Cloud: user_id is already fully qualified; no local scoping.
         scoped_user_id = base_user_id
+
+    # ---------------------------------------------------------------------------
+    # Phase 4: approval reply detection.
+    # Check BEFORE routing to the agent.  Conservative: only intercepts when
+    # the sender has >= 1 pending approval AND the message matches the exact
+    # keyword grammar.  Normal chat is never eaten.
+    # ---------------------------------------------------------------------------
+    try:
+        approval_reply = await _maybe_handle_approval_reply(
+            wa_id=normalized_wa_id,
+            text=text,
+            scoped_user_id=scoped_user_id,
+        )
+    except Exception:
+        logger.exception("WhatsApp approval reply check failed; falling through to agent")
+        approval_reply = None
+
+    if approval_reply is not None:
+        try:
+            send_whatsapp_text(normalized_wa_id, approval_reply)
+        except Exception:
+            logger.exception("WhatsApp approval reply send failed")
+        return
 
     conversation_id = f"whatsapp:{normalized_wa_id}"
     try:
