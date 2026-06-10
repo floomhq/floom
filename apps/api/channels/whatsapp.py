@@ -367,6 +367,67 @@ def claim_whatsapp_sender(
 
 
 # ---------------------------------------------------------------------------
+# My WhatsApp binding — status + unlink
+# ---------------------------------------------------------------------------
+
+@whatsapp_router.get("/whatsapp/bindings/me")
+def get_whatsapp_binding_me(auth: AuthContext = Depends(get_auth_context)) -> Dict[str, Any]:
+    """Return the caller's active WhatsApp sender binding, if any.
+
+    Returns:
+        { "linked": true, "wa_id_masked": "***9709", "workspace_id": ...,
+          "profile_name": ..., "linked_at": ..., "last_seen_at": ... }
+        or
+        { "linked": false }
+    """
+    from db import get_db
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT wa_id, profile_name, workspace_id, updated_at, last_seen_at
+            FROM whatsapp_sender_bindings
+            WHERE user_id = ? AND status = 'active'
+            ORDER BY updated_at DESC
+            LIMIT 1
+            """,
+            (auth.user_id,),
+        ).fetchone()
+    if not row:
+        return {"linked": False}
+    wa_id = str(row["wa_id"] or "")
+    masked = ("*" * max(0, len(wa_id) - 4) + wa_id[-4:]) if len(wa_id) > 4 else wa_id
+    workspace_id = row["workspace_id"] or _DEFAULT_WORKSPACE_ID
+    return {
+        "linked": True,
+        "wa_id_masked": masked,
+        "workspace_id": workspace_id,
+        "profile_name": row["profile_name"] or None,
+        "linked_at": row["updated_at"],
+        "last_seen_at": row["last_seen_at"] or None,
+    }
+
+
+@whatsapp_router.delete("/whatsapp/bindings/me")
+def delete_whatsapp_binding_me(auth: AuthContext = Depends(get_auth_context)) -> Dict[str, Any]:
+    """Unlink the caller's active WhatsApp sender binding.
+
+    Returns the number of rows unlinked.  Safe to call when not linked.
+    """
+    from db import get_db, now_iso
+    with get_db() as conn:
+        result = conn.execute(
+            """
+            UPDATE whatsapp_sender_bindings
+            SET user_id = NULL, status = 'unlinked', workspace_id = NULL, updated_at = ?
+            WHERE user_id = ? AND status = 'active'
+            """,
+            (now_iso(), auth.user_id),
+        )
+        unlinked = result.rowcount
+    return {"ok": True, "unlinked": unlinked}
+
+
+# ---------------------------------------------------------------------------
 # Signature verification
 # ---------------------------------------------------------------------------
 

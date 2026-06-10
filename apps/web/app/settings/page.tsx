@@ -700,6 +700,176 @@ function ToggleRow({
 
 // SPEC §12: Channels — how you reach Emily/workers (inbound), set once.
 // Slack (live), WhatsApp (coming), and "install in your agent" over MCP/CLI.
+// ---------------------------------------------------------------------------
+// WhatsApp QR — generated client-side with a minimal SVG approach using
+// wa.me deep-link (no npm dep). We embed a plain link fallback for envs
+// that block the QR library, and use an <img> via Google Charts for a
+// dependency-free QR without adding a package.
+// ---------------------------------------------------------------------------
+const WA_BOT_NUMBER = "16503999709";
+const WA_LINK = `https://wa.me/${WA_BOT_NUMBER}`;
+
+function WhatsAppQR() {
+  const qrUrl = `https://chart.googleapis.com/chart?cht=qr&chs=160x160&chl=${encodeURIComponent(WA_LINK)}&choe=UTF-8`;
+  return (
+    <div className="flex flex-col items-center gap-2">
+      {/* eslint-disable-next-line @next/next/no-img-element */}
+      <img
+        src={qrUrl}
+        alt="WhatsApp QR code"
+        width={120}
+        height={120}
+        className="rounded-md border border-[var(--border-default)]"
+      />
+      <a
+        href={WA_LINK}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
+      >
+        +1 650-399-9709
+      </a>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SlackBindingStatus — per-user DM identity status + unlink
+// ---------------------------------------------------------------------------
+function SlackBindingStatus() {
+  const [binding, setBinding] = useState<import("@/lib/types").SlackBindingMe | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [unlinking, setUnlinking] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setBinding(await api.slack.bindingMe());
+    } catch {
+      // endpoint may not exist on older engines — fail silently
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function handleUnlink() {
+    if (!confirm("Unlink your Slack identity from this account?")) return;
+    setUnlinking(true);
+    try {
+      await api.slack.unlink();
+      toast.success("Slack identity unlinked");
+      void load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to unlink Slack");
+    } finally {
+      setUnlinking(false);
+    }
+  }
+
+  if (loading) return <Skeleton className="h-8 w-48" />;
+  if (!binding) return null;
+  if (!binding.linked) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        DM Emily in Slack to link your identity.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-muted/40 px-3 py-2">
+      <div className="min-w-0">
+        <p className="text-xs font-medium text-foreground truncate">
+          {binding.profile_name
+            ? `${binding.profile_name} (${binding.slack_user_id})`
+            : binding.slack_user_id}
+        </p>
+        <p className="text-[11px] text-muted-foreground">Team {binding.slack_team_id}</p>
+      </div>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="shrink-0 text-muted-foreground hover:text-destructive"
+        onClick={() => void handleUnlink()}
+        disabled={unlinking}
+      >
+        {unlinking ? "Unlinking..." : "Unlink"}
+      </Button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WhatsAppBindingStatus — per-user binding status + unlink
+// ---------------------------------------------------------------------------
+function WhatsAppBindingStatus() {
+  const [binding, setBinding] = useState<import("@/lib/types").WhatsAppBindingMe | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [unlinking, setUnlinking] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setBinding(await api.whatsapp.bindingMe());
+    } catch {
+      // endpoint may not exist on older engines — fail silently
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function handleUnlink() {
+    if (!confirm("Unlink your WhatsApp number from this account?")) return;
+    setUnlinking(true);
+    try {
+      await api.whatsapp.unlink();
+      toast.success("WhatsApp number unlinked");
+      void load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to unlink WhatsApp");
+    } finally {
+      setUnlinking(false);
+    }
+  }
+
+  if (loading) return <Skeleton className="h-8 w-48" />;
+  if (!binding) return null;
+  if (!binding.linked) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Scan the QR or text the number above, then tap the link Emily sends you.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-muted/40 px-3 py-2">
+      <div className="min-w-0">
+        <p className="text-xs font-medium text-foreground truncate">
+          {binding.profile_name
+            ? `${binding.profile_name} (${binding.wa_id_masked})`
+            : binding.wa_id_masked}
+        </p>
+        <p className="text-[11px] text-muted-foreground">Linked to this account</p>
+      </div>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="shrink-0 text-muted-foreground hover:text-destructive"
+        onClick={() => void handleUnlink()}
+        disabled={unlinking}
+      >
+        {unlinking ? "Unlinking..." : "Unlink"}
+      </Button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ChannelsTab — Slack + WhatsApp + Agent install
+// ---------------------------------------------------------------------------
 function ChannelsTab() {
   return (
     <>
@@ -710,16 +880,54 @@ function ChannelsTab() {
             Where workers reach you and where Emily can be reached.
           </p>
         </div>
-        <SlackConnect />
-        <Card>
-          <CardContent className="flex items-center gap-3 py-4">
-            <div className="flex-1">
-              <div className="text-sm font-medium">WhatsApp</div>
-              <div className="text-xs text-muted-foreground">Not connected</div>
+
+        {/* Slack card */}
+        <div className="space-y-3 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-card p-4">
+          <div className="flex items-center gap-2.5">
+            <svg viewBox="0 0 256 256" className="size-5 shrink-0" aria-hidden="true" focusable="false">
+              <path fill="#E01E5A" d="M53.8,161.3c0,14.8-12,26.8-26.8,26.8S0,176.2,0,161.3s12-26.8,26.8-26.8h26.8V161.3z M67.3,161.3 c0-14.8,12-26.8,26.8-26.8s26.8,12,26.8,26.8v67.1c0,14.8-12,26.8-26.8,26.8s-26.8-12-26.8-26.8V161.3z" />
+              <path fill="#36C5F0" d="M94.1,53.6c-14.8,0-26.8-12-26.8-26.8S79.3,0,94.1,0s26.8,12,26.8,26.8v26.8H94.1z M94.1,67.3 c14.8,0,26.8,12,26.8,26.8s-12,26.8-26.8,26.8H26.8C12,120.9,0,108.9,0,94.1s12-26.8,26.8-26.8H94.1z" />
+              <path fill="#2EB67D" d="M201.5,94.1c0-14.8,12-26.8,26.8-26.8s26.8,12,26.8,26.8s-12,26.8-26.8,26.8h-26.8V94.1z M188.1,94.1 c0,14.8-12,26.8-26.8,26.8s-26.8-12-26.8-26.8V26.8C134.4,12,146.4,0,161.3,0s26.8,12,26.8,26.8V94.1z" />
+              <path fill="#ECB22E" d="M161.3,201.5c14.8,0,26.8,12,26.8,26.8s-12,26.8-26.8,26.8s-26.8-12-26.8-26.8v-26.8H161.3z M161.3,188.1 c-14.8,0-26.8-12-26.8-26.8s12-26.8,26.8-26.8h67.3c14.8,0,26.8,12,26.8,26.8s-12,26.8-26.8,26.8H161.3z" />
+            </svg>
+            <h3 className="text-sm font-medium">Slack</h3>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Install Emily to your Slack workspace, then DM her to link your identity.
+          </p>
+          <SlackConnect />
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">Your link status</p>
+            <SlackBindingStatus />
+          </div>
+        </div>
+
+        {/* WhatsApp card */}
+        <div className="space-y-3 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-card p-4">
+          <div className="flex items-center gap-2.5">
+            <svg viewBox="0 0 24 24" className="size-5 shrink-0 text-[#25D366]" aria-hidden="true" focusable="false">
+              <use href="#brand-whatsapp" />
+            </svg>
+            <h3 className="text-sm font-medium">WhatsApp</h3>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Text Emily on WhatsApp. She&apos;ll reply with a link to bind your number to this account.
+          </p>
+          <div className="flex flex-wrap items-start gap-6">
+            <WhatsAppQR />
+            <div className="flex-1 min-w-[160px] space-y-3">
+              <ol className="space-y-1.5 text-xs text-muted-foreground">
+                <li>1. Scan the QR or text <span className="font-medium text-foreground">+1 650-399-9709</span>.</li>
+                <li>2. Emily replies with a claim link — tap it.</li>
+                <li>3. Your number is bound to this account.</li>
+              </ol>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Your link status</p>
+                <WhatsAppBindingStatus />
+              </div>
             </div>
-            <Badge variant="secondary">Coming soon</Badge>
-          </CardContent>
-        </Card>
+          </div>
+        </div>
       </section>
 
       <section className="space-y-3">
