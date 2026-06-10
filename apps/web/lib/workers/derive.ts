@@ -38,11 +38,22 @@ export function workerStatusKey(w: WorkerSummary): string {
 
 const RECENT_WINDOW_MS = 14 * 24 * 60 * 60 * 1000; // 14 days (SPEC §1 "Recent")
 
+/** ISO timestamp of most recent worker activity, using run time then edit/create fallbacks. */
+export function workerActivityTimestamp(w: WorkerSummary): number {
+  const iso =
+    w.recent_stats?.last_run_at ||
+    w.last_run?.started_at ||
+    w.last_run?.created_at ||
+    w.updated_at ||
+    w.created_at ||
+    "";
+  const t = iso ? Date.parse(iso) : Number.NaN;
+  return Number.isFinite(t) ? t : 0;
+}
+
 export function isRecent(w: WorkerSummary, now: number): boolean {
-  const ts = w.recent_stats?.last_run_at;
-  if (!ts) return false;
-  const t = Date.parse(ts);
-  return Number.isFinite(t) && now - t <= RECENT_WINDOW_MS;
+  const t = workerActivityTimestamp(w);
+  return t > 0 && now - t <= RECENT_WINDOW_MS;
 }
 
 /** The smart-tag values a worker carries (starred is external/localStorage). */

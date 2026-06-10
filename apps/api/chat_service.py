@@ -713,8 +713,13 @@ def _tool_title(tool_name: str, args_preview: Any) -> str:
 def _tool_resource(tool_name: str, payload: Any) -> Optional[Dict[str, Any]]:
     if not isinstance(payload, dict):
         return None
-    worker_id = payload.get("worker_id") or payload.get("id")
-    run_id = payload.get("run_id")
+    nested_run = payload.get("run") if isinstance(payload.get("run"), dict) else {}
+    worker_id = (
+        payload.get("worker_id")
+        or nested_run.get("worker_id")
+        or payload.get("id")
+    )
+    run_id = payload.get("run_id") or nested_run.get("run_id") or nested_run.get("id")
     if tool_name == "workers__create_from_prompt":
         worker_id = payload.get("worker_id") or "worker-author"
     if run_id:
@@ -735,8 +740,16 @@ def _tool_actions(tool_name: str, resource: Optional[Dict[str, Any]], status: st
     actions: List[Dict[str, Any]] = []
     if resource and resource.get("run_id"):
         run_id = str(resource["run_id"])
-        actions.append({"id": "open_run", "method": "GET", "href": f"/runs/{run_id}"})
-        actions.append({"id": "cancel_run", "method": "POST", "href": f"/runs/{run_id}/cancel"})
+        actions.append(
+            {
+                "id": "open_run",
+                "label": "View run",
+                "method": "GET",
+                "href": f"/runs/{run_id}?tab=logs",
+            }
+        )
+        if status in {"starting", "running", "queued"}:
+            actions.append({"id": "cancel_run", "method": "POST", "href": f"/runs/{run_id}/cancel"})
     if resource and resource.get("worker_id") and status == "completed":
         worker_id = str(resource["worker_id"])
         if worker_id != "worker-author":

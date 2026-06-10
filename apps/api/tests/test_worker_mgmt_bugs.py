@@ -118,7 +118,10 @@ def test_worker_routes_resolve_slug_equivalent_id(app_ctx):
 
     listed = client.get("/workers?shape=list")
     assert listed.status_code == 200, listed.text
-    assert "sales-summary" in {worker["id"] for worker in listed.json()}
+    listed_workers = {worker["id"]: worker for worker in listed.json()}
+    assert "sales-summary" in listed_workers
+    assert listed_workers["sales-summary"]["created_at"]
+    assert "updated_at" in listed_workers["sales-summary"]
 
     detail = client.get("/workers/Sales_Summary")
     assert detail.status_code == 200, detail.text
