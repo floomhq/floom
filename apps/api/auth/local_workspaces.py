@@ -118,6 +118,21 @@ def create_local_workspace(owner_user_id: str, name: str) -> dict[str, Any]:
     return created
 
 
+def rename_local_workspace(owner_user_id: str, workspace_id: str, name: str) -> dict[str, Any] | None:
+    """#791: rename a workspace. Returns the updated row, or None if not found."""
+    clean_name = (name or "").strip()
+    if not clean_name:
+        raise ValueError("workspace name required")
+    with get_db() as conn:
+        cur = conn.execute(
+            "UPDATE local_workspaces SET name = ? WHERE owner_user_id = ? AND id = ?",
+            (clean_name, owner_user_id, workspace_id),
+        )
+        if cur.rowcount == 0:
+            return None
+    return get_local_workspace(owner_user_id, workspace_id)
+
+
 def requested_local_workspace_id(request: Request) -> str | None:
     header_value = request.headers.get(ACTIVE_WORKSPACE_HEADER)
     query_value = request.query_params.get("workspace_id")

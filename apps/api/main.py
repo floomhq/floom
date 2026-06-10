@@ -73,6 +73,7 @@ from auth.local_workspaces import (
     list_local_workspaces,
     local_workspace_base_user_id,
     local_workspace_user_id,
+    rename_local_workspace,
     requested_local_workspace_id,
 )
 from contexts import (
@@ -645,6 +646,10 @@ class LocalWorkspaceCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
 
 
+class LocalWorkspaceRenameRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+
+
 class LocalWorkspaceOut(BaseModel):
     id: str
     name: str
@@ -737,6 +742,24 @@ def create_workspace(
     _require_local_workspace_mode()
     base_user_id = local_workspace_base_user_id(auth.user_id)
     return _local_workspace_out(create_local_workspace(base_user_id, payload.name))
+
+
+@app.patch("/workspaces/{workspace_id}", response_model=LocalWorkspaceOut)
+def rename_workspace(
+    workspace_id: str,
+    payload: LocalWorkspaceRenameRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> LocalWorkspaceOut:
+    """#791: rename a local OSS workspace (owner-scoped)."""
+    _require_local_workspace_mode()
+    base_user_id = local_workspace_base_user_id(auth.user_id)
+    try:
+        updated = rename_local_workspace(base_user_id, workspace_id, payload.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    return _local_workspace_out(updated)
 
 
 @app.post("/workspaces/{workspace_id}/select", response_model=LocalWorkspaceOut)
