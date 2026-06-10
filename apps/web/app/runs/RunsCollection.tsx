@@ -10,6 +10,8 @@ import { formatRelative } from "@/lib/formatters";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection, Avatar } from "@/components/collection";
+import { InlineFileOpen } from "@/components/file-viewer/InlineFileOpen";
+import { traceSteps } from "@/lib/runs/trace";
 import { contentTagOptions } from "@/lib/workers/derive";
 import {
   formatDuration,
@@ -45,9 +47,17 @@ function useRunDetail(id: string): RunDetail | undefined {
   return d;
 }
 
+// SPEC §4 Output: result + files; files open INLINE (breadcrumb/Back/Download);
+// PNG artifacts render as images (shared InlineFileOpen, rule #5).
 function OutputTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id);
   if (!d) return <div style={muted}>Loading…</div>;
+  const files = (d.artifacts ?? []).map((a) => ({
+    id: a.id,
+    name: a.name,
+    url: api.runs.artifactUrl(d.id, a.id),
+    sizeBytes: a.size_bytes,
+  }));
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {d.error && (
@@ -60,106 +70,75 @@ function OutputTab({ r }: { r: RunSummary }) {
         <h4 style={h4}>Result</h4>
         <pre style={code}>{JSON.stringify(d.output ?? {}, null, 2)}</pre>
       </div>
-      {d.artifacts?.length > 0 && (
+      {files.length > 0 && (
         <div>
           <h4 style={h4}>Files</h4>
-          <div className="c-ltable">
-            {d.artifacts.map((a) => (
-              <a
-                key={a.id}
-                href={api.runs.artifactUrl(d.id, a.id)}
-                className="c-lrow"
-                style={{ gridTemplateColumns: "1fr auto", textDecoration: "none" }}
-              >
-                <div className="c-lprimary">
-                  <div className="c-lp-tx">
-                    <div className="nm" style={{ fontFamily: "var(--font-mono)" }}>
-                      {a.name}
-                    </div>
-                  </div>
-                </div>
-                <span className="c-cell m">{a.size_bytes ? `${Math.round(a.size_bytes / 1024)} KB` : ""}</span>
-              </a>
-            ))}
-          </div>
+          <InlineFileOpen files={files} rootLabel="Output" />
         </div>
       )}
     </div>
   );
 }
 
-function StepsTab({ r }: { r: RunSummary }) {
+// SPEC §4 Trace: steps + logs. Transcript carries no per-step timestamps (no
+// structured field), so durations come from the run-level timeline, not faked.
+function TraceTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id);
   if (!d) return <div style={muted}>Loading…</div>;
-  const steps = d.transcript ?? [];
+  const steps = traceSteps(d.transcript);
+  const logs = d.logs ?? [];
   return (
-    <div className="c-ltable">
-      {steps.map((s, i) => (
-        <div key={i} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
-          <div className="c-lprimary">
-            <div className="c-lp-tx">
-              <div className="nm">{(s as { role?: string }).role ?? `Step ${i + 1}`}</div>
-              <div className="sub" style={{ whiteSpace: "normal" }}>
-                {String((s as { content?: unknown }).content ?? "").slice(0, 240)}
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <div style={kv}>
+        <span style={kvK}>Duration</span>
+        <span>{formatDuration(d.duration_ms)}</span>
+        <span style={kvK}>Tokens</span>
+        <span style={{ fontFamily: "var(--font-mono)" }}>{d.total_tokens ?? "—"}</span>
+      </div>
+      <div>
+        <h4 style={h4}>Steps</h4>
+        <div className="c-ltable">
+          {steps.map((s, i) => (
+            <div key={i} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
+              <div className="c-lprimary">
+                <div className="c-lp-tx">
+                  <div className="nm">{s.label}</div>
+                  <div className="sub" style={{ whiteSpace: "normal" }}>
+                    {s.content}
+                  </div>
+                </div>
               </div>
             </div>
-          </div>
+          ))}
+          {steps.length === 0 && <div style={{ ...muted, padding: 14 }}>No steps recorded.</div>}
         </div>
-      ))}
-      {steps.length === 0 && <div style={{ ...muted, padding: 14 }}>No steps recorded.</div>}
+      </div>
+      {logs.length > 0 && (
+        <div>
+          <h4 style={h4}>Logs</h4>
+          <pre style={code}>
+            {logs.map((l) => `${l.timestamp} [${l.level}] ${l.message}`).join("\n")}
+          </pre>
+        </div>
+      )}
     </div>
   );
 }
 
-function ToolsTab({ r }: { r: RunSummary }) {
+// SPEC §4: Inputs — the run's input payload.
+function InputsTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id);
   if (!d) return <div style={muted}>Loading…</div>;
-  const calls = d.tool_calls ?? [];
-  return (
-    <div className="c-ltable">
-      {calls.map((t) => (
-        <div key={t.id} className="c-lrow" style={{ gridTemplateColumns: "1fr auto" }}>
-          <div className="c-lprimary">
-            <div className="c-lp-tx">
-              <div className="nm" style={{ fontFamily: "var(--font-mono)" }}>
-                {t.name}
-              </div>
-              <div className="sub" style={{ whiteSpace: "normal" }}>
-                {JSON.stringify(t.arguments).slice(0, 200)}
-              </div>
-            </div>
-          </div>
-          {t.error ? (
-            <span className="c-pill err">
-              <span className="dot" />
-              error
-            </span>
-          ) : (
-            <span className="c-pill ok">
-              <span className="dot" />
-              ok
-            </span>
-          )}
-        </div>
-      ))}
-      {calls.length === 0 && <div style={{ ...muted, padding: 14 }}>No tool calls in this run.</div>}
-    </div>
-  );
+  const input = d.input ?? {};
+  if (Object.keys(input).length === 0) return <div style={muted}>This run took no inputs.</div>;
+  return <pre style={code}>{JSON.stringify(input, null, 2)}</pre>;
 }
 
-function CostTab({ r }: { r: RunSummary }) {
+// SPEC §4: Raw — the full run record.
+function RawTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id);
   if (!d) return <div style={muted}>Loading…</div>;
-  return (
-    <div style={kv}>
-      <span style={kvK}>Tokens</span>
-      <span style={{ fontFamily: "var(--font-mono)" }}>{d.total_tokens ?? "—"}</span>
-      <span style={kvK}>Duration</span>
-      <span>{formatDuration(d.duration_ms)}</span>
-      <span style={kvK}>Runner</span>
-      <span>{d.runner}</span>
-    </div>
-  );
+  return <pre style={code}>{JSON.stringify(d, null, 2)}</pre>;
 }
 
 export default function RunsCollection({ initialRuns }: { initialRuns: RunSummary[] }) {
@@ -311,6 +290,10 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
         ),
         actions: (
           <>
+            {/* SPEC §4: ↑ worker link (worker_id on every run — BUILT). */}
+            <Link href={`/workers/${r.worker_id}`} className="c-vpill" style={{ padding: "6px 11px" }}>
+              ↑ Open worker
+            </Link>
             <button
               type="button"
               className="c-vpill"
@@ -319,17 +302,27 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
             >
               Replay
             </button>
+            {/* TODO(#765): run share link — backend pending; honest stub for now. */}
+            <button
+              type="button"
+              className="c-vpill"
+              style={{ padding: "6px 11px" }}
+              onClick={() => toast("Sharing a run is coming soon (#765).")}
+            >
+              Share
+            </button>
             <Link href={`/runs/${r.id}`} className="c-vpill" style={{ padding: "6px 11px" }}>
               Open full run →
             </Link>
           </>
         ),
       },
+      // SPEC §4: Output · Trace · Inputs · Raw (RUN_DETAIL_TABS).
       tabs: [
         { key: "Output", label: "Output", render: () => <OutputTab r={r} /> },
-        { key: "Steps", label: "Steps", render: () => <StepsTab r={r} /> },
-        { key: "Tools", label: "Tools", render: () => <ToolsTab r={r} /> },
-        { key: "Cost", label: "Cost", render: () => <CostTab r={r} /> },
+        { key: "Trace", label: "Trace", render: () => <TraceTab r={r} /> },
+        { key: "Inputs", label: "Inputs", render: () => <InputsTab r={r} /> },
+        { key: "Raw", label: "Raw", render: () => <RawTab r={r} /> },
       ],
     }),
     states: {
