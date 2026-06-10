@@ -66,6 +66,21 @@ export function workerTags(
   };
 }
 
+/** Canonical worker source-file order for the Source sub-tabs (SPEC §11). */
+export const SOURCE_FILE_ORDER = ["worker.yml", "SKILL.md", "run.py", "requirements.txt"];
+
+/** Files with content, canonical order first, then any other text files. */
+export function orderedSourceFiles<T extends { path: string; content?: string | null }>(
+  files: T[],
+): T[] {
+  const withContent = files.filter((f) => f.content != null);
+  const canon = SOURCE_FILE_ORDER.map((p) => withContent.find((f) => f.path === p)).filter(
+    (f): f is T => Boolean(f),
+  );
+  const extras = withContent.filter((f) => !SOURCE_FILE_ORDER.includes(f.path));
+  return [...canon, ...extras];
+}
+
 /** Unique content-tag options across the visible workers (sorted, with counts). */
 export function contentTagOptions(workers: WorkerSummary[]): TagOption[] {
   const counts = new Map<string, number>();
