@@ -165,6 +165,9 @@ def test_worker_can_view_admin_vs_isolated_member(tmp_path, monkeypatch):
     db = tmp_path / "vis3.db"
     _seed_visibility_db(db)
     monkeypatch.setenv("FLOOM_DB", str(db))
+    # Simulate multi-user mode so filesystem fallback is disabled and an
+    # unknown worker ID correctly returns False instead of True.
+    monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
     import chat_service
     from db import get_db
     with get_db() as conn:

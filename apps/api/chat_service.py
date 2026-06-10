@@ -1754,13 +1754,73 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
         if is_admin:
             rows = conn.execute(base_select + "ORDER BY w.name").fetchall()
         else:
-            rows = conn.execute(
-                base_select
-                + "WHERE w.owner_id = ? "
-                + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
-                + "ORDER BY w.name",
-                (user_id,),
-            ).fetchall()
+            # Mirror _worker_can_view exactly: a member sees their own workers,
+            # stock/public workers (always accessible regardless of ownership),
+            # plus workspace-visible workers they are an active member of.
+            # The workspace_members table may be absent in single-user OSS
+            # (no multi-member); check for its existence before using it.
+            from main import PUBLIC_STOCK_WORKER_IDS, PROTECTED_STOCK_WORKER_IDS
+            all_stock_ids = list(PUBLIC_STOCK_WORKER_IDS | PROTECTED_STOCK_WORKER_IDS)
+            try:
+                has_members_table = bool(conn.execute(
+                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_members' LIMIT 1"
+                ).fetchone())
+            except Exception:
+                has_members_table = False
+
+            if has_members_table:
+                # Show own workers and workspace-visible workers where the user
+                # is an active workspace member — matching _worker_can_view.
+                rows = conn.execute(
+                    base_select
+                    + "LEFT JOIN workspace_members wm "
+                    + "  ON wm.workspace_id = COALESCE(w.workspace_id, 'local-default') "
+                    + "  AND wm.user_id = ? AND wm.status = 'active' "
+                    + "WHERE w.owner_id = ? "
+                    + "OR (COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                    + "    AND wm.user_id IS NOT NULL) "
+                    + "ORDER BY w.name",
+                    (user_id, user_id),
+                ).fetchall()
+                # Also include stock/public workers not already captured above
+                # (e.g. stock worker owned by another user in a workspace the
+                # member doesn't belong to — stock workers are always runnable
+                # by everyone, matching _worker_can_view's stock-first check).
+                if all_stock_ids:
+                    seen_ids = {r["id"] for r in rows}
+                    missing_stock = [sid for sid in all_stock_ids if sid not in seen_ids]
+                    if missing_stock:
+                        placeholders = ",".join("?" * len(missing_stock))
+                        stock_rows = conn.execute(
+                            base_select
+                            + f"WHERE w.id IN ({placeholders}) ORDER BY w.name",
+                            missing_stock,
+                        ).fetchall()
+                        rows = list(rows) + stock_rows
+            else:
+                # Single-user OSS: no workspace_members table.
+                # In single-user mode everyone is effectively in every workspace,
+                # so workspace-visible workers are accessible to all users —
+                # matching _worker_can_view's _shared_filesystem_fallback_allowed
+                # path. Show own + workspace-visible + stock workers.
+                if all_stock_ids:
+                    placeholders = ",".join("?" * len(all_stock_ids))
+                    rows = conn.execute(
+                        base_select
+                        + f"WHERE w.owner_id = ? "
+                        + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                        + f"OR w.id IN ({placeholders}) "
+                        + "ORDER BY w.name",
+                        [user_id] + all_stock_ids,
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        base_select
+                        + "WHERE w.owner_id = ? "
+                        + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                        + "ORDER BY w.name",
+                        (user_id,),
+                    ).fetchall()
     for row in rows:
         try:
             manifest = json.loads(row["manifest_json"] or "{}") if row["manifest_json"] else {}
@@ -1803,6 +1863,16 @@ def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
     real "not found" error using its own resolution logic.
     """
     import sqlite3 as _sqlite3
+    # Stock/public workers are always accessible regardless of DB state.
+    # Check this first so a DB row with a different owner_id or restrictive
+    # visibility on a stock worker never blocks a valid user.
+    from main import (
+        PUBLIC_STOCK_WORKER_IDS,
+        PROTECTED_STOCK_WORKER_IDS,
+        _shared_filesystem_fallback_allowed,
+    )
+    if worker_id in PUBLIC_STOCK_WORKER_IDS or worker_id in PROTECTED_STOCK_WORKER_IDS:
+        return True
     try:
         row = conn.execute(
             "SELECT owner_id, workspace_id, visibility FROM workers WHERE id = ? LIMIT 1",
@@ -1812,15 +1882,7 @@ def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
         # DB not initialised or workers table absent — let the run path decide.
         return True
     if row is None:
-        # No DB row — worker is either a stock/filesystem worker or unknown.
-        # Import here to avoid a circular import at module level.
-        from main import (
-            PUBLIC_STOCK_WORKER_IDS,
-            PROTECTED_STOCK_WORKER_IDS,
-            _shared_filesystem_fallback_allowed,
-        )
-        if worker_id in PUBLIC_STOCK_WORKER_IDS or worker_id in PROTECTED_STOCK_WORKER_IDS:
-            return True
+        # No DB row — worker is either an unregistered filesystem worker or unknown.
         if _shared_filesystem_fallback_allowed():
             # Single-user / dev mode: unowned on-disk workers are always
             # accessible.  The run path itself will return "not found" if the
