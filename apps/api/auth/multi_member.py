@@ -211,7 +211,10 @@ class MultiMemberAuthProvider:
         except Exception:
             pass
 
-        role = row["role"] or "admin"
+        # #847: a NULL/empty role column must degrade to "member", not "admin" —
+        # the least-privilege default. Tokens are minted with an explicit role,
+        # so this fallback only fires for malformed rows.
+        role = row["role"] or "member"
         return AuthContext(
             user_id=row["user_id"],
             role=role,
