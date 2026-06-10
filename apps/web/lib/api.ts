@@ -577,6 +577,13 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/share-link`,
         { method: "POST" }
       ),
+    // #777: inspect a brain .db file — tables list, or a table's rows.
+    sqlite: (name: string, path: string, table?: string) => {
+      const qs = table ? `?table=${encodeURIComponent(table)}` : "";
+      return fetchJson<import("./types").SqliteView>(
+        `/contexts/${encodeURIComponent(name)}/sqlite/${path.split("/").map(encodeURIComponent).join("/")}${qs}`
+      );
+    },
     readTextFile: async (name: string, path: string) => {
       const res = await fetchRaw(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`

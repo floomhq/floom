@@ -70,6 +70,8 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
       rootLabel={folder.name}
       emptyLabel="This folder is empty."
       loadText={(f) => api.contexts.readTextFile(folder.name, f.id)}
+      // #777: inline SQLite viewer for .db files.
+      loadSqlite={(f, table) => api.contexts.sqlite(folder.name, f.id, table)}
       // #770: rename a file (move within the same directory), then refresh.
       onRename={async (file, newName) => {
         const dir = file.id.includes("/") ? file.id.slice(0, file.id.lastIndexOf("/") + 1) : "";

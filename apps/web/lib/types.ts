@@ -459,6 +459,15 @@ export interface PublicShareRun {
   files: { name: string; type?: string | null }[];
 }
 
+export interface SqliteView {
+  tables: string[];
+  table?: string | null;
+  columns?: string[] | null;
+  rows?: (string | number | boolean | null)[][] | null;
+  row_count?: number | null;
+  truncated?: boolean | null;
+}
+
 export interface StandaloneShare {
   entity_type: "worker" | "brain_file" | "brain_pack" | "run";
   title: string;
