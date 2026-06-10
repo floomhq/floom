@@ -1,0 +1,54 @@
+# Example: agent-mode worker with Composio connection + cron trigger.
+# Pattern: scheduled, calls GitHub via Composio, sends a Slack digest.
+
+schema_version: '0.3'
+is_example: true
+name: github-digest
+title: GitHub Digest Sender
+description: Every morning at 9am, send a digest of unread GitHub PRs and open issues.
+long_description: |
+  Pulls unread PRs, issues you're assigned to, and review requests from a
+  configured set of repos, then formats a one-paragraph digest and posts it
+  to a Slack channel.
+
+mode: agent
+
+inputs:
+  repos: array        # list of "owner/repo" strings
+  slack_channel: string
+
+use_cases:
+- Wake up to a one-paragraph summary of what GitHub needs your attention on today.
+- Catch missed review requests without checking GitHub directly.
+- Run hourly or daily as a digest.
+
+how_it_works: |
+  Scheduled trigger
+    -> Composio github.search_pull_requests for each repo
+    -> Composio github.list_assigned_issues
+    -> LLM summarizes priorities in 3 bullets
+    -> Composio slack.post_message
+    -> return summary text
+
+connections:
+- github
+- slack
+
+secrets: []   # OAuth handled by Composio
+
+triggers:
+- type: schedule
+  cron: '0 9 * * *'
+  timezone: UTC
+
+exec:
+  entry: run.py
+  outputs:
+    summary: string
+    digest_message_ts: string
+
+tags:
+- github
+- slack
+- digest
+- operations

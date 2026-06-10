@@ -1,0 +1,104 @@
+schema_version: "0.3"
+is_example: false
+name: "openpaper-posthog-daily"
+title: "OpenPaper PostHog Daily Summary"
+description: "Every morning, query the OpenPaper PostHog project for the last 24h and email a funnel summary."
+long_description: |
+  Pulls OpenPaper's product analytics from PostHog once a day and emails a
+  clean summary. It compares the last 24 hours against the prior 24 hours
+  across OpenPaper's funnel: pageviews, sign-ups, paper generations, PDF/DOCX
+  downloads, credit exhaustion, upgrade clicks, and Stripe checkouts. An
+  optional Gemini analyst note highlights what moved and what to watch.
+
+  OpenPaper is an AI academic-paper generator that produces thesis-level drafts
+  in under 10 minutes with verifiable citations from CrossRef, Semantic Scholar,
+  arXiv and PubMed. The summary is framed around that product so it reads as a
+  daily growth/health check, not a raw event dump.
+use_cases:
+  - "Daily founder health check on OpenPaper activation and conversion."
+  - "Spot day-over-day drops in generations or checkouts without opening PostHog."
+  - "Keep a lightweight analytics pulse in the inbox every morning."
+how_it_works: |
+  Scheduled daily
+    -> discover the OpenPaper PostHog project (US or EU cloud, auto-detected)
+    -> run two HogQL queries (event funnel + active users, this window vs previous)
+    -> render an HTML + markdown summary with day-over-day deltas
+    -> optional Gemini analyst note
+    -> email it via the Composio Gmail proxy (GMAIL_SEND_EMAIL)
+folder: "Operations/Reporting"
+tags:
+  - "posthog"
+  - "analytics"
+  - "digest"
+  - "daily"
+  - "openpaper"
+version: "0.1.0"
+targets:
+  - "generic"
+limits:
+  max_tool_iterations: 6
+  max_output_tokens: 4096
+  max_total_tokens: 100000
+  timeout_seconds: 300
+trigger:
+  type: "schedule"
+  cron: "0 7 * * *"
+  timezone: "America/Los_Angeles"
+exec:
+  entry: "run.py"
+  command: "python run.py"
+  runtime: "python311"
+  runner: "e2b"
+  inputs:
+    - name: "recipient_email"
+      kind: "scalar"
+      type: "string"
+      required: false
+      default: "depontefede@gmail.com"
+      label: "Recipient email"
+      placeholder: "you@example.com"
+    - name: "posthog_host"
+      kind: "scalar"
+      type: "string"
+      required: false
+      default: "https://us.posthog.com"
+      label: "PostHog host (auto-detects US/EU if left at default)"
+      placeholder: "https://us.posthog.com"
+    - name: "project_id"
+      kind: "scalar"
+      type: "string"
+      required: false
+      default: ""
+      label: "PostHog project ID (optional, auto-discovered if blank)"
+    - name: "lookback_hours"
+      kind: "scalar"
+      type: "number"
+      required: false
+      default: 24
+      label: "Lookback window (hours)"
+  outputs:
+    - name: "summary"
+      kind: "file"
+      media_type: "text/markdown"
+      path: "out/summary.md"
+      required: true
+      label: "Daily summary"
+    - name: "metrics"
+      kind: "file"
+      media_type: "application/json"
+      path: "out/metrics.json"
+      required: false
+      label: "Raw metrics"
+  secrets:
+    - "OPENPAPER_POSTHOG_API_KEY"
+capabilities:
+  secrets:
+    - "OPENPAPER_POSTHOG_API_KEY"
+  network:
+    egress: true
+approvals:
+  required: false
+connections:
+  - app: gmail
+    allowed_tools:
+      - GMAIL_SEND_EMAIL
