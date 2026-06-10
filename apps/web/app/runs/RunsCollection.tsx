@@ -205,6 +205,31 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     toast.success(`Exported ${all.length} runs`);
   };
 
+  // #796: bulk-export the loaded runs as one ZIP (result + artifacts per run).
+  const [exportingZip, setExportingZip] = useState(false);
+  const exportZip = async () => {
+    const ids = runs.map((r) => r.id);
+    if (ids.length === 0) {
+      toast("No runs to export.");
+      return;
+    }
+    setExportingZip(true);
+    try {
+      const blob = await api.runs.exportBundle(ids);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `workeros-runs-${new Date().toISOString().slice(0, 10)}.zip`;
+      a.click();
+      URL.revokeObjectURL(url);
+      toast.success(`Exported ${ids.length} runs`);
+    } catch (err) {
+      toast.error((err as Error).message || "Could not export runs.");
+    } finally {
+      setExportingZip(false);
+    }
+  };
+
   const cancel = async (r: RunSummary) => {
     try {
       await api.runs.cancel(r.id);
@@ -260,9 +285,20 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     ],
     view: { default: "list", grid: true },
     toolbarActions: (
-      <button type="button" className="c-vpill" style={{ padding: "9px 12px" }} onClick={() => void exportCSV()}>
-        <Download size={14} /> Export CSV
-      </button>
+      <>
+        <button type="button" className="c-vpill" style={{ padding: "9px 12px" }} onClick={() => void exportCSV()}>
+          <Download size={14} /> Export CSV
+        </button>
+        <button
+          type="button"
+          className="c-vpill"
+          style={{ padding: "9px 12px" }}
+          disabled={exportingZip}
+          onClick={() => void exportZip()}
+        >
+          <Download size={14} /> {exportingZip ? "Exporting…" : "Export ZIP"}
+        </button>
+      </>
     ),
     group: (r) => dayLabel(r.created_at ?? r.started_at, now),
     columns: {

@@ -382,6 +382,16 @@ export const api = {
         `/workers/${encodeURIComponent(workerId)}/runs/${encodeURIComponent(runId)}/replay`,
         { method: "POST" }
       ),
+    // #796: bulk-export the given runs as one ZIP blob.
+    exportBundle: async (runIds: string[]): Promise<Blob> => {
+      const res = await fetch(`${API_BASE}${withWorkspaceQuery("/runs/export")}`, {
+        method: "POST",
+        headers: { ...withWorkspaceHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ run_ids: runIds }),
+      });
+      if (!res.ok) throw new Error(await apiErrorFromResponse(res));
+      return res.blob();
+    },
     shareLink: (id: string) => // #765
       fetchJson<import("./types").StandaloneShareLink>(`/runs/${encodeURIComponent(id)}/share-link`, { method: "POST" }),
     revokeShareLink: (id: string) =>
