@@ -31,13 +31,16 @@ import type {
   GenericToolCard,
   MsgPart,
   CardStatus,
+  RunCard,
   ToolCard,
   WorkerListCard,
 } from "./emily-chat-types";
 import {
+  asRecord,
   getToolCardTitle,
   isInternalToolName,
   normalizeToolName,
+  optionalString,
   workerRowsFromResult,
 } from "./useChatStream";
 
@@ -99,8 +102,58 @@ function toWorkerListCard(row: ConversationToolCardRow): WorkerListCard | null {
   };
 }
 
+/**
+ * #842 (follow-through): rebuild RunCard rows the same way — from the
+ * persisted run_id/worker_id columns plus result_preview — mirroring the
+ * detection rules of the live runCardFromResult.
+ */
+function toRunCard(row: ConversationToolCardRow): RunCard | null {
+  const normalized = row.toolName ? normalizeToolName(row.toolName) : "";
+  const persistedKind = (row.card as { kind?: unknown } | null)?.kind;
+  const isRun =
+    persistedKind === "run" ||
+    normalized === "workers.run" ||
+    normalized === "runs.get";
+  if (!isRun) return null;
+  const result = asRecord(row.result_preview);
+  const nestedRun = asRecord(result?.run);
+  const runId =
+    optionalString(row.run_id) ??
+    optionalString(result?.run_id) ??
+    optionalString(nestedRun?.run_id) ??
+    optionalString(nestedRun?.id);
+  if (!runId) return null;
+  const workerId =
+    optionalString(row.worker_id) ?? optionalString(nestedRun?.worker_id);
+  const workerName =
+    optionalString(nestedRun?.worker_name) ?? workerId ?? "Worker run";
+  const callId = row.callId || row.id;
+  return {
+    kind: "run",
+    callId,
+    card_id: row.id || callId,
+    status: normalizeStatus(row.status),
+    toolName: normalized || row.toolName || undefined,
+    runId,
+    ...(workerId ? { workerId } : {}),
+    workerName,
+    ...(row.streams ? { streams: row.streams } : {}),
+    actions:
+      row.actions && row.actions.length
+        ? (row.actions as RunCard["actions"])
+        : [
+            {
+              id: "open_run",
+              label: "View run",
+              method: "GET",
+              href: `/runs/${runId}?tab=logs`,
+            },
+          ],
+  };
+}
+
 function toCard(row: ConversationToolCardRow): ToolCard {
-  return toWorkerListCard(row) ?? toGenericCard(row);
+  return toWorkerListCard(row) ?? toRunCard(row) ?? toGenericCard(row);
 }
 
 export function rehydrateConversation(detail: ConversationDetail): ChatMessage[] {

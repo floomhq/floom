@@ -91,6 +91,41 @@ describe("rehydrateConversation worker-list reconstruction (#842)", () => {
     expect(card.kind).toBe("generic");
   });
 
+  it("rebuilds a RunCard from persisted run_id and result_preview", () => {
+    const detail = baseDetail({
+      id: "tc5",
+      callId: "call-5",
+      toolName: "workers__run",
+      status: "completed",
+      created_at: "2026-06-10T10:00:01Z",
+      run_id: "run-77",
+      worker_id: "w-3",
+      result_preview: { run_id: "run-77", run: { worker_name: "Daily digest" } },
+    });
+
+    const card = (cardParts(detail)[0] as Extract<MsgPart, { type: "tool-card" }>).card;
+    expect(card.kind).toBe("run");
+    const run = card as import("@/lib/emily-chat-types").RunCard;
+    expect(run.runId).toBe("run-77");
+    expect(run.workerId).toBe("w-3");
+    expect(run.workerName).toBe("Daily digest");
+    expect(run.actions?.[0]?.href).toBe("/runs/run-77?tab=logs");
+  });
+
+  it("run-shaped rows without any run id fall back to GenericToolCard", () => {
+    const detail = baseDetail({
+      id: "tc6",
+      callId: "call-6",
+      toolName: "runs__get",
+      status: "completed",
+      created_at: "2026-06-10T10:00:01Z",
+      result_preview: null,
+    });
+
+    const card = (cardParts(detail)[0] as Extract<MsgPart, { type: "tool-card" }>).card;
+    expect(card.kind).toBe("generic");
+  });
+
   it("leaves unrelated tools as GenericToolCard", () => {
     const detail = baseDetail({
       id: "tc4",
