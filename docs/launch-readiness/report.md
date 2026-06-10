@@ -23,7 +23,7 @@ The product runs end-to-end. Agent-mode skill workers execute. MCP package insta
 | SEO + sharing | 5 | N/A | — | No anonymous-public surface |
 | Data + DB | 8 | 85/100 | 6.8 | Single-tenant SQLite, no leak strings, dedup works |
 | Email + transactional | 5 | N/A | — | Workeros sends no email |
-| Sandbox / runtime | 8 | 85/100 | 6.8 | Local + E2B abstractions tested via real run, no sandbox escape attempted |
+| Sandbox / runtime | 8 | 85/100 | 6.8 | AgentDriver in-process run tested; E2B pure-script path listed separately, no sandbox escape attempted |
 | Documentation + onboarding | 5 | 75/100 | 3.75 | ROADMAP rewritten, MCP README clear, ISSUES.md absent |
 | Trust + brand | 4 | 85/100 | 3.4 | Real Composio logos, scope display, clean UI copy |
 | Disaster scenarios | 3 | 50/100 | 1.5 | Memory leak in next-server kept respawning; no `FLOOM_SECRET` env in prod uvicorn |

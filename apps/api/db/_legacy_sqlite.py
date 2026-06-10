@@ -1832,6 +1832,42 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_worker_feedback_worker_id
         ON worker_feedback(worker_id, created_at);
     """,
+    # -- migration 64: Slack per-user sender bindings (claim-link DM identity) --
+    # Mirrors whatsapp_sender_bindings (migration 57). PK is (slack_team_id,
+    # slack_user_id) so the same Slack user in two different workspaces can have
+    # independent bindings. claim_token is UNIQUE to support fast single-use
+    # lookup and invalidation.
+    """
+    CREATE TABLE IF NOT EXISTS slack_sender_bindings (
+        slack_team_id   TEXT NOT NULL,
+        slack_user_id   TEXT NOT NULL,
+        user_id         TEXT,
+        profile_name    TEXT,
+        status          TEXT NOT NULL DEFAULT 'pending',
+        claim_token     TEXT UNIQUE,
+        claim_expires_at TEXT,
+        created_at      TEXT NOT NULL,
+        updated_at      TEXT NOT NULL,
+        last_seen_at    TEXT,
+        PRIMARY KEY (slack_team_id, slack_user_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_slack_sender_bindings_user_id
+        ON slack_sender_bindings(user_id);
+    CREATE INDEX IF NOT EXISTS idx_slack_sender_bindings_claim_token
+        ON slack_sender_bindings(claim_token);
+    """,
+    # -- migration 65: pin workspace_id on WhatsApp sender bindings -----------
+    # Adds workspace_id (nullable for backward compat — NULL = 'local-default').
+    # Backfills existing active rows to 'local-default' so the live Federico
+    # binding keeps working without any manual intervention.
+    """
+    ALTER TABLE whatsapp_sender_bindings ADD COLUMN workspace_id TEXT;
+    CREATE INDEX IF NOT EXISTS idx_whatsapp_sender_bindings_workspace_id
+        ON whatsapp_sender_bindings(workspace_id);
+    UPDATE whatsapp_sender_bindings
+    SET workspace_id = 'local-default'
+    WHERE status = 'active' AND workspace_id IS NULL;
+    """,
 ]
 
 
@@ -1859,7 +1895,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50, 65} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",

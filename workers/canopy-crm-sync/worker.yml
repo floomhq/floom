@@ -1,0 +1,47 @@
+schema_version: "0.3"
+name: canopy-crm-sync
+title: Canopy CRM daily sync
+description: Sync new Canopy form signups into the Everyone sheet, enrich one-liners, share access, and send welcome emails.
+long_description: |
+  Watches for new Canopy batch signups, merges them into the Everyone CRM tab,
+  normalizes website URLs, fills missing company one-liners, grants sheet access,
+  and sends the personalized welcome email once per person.
+version: "0.1.2"
+targets: ["generic"]
+limits:
+  max_tool_iterations: 20
+  max_output_tokens: 8000
+  max_total_tokens: 100000
+  timeout_seconds: 600
+entrypoint: run.py
+exec:
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  entry: run.py
+  secrets:
+    - OPENAI_API_KEY
+capabilities:
+  secrets:
+    - OPENAI_API_KEY
+  network:
+    egress: true
+approvals:
+  required: false
+trigger:
+  type: schedule
+  cron: "0 9 * * *"
+  timezone: America/Los_Angeles
+connections:
+  - app: googlesheets
+    allowed_tools:
+      - GOOGLESHEETS_GET_SHEET_NAMES
+      - GOOGLESHEETS_BATCH_GET
+      - GOOGLESHEETS_BATCH_UPDATE
+      - GOOGLEDRIVE_ADD_FILE_SHARING_PREFERENCE
+  - app: gmail
+    allowed_tools:
+      - GMAIL_SEND_EMAIL
+contexts:
+- name: canopy-crm
+  writeable: false

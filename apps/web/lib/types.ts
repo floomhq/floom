@@ -667,6 +667,14 @@ export interface SlackSetupConfigResponse {
   setup: SlackSetupStatus;
 }
 
+export type SlackBindingMe =
+  | { linked: true; slack_user_id: string; slack_team_id: string; profile_name?: string | null; linked_at: string; last_seen_at?: string | null }
+  | { linked: false };
+
+export type WhatsAppBindingMe =
+  | { linked: true; wa_id_masked: string; workspace_id: string; profile_name?: string | null; linked_at: string; last_seen_at?: string | null }
+  | { linked: false };
+
 export interface WorkspaceAgentTool {
   name: string;
   description: string;
