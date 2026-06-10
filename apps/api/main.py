@@ -6615,6 +6615,7 @@ def list_workers(
     include_system: bool = False,
     include_archived: bool = False,
     shape: str = "full",
+    q: Optional[str] = None,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[WorkerListSummary]:
@@ -6645,6 +6646,18 @@ def list_workers(
     # _list_operator_workers exactly (shared filter, see 1.5.4).
     if not include_archived:
         workers = [w for w in workers if not w.get("archived", False)]
+    # #779: server-side search over name/description/tags (case-insensitive).
+    # The web list uses this once the box is wired; CLI/MCP can pass ?q= too.
+    if q and q.strip():
+        needle = q.strip().lower()
+        def _worker_matches_query(w: Dict[str, Any]) -> bool:
+            haystack = " ".join([
+                str(w.get("name") or ""),
+                str(w.get("description") or ""),
+                " ".join(str(t) for t in (w.get("tags") or [])),
+            ]).lower()
+            return needle in haystack
+        workers = [w for w in workers if _worker_matches_query(w)]
     worker_ids = [w["id"] for w in workers]
     stats_by_id = _get_stats_batch(worker_ids, user_id=worker_user_id, repos=repos)
     # S44 Win 3: skip expensive timeseries fetch when list shape requested.
