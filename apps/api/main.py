@@ -20398,7 +20398,12 @@ def auth_login(
     session_id = _secrets_mod.token_urlsafe(32)
     from datetime import datetime, timedelta, timezone as _tz
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
-    session_repo.create(session_id=session_id, user_id=user["id"], expires_at=expires)
+    try:
+        session_repo.create(session_id=session_id, user_id=user["id"], expires_at=expires)
+    except ValueError:
+        # #848: user was disabled between the credential check above and the
+        # session insert (TOCTOU) — the atomic guard in create() caught it.
+        raise HTTPException(status_code=403, detail="account disabled")
     _set_session_cookie(response, session_id)
     return {
         "id": user["id"],
@@ -20503,7 +20508,12 @@ def auth_consume_magic_link(
     from datetime import datetime, timedelta, timezone as _tz
     session_id = pysecrets.token_urlsafe(32)
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
-    session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
+    try:
+        session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
+    except ValueError:
+        # #848: user was disabled between the check above and the session
+        # insert (TOCTOU) — the atomic guard in create() caught it.
+        raise HTTPException(status_code=403, detail="Account disabled")
     _set_session_cookie(response, session_id)
     return {"ok": True, "redirect_to": "/overview"}
 
