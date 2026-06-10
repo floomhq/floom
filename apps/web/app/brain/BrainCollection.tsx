@@ -51,6 +51,7 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
       url: api.contexts.fileUrl(folder.name, f.path),
       sizeBytes: f.size,
       binary: f.is_binary,
+      tags: f.tags, // #780: show file tags as chips
     }));
   return (
     <InlineFileOpen

@@ -544,10 +544,10 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
         { method: "DELETE" }
       ),
-    saveTextFile: (name: string, path: string, content: string) =>
+    saveTextFile: (name: string, path: string, content: string, tags?: string[]) =>
       fetchJson<import("./types").ContextFileItem>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
-        { method: "PUT", body: JSON.stringify({ content }) }
+        { method: "PUT", body: JSON.stringify(tags ? { content, tags } : { content }) } // #780
       ),
     deleteFile: (name: string, path: string) =>
       fetchJson<import("./types").ContextDetail>(

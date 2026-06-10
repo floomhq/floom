@@ -15,6 +15,8 @@ export interface InlineFile {
   sizeBytes?: number;
   /** Known-binary (e.g. .db) — never text-loaded; shows the download fallback. */
   binary?: boolean;
+  /** #780: file tags (Brain) rendered as quiet chips in the row. */
+  tags?: string[];
 }
 
 function sizeLabel(bytes?: number): string {
@@ -141,6 +143,24 @@ export function InlineFileOpen({
               <div className="nm" style={{ fontFamily: "var(--font-mono)" }}>
                 {f.name}
               </div>
+              {f.tags && f.tags.length > 0 ? (
+                <div style={{ display: "flex", gap: 4, marginTop: 3, flexWrap: "wrap" }}>
+                  {f.tags.map((t) => (
+                    <span
+                      key={t}
+                      style={{
+                        fontSize: 10.5,
+                        padding: "1px 7px",
+                        borderRadius: "var(--r-pill, 9999px)",
+                        background: "var(--bg-2)",
+                        color: "var(--muted-foreground)",
+                      }}
+                    >
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              ) : null}
             </div>
           </div>
           <span className="c-cell m">{sizeLabel(f.sizeBytes)}</span>
