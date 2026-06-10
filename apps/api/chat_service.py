@@ -3731,37 +3731,58 @@ def _build_system_prompt(user_id: str, *, include_authoring_rules: bool = False)
     )
 
 
-# Per-call environment notes. The engine persona is shared and
-# identical everywhere; only this short, env-aware context is injected per call
-# so the assistant knows HOW it is being reached and adapts shape accordingly.
-# Keep these short, a few lines. Do NOT move personality here.
+# ---------------------------------------------------------------------------
+# Surface-aware communication profiles
+#
+# Structure: GLOBAL_COMMUNICATION_RULES (applied to every call) +
+# ENVIRONMENT_NOTES (per-surface block, keyed by source).  Both are appended
+# to the shared Emily persona so the model knows HOW it is being reached and
+# adapts reply shape accordingly.  Keep each block short (<=80 words).
+# Do NOT move personality here — persona lives in EMILY_BASE_PERSONA.
+# ---------------------------------------------------------------------------
+
+GLOBAL_COMMUNICATION_RULES: str = (
+    "## Communication rules (all surfaces)\n"
+    "Be user-friendly and concise. Every sentence earns its place. "
+    "Be honest about limits — if you don't know, say so and call a tool or ask. "
+    "Never use robotic legalese, hedging walls, or filler phrases. "
+    "No double spaces. When giving links, use the shortest accurate URL the tool returns. "
+    "Never invent host names or run IDs."
+)
+
 ENVIRONMENT_NOTES: Dict[str, str] = {
-    "slack": (
-        "## Current environment: Slack\n"
-        "You are currently being reached in Slack (a chat). Keep replies short and "
-        "chat-shaped. The person is DMing you or mentioned you in a channel. When "
-        "something needs the screen, give them the link the tool hands you so they "
-        "can tap through (never invent a host).\n"
-        "Use Slack mrkdwn: *bold* for emphasis, and triple-backtick YAML, JSON, "
-        "and code blocks."
-    ),
     "whatsapp": (
         "## Current environment: WhatsApp\n"
-        "You are reached on WhatsApp, a personal text chat. Keep it short and "
-        "conversational. When something needs the screen, give a workers.floom.dev "
-        "link they can tap. For investigations, do the read-only checking first "
-        "and send one findings message."
+        "You are talking on WhatsApp on a phone. "
+        "Reply in 1-3 short paragraphs, plain text only: "
+        "no markdown headers, tables, or code blocks; use simple dashes for lists. "
+        "Keep links short. The reader is on the go."
     ),
-    "mcp": (
-        "## Current environment: MCP (another AI agent)\n"
-        "You are currently being driven by another AI agent via MCP, not a human. Be "
-        "precise and structured, skip the warm small-talk and onboarding pleasantries, "
-        "return clean actionable results the calling agent can use."
+    "slack": (
+        "## Current environment: Slack\n"
+        "You are talking in Slack. Use Slack mrkdwn (*bold* for emphasis, "
+        "triple-backtick for code/YAML/JSON). Keep replies tight. "
+        "Reference channels and users with Slack conventions. "
+        "Threaded context carries forward — no need to repeat prior context. "
+        "When something needs the screen, give the exact link the tool returns."
     ),
     "web": (
-        "## Current environment: Workeros web assistant\n"
-        "You are in the Workeros web assistant. The person can click links and see the "
-        "dashboard alongside this chat."
+        "## Current environment: Workeros web app\n"
+        "You are in the Workeros web app. Rich markdown is fine; "
+        "tool results render as cards; longer structured answers are OK when asked. "
+        "The person can see the dashboard alongside this chat."
+    ),
+    "mcp": (
+        "## Current environment: MCP (programmatic caller)\n"
+        "You are being called via MCP, likely by another AI agent. "
+        "Be terse and structured. No pleasantries or onboarding text. "
+        "Return clean, actionable results the calling agent can use directly."
+    ),
+    "cli": (
+        "## Current environment: CLI / API (programmatic caller)\n"
+        "You are being called via the CLI or a direct API client. "
+        "Be terse and structured. No pleasantries. "
+        "Return clean, actionable results suitable for scripting or piping."
     ),
 }
 
@@ -3792,17 +3813,18 @@ def _environment_note(source: str) -> str:
 
 
 def build_system_prompt_for_source(user_id: str, source: str = "web", message: str = "") -> str:
-    """Shared workspace-agent prompt plus a short per-call environment note.
+    """Shared workspace-agent prompt plus global communication rules and a
+    per-surface environment block.
 
     The editable base persona and workspace.md custom instructions are identical
-    for every source. The appended environment note differs by Slack, WhatsApp,
-    MCP, or web.
+    for every source.  The appended global rules + environment note differ by
+    surface (whatsapp / slack / web / mcp / cli).
     """
     base = _build_system_prompt(
         user_id,
         include_authoring_rules=_is_worker_authoring_intent(message),
     )
-    return f"{base}\n\n{_environment_note(source)}"
+    return f"{base}\n\n{GLOBAL_COMMUNICATION_RULES}\n\n{_environment_note(source)}"
 
 
 def workspace_agent_tool_metadata(user_id: str) -> List[Dict[str, str]]:
@@ -3919,6 +3941,13 @@ async def stream_chat(
         conversation_id = create_conversation(user_id, title=title)
 
     assistant_message_id = f"msg_pending_{uuid.uuid4().hex[:16]}"
+
+    logger.debug(
+        "stream_chat start conversation=%s user=%s surface=%s",
+        conversation_id,
+        user_id,
+        source,
+    )
 
     # Persist user message
     insert_message(conversation_id, "user", message)
