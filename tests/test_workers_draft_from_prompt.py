@@ -513,10 +513,6 @@ trigger:
   type: manual
 """
 
-    @pytest.mark.xfail(
-        reason="pending #752: _embed_files_in_skill_version not yet called on create_worker",
-        strict=True,
-    )
     def test_provided_skill_md_is_written_to_disk(self, client):
         """When skill_md is provided in the request body, SKILL.md on disk matches exactly."""
         custom_skill = "# Custom Skill\n\nThis is the real skill content."
@@ -532,11 +528,17 @@ trigger:
         skill_path = self._workers_dir / "skill-md-test" / "SKILL.md"
         assert skill_path.is_file(), "SKILL.md was not created"
         assert skill_path.read_text() == custom_skill, "SKILL.md content does not match provided skill_md"
+        from db import get_db
 
-    @pytest.mark.xfail(
-        reason="pending #752: _embed_files_in_skill_version not yet called on create_worker",
-        strict=True,
-    )
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT sv.manifest_json FROM skill_versions sv "
+                "JOIN workers w ON w.skill_version_id = sv.id WHERE w.id = ?",
+                ("skill-md-test",),
+            ).fetchone()
+        assert row is not None
+        assert json.loads(row["manifest_json"])["_files"]["SKILL.md"] == custom_skill
+
     def test_omitted_skill_md_writes_placeholder(self, client):
         """When skill_md is not provided, a placeholder SKILL.md is written."""
         resp = client.post(
