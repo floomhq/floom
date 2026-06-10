@@ -21,7 +21,7 @@ import { CliCommandPanel } from "@/components/CliCommandPanel";
 import { GitWorkspacePanel } from "@/components/GitWorkspacePanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { SlackConnect } from "@/components/assistant/SlackConnect";
-import { AlertTriangle, CheckCircle2, Copy, Trash2 } from "lucide-react";
+import { AlertTriangle, CheckCircle2, Copy, Mail, Trash2 } from "lucide-react";
 
 function PersonalAccessTokensPanel() {
   const [tokens, setTokens] = useState<PersonalAccessToken[] | null>(null);
@@ -883,9 +883,9 @@ function WhatsAppBindingStatus() {
 }
 
 // ---------------------------------------------------------------------------
-// ChannelsTab — Slack + WhatsApp + Agent install
+// ChannelsTab — Slack + WhatsApp + Email + Agent install
 // ---------------------------------------------------------------------------
-function ChannelsTab() {
+export function ChannelsTab() {
   return (
     <>
       <section className="space-y-3">
@@ -942,6 +942,23 @@ function ChannelsTab() {
               </div>
             </div>
           </div>
+        </div>
+
+        {/* Email card — no email channel exists yet (#787/#799). Quiet "Not
+            connected", never a fake "Connected" state. */}
+        <div className="space-y-3 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-card p-4">
+          <div className="flex items-center justify-between gap-2.5">
+            <div className="flex items-center gap-2.5">
+              <Mail className="size-5 shrink-0 text-muted-foreground" aria-hidden="true" />
+              <h3 className="text-sm font-medium">Email</h3>
+            </div>
+            <span className="rounded-full bg-[var(--bg-2)] px-2 py-0.5 text-[11px] font-normal text-muted-foreground">
+              Not connected
+            </span>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Reaching workers over email isn&apos;t available yet. Use Slack or WhatsApp to message Emily today.
+          </p>
         </div>
       </section>
 
