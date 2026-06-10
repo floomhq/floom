@@ -17952,12 +17952,18 @@ def platform_config(auth: AuthContext = Depends(get_auth_context)):
 
 @app.get("/system/info")
 def system_info(auth: AuthContext = Depends(get_auth_context)):
-    return {
+    # #837 RCA: python_version and started_at (process uptime) were returned to
+    # every authenticated caller — recon data that maps the runtime for
+    # interpreter-specific exploits and restart tracking. Admins keep the full
+    # payload; everyone else gets version + runner only.
+    info: Dict[str, Any] = {
         "version": app.version,
-        "started_at": _PROCESS_STARTED_AT,
-        "python_version": sys.version.split()[0],
         "runner": "e2b",
     }
+    if auth.is_admin:
+        info["started_at"] = _PROCESS_STARTED_AT
+        info["python_version"] = sys.version.split()[0]
+    return info
 
 
 @app.get("/system/workspace-agent")
