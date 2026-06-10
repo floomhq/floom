@@ -580,6 +580,59 @@ export function EmilyDock({ className }: { className?: string }) {
   );
 }
 
+// ── Mobile bottom-sheet (SPEC §8c: Emily becomes a bottom sheet on mobile) ────
+
+export function EmilyMobileSheet() {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      {!open && (
+        <button
+          type="button"
+          onClick={() => setOpen(true)}
+          aria-label="Open Emily"
+          className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-full bg-background shadow-lg border border-border"
+        >
+          <EmilyAvatar size="sm" />
+        </button>
+      )}
+      {open && (
+        <div className="fixed inset-0 z-50 flex flex-col justify-end" role="dialog" aria-label="Emily">
+          <button
+            type="button"
+            aria-label="Close Emily"
+            className="absolute inset-0 bg-black/40"
+            onClick={() => setOpen(false)}
+          />
+          <div className="relative flex h-[85vh] flex-col rounded-t-2xl border-t border-border bg-background">
+            <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-border px-4">
+              <EmilyAvatar size="sm" />
+              <div className="flex-1 min-w-0">
+                <p className="text-sm font-semibold leading-none truncate">Emily</p>
+                <p className="text-[11px] text-muted-foreground leading-none mt-0.5">Chief of Staff</p>
+              </div>
+              <Button
+                size="sm"
+                variant="ghost"
+                className="size-7 p-0"
+                onClick={() => setOpen(false)}
+                title="Close Emily"
+                aria-label="Close Emily"
+              >
+                <ChevronDown className="size-4" />
+              </Button>
+            </div>
+            {/* Mounted only while open → no second background chat instance */}
+            <div className="flex-1 min-h-0 overflow-hidden">
+              <EmilyChatCore />
+            </div>
+          </div>
+        </div>
+      )}
+    </>
+  );
+}
+
 // ── Full-page chat (used by /chat route) ──────────────────────────────────────
 
 export function EmilyChatPage() {
