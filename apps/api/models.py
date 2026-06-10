@@ -2170,6 +2170,25 @@ class WorkerAlertCreate(BaseModel):
 
 
 # ---------------------------------------------------------------------------
+# Worker feedback (SPEC §12 — lightweight comment anyone who can SEE can leave)
+# ---------------------------------------------------------------------------
+
+class WorkerFeedback(BaseModel):
+    """A feedback comment left on a worker, surfaced to the owner (SPEC §12)."""
+
+    id: str
+    worker_id: str
+    author_id: str
+    author_name: Optional[str] = None
+    content: str
+    created_at: str
+
+
+class WorkerFeedbackCreate(BaseModel):
+    content: str
+
+
+# ---------------------------------------------------------------------------
 # Stats response shapes
 # ---------------------------------------------------------------------------
 
