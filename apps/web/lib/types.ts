@@ -448,14 +448,26 @@ export interface PublicSharePack {
   updated_at?: string | null;
 }
 
+export interface PublicShareRun {
+  run_id: string;
+  worker_id: string;
+  worker_name?: string | null;
+  status?: string | null;
+  created_at?: string | null;
+  duration_ms?: number | null;
+  result: string;
+  files: { name: string; type?: string | null }[];
+}
+
 export interface StandaloneShare {
-  entity_type: "worker" | "brain_file" | "brain_pack";
+  entity_type: "worker" | "brain_file" | "brain_pack" | "run";
   title: string;
   description?: string | null;
   worker?: PublicWorker;
   pack?: PublicSharePack;
   file?: PublicShareFile | null;
   files: PublicShareFile[];
+  run?: PublicShareRun; // #765
 }
 
 export interface WorkerSuggestion {

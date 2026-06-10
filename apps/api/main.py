@@ -6887,7 +6887,7 @@ def _ensure_standalone_share_links_table() -> None:
 
 def _create_or_get_standalone_share_link(
     *,
-    entity_type: Literal["worker", "brain_file", "brain_pack"],
+    entity_type: Literal["worker", "brain_file", "brain_pack", "run"],
     entity_id: str,
     owner_id: str,
     file_path: str = "",
@@ -7516,6 +7516,53 @@ def _public_worker_share_from_worker(worker: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _public_run_share(row: Dict[str, Any], repos: Repositories) -> Dict[str, Any]:
+    """#765: recipient-facing run payload. Exposes ONLY the human result text,
+    artifact NAMES, worker link and status/timing — never secrets, transcript
+    content, or downloadable artifact bytes."""
+    run_id = str(row.get("entity_id") or "")
+    owner_id = str(row.get("owner_id") or "")
+    run_row = _get_run_by_explicit_id(run_id, user_id=owner_id, repos=repos)
+    if not run_row:
+        raise HTTPException(status_code=404, detail="Share link not found")
+    run = row_to_dict(run_row)
+    output: Dict[str, Any] = {}
+    try:
+        parsed = json.loads(run.get("output_json") or "{}")
+        output = parsed if isinstance(parsed, dict) else {"result": parsed}
+    except Exception:
+        output = {}
+    result_text = ""
+    for key in ("result", "summary", "output", "text", "message"):
+        v = output.get(key)
+        if isinstance(v, str) and v.strip():
+            result_text = v
+            break
+    artifacts = repos.runs.list_artifacts(user_id=owner_id, run_id=run_id) or []
+    worker_id = str(run.get("worker_id") or "")
+    worker = repos.workers.get_any(worker_id=worker_id) if worker_id else None
+    worker_name = (worker or {}).get("name") if worker else None
+    return {
+        "entity_type": "run",
+        "title": f"Run · {worker_name or worker_id or run_id}",
+        "description": (run.get("status") or None),
+        "run": {
+            "run_id": run_id,
+            "worker_id": worker_id,
+            "worker_name": worker_name,
+            "status": run.get("status"),
+            "created_at": run.get("created_at"),
+            "duration_ms": run.get("duration_ms"),
+            "result": result_text,
+            "files": [
+                {"name": a.get("name"), "type": a.get("type")}
+                for a in artifacts
+                if isinstance(a, dict)
+            ],
+        },
+    }
+
+
 def _load_standalone_share_row(token: str) -> Optional[Dict[str, Any]]:
     if not re.fullmatch(r"fls_[A-Za-z0-9]{6,80}", token or ""):
         raise HTTPException(status_code=404, detail="Share link not found")
@@ -7546,6 +7593,8 @@ def _standalone_share_payload(token: str, repos: Repositories) -> Dict[str, Any]
             return _public_brain_file_share(row)
         if entity_type == "brain_pack":
             return _public_brain_pack_share(row)
+        if entity_type == "run":
+            return _public_run_share(row, repos)
         raise HTTPException(status_code=404, detail="Share link not found")
 
     # Backward compatibility for worker short links created before the unified
@@ -12815,6 +12864,36 @@ def reject_agent_tool_approval(
     })
 
     return ActionResponse(status="rejected", run_id=str(approval["run_id"]))
+
+
+@app.post("/runs/{run_id}/share-link")
+def create_run_share_link(
+    run_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, str]:
+    """#765: create a signed, login-free link to a run's result + files."""
+    run_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
+    if run_row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    real_id = str(row_to_dict(run_row).get("id") or run_id)
+    return _create_or_get_standalone_share_link(
+        entity_type="run",
+        entity_id=real_id,
+        owner_id=auth.user_id,
+    )
+
+
+@app.delete("/runs/{run_id}/share-link", status_code=204)
+def revoke_run_share_link(
+    run_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    """#765/#766: revoke a run share link (idempotent)."""
+    run_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
+    real_id = str(row_to_dict(run_row).get("id") or run_id) if run_row else run_id
+    _revoke_standalone_share_link(entity_type="run", entity_id=real_id, owner_id=auth.user_id)
 
 
 @app.get("/runs/{run_id}/download")

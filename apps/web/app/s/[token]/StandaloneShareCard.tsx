@@ -109,6 +109,54 @@ export function StandaloneShareCard({
     );
   }
 
+  // #765: run shares show the result + files + a link back to the worker.
+  if (share.entity_type === "run" && share.run) {
+    const run = share.run;
+    return (
+      <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 680 }}>
+        <div className="rounded-[var(--radius-card)] border border-[var(--card-border)] bg-[var(--bg-card)] p-6 shadow-[var(--shadow-pop)]">
+          <div className="flex items-center justify-between gap-3">
+            <h1 className="text-lg font-semibold tracking-tight text-[var(--ink)]">
+              {run.worker_name || "Run"}
+            </h1>
+            {run.status && (
+              <span className="rounded-full bg-[var(--bg-2)] px-2.5 py-0.5 text-xs text-[var(--ink-soft)]">
+                {run.status}
+              </span>
+            )}
+          </div>
+          {run.result ? (
+            <pre className="mt-4 max-h-[420px] overflow-auto whitespace-pre-wrap rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-2)] p-4 font-mono text-xs text-[var(--ink-soft)]">
+              {run.result}
+            </pre>
+          ) : (
+            <p className="mt-4 text-sm text-[var(--muted-foreground)]">No text result for this run.</p>
+          )}
+          {run.files.length > 0 && (
+            <div className="mt-4">
+              <p className="text-[11px] font-medium uppercase text-[var(--muted-foreground)]">Files</p>
+              <ul className="mt-2 space-y-1">
+                {run.files.map((f) => (
+                  <li key={f.name} className="font-mono text-xs text-[var(--ink-soft)]">
+                    {f.name}
+                  </li>
+                ))}
+              </ul>
+            </div>
+          )}
+          {authed && run.worker_id && (
+            <a
+              href={`/workers/${encodeURIComponent(run.worker_id)}`}
+              className="mt-5 inline-block text-sm text-[var(--accent)] hover:underline"
+            >
+              ↑ Open worker
+            </a>
+          )}
+        </div>
+      </div>
+    );
+  }
+
   // Breadcrumb segments for the current location.
   const crumbs: { label: string; onClick?: () => void }[] = [
     { label: "Brain" },

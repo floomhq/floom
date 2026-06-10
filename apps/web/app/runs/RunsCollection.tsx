@@ -10,6 +10,7 @@ import { formatRelative } from "@/lib/formatters";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection, Avatar } from "@/components/collection";
+import { RunShareButton } from "@/components/RunShareButton";
 import { InlineFileOpen } from "@/components/file-viewer/InlineFileOpen";
 import { traceSteps } from "@/lib/runs/trace";
 import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
@@ -312,15 +313,8 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
             >
               Replay
             </button>
-            {/* TODO(#765): run share link — backend pending; honest stub for now. */}
-            <button
-              type="button"
-              className="c-vpill"
-              style={{ padding: "6px 11px" }}
-              onClick={() => toast("Sharing a run is coming soon (#765).")}
-            >
-              Share
-            </button>
+            {/* #765: real run share link via the Drive-pattern modal. */}
+            <RunShareButton runId={r.id} />
             <Link href={`/runs/${r.id}`} className="c-vpill" style={{ padding: "6px 11px" }}>
               Open full run →
             </Link>

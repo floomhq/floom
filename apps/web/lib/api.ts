@@ -382,6 +382,10 @@ export const api = {
         `/workers/${encodeURIComponent(workerId)}/runs/${encodeURIComponent(runId)}/replay`,
         { method: "POST" }
       ),
+    shareLink: (id: string) => // #765
+      fetchJson<import("./types").StandaloneShareLink>(`/runs/${encodeURIComponent(id)}/share-link`, { method: "POST" }),
+    revokeShareLink: (id: string) =>
+      fetchJson<null>(`/runs/${encodeURIComponent(id)}/share-link`, { method: "DELETE" }),
     downloadUrl: (id: string) =>
       `${API_BASE}${withWorkspaceQuery(`/runs/${encodeURIComponent(id)}/download`)}`,
     artifactUrl: (id: string, artifactId: string) =>

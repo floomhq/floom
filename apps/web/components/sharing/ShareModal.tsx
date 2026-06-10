@@ -25,9 +25,11 @@ export interface ShareModalProps {
   open: boolean;
   onOpenChange: (open: boolean) => void;
   title: string;
-  visibility: AssetVisibility;
+  /** Visibility section is shown only when both visibility + setter are given
+   *  (runs/approvals have no private|workspace level — they're owner-scoped). */
+  visibility?: AssetVisibility;
   /** BUILT: PUT .../visibility. Returns once persisted. */
-  onSetVisibility: (v: AssetVisibility) => Promise<void> | void;
+  onSetVisibility?: (v: AssetVisibility) => Promise<void> | void;
   /** BUILT: create/return the standalone share URL. */
   getShareLink: () => Promise<string>;
   /** #766 BUILT: revoke the public link. When provided, the toggle is live. */
@@ -88,7 +90,7 @@ export function ShareModal({
   };
 
   const setVis = async (v: AssetVisibility) => {
-    if (v === visibility) return;
+    if (v === visibility || !onSetVisibility) return;
     setBusy(true);
     try {
       await onSetVisibility(v);
@@ -119,7 +121,9 @@ export function ShareModal({
           </p>
         </div>
 
-        {/* General access — Private | Workspace ONLY (rule #8: no public level). */}
+        {/* General access — Private | Workspace ONLY (rule #8: no public level).
+            Hidden for owner-scoped assets (runs/approvals) that have no level. */}
+        {visibility && onSetVisibility && (
         <div className="space-y-1.5">
           <p className="text-[11px] font-medium uppercase text-muted-foreground">General access</p>
           <div className="flex gap-1.5">
@@ -143,6 +147,7 @@ export function ShareModal({
           </div>
           <p className="text-xs text-muted-foreground">{shareSummary(visibility)}</p>
         </div>
+        )}
 
         {/* Public link toggle (#766) — view & duplicate. */}
         {onRevokeShareLink ? (
