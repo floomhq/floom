@@ -339,10 +339,18 @@ contexts:
 
 Inside `run.py`, the cloned pack is available under `context/hello-world/`. A minimal smoke can list that directory and write `result.json` only after the clone succeeds.
 
+Repo-testable E2B coverage:
+
+```bash
+python3 -m pytest tests/test_e2b_artifact_collection.py::test_uploads_git_context_clones_real_repo_into_context_dir -q
+```
+
+That test creates a temporary git repo, routes the E2B staging helper through a host-mapped fake sandbox, runs a real `git clone --depth 1`, and verifies the cloned files land under `context/hello-world/`.
+
 Prod smoke command:
 
 ```bash
-python scripts/smoke_git_context_worker.py --secret "$FLOOM_SECRET"
+python3 scripts/smoke_git_context_worker.py --secret "$FLOOM_SECRET"
 ```
 
 ### Triggers
