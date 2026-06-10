@@ -108,13 +108,20 @@ function test556WorkerDetailShowsSecretNames(): void {
 // Frontend: connections page — setup required callout
 // ---------------------------------------------------------------------------
 
-// UNWIRED pending https://github.com/floomhq/workeros/issues/813 —
-// the ui-collection refactor (ConnectionsCollection.tsx, SPEC §5) dropped the
-// 'Setup required' callout entirely; restore-or-descope is a product decision.
-// Re-wire (against ConnectionsCollection.tsx) if #813 lands as "restore".
+// #813 RESTORE — re-wired against ConnectionsCollection.tsx.
+// The ui-collection refactor dropped the callout; #813 product decision = restore.
+// computeMissingBySlug reads worker.missing_connections (#556 backend field) and
+// produces a missingBySlug map; the SetupRequiredCallout renders "Setup required".
 function test556ConnectionsSetupCallout(): void {
   const s = src("app/connections/ConnectionsCollection.tsx");
-  assert(s.length > 0, "connections collection page must exist");
+  assert(s.includes("missingBySlug"),
+    "ConnectionsCollection must track missingBySlug state");
+  assert(s.includes("computeMissingBySlug"),
+    "ConnectionsCollection must define computeMissingBySlug helper");
+  assert(s.includes("Setup required"),
+    "ConnectionsCollection must render a 'Setup required' callout");
+  assert(s.includes("missing_connections"),
+    "computeMissingBySlug must read worker.missing_connections");
 }
 
 // ---------------------------------------------------------------------------
@@ -129,7 +136,7 @@ const tests: [string, () => void][] = [
   ["#556 worker detail builder computes and passes missing fields", test556MainComputesMissingInDetail],
   ["#556 TypeScript types updated for both interfaces", test556TypesUpdated],
   ["#556 worker detail page renders specific secret names with prefill links", test556WorkerDetailShowsSecretNames],
-  ["#556 connections page exists (callout assertions unwired pending #813)", test556ConnectionsSetupCallout],
+  ["#556 connections page shows Setup required callout from missingBySlug", test556ConnectionsSetupCallout],
 ];
 
 let passed = 0;
