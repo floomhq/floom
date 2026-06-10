@@ -136,7 +136,7 @@ function HowItWorks() {
             <div className="w-full max-w-[440px] overflow-hidden rounded-[16px] border border-border bg-card">
               <PanelHead title="Runs" meta="last 3 days" />
               {[
-                ["Today, 5:00 PM", "Output ready · 12 action items", <StatusPill key="a" tone="default">Awaiting you</StatusPill>],
+                ["Today, 5:00 PM", "Output ready · 12 action items", <StatusPill key="a" tone="pending">Awaiting you</StatusPill>],
                 ["Yesterday, 5:00 PM", "Approved · posted to HubSpot", <StatusPill key="b" tone="success">Done</StatusPill>],
                 ["Monday, 5:00 PM", "Approved · posted to HubSpot", <StatusPill key="c" tone="success">Done</StatusPill>],
               ].map(([t, s, pill], i) => (

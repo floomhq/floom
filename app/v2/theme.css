@@ -2,7 +2,7 @@
    Scoped: overrides the source vars that globals.css derives everything from,
    so every existing landing-ref component re-skins without modification. */
 
-.theme-v2 {
+.theme-v2.theme-v2 {
   /* source tokens */
   --bg-app: #FBFBFC;
   --bg-card: #FFFFFF;
@@ -37,7 +37,7 @@
   color: var(--text-primary);
 }
 
-.theme-v2.dark {
+.theme-v2.theme-v2.dark {
   --bg-app: #191A1D;
   --bg-card: #212327;
   --text-primary: #ECEDEF;
@@ -60,8 +60,8 @@
 
 /* derived chain (globals.css derives these from the source tokens at :root
    scope; redeclare locally so the scoped override actually cascades) */
-.theme-v2,
-.theme-v2.dark {
+.theme-v2.theme-v2,
+.theme-v2.theme-v2.dark {
   --bg: var(--bg-app);
   --paper: var(--bg-app);
   --ink: var(--text-primary);
@@ -89,4 +89,22 @@
   border-radius: 4px;
   padding: 0 3px;
   font-weight: 500;
+}
+
+
+/* flat spec: the composer carries inline JS shadows the token override can't
+   reach — force flat. Focus ring handled by the border color below. */
+.theme-v2 form[class*="rounded-[18px]"] {
+  box-shadow: 0 0 0 1px var(--border-default) !important;
+  border-color: transparent !important;
+}
+.theme-v2 form[class*="rounded-[18px]"]:focus-within {
+  box-shadow: 0 0 0 1.5px var(--v2-accent) !important;
+}
+
+/* dark mode: monochrome brand marks (Notion/GitHub) get a light fill */
+.theme-v2.dark svg path[fill="#000"],
+.theme-v2.dark svg path[fill="#000000"],
+.theme-v2.dark svg path[fill="#181717"] {
+  fill: #ECEDEF;
 }
