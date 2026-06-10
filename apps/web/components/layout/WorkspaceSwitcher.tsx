@@ -382,7 +382,7 @@ export function WorkspaceSwitcher() {
             <DialogTitle>New workspace</DialogTitle>
             <DialogDescription>
               Workspaces keep workers, runs, connections, secrets, and brain folders
-              isolated on this local Workeros instance.
+              isolated on this local WorkerOS instance.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-2 py-2">

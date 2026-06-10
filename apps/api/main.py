@@ -19238,6 +19238,7 @@ async def reset_workspace_base_persona(
         get_workspace_base_persona,
     )
 
+    _require_workspace_write(auth)  # #804
     was_custom = base_persona_is_custom()
     clear_workspace_base_persona()
     if was_custom:
@@ -19306,6 +19307,7 @@ async def rollback_workspace_base_persona(
 ) -> PlainTextResponse:
     """Restore workspace.base.md to its state at a given git commit SHA."""
     from chat_service import WORKSPACE_BASE_PERSONA_PATH, set_workspace_base_persona
+    _require_workspace_write(auth)  # #804
     workspace = _git_workspace()
     try:
         rel = WORKSPACE_BASE_PERSONA_PATH.relative_to(workspace).as_posix()
@@ -19331,6 +19333,7 @@ async def put_workspace_base_persona(
     """Update workspace.base.md, the editable base persona override."""
     from chat_service import set_workspace_base_persona, unwrap_workspace_body
 
+    _require_workspace_write(auth)  # #804
     body = await request.body()
     content = unwrap_workspace_body(body.decode("utf-8", errors="replace"))
     if not content.strip():
@@ -19394,6 +19397,7 @@ async def rollback_workspace_instructions(
 ) -> PlainTextResponse:
     """Restore workspace.md to its state at a given git commit SHA."""
     from chat_service import WORKSPACE_MD_PATH, set_workspace_md
+    _require_workspace_write(auth)  # #804
     workspace = _git_workspace()
     try:
         rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
@@ -19421,6 +19425,7 @@ async def put_workspace(
     """Update workspace.md (replaces entire content)."""
     from chat_service import set_workspace_md, unwrap_workspace_body
 
+    _require_workspace_write(auth)  # #804
     body = await request.body()
     content = unwrap_workspace_body(body.decode("utf-8", errors="replace"))
     if not content.strip():
@@ -20327,6 +20332,19 @@ def _require_multi_member_repos(repos: Repositories):
 def _require_admin(auth: AuthContext) -> None:
     if not auth.is_admin:
         raise HTTPException(status_code=403, detail="admin required")
+
+
+def _require_workspace_write(auth: AuthContext) -> None:
+    """#804: workspace instructions (workspace.md / workspace.base.md) are admin-write.
+
+    Members are read-only and get a server-enforced 403 — not merely a hidden UI.
+    AI worker-authoring still works: run-token auth carries role="member" by design
+    (see auth/multi_member.py), so allow auth_method=="run_token" through; those calls
+    are what the handlers record as source="ai".
+    """
+    if auth.is_admin or auth.auth_method == "run_token":
+        return
+    raise HTTPException(status_code=403, detail="admin required to edit workspace instructions")
 
 
 @app.post("/auth/setup", response_model=_UserOut, status_code=201)

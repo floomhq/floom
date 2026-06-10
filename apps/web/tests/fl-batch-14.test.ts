@@ -23,9 +23,12 @@ describe("#616 Settings Git tab", () => {
   });
 
   it("defines Git as a visible Settings tab", () => {
+    // The tab strip now renders from lib/settings/nav-groups (v4 §4 two-group
+    // nav); the Git entry lives there, the page renders its content panel.
+    const nav = src("lib/settings/nav-groups.ts");
+    expect(nav).toContain('{ key: "git", label: "Git", scope: "workspace" }');
     const s = src("app/settings/page.tsx");
     expect(s).toContain('"git"');
-    expect(s).toContain('{ key: "git", label: "Git" }');
     expect(s).toContain('value="git"');
   });
 

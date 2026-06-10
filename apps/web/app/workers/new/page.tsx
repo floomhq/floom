@@ -488,7 +488,7 @@ function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
       <div className="space-y-1.5">
         <h1 className="text-xl font-semibold tracking-tight">Hire a new AI worker</h1>
         <p className="text-sm text-muted-foreground">
-          Describe the job in plain English. Workeros drafts the worker, picks the right
+          Describe the job in plain English. WorkerOS drafts the worker, picks the right
           integrations, and opens the editor so you can review before running.
         </p>
       </div>
@@ -749,7 +749,7 @@ function GeneratingPanel({
         <p className="text-sm text-muted-foreground max-w-md mx-auto">
           {isStreaming
             ? "Worker Author is running — you'll see real progress below."
-            : "Workeros is reading your prompt, picking integrations, and writing the worker files."}
+            : "WorkerOS is reading your prompt, picking integrations, and writing the worker files."}
         </p>
       </div>
 
