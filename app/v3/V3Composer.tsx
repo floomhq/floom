@@ -107,7 +107,7 @@ export function V3Composer({
       }}
       animate={{ scale: focused ? 1.01 : 1 }}
       transition={{ type: "spring", stiffness: 150, damping: 24 }}
-      className="mx-auto w-full max-w-[640px] rounded-[20px] bg-card p-5 text-left"
+      className="mx-auto w-full max-w-[640px] rounded-[20px] bg-secondary p-5 text-left"
       style={{
         boxShadow: focused ? "0 0 0 1.5px var(--v3-accent)" : "none",
         transition: "box-shadow 180ms cubic-bezier(0.22,1,0.36,1)",
@@ -131,7 +131,7 @@ export function V3Composer({
           }}
           placeholder={placeholder}
           rows={2}
-          className="relative w-full resize-none bg-transparent px-1 pb-6 pt-1 text-left text-[15.5px] leading-relaxed placeholder:text-muted-foreground/80 focus:outline-none"
+          className="relative w-full resize-none bg-transparent px-1 pb-6 pt-1 text-left text-[15.5px] leading-relaxed placeholder:text-muted-foreground focus:outline-none"
           style={{ color: "transparent", caretColor: "var(--text-primary)", WebkitTextFillColor: "transparent" }}
           aria-label="Describe the job"
         />

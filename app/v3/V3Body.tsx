@@ -183,7 +183,7 @@ function Story() {
   const VIS = [BeatDescribe, BeatApprove, BeatRecord];
 
   return (
-    <section className="pb-40">
+    <section className="pb-24">
       <div className="grid gap-16 md:grid-cols-[1fr_1.05fr]">
         <div className="flex flex-col justify-center">
           {BEATS.map((b, i) => (
@@ -191,13 +191,13 @@ function Story() {
               key={b.t}
               data-beat={i}
               ref={(el) => { refs.current[i] = el; }}
-              className="flex min-h-[200px] cursor-default flex-col justify-center py-4 md:min-h-[190px]"
+              className="flex min-h-[200px] cursor-default flex-col justify-center py-4 md:min-h-[175px]"
               onMouseEnter={() => setActive(i)}
             >
-              <h3 className={`text-[34px] font-semibold tracking-[-0.025em] transition-colors duration-300 ${active === i ? "text-foreground" : "text-foreground md:text-muted-foreground/40"}`}>
+              <h3 className={`text-[34px] font-semibold tracking-[-0.025em] transition-colors duration-300 ${active === i ? "text-foreground" : "text-foreground md:text-muted-foreground/55"}`}>
                 {b.t}
               </h3>
-              <p className={`mt-2 max-w-[360px] text-[14px] leading-relaxed text-muted-foreground transition-opacity duration-300 ${active === i ? "opacity-100" : "opacity-100 md:opacity-40"}`}>
+              <p className={`mt-2 max-w-[360px] text-[14px] leading-relaxed text-muted-foreground transition-opacity duration-300 ${active === i ? "opacity-100" : "opacity-100 md:opacity-55"}`}>
                 {b.p}
               </p>
               <div className="mt-5 flex origin-top justify-center rounded-[18px] bg-secondary/70 p-4 md:hidden [&>div]:scale-[0.92]">
@@ -206,7 +206,7 @@ function Story() {
             </div>
           ))}
         </div>
-        <div className="hidden md:sticky md:top-20 md:block md:h-[520px]">
+        <div className="hidden md:sticky md:top-20 md:block md:h-[500px]">
           <div className="flex h-full items-center justify-center rounded-[22px] bg-secondary/70 p-9">
             <AnimatePresence mode="wait">
               {VIS.map((V, i) =>
@@ -241,7 +241,7 @@ const TPLS = [
 
 function Templates() {
   return (
-    <section className="pb-40">
+    <section className="pb-24">
       <motion.h2
         initial={{ opacity: 0, y: 12 }}
         whileInView={{ opacity: 1, y: 0 }}
@@ -310,9 +310,9 @@ export function V3Body() {
             Workeros
           </Link>
           <div className="flex items-center gap-0.5 text-[13px] text-muted-foreground">
-            <Link href="/v3/product" className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">Product</Link>
-            <Link href="/v3/templates" className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">Templates</Link>
-            <Link href="/v3/docs" className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">Docs</Link>
+            <Link href="/v3/product" className="hidden rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground sm:block">Product</Link>
+            <Link href="/v3/templates" className="hidden rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground sm:block">Templates</Link>
+            <Link href="/v3/docs" className="hidden rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground sm:block">Docs</Link>
             <button
               type="button"
               aria-label="Toggle theme"
@@ -372,7 +372,7 @@ export function V3Body() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.5, delay: 0.46 }}
-            className="mx-auto mt-9 text-[12.5px] text-muted-foreground"
+            className="mx-auto mt-8 text-[12px] text-muted-foreground/90"
           >
             Works without the dashboard too:{" "}
             <Link href="/login?install=slack" className="text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline">Slack</Link>,{" "}
@@ -386,11 +386,14 @@ export function V3Body() {
           initial={{ opacity: 0 }}
           animate={{ opacity: 1 }}
           transition={{ duration: 0.7, delay: 0.5 }}
-          className="flex items-center justify-center gap-5 pb-36 pt-10 opacity-80"
+          className="flex flex-col items-center gap-4 pb-36 pt-10"
         >
+          <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground/80">Connects to your tools</span>
+          <span className="flex items-center justify-center gap-5 opacity-80">
           {[<GmailLogo key="g" />, <SlackLogo key="s" />, <HubSpotLogo key="h" />, <NotionLogo key="n" />, <GCalLogo key="c" />, <SheetsLogo key="sh" />].map((logo, i) => (
             <span key={i} className="flex h-5 w-5 items-center justify-center grayscale-[0.2] [&_svg]:h-5 [&_svg]:w-5">{logo}</span>
           ))}
+          </span>
         </motion.section>
 
         <Story />
@@ -431,6 +434,7 @@ export function V3Body() {
         <div className="mx-auto flex max-w-[1000px] items-center justify-between px-7 py-6 text-[12px] text-muted-foreground">
           <span>Workeros by Floom · Backed by Founders Inc</span>
           <span className="flex gap-4">
+            <Link href="/v3/product" className="hover:text-foreground">Product</Link>
             <Link href="/v3/templates" className="hover:text-foreground">Templates</Link>
             <Link href="/v3/docs" className="hover:text-foreground">Docs</Link>
             <Link href="/privacy" className="hover:text-foreground">Privacy</Link>

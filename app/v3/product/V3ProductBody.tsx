@@ -58,8 +58,8 @@ export function V3ProductBody() {
             {SURFACES.map((s, i) => (
               <RevealUp key={s.t} delay={i * 0.04}>
                 <div className="border-t border-border pt-4">
-                  <div className="text-[14px] font-medium">{s.t}</div>
-                  <p className="mt-1 text-[12.5px] leading-relaxed text-muted-foreground">{s.p}</p>
+                  <div className="text-[15px] font-semibold">{s.t}</div>
+                  <p className="mt-1.5 text-[13.5px] leading-relaxed text-muted-foreground">{s.p}</p>
                 </div>
               </RevealUp>
             ))}
