@@ -211,3 +211,12 @@
   --v2-accent: var(--v3-accent);
   --v2-sel: var(--v3-sel);
 }
+
+/* monochrome brand marks must flip in SYSTEM dark too (not just .dark) */
+@media (prefers-color-scheme: dark) {
+  .theme-v3:not(.light) svg path[fill="#000"],
+  .theme-v3:not(.light) svg path[fill="#000000"],
+  .theme-v3:not(.light) svg path[fill="#181717"] {
+    fill: #ECEDEF;
+  }
+}
