@@ -156,13 +156,16 @@ def test_get_challenge_fails_closed_with_no_creds(monkeypatch, tmp_path):
 
 def test_post_accepts_valid_signature_and_queues(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
 
     captured: list = []
 
     async def _fake_handle(*, wa_id, text, message_id, profile_name=""):
         captured.append((wa_id, text, message_id))
 
+    # Patch both the main re-export and the actual module reference used by the router.
     monkeypatch.setattr(main, "_handle_whatsapp_message", _fake_handle)
+    monkeypatch.setattr(_wa_mod, "_handle_whatsapp_message", _fake_handle)
 
     body = json.dumps(_text_payload(text="hi")).encode("utf-8")
     with TestClient(main.app) as client:
@@ -228,11 +231,14 @@ def test_post_ignores_status_callbacks(monkeypatch, tmp_path):
 
 def test_post_dedups_meta_retries(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
 
     async def _fake_handle(*, wa_id, text, message_id, profile_name=""):
         return None
 
+    # Patch both the main re-export and the actual module reference used by the router.
     monkeypatch.setattr(main, "_handle_whatsapp_message", _fake_handle)
+    monkeypatch.setattr(_wa_mod, "_handle_whatsapp_message", _fake_handle)
 
     body = json.dumps(_text_payload(message_id="wamid.DEDUP1")).encode("utf-8")
     headers = {"Content-Type": "application/json", "X-Hub-Signature-256": _sign(body)}
@@ -245,13 +251,18 @@ def test_post_dedups_meta_retries(monkeypatch, tmp_path):
 
 def test_unbound_sender_gets_claim_prompt_without_workspace_access(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
+    import channels.common as _common_mod
     sent: list[tuple[str, str]] = []
 
     async def _boom_collect(**_kwargs):  # pragma: no cover - must never run
         raise AssertionError("unbound sender must not reach workspace chat")
 
+    # Patch both the main re-export and the actual module symbols.
     monkeypatch.setattr(main, "_collect_workspace_agent_reply_for_slack", _boom_collect)
+    monkeypatch.setattr(_common_mod, "collect_agent_reply", _boom_collect)
     monkeypatch.setattr(main, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
+    monkeypatch.setattr(_wa_mod, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
 
     asyncio.run(
         main._handle_whatsapp_message(
@@ -270,6 +281,8 @@ def test_unbound_sender_gets_claim_prompt_without_workspace_access(monkeypatch, 
 
 def test_bound_senders_route_to_distinct_users(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
+    import channels.common as _common_mod
     routed: list[tuple[str, str]] = []
     sent: list[tuple[str, str]] = []
 
@@ -290,9 +303,14 @@ def test_bound_senders_route_to_distinct_users(monkeypatch, tmp_path):
         routed.append((user_id, conversation_id))
         return f"reply for {user_id}"
 
+    # Patch both the main re-export and the actual module symbols.
     monkeypatch.setattr(main, "_send_whatsapp_typing_indicator", lambda _message_id: None)
+    monkeypatch.setattr(_wa_mod, "_send_whatsapp_typing_indicator", lambda _message_id: None)
     monkeypatch.setattr(main, "_collect_workspace_agent_reply_for_slack", _fake_collect)
+    # collect_agent_reply is imported directly into channels.whatsapp namespace.
+    monkeypatch.setattr(_wa_mod, "collect_agent_reply", _fake_collect)
     monkeypatch.setattr(main, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
+    monkeypatch.setattr(_wa_mod, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
 
     asyncio.run(main._handle_whatsapp_message(wa_id="491701111111", text="hi", message_id="wamid.A"))
     asyncio.run(main._handle_whatsapp_message(wa_id="491702222222", text="hi", message_id="wamid.B"))

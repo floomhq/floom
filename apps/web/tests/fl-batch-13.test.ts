@@ -125,7 +125,8 @@ function test538MagicLinkEndpointConsume(): void {
 // ---------------------------------------------------------------------------
 
 function test538SlackDmHandlerGeneratesMagicLink(): void {
-  const s = api("main.py");
+  // _handle_slack_direct_message was extracted to channels/slack.py by the channels refactor
+  const s = api("channels/slack.py");
   const handlerIdx = s.indexOf("async def _handle_slack_direct_message");
   const snippet = s.slice(handlerIdx, handlerIdx + 1500);
   assert(
@@ -135,7 +136,8 @@ function test538SlackDmHandlerGeneratesMagicLink(): void {
 }
 
 function test538SlackDmHandlerPassesSystemSuffix(): void {
-  const s = api("main.py");
+  // _handle_slack_direct_message was extracted to channels/slack.py by the channels refactor
+  const s = api("channels/slack.py");
   const handlerIdx = s.indexOf("async def _handle_slack_direct_message");
   const snippet = s.slice(handlerIdx, handlerIdx + 1500);
   assert(

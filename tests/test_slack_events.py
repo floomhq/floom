@@ -128,10 +128,11 @@ def test_slack_interactivity_dismisses_signed_approval_action(monkeypatch, tmp_p
 
 def test_slack_app_mention_queues_workspace_agent_reply(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
+    import channels.slack as _slack_mod
     calls = []
     posts = []
 
-    async def fake_collect(*, message, user_id, conversation_id):
+    async def fake_collect(*, message, user_id, conversation_id, **kwargs):
         calls.append((message, user_id, conversation_id))
         return "workspace reply"
 
@@ -139,7 +140,9 @@ def test_slack_app_mention_queues_workspace_agent_reply(monkeypatch, tmp_path):
         posts.append((channel, thread_ts, text, bot_token))
 
     monkeypatch.setattr(main, "_collect_workspace_agent_reply_for_slack", fake_collect)
+    monkeypatch.setattr(_slack_mod, "collect_agent_reply", fake_collect)
     monkeypatch.setattr(main, "_post_slack_thread_reply", fake_post)
+    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply", fake_post)
 
     body = json.dumps(
         {
@@ -168,6 +171,7 @@ def test_slack_app_mention_queues_workspace_agent_reply(monkeypatch, tmp_path):
 
 def test_slack_app_mention_uses_team_install_bot_token(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
+    import channels.slack as _slack_mod
     calls = []
     posts = []
     monkeypatch.delenv("SLACK_BOT_TOKEN", raising=False)
@@ -185,7 +189,7 @@ def test_slack_app_mention_uses_team_install_bot_token(monkeypatch, tmp_path):
         installed_by_user_id="slack-test-user",
     )
 
-    async def fake_collect(*, message, user_id, conversation_id):
+    async def fake_collect(*, message, user_id, conversation_id, **kwargs):
         calls.append((message, user_id, conversation_id))
         return "team reply"
 
@@ -198,7 +202,9 @@ def test_slack_app_mention_uses_team_install_bot_token(monkeypatch, tmp_path):
         })
 
     monkeypatch.setattr(main, "_collect_workspace_agent_reply_for_slack", fake_collect)
+    monkeypatch.setattr(_slack_mod, "collect_agent_reply", fake_collect)
     monkeypatch.setattr(main, "_post_slack_thread_reply", fake_post)
+    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply", fake_post)
 
     body = json.dumps(
         {
@@ -226,14 +232,17 @@ def test_slack_app_mention_uses_team_install_bot_token(monkeypatch, tmp_path):
 
 def test_slack_app_mention_deduplicates_event_id(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
+    import channels.slack as _slack_mod
     calls = []
 
-    async def fake_collect(*, message, user_id, conversation_id):
+    async def fake_collect(*, message, user_id, conversation_id, **kwargs):
         calls.append(message)
         return "workspace reply"
 
     monkeypatch.setattr(main, "_collect_workspace_agent_reply_for_slack", fake_collect)
+    monkeypatch.setattr(_slack_mod, "collect_agent_reply", fake_collect)
     monkeypatch.setattr(main, "_post_slack_thread_reply", lambda **kwargs: None)
+    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply", lambda **kwargs: None)
 
     body = json.dumps(
         {
