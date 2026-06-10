@@ -1,33 +1,21 @@
-import { Clock, ExternalLink, Loader2, CheckCircle2, XCircle, Wrench } from "lucide-react";
-import { cn } from "@/lib/utils";
+import { ExternalLink } from "lucide-react";
 import type { GenericToolCard as GenericToolCardType } from "@/lib/emily-chat-types";
+import { Tool } from "@/components/ai-elements/tool";
 
+// #825: tool calls render with the EXISTING collapsible ai-elements/tool.tsx
+// (click → args/result/status) — the same component run details use — instead
+// of a flat one-line card.
 export function GenericToolCard({ card }: { card: GenericToolCardType }) {
-  const { status, title, isError, actions } = card;
-  const isRunning = status === "running" || status === "starting";
-  const isDone = status === "completed";
+  const { status, title, toolName, preview, isError, callId, actions } = card;
   const isFailed = status === "failed" || isError;
-  const isPending = status === "pending_approval";
+  // result is undefined while the tool is still in flight (running/starting/
+  // pending) → the collapsible shows the in-flight "called" state and defaults open.
+  const inFlight = status === "running" || status === "starting" || status === "pending_approval";
+  const result = inFlight ? undefined : preview;
 
   return (
-    <div className="rounded-lg border border-border bg-muted/30 px-3.5 py-2.5 text-sm">
-      <div className="flex items-center gap-2.5">
-        {isRunning && <Loader2 className="size-3.5 shrink-0 animate-spin text-[#59AAF8]" />}
-        {isDone && <CheckCircle2 className="size-3.5 shrink-0 text-green-600" />}
-        {isFailed && <XCircle className="size-3.5 shrink-0 text-destructive" />}
-        {isPending && <Clock className="size-3.5 shrink-0 text-amber-600" />}
-        {!isRunning && !isDone && !isFailed && (
-          <Wrench className="size-3.5 shrink-0 text-muted-foreground" />
-        )}
-        <span
-          className={cn(
-            "text-xs",
-            isFailed ? "text-destructive" : isPending ? "text-amber-700" : "text-muted-foreground"
-          )}
-        >
-          {title}
-        </span>
-      </div>
+    <div className="space-y-2">
+      <Tool name={title || toolName} result={result} isError={isFailed} callId={callId} />
       {actions && actions.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {actions.map((action) =>

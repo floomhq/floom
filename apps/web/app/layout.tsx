@@ -16,7 +16,7 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Workeros",
+  title: "WorkerOS",
   description: "Workers that use your tools. Run them on schedule, webhook, or approval.",
 };
 

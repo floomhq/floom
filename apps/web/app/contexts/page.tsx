@@ -1404,7 +1404,7 @@ function PackDetailPane({
         </div>
         {readOnly && (
           <p className="mt-2 text-xs text-muted-foreground">
-            This is a Workeros engine folder. It shapes how workers are generated and is read-only.
+            This is a WorkerOS engine folder. It shapes how workers are generated and is read-only.
           </p>
         )}
         {detail.description ? (

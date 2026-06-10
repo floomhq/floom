@@ -315,3 +315,122 @@ class TestPromptIncludesSnapshot:
         p1 = chat_service.build_system_prompt_for_source("alice", "web")
         p2 = chat_service.build_system_prompt_for_source("bob", "web")
         assert p1 != p2, "prompts for different actors must differ (snapshots are actor-scoped)"
+
+
+# ---------------------------------------------------------------------------
+# Snapshot: user-benefit tone (BUG 2 — do not recite internal guardrails)
+# ---------------------------------------------------------------------------
+
+class TestSnapshotUserBenefitTone:
+    """The capabilities snapshot must instruct Emily to speak in user-benefit terms
+    and NOT recite security constraints, permission models, or tool plumbing
+    when asked 'who are you / what can you do?'.
+    """
+
+    def test_snapshot_contains_do_not_recite_guidance(self):
+        """The snapshot block must contain guidance telling Emily NOT to expose
+        internal rules verbatim to end users."""
+        # Build a real snapshot via monkeypatching DB calls away.
+        import chat_service as cs
+        # We test the real _build_capabilities_snapshot return value.
+        # Monkeypatch DB helpers to return empty state so we get a clean snapshot.
+        import sys
+        import importlib
+
+        # Patch only the DB layer inside the function so it returns empty data.
+        original = cs._build_capabilities_snapshot
+
+        class _FakeRepos:
+            class connections:
+                @staticmethod
+                def list(user_id):
+                    return []
+            class workers:
+                @staticmethod
+                def list(user_id):
+                    return []
+            members = None
+
+        import db as _db_mod
+        orig_get_repos = _db_mod.get_repositories
+        orig_owner_brain = cs._owner_brain_pack_names
+
+        try:
+            _db_mod.get_repositories = lambda: _FakeRepos()  # type: ignore[assignment]
+            cs._owner_brain_pack_names = lambda uid: []
+            snap = cs._build_capabilities_snapshot("u1")
+        finally:
+            _db_mod.get_repositories = orig_get_repos
+            cs._owner_brain_pack_names = orig_owner_brain
+
+        assert "INTERNAL" in snap or "internal context" in snap.lower(), (
+            "snapshot must label itself as INTERNAL CONTEXT so Emily knows not to recite it"
+        )
+
+    def test_snapshot_contains_user_benefit_framing_instruction(self):
+        """The snapshot must explicitly instruct Emily to speak in user-benefit terms."""
+        import chat_service as cs
+        import db as _db_mod
+
+        class _FakeRepos:
+            class connections:
+                @staticmethod
+                def list(user_id):
+                    return []
+            class workers:
+                @staticmethod
+                def list(user_id):
+                    return []
+            members = None
+
+        orig_get_repos = _db_mod.get_repositories
+        orig_owner_brain = cs._owner_brain_pack_names
+
+        try:
+            _db_mod.get_repositories = lambda: _FakeRepos()  # type: ignore[assignment]
+            cs._owner_brain_pack_names = lambda uid: []
+            snap = cs._build_capabilities_snapshot("u1")
+        finally:
+            _db_mod.get_repositories = orig_get_repos
+            cs._owner_brain_pack_names = orig_owner_brain
+
+        # Should guide Emily to speak about what she can DO FOR the user.
+        assert "user-benefit" in snap.lower() or "do for" in snap.lower() or "benefit" in snap.lower(), (
+            "snapshot must include user-benefit framing instruction"
+        )
+
+    def test_snapshot_instructs_not_to_expose_security_constraints(self):
+        """Emily must be told NOT to recite security constraints to users."""
+        import chat_service as cs
+        import db as _db_mod
+
+        class _FakeRepos:
+            class connections:
+                @staticmethod
+                def list(user_id):
+                    return []
+            class workers:
+                @staticmethod
+                def list(user_id):
+                    return []
+            members = None
+
+        orig_get_repos = _db_mod.get_repositories
+        orig_owner_brain = cs._owner_brain_pack_names
+
+        try:
+            _db_mod.get_repositories = lambda: _FakeRepos()  # type: ignore[assignment]
+            cs._owner_brain_pack_names = lambda uid: []
+            snap = cs._build_capabilities_snapshot("u1")
+        finally:
+            _db_mod.get_repositories = orig_get_repos
+            cs._owner_brain_pack_names = orig_owner_brain
+
+        lower = snap.lower()
+        assert (
+            "do not recite" in lower or "not recite" in lower
+            or "do not expose" in lower or "not expose" in lower
+            or "security rules" in lower or "permission models" in lower
+        ), (
+            "snapshot must explicitly instruct Emily not to recite security constraints to users"
+        )

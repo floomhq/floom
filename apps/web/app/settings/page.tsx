@@ -16,6 +16,7 @@ import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
+import { settingsGroup, settingsCounts, groupLabel } from "@/lib/settings/nav-groups";
 import { CliCommandPanel } from "@/components/CliCommandPanel";
 import { GitWorkspacePanel } from "@/components/GitWorkspacePanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
@@ -186,14 +187,8 @@ const TAB_KEYS: TabKey[] = [
   "danger",
 ];
 
-const NAV_ITEMS: { key: TabKey; label: string }[] = [
-  { key: "developer", label: "Developer" },
-  { key: "system", label: "System" },
-  { key: "git", label: "Git" },
-  { key: "channels", label: "Channels" },
-  { key: "appearance", label: "Appearance" },
-  { key: "danger", label: "Danger zone" },
-];
+// V4 §4: the tab strip renders TWO labeled groups (Workspace · / Account ·)
+// from lib/settings/nav-groups — single source for keys, labels, scopes.
 
 function isValidTab(value: string | null): value is TabKey {
   return value !== null && TAB_KEYS.includes(value as TabKey);
@@ -293,7 +288,7 @@ function SettingsContent() {
           raw === "WhatsApp claim not found"
             ? "This link was not found or the number is already linked."
             : raw === "WhatsApp claim expired"
-              ? "This link has expired. Text the Workeros number again to get a new one."
+              ? "This link has expired. Text the WorkerOS number again to get a new one."
               : raw || "Failed to link WhatsApp.";
         toast.error(friendly);
         setWaClaimBanner({ ok: false, message: friendly });
@@ -424,7 +419,7 @@ function SettingsContent() {
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
-          System configuration and access.
+          System configuration and access. {settingsCounts()}.
         </p>
       </div>
 
@@ -472,13 +467,25 @@ function SettingsContent() {
           S22f: Notifications stays hidden until outbound email ships. */}
       <Tabs value={tab} onValueChange={handleTabChange}>
         <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
-          <TabsList>
-            {NAV_ITEMS.filter((item) => item.key !== "danger" || isAdmin).map((item) => (
-              <TabsTrigger key={item.key} value={item.key}>
-                {item.label}
-              </TabsTrigger>
+          {/* V4 §4: two labeled groups — Workspace · {name} and Account · {user}. */}
+          <div className="flex items-center gap-3">
+            {(["workspace", "account"] as const).map((scope) => (
+              <div key={scope} className="flex items-center gap-2">
+                <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
+                  {groupLabel(scope)}
+                </span>
+                <TabsList>
+                  {settingsGroup(scope)
+                    .filter((item) => !item.adminOnly || isAdmin)
+                    .map((item) => (
+                      <TabsTrigger key={item.key} value={item.key}>
+                        {item.label}
+                      </TabsTrigger>
+                    ))}
+                </TabsList>
+              </div>
             ))}
-          </TabsList>
+          </div>
         </div>
 
         <TabsContent value="developer" className="space-y-8 pt-6">
@@ -605,7 +612,7 @@ function SettingsContent() {
               compact cycle button; here we show all three at once. */}
           <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
           <p className="text-sm text-muted-foreground">
-            Choose how Workeros looks. System follows your operating system.
+            Choose how WorkerOS looks. System follows your operating system.
           </p>
           <ThemeModeToggleGroup />
         </TabsContent>
