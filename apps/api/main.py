@@ -18992,7 +18992,12 @@ def _frontend_public_base() -> str:
     return (os.environ.get("WORKERS_FRONTEND_URL") or "https://workers.floom.dev").rstrip("/")
 
 
-def _issue_cli_auth_pat(*, user_id: str, client_name: str, repos: Repositories) -> str:
+def _issue_cli_auth_pat(*, user_id: str, client_name: str, repos: Repositories, role: str) -> str:
+    # #847 RCA: this used to hardcode role="admin", so ANY member approving a
+    # CLI device minted themselves an admin token (member → admin escalation).
+    # Fix: the token inherits the approver's role, never more. Unknown role
+    # strings clamp to "member" so a bad value can't widen privileges.
+    token_role = role if role in ("admin", "member") else "member"
     raw = "wos_" + _secrets_mod.token_urlsafe(32)
     token_id = str(_uuid_mod.uuid4())
     token_name = f"CLI device: {(client_name or 'unknown').strip() or 'unknown'}"
@@ -19004,7 +19009,7 @@ def _issue_cli_auth_pat(*, user_id: str, client_name: str, repos: Repositories) 
                     (id, token_hash, user_id, role, name, created_at, last_used_at, revoked_at)
                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)
                 """,
-                (token_id, _hash_pat(raw), user_id, "admin", token_name, now_iso()),
+                (token_id, _hash_pat(raw), user_id, token_role, token_name, now_iso()),
             )
     except Exception as exc:
         logger.exception("Could not issue CLI auth token for user %s", user_id)
@@ -19119,6 +19124,9 @@ def approve_cli_device(
         user_id=auth.user_id,
         client_name=str(record.get("client_name") or "unknown"),
         repos=repos,
+        # #847: CLI token carries the approver's own role — a member approving
+        # a device gets a member token, not admin.
+        role=auth.role,
     )
     repos.cli_auth.update(
         device_code=record["device_code"],
