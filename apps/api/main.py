@@ -19959,7 +19959,12 @@ _MCP_ADMIN_ONLY_TOOLS = frozenset({
 })
 
 # #838/#840: exposed only when WORKEROS_MCP_ENABLE_DESTRUCTIVE=1.
-_MCP_OFF_BY_DEFAULT_TOOLS: frozenset = frozenset()
+# - connections.add_mcp (#838): registers arbitrary external MCP servers
+#   (url/command/env) that workers later invoke — a remote-config C2 /
+#   exfiltration channel if the serve secret leaks.
+_MCP_OFF_BY_DEFAULT_TOOLS: frozenset = frozenset({
+    "connections.add_mcp",
+})
 
 
 def _mcp_destructive_tools_enabled() -> bool:
