@@ -73,6 +73,20 @@ class TestEnvironmentNote:
         assert "plain text" in note.lower() or "no markdown" in note.lower()
         assert "WhatsApp" in note
 
+    def test_whatsapp_note_single_asterisk_bold(self):
+        """WhatsApp uses *single asterisk* for bold — the note must teach this explicitly."""
+        note = chat_service._environment_note("whatsapp")
+        assert "*single asterisk*" in note or "single asterisk" in note.lower(), (
+            "WhatsApp note must teach *single asterisk* for bold"
+        )
+
+    def test_whatsapp_note_forbids_double_asterisk(self):
+        """The note must explicitly forbid **double asterisk** to prevent the papaya77 bug."""
+        note = chat_service._environment_note("whatsapp")
+        assert "double asterisk" in note.lower() or "**double" in note or "NEVER **" in note, (
+            "WhatsApp note must forbid **double asterisk** bold"
+        )
+
     def test_slack_note_mrkdwn(self):
         note = chat_service._environment_note("slack")
         assert "mrkdwn" in note or "*bold*" in note
