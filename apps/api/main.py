@@ -470,6 +470,11 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
         "whatsapp-listener",
         "worker-author",
         "workspace-agent",
+        "canopy-crm-sync",
+        "gmail-inbox-manager-plus",
+        "gmail-smart-replies",
+        "openpaper-posthog-daily",
+        "seo-opportunity-digest",
     }
 )
 
