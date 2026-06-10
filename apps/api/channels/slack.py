@@ -1501,8 +1501,25 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
         raise HTTPException(status_code=503, detail="SLACK_BOT_TOKEN is not configured")
 
     from main import _claim_webhook_delivery, _bootstrap_user_id
-    event_id = str(payload.get("event_id") or request.headers.get("X-Slack-Retry-Num") or "")
-    if event_id and not _claim_webhook_delivery("slack:events", event_id):
+    # Dedup key: prefer Slack's globally unique event_id (always present in
+    # event_callback payloads as a string like "Ev08TQ43V3RK").  If absent,
+    # fall back to a ms-precision composite built from the event type, channel,
+    # and the Slack message timestamp (which has µs granularity, e.g.
+    # "1781077338.021456").  The former X-Slack-Retry-Num fallback was WRONG —
+    # it is a retry counter (1, 2, …), not a message identifier; two distinct
+    # events in simultaneous first-delivery both have X-Slack-Retry-Num:1,
+    # causing the second to be incorrectly rejected as a duplicate.
+    _event_id_raw = str(payload.get("event_id") or "").strip()
+    if not _event_id_raw:
+        # Build a ms-precision composite key from event type + channel + ts.
+        # Slack ts values (e.g. "1781077338.021456") are unique per message
+        # within a channel, giving sub-millisecond dedup granularity.
+        _evt = event  # already extracted above
+        _etype = str(_evt.get("type") or payload_type or "")
+        _channel = str(_evt.get("channel") or (_evt.get("assistant_thread") or {}).get("channel_id") or "")
+        _ts = str(_evt.get("ts") or _evt.get("event_ts") or "")
+        _event_id_raw = f"fallback:{_etype}:{_channel}:{_ts}" if (_etype and _ts) else ""
+    if _event_id_raw and not _claim_webhook_delivery("slack:events", _event_id_raw):
         return JSONResponse({"ok": True, "duplicate": True})
 
     if event_type == "assistant_thread_started":
