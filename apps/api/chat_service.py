@@ -1653,17 +1653,33 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
     from db import get_db as _get_db
     result = []
     with _get_db() as conn:
-        rows = conn.execute(
-            """
-            SELECT w.id, w.name, w.trigger_type, w.enabled, w.owner_id,
-                   sv.manifest_json
-            FROM workers w
-            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
-            WHERE w.owner_id = ?
-            ORDER BY w.name
-            """,
-            (user_id,),
-        ).fetchall()
+        # Role-aware visibility, mirroring the /workers UI: an admin sees EVERY
+        # worker; a member sees their own + workspace-shared. This was previously
+        # strictly owner-scoped (WHERE owner_id = ?), so an admin who owns no
+        # workers (e.g. the seed workers belong to the local-default user) got an
+        # empty list from Emily while the UI showed all of them.
+        try:
+            role_row = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+            is_admin = bool(role_row) and str(role_row["role"]).lower() == "admin"
+        except Exception:
+            # No users table (single-user OSS without multi-member) -> not admin;
+            # the member path below (own + workspace-shared) is the safe default.
+            is_admin = False
+        base_select = (
+            "SELECT w.id, w.name, w.trigger_type, w.enabled, w.owner_id, sv.manifest_json "
+            "FROM workers w "
+            "LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id "
+        )
+        if is_admin:
+            rows = conn.execute(base_select + "ORDER BY w.name").fetchall()
+        else:
+            rows = conn.execute(
+                base_select
+                + "WHERE w.owner_id = ? "
+                + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                + "ORDER BY w.name",
+                (user_id,),
+            ).fetchall()
     for row in rows:
         try:
             manifest = json.loads(row["manifest_json"] or "{}") if row["manifest_json"] else {}
@@ -1701,16 +1717,32 @@ def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
         return False
     if row["owner_id"] == user_id:
         return True
+    # Admins may view every worker, mirroring the role-aware /workers UI and
+    # workers__list_all. Without this, an admin who owns no workers could LIST a
+    # worker but get "not found" on read/run. Defensive: no users table (single-
+    # user OSS) -> not admin.
+    try:
+        role_row = conn.execute(
+            "SELECT role FROM users WHERE id = ? LIMIT 1", (user_id,)
+        ).fetchone()
+        if role_row and str(role_row["role"]).lower() == "admin":
+            return True
+    except Exception:
+        pass
     visibility = (row["visibility"] or "private").lower()
     if visibility not in ("workspace", "shared"):
         return False
-    # Check active membership in the worker's workspace.
+    # Check active membership in the worker's workspace. Defensive: the
+    # workspace_members table is absent in single-user OSS.
     workspace_id = row["workspace_id"] or "local-default"
-    member_row = conn.execute(
-        "SELECT 1 FROM workspace_members "
-        "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
-        (workspace_id, user_id),
-    ).fetchone()
+    try:
+        member_row = conn.execute(
+            "SELECT 1 FROM workspace_members "
+            "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
+            (workspace_id, user_id),
+        ).fetchone()
+    except Exception:
+        return False
     return member_row is not None
 
 
