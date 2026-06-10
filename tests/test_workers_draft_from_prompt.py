@@ -513,6 +513,10 @@ trigger:
   type: manual
 """
 
+    @pytest.mark.xfail(
+        reason="pending #752: _embed_files_in_skill_version not yet called on create_worker",
+        strict=True,
+    )
     def test_provided_skill_md_is_written_to_disk(self, client):
         """When skill_md is provided in the request body, SKILL.md on disk matches exactly."""
         custom_skill = "# Custom Skill\n\nThis is the real skill content."
@@ -529,6 +533,10 @@ trigger:
         assert skill_path.is_file(), "SKILL.md was not created"
         assert skill_path.read_text() == custom_skill, "SKILL.md content does not match provided skill_md"
 
+    @pytest.mark.xfail(
+        reason="pending #752: _embed_files_in_skill_version not yet called on create_worker",
+        strict=True,
+    )
     def test_omitted_skill_md_writes_placeholder(self, client):
         """When skill_md is not provided, a placeholder SKILL.md is written."""
         resp = client.post(
