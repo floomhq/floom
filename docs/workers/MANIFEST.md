@@ -1,8 +1,8 @@
 # Worker Manifest — S38
 
 **Last updated:** 2026-05-29  
-**Active workers:** 12 (non-system, non-archived)  
-**Archived workers:** 2  
+**Active workers:** 11 (non-system, non-archived)
+**Archived workers:** 3
 **System workers:** 1 (worker-author, hidden from /workers list)
 
 ---
@@ -89,16 +89,6 @@
 - **Runtime:** python311 (run.py)
 - **Status:** ACTIVE
 
-### linkedin-post-engagements
-- **Bundle:** workers/linkedin-post-engagements/
-- **Trigger:** Schedule (0 9 * * 2,5 Europe/Berlin)
-- **Smoke input:** docs/workers/inputs/linkedin-post-engagements.json
-- **Expected output:** out/engagements.json, out/summary.md
-- **Connections required:** none
-- **Secrets required:** APIFY_API_KEY
-- **Runtime:** python311 (run.py)
-- **Status:** ARCHIVED — APIFY_API_KEY free credits exhausted until 2026-06-25. Worker code correct (KeyError guard added lane/reliability-2026-05-29). Restore when credits renew.
-
 ### node-smoke-test
 - **Bundle:** workers/node-smoke-test/
 - **Trigger:** Manual
@@ -146,6 +136,16 @@
 ---
 
 ## Archived Workers
+
+### linkedin-post-engagements
+- **Bundle:** workers/linkedin-post-engagements/
+- **Trigger:** Schedule (0 9 * * 2,5 Europe/Berlin)
+- **Smoke input:** docs/workers/inputs/linkedin-post-engagements.json
+- **Expected output:** out/engagements.json, out/summary.md
+- **Connections required:** none
+- **Secrets required:** APIFY_API_KEY
+- **Runtime:** python311 (run.py)
+- **Status:** ARCHIVED — APIFY_API_KEY free credits exhausted until 2026-06-25. Worker code correct (KeyError guard added lane/reliability-2026-05-29). Restore when credits renew.
 
 ### kugelaudio-bug-intake
 - **Bundle:** workers/kugelaudio-bug-intake/ (preserved on disk)
