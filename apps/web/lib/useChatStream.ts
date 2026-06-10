@@ -35,6 +35,8 @@ export interface ChatStreamState {
   sendMessage: (text: string, files?: AttachedFile[]) => void;
   /** Reset to a fresh conversation. The previous one stays retrievable server-side. */
   newSession: () => void;
+  /** Load a past conversation into the live stream (Emily history rail). */
+  loadConversation: (id: string) => void;
 }
 
 export function useChatStream(): ChatStreamState {
@@ -223,6 +225,33 @@ export function useChatStream(): ChatStreamState {
     setIsStreaming(false);
   }, []);
 
+  // Load a past conversation into this instance (same-instance switch; the
+  // storage event only syncs OTHER tabs, so we hydrate directly here).
+  const loadConversation = useCallback(
+    (id: string) => {
+      if (!id || id === conversationId) return;
+      abortRef.current?.abort();
+      subscribedCardIds.current.clear();
+      setIsStreaming(false);
+      setError(null);
+      setIsHydrating(true);
+      (async () => {
+        try {
+          const detail = await api.conversations.get(id);
+          const hydrated = rehydrateConversation(detail);
+          setMessages(hydrated);
+          setConversationId(id);
+          writeStoredConversationId(id);
+        } catch {
+          setError("Could not load that conversation.");
+        } finally {
+          setIsHydrating(false);
+        }
+      })();
+    },
+    [conversationId],
+  );
+
   const sendMessage = useCallback(
     (text: string, files?: AttachedFile[]) => {
       if (!text.trim() && (!files || files.length === 0)) return;
@@ -381,6 +410,7 @@ export function useChatStream(): ChatStreamState {
     error,
     sendMessage,
     newSession,
+    loadConversation,
   };
 }
 
