@@ -817,17 +817,15 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, pr
     base_user_id, workspace_id = binding
 
     # Validate the bound user still exists (hardening: user deleted after bind).
+    # bound_user_is_valid() treats the bootstrap/legacy owner id as always-valid
+    # so a "federico" binding on a non-empty users table is never wrongly reset.
     try:
-        from db import get_db as _get_db
         deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
         if deploy == "local":
             from auth.local_workspaces import local_workspace_base_user_id
+            from channels.common import bound_user_is_valid
             base_only = local_workspace_base_user_id(base_user_id)
-            with _get_db() as conn:
-                exists = conn.execute(
-                    "SELECT 1 FROM users WHERE id = ? LIMIT 1", (base_only,)
-                ).fetchone()
-            if not exists:
+            if not bound_user_is_valid(base_only):
                 logger.warning(
                     "WhatsApp binding user %s no longer exists; resetting binding for %s",
                     base_user_id, normalized_wa_id,
