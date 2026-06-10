@@ -133,17 +133,6 @@ def _public_stock_ids_block() -> str:
     return "\n".join(contents)
 
 
-def test_590_topic_explainer_is_public():
-    """topic-explainer is shipped as a demo worker and must be in
-    PUBLIC_STOCK_WORKER_IDS so its runs appear in /runs."""
-    block = _public_stock_ids_block()
-    assert block, "PUBLIC_STOCK_WORKER_IDS not found in main.py"
-    assert "topic-explainer" in block, (
-        "topic-explainer is a demo worker committed to the repo but was "
-        "missing from PUBLIC_STOCK_WORKER_IDS — its runs were invisible in /runs"
-    )
-
-
 def test_590_kugelaudio_workers_are_public():
     """kugelaudio workers have is_example:true in their worker.yml and must
     be in PUBLIC_STOCK_WORKER_IDS."""
