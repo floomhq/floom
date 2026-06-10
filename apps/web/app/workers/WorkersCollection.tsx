@@ -9,7 +9,12 @@ import type {
   WorkerDetail,
   WorkerContextSpec,
   WorkerConnectionSpec,
+  VersionSummary,
+  RunSummary,
 } from "@/lib/types";
+import { formatVersionRows } from "@/lib/workers/versions";
+import { formatDuration } from "@/lib/runs/format";
+import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection, Avatar } from "@/components/collection";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
@@ -93,8 +98,65 @@ function Loading() {
   return <div style={muted}>Loading…</div>;
 }
 
-function AboutTab({ w }: { w: WorkerSummary }) {
+// SPEC §4 + rule #4: Overview is OUTPUT-FIRST — latest result/artifacts and an
+// "All runs →" link lead; the "what it does" flow follows. The actual output
+// text/artifact preview needs `last_run.output_preview` (#815); until then we
+// surface the latest run's status/time and link into Runs for the full output.
+function LatestOutput({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
+  const last: RunSummary | undefined = d?.recent_runs?.[0] ?? w.last_run;
+  return (
+    <div>
+      <div style={{ display: "flex", alignItems: "center", marginBottom: 9 }}>
+        <h4 style={{ ...h4, margin: 0 }}>Latest output</h4>
+        <Link
+          href={`/runs?worker_id=${w.id}`}
+          className="c-vpill"
+          style={{ marginLeft: "auto", padding: "5px 9px" }}
+        >
+          All runs →
+        </Link>
+      </div>
+      {last ? (
+        <Link
+          href={`/runs?worker_id=${w.id}&sel=${last.id}`}
+          className="c-ltable"
+          style={{ display: "block", textDecoration: "none", color: "inherit" }}
+        >
+          <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto auto", gap: 12 }}>
+            <div className="c-lprimary">
+              <div className="c-lp-tx">
+                <div className="nm">Run #{last.id}</div>
+                <div className="sub">{last.status}</div>
+              </div>
+            </div>
+            <span className="c-cell m">{formatDuration(last.duration_ms)}</span>
+            <span className="c-cell m">{rel(last.created_at)}</span>
+          </div>
+        </Link>
+      ) : (
+        <div className="c-ltable" style={{ padding: 14, ...muted }}>
+          No runs yet. Run this worker to see its latest output here.
+        </div>
+      )}
+      {/* TODO(#815): render last_run.output_preview (result text + artifact chips) inline. */}
+    </div>
+  );
+}
+
+function OverviewTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
+      <LatestOutput w={w} d={d} />
+      <div>
+        <h4 style={h4}>What it does</h4>
+        <AboutBody w={w} d={d} />
+      </div>
+    </div>
+  );
+}
+
+function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <WorkerAsciiDiagram
@@ -126,55 +188,9 @@ function AboutTab({ w }: { w: WorkerSummary }) {
   );
 }
 
-function RunTab({ w }: { w: WorkerSummary }) {
-  const [d] = useWorkerDetail(w.id);
-  const [inputs, setInputs] = useState<Record<string, string>>({});
-  const [running, setRunning] = useState(false);
-  if (!d) return <Loading />;
-  const fields = d.config?.inputs ?? [];
-  const submit = async () => {
-    setRunning(true);
-    try {
-      const res = await api.workers.run(w.id, inputs);
-      toast.success(res.run_id ? `Run started · #${res.run_id}` : "Run started");
-    } catch {
-      toast.error("Could not start the run.");
-    } finally {
-      setRunning(false);
-    }
-  };
-  return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 12, maxWidth: 560 }}>
-      {fields.length === 0 && <div style={muted}>This worker takes no inputs.</div>}
-      {fields.map((f) => (
-        <label key={f.name} style={{ display: "flex", flexDirection: "column", gap: 4 }}>
-          <span style={{ fontSize: 12.5, color: "var(--ink-soft)" }}>{f.label || f.name}</span>
-          <input
-            className="c-srch"
-            style={{ maxWidth: "none" }}
-            value={inputs[f.name] ?? ""}
-            onChange={(e) => setInputs((p) => ({ ...p, [f.name]: e.target.value }))}
-            placeholder={f.name}
-          />
-        </label>
-      ))}
-      <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
-        <button
-          type="button"
-          className="c-addbtn"
-          disabled={running || d.enabled === false || !can("run", d)}
-          onClick={() => void submit()}
-          style={{ opacity: running ? 0.6 : 1 }}
-        >
-          {running ? "Running…" : "Run"}
-        </button>
-        {d.webhook_url && <span style={muted}>Webhook: {d.webhook_url}</span>}
-      </div>
-    </div>
-  );
-}
 
-function RunsTab({ w }: { w: WorkerSummary }) {
+// SPEC §4 History: recent runs w/ durations, link to Runs.
+function HistoryTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
   const runs = d?.recent_runs ?? (w.last_run ? [w.last_run] : []);
   return (
@@ -187,18 +203,117 @@ function RunsTab({ w }: { w: WorkerSummary }) {
       </div>
       <div className="c-ltable">
         {runs.map((r) => (
-          <div key={r.id} className="c-lrow" style={{ gridTemplateColumns: "1fr auto" }}>
+          <Link
+            key={r.id}
+            href={`/runs?worker_id=${w.id}&sel=${r.id}`}
+            className="c-lrow"
+            style={{ gridTemplateColumns: "1fr auto auto", gap: 12, textDecoration: "none", color: "inherit" }}
+          >
             <div className="c-lprimary">
               <div className="c-lp-tx">
                 <div className="nm">#{r.id}</div>
                 <div className="sub">{r.status}</div>
               </div>
             </div>
+            <span className="c-cell m">{formatDuration(r.duration_ms)}</span>
             <span className="c-cell m">{rel(r.created_at)}</span>
-          </div>
+          </Link>
         ))}
         {runs.length === 0 && <div style={{ ...muted, padding: 14 }}>No runs yet.</div>}
       </div>
+    </div>
+  );
+}
+
+// SPEC §4 Versions: git log in the GLOBAL list style — message + `sha · author ·
+// age`, current marker, Diff (modal) + Restore (confirm). Endpoints BUILT.
+function VersionsTab({ w }: { w: WorkerSummary }) {
+  const [, applyDetail] = useWorkerDetail(w.id);
+  const [versions, setVersions] = useState<VersionSummary[] | null>(null);
+  const [diff, setDiff] = useState<{ id: string; content: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [now] = useState(() => Date.now());
+  const editable = can("edit", w);
+
+  useEffect(() => {
+    let alive = true;
+    api.workers
+      .listVersions(w.id)
+      .then((v) => alive && setVersions(v))
+      .catch(() => alive && setVersions([]));
+    return () => {
+      alive = false;
+    };
+  }, [w.id]);
+
+  if (!versions) return <Loading />;
+  if (versions.length === 0) return <div style={muted}>No version history yet.</div>;
+  const rows = formatVersionRows(versions, now);
+
+  const showDiff = async (id: string) => {
+    try {
+      const v = await api.workers.getVersion(w.id, id);
+      const file = v.files?.find((f) => f.path === "worker.yml") ?? v.files?.[0];
+      setDiff({ id, content: file?.content ?? "" });
+    } catch {
+      toast.error("Could not load that version.");
+    }
+  };
+  const restore = async (id: string) => {
+    if (!window.confirm(`Restore worker to version ${id.slice(0, 7)}? This commits a new version.`)) return;
+    setBusy(true);
+    try {
+      applyDetail(await api.workers.rollback(w.id, id));
+      toast.success(`Restored to ${id.slice(0, 7)}`);
+      setVersions(await api.workers.listVersions(w.id));
+    } catch {
+      toast.error("Could not restore that version.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div>
+      <div className="c-ltable">
+        {rows.map((r) => (
+          <div key={r.id} className="c-lrow" style={{ gridTemplateColumns: "1fr auto" }}>
+            <div className="c-lprimary">
+              <div className="c-lp-tx">
+                <div className="nm">
+                  {r.message}
+                  {r.isCurrent && <span className="c-vpill" style={{ marginLeft: 8 }}>current</span>}
+                </div>
+                <div className="sub">{r.meta}</div>
+              </div>
+            </div>
+            <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+              <button type="button" className="c-vpill" style={pillBtn} onClick={() => void showDiff(r.id)}>
+                Diff
+              </button>
+              {editable && !r.isCurrent && (
+                <button
+                  type="button"
+                  className="c-vpill"
+                  style={pillBtn}
+                  disabled={busy}
+                  onClick={() => void restore(r.id)}
+                >
+                  Restore
+                </button>
+              )}
+            </span>
+          </div>
+        ))}
+      </div>
+      <Dialog open={!!diff} onOpenChange={(o) => !o && setDiff(null)}>
+        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Version {diff?.id.slice(0, 7)}</DialogTitle>
+          </DialogHeader>
+          {diff && <CodeBlock text={diff.content} filePath="worker.yml" />}
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }
@@ -288,31 +403,54 @@ function ToolsTab({ w }: { w: WorkerSummary }) {
   );
 }
 
-function SettingsTab({ w }: { w: WorkerSummary }) {
+// SPEC §4 Config: Tools · Brain attach · Triggers · Limits in one tab.
+// ("paused" = enabled:false — there is no paused status; pause/resume is #788;
+// spend cap is #793; PATCH name/desc is #785; brain attach/detach is #790 —
+// today these route through the full worker-YAML PUT.)
+function ConfigTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
   if (!d) return <Loading />;
   return (
-    <div style={kv}>
-      <span style={kvK}>Trigger</span>
-      <span>{w.trigger_type}</span>
-      <span style={kvK}>Runtime</span>
-      <span>{w.runner}</span>
-      {d.webhook_url && (
-        <>
-          <span style={kvK}>Webhook</span>
-          <span style={{ fontFamily: "var(--font-mono)" }}>{d.webhook_url}</span>
-        </>
+    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+      <section>
+        <h4 style={h4}>Tools</h4>
+        <ToolsTab w={w} />
+      </section>
+      <section>
+        <h4 style={h4}>Brain</h4>
+        <BrainTab w={w} />
+      </section>
+      <section>
+        <h4 style={h4}>Triggers</h4>
+        <div style={kv}>
+          <span style={kvK}>Trigger</span>
+          <span>{w.trigger_type}</span>
+          {d.webhook_url && (
+            <>
+              <span style={kvK}>Webhook</span>
+              <span style={{ fontFamily: "var(--font-mono)" }}>{d.webhook_url}</span>
+            </>
+          )}
+          <span style={kvK}>Status</span>
+          {/* TODO(#788): pause/resume toggle — "paused" is enabled:false today. */}
+          <span>{d.enabled === false ? "Paused" : "Enabled"}</span>
+        </div>
+      </section>
+      <section>
+        <h4 style={h4}>Limits</h4>
+        <div style={kv}>
+          <span style={kvK}>Runtime</span>
+          <span>{w.runner}</span>
+          {/* TODO(#793): monthly spend cap field. */}
+        </div>
+      </section>
+      {FEEDBACK_BACKEND_AVAILABLE && (
+        <section>
+          <h4 style={h4}>Feedback</h4>
+          <WorkerFeedbackPanel workerId={w.id} canLeave={canLeaveFeedback(w)} canModerate={can("edit", w)} />
+        </section>
       )}
-      <span style={kvK}>Status</span>
-      <span>{d.enabled === false ? "Paused" : "Enabled"}</span>
     </div>
-  );
-}
-
-function FeedbackTab({ w }: { w: WorkerSummary }) {
-  // Anyone who can see the worker may comment (SPEC §12); owner/admin moderate.
-  return (
-    <WorkerFeedbackPanel workerId={w.id} canLeave={canLeaveFeedback(w)} canModerate={can("edit", w)} />
   );
 }
 
@@ -408,8 +546,10 @@ export default function WorkersCollection({
       const viewOnly = isViewOnly(w);
       const actions = (
         <>
+          {/* SPEC §4: Run opens the inputs flow on the full worker page (the
+              dedicated Run-with-inputs modal is §5). */}
           {can("run", w) && (
-            <Link href={`/workers/${w.id}?tab=run`} className="c-addbtn" style={pillBtn}>
+            <Link href={`/workers/${w.id}#run`} className="c-addbtn" style={pillBtn}>
               Run
             </Link>
           )}
@@ -442,17 +582,13 @@ export default function WorkersCollection({
             </>
           ),
         },
+        // SPEC §4: Overview · History · Source · Versions · Config (WORKER_DETAIL_TABS).
         tabs: [
-          { key: "About", label: "About", render: () => <AboutTab w={w} /> },
-          { key: "Run", label: "Run", render: () => <RunTab w={w} /> },
-          { key: "Runs", label: "Runs", render: () => <RunsTab w={w} /> },
+          { key: "Overview", label: "Overview", render: () => <OverviewTab w={w} /> },
+          { key: "History", label: "History", render: () => <HistoryTab w={w} /> },
           { key: "Source", label: "Source", render: () => <SourceTab w={w} /> },
-          { key: "Settings", label: "Settings", render: () => <SettingsTab w={w} /> },
-          { key: "Brain", label: "Brain", render: () => <BrainTab w={w} /> },
-          { key: "Tools", label: "Tools", render: () => <ToolsTab w={w} /> },
-          ...(FEEDBACK_BACKEND_AVAILABLE
-            ? [{ key: "Feedback", label: "Feedback", render: () => <FeedbackTab w={w} /> }]
-            : []),
+          { key: "Versions", label: "Versions", render: () => <VersionsTab w={w} /> },
+          { key: "Config", label: "Config", render: () => <ConfigTab w={w} /> },
         ],
       };
     },
