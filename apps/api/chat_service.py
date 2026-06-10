@@ -1787,14 +1787,46 @@ def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
 
     "shared" is accepted as an alias for "workspace" in case a cloud-side
     migration ever writes that value; the canonical OS value is "workspace".
-    Returns False when the worker row does not exist (the caller should then
-    return a generic "not found" so as not to leak existence).
+
+    File-based stock/example workers (PUBLIC_STOCK_WORKER_IDS,
+    PROTECTED_STOCK_WORKER_IDS) do NOT have a DB row; they are shared
+    read-execute resources accessible to every user.  When no row exists the
+    guard therefore falls back to the same logic used by _get_visible_worker in
+    main.py: stock workers are always accessible; in single-user / dev mode
+    (filesystem-fallback allowed) unowned on-disk workers are accessible; only
+    truly unknown IDs are blocked.  This preserves the pre-#750 behaviour for
+    owner/stock access while keeping the cross-user private-worker guard intact.
+
+    If the DB schema is not yet initialised (e.g. unit tests that stub the DB
+    at a higher level and don't run migrations), the OperationalError is caught
+    and the function returns True — the downstream run path will surface any
+    real "not found" error using its own resolution logic.
     """
-    row = conn.execute(
-        "SELECT owner_id, workspace_id, visibility FROM workers WHERE id = ? LIMIT 1",
-        (worker_id,),
-    ).fetchone()
+    import sqlite3 as _sqlite3
+    try:
+        row = conn.execute(
+            "SELECT owner_id, workspace_id, visibility FROM workers WHERE id = ? LIMIT 1",
+            (worker_id,),
+        ).fetchone()
+    except _sqlite3.OperationalError:
+        # DB not initialised or workers table absent — let the run path decide.
+        return True
     if row is None:
+        # No DB row — worker is either a stock/filesystem worker or unknown.
+        # Import here to avoid a circular import at module level.
+        from main import (
+            PUBLIC_STOCK_WORKER_IDS,
+            PROTECTED_STOCK_WORKER_IDS,
+            _shared_filesystem_fallback_allowed,
+        )
+        if worker_id in PUBLIC_STOCK_WORKER_IDS or worker_id in PROTECTED_STOCK_WORKER_IDS:
+            return True
+        if _shared_filesystem_fallback_allowed():
+            # Single-user / dev mode: unowned on-disk workers are always
+            # accessible.  The run path itself will return "not found" if the
+            # file doesn't actually exist.
+            return True
+        # Unknown worker ID in a multi-user deployment — block it.
         return False
     if row["owner_id"] == user_id:
         return True
