@@ -114,6 +114,17 @@ TWO groups with labels: **Workspace · {name}** (System, Channels, Assistant, Me
 - Approval page: calm "Waiting for your review" + tool logo + preview + comment + Approve/Reject (public routes BUILT).
 - **Channel-first onboarding** (#817): landing → "Start in Slack / Start in WhatsApp", dashboard optional. New flow, design in wireframe, backend issue filed (depends #762/#733/#800).
 
+## 5b. Landing ↔ App continuity (Federico 2026-06-10)
+
+- **One design system.** Landing and app share the tokens in §1 (palette, radii, flat border system). Theme: day/night/system exists on the landing exactly like in the app, same storage key, carried across the transition (#820).
+- **Sign-in as late as possible.** The landing's "Works without the dashboard too: Slack, WhatsApp, or any MCP agent" row routes to the INSTALL FLOWS directly (Slack install / WhatsApp QR / MCP config) — never to sign-in (#819). Full anonymous provisioning is #817; #552 (install-after-sign-in) is the interim inverse.
+- **Session-aware CTA.** Already authenticated → landing nav says "Dashboard", not "Sign in" (#821).
+
+## 5c. Mobile status (verified 2026-06-10)
+
+First-pass responsive is IN the wireframe and verified at 390px across Overview, Workers, Runs, Brain, Approvals, Settings: rails auto-collapse to icon bars (<880px), tiles 2×2, cards single-column, list rows reduce to name + context, split detail takes full width, modals fit (94vw). The v3 landing is separately mobile-certified (375px, all 5 page types, PR #159).
+**Explicitly out of scope here:** bottom tab bar, Emily as a swipe-up sheet, 44px touch-target audit, gesture work. That is a dedicated mobile pass — do not block the desktop implementation on it, but keep the <880px CSS working (definition of done includes a 390px render check per page).
+
 ## 6. Backend contract — the law
 
 Implement ONLY against endpoints marked BUILT in `ui-backend-coverage-2026-06-10.md`. Everything else has an issue number — reference it in code comments (`// TODO(#788): pause/resume endpoint`) and ship the honest fallback (hide, disable-with-tooltip, or client-side equivalent). **Never assume a backend change that isn't an accepted issue.**
