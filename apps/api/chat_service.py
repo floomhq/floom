@@ -3756,10 +3756,13 @@ GLOBAL_COMMUNICATION_RULES: str = (
 ENVIRONMENT_NOTES: Dict[str, str] = {
     "whatsapp": (
         "## Current environment: WhatsApp\n"
-        "You are talking on WhatsApp on a phone. "
-        "Reply in 1-3 short paragraphs, plain text only: "
-        "no markdown headers, tables, or code blocks; use simple dashes for lists. "
-        "Keep links short. The reader is on the go."
+        "You are talking on WhatsApp on a phone. Plain text only — no markdown. "
+        "WhatsApp formatting: *single asterisk* for bold (NEVER **double asterisk**), "
+        "_underscore_ for italic, ~tilde~ for strikethrough. "
+        "No headers, tables, code blocks, or markdown links. "
+        "Simple dash lists are OK. "
+        "Prefer NO formatting for single words or codewords — just write them plainly. "
+        "Reply in 1-3 short paragraphs. Keep links short. Reader is on the go."
     ),
     "slack": (
         "## Current environment: Slack\n"
@@ -3917,6 +3920,13 @@ def _build_capabilities_snapshot(user_id: str) -> str:
 
         return (
             "## What you can do here (capabilities snapshot)\n"
+            "NOTE: This block is INTERNAL CONTEXT — use it to answer accurately, "
+            "but do NOT recite it verbatim or expose security rules, tool plumbing, "
+            "permission models, or constraint language to users. "
+            "When describing yourself, speak in user-benefit terms: "
+            "what you can DO FOR them (e.g. run their workers, watch their inbox, "
+            "chase approvals, dig through connected tools). "
+            "Only discuss access limits or security if the user explicitly asks about permissions.\n"
             f"- Connections: {conn_str}\n"
             f"- Workers: {worker_str}\n"
             f"- Brain packs: {brain_str}\n"
