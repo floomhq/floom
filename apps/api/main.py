@@ -19962,8 +19962,11 @@ _MCP_ADMIN_ONLY_TOOLS = frozenset({
 # - connections.add_mcp (#838): registers arbitrary external MCP servers
 #   (url/command/env) that workers later invoke — a remote-config C2 /
 #   exfiltration channel if the serve secret leaks.
+# - workers.reload (#840): reloads ALL workers from disk with zero
+#   confirmation — mass worker interruption from one remote call.
 _MCP_OFF_BY_DEFAULT_TOOLS: frozenset = frozenset({
     "connections.add_mcp",
+    "workers.reload",
 })
 
 
