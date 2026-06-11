@@ -40,7 +40,7 @@ def test_rotate_swaps_secret_keeps_identity(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
     with TestClient(main.app, base_url="https://testserver") as c:
-        c.post("/auth/setup", json={"username": "alice", "password": "password123"})
+        c.post("/auth/setup", json={"username": "alice", "password": "password123-long"})
         created = c.post("/auth/tokens", json={"name": "ci-token"}).json()
         old_raw = created["token"]
         token_id = created["pat"]["id"]
@@ -68,6 +68,6 @@ def test_rotate_unknown_token_404(monkeypatch, tmp_path):
     from fastapi.testclient import TestClient
     main = load_main(monkeypatch, tmp_path)
     with TestClient(main.app, base_url="https://testserver") as c:
-        c.post("/auth/setup", json={"username": "alice", "password": "password123"})
+        c.post("/auth/setup", json={"username": "alice", "password": "password123-long"})
         resp = c.post("/auth/tokens/does-not-exist/rotate")
         assert resp.status_code == 404, resp.text
