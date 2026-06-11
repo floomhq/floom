@@ -6697,105 +6697,6 @@ def import_worker_from_share(
     return {"worker_id": new_id, "url": f"/workers/{new_id}"}
 
 
-class _GrantRequest(BaseModel):
-    asset_type: str = Field(..., max_length=32)
-    asset_id: str = Field(..., max_length=256)
-    email: str = Field(..., max_length=256)
-
-
-class _GrantOut(BaseModel):
-    id: str
-    email: str
-    created_at: str
-
-
-def _canonical_grant_asset_id(asset_type: str, asset_id: str) -> str:
-    """Normalize a grant's asset id. Worker ids are canonicalized so a grant
-    stored under any alias resolves the same id the enforcement path looks up;
-    other asset types are stored verbatim."""
-    return _canonical_worker_id(asset_id) if asset_type == "worker" else asset_id
-
-
-def _assert_can_share_asset(asset_type: str, asset_id: str, auth: AuthContext, repos: Repositories) -> None:
-    """#767: only someone who can share the asset may grant access to it."""
-    if asset_type == "worker":
-        worker = _get_visible_worker(_canonical_worker_id(asset_id), user_id=auth.user_id, repos=repos)
-        if not worker:
-            raise HTTPException(status_code=404, detail="Asset not found")
-        if not _worker_permissions(worker, user_id=auth.user_id, repos=repos).can_share:
-            raise HTTPException(status_code=403, detail="You cannot share this asset")
-    # brain/run/workspace grants are owner-scoped — the auth check suffices.
-
-
-@app.post("/share/grants", response_model=_GrantOut, status_code=201)
-def add_share_grant(
-    body: _GrantRequest,
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> _GrantOut:
-    """#767: grant a person (by email) access to an asset."""
-    email = body.email.strip().lower()
-    if "@" not in email or "." not in email.split("@")[-1]:
-        raise HTTPException(status_code=422, detail="A valid email is required")
-    _assert_can_share_asset(body.asset_type, body.asset_id, auth, repos)
-    # Store the canonical worker id so the enforcement path (which canonicalizes
-    # the requested id) finds the grant regardless of the alias the caller used.
-    asset_id = _canonical_grant_asset_id(body.asset_type, body.asset_id)
-    ts = now_iso()
-    gid = str(_uuid_mod.uuid4())
-    with get_db() as conn:
-        try:
-            conn.execute(
-                "INSERT INTO asset_grants (id, asset_type, asset_id, owner_id, grantee_email, created_at) "
-                "VALUES (?, ?, ?, ?, ?, ?)",
-                (gid, body.asset_type, asset_id, auth.user_id, email, ts),
-            )
-        except sqlite3.IntegrityError:
-            existing = conn.execute(
-                "SELECT id, created_at FROM asset_grants "
-                "WHERE asset_type=? AND asset_id=? AND owner_id=? AND grantee_email=?",
-                (body.asset_type, asset_id, auth.user_id, email),
-            ).fetchone()
-            return _GrantOut(id=str(existing["id"]), email=email, created_at=str(existing["created_at"]))
-    return _GrantOut(id=gid, email=email, created_at=ts)
-
-
-@app.get("/share/grants", response_model=List[_GrantOut])
-def list_share_grants(
-    asset_type: str,
-    asset_id: str,
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> List[_GrantOut]:
-    """#768: list the people granted access to an asset (owner-scoped)."""
-    asset_id = _canonical_grant_asset_id(asset_type, asset_id)
-    with get_db() as conn:
-        rows = conn.execute(
-            "SELECT id, grantee_email, created_at FROM asset_grants "
-            "WHERE asset_type=? AND asset_id=? AND owner_id=? ORDER BY created_at",
-            (asset_type, asset_id, auth.user_id),
-        ).fetchall()
-    return [
-        _GrantOut(id=str(r["id"]), email=str(r["grantee_email"]), created_at=str(r["created_at"]))
-        for r in rows
-    ]
-
-
-@app.delete("/share/grants/{grant_id}", status_code=204)
-def delete_share_grant(
-    grant_id: str,
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> None:
-    """#767: revoke a person's access grant."""
-    with get_db() as conn:
-        cur = conn.execute(
-            "DELETE FROM asset_grants WHERE id = ? AND owner_id = ?", (grant_id, auth.user_id)
-        )
-    if cur.rowcount == 0:
-        raise HTTPException(status_code=404, detail="Grant not found")
-
-
 class _AssetAccessEntry(BaseModel):
     user_id: Optional[str] = None
     email: Optional[str] = None
@@ -15773,6 +15674,18 @@ from routers.user_settings import (
     put_user_settings,
 )
 app.include_router(user_settings_router)
+
+from routers.share import (
+    share_router,
+    _GrantRequest,
+    _GrantOut,
+    _canonical_grant_asset_id,
+    _assert_can_share_asset,
+    add_share_grant,
+    list_share_grants,
+    delete_share_grant,
+)
+app.include_router(share_router)
 
 # ---------------------------------------------------------------------------
 # WhatsApp integration — extracted to channels/whatsapp.py
