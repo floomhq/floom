@@ -40,8 +40,37 @@ cp apps/api/.env.example apps/api/.env
 ```
 
 **Required:**
-- `OPENAI_API_KEY` — powers all agent-mode workers
+- `OPENAI_API_KEY` — the default model provider (powers Emily, agent-mode workers, and codegen)
 - `E2B_API_KEY` — sandbox execution (get one at e2b.dev)
+
+**Model providers (OpenAI by default, or AWS Bedrock / Claude):**
+
+The backend is provider-agnostic: each model call is selected by a *model id* and
+routed through litellm. OpenAI is the zero-config default. To use another provider,
+point the per-role model vars at that provider's id and supply its credentials:
+
+| Env var | Role | Default |
+| --- | --- | --- |
+| `WORKEROS_WORKER_AGENT_MODEL` | tool-calling worker agents | `gpt-5.5` |
+| `WORKEROS_CHAT_MODEL` | Emily (chat assistant) | `gpt-5.4-mini` |
+| `WORKEROS_CODEGEN_MODEL` | worker codegen / draft / repair | `gpt-5.5` |
+| `WORKEROS_SUGGEST_MODEL` | worker-edit conflict check | codegen model |
+
+Example — AWS Bedrock (Claude Sonnet 4.6):
+
+```bash
+WORKEROS_WORKER_AGENT_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
+WORKEROS_CHAT_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
+WORKEROS_CODEGEN_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION_NAME=us-west-2
+```
+
+Anthropic models on Bedrock require submitting the one-time "use case details" form
+in the Bedrock console (per region). Prompt caching of the static system prompt is
+applied automatically on Anthropic/Bedrock codegen calls; OpenAI caches prefixes
+server-side.
 
 **Recommended for production:**
 - `FLOOM_SECRET` — operator secret that gates all API requests. Omit entirely for unauthenticated local dev.

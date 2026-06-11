@@ -22,11 +22,10 @@ again on 2026-06-05 for ``gpt-5.5``):
   - Some gpt-5.x models accept only default temperature, so this helper retries
     once without ``temperature`` when the API rejects a non-default value.
 
-``chat_completion_codegen`` wraps ``client.chat.completions.create`` so callers
-never have to know whether the configured model wants ``max_tokens`` or
-``max_completion_tokens`` — it picks the right one from the model name and
-retries once on the well-known "use max_completion_tokens instead" 400 so an
-ops model override (e.g. back to a gpt-4 family model) keeps working.
+``chat_completion_codegen`` routes through the provider-agnostic ``llm`` seam, so
+one code path serves OpenAI and any litellm provider (e.g. Bedrock / Claude),
+selected by ``WORKEROS_CODEGEN_MODEL``. litellm normalizes the token parameter
+across providers, so callers always pass ``max_output_tokens``.
 """
 
 from __future__ import annotations
@@ -47,63 +46,40 @@ def codegen_model() -> str:
     return value or DEFAULT_CODEGEN_MODEL
 
 
-def _uses_max_completion_tokens(model: str) -> bool:
-    """gpt-5.x / o-series reasoning models require ``max_completion_tokens``.
-
-    The legacy gpt-4 / gpt-4o family still uses ``max_tokens``. Detect by name
-    so an ops override to either family sends the right parameter.
-    """
-    m = model.lower()
-    return m.startswith(("gpt-5", "o1", "o3", "o4"))
-
-
 def chat_completion_codegen(
-    client: Any,
     *,
     messages: List[Dict[str, Any]],
     max_output_tokens: int,
     temperature: float = 0.2,
     response_format: Dict[str, Any] | None = None,
     model: str | None = None,
+    cache_prompt: bool = True,
 ) -> Any:
-    """Call chat.completions with the codegen model, param-compatible across families.
+    """Run the code-generation model, provider-agnostic via the ``llm`` seam.
 
-    Picks ``max_completion_tokens`` vs ``max_tokens`` from the model name, and
-    self-heals on the OpenAI 400 that names the other parameter (so a model
-    override never silently breaks generation).
+    Routes to OpenAI or any litellm provider (e.g. Bedrock / Claude) purely by the
+    configured model id (``WORKEROS_CODEGEN_MODEL``). litellm normalizes the token
+    parameter across providers, so callers always pass ``max_output_tokens``.
+    Returns an OpenAI-shaped response (``.choices[0].message.content``). The static
+    system prefix is marked cacheable (no-op on OpenAI; up to ~90% off on
+    Anthropic/Bedrock). Retries once without ``temperature`` for models that only
+    accept the default.
     """
-    chosen = model or codegen_model()
-    token_kwarg = (
-        "max_completion_tokens" if _uses_max_completion_tokens(chosen) else "max_tokens"
-    )
+    import llm
 
-    def _create(token_param: str, *, include_temperature: bool = True) -> Any:
-        kwargs: Dict[str, Any] = {
-            "model": chosen,
-            "messages": messages,
-            token_param: max_output_tokens,
-        }
-        if include_temperature:
-            kwargs["temperature"] = temperature
-        if response_format is not None:
-            kwargs["response_format"] = response_format
-        return client.chat.completions.create(**kwargs)
+    chosen = model or codegen_model()
+    kwargs: Dict[str, Any] = {
+        "model": chosen,
+        "messages": messages,
+        "max_tokens": max_output_tokens,
+        "cache_prompt": cache_prompt,
+    }
+    if response_format is not None:
+        kwargs["response_format"] = response_format
 
     try:
-        return _create(token_kwarg)
-    except Exception as exc:  # noqa: BLE001 - inspect the message, then retry once
-        msg = str(exc).lower()
-        if "max_completion_tokens" in msg and token_kwarg == "max_tokens":
-            return _create("max_completion_tokens")
-        if "max_tokens" in msg and token_kwarg == "max_completion_tokens":
-            return _create("max_tokens")
-        if (
-            "temperature" in msg
-            and (
-                "unsupported" in msg
-                or "does not support" in msg
-                or "only the default" in msg
-            )
-        ):
-            return _create(token_kwarg, include_temperature=False)
+        return llm.completion(temperature=temperature, **kwargs)
+    except Exception as exc:  # noqa: BLE001 - some models reject a non-default temperature
+        if "temperature" in str(exc).lower():
+            return llm.completion(**kwargs)
         raise
