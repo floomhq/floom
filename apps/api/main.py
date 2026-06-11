@@ -7569,6 +7569,81 @@ def create_brain_file_share_link(
     )
 
 
+def _revoke_standalone_share_link(
+    *,
+    entity_type: str,
+    entity_id: str,
+    owner_id: str,
+    file_path: str = "",
+) -> Dict[str, bool]:
+    # #766: delete the token row so the public link stops resolving. A later
+    # POST /share-link mints a fresh token (the frontend toggle off->on flow).
+    _ensure_standalone_share_links_table()
+    with get_db() as conn:
+        cursor = conn.execute(
+            """
+            DELETE FROM standalone_share_links
+            WHERE entity_type = ? AND entity_id = ? AND file_path = ? AND owner_id = ?
+            """,
+            (entity_type, entity_id, file_path or "", owner_id),
+        )
+    return {"revoked": cursor.rowcount > 0}
+
+
+@app.delete("/workers/{worker_id}/share-link")
+def revoke_worker_share_link(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, bool]:
+    """#766: revoke (disable) a worker's public share link."""
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    perms = _worker_permissions(worker, user_id=auth.user_id, repos=repos)
+    if not perms.can_share:
+        raise HTTPException(status_code=403, detail="You cannot share this worker")
+    return _revoke_standalone_share_link(
+        entity_type="worker",
+        entity_id=str(worker["id"]),
+        owner_id=str(worker.get("owner_id") or auth.user_id),
+    )
+
+
+@app.delete("/contexts/{name}/share-link")
+def revoke_brain_pack_share_link(
+    name: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, bool]:
+    """#766: revoke a brain pack's public share link."""
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    return _revoke_standalone_share_link(
+        entity_type="brain_pack",
+        entity_id=safe_name,
+        owner_id=auth.user_id,
+    )
+
+
+@app.delete("/contexts/{name}/files/{file_path:path}/share-link")
+def revoke_brain_file_share_link(
+    name: str,
+    file_path: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, bool]:
+    """#766: revoke a brain file's public share link."""
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    rel = _context_file_path_or_400(file_path)
+    return _revoke_standalone_share_link(
+        entity_type="brain_file",
+        entity_id=safe_name,
+        file_path=rel,
+        owner_id=auth.user_id,
+    )
+
+
 @app.get("/s/{token}/download")
 def download_standalone_share_file(
     token: str,
