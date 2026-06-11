@@ -386,8 +386,17 @@ class TestSnapshotUserBenefitTone:
             _db_mod.get_repositories = orig_get_repos
             cs._owner_brain_pack_names = orig_owner_brain
 
-        assert "user-benefit" in snap.lower() or "do for" in snap.lower() or "benefit" in snap.lower(), (
-            "snapshot must include user-benefit framing instruction"
+        # Should guide Emily to speak about outcomes she gets DONE for the user,
+        # in chief-of-staff terms, not a tool inventory.
+        lower = snap.lower()
+        assert (
+            "chief of staff" in lower or "outcomes" in lower
+            or "get done" in lower or "user-benefit" in lower or "benefit" in lower
+        ), (
+            "snapshot must include chief-of-staff / outcome framing instruction"
+        )
+        assert "tool inventory" in lower, (
+            "snapshot must tell Emily NOT to answer as a tool inventory"
         )
 
     def test_snapshot_instructs_not_to_expose_security_constraints(self):
@@ -419,11 +428,20 @@ class TestSnapshotUserBenefitTone:
 
         lower = snap.lower()
         assert (
-            "do not recite" in lower or "not recite" in lower
+            "do not recite" in lower or "not recite" in lower or "never recite" in lower
             or "do not expose" in lower or "not expose" in lower
             or "security rules" in lower or "permission models" in lower
         ), (
             "snapshot must explicitly instruct Emily not to recite security constraints to users"
+        )
+        # New: must forbid reciting tool/plumbing terms (secrets, MCP, connections,
+        # debug workers) and naming connected apps unless explicitly asked.
+        for forbidden_term in ("secrets", "mcp", "connections", "debug workers"):
+            assert forbidden_term in lower, (
+                f"snapshot must name {forbidden_term!r} among the plumbing terms Emily must not recite"
+            )
+        assert "list connected apps" in lower or "connected apps by name" in lower, (
+            "snapshot must forbid listing connected apps by name"
         )
 
 
@@ -501,3 +519,64 @@ class TestPromptImprovements:
         from itertools import combinations
         for a, b in combinations(ALL_SOURCES, 2):
             assert notes[a] != notes[b], f"surface notes for {a!r} and {b!r} must be distinct"
+
+
+# ---------------------------------------------------------------------------
+# Identity: chief-of-staff persona (non-technical, outcome-framed)
+# ---------------------------------------------------------------------------
+
+class TestChiefOfStaffIdentity:
+    """EMILY_BASE_PERSONA must present Emily as a chief of staff for a
+    non-technical buyer: autonomous, always-on, runs a team of workers, has a
+    memory. NOT a developer tool inventory.
+    """
+
+    def test_identity_is_chief_of_staff(self):
+        persona = chat_service.EMILY_BASE_PERSONA.lower()
+        assert "chief of staff" in persona, (
+            "identity must frame Emily as a chief of staff"
+        )
+
+    def test_identity_conveys_autonomous_always_on(self):
+        persona = chat_service.EMILY_BASE_PERSONA.lower()
+        assert "autonomous" in persona or "around the clock" in persona or "always-on" in persona, (
+            "identity must convey autonomous / always-on operation"
+        )
+
+    def test_identity_conveys_team_and_memory(self):
+        persona = chat_service.EMILY_BASE_PERSONA.lower()
+        assert "team of" in persona and ("worker" in persona), (
+            "identity must convey that Emily runs a team of workers"
+        )
+        assert "memory" in persona or "remember" in persona, (
+            "identity must convey that Emily has a brain/memory for what matters"
+        )
+
+    def test_identity_loops_in_only_for_decisions(self):
+        persona = chat_service.EMILY_BASE_PERSONA.lower()
+        assert "decision" in persona or "loop you in" in persona, (
+            "identity must convey she handles work end to end and loops in for decisions"
+        )
+
+    def test_identity_uses_relatable_outcome_examples(self):
+        """The identity should give a founder-relatable everyday example, not a
+        tool catalog."""
+        persona = chat_service.EMILY_BASE_PERSONA.lower()
+        assert (
+            "morning brief" in persona or "inbox" in persona or "chasing" in persona
+            or "replies" in persona
+        ), (
+            "identity must give concrete everyday outcome examples"
+        )
+
+    def test_identity_has_no_technical_plumbing(self):
+        """The user-facing identity must not recite internal plumbing terms."""
+        persona = chat_service.EMILY_BASE_PERSONA.lower()
+        for term in ("mcp", "secret", "debug worker", "register", "missing config"):
+            assert term not in persona, (
+                f"identity must not contain technical plumbing term {term!r}"
+            )
+
+    def test_identity_has_no_em_dashes(self):
+        assert "—" not in chat_service.EMILY_BASE_PERSONA
+        assert "–" not in chat_service.EMILY_BASE_PERSONA
