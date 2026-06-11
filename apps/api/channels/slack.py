@@ -720,12 +720,15 @@ def _slack_claim_url(token: str) -> str:
 
 
 def _slack_short_claim_url(token: str) -> str:
-    """Return the short /c/{token} redirect URL for use in outbound messages."""
-    base = (
-        os.environ.get("WORKERS_FRONTEND_URL")
-        or os.environ.get("WORKEROS_PUBLIC_URL")
-        or "https://workers.floom.dev"
-    ).rstrip("/")
+    """Return the short /c/{token} redirect URL for use in outbound messages.
+
+    Built on the API public base (_public_api_base_url) because the /c/ route
+    is served by the FastAPI app (workers-api.floom.dev), not the Next.js web
+    app (workers.floom.dev).  The route 302s cross-domain to the frontend
+    /settings?slack_claim= URL.  Building it on the frontend base produced a
+    dead link that 404'd / bounced to /login.
+    """
+    base = _public_api_base_url()
     return f"{base}/c/{urllib.parse.quote(token)}"
 
 
