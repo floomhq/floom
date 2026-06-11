@@ -96,7 +96,7 @@ def test_endpoint_returns_prompt_and_tools(client_and_main):
         "allowed_team_ids_configured": False,
     }
     # System prompt is the resolved SKILL.md (placeholder expanded).
-    assert "I'm Emily, your chief-of-staff for this Workeros workspace." in body["system_prompt"]
+    assert "I'm Emily, your chief of staff." in body["system_prompt"]
     assert "You manage the workspace." in body["system_prompt"]
     assert "{{WORKSPACE_PREAMBLE}}" not in body["system_prompt"]
     assert "Workspace snapshot" in body["system_prompt"]
@@ -183,7 +183,7 @@ def test_base_persona_and_workspace_instructions_are_separate_editable_layers(cl
 
     default_base = client.get("/workspace/base")
     assert default_base.status_code == 200
-    assert "I'm Emily, your chief-of-staff for this Workeros workspace." in default_base.text
+    assert "I'm Emily, your chief of staff." in default_base.text
     assert "Owner: Federico" not in default_base.text
     assert "personal Chief-of-Staff" not in default_base.text
 
@@ -224,7 +224,7 @@ def test_base_persona_state_and_reset_to_default(client_and_main):
     # Pristine: built-in default in effect, not custom.
     state = client.get("/workspace/base/state").json()
     assert state["is_custom"] is False
-    assert "I'm Emily, your chief-of-staff" in state["content"]
+    assert "I'm Emily, your chief of staff." in state["content"]
     assert state["content"] == state["default"]
 
     custom = "# Emily\n\nYou are Emily, edited base.\n"
@@ -238,7 +238,7 @@ def test_base_persona_state_and_reset_to_default(client_and_main):
     state2 = client.get("/workspace/base/state").json()
     assert state2["is_custom"] is True
     assert state2["content"] == custom
-    assert "I'm Emily, your chief-of-staff" in state2["default"]
+    assert "I'm Emily, your chief of staff." in state2["default"]
 
     reset = client.delete("/workspace/base")
     assert reset.status_code == 204, reset.text
