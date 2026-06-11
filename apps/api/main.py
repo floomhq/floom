@@ -180,6 +180,14 @@ from services.git_service import _git_workspace, _git_author
 # Small pure utilities live in core.utils; re-exported for this module's call
 # sites and for channels/* + tests that import them from `main`.
 from core.utils import row_to_dict, _parse_iso8601
+# Public base-URL resolvers live in core.urls; re-exported for call sites here.
+from core.urls import (
+    _short_link_base_url,
+    _public_api_base_url,
+    _frontend_base_url,
+    _api_public_base,
+    _frontend_public_base,
+)
 
 from run_service import (
     create_run,
@@ -6250,10 +6258,6 @@ def _public_noindex_headers() -> Dict[str, str]:
         "X-Robots-Tag": "noindex, nofollow",
         "Cache-Control": "no-store",
     }
-
-
-def _short_link_base_url() -> str:
-    return (os.environ.get("WORKEROS_SHORT_LINK_BASE_URL") or "https://floom.dev/s").rstrip("/")
 
 
 def _mint_worker_short_id() -> str:
@@ -15980,20 +15984,6 @@ async def composio_events_alias(request: Request) -> ActionResponse:
 # URL base helpers (used by Slack, MCP, approvals, and other routes)
 # ---------------------------------------------------------------------------
 
-def _public_api_base_url() -> str:
-    raw = (
-        os.environ.get("WORKEROS_PUBLIC_API_URL")
-        or os.environ.get("WORKEROS_API_URL")
-        or os.environ.get("WORKERS_API_URL")
-        or "https://workers-api.floom.dev"
-    )
-    return raw.rstrip("/")
-
-
-def _frontend_base_url() -> str:
-    return (os.environ.get("WORKERS_FRONTEND_URL") or "https://workers.floom.dev").rstrip("/")
-
-
 # ---------------------------------------------------------------------------
 # Slack Events API — extracted to channels/slack.py
 # ---------------------------------------------------------------------------
@@ -18809,14 +18799,6 @@ def _new_user_code() -> str:
     left = "".join(pysecrets.choice(_CLI_AUTH_USER_CODE_ALPHABET) for _ in range(4))
     right = "".join(pysecrets.choice(_CLI_AUTH_USER_CODE_ALPHABET) for _ in range(4))
     return f"{left}-{right}"
-
-
-def _api_public_base() -> str:
-    return (os.environ.get("WORKEROS_API_BASE") or "https://workers-api.floom.dev").rstrip("/")
-
-
-def _frontend_public_base() -> str:
-    return (os.environ.get("WORKERS_FRONTEND_URL") or "https://workers.floom.dev").rstrip("/")
 
 
 def _issue_cli_auth_pat(*, user_id: str, client_name: str, repos: Repositories, role: str) -> str:
