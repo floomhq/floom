@@ -203,12 +203,29 @@ def test_599_mcp_test_handles_connection_error():
 def test_599_mcp_test_distinguishes_auth_vs_url_errors():
     """401/403 should say 'check credentials', not 'check URL'."""
     test_idx = MAIN_SRC.find("def test_connection(")
-    endpoint_src = MAIN_SRC[test_idx: test_idx + 3000]
+    endpoint_src = MAIN_SRC[test_idx: test_idx + 6000]
     assert "401" in endpoint_src and "403" in endpoint_src, (
         "#599: 401/403 must be handled separately from other HTTP errors"
     )
     assert "authentication failed" in endpoint_src or "credentials" in endpoint_src.lower(), (
         "#599: 401/403 must explain it's an auth failure, not a URL problem"
+    )
+
+
+def test_857_mcp_test_speaks_streamable_http():
+    """#857: the probe must send the MCP streamable-HTTP Accept header
+    (compliant servers reject without it, HTTP 406), parse SSE-framed
+    JSON-RPC responses, and echo the server-assigned session id."""
+    test_idx = MAIN_SRC.find("def test_connection(")
+    endpoint_src = MAIN_SRC[test_idx: test_idx + 6000]
+    assert "application/json, text/event-stream" in endpoint_src, (
+        "#857: probe must send Accept: application/json, text/event-stream"
+    )
+    assert "_parse_mcp_response" in endpoint_src, (
+        "#857: probe must parse SSE-framed JSON-RPC responses"
+    )
+    assert "mcp-session-id" in endpoint_src, (
+        "#857: probe must echo the Mcp-Session-Id header on follow-up requests"
     )
 
 

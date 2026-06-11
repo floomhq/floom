@@ -57,7 +57,8 @@ workeros workspace switch <workspace-name-or-id>
 ```
 
 Workspace switching also works for OSS local workspaces. `workeros mcp list` /
-`workeros mcp switch <label>` switch the active MCP server the same way.
+`workeros mcp switch <label>` switch the active MCP server the same way, and
+`workeros mcp test [label]` live-probes a server (defaults to the active one).
 `workspaces` and `use` remain as aliases.
 
 Credentials live in `~/.config/workeros/credentials.json`.
