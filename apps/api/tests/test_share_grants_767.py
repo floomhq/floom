@@ -55,6 +55,8 @@ def client(monkeypatch, tmp_path):
     for name in ["db", "db._legacy_sqlite", "db.sqlite", "db.factory", "db.dependency",
                  "db.interface", "models", "worker_registry", "run_service", "scheduler", "main"]:
         sys.modules.pop(name, None)
+    for name in [n for n in list(sys.modules) if n.startswith("routers")]:
+        sys.modules.pop(name, None)
     sys.modules["scheduler"] = types.SimpleNamespace(start_scheduler=lambda: None, stop_scheduler=lambda: None)
     db = importlib.import_module("db")
     db.init_db()
