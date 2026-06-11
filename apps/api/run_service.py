@@ -2679,12 +2679,45 @@ def _maybe_pause_scheduled_worker_after_setup_failure(
     return True
 
 
+_FALSEY = {"0", "false", "no", "off"}
+
+
+def _workspace_setting(key: str, *, workspace_id: str = "local-default") -> Optional[str]:
+    """#794: read a workspace behaviour toggle from the workspace_settings KV
+    table (set via PUT /workspace/settings/{key}). Returns None when unset."""
+    try:
+        from db import get_db
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM workspace_settings WHERE workspace_id = ? AND key = ? LIMIT 1",
+                (workspace_id, key),
+            ).fetchone()
+        return str(row["value"]) if row and row["value"] is not None else None
+    except Exception:
+        return None
+
+
+def _workspace_toggle(key: str, *, env_var: str, default: bool) -> bool:
+    """#794: a DB workspace setting wins over the env var, which wins over the
+    hard default."""
+    setting = _workspace_setting(key)
+    if setting is not None:
+        return setting.strip().lower() not in _FALSEY
+    raw = os.environ.get(env_var)
+    if raw is not None:
+        return raw.strip().lower() not in _FALSEY
+    return default
+
+
 def _auto_pause_on_consecutive_failures_enabled() -> bool:
+    # #794: workspace setting 'auto_pause_enabled' overrides the env var.
     # Default ON (opt-out). Broken scheduled workers inflated failure rate to
-    # 1,683/1,866 runs over 7 days (#526). Opt out via
-    # WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES=0.
-    raw = os.environ.get("WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES", "1")
-    return raw.strip().lower() not in {"0", "false", "no", "off"}
+    # 1,683/1,866 runs over 7 days (#526).
+    return _workspace_toggle(
+        "auto_pause_enabled",
+        env_var="WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES",
+        default=True,
+    )
 
 
 def _alert_consecutive_failure_threshold() -> int:
@@ -3500,6 +3533,18 @@ def execute_run(
             preview = decision_required.get("preview") or ""
             decision_input_json = json.dumps(effective_inputs)
             now_ts = _now_iso()
+            # #798: pending approvals auto-expire after APPROVAL_TTL_HOURS (24h
+            # default) so a run never sits pending forever. #792: a worker may
+            # declare a typed preview (email/records/tasks) for a rich render.
+            try:
+                _ttl_hours = float(os.environ.get("APPROVAL_TTL_HOURS", "24") or "24")
+            except ValueError:
+                _ttl_hours = 24.0
+            from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+            expires_at = (_dt.now(_tz.utc) + _td(hours=_ttl_hours)).isoformat()
+            preview_type = decision_required.get("preview_type") or decision_required.get("type")
+            preview_payload = decision_required.get("preview_payload")
+            preview_payload_json = json.dumps(preview_payload) if isinstance(preview_payload, (dict, list)) else None
             try:
                 repos_obj.approvals.create(
                     owner_id=owner_id,
@@ -3510,6 +3555,9 @@ def execute_run(
                     label=label,
                     preview=preview,
                     created_at=now_ts,
+                    expires_at=expires_at,
+                    preview_type=(str(preview_type) if preview_type else None),
+                    preview_payload_json=preview_payload_json,
                     decision_input_json=decision_input_json,
                 )
             except Exception as exc:
