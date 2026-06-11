@@ -26,8 +26,13 @@ API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _api_source import api_source
+
 MAIN_PY = API_DIR / "main.py"
-MAIN_SRC = MAIN_PY.read_text(encoding="utf-8")
+# Backend-wide source corpus: invariants that used to live in main.py may now
+# live in core/ or routers/ after modularization; check the whole backend.
+MAIN_SRC = api_source()
 
 RUN_SERVICE_PY = API_DIR / "run_service.py"
 # Reload from disk so all edits are picked up at test-collection time

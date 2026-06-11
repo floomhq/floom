@@ -45,3 +45,7 @@ CODEX_BRIEF.md
 .DS_Store
 .vercel
 .gstack/
+
+# api modularization scratch artifacts
+BASELINE_api_tests.txt
+P*_full.txt

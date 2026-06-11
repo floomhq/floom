@@ -11,10 +11,15 @@ Run from repo root:
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
-MAIN_PY = Path(__file__).resolve().parents[1] / "main.py"
-MAIN_SRC = MAIN_PY.read_text(encoding="utf-8")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _api_source import api_source
+
+# Backend-wide source corpus: invariants that used to live in main.py may now
+# live in core/ or routers/ after modularization; check the whole backend.
+MAIN_SRC = api_source()
 MODELS_PY = Path(__file__).resolve().parents[1] / "models.py"
 MODELS_SRC = MODELS_PY.read_text(encoding="utf-8")
 
