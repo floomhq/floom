@@ -16,6 +16,10 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 import main as _main
+# _get_or_create_secrets_key + its module state moved to services.git_service;
+# patch/rebind the SERVICE module (the function reads ITS globals), while the
+# re-exported callable on main stays the same object.
+from services import git_service as _gitsvc
 
 
 # ---------------------------------------------------------------------------
@@ -23,8 +27,8 @@ import main as _main
 # ---------------------------------------------------------------------------
 
 def test_local_key_path_constant_correct():
-    assert str(_main._LOCAL_KEY_PATH).endswith(".config/workeros/secrets.key"), (
-        f"_LOCAL_KEY_PATH should end with .config/workeros/secrets.key, got {_main._LOCAL_KEY_PATH}"
+    assert str(_gitsvc._LOCAL_KEY_PATH).endswith(".config/workeros/secrets.key"), (
+        f"_LOCAL_KEY_PATH should end with .config/workeros/secrets.key, got {_gitsvc._LOCAL_KEY_PATH}"
     )
 
 
@@ -37,14 +41,14 @@ def test_get_or_create_uses_local_path_when_no_repo(tmp_path):
     expected_key = os.urandom(32)
     key_file.write_bytes(expected_key)
 
-    original_resolver = _main._secrets_key_resolver
+    original_resolver = _gitsvc._secrets_key_resolver
     try:
-        _main._secrets_key_resolver = None
-        with patch.object(_main, "_LOCAL_KEY_PATH", key_file):
+        _gitsvc._secrets_key_resolver = None
+        with patch.object(_gitsvc, "_LOCAL_KEY_PATH", key_file):
             result = _main._get_or_create_secrets_key(pat="", repo_full_name="")
         assert result == expected_key, "Should return the key bytes from the local file"
     finally:
-        _main._secrets_key_resolver = original_resolver
+        _gitsvc._secrets_key_resolver = original_resolver
 
 
 # ---------------------------------------------------------------------------
@@ -55,10 +59,10 @@ def test_get_or_create_generates_local_key_when_missing(tmp_path):
     key_file = tmp_path / "subdir" / "secrets.key"
     assert not key_file.exists()
 
-    original_resolver = _main._secrets_key_resolver
+    original_resolver = _gitsvc._secrets_key_resolver
     try:
-        _main._secrets_key_resolver = None
-        with patch.object(_main, "_LOCAL_KEY_PATH", key_file):
+        _gitsvc._secrets_key_resolver = None
+        with patch.object(_gitsvc, "_LOCAL_KEY_PATH", key_file):
             result = _main._get_or_create_secrets_key(pat="", repo_full_name="")
         assert key_file.exists(), "Key file must be created when absent"
         assert len(result) == 32, "Generated key must be 32 bytes"
@@ -66,7 +70,7 @@ def test_get_or_create_generates_local_key_when_missing(tmp_path):
         mode = oct(key_file.stat().st_mode & 0o777)
         assert mode == oct(0o600), f"Key file must be mode 600, got {mode}"
     finally:
-        _main._secrets_key_resolver = original_resolver
+        _gitsvc._secrets_key_resolver = original_resolver
 
 
 # ---------------------------------------------------------------------------
@@ -80,15 +84,15 @@ def test_local_key_path_not_reached_when_resolver_set(tmp_path):
     key_file = tmp_path / "secrets.key"
     key_file.write_bytes(os.urandom(32))  # different key on disk
 
-    original_resolver = _main._secrets_key_resolver
+    original_resolver = _gitsvc._secrets_key_resolver
     try:
-        _main._secrets_key_resolver = mock_resolver
-        with patch.object(_main, "_LOCAL_KEY_PATH", key_file):
+        _gitsvc._secrets_key_resolver = mock_resolver
+        with patch.object(_gitsvc, "_LOCAL_KEY_PATH", key_file):
             result = _main._get_or_create_secrets_key(pat="", repo_full_name="")
         assert result == cloud_key, "Cloud resolver must take precedence over local file"
         mock_resolver.assert_called_once()
     finally:
-        _main._secrets_key_resolver = original_resolver
+        _gitsvc._secrets_key_resolver = original_resolver
 
 
 # ---------------------------------------------------------------------------
@@ -100,11 +104,11 @@ def test_github_path_used_when_repo_present(tmp_path):
     mock_gh = MagicMock()
     mock_gh.get_secrets_key.return_value = github_key
 
-    original_resolver = _main._secrets_key_resolver
+    original_resolver = _gitsvc._secrets_key_resolver
     import sys
     original_gh_module = sys.modules.get("github_api")
     try:
-        _main._secrets_key_resolver = None
+        _gitsvc._secrets_key_resolver = None
         sys.modules["github_api"] = mock_gh
         result = _main._get_or_create_secrets_key(
             pat="ghp_fake", repo_full_name="org/repo"
@@ -112,7 +116,7 @@ def test_github_path_used_when_repo_present(tmp_path):
         assert result == github_key, "GitHub repo variable path must be used when repo_full_name is set"
         mock_gh.get_secrets_key.assert_called_once_with("ghp_fake", "org/repo")
     finally:
-        _main._secrets_key_resolver = original_resolver
+        _gitsvc._secrets_key_resolver = original_resolver
         if original_gh_module is not None:
             sys.modules["github_api"] = original_gh_module
         else:
