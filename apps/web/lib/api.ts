@@ -203,6 +203,20 @@ export const api = {
     }
     return res.json() as Promise<import("./types").CurrentUser>;
   },
+  // #767/#768: specific-people share grants.
+  share: {
+    listGrants: (assetType: string, assetId: string) =>
+      fetchJson<import("./types").ShareGrant[]>(
+        `/share/grants?asset_type=${encodeURIComponent(assetType)}&asset_id=${encodeURIComponent(assetId)}`
+      ),
+    addGrant: (assetType: string, assetId: string, email: string) =>
+      fetchJson<import("./types").ShareGrant>("/share/grants", {
+        method: "POST",
+        body: JSON.stringify({ asset_type: assetType, asset_id: assetId, email }),
+      }),
+    revokeGrant: (grantId: string) =>
+      fetchJson<null>(`/share/grants/${encodeURIComponent(grantId)}`, { method: "DELETE" }),
+  },
   // #773: per-user settings (theme, etc.) persisted server-side.
   settings: {
     get: () => fetchJson<Record<string, string>>("/me/settings"),

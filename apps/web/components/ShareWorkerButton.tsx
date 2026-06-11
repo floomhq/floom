@@ -43,6 +43,7 @@ export function ShareWorkerButton({
       onRevokeShareLink={async () => {
         await api.workers.revokeShareLink(workerId);
       }}
+      grantAsset={{ type: "worker", id: workerId }}
     />
   );
 

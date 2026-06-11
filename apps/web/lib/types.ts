@@ -459,6 +459,12 @@ export interface PublicShareRun {
   files: { name: string; type?: string | null }[];
 }
 
+export interface ShareGrant {
+  id: string;
+  email: string;
+  created_at: string;
+}
+
 export interface SqliteView {
   tables: string[];
   table?: string | null;
