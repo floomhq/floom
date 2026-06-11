@@ -697,6 +697,51 @@ def _post_slack_response_url(*, response_url: str, text: str, response_type: str
         raise RuntimeError(f"Slack response_url post failed with HTTP {response.status_code}")
 
 
+def _post_slack_ephemeral(
+    *,
+    channel: str,
+    user: str,
+    text: str,
+    blocks: Optional[List[Dict[str, Any]]] = None,
+    bot_token: Optional[str] = None,
+) -> None:
+    """Post an ephemeral message visible ONLY to ``user`` in ``channel``.
+
+    Used to deliver claim links privately so a bearer claim token is never
+    written into a public channel message body (Codex finding #2 — public
+    claim-token leak / identity takeover).  ``chat.postEphemeral`` requires the
+    ``chat:write`` scope and is delivered out-of-band to the target user only.
+    """
+    bot_token = (bot_token or os.environ.get("SLACK_BOT_TOKEN", "")).strip()
+    if not bot_token:
+        raise RuntimeError("SLACK_BOT_TOKEN is not configured")
+    json_body: Dict[str, Any] = {
+        "channel": channel,
+        "user": user,
+        "text": text or "(No reply)",
+        "unfurl_links": False,
+        "unfurl_media": False,
+    }
+    if blocks is not None:
+        json_body["blocks"] = blocks
+    response = requests.post(
+        "https://slack.com/api/chat.postEphemeral",
+        headers={
+            "Authorization": f"Bearer {bot_token}",
+            "Content-Type": "application/json; charset=utf-8",
+        },
+        json=json_body,
+        timeout=15,
+    )
+    try:
+        payload = response.json()
+    except Exception as exc:
+        raise RuntimeError(f"Slack ephemeral post failed with HTTP {response.status_code}") from exc
+    if not response.ok or not payload.get("ok"):
+        error = str(payload.get("error") or f"HTTP {response.status_code}")
+        raise RuntimeError(f"Slack ephemeral post failed: {error}")
+
+
 # ---------------------------------------------------------------------------
 # URL helpers that need _frontend_base_url
 # ---------------------------------------------------------------------------
@@ -1235,19 +1280,36 @@ async def _handle_slack_app_mention(
         except Exception:
             logger.exception("Slack app_mention pointer reply failed (bound user)")
     else:
+        # Codex finding #2: NEVER post a claim token into a public channel — any
+        # channel reader could claim the mentioner's identity first (takeover).
+        # The visible thread reply is generic with NO token; the claim link is
+        # delivered privately via an ephemeral message targeted at the mentioner.
         try:
-            claim = _slack_create_claim(team_id, slack_sender_id)
-            _post_slack_thread_reply_blocks(
+            _post_slack_thread_reply(
                 channel=channel,
                 thread_ts=thread_ts,
-                text="I work in DMs. Link your account and message me directly.",
+                text="I work in DMs. Message me directly to get set up.",
+                bot_token=bot_token,
+            )
+        except Exception:
+            logger.exception("Slack app_mention generic public reply failed (unbound user)")
+
+        if not slack_sender_id:
+            return
+        try:
+            claim = _slack_create_claim(team_id, slack_sender_id)
+            short_url = _slack_short_claim_url(claim["claim_token"])
+            _post_slack_ephemeral(
+                channel=channel,
+                user=slack_sender_id,
+                text="Link your account and message me directly.",
                 blocks=[
                     {
                         "type": "section",
                         "text": {
                             "type": "mrkdwn",
-                            "text": "I work in DMs. <{url}|Link your account> and message me directly.".format(
-                                url=_slack_short_claim_url(claim["claim_token"])
+                            "text": "<{url}|Link your account> and message me directly. (valid 24h)".format(
+                                url=short_url
                             ),
                         },
                     }
@@ -1255,16 +1317,20 @@ async def _handle_slack_app_mention(
                 bot_token=bot_token,
             )
         except Exception:
-            logger.exception("Slack app_mention pointer reply failed (unbound user)")
+            # Ephemeral delivery failed (e.g. missing scope) — fall back to a
+            # DM with the claim link.  Still NEVER posts the token publicly.
+            logger.exception("Slack app_mention ephemeral claim delivery failed; trying DM")
             try:
-                _post_slack_thread_reply(
-                    channel=channel,
-                    thread_ts=thread_ts,
-                    text="I work in DMs. Message me directly and I'm all yours.",
+                claim = _slack_create_claim(team_id, slack_sender_id)
+                short_url = _slack_short_claim_url(claim["claim_token"])
+                _post_slack_dm(
+                    slack_user_id=slack_sender_id,
+                    team_id=team_id,
+                    text=f"Link your account and message me directly: {short_url} (valid 24h)",
                     bot_token=bot_token,
                 )
             except Exception:
-                logger.exception("Slack app_mention fallback reply failed")
+                logger.exception("Slack app_mention claim DM fallback failed")
 
 
 async def _handle_slack_assistant_thread_started(*, event: Dict[str, Any], bot_token: Optional[str] = None) -> None:
@@ -1410,6 +1476,38 @@ async def _handle_slack_command_message(
             logger.exception("Slack command error reply failed")
 
 
+def _slack_unbound_command_response(team_id: str, slack_user_id: str) -> Response:
+    """Ephemeral claim-link response for an unbound slash-command sender.
+
+    Codex finding #1/#2: an unbound sender must NOT run as the bootstrap owner,
+    and the claim link must be delivered privately.  A Slack slash-command
+    ``response_type: ephemeral`` reply is visible ONLY to the invoking user, so
+    the token is never exposed to other channel members.
+    """
+    try:
+        claim = _slack_create_claim(team_id, slack_user_id)
+        short_url = _slack_short_claim_url(claim["claim_token"])
+        return JSONResponse({
+            "response_type": "ephemeral",
+            "text": f"Link your account first: <{short_url}|Link your account> (valid 24h)",
+            "blocks": [
+                {
+                    "type": "section",
+                    "text": {
+                        "type": "mrkdwn",
+                        "text": f"Link your account first: <{short_url}|Link your account> (valid 24h)",
+                    },
+                }
+            ],
+        })
+    except Exception:
+        logger.exception("Slack slash-command claim creation failed (best-effort)")
+        return JSONResponse({
+            "response_type": "ephemeral",
+            "text": "Link your account first. Send Emily a DM to get set up.",
+        })
+
+
 async def _slack_command_response_from_form(
     form: Dict[str, str],
     background_tasks: BackgroundTasks,
@@ -1423,8 +1521,20 @@ async def _slack_command_response_from_form(
     text = str(form.get("text") or "").strip()
     response_url = str(form.get("response_url") or "")
     channel_id = str(form.get("channel_id") or "")
-    user_id = _slack_workspace_user_id()
     command = text.lower()
+
+    # Codex finding #1: resolve the slash-command actor from the Slack user_id
+    # via the per-user binding (same path the DM handler uses after #803).  An
+    # unbound sender must NOT execute as the bootstrap owner — instead reply with
+    # a private claim link.  Legacy single-user mode still maps to the owner.
+    slack_user_id = str(form.get("user_id") or "").strip()
+    user_id = _slack_binding_user_id(team_id, slack_user_id) if slack_user_id else None
+    if not user_id:
+        if _slack_legacy_single_user_mode():
+            user_id = _slack_workspace_user_id()
+        else:
+            # Unbound: never run as owner. Reply with a private claim link.
+            return _slack_unbound_command_response(team_id, slack_user_id)
 
     if command in {"", "help"}:
         return JSONResponse({
@@ -1693,43 +1803,9 @@ async def slack_commands(request: Request, background_tasks: BackgroundTasks) ->
         raise HTTPException(status_code=401, detail="Invalid Slack signature")
 
     form = _parse_slack_form_body(body)
-    team_id = str(form.get("team_id") or "")
-    allowed_team_ids = _slack_allowed_team_ids()
-    if allowed_team_ids and team_id not in allowed_team_ids:
-        raise HTTPException(status_code=403, detail="Slack team is not allowed")
-
-    text = str(form.get("text") or "").strip()
-    response_url = str(form.get("response_url") or "")
-    channel_id = str(form.get("channel_id") or "")
-    user_id = _slack_workspace_user_id()
-    command = text.lower()
-
-    if command in {"", "help"}:
-        return JSONResponse({
-            "response_type": "ephemeral",
-            "text": "Try `/floom approvals` or `/floom <question for your workspace agent>`.",
-        })
-
-    if command in {"approvals", "approval", "pending approvals"}:
-        from db import get_repositories
-        repos = get_repositories()
-        rows = repos.approvals.list_pending(owner_id=user_id)
-        return JSONResponse(_slack_pending_approvals_response(rows))
-
-    if not response_url:
-        raise HTTPException(status_code=400, detail="Slack response_url is required")
-
-    background_tasks.add_task(
-        _handle_slack_command_message,
-        prompt=text,
-        response_url=response_url,
-        user_id=user_id,
-        channel_id=channel_id,
-    )
-    return JSONResponse({
-        "response_type": "ephemeral",
-        "text": "Working on it...",
-    })
+    # Single source of truth: actor resolution + ephemeral claim handling lives
+    # in _slack_command_response_from_form (Codex finding #1).
+    return await _slack_command_response_from_form(form, background_tasks)
 
 
 @slack_router.post("/slack/interactivity")
