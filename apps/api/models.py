@@ -1868,6 +1868,11 @@ class WorkerDetail(BaseModel):
     config: WorkerConfig
     recent_stats: Optional[RecentStats] = None
     recent_runs: List[RunSummary] = Field(default_factory=list)
+    # #815: output-first overview — the most recent completed run's output +
+    # its run id, so the detail page can show "latest result" without a second
+    # round-trip. None when the worker has never produced output.
+    latest_output: Optional[Dict[str, Any]] = None
+    latest_output_run_id: Optional[str] = None
     manifest_yaml: Optional[str] = None  # Raw worker.yml content for manifest viewer
     run_py: Optional[str] = None
     skill_md_content: Optional[str] = None  # Raw SKILL.md content
