@@ -1669,6 +1669,17 @@ class RunSummary(BaseModel):
     error_code: Optional[str] = None
 
 
+class WorkerDetailArtifactPreview(BaseModel):
+    name: str
+    size: Optional[int] = None
+
+
+class WorkerDetailLastRun(RunSummary):
+    finished_at: Optional[str] = None
+    output_preview: Optional[str] = None
+    artifacts: List[WorkerDetailArtifactPreview] = Field(default_factory=list)
+
+
 class LogEntry(BaseModel):
     level: LogLevel
     message: str
@@ -1866,6 +1877,7 @@ class WorkerDetail(BaseModel):
     trigger_type: str
     runner: str
     config: WorkerConfig
+    last_run: Optional[WorkerDetailLastRun] = None
     recent_stats: Optional[RecentStats] = None
     recent_runs: List[RunSummary] = Field(default_factory=list)
     # #815: output-first overview — the most recent completed run's output +

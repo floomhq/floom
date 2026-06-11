@@ -82,11 +82,25 @@ def test_latest_output_surfaced(client):
     repos.runs.create(
         user_id=OWNER, run_id="new", worker_id="outw",
         status=main.RunStatus.COMPLETED.value, trigger_source="manual",
-        runner="e2b", input_json={}, output_json={"answer": "NEW"},
+        runner="e2b", input_json={}, output_json={"result": "N" * 320},
+    )
+    repos.runs.add_artifact(
+        user_id=OWNER, run_id="new", artifact_id="art-visible",
+        name="result.csv", artifact_type="text/csv", path="/tmp/result.csv",
+        size_bytes=123, created_at=main.now_iso(),
+    )
+    repos.runs.add_artifact(
+        user_id=OWNER, run_id="new", artifact_id="art-sensitive",
+        name="transcript.jsonl", artifact_type="application/jsonl", path="/tmp/transcript.jsonl",
+        size_bytes=999, created_at=main.now_iso(),
     )
     body = c.get("/workers/outw").json()
-    assert body["latest_output"] == {"answer": "NEW"}
+    assert body["latest_output"] == {"result": "N" * 320}
     assert body["latest_output_run_id"] == "new"
+    assert body["last_run"]["id"] == "new"
+    assert body["last_run"]["status"] == "completed"
+    assert body["last_run"]["output_preview"] == "N" * 280
+    assert body["last_run"]["artifacts"] == [{"name": "result.csv", "size": 123}]
 
 
 def test_no_completed_run_null(client):
@@ -100,3 +114,6 @@ def test_no_completed_run_null(client):
     body = c.get("/workers/outw").json()
     assert body["latest_output"] is None
     assert body["latest_output_run_id"] is None
+    assert body["last_run"]["id"] == "failed"
+    assert body["last_run"]["output_preview"] is None
+    assert body["last_run"]["artifacts"] == []

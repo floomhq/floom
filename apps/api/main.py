@@ -122,6 +122,7 @@ from models import (
     WorkerVisibilityUpdate,
     WorkerSummary,
     WorkerDetail,
+    WorkerDetailLastRun,
     PublicWorker,
     PublicWorkerInput,
     PublicWorkerOutput,
@@ -219,7 +220,12 @@ from run_service import register_sse_publisher, register_part_publisher
 
 load_dotenv()
 try:
-    api_env_path = Path.home() / ".config" / "workeros" / "api.env"
+    api_env_override = os.environ.get("WORKEROS_API_ENV_FILE") or os.environ.get("FLOOM_API_ENV_FILE")
+    api_env_path = (
+        Path(api_env_override).expanduser()
+        if api_env_override
+        else Path.home() / ".config" / "workeros" / "api.env"
+    )
     if api_env_path.is_file():
         load_dotenv(api_env_path, override=False)
 except OSError:
@@ -2426,6 +2432,96 @@ def _make_run_summary(row: Any) -> RunSummary:
         duration_ms=d.get("duration_ms"),
         error=_operator_error_message(d.get("error"), d.get("error_code")),
         error_code=d.get("error_code"),
+    )
+
+
+def _run_output_preview_from_json(raw_output_json: Any, *, limit: int = 280) -> Optional[str]:
+    if raw_output_json is None:
+        return None
+    try:
+        parsed = json.loads(raw_output_json) if isinstance(raw_output_json, str) else raw_output_json
+    except Exception:
+        parsed = raw_output_json
+
+    value: Any = parsed
+    if isinstance(parsed, dict):
+        if not parsed:
+            return None
+        for key in ("result", "summary", "output", "text", "answer", "body"):
+            candidate = parsed.get(key)
+            if candidate not in (None, ""):
+                value = candidate
+                break
+    elif isinstance(parsed, list) and not parsed:
+        return None
+
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        text = value
+    elif isinstance(value, (int, float, bool)):
+        text = str(value)
+    else:
+        try:
+            text = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        except Exception:
+            text = str(value)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit] if text else None
+
+
+def _worker_detail_artifact_previews(
+    *,
+    user_id: str,
+    run_id: str,
+    repos: Repositories,
+) -> List[Dict[str, Any]]:
+    try:
+        rows = repos.runs.list_artifacts(user_id=user_id, run_id=run_id)
+    except Exception:
+        logger.debug("artifact preview fetch failed for run %s", run_id, exc_info=True)
+        return []
+    previews: List[Dict[str, Any]] = []
+    for row in rows:
+        if _is_sensitive_artifact_row(row):
+            continue
+        data = row_to_dict(row)
+        name = str(data.get("name") or Path(str(data.get("path") or "")).name or "artifact")
+        previews.append({"name": name, "size": data.get("size_bytes")})
+    return previews
+
+
+def _make_worker_detail_last_run(
+    summary: Optional[RunSummary],
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> Optional[WorkerDetailLastRun]:
+    if summary is None:
+        return None
+    output_preview: Optional[str] = None
+    try:
+        run_row = repos.runs.get(user_id=user_id, run_id=summary.id)
+        if run_row:
+            output_preview = _run_output_preview_from_json(run_row.get("output_json"))
+    except Exception:
+        logger.debug("last-run preview fetch failed for run %s", summary.id, exc_info=True)
+
+    return WorkerDetailLastRun(
+        id=summary.id,
+        worker_id=summary.worker_id,
+        worker_name=summary.worker_name,
+        status=summary.status,
+        trigger_source=summary.trigger_source,
+        created_at=summary.created_at,
+        started_at=summary.started_at,
+        completed_at=summary.completed_at,
+        finished_at=summary.completed_at,
+        duration_ms=summary.duration_ms,
+        error=summary.error,
+        error_code=summary.error_code,
+        output_preview=output_preview,
+        artifacts=_worker_detail_artifact_previews(user_id=user_id, run_id=summary.id, repos=repos),
     )
 
 
@@ -7533,7 +7629,7 @@ def _build_worker_detail(
     latest_output: Optional[Dict[str, Any]] = None
     latest_output_run_id: Optional[str] = None
     _latest_completed = next(
-        (r for r in recent_runs if str(getattr(r, "status", "")).lower().endswith("completed")),
+        (r for r in recent_runs if r.status == RunStatus.COMPLETED),
         None,
     )
     if _latest_completed is not None:
@@ -7632,6 +7728,12 @@ def _build_worker_detail(
     if config and config.runtime and config.runtime.bundle_path:
         config.runtime.bundle_path = Path(config.runtime.bundle_path).name
 
+    last_run_detail = _make_worker_detail_last_run(
+        recent_runs[0] if recent_runs else None,
+        user_id=user_id,
+        repos=repos,
+    )
+
     return WorkerDetail(
         id=worker["id"],
         name=worker["name"],
@@ -7651,6 +7753,7 @@ def _build_worker_detail(
         trigger_type=worker["trigger_type"],
         runner=worker["runner"],
         config=config,
+        last_run=last_run_detail,
         recent_runs=recent_runs,
         latest_output=latest_output,  # #815
         latest_output_run_id=latest_output_run_id,  # #815
@@ -9058,6 +9161,71 @@ class _WorkerContextUpdateRequest(BaseModel):
     writeable: bool
 
 
+def _patch_worker_contexts_in_yml(worker_yml_path: Path, new_contexts: List[Dict[str, Any]]) -> None:
+    import yaml as _pyyaml
+
+    original = worker_yml_path.read_text(encoding="utf-8")
+    lines = original.splitlines()
+    had_final_newline = original.endswith("\n")
+    block_lines = _pyyaml.safe_dump(
+        {"contexts": new_contexts},
+        sort_keys=False,
+        default_flow_style=False,
+    ).rstrip("\n").splitlines()
+
+    def _is_top_level_key(line: str) -> bool:
+        return bool(re.match(r"^[A-Za-z_][\w_-]*\s*:", line))
+
+    def _remove_exec_contexts(raw_lines: List[str]) -> List[str]:
+        exec_start = next((i for i, ln in enumerate(raw_lines) if re.match(r"^exec\s*:", ln)), None)
+        if exec_start is None:
+            return raw_lines
+        exec_end = len(raw_lines)
+        for i in range(exec_start + 1, len(raw_lines)):
+            if _is_top_level_key(raw_lines[i]):
+                exec_end = i
+                break
+        ctx_start = None
+        ctx_indent = 0
+        for i in range(exec_start + 1, exec_end):
+            match = re.match(r"^(\s+)contexts\s*:", raw_lines[i])
+            if match:
+                ctx_start = i
+                ctx_indent = len(match.group(1))
+                break
+        if ctx_start is None:
+            return raw_lines
+        ctx_end = exec_end
+        for i in range(ctx_start + 1, exec_end):
+            stripped = raw_lines[i].strip()
+            if not stripped:
+                continue
+            indent = len(raw_lines[i]) - len(raw_lines[i].lstrip(" "))
+            if indent <= ctx_indent:
+                ctx_end = i
+                break
+        return raw_lines[:ctx_start] + raw_lines[ctx_end:]
+
+    lines = _remove_exec_contexts(lines)
+    start = next((i for i, ln in enumerate(lines) if re.match(r"^contexts\s*:", ln)), None)
+    if start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend(block_lines)
+    else:
+        end = len(lines)
+        for i in range(start + 1, len(lines)):
+            if _is_top_level_key(lines[i]):
+                end = i
+                break
+        lines = lines[:start] + block_lines + lines[end:]
+
+    updated = "\n".join(lines)
+    if had_final_newline:
+        updated += "\n"
+    worker_yml_path.write_text(updated, encoding="utf-8")
+
+
 def _mutate_worker_contexts(
     worker_id: str,
     mutate,
@@ -9093,15 +9261,9 @@ def _mutate_worker_contexts(
     # Best-effort worker.yml write-back so the change survives a registry reload.
     try:
         from worker_registry import WORKERS_DIR
-        import yaml as _pyyaml
         wpath = WORKERS_DIR / worker_id / "worker.yml"
         if wpath.exists():
-            doc = _pyyaml.safe_load(wpath.read_text(encoding="utf-8")) or {}
-            if isinstance(doc, dict):
-                doc["contexts"] = new_contexts
-                if isinstance(doc.get("exec"), dict):
-                    doc["exec"].pop("contexts", None)
-                wpath.write_text(_pyyaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+            _patch_worker_contexts_in_yml(wpath, new_contexts)
     except Exception:
         logger.warning("PATCH %s: could not write contexts to worker.yml", worker_id, exc_info=True)
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
@@ -12920,6 +13082,9 @@ def _approval_response(
             parsed_preview_payload = None
     response["preview_payload"] = parsed_preview_payload
     # expires_at (#798) + preview_type (#792) pass through from the row as-is.
+    # `type` mirrors preview_type for the v4 frontend's preview dispatcher.
+    if response.get("preview_type") is not None:
+        response["type"] = response.get("preview_type")
     # Standalone share/review link for the authenticated owner. The token is the
     # same deterministic HMAC the /approvals/public/* routes verify, so the owner
     # can copy this URL to open the approval full-page (no app chrome) or share it
@@ -22158,7 +22323,13 @@ def auth_setup(
         raise HTTPException(status_code=422, detail="username required")
     password = payload.password
     _validate_new_password(password, username=username)
-    user_id = str(_uuid_mod.uuid4())
+    if (
+        (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() == "local"
+        and username == _bootstrap_user_id()
+    ):
+        user_id = username
+    else:
+        user_id = str(_uuid_mod.uuid4())
     pw_hash = _bcrypt_hash(password)
     row = user_repo.create(
         user_id=user_id,
