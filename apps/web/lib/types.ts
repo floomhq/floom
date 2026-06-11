@@ -448,6 +448,12 @@ export interface PublicSharePack {
   updated_at?: string | null;
 }
 
+export interface ShareGrant {
+  id: string;
+  email: string;
+  created_at: string;
+}
+
 export interface SqliteView {
   tables: string[];
   table?: string | null;
