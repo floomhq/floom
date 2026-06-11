@@ -6489,6 +6489,66 @@ def delete_context_file(
     return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
 
 
+class _SqliteView(BaseModel):
+    tables: List[str] = Field(default_factory=list)
+    table: Optional[str] = None
+    columns: Optional[List[str]] = None
+    rows: Optional[List[List[Any]]] = None
+    row_count: Optional[int] = None
+    truncated: Optional[bool] = None
+
+
+@app.get("/contexts/{name}/sqlite/{file_path:path}", response_model=_SqliteView)
+def view_context_sqlite(
+    name: str,
+    file_path: str,
+    table: Optional[str] = None,
+    limit: int = 100,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> _SqliteView:
+    """#777: inspect a brain .db file — list tables, or read a table's rows.
+    Opens the file READ-ONLY; table name is validated against the real table
+    list before use (no injection); rows are capped and BLOBs are summarised."""
+    safe_name, _meta = _require_context_for_user(name, user_id=auth.user_id)
+    rel = _context_file_path_or_400(file_path)
+    target = _safe_context_file_or_400(safe_name, rel)
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Context file not found")
+    if not rel.lower().endswith((".db", ".sqlite", ".sqlite3")):
+        raise HTTPException(status_code=400, detail="Not a SQLite database file")
+    capped = max(1, min(int(limit or 100), 500))
+
+    def _cell(v: Any) -> Any:
+        return f"<{len(v)} bytes>" if isinstance(v, (bytes, bytearray)) else v
+
+    try:
+        conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not open database: {exc}") from exc
+    try:
+        names = [
+            str(r[0]) for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ).fetchall()
+        ]
+        if not table:
+            return _SqliteView(tables=names)
+        if table not in names:
+            raise HTTPException(status_code=404, detail="Table not found")
+        cur = conn.execute(f'SELECT * FROM "{table}" LIMIT ?', (capped + 1,))
+        columns = [str(d[0]) for d in cur.description] if cur.description else []
+        fetched = cur.fetchall()
+        truncated = len(fetched) > capped
+        rows = [[_cell(c) for c in row] for row in fetched[:capped]]
+        return _SqliteView(
+            tables=names, table=table, columns=columns,
+            rows=rows, row_count=len(rows), truncated=truncated,
+        )
+    finally:
+        conn.close()
+
+
 @app.post("/contexts/{name}/files/{file_path:path}/move", response_model=ContextFileItem)
 def move_context_file(
     name: str,

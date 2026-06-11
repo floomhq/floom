@@ -58,6 +58,8 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
       rootLabel={folder.name}
       emptyLabel="This folder is empty."
       loadText={(f) => api.contexts.readTextFile(folder.name, f.id)}
+      // #777: inline SQLite viewer for .db files.
+      loadSqlite={(f, table) => api.contexts.sqlite(folder.name, f.id, table)}
     />
   );
 }
