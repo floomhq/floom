@@ -243,18 +243,20 @@ export function WorkspaceSwitcher() {
   return (
     <div className="px-3 pb-2">
       <DropdownMenu>
+        {/* V4 SPEC §2: workspace identity — mark + name + chevron-on-hover */}
         <DropdownMenuTrigger
           className={cn(
-            "flex h-10 w-full items-center gap-2 rounded-md border border-line bg-transparent px-2.5 text-sm font-medium text-ink transition-colors duration-150",
-            "hover:bg-[color-mix(in_srgb,var(--paper)_62%,transparent)]"
+            "group flex h-10 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm font-semibold text-ink transition-colors duration-150",
+            "hover:bg-[var(--active-nav-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
           )}
           aria-label="Switch workspace"
         >
+          {/* Workspace mark: company logo if available, else colored initial */}
           <div className="size-6 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_22%,transparent)] text-[var(--accent)] grid place-items-center text-[10px] font-semibold uppercase tracking-wide">
             {shortInitial(active.name)}
           </div>
           <span className="flex-1 truncate text-left">{active.name}</span>
-          <ChevronsUpDown className="size-4 opacity-60" />
+          <ChevronsUpDown className="size-4 opacity-0 group-hover:opacity-60 transition-opacity duration-100" />
         </DropdownMenuTrigger>
         {/* V9 (Federico 2026-06-02): "this can also be cleaner." The popover is
             split into two clear sections — the workspace LIST (active row
