@@ -16885,6 +16885,30 @@ def test_connection(
                 headers = {}
                 if mcp_token:
                     headers["Authorization"] = f"Bearer {mcp_token}"
+                # Streamable-HTTP MCP servers (spec 2025-03-26) reject probes
+                # without this Accept header (HTTP 406) and may frame their
+                # JSON-RPC responses as SSE.
+                headers["accept"] = "application/json, text/event-stream"
+
+                def _parse_mcp_response(resp) -> dict:
+                    ctype = (resp.headers.get("content-type") or "").lower()
+                    if "text/event-stream" in ctype:
+                        for line in resp.text.splitlines():
+                            line = line.strip()
+                            if line.startswith("data:"):
+                                try:
+                                    parsed = json.loads(line[5:].strip())
+                                except Exception:
+                                    continue
+                                if isinstance(parsed, dict):
+                                    return parsed
+                        return {}
+                    try:
+                        body = resp.json()
+                    except Exception:
+                        return {}
+                    return body if isinstance(body, dict) else {}
+
                 probe_url = mcp_url.rstrip("/")
                 init_payload = {
                     "jsonrpc": "2.0",
@@ -16919,16 +16943,21 @@ def test_connection(
                     )
                     return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
 
+                # Streamable-HTTP sessions: echo the server-assigned session id
+                # on follow-up requests, or compliant servers reject tools/list.
+                init_session_id = init_resp.headers.get("mcp-session-id")
+                if init_session_id:
+                    headers["mcp-session-id"] = init_session_id
+
                 tools_resp = _httpx.post(probe_url, json=tools_payload, headers=headers, timeout=8.0)
                 tools = None
                 if tools_resp.status_code in (200, 201):
-                    body = tools_resp.json()
-                    if isinstance(body, dict):
-                        tools = body.get("tools")
-                        if tools is None and isinstance(body.get("result"), dict):
-                            tools = body["result"].get("tools")
-                        if tools is None and isinstance(body.get("result"), dict):
-                            tools = body["result"].get("capabilities", {}).get("tools")
+                    body = _parse_mcp_response(tools_resp)
+                    tools = body.get("tools")
+                    if tools is None and isinstance(body.get("result"), dict):
+                        tools = body["result"].get("tools")
+                    if tools is None and isinstance(body.get("result"), dict):
+                        tools = body["result"].get("capabilities", {}).get("tools")
                 elif tools_resp.status_code in (401, 403):
                     reason = (
                         f"MCP server reachable but authentication failed (HTTP {tools_resp.status_code}). "

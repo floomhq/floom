@@ -299,6 +299,7 @@ export async function mcpUninstallCommand(options: { target?: ClientTarget }): P
 }
 
 type McpConnectionRow = {
+  id?: string;
   kind?: string;
   mcp_label?: string;
   app_name?: string;
@@ -376,7 +377,62 @@ export async function mcpSwitchCommand(target: string): Promise<number> {
     const label = mcpRowLabel(match);
     await updateCredentials({ active_mcp_label: label });
     log.ok(`Active MCP server set to ${label}.`);
+    log.step(`Verify it responds: floom mcp test`);
     return 0;
+  } catch (error) {
+    const handled = handleAuthError(error);
+    if (handled !== null) return handled;
+    throw error;
+  }
+}
+
+type McpTestResult = {
+  status?: string;
+  reason?: string;
+  tested_at?: string;
+  tools?: string[] | null;
+};
+
+// Tests the named MCP server, or the active one (`floom mcp switch`) when no
+// name is given. The API probes the server live: MCP initialize + tools/list.
+export async function mcpTestCommand(
+  target: string | undefined,
+  options: { json?: boolean },
+): Promise<number> {
+  try {
+    const { client, credentials } = await createAuthenticatedClient();
+    const name = (target || credentials.active_mcp_label || "").trim();
+    if (!name) {
+      log.err("No MCP server specified and no active one is set.");
+      process.stderr.write("Run `floom mcp switch <name>` first, or pass a name: floom mcp test <name>\n");
+      return 1;
+    }
+    const servers = await fetchMcpConnections(client);
+    const needle = name.toLowerCase();
+    const match = servers.find((row) => mcpRowLabel(row).toLowerCase() === needle);
+    if (!match || !match.id) {
+      log.err(`No configured MCP server matches "${name}".`);
+      process.stderr.write("Run `floom mcp list` to see configured servers.\n");
+      return 1;
+    }
+    const result = (await client.requestJson(
+      "POST",
+      `/connections/${encodeURIComponent(match.id)}/test`,
+    )) as McpTestResult;
+    const valid = result.status === "valid";
+    if (options.json) {
+      printJson({ label: mcpRowLabel(match), ...result });
+      return valid ? 0 : 1;
+    }
+    if (valid) {
+      log.ok(`${mcpRowLabel(match)} is reachable.`);
+    } else {
+      log.err(`${mcpRowLabel(match)} failed: ${result.reason || result.status || "unknown error"}`);
+    }
+    if (result.tools && result.tools.length) {
+      log.kv("Tools", `${result.tools.length} (${result.tools.slice(0, 8).join(", ")}${result.tools.length > 8 ? ", …" : ""})`);
+    }
+    return valid ? 0 : 1;
   } catch (error) {
     const handled = handleAuthError(error);
     if (handled !== null) return handled;
