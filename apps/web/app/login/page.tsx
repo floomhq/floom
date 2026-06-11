@@ -76,6 +76,9 @@ function LoginContent() {
   const [secret, setSecret] = useState("");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState("");
+  // Manual escape hatch: lets the user switch to secret mode regardless of the
+  // auto-detected mode (needed on deployments that have no username accounts).
+  const [forceSecret, setForceSecret] = useState(false);
 
   const installChannel = searchParams.get("install");
   const INSTALL_ROUTES: Record<string, string> = {
@@ -87,6 +90,8 @@ function LoginContent() {
   const rawNext = searchParams.get("next") ||
     (installChannel ? (INSTALL_ROUTES[installChannel] ?? "/overview") : "/overview");
   const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/overview";
+
+  const effectiveMode: LoginMode = forceSecret && (mode === "username" || mode === "setup") ? "secret" : mode;
 
   useEffect(() => {
     void (async () => {
@@ -111,7 +116,7 @@ function LoginContent() {
     setError("");
 
     try {
-      if (mode === "setup") {
+      if (effectiveMode === "setup") {
         const res = await fetch("/api/auth/setup", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -122,7 +127,7 @@ function LoginContent() {
           setError(body.detail || "Setup failed.");
           return;
         }
-      } else if (mode === "username") {
+      } else if (effectiveMode === "username") {
         const res = await fetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -156,11 +161,11 @@ function LoginContent() {
   }
 
   const heading =
-    mode === "setup" ? "Create your workspace" : "Sign in";
+    effectiveMode === "setup" ? "Create your workspace" : "Sign in";
   const sub =
-    mode === "setup"
+    effectiveMode === "setup"
       ? "Set up the first admin account for this WorkerOS instance."
-      : mode === "username"
+      : effectiveMode === "username"
       ? "Enter your username and password to continue."
       : "Enter your access secret to continue.";
 
@@ -185,7 +190,7 @@ function LoginContent() {
               <p className="mt-1 text-sm text-muted-foreground">{sub}</p>
 
               <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-                {mode === "secret" ? (
+                {effectiveMode === "secret" ? (
                   <div className="space-y-2">
                     <Label htmlFor="access-secret" className="text-xs font-medium text-muted-foreground">
                       Access secret
@@ -202,7 +207,7 @@ function LoginContent() {
                   </div>
                 ) : (
                   <>
-                    {mode === "setup" && (
+                    {effectiveMode === "setup" && (
                       <div className="space-y-2">
                         <Label htmlFor="display-name" className="text-xs font-medium text-muted-foreground">
                           Display name <span className="text-muted-foreground/60">(optional)</span>
@@ -226,7 +231,7 @@ function LoginContent() {
                         id="username"
                         type="text"
                         autoComplete="username"
-                        autoFocus={mode === "username"}
+                        autoFocus={effectiveMode === "username"}
                         placeholder="alice"
                         value={username}
                         onChange={(e) => setUsername(e.target.value)}
@@ -239,7 +244,7 @@ function LoginContent() {
                       <Input
                         id="password"
                         type="password"
-                        autoComplete={mode === "setup" ? "new-password" : "current-password"}
+                        autoComplete={effectiveMode === "setup" ? "new-password" : "current-password"}
                         placeholder="••••••••••••"
                         value={password}
                         onChange={(e) => setPassword(e.target.value)}
@@ -252,12 +257,25 @@ function LoginContent() {
 
                 <Button
                   type="submit"
-                  disabled={busy || (mode === "secret" ? !secret : (!username.trim() || !password))}
+                  disabled={busy || (effectiveMode === "secret" ? !secret : (!username.trim() || !password))}
                   className="w-full"
                 >
-                  {busy ? (mode === "setup" ? "Creating…" : "Signing in…") : (mode === "setup" ? "Create workspace" : "Sign in")}
+                  {busy ? (effectiveMode === "setup" ? "Creating…" : "Signing in…") : (effectiveMode === "setup" ? "Create workspace" : "Sign in")}
                 </Button>
               </form>
+
+              {/* Escape hatch: manual toggle for deployments that use secret-only auth. */}
+              {(mode === "username" || mode === "setup") && (
+                <p className="mt-4 text-center text-xs text-muted-foreground/60">
+                  <button
+                    type="button"
+                    className="underline-offset-2 hover:text-muted-foreground hover:underline"
+                    onClick={() => { setForceSecret((v) => !v); setError(""); }}
+                  >
+                    {forceSecret ? "Back to username sign-in" : "Sign in with admin secret"}
+                  </button>
+                </p>
+              )}
             </>
           )}
         </div>
