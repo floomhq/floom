@@ -5,6 +5,7 @@ import { Paperclip, SendHorizonal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { PromptChips } from "@/components/PromptChips";
 import { FileChip } from "./FileChip";
+import { api } from "@/lib/api";
 import type { AttachedFile } from "@/lib/emily-chat-types";
 
 const ACCEPTED_TYPES = [
@@ -62,18 +63,25 @@ export function PromptInput({
     }
   }, [value]);
 
-  const handleFileChange = (e: React.ChangeEvent<HTMLInputElement>) => {
-    const newFiles = Array.from(e.target.files ?? []);
-    const valid: AttachedFile[] = newFiles
-      .filter((f) => f.size <= MAX_FILE_SIZE)
-      .map((f) => ({
-        id: `${f.name}-${f.size}-${Date.now()}`,
-        name: f.name,
-        size: f.size,
-        type: f.type,
-      }));
-    onFilesChange([...attachedFiles, ...valid]);
+  const handleFileChange = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const picked = Array.from(e.target.files ?? []).filter((f) => f.size <= MAX_FILE_SIZE);
     if (fileInputRef.current) fileInputRef.current.value = "";
+    if (picked.length === 0) return;
+    const base: AttachedFile[] = picked.map((f) => ({
+      id: `${f.name}-${f.size}-${Date.now()}-${Math.round(Math.random() * 1e6)}`,
+      name: f.name,
+      size: f.size,
+      type: f.type,
+    }));
+    // #778: upload to extract text content, then enrich (best-effort).
+    let enriched = base;
+    try {
+      const results = await api.chat.uploadAttachments(picked);
+      enriched = base.map((a, i) => ({ ...a, text: results[i]?.text ?? undefined }));
+    } catch {
+      /* keep metadata-only — the file chip still shows, just no content */
+    }
+    onFilesChange([...attachedFiles, ...enriched]);
   };
 
   const removeFile = (id: string) => {

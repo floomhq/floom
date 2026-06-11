@@ -224,6 +224,8 @@ export interface AttachedFile {
   name: string;
   size: number;
   type: string;
+  /** #778: extracted text content (text-like files), rides along in the message. */
+  text?: string;
 }
 
 export type MsgPart =

@@ -203,6 +203,20 @@ export const api = {
     }
     return res.json() as Promise<import("./types").CurrentUser>;
   },
+  // #778: Emily chat attachments — upload to extract text for the next message.
+  chat: {
+    uploadAttachments: async (files: File[]): Promise<import("./types").ChatAttachment[]> => {
+      const fd = new FormData();
+      for (const f of files) fd.append("files", f);
+      const res = await fetch(`${API_BASE}${withWorkspaceQuery("/chat/attachments")}`, {
+        method: "POST",
+        headers: withWorkspaceHeaders(), // no Content-Type — browser sets the multipart boundary
+        body: fd,
+      });
+      if (!res.ok) throw new Error(await apiErrorFromResponse(res));
+      return res.json();
+    },
+  },
   // #767/#768: specific-people share grants.
   share: {
     listGrants: (assetType: string, assetId: string) =>
