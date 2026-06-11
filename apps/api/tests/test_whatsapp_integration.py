@@ -773,6 +773,45 @@ def test_shortlink_returns_404_for_expired_token(monkeypatch, tmp_path):
     assert resp.status_code == 404
 
 
+def test_whatsapp_short_claim_url_built_on_host_that_serves_c(monkeypatch, tmp_path):
+    """The short /c/ link MUST be built on the API host that actually serves /c/.
+
+    Regression guard: the /c/{token} redirect route lives on the FastAPI app
+    (workers-api.floom.dev), NOT on the Next.js web app (workers.floom.dev).
+    Building it on WORKERS_FRONTEND_URL produced a dead link that 404'd /
+    bounced to /login. It must use the public API base.
+    """
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as wa
+
+    # Frontend (web) base and API (public) base are deliberately different hosts.
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    monkeypatch.setenv("WORKEROS_PUBLIC_API_URL", "https://workers-api.floom.dev")
+
+    short_url = wa._whatsapp_short_claim_url("tok123")
+    # Built on the API host (serves /c/), NOT the web host (does not).
+    assert short_url == "https://workers-api.floom.dev/c/tok123"
+    assert "/c/" in short_url
+    # The long claim URL still targets the frontend /settings page (unchanged).
+    assert wa._whatsapp_claim_url("tok123") == (
+        "https://workers.floom.dev/settings?whatsapp_claim=tok123"
+    )
+
+
+def test_whatsapp_short_claim_url_defaults_to_api_host(monkeypatch, tmp_path):
+    """With no overrides, the short link defaults to the API host, not the web host."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as wa
+
+    for var in ("WORKEROS_PUBLIC_API_URL", "WORKEROS_API_URL", "WORKERS_API_URL"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+
+    short_url = wa._whatsapp_short_claim_url("deftok")
+    assert short_url == "https://workers-api.floom.dev/c/deftok"
+    assert "workers.floom.dev/c/" not in short_url.replace("workers-api.floom.dev", "")
+
+
 # --------------------------------------------------------------------------- #
 # Env note
 # --------------------------------------------------------------------------- #
