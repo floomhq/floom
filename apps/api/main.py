@@ -21642,6 +21642,52 @@ def delete_token(
         raise HTTPException(status_code=404, detail="token not found")
 
 
+class _WorkspaceSettingValue(BaseModel):
+    value: str = Field(..., max_length=4000)
+
+
+def _active_workspace_id(request: Request) -> str:
+    return requested_local_workspace_id(request) or DEFAULT_WORKSPACE_ID
+
+
+@app.get("/workspace/settings")
+def get_workspace_settings(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, str]:
+    """#794/#797: workspace behaviour toggles + model defaults (key→value map)."""
+    ws = _active_workspace_id(request)
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT key, value FROM workspace_settings WHERE workspace_id = ?", (ws,)
+        ).fetchall()
+    return {str(r["key"]): str(r["value"]) for r in rows}
+
+
+@app.put("/workspace/settings/{key}", status_code=204)
+def put_workspace_setting(
+    key: str,
+    body: _WorkspaceSettingValue,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> None:
+    """#794/#797: upsert a workspace setting. Admin-guarded (the #804 model:
+    members must not change workspace behaviour, enforced server-side)."""
+    _require_workspace_write(auth)
+    if not key or len(key) > 64:
+        raise HTTPException(status_code=422, detail="invalid setting key")
+    ws = _active_workspace_id(request)
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO workspace_settings (workspace_id, key, value, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(workspace_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (ws, key, body.value, now_iso()),
+        )
+
+
 @app.post("/auth/tokens/{token_id}/rotate", response_model=_PATCreateResponse)
 def rotate_token(
     token_id: str = PathParam(...),
