@@ -34,6 +34,7 @@ from pydantic import BaseModel
 
 from auth import AuthContext, get_auth_context
 from channels.common import _MAX_WEBHOOK_BODY_BYTES, collect_agent_reply
+from channels.mrkdwn import markdown_to_mrkdwn
 
 logger = logging.getLogger(__name__)
 
@@ -1435,7 +1436,14 @@ async def _handle_slack_direct_message(
             conversation_id=conversation_id,
             system_suffix=_slack_system_suffix,
         )
-        _post_slack_thread_reply(channel=channel, thread_ts=thread_ts, text=reply, bot_token=bot_token)
+        # Emily authors replies in standard Markdown; Slack renders mrkdwn only.
+        # Convert on egress so users do not see literal ** / # (issue #876).
+        _post_slack_thread_reply(
+            channel=channel,
+            thread_ts=thread_ts,
+            text=markdown_to_mrkdwn(reply),
+            bot_token=bot_token,
+        )
     except Exception:
         logger.exception("Slack direct message processing failed")
         if os.environ.get("SLACK_POST_ERRORS_TO_THREAD", "1").strip().lower() not in {"0", "false", "no", "off"}:
@@ -1464,7 +1472,11 @@ async def _handle_slack_command_message(
             user_id=user_id,
             conversation_id=conversation_id,
         )
-        _post_slack_response_url(response_url=response_url, text=reply or "(No reply)")
+        # Convert Markdown -> Slack mrkdwn on egress (issue #876).
+        _post_slack_response_url(
+            response_url=response_url,
+            text=markdown_to_mrkdwn(reply) or "(No reply)",
+        )
     except Exception:
         logger.exception("Slack command processing failed")
         try:
