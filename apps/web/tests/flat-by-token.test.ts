@@ -66,4 +66,35 @@ describe("collection surfaces are flat by token (rule #2)", () => {
     expect(rule(".c-lrow")).toContain("border-bottom:var(--bd-div)");
     expect(rule(".c-lhead")).toContain("border-bottom:var(--bd-div)");
   });
+
+  // Phase 1 additions: close the blind spots flagged in the migration plan.
+  // These four classes had hardcoded `border: 1px solid var(--line)` pre-v4.
+
+  it(".c-srch uses --bd-input token and bg-2 fill (no hardcoded border)", () => {
+    const r = rule(".c-srch");
+    expect(r).toContain("border:var(--bd-input)");
+    expect(/border:\s*1px solid/.test(r)).toBe(false);
+    expect(r).toContain("background:var(--bg-2)");
+  });
+
+  it(".c-vtog uses --bd-input token and bg-2 fill (no hardcoded border)", () => {
+    const r = rule(".c-vtog");
+    expect(r).toContain("border:var(--bd-input)");
+    expect(/border:\s*1px solid/.test(r)).toBe(false);
+    expect(r).toContain("background:var(--bg-2)");
+  });
+
+  it(".c-tag uses --bd-pill token and bg-2 fill (no hardcoded border)", () => {
+    const r = rule(".c-tag");
+    expect(r).toContain("border:var(--bd-pill)");
+    expect(/border:\s*1px solid/.test(r)).toBe(false);
+    expect(r).toContain("background:var(--bg-2)");
+  });
+
+  it(".c-vpill uses --bd-pill token and bg-2 fill (no hardcoded border)", () => {
+    const r = rule(".c-vpill");
+    expect(r).toContain("border:var(--bd-pill)");
+    expect(/border:\s*1px solid/.test(r)).toBe(false);
+    expect(r).toContain("background:var(--bg-2)");
+  });
 });

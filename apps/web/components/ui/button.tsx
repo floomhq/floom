@@ -9,7 +9,10 @@ const buttonVariants = cva(
     variants: {
       variant: {
         default:
-          "border-[color-mix(in_srgb,var(--accent)_82%,var(--solid)_18%)] bg-[var(--accent)] text-[var(--solid-fg)] shadow-btn hover:bg-[color-mix(in_srgb,var(--accent)_90%,var(--solid)_10%)] hover:shadow-md active:not-aria-[haspopup]:shadow-sm [a]:hover:bg-[color-mix(in_srgb,var(--accent)_90%,var(--solid)_10%)]",
+          // Phase 1 (Codex trap): primary button reads --primary (near-black), NOT --accent.
+          // --accent is now #3E6FE0 (blue); using it here would turn all primary buttons blue.
+          // Rule: primary = --primary fill + --solid-fg text, always.
+          "border-[color-mix(in_srgb,var(--primary)_82%,black_18%)] bg-[var(--primary)] text-[var(--solid-fg)] shadow-btn hover:bg-[color-mix(in_srgb,var(--primary)_90%,black_10%)] hover:shadow-md active:not-aria-[haspopup]:shadow-sm [a]:hover:bg-[color-mix(in_srgb,var(--primary)_90%,black_10%)]",
         outline:
           "border-[var(--accent-line)] bg-[var(--glass-bg)] text-ink shadow-sm backdrop-blur-[10px] backdrop-saturate-[180%] hover:bg-[var(--bg-2)] hover:text-ink aria-expanded:bg-[var(--bg-2)] aria-expanded:text-ink",
         secondary:
