@@ -220,7 +220,12 @@ from run_service import register_sse_publisher, register_part_publisher
 
 load_dotenv()
 try:
-    api_env_path = Path.home() / ".config" / "workeros" / "api.env"
+    api_env_override = os.environ.get("WORKEROS_API_ENV_FILE") or os.environ.get("FLOOM_API_ENV_FILE")
+    api_env_path = (
+        Path(api_env_override).expanduser()
+        if api_env_override
+        else Path.home() / ".config" / "workeros" / "api.env"
+    )
     if api_env_path.is_file():
         load_dotenv(api_env_path, override=False)
 except OSError:
@@ -22318,7 +22323,13 @@ def auth_setup(
         raise HTTPException(status_code=422, detail="username required")
     password = payload.password
     _validate_new_password(password, username=username)
-    user_id = str(_uuid_mod.uuid4())
+    if (
+        (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() == "local"
+        and username == _bootstrap_user_id()
+    ):
+        user_id = username
+    else:
+        user_id = str(_uuid_mod.uuid4())
     pw_hash = _bcrypt_hash(password)
     row = user_repo.create(
         user_id=user_id,
