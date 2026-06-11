@@ -12257,6 +12257,7 @@ def approve_public_approval(
             auth,
             repos,
             annotations=body.annotations,
+            reason=body.reason,  # #769: was dropped on the public destructive-delete path
         )
         return ActionResponse(status=str(result.get("status") or "approved"), run_id=str(approval["run_id"]))
     if decision_input.get("kind") == "agent_tool":
@@ -12627,6 +12628,7 @@ def _execute_destructive_delete(path: str, owner_id: str, repos: Repositories) -
 
 class ApproveActionRequest(BaseModel):
     annotations: Optional[Dict[str, Any]] = None
+    reason: Optional[str] = None  # #769: optional plain-text approve comment
 
 
 @app.post("/approvals/{approval_id}/approve-action")
@@ -12636,13 +12638,14 @@ def approve_destructive_action(
     repos: Repositories = Depends(get_repos),
     body: ApproveActionRequest = Body(default_factory=ApproveActionRequest),
     annotations: Optional[Dict[str, Any]] = None,
+    reason: Optional[str] = None,
 ):
     """Approve and execute a sandboxed-worker DELETE request.
 
     Only works for approvals created by the run-token middleware (kind=destructive_delete).
-    The optional `annotations` keyword lets the public-link forwarder pass
-    reviewer feedback without a request body; the route body carries it for
-    authed callers.
+    The optional `annotations`/`reason` keywords let the public-link forwarder
+    pass reviewer feedback without a request body; the route body carries them
+    for authed callers.
     """
     approval = _load_typed_approval(approval_id, auth.user_id, "destructive_delete", repos)
     decision_input: Dict[str, Any] = json.loads(approval.get("decision_input_json") or "{}")
@@ -12657,6 +12660,9 @@ def approve_destructive_action(
         run_id=approval["run_id"],
         decided_at=now_iso(),
         annotations_json=annotations_json,
+        # #769: forward the approve reason for the destructive-delete path too
+        # (mirrors reject_destructive_action; was previously dropped).
+        reason=reason if reason is not None else getattr(body, "reason", None),
     )
 
     _sse_publish(approval["run_id"], {
