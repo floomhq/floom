@@ -1879,6 +1879,20 @@ MIGRATIONS: list[Migration] = [
         updated_at TEXT NOT NULL
     );
     """,
+    # -- migration 67: per-user worker star/favorite (#782) -------------------
+    # Kept per-user (not a workers column) so stars don't leak across members
+    # in a shared workspace. One row per (user, worker) that is starred.
+    """
+    CREATE TABLE IF NOT EXISTS user_worker_prefs (
+        user_id    TEXT NOT NULL,
+        worker_id  TEXT NOT NULL,
+        starred    INTEGER NOT NULL DEFAULT 0,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, worker_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_user_worker_prefs_user
+        ON user_worker_prefs(user_id, starred);
+    """,
 ]
 
 

@@ -6665,6 +6665,39 @@ class WorkerListSummary(WorkerSummary):
     updated_at: Optional[str] = None
 
 
+def _starred_worker_ids(user_id: str) -> set[str]:
+    """#782: the set of worker ids the user has starred."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT worker_id FROM user_worker_prefs WHERE user_id = ? AND starred = 1",
+                (user_id,),
+            ).fetchall()
+        return {str(r["worker_id"]) for r in rows}
+    except Exception:
+        return set()
+
+
+def _toggle_worker_star(user_id: str, worker_id: str) -> bool:
+    """#782: flip the star for (user, worker); returns the new state."""
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT starred FROM user_worker_prefs WHERE user_id = ? AND worker_id = ?",
+            (user_id, worker_id),
+        ).fetchone()
+        new_state = 0 if (row and row["starred"]) else 1
+        conn.execute(
+            """
+            INSERT INTO user_worker_prefs (user_id, worker_id, starred, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, worker_id) DO UPDATE SET
+                starred = excluded.starred, updated_at = excluded.updated_at
+            """,
+            (user_id, worker_id, new_state, now_iso()),
+        )
+    return bool(new_state)
+
+
 @app.get("/workers", response_model=List[WorkerListSummary])
 def list_workers(
     include_system: bool = False,
@@ -6672,6 +6705,7 @@ def list_workers(
     shape: str = "full",
     visibility: Optional[str] = None,
     q: Optional[str] = None,
+    starred: Optional[bool] = None,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[WorkerListSummary]:
@@ -6720,6 +6754,11 @@ def list_workers(
             if needle in str(w.get("name") or "").lower()
             or needle in str(w.get("description") or "").lower()
         ]
+    # #782: per-user star set; optional ?starred=true filter feeds the
+    # "starred" tag tab.
+    _starred_ids = _starred_worker_ids(auth.user_id)
+    if starred:
+        workers = [w for w in workers if w["id"] in _starred_ids]
     worker_ids = [w["id"] for w in workers]
     stats_by_id = _get_stats_batch(worker_ids, user_id=worker_user_id, repos=repos)
     # S44 Win 3: skip expensive timeseries fetch when list shape requested.
@@ -6826,6 +6865,7 @@ def list_workers(
                 public_link=_worker_public_link(w) if str(w.get("visibility") or "private") == "public" else None,
                 owner_id=w.get("owner_id"),
                 visibility=str(w.get("visibility") or "private"),
+                starred=w["id"] in _starred_ids,  # #782
                 permissions=_worker_permissions(w, user_id=worker_user_id, repos=repos),
             )
         )
@@ -8397,6 +8437,20 @@ def _set_worker_enabled(
         logger.debug("reconcile_triggers on enabled-toggle failed (non-fatal)", exc_info=True)
     invalidate_worker_cache()
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+
+@app.post("/workers/{worker_id}/star")
+def toggle_worker_star(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, bool]:
+    """#782: toggle the caller's star/favorite for a worker. Per-user; returns
+    the new state. 404 if the worker is not visible to the caller."""
+    worker_id = _canonical_worker_id(worker_id)
+    if _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos) is None:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    return {"starred": _toggle_worker_star(auth.user_id, worker_id)}
 
 
 @app.post("/workers/{worker_id}/pause", response_model=WorkerDetail)
