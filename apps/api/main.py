@@ -1521,6 +1521,7 @@ async def auth_middleware(request: Request, call_next):
             or path == "/connections/callback"
             or path.startswith("/approvals/public/")
             or path.startswith("/workers/public/")
+            or path.startswith("/runs/public/")  # #765: token-gated read-only run view
             or path.startswith("/workers/short-links/")
             or path.startswith("/s/")
             or path.startswith("/c/")
@@ -6881,7 +6882,7 @@ def _ensure_standalone_share_links_table() -> None:
 
 def _create_or_get_standalone_share_link(
     *,
-    entity_type: Literal["worker", "brain_file", "brain_pack"],
+    entity_type: Literal["worker", "brain_file", "brain_pack", "run"],
     entity_id: str,
     owner_id: str,
     file_path: str = "",
@@ -13029,6 +13030,61 @@ def get_run(
         created_at=run.get("created_at"),
         queue_position=queue_position,
     )
+
+
+@app.post("/runs/{run_id}/share-link")
+def create_run_share_link(
+    run_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, str]:
+    """#765: mint a read-only public share link for a run. Owner only.
+
+    Reuses the standalone_share_links infra (entity_type='run'); recipients
+    open the run via GET /runs/public/{run_id}?token= with no sign-in.
+    """
+    run = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return _create_or_get_standalone_share_link(
+        entity_type="run",
+        entity_id=run_id,
+        owner_id=auth.user_id,
+    )
+
+
+@app.delete("/runs/{run_id}/share-link")
+def revoke_run_share_link(
+    run_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, bool]:
+    """#765/#766: revoke a run's public share link."""
+    run = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
+    if run is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return _revoke_standalone_share_link(
+        entity_type="run", entity_id=run_id, owner_id=auth.user_id,
+    )
+
+
+@app.get("/runs/public/{run_id}", response_model=RunDetail)
+def get_public_run(
+    run_id: str,
+    token: str = Query(..., min_length=10),
+    repos: Repositories = Depends(get_repos),
+) -> RunDetail:
+    """#765: read-only run view for a signed share link, no auth required.
+
+    The token must resolve to a 'run' share row for THIS run_id; the run is
+    then rendered under the share owner's identity (same builder as the authed
+    GET /runs/{id}). 404 for any token/run mismatch — never leaks another run.
+    """
+    row = _load_standalone_share_row(token)
+    if not row or str(row.get("entity_type")) != "run" or str(row.get("entity_id")) != run_id:
+        raise HTTPException(status_code=404, detail="Run not found")
+    owner_auth = AuthContext(user_id=str(row.get("owner_id") or ""), email=None, scopes=("run_share",))
+    return get_run(run_id, auth=owner_auth, repos=repos)
 
 
 @app.get("/runs/{run_id}/stream")
