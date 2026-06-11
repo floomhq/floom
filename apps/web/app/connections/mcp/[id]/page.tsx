@@ -250,6 +250,19 @@ export default function McpConnectionDetailPage() {
               {testResult.status === "valid"
                 ? "Connection is valid and responding."
                 : `Test failed: ${testResult.reason || testResult.status}`}
+              {/* #789: live-enumerated tools from the probe. */}
+              {testResult.status === "valid" && testResult.tools && testResult.tools.length > 0 && (
+                <div className="mt-2 flex flex-wrap gap-1.5">
+                  {testResult.tools.map((t) => (
+                    <span
+                      key={t}
+                      className="rounded-full bg-[var(--bg-2)] px-2 py-0.5 font-mono text-[11px] text-[var(--ink-soft)]"
+                    >
+                      {t}
+                    </span>
+                  ))}
+                </div>
+              )}
             </div>
           )}
         </div>
