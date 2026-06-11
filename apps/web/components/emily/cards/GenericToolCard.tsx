@@ -6,16 +6,24 @@ import { Tool } from "@/components/ai-elements/tool";
 // (click → args/result/status) — the same component run details use — instead
 // of a flat one-line card.
 export function GenericToolCard({ card }: { card: GenericToolCardType }) {
-  const { status, title, toolName, preview, isError, callId, actions } = card;
+  const { status, title, toolName, args, result: cardResult, preview, isError, callId, actions, duration } = card;
   const isFailed = status === "failed" || isError;
   // result is undefined while the tool is still in flight (running/starting/
   // pending) → the collapsible shows the in-flight "called" state and defaults open.
   const inFlight = status === "running" || status === "starting" || status === "pending_approval";
-  const result = inFlight ? undefined : preview;
+  const result = inFlight ? undefined : cardResult ?? preview;
 
   return (
     <div className="space-y-2">
-      <Tool name={title || toolName} result={result} isError={isFailed} callId={callId} />
+      <Tool
+        name={title || toolName}
+        args={args ?? preview}
+        result={result}
+        isError={isFailed}
+        callId={callId}
+        status={status}
+        duration={duration}
+      />
       {actions && actions.length > 0 && (
         <div className="mt-2 flex flex-wrap gap-1.5">
           {actions.map((action) =>
