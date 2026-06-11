@@ -9058,6 +9058,71 @@ class _WorkerContextUpdateRequest(BaseModel):
     writeable: bool
 
 
+def _patch_worker_contexts_in_yml(worker_yml_path: Path, new_contexts: List[Dict[str, Any]]) -> None:
+    import yaml as _pyyaml
+
+    original = worker_yml_path.read_text(encoding="utf-8")
+    lines = original.splitlines()
+    had_final_newline = original.endswith("\n")
+    block_lines = _pyyaml.safe_dump(
+        {"contexts": new_contexts},
+        sort_keys=False,
+        default_flow_style=False,
+    ).rstrip("\n").splitlines()
+
+    def _is_top_level_key(line: str) -> bool:
+        return bool(re.match(r"^[A-Za-z_][\w_-]*\s*:", line))
+
+    def _remove_exec_contexts(raw_lines: List[str]) -> List[str]:
+        exec_start = next((i for i, ln in enumerate(raw_lines) if re.match(r"^exec\s*:", ln)), None)
+        if exec_start is None:
+            return raw_lines
+        exec_end = len(raw_lines)
+        for i in range(exec_start + 1, len(raw_lines)):
+            if _is_top_level_key(raw_lines[i]):
+                exec_end = i
+                break
+        ctx_start = None
+        ctx_indent = 0
+        for i in range(exec_start + 1, exec_end):
+            match = re.match(r"^(\s+)contexts\s*:", raw_lines[i])
+            if match:
+                ctx_start = i
+                ctx_indent = len(match.group(1))
+                break
+        if ctx_start is None:
+            return raw_lines
+        ctx_end = exec_end
+        for i in range(ctx_start + 1, exec_end):
+            stripped = raw_lines[i].strip()
+            if not stripped:
+                continue
+            indent = len(raw_lines[i]) - len(raw_lines[i].lstrip(" "))
+            if indent <= ctx_indent:
+                ctx_end = i
+                break
+        return raw_lines[:ctx_start] + raw_lines[ctx_end:]
+
+    lines = _remove_exec_contexts(lines)
+    start = next((i for i, ln in enumerate(lines) if re.match(r"^contexts\s*:", ln)), None)
+    if start is None:
+        if lines and lines[-1].strip():
+            lines.append("")
+        lines.extend(block_lines)
+    else:
+        end = len(lines)
+        for i in range(start + 1, len(lines)):
+            if _is_top_level_key(lines[i]):
+                end = i
+                break
+        lines = lines[:start] + block_lines + lines[end:]
+
+    updated = "\n".join(lines)
+    if had_final_newline:
+        updated += "\n"
+    worker_yml_path.write_text(updated, encoding="utf-8")
+
+
 def _mutate_worker_contexts(
     worker_id: str,
     mutate,
@@ -9093,15 +9158,9 @@ def _mutate_worker_contexts(
     # Best-effort worker.yml write-back so the change survives a registry reload.
     try:
         from worker_registry import WORKERS_DIR
-        import yaml as _pyyaml
         wpath = WORKERS_DIR / worker_id / "worker.yml"
         if wpath.exists():
-            doc = _pyyaml.safe_load(wpath.read_text(encoding="utf-8")) or {}
-            if isinstance(doc, dict):
-                doc["contexts"] = new_contexts
-                if isinstance(doc.get("exec"), dict):
-                    doc["exec"].pop("contexts", None)
-                wpath.write_text(_pyyaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+            _patch_worker_contexts_in_yml(wpath, new_contexts)
     except Exception:
         logger.warning("PATCH %s: could not write contexts to worker.yml", worker_id, exc_info=True)
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
