@@ -1832,6 +1832,7 @@ class WorkerSummary(BaseModel):
     # Members STEP 1: ownership + per-asset visibility + computed permissions.
     owner_id: Optional[str] = None
     visibility: str = "private"
+    starred: bool = False  # #782: per-user favorite flag
     permissions: AssetPermissions = Field(default_factory=AssetPermissions)
 
 
@@ -1893,6 +1894,7 @@ class WorkerDetail(BaseModel):
     # Members STEP 1: ownership + per-asset visibility + computed permissions.
     owner_id: Optional[str] = None
     visibility: str = "private"
+    starred: bool = False  # #782: per-user favorite flag
     permissions: AssetPermissions = Field(default_factory=AssetPermissions)
 
 
