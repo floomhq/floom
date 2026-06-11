@@ -69,6 +69,7 @@ from auth.context import current_auth_context, current_auth_user_id, set_current
 from auth.local_workspaces import (
     DEFAULT_WORKSPACE_ID,
     create_local_workspace,
+    delete_local_workspace,
     get_local_workspace,
     list_local_workspaces,
     local_workspace_base_user_id,
@@ -756,6 +757,29 @@ def select_workspace(
     if workspace is None:
         raise HTTPException(status_code=404, detail="workspace not found")
     return _local_workspace_out(workspace)
+
+
+@app.delete("/workspaces/{workspace_id}")
+def delete_workspace(
+    workspace_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, bool]:
+    """#805: delete a local OSS workspace (Settings > Danger).
+
+    Owner-scoped (404 for another owner's / unknown workspace). The default
+    workspace cannot be deleted (409) — there must always be one. On this
+    single-tenant engine workers/knowledge live in a shared on-disk pool, so
+    deleting a workspace removes only the workspace row + its selection, not
+    the shared assets.
+    """
+    _require_local_workspace_mode()
+    if workspace_id == DEFAULT_WORKSPACE_ID:
+        raise HTTPException(status_code=409, detail="The default workspace cannot be deleted")
+    base_user_id = local_workspace_base_user_id(auth.user_id)
+    if get_local_workspace(base_user_id, workspace_id) is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    delete_local_workspace(base_user_id, workspace_id)
+    return {"deleted": True}
 
 
 def _duplicate_workspace_name(name: str) -> str:

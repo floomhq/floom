@@ -118,6 +118,18 @@ def create_local_workspace(owner_user_id: str, name: str) -> dict[str, Any]:
     return created
 
 
+def delete_local_workspace(owner_user_id: str, workspace_id: str) -> bool:
+    """#805: delete an owner's local workspace row. Returns False if it does
+    not exist for this owner. The default workspace is not deletable (guarded
+    by the caller)."""
+    with get_db() as conn:
+        cursor = conn.execute(
+            "DELETE FROM local_workspaces WHERE owner_user_id = ? AND id = ?",
+            (owner_user_id, workspace_id),
+        )
+    return cursor.rowcount > 0
+
+
 def requested_local_workspace_id(request: Request) -> str | None:
     header_value = request.headers.get(ACTIVE_WORKSPACE_HEADER)
     query_value = request.query_params.get("workspace_id")
