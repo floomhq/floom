@@ -6,23 +6,67 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
-import type { PlatformConfig, PersonalAccessToken, SystemInfo } from "@/lib/types";
+import type {
+  CurrentUser,
+  LocalWorkspaceListResponse,
+  PersonalAccessToken,
+  PlatformConfig,
+  SystemInfo,
+  VersionSummary,
+  WorkspaceAgentInfo,
+  WorkspaceMember,
+  WorkspaceMembersResponse,
+  WorkspaceRole,
+} from "@/lib/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { settingsGroup, settingsCounts, groupLabel } from "@/lib/settings/nav-groups";
+import { Textarea } from "@/components/ui/textarea";
+import { CollectionView } from "@/components/collection/CollectionView";
+import { emptyState } from "@/lib/collection/url-state";
+import type { CollectionConfig, CollectionState, PillTone } from "@/lib/collection/types";
+import { SETTINGS_NAV, settingsGroup, settingsCounts, groupLabel } from "@/lib/settings/nav-groups";
 import { CliCommandPanel } from "@/components/CliCommandPanel";
 import { GitWorkspacePanel } from "@/components/GitWorkspacePanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { SlackConnect } from "@/components/assistant/SlackConnect";
 import { ClaimSuccessOverlay, type ClaimChannel } from "@/components/channels/ClaimSuccessOverlay";
-import { AlertTriangle, CheckCircle2, Copy, Trash2 } from "lucide-react";
+import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
+import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
+import { EmilyAvatar } from "@/components/emily/EmilyAvatar";
+import { cn } from "@/lib/utils";
+import {
+  AlertTriangle,
+  Bot,
+  CheckCircle2,
+  Code2,
+  Copy,
+  History,
+  MessageSquare,
+  Palette,
+  RotateCcw,
+  Save,
+  Settings,
+  ShieldAlert,
+  Trash2,
+  UserPlus,
+  Users,
+  X,
+} from "lucide-react";
 
 function PersonalAccessTokensPanel() {
   const [tokens, setTokens] = useState<PersonalAccessToken[] | null>(null);
@@ -152,55 +196,22 @@ function PersonalAccessTokensPanel() {
   );
 }
 
-// S22f: Notifications tab is currently hidden. The TabKey type still includes
-// it (plus the now-removed "assistant") so old URLs (?tab=assistant /
-// #assistant) don't blow up; we silently fall back to "developer" for any tab
-// not in VISIBLE_TAB_KEYS.
-// Phase 2 (Slack→Settings): Slack is the human interface for Floom Worker OS
-// (DM the assistant, @mention, approvals) — NOT a worker OAuth connection. It
-// belongs in Settings, not Connections.
-// S-dev: renamed "API access" tab to "Developer" (value "api" → "developer").
-// The old ?tab=api / #api URLs are handled by the legacy fallback below.
-// SPEC §12: "Channels" (Slack · WhatsApp · Agent-install) is a Settings tab —
-// set-once, low-frequency config lives here (nav placement follows frequency).
-// The old "slack" tab folds into Channels; #slack deep-links still resolve.
-type TabKey =
-  | "developer"
-  | "system"
-  | "git"
-  | "channels"
-  | "slack"
-  | "assistant"
-  | "notifications"
-  | "appearance"
-  | "danger";
+type SectionKey = (typeof SETTINGS_NAV)[number]["key"];
 
-const VISIBLE_TAB_KEYS: TabKey[] = ["developer", "system", "git", "channels", "appearance", "danger"];
-const TAB_KEYS: TabKey[] = [
-  "developer",
-  "system",
-  "git",
-  "channels",
-  "slack",
-  "assistant",
-  "notifications",
-  "appearance",
-  "danger",
-];
+const SECTION_KEYS = SETTINGS_NAV.map((item) => item.key);
 
-// V4 §4: the tab strip renders TWO labeled groups (Workspace · / Account ·)
-// from lib/settings/nav-groups — single source for keys, labels, scopes.
-
-function isValidTab(value: string | null): value is TabKey {
-  return value !== null && TAB_KEYS.includes(value as TabKey);
+function isValidSection(value: string | null): value is SectionKey {
+  return value !== null && SECTION_KEYS.includes(value as SectionKey);
 }
 
-function visibleTabFromCandidate(value: string | null): TabKey | null {
-  // Legacy aliases: #api → developer, #slack → channels.
-  const candidate = value === "api" ? "developer" : value === "slack" ? "channels" : value;
-  return isValidTab(candidate) && VISIBLE_TAB_KEYS.includes(candidate)
-    ? candidate
-    : null;
+function sectionFromCandidate(value: string | null): SectionKey | null {
+  const candidate =
+    value === "api" ? "developer" :
+    value === "slack" ? "channels" :
+    value === "notifications" ? "channels" :
+    value === "git" ? "developer" :
+    value;
+  return isValidSection(candidate) ? candidate : null;
 }
 
 export default function SettingsPage() {
@@ -217,25 +228,19 @@ function SettingsContent() {
     typeof window !== "undefined" ? window.location.search : ""
   );
   const searchParams = useMemo(() => new URLSearchParams(search), [search]);
-  // S28: tabs use URL hash now (#api, #danger, etc.). Fall back to legacy
-  // ?tab= for old links.
-  // S30: own the hash via the History API instead of router.replace. The App
-  // Router treated a same-pathname `#hash` navigation as an append (clicking
-  // System then Appearance produced `/settings#system#appearance`), so the tab
-  // could only switch once per load. We are the single source of truth for the
-  // hash now: state drives history.replaceState, and a hashchange listener
-  // keeps deep-links + back/forward in sync.
-  const initialTab = (() => {
+  const initialSection = (() => {
     const fromHash =
       typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : null;
     const fromQuery = searchParams.get("tab");
-    return visibleTabFromCandidate(fromHash || fromQuery) ?? "developer";
+    return sectionFromCandidate(fromHash || fromQuery);
   })();
-  const [tab, setTab] = useState<TabKey>(initialTab);
+  const [collectionState, setCollectionState] = useState<CollectionState>(() => ({
+    ...emptyState("list"),
+    sel: initialSection,
+  }));
 
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null);
-  const [reloading, setReloading] = useState(false);
   const [clearing, setClearing] = useState(false);
   const [claimedWhatsAppToken, setClaimedWhatsAppToken] = useState<string | null>(null);
   const [waClaimBanner, setWaClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
@@ -245,17 +250,21 @@ function SettingsContent() {
   // not just an inline banner. Channel-aware copy; null = no overlay.
   const [claimSuccess, setClaimSuccess] = useState<ClaimChannel | null>(null);
   const [fromInstallChannel, setFromInstallChannel] = useState<string | null>(null);
-  // SPEC §6: the Danger zone is admin-only. Default to shown so single-tenant
-  // (no role) and admins never lose it; hide once we learn the viewer is a member.
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [workspaceList, setWorkspaceList] = useState<LocalWorkspaceListResponse | null>(null);
   const [isAdmin, setIsAdmin] = useState(true);
+
   useEffect(() => {
-    api
-      .me()
-      .then((u) => {
-        const who = u as { role?: string; is_admin?: boolean };
-        setIsAdmin(who.is_admin ?? (who.role == null ? true : who.role === "admin" || who.role === "owner"));
-      })
-      .catch(() => {});
+    void (async () => {
+      try {
+        const u = await api.me();
+        setCurrentUser(u);
+        setIsAdmin(u.is_admin ?? (u.role == null ? true : u.role === "admin" || u.role === "owner"));
+      } catch {}
+      try {
+        setWorkspaceList(await api.workspace.list());
+      } catch {}
+    })();
   }, []);
   // PR S19 (I-44): type-to-confirm text for the Clear runs button.
   const [clearConfirmText, setClearConfirmText] = useState("");
@@ -343,13 +352,13 @@ function SettingsContent() {
     const channel = searchParams.get("from_install");
     if (!channel) return;
     setFromInstallChannel(channel);
-    const tabMap: Record<string, TabKey> = { slack: "slack", cli: "developer" };
+    const tabMap: Record<string, SectionKey> = { slack: "channels", cli: "developer" };
     const dest = tabMap[channel];
-    if (dest && VISIBLE_TAB_KEYS.includes(dest)) setTab(dest);
+    if (dest) setCollectionState((prev) => ({ ...prev, sel: dest, tab: null }));
     const params = new URLSearchParams(searchParams.toString());
     params.delete("from_install");
     const qs = params.size ? `?${params.toString()}` : "";
-    window.history.replaceState(null, "", `${window.location.pathname}${qs}${window.location.hash}`);
+    window.history.replaceState(null, "", `${window.location.pathname}${qs}#${dest ?? "channels"}`);
     setSearch(window.location.search);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
@@ -358,39 +367,14 @@ function SettingsContent() {
   useEffect(() => {
     function syncFromHash() {
       const raw = window.location.hash.replace(/^#/, "");
-      const fromHash = visibleTabFromCandidate(raw);
+      const fromHash = sectionFromCandidate(raw);
       if (fromHash) {
-        setTab((prev) => (prev === fromHash ? prev : fromHash));
+        setCollectionState((prev) => (prev.sel === fromHash ? prev : { ...prev, sel: fromHash, tab: null }));
       }
     }
     window.addEventListener("hashchange", syncFromHash);
     return () => window.removeEventListener("hashchange", syncFromHash);
   }, []);
-
-  function handleTabChange(value: string) {
-    if (!isValidTab(value)) return;
-    setTab(value);
-    // S30: set the hash to exactly the clicked tab via the History API so it
-    // REPLACES rather than appends. Drop the legacy ?tab= param if present.
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("tab");
-    const qs = params.size ? `?${params.toString()}` : "";
-    window.history.replaceState(null, "", `${window.location.pathname}${qs}#${value}`);
-    setSearch(window.location.search);
-  }
-
-  async function handleReload() {
-    setReloading(true);
-    try {
-      const res = await api.workers.reload();
-      toast.success(`Loaded ${res.workers_loaded} workers`);
-      void loadData();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to reload");
-    } finally {
-      setReloading(false);
-    }
-  }
 
   async function handleClearRuns() {
     if (clearConfirmText.trim() !== "DELETE ALL RUNS") return;
@@ -413,6 +397,121 @@ function SettingsContent() {
       toast.success(`Copied ${name}`);
     } catch {
       toast.error("Could not copy name");
+    }
+  }
+
+  const workspaceName =
+    workspaceList?.workspaces.find((workspace) => workspace.id === workspaceList.active_id)?.name ??
+    "Floom";
+  const accountName =
+    currentUser?.display_name?.trim() ||
+    currentUser?.email?.trim() ||
+    currentUser?.username?.trim() ||
+    "Federico";
+
+  const config = useMemo<CollectionConfig<SettingsNavItemWithIcon>>(() => {
+    const items = SETTINGS_NAV.map((item) => ({ ...item, icon: iconForSection(item.key) }));
+    return {
+      title: "Settings",
+      subtitle: "Workspace settings and your account settings, kept separate.",
+      items,
+      idOf: (item) => item.key,
+      searchOf: (item) => `${item.label} ${item.description} ${item.scope}`,
+      tags: {},
+      counts: [
+        { value: settingsGroup("workspace").length, label: "workspace" },
+        { value: settingsGroup("account").length, label: "account" },
+      ],
+      view: { default: "list", grid: false },
+      group: (item) =>
+        item.scope === "workspace"
+          ? groupLabel("workspace", workspaceName)
+          : groupLabel("account", accountName),
+      columns: { template: "1fr 180px 90px 34px", headers: ["Section", "Group", "Access", ""] },
+      row: (item) => ({
+        leading: <SettingsIcon icon={item.icon} />,
+        primary: item.label,
+        secondary: item.description,
+        cols: [
+          item.scope === "workspace" ? "Workspace" : "Account",
+          item.scope === "workspace" ? (isAdmin ? "Editable" : "View only") : "Personal",
+        ],
+        status: statusForSection(item, isAdmin),
+      }),
+      detail: (item) => ({
+        header: {
+          leading: <SettingsIcon icon={item.icon} />,
+          title: item.label,
+          sub: (
+            <span>
+              {item.scope === "workspace"
+                ? groupLabel("workspace", workspaceName)
+                : groupLabel("account", accountName)}
+              {" · "}
+              {item.description}
+            </span>
+          ),
+        },
+        tabs: [
+          {
+            key: "settings",
+            label: item.label,
+            render: () => renderSection(item.key),
+          },
+        ],
+      }),
+      states: {
+        empty: { title: "No settings found" },
+      },
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountName, clearConfirmText, clearing, info, isAdmin, platformConfig, workspaceName]);
+
+  function handleCollectionChange(next: CollectionState) {
+    setCollectionState(next);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("tab");
+    const qs = params.size ? `?${params.toString()}` : "";
+    const hash = next.sel && isValidSection(next.sel) ? `#${next.sel}` : "";
+    window.history.replaceState(null, "", `${window.location.pathname}${qs}${hash}`);
+    setSearch(window.location.search);
+  }
+
+  function renderSection(key: SectionKey) {
+    switch (key) {
+      case "system":
+        return (
+          <SystemSection
+            info={info}
+            platformConfig={platformConfig}
+            canEdit={isAdmin}
+            onCopySecretName={copySecretName}
+          />
+        );
+      case "channels":
+        return <ChannelsTab canManageWorkspace={isAdmin} />;
+      case "assistant":
+        return <AssistantSettingsPanel canManageWorkspace={isAdmin} />;
+      case "members":
+        return <MembersSettingsPanel />;
+      case "versions":
+        return <VersionHistorySettingsPanel />;
+      case "danger":
+        return (
+          <DangerSection
+            canEdit={isAdmin}
+            clearConfirmText={clearConfirmText}
+            setClearConfirmText={setClearConfirmText}
+            clearing={clearing}
+            onClearRuns={handleClearRuns}
+          />
+        );
+      case "developer":
+        return (
+          <DeveloperSection />
+        );
+      case "appearance":
+        return <AppearanceSection />;
     }
   }
 
@@ -482,223 +581,241 @@ function SettingsContent() {
         </Alert>
       )}
 
-      {/* V4: top-bar tab strip, consistent with the rest of the app (e.g. the
-          worker-detail page). Reverted from the prior left vertical nav.
-          MOBILE-375: the tab bar is `inline-flex w-fit whitespace-nowrap` and
-          cannot shrink below its content width, so we wrap it in a full-width
-          horizontal scroll container — overflow stays inside the strip and never
-          drives page width. Mirrors the worker-detail page exactly.
-          S22f: Notifications stays hidden until outbound email ships. */}
-      <Tabs value={tab} onValueChange={handleTabChange}>
-        <div className="-mx-4 overflow-x-auto px-4 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden sm:mx-0 sm:px-0">
-          {/* V4 §4: two labeled groups — Workspace · {name} and Account · {user}. */}
-          <div className="flex items-center gap-3">
-            {(["workspace", "account"] as const).map((scope) => (
-              <div key={scope} className="flex items-center gap-2">
-                <span className="shrink-0 text-[11px] font-medium uppercase tracking-wide text-muted-foreground">
-                  {groupLabel(scope)}
-                </span>
-                <TabsList>
-                  {settingsGroup(scope)
-                    .filter((item) => !item.adminOnly || isAdmin)
-                    .map((item) => (
-                      <TabsTrigger key={item.key} value={item.key}>
-                        {item.label}
-                      </TabsTrigger>
-                    ))}
-                </TabsList>
-              </div>
-            ))}
-          </div>
-        </div>
-
-        <TabsContent value="developer" className="space-y-8 pt-6">
-          <CliCommandPanel />
-          <PersonalAccessTokensPanel />
-        </TabsContent>
-
-        <TabsContent value="system" className="space-y-8 pt-6">
-          {/* S29s: dropped Card wrappers. Match sister tabs (Developer,
-              Appearance) which also flat-section now. */}
-          <section className="space-y-3">
-            <h2 className="text-sm font-medium text-muted-foreground">System info</h2>
-            <div className="space-y-3 text-sm">
-              {info ? (
-                <>
-                  <Row label="Version" value={info.version} mono />
-                  <Row label="Started at" value={info.started_at} mono />
-                  <Row label="Python" value={info.python_version} mono />
-                  <Row label="Runner" value={info.runner} />
-                </>
-              ) : (
-                <div className="space-y-3">
-                  {[120, 96, 80].map((w, i) => (
-                    <div key={i} className="flex justify-between items-center">
-                      <Skeleton className="h-4" style={{ width: 80 }} />
-                      <Skeleton className="h-4" style={{ width: w }} />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-
-          <section className="space-y-3">
-            <h2 className="text-sm font-medium text-muted-foreground">Workspace</h2>
-            <WorkspaceInfoSettings />
-          </section>
-
-          <section className="space-y-3">
-            <h2 className="text-sm font-medium text-muted-foreground">Behaviour</h2>
-            <BehaviourSettings />
-          </section>
-
-          <section className="space-y-3">
-            <h2 className="text-sm font-medium text-muted-foreground">Model defaults &amp; limits</h2>
-            <ModelDefaults />
-          </section>
-
-          <section className="space-y-3">
-            <h2 className="text-sm font-medium text-muted-foreground">Platform configuration</h2>
-            <div className="space-y-3">
-              {!platformConfig ? (
-                <Skeleton className="h-12 w-full" />
-              ) : (
-                <>
-                  <div className="flex items-center justify-between rounded-[var(--radius-card)] bg-muted p-3">
-                    <span className="text-sm">Configured</span>
-                    <span className="text-sm font-medium">
-                      {platformConfig.set_count}/{platformConfig.required_count}
-                    </span>
-                  </div>
-                  {platformConfig.all_required_set ? (
-                    <Alert>
-                      <CheckCircle2 className="size-4" />
-                      <AlertTitle>All required secrets are set</AlertTitle>
-                      <AlertDescription>
-                        Workers can run with full platform configuration.
-                      </AlertDescription>
-                    </Alert>
-                  ) : (
-                    <Alert variant="destructive">
-                      <AlertTriangle className="size-4" />
-                      <AlertTitle>
-                        {platformConfig.missing.length} required{" "}
-                        {platformConfig.missing.length === 1 ? "secret" : "secrets"} missing
-                      </AlertTitle>
-                      <AlertDescription>
-                        <div className="mt-2 space-y-1.5">
-                          {platformConfig.missing.map((name) => (
-                            <div
-                              key={name}
-                              className="flex items-center justify-between gap-2"
-                            >
-                              <code className="text-xs">{name}</code>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => void copySecretName(name)}
-                              >
-                                Copy name
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                </>
-              )}
-            </div>
-          </section>
-        </TabsContent>
-
-        <TabsContent value="channels" className="space-y-8 pt-6">
-          <ChannelsTab />
-        </TabsContent>
-
-        <TabsContent value="git" className="pt-6">
-          <GitWorkspacePanel />
-        </TabsContent>
-
-        <TabsContent value="notifications" className="space-y-4 pt-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Email notifications</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <ToggleRow
-                title="Email on run failure"
-                description="Send an email when a worker run ends in error."
-                disabled
-              />
-              <ToggleRow
-                title="Email on connection expiry"
-                description="Warn when a connected account is about to lose access."
-                disabled
-              />
-              <p className="text-xs text-muted-foreground">
-                Email delivery is not wired up yet. Toggles will activate once
-                outbound email is configured.
-              </p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="appearance" className="space-y-3 pt-6">
-          {/* S29z: explicit three-button toggle (System / Light / Dark)
-              instead of a single cycling button. Sidebar keeps the
-              compact cycle button; here we show all three at once. */}
-          <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
-          <p className="text-sm text-muted-foreground">
-            Choose how WorkerOS looks. System follows your operating system.
-          </p>
-          <ThemeModeToggleGroup />
-        </TabsContent>
-
-        <TabsContent value="danger" className="space-y-4 pt-6">
-          {isAdmin && (
-          <Card className="border-destructive/40">
-            <CardHeader>
-              <CardTitle className="text-sm font-medium text-destructive">Danger zone</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-3">
-                <div>
-                  <p className="text-sm font-medium">Clear run history</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Deletes all runs, logs, artifacts, and approvals. Cannot be undone.
-                  </p>
-                </div>
-                {/* PR S19 (I-44): type-to-confirm, same pattern as delete-worker.
-                    Previous version was a single-click after a tap → click chain
-                    which is too easy to fat-finger. */}
-                <Label htmlFor="clear-runs-confirm" className="text-xs text-muted-foreground">
-                  Type <code className="text-foreground">DELETE ALL RUNS</code> to confirm.
-                </Label>
-                <Input
-                  id="clear-runs-confirm"
-                  value={clearConfirmText}
-                  onChange={(e) => setClearConfirmText(e.target.value)}
-                  placeholder="DELETE ALL RUNS"
-                  className="max-w-sm"
-                />
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  className="shrink-0"
-                  onClick={handleClearRuns}
-                  disabled={clearing || clearConfirmText.trim() !== "DELETE ALL RUNS"}
-                >
-                  {clearing ? "Clearing..." : "Delete all runs"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-          )}
-        </TabsContent>
-      </Tabs>
+      <CollectionView
+        config={config}
+        state={collectionState}
+        onChange={handleCollectionChange}
+      />
     </div>
+  );
+}
+
+type SettingsIconType = typeof Settings;
+type SettingsNavItemWithIcon = (typeof SETTINGS_NAV)[number] & { icon: SettingsIconType };
+
+function iconForSection(key: SectionKey): SettingsIconType {
+  switch (key) {
+    case "system":
+      return Settings;
+    case "channels":
+      return MessageSquare;
+    case "assistant":
+      return Bot;
+    case "members":
+      return Users;
+    case "versions":
+      return History;
+    case "danger":
+      return ShieldAlert;
+    case "developer":
+      return Code2;
+    case "appearance":
+      return Palette;
+  }
+}
+
+function SettingsIcon({ icon: Icon }: { icon: SettingsIconType }) {
+  return (
+    <span className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] text-[var(--ink-soft)]">
+      <Icon className="size-4" />
+    </span>
+  );
+}
+
+function statusForSection(
+  item: SettingsNavItemWithIcon,
+  isAdmin: boolean,
+): { tone: PillTone; label: string } | null {
+  if (item.scope === "account") return { tone: "idle", label: "Personal" };
+  if (item.key === "danger") return { tone: isAdmin ? "warn" : "idle", label: isAdmin ? "Admin" : "View only" };
+  if (item.key === "assistant" || item.key === "members") {
+    return { tone: isAdmin ? "ok" : "idle", label: isAdmin ? "Editable" : "View only" };
+  }
+  return { tone: isAdmin ? "ok" : "idle", label: isAdmin ? "Workspace" : "View only" };
+}
+
+function SystemSection({
+  info,
+  platformConfig,
+  canEdit,
+  onCopySecretName,
+}: {
+  info: SystemInfo | null;
+  platformConfig: PlatformConfig | null;
+  canEdit: boolean;
+  onCopySecretName: (name: string) => Promise<void>;
+}) {
+  return (
+    <div className="space-y-8">
+      {!canEdit ? <ReadOnlyNotice /> : null}
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">System info</h2>
+        <div className="space-y-3 text-sm">
+          {info ? (
+            <>
+              <Row label="Version" value={info.version} mono />
+              <Row label="Started at" value={info.started_at} mono />
+              <Row label="Python" value={info.python_version} mono />
+              <Row label="Runner" value={info.runner} />
+            </>
+          ) : (
+            <div className="space-y-3">
+              {[120, 96, 80].map((w, i) => (
+                <div key={i} className="flex items-center justify-between">
+                  <Skeleton className="h-4" style={{ width: 80 }} />
+                  <Skeleton className="h-4" style={{ width: w }} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Workspace</h2>
+        <WorkspaceInfoSettings canEdit={canEdit} />
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Behaviour</h2>
+        <BehaviourSettings canEdit={canEdit} />
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Model defaults &amp; limits</h2>
+        <ModelDefaults canEdit={canEdit} />
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Platform configuration</h2>
+        <div className="space-y-3">
+          {!platformConfig ? (
+            <Skeleton className="h-12 w-full" />
+          ) : (
+            <>
+              <div className="flex items-center justify-between rounded-[var(--radius-card)] bg-muted p-3">
+                <span className="text-sm">Configured</span>
+                <span className="text-sm font-medium">
+                  {platformConfig.set_count}/{platformConfig.required_count}
+                </span>
+              </div>
+              {platformConfig.all_required_set ? (
+                <Alert>
+                  <CheckCircle2 className="size-4" />
+                  <AlertTitle>All required secrets are set</AlertTitle>
+                  <AlertDescription>
+                    Workers can run with full platform configuration.
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Alert variant="destructive">
+                  <AlertTriangle className="size-4" />
+                  <AlertTitle>
+                    {platformConfig.missing.length} required{" "}
+                    {platformConfig.missing.length === 1 ? "secret" : "secrets"} missing
+                  </AlertTitle>
+                  <AlertDescription>
+                    <div className="mt-2 space-y-1.5">
+                      {platformConfig.missing.map((name) => (
+                        <div key={name} className="flex items-center justify-between gap-2">
+                          <code className="text-xs">{name}</code>
+                          <Button variant="outline" size="sm" onClick={() => void onCopySecretName(name)}>
+                            Copy name
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              )}
+            </>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function DeveloperSection() {
+  return (
+    <div className="space-y-8">
+      <CliCommandPanel />
+      <PersonalAccessTokensPanel />
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Git workspace</h2>
+        <GitWorkspacePanel />
+      </section>
+    </div>
+  );
+}
+
+function AppearanceSection() {
+  return (
+    <div className="space-y-3">
+      <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
+      <p className="text-sm text-muted-foreground">
+        Choose how WorkerOS looks. System follows your operating system.
+      </p>
+      <ThemeModeToggleGroup />
+    </div>
+  );
+}
+
+function DangerSection({
+  canEdit,
+  clearConfirmText,
+  setClearConfirmText,
+  clearing,
+  onClearRuns,
+}: {
+  canEdit: boolean;
+  clearConfirmText: string;
+  setClearConfirmText: (value: string) => void;
+  clearing: boolean;
+  onClearRuns: () => Promise<void>;
+}) {
+  if (!canEdit) {
+    return <ReadOnlyNotice message="Danger actions are hidden because this account cannot perform workspace-destructive operations." />;
+  }
+  return (
+    <div className="space-y-4">
+      <section className="space-y-4">
+        <div>
+          <p className="text-sm font-medium text-destructive">Clear run history</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Deletes all runs, logs, artifacts, and approvals. Cannot be undone.
+          </p>
+        </div>
+        <Label htmlFor="clear-runs-confirm" className="text-xs text-muted-foreground">
+          Type <code className="text-foreground">DELETE ALL RUNS</code> to confirm.
+        </Label>
+        <Input
+          id="clear-runs-confirm"
+          value={clearConfirmText}
+          onChange={(e) => setClearConfirmText(e.target.value)}
+          placeholder="DELETE ALL RUNS"
+          className="max-w-sm"
+        />
+        <Button
+          variant="destructive"
+          size="sm"
+          className="shrink-0"
+          onClick={() => void onClearRuns()}
+          disabled={clearing || clearConfirmText.trim() !== "DELETE ALL RUNS"}
+        >
+          {clearing ? "Clearing..." : "Delete all runs"}
+        </Button>
+      </section>
+    </div>
+  );
+}
+
+function ReadOnlyNotice({ message = "Workspace controls are view only for this account." }: { message?: string }) {
+  return (
+    <Alert>
+      <AlertTitle>View only</AlertTitle>
+      <AlertDescription>{message}</AlertDescription>
+    </Alert>
   );
 }
 
@@ -741,7 +858,7 @@ function ToggleRow({
       <Switch disabled={disabled} checked={checked} onCheckedChange={onCheckedChange} />
       {disabled ? (
         <Badge variant="outline" className="text-xs">
-          Soon
+          View only
         </Badge>
       ) : null}
     </div>
@@ -768,7 +885,11 @@ const BEHAVIOUR_TOGGLES: { key: string; title: string; description: string }[] =
   },
 ];
 
-export function BehaviourSettings() {
+export function BehaviourSettings({ canEdit = true }: { canEdit?: boolean }) {
+  return <BehaviourSettingsInner canEdit={canEdit} />;
+}
+
+function BehaviourSettingsInner({ canEdit }: { canEdit: boolean }) {
   const [values, setValues] = useState<Record<string, string> | null>(null);
 
   useEffect(() => {
@@ -779,6 +900,7 @@ export function BehaviourSettings() {
   }, []);
 
   const toggle = (key: string, next: boolean) => {
+    if (!canEdit) return;
     setValues((prev) => ({ ...(prev ?? {}), [key]: next ? "true" : "false" }));
     api.workspace.setSetting(key, next ? "true" : "false").catch((err) => {
       toast.error((err as Error).message || "Could not save setting");
@@ -795,6 +917,7 @@ export function BehaviourSettings() {
           key={t.key}
           title={t.title}
           description={t.description}
+          disabled={!canEdit}
           checked={values[t.key] === "true"}
           onCheckedChange={(v) => toggle(t.key, v)}
         />
@@ -802,6 +925,7 @@ export function BehaviourSettings() {
     </div>
   );
 }
+
 
 // #797: workspace model defaults & limits, persisted to the same workspace
 // settings KV. Free-text/number inputs save on blur (admin-only writes; the
@@ -826,7 +950,7 @@ const WORKSPACE_INFO_FIELDS: { key: string; label: string; placeholder: string; 
   { key: "company_domain", label: "Company domain", placeholder: "e.g. acme.com", hint: "Used for the workspace logo." },
 ];
 
-export function WorkspaceInfoSettings() {
+export function WorkspaceInfoSettings({ canEdit = true }: { canEdit?: boolean }) {
   const [values, setValues] = useState<Record<string, string> | null>(null);
 
   useEffect(() => {
@@ -834,6 +958,7 @@ export function WorkspaceInfoSettings() {
   }, []);
 
   const save = (key: string, value: string) => {
+    if (!canEdit) return;
     api.workspace.setSetting(key, value).catch((err) => {
       toast.error((err as Error).message || "Could not save setting");
     });
@@ -850,7 +975,9 @@ export function WorkspaceInfoSettings() {
             defaultValue={values[f.key] ?? ""}
             placeholder={f.placeholder}
             className="max-w-xs"
+            disabled={!canEdit}
             onBlur={(e) => {
+              if (!canEdit) return;
               const v = e.target.value.trim();
               if (v !== (values[f.key] ?? "")) {
                 setValues((prev) => ({ ...(prev ?? {}), [f.key]: v }));
@@ -865,7 +992,7 @@ export function WorkspaceInfoSettings() {
   );
 }
 
-export function ModelDefaults() {
+export function ModelDefaults({ canEdit = true }: { canEdit?: boolean }) {
   const [values, setValues] = useState<Record<string, string> | null>(null);
 
   useEffect(() => {
@@ -873,6 +1000,7 @@ export function ModelDefaults() {
   }, []);
 
   const save = (key: string, value: string) => {
+    if (!canEdit) return;
     api.workspace.setSetting(key, value).catch((err) => {
       toast.error((err as Error).message || "Could not save setting");
     });
@@ -890,7 +1018,9 @@ export function ModelDefaults() {
             defaultValue={values[f.key] ?? ""}
             placeholder={f.placeholder}
             className="max-w-xs"
+            disabled={!canEdit}
             onBlur={(e) => {
+              if (!canEdit) return;
               const v = e.target.value.trim();
               if (v !== (values[f.key] ?? "")) {
                 setValues((prev) => ({ ...(prev ?? {}), [f.key]: v }));
@@ -902,6 +1032,682 @@ export function ModelDefaults() {
         </div>
       ))}
     </div>
+  );
+}
+
+function SettingsHistoryMenu({
+  loadVersions,
+  rollback,
+  onRollback,
+  refreshKey,
+  confirmLabel,
+  canRestore,
+}: {
+  loadVersions: () => Promise<VersionSummary[]>;
+  rollback: (versionId: string) => Promise<string>;
+  onRollback: (content: string) => void;
+  refreshKey: number;
+  confirmLabel: string;
+  canRestore: boolean;
+}) {
+  const [versions, setVersions] = useState<VersionSummary[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const [rollingBack, setRollingBack] = useState<string | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<VersionSummary | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      setVersions(await loadVersions());
+    } catch {
+      setVersions([]);
+    } finally {
+      setLoading(false);
+      setLoadedOnce(true);
+    }
+  }, [loadVersions]);
+
+  useEffect(() => {
+    if (loadedOnce) void refresh();
+  }, [loadedOnce, refresh, refreshKey]);
+
+  async function doRollback() {
+    if (!pendingRestore) return;
+    const v = pendingRestore;
+    setPendingRestore(null);
+    setRollingBack(v.id);
+    try {
+      const content = await rollback(v.id);
+      onRollback(content);
+      await refresh();
+      toast.success(`Rolled back to version ${v.sha}`);
+    } catch (e: unknown) {
+      toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
+    } finally {
+      setRollingBack(null);
+    }
+  }
+
+  return (
+    <>
+      <VersionHistoryMenu
+        versions={versions}
+        loading={loading && !loadedOnce}
+        canRestore={canRestore}
+        restoringId={rollingBack}
+        onOpen={() => {
+          if (!loadedOnce) void refresh();
+        }}
+        onRestore={(v) => setPendingRestore(v)}
+      />
+      <Dialog open={!!pendingRestore} onOpenChange={(open) => { if (!open) setPendingRestore(null); }}>
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Restore version {pendingRestore?.sha}?</DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            {confirmLabel} The current version is saved automatically before restoring.
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingRestore(null)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void doRollback()}>
+              Restore
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: boolean }) {
+  const [agent, setAgent] = useState<WorkspaceAgentInfo | null>(null);
+  const [base, setBase] = useState("");
+  const [originalBase, setOriginalBase] = useState("");
+  const [baseIsCustom, setBaseIsCustom] = useState(false);
+  const [editingBase, setEditingBase] = useState(false);
+  const [savingBase, setSavingBase] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [instructions, setInstructions] = useState("");
+  const [originalInstructions, setOriginalInstructions] = useState("");
+  const [editingInstructions, setEditingInstructions] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [versionsKey, setVersionsKey] = useState(0);
+  const [baseVersionsKey, setBaseVersionsKey] = useState(0);
+
+  const canEdit = canManageWorkspace && agent?.permissions?.can_edit !== false;
+  const dirty = instructions !== originalInstructions;
+  const baseDirty = base !== originalBase;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [agentRes, baseRes, instructionsRes] = await Promise.all([
+        api.system.workspaceAgent(),
+        api.system.workspaceBasePersona(),
+        api.system.workspaceInstructions(),
+      ]);
+      setAgent(agentRes);
+      setBase(baseRes.content);
+      setOriginalBase(baseRes.content);
+      setBaseIsCustom(baseRes.is_custom);
+      setInstructions(instructionsRes);
+      setOriginalInstructions(instructionsRes);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load workspace agent");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function saveBase() {
+    if (!canEdit || !base.trim()) return;
+    setSavingBase(true);
+    try {
+      await api.system.updateWorkspaceBasePersona(base);
+      setOriginalBase(base);
+      setBaseIsCustom(true);
+      setEditingBase(false);
+      setBaseVersionsKey((k) => k + 1);
+      toast.success("Base instructions saved");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save base instructions");
+    } finally {
+      setSavingBase(false);
+    }
+  }
+
+  async function saveInstructions() {
+    if (!canEdit || !instructions.trim()) return;
+    setSaving(true);
+    try {
+      await api.system.updateWorkspaceInstructions(instructions);
+      setOriginalInstructions(instructions);
+      setEditingInstructions(false);
+      setVersionsKey((k) => k + 1);
+      toast.success("Instructions saved");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save instructions");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function resetBase() {
+    if (!canEdit) return;
+    setResetting(true);
+    try {
+      await api.system.resetWorkspaceBasePersona();
+      setResetConfirm(false);
+      setEditingBase(false);
+      setBaseVersionsKey((k) => k + 1);
+      toast.success("Base instructions reset to the built-in default");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to reset base instructions");
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  if (error) {
+    return (
+      <Alert variant="destructive">
+        <AlertTriangle className="size-4" />
+        <AlertTitle>Couldn&apos;t load the assistant</AlertTitle>
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {!canEdit ? <ReadOnlyNotice message="Assistant editing controls are hidden because this account cannot edit workspace assistant settings." /> : null}
+      <div className="flex flex-wrap items-center gap-3">
+        <EmilyAvatar size="md" />
+        <div className="min-w-0">
+          <h2 className="text-sm font-medium">Emily</h2>
+          <p className="text-xs text-muted-foreground">Persona, workspace notes, and compiled prompt.</p>
+        </div>
+        {agent?.model ? <Badge variant="outline" className="font-mono text-xs">{agent.model}</Badge> : null}
+        {agent ? (
+          <span className="ml-auto">
+            <AssetVisibilityControl
+              visibility={agent.visibility}
+              canShare={canEdit && (agent.permissions?.can_share ?? true)}
+              noun="Emily"
+              titleLabel="Emily visibility"
+              onApply={async (next) => {
+                const updated = await api.system.setAssistantVisibility(next);
+                setAgent(updated);
+                return updated.visibility;
+              }}
+            />
+          </span>
+        ) : null}
+      </div>
+
+      <Tabs defaultValue="base">
+        <TabsList>
+          <TabsTrigger value="base">Persona</TabsTrigger>
+          <TabsTrigger value="instructions">Workspace notes</TabsTrigger>
+          <TabsTrigger value="prompt">Compiled prompt</TabsTrigger>
+        </TabsList>
+        <TabsContent value="base" className="space-y-3">
+          {loading ? <Skeleton className="h-80 w-full" /> : (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-medium">Emily persona</h3>
+                    <Badge variant="outline" className="text-xs">{baseIsCustom ? "Custom" : "Built-in default"}</Badge>
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Emily&apos;s core identity and style.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <SettingsHistoryMenu
+                    refreshKey={baseVersionsKey}
+                    loadVersions={() => api.system.listWorkspaceBaseVersions()}
+                    rollback={(id) => api.system.rollbackWorkspaceBasePersona(id)}
+                    onRollback={(content) => {
+                      setBase(content);
+                      setOriginalBase(content);
+                      setBaseIsCustom(true);
+                      setEditingBase(false);
+                      setBaseVersionsKey((k) => k + 1);
+                    }}
+                    confirmLabel="This will overwrite your current base instructions."
+                    canRestore={canEdit}
+                  />
+                  {editingBase ? (
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => { setBase(originalBase); setEditingBase(false); }} disabled={savingBase}>
+                        <X className="size-3.5" />
+                        Cancel
+                      </Button>
+                      <Button size="sm" onClick={() => void saveBase()} disabled={!baseDirty || savingBase}>
+                        <Save className="size-3.5" />
+                        {savingBase ? "Saving" : "Save"}
+                      </Button>
+                    </>
+                  ) : canEdit ? (
+                    <>
+                      {baseIsCustom ? (
+                        <Button size="sm" variant="outline" onClick={() => setResetConfirm(true)} disabled={resetting}>
+                          <RotateCcw className="size-3.5" />
+                          Reset
+                        </Button>
+                      ) : null}
+                      <Button size="sm" variant="outline" onClick={() => setEditingBase(true)}>Edit</Button>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+              <Textarea
+                value={base}
+                onChange={(event) => { if (editingBase) setBase(event.target.value); }}
+                readOnly={!editingBase}
+                className="min-h-[22rem] font-mono text-xs leading-relaxed read-only:bg-muted/40"
+                spellCheck={false}
+              />
+            </>
+          )}
+        </TabsContent>
+        <TabsContent value="instructions" className="space-y-3">
+          {loading ? <Skeleton className="h-80 w-full" /> : (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-medium">Workspace notes</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Workspace-specific context and preferences.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <SettingsHistoryMenu
+                    refreshKey={versionsKey}
+                    loadVersions={() => api.system.listWorkspaceVersions()}
+                    rollback={(id) => api.system.rollbackWorkspaceInstructions(id)}
+                    onRollback={(content) => {
+                      setInstructions(content);
+                      setOriginalInstructions(content);
+                      setEditingInstructions(false);
+                      setVersionsKey((k) => k + 1);
+                    }}
+                    confirmLabel="This will overwrite your current workspace instructions."
+                    canRestore={canEdit}
+                  />
+                  {editingInstructions ? (
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => { setInstructions(originalInstructions); setEditingInstructions(false); }} disabled={saving}>
+                        <X className="size-3.5" />
+                        Cancel
+                      </Button>
+                      <Button size="sm" onClick={() => void saveInstructions()} disabled={!dirty || saving}>
+                        <Save className="size-3.5" />
+                        {saving ? "Saving" : "Save"}
+                      </Button>
+                    </>
+                  ) : canEdit ? (
+                    <Button size="sm" variant="outline" onClick={() => setEditingInstructions(true)}>Edit</Button>
+                  ) : null}
+                </div>
+              </div>
+              <Textarea
+                value={instructions}
+                onChange={(event) => { if (editingInstructions) setInstructions(event.target.value); }}
+                readOnly={!editingInstructions}
+                className="min-h-[22rem] font-mono text-xs leading-relaxed read-only:bg-muted/40"
+                spellCheck={false}
+              />
+            </>
+          )}
+        </TabsContent>
+        <TabsContent value="prompt" className="space-y-3">
+          {loading || !agent ? <Skeleton className="h-96 w-full" /> : (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-medium">Compiled prompt</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Read-only preview of Emily&apos;s full system prompt.</p>
+                </div>
+                <Badge variant="outline" className="text-xs">Read-only</Badge>
+              </div>
+              <pre className="max-h-[36rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
+                {agent.system_prompt}
+              </pre>
+            </>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      <Dialog open={resetConfirm} onOpenChange={(open) => { if (!open) setResetConfirm(false); }}>
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Reset base instructions?</DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            This removes your custom base instructions and restores the built-in default.
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResetConfirm(false)} disabled={resetting}>Cancel</Button>
+            <Button onClick={() => void resetBase()} disabled={resetting}>{resetting ? "Resetting" : "Reset to default"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+const ROLE_LABEL: Record<WorkspaceRole, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  member: "Member",
+};
+
+function RoleBadge({ role }: { role: WorkspaceRole }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-[var(--radius-pill)] px-2 py-0.5 text-xs font-medium",
+        role === "owner"
+          ? "bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--accent)]"
+          : "bg-[var(--bg-2)] text-[var(--ink-soft)]",
+      )}
+    >
+      {ROLE_LABEL[role]}
+    </span>
+  );
+}
+
+function memberLabel(m: WorkspaceMember): string {
+  return m.display_name?.trim() || m.email?.trim() || m.user_id;
+}
+
+function memberInitial(m: WorkspaceMember): string {
+  const base = m.display_name?.trim() || m.email?.trim() || m.user_id || "?";
+  return base.slice(0, 2).toUpperCase();
+}
+
+function MembersSettingsPanel() {
+  const [data, setData] = useState<WorkspaceMembersResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
+  const [inviting, setInviting] = useState(false);
+  const [busyUser, setBusyUser] = useState<string | null>(null);
+  const [pendingAction, setPendingAction] = useState<
+    | { kind: "remove"; member: WorkspaceMember }
+    | { kind: "transfer"; member: WorkspaceMember }
+    | null
+  >(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await api.members.list();
+      setData(res);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message || "Failed to load members");
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  const myRole = data?.my_role ?? null;
+  const canManage = myRole === "owner" || myRole === "admin";
+  const isOwner = myRole === "owner";
+  const sortedMembers = data?.members ?? [];
+
+  async function handleInvite(e: React.FormEvent) {
+    e.preventDefault();
+    const email = inviteEmail.trim();
+    if (!email || inviting || !canManage) return;
+    setInviting(true);
+    try {
+      await api.members.invite(email, inviteRole);
+      setInviteEmail("");
+      toast.success(`Invited ${email}`);
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to invite member");
+    } finally {
+      setInviting(false);
+    }
+  }
+
+  async function handleSetRole(m: WorkspaceMember, role: "admin" | "member") {
+    if (m.role === role || !isOwner) return;
+    setBusyUser(m.user_id);
+    try {
+      await api.members.setRole(m.user_id, role);
+      toast.success(`${memberLabel(m)} is now ${ROLE_LABEL[role]}`);
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to change role");
+    } finally {
+      setBusyUser(null);
+    }
+  }
+
+  async function runPendingAction() {
+    if (!pendingAction) return;
+    const action = pendingAction;
+    setPendingAction(null);
+    setBusyUser(action.member.user_id);
+    try {
+      if (action.kind === "remove") {
+        await api.members.remove(action.member.user_id);
+        toast.success(`Removed ${memberLabel(action.member)}`);
+      } else {
+        await api.members.transferOwner(action.member.user_id);
+        toast.success(`${memberLabel(action.member)} is now the Owner`);
+      }
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Member action failed");
+    } finally {
+      setBusyUser(null);
+    }
+  }
+
+  if (!data && !error) return <Skeleton className="h-48 w-full" />;
+
+  return (
+    <div className="space-y-6">
+      {error ? (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>Couldn&apos;t load members</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+      {!canManage ? <ReadOnlyNotice message="Member management controls are hidden because this account is not Owner or Admin." /> : null}
+
+      {canManage ? (
+        <form onSubmit={handleInvite} className="flex flex-col gap-2 rounded-[var(--radius-card)] bg-[var(--bg-2)] p-4 sm:flex-row sm:items-center">
+          <div className="flex flex-1 items-center gap-2">
+            <UserPlus className="size-4 shrink-0 text-[var(--ink-mute)]" />
+            <Input
+              type="email"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              placeholder="teammate@company.com"
+              className="flex-1"
+              aria-label="Invite member by email"
+              maxLength={254}
+            />
+          </div>
+          <div className="inline-flex rounded-[var(--radius-button)] bg-[var(--bg-card)] p-0.5">
+            {(["member", "admin"] as const).map((role) => (
+              <button
+                key={role}
+                type="button"
+                className={cn(
+                  "h-8 px-3 text-sm",
+                  inviteRole === role ? "rounded-[var(--radius-button)] bg-[var(--bg-2)] text-foreground" : "text-muted-foreground",
+                )}
+                onClick={() => setInviteRole(role)}
+              >
+                {ROLE_LABEL[role]}
+              </button>
+            ))}
+          </div>
+          <Button type="submit" disabled={!inviteEmail.trim() || inviting}>
+            {inviting ? "Inviting..." : "Invite"}
+          </Button>
+        </form>
+      ) : null}
+
+      <div className="space-y-1">
+        {sortedMembers.map((m) => {
+          const isMe = m.user_id === data?.my_user_id;
+          const isBusy = busyUser === m.user_id;
+          const canChangeRole = isOwner && m.role !== "owner" && !isMe;
+          const canRemove =
+            canManage &&
+            m.role !== "owner" &&
+            !isMe &&
+            !(myRole === "admin" && m.role === "admin");
+          const canTransfer = isOwner && m.role !== "owner" && m.status === "active";
+          return (
+            <div key={m.user_id} className="flex flex-wrap items-center gap-3 border-b border-[var(--line-soft)] py-3 last:border-b-0">
+              <div className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--bg-2)] text-[11px] font-medium text-foreground">
+                {memberInitial(m)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-medium text-foreground">{memberLabel(m)}</span>
+                  {isMe ? <span className="text-[11px] text-[var(--ink-mute)]">You</span> : null}
+                </div>
+                {m.email && m.email !== memberLabel(m) ? (
+                  <p className="truncate text-xs text-[var(--ink-mute)]">{m.email}</p>
+                ) : null}
+              </div>
+              {m.status === "invited" ? (
+                <span className="rounded-[var(--radius-pill)] bg-[var(--bg-2)] px-2 py-0.5 text-[11px] text-[var(--ink-mute)]">
+                  Invited
+                </span>
+              ) : null}
+              <RoleBadge role={m.role} />
+              {canChangeRole ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={isBusy}
+                  onClick={() => void handleSetRole(m, m.role === "member" ? "admin" : "member")}
+                >
+                  Make {m.role === "member" ? "admin" : "member"}
+                </Button>
+              ) : null}
+              {canTransfer ? (
+                <Button size="sm" variant="ghost" disabled={isBusy} onClick={() => setPendingAction({ kind: "transfer", member: m })}>
+                  Transfer
+                </Button>
+              ) : null}
+              {canRemove ? (
+                <Button size="sm" variant="ghost" className="text-destructive" disabled={isBusy} onClick={() => setPendingAction({ kind: "remove", member: m })}>
+                  Remove
+                </Button>
+              ) : null}
+            </div>
+          );
+        })}
+        {sortedMembers.length === 0 ? (
+          <div className="py-8 text-center text-sm text-[var(--ink-mute)]">No members yet.</div>
+        ) : null}
+      </div>
+
+      <Dialog open={!!pendingAction} onOpenChange={(open) => { if (!open) setPendingAction(null); }}>
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {pendingAction?.kind === "transfer" ? "Transfer ownership?" : "Remove member?"}
+            </DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            {pendingAction?.kind === "transfer"
+              ? `Transfer ownership to ${pendingAction ? memberLabel(pendingAction.member) : "this member"}? You will be demoted to Admin.`
+              : `Remove ${pendingAction ? memberLabel(pendingAction.member) : "this member"} from this workspace?`}
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingAction(null)}>Cancel</Button>
+            <Button variant={pendingAction?.kind === "remove" ? "destructive" : "default"} onClick={() => void runPendingAction()}>
+              {pendingAction?.kind === "transfer" ? "Transfer" : "Remove"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function VersionHistorySettingsPanel() {
+  const [workspaceVersions, setWorkspaceVersions] = useState<VersionSummary[] | null>(null);
+  const [baseVersions, setBaseVersions] = useState<VersionSummary[] | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const [workspace, base] = await Promise.allSettled([
+        api.system.listWorkspaceVersions(),
+        api.system.listWorkspaceBaseVersions(),
+      ]);
+      setWorkspaceVersions(workspace.status === "fulfilled" ? workspace.value : []);
+      setBaseVersions(base.status === "fulfilled" ? base.value : []);
+    })();
+  }, []);
+
+  return (
+    <div className="space-y-6">
+      <Alert>
+        <AlertTitle>Workspace changelog</AlertTitle>
+        <AlertDescription>
+          Merged multi-asset timeline is tracked as #772; this view shows the built workspace instruction histories.
+        </AlertDescription>
+      </Alert>
+      <VersionList title="Workspace notes" versions={workspaceVersions} />
+      <VersionList title="Base persona" versions={baseVersions} />
+    </div>
+  );
+}
+
+function VersionList({ title, versions }: { title: string; versions: VersionSummary[] | null }) {
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
+      {versions === null ? (
+        <Skeleton className="h-24 w-full" />
+      ) : versions.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No commits yet.</p>
+      ) : (
+        <div className="space-y-1">
+          {versions.map((v, index) => (
+            <div key={`${v.asset_type}-${v.id}-${index}`} className="flex items-center justify-between gap-3 border-b border-[var(--line-soft)] py-2 text-sm last:border-b-0">
+              <div className="min-w-0">
+                <p className="truncate font-medium">{v.message}</p>
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-mono">{v.sha}</span> · {v.author} · {new Date(v.timestamp).toLocaleString()}
+                </p>
+              </div>
+              {index === 0 ? <Badge variant="outline">Current</Badge> : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
   );
 }
 
@@ -1085,7 +1891,7 @@ function WhatsAppBindingStatus() {
 // ---------------------------------------------------------------------------
 // ChannelsTab — Slack + WhatsApp + Agent install
 // ---------------------------------------------------------------------------
-function ChannelsTab() {
+function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
   return (
     <>
       <section className="space-y-3">
@@ -1110,7 +1916,11 @@ function ChannelsTab() {
           <p className="text-xs text-muted-foreground">
             Install Emily to your Slack workspace, then DM her to link your identity.
           </p>
-          <SlackConnect />
+          {canManageWorkspace ? (
+            <SlackConnect />
+          ) : (
+            <ReadOnlyNotice message="Slack workspace install controls are hidden because this account is not Owner or Admin." />
+          )}
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">Your link status</p>
             <SlackBindingStatus />
