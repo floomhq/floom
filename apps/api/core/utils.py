@@ -6,8 +6,20 @@ anywhere (including modules the test suite reloads), since they capture nothing.
 
 from __future__ import annotations
 
+import os
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional
+
+
+def _positive_int_env(name: str, default: int) -> int:
+    raw = os.environ.get(name)
+    if raw is None:
+        return default
+    try:
+        value = int(raw)
+    except ValueError:
+        return default
+    return value if value > 0 else default
 
 
 def row_to_dict(row: Any) -> Dict[str, Any]:
