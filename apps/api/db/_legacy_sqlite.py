@@ -1893,6 +1893,16 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_user_worker_prefs_user
         ON user_worker_prefs(user_id, starred);
     """,
+    # -- migration 68: workspace settings KV (#794 toggles, #797 model defaults) -
+    """
+    CREATE TABLE IF NOT EXISTS workspace_settings (
+        workspace_id TEXT NOT NULL,
+        key          TEXT NOT NULL,
+        value        TEXT NOT NULL,
+        updated_at   TEXT NOT NULL,
+        PRIMARY KEY (workspace_id, key)
+    );
+    """,
 ]
 
 
