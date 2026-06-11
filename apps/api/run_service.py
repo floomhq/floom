@@ -2679,12 +2679,45 @@ def _maybe_pause_scheduled_worker_after_setup_failure(
     return True
 
 
+_FALSEY = {"0", "false", "no", "off"}
+
+
+def _workspace_setting(key: str, *, workspace_id: str = "local-default") -> Optional[str]:
+    """#794: read a workspace behaviour toggle from the workspace_settings KV
+    table (set via PUT /workspace/settings/{key}). Returns None when unset."""
+    try:
+        from db import get_db
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM workspace_settings WHERE workspace_id = ? AND key = ? LIMIT 1",
+                (workspace_id, key),
+            ).fetchone()
+        return str(row["value"]) if row and row["value"] is not None else None
+    except Exception:
+        return None
+
+
+def _workspace_toggle(key: str, *, env_var: str, default: bool) -> bool:
+    """#794: a DB workspace setting wins over the env var, which wins over the
+    hard default."""
+    setting = _workspace_setting(key)
+    if setting is not None:
+        return setting.strip().lower() not in _FALSEY
+    raw = os.environ.get(env_var)
+    if raw is not None:
+        return raw.strip().lower() not in _FALSEY
+    return default
+
+
 def _auto_pause_on_consecutive_failures_enabled() -> bool:
+    # #794: workspace setting 'auto_pause_enabled' overrides the env var.
     # Default ON (opt-out). Broken scheduled workers inflated failure rate to
-    # 1,683/1,866 runs over 7 days (#526). Opt out via
-    # WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES=0.
-    raw = os.environ.get("WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES", "1")
-    return raw.strip().lower() not in {"0", "false", "no", "off"}
+    # 1,683/1,866 runs over 7 days (#526).
+    return _workspace_toggle(
+        "auto_pause_enabled",
+        env_var="WORKEROS_AUTO_PAUSE_ON_CONSECUTIVE_FAILURES",
+        default=True,
+    )
 
 
 def _alert_consecutive_failure_threshold() -> int:
