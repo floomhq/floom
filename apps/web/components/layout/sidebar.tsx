@@ -1,6 +1,5 @@
 "use client";
 
-import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
@@ -44,42 +43,26 @@ export function FloomMark({ size = 28 }: { size?: number }) {
   );
 }
 
-// C6: Emily avatar — solid WorkerOS accent blue circle, no glyph.
-// Used as the nav icon for the Assistant item in place of the generic Bot glyph.
-// The accent blue (#59AAF8 / --accent in dark, hardcoded for light) is the
-// WorkerOS brand blue Federico designated for Emily's identity.
-function EmilyDot({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn("shrink-0 rounded-full", className)}
-      style={{ background: "var(--emily-accent, #59AAF8)", width: "16px", height: "16px" }}
-      aria-hidden="true"
-    />
-  );
-}
-
 // S24: Secrets removed from top-level nav; reachable as a third tab on
 // /connections ("Connected" / "Browse" / "Secrets"). Connections + secrets
 // are the same mental model (credentials a worker can read) so they share
 // a surface.
 // `hint` is surfaced as a native title tooltip on hover — the flat single-row
 // nav has no room for a permanent subtitle without a redesign, so the
-// employee-model microcopy ("Assistant = the thing you talk to"; "Workers run
-// on triggers") lives in the tooltip instead (Federico 2026-06-02).
+// employee-model microcopy ("Workers run on triggers") lives in the tooltip
+// instead (Federico 2026-06-02).
 type NavItem = {
   href: string;
   label: string;
-  icon: React.ElementType | null;
+  icon: React.ElementType;
   hint?: string;
   badge?: boolean;
-  emilyDot?: boolean;
 };
 
+// V4 SPEC §2: nav order per wireframe — no Assistant item (config lives in
+// Settings per v4). Overview · Workers · Brain · Runs · Approvals · Connections.
 const nav: NavItem[] = [
   { href: "/overview", label: "Overview", icon: Activity },
-  // FL9: Assistant above Workers — the thing you talk to comes before the
-  // things that run on triggers.
-  { href: "/assistant", label: "Assistant", icon: null, emilyDot: true, hint: "Chat, ask, delegate" },
   { href: "/workers", label: "Workers", icon: Box, hint: "Runs on triggers and schedules" },
   { href: "/brain", label: "Brain", icon: Brain },
   { href: "/runs", label: "Runs", icon: Clock },
@@ -113,11 +96,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
                 : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
             )}
           >
-            {item.emilyDot ? (
-              <EmilyDot />
-            ) : item.icon ? (
-              <item.icon className="w-4 h-4" />
-            ) : null}
+            <item.icon className="w-4 h-4" />
             {item.label}
             {showBadge && (
               <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] px-1 text-[10px] font-semibold leading-none text-[var(--primary-text)]">
@@ -177,6 +156,7 @@ export function Sidebar() {
   return (
     <>
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--border-soft)] bg-[var(--bg-app)] px-4 md:hidden">
+        {/* Mobile: compact workspace identity row */}
         <Link href="/overview" className="flex items-center gap-2">
           <FloomMark size={22} />
           <span className="font-semibold text-base tracking-tight">WorkerOS</span>
@@ -204,17 +184,13 @@ export function Sidebar() {
 
       <aside className="sticky top-0 z-20 hidden h-screen w-[228px] flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] md:flex">
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
-        <div className="px-5 pt-6 pb-8">
-          <Link href="/overview" className="flex items-center gap-2">
-            <FloomMark size={22} />
-            <span className="font-semibold text-base tracking-tight">WorkerOS</span>
-          </Link>
+        {/* V4 SPEC §2: top-left = workspace identity, not wordmark */}
+        <div className="pt-3 pb-2">
+          <WorkspaceSwitcher />
         </div>
         <SidebarPrimaryActions />
         <NavLinks pathname={pathname} />
-        <div className="mt-auto pt-3 border-t border-[var(--border-soft)]">
-          <WorkspaceSwitcher />
-        </div>
+        {/* V4 SPEC §2: bottom = pinned account row */}
         <UserProfileFooter />
       </aside>
 
@@ -227,16 +203,16 @@ export function Sidebar() {
           />
           <aside className="relative z-50 flex h-full w-64 max-w-[80vw] flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] shadow-pop">
             <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
-            <div className="flex items-center justify-between border-b border-[var(--border-soft)] px-5 py-4">
-              <Link href="/overview" className="flex items-center gap-2" onClick={() => setOpen(false)}>
-                <FloomMark size={22} />
-                <span className="font-semibold text-base tracking-tight">WorkerOS</span>
-              </Link>
+            <div className="flex items-center justify-between border-b border-[var(--border-soft)] px-3 py-2">
+              {/* Mobile drawer: workspace identity at top */}
+              <div className="flex-1 min-w-0">
+                <WorkspaceSwitcher />
+              </div>
               <button
                 type="button"
                 aria-label="Close navigation"
                 onClick={() => setOpen(false)}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
+                className="ml-1 inline-flex h-11 w-11 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -244,9 +220,6 @@ export function Sidebar() {
             <div className="py-3 flex-1 overflow-auto">
               <SidebarPrimaryActions onNavigate={() => setOpen(false)} />
               <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
-            </div>
-            <div className="pt-3 border-t border-[var(--border-soft)]">
-              <WorkspaceSwitcher />
             </div>
             <UserProfileFooter onNavigate={() => setOpen(false)} />
           </aside>
