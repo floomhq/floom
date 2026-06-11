@@ -3364,6 +3364,24 @@ class SqlitePersonalAccessTokenRepository:
                 (last_used_at, token_id),
             )
 
+    def rotate(self, *, token_id: str, user_id: str, token_hash: str) -> dict[str, Any] | None:
+        # #784: replace the secret hash in place, keeping the same token row
+        # (id/name/created_at/expires_at) and clearing last_used_at.
+        with get_db() as conn:
+            cursor = conn.execute(
+                "UPDATE personal_access_tokens SET token_hash = ?, last_used_at = NULL "
+                "WHERE id = ? AND user_id = ?",
+                (token_hash, token_id, user_id),
+            )
+            if cursor.rowcount == 0:
+                return None
+            row = conn.execute(
+                "SELECT id, user_id, name, last_used_at, created_at, expires_at "
+                "FROM personal_access_tokens WHERE id = ?",
+                (token_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
 
 class SqliteUserSessionRepository:
     """Server-side sessions for cookie-based auth — each session is a random UUID."""

@@ -21122,6 +21122,24 @@ def delete_token(
         raise HTTPException(status_code=404, detail="token not found")
 
 
+@app.post("/auth/tokens/{token_id}/rotate", response_model=_PATCreateResponse)
+def rotate_token(
+    token_id: str = PathParam(...),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> _PATCreateResponse:
+    """#784: rotate a PAT in place — issues a fresh raw value while keeping the
+    same token id/name. The old value stops working immediately; the new value
+    is shown once."""
+    _, _, token_repo = _require_multi_member_repos(repos)
+    raw = "wos_" + _secrets_mod.token_urlsafe(32)
+    row = token_repo.rotate(token_id=token_id, user_id=auth.user_id, token_hash=_hash_pat(raw))
+    if row is None:
+        raise HTTPException(status_code=404, detail="token not found")
+    pat = _PATOut(**{k: row[k] for k in ("id", "name", "last_used_at", "created_at", "expires_at")})
+    return _PATCreateResponse(token=raw, pat=pat)
+
+
 if __name__ == "__main__":
     import uvicorn
     from pathlib import Path as _Path
