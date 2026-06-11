@@ -3092,6 +3092,10 @@ class ContextTextWriteRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 
+class ContextFileMoveRequest(BaseModel):
+    new_path: str  # #770: destination path within the same context
+
+
 class ContextDeleteResponse(BaseModel):
     status: str
     referenced_by: List[str] = Field(default_factory=list)
@@ -6028,14 +6032,22 @@ def _context_detail(
     *,
     repos: Optional[Repositories] = None,
     user_id: str = "federico",
+    path_prefix: str | None = None,
 ) -> ContextDetail:
     root = context_dir(name)
     if not root.is_dir():
         raise HTTPException(status_code=404, detail="Context not found")
     meta = metadata if metadata is not None else load_context_metadata()
+    # #783: optional path_prefix narrows the (otherwise flat) file list to one
+    # subfolder so the Brain UI can navigate nested folders. Normalized to a
+    # trailing-slash dir prefix; matched against each file's posix relpath.
+    norm_prefix = ""
+    if path_prefix and path_prefix.strip("/"):
+        norm_prefix = path_prefix.strip("/") + "/"
     files = [
         ContextFileItem(**context_file_metadata(root, path, pack_metadata=meta.get(name) or {}))
         for path in sorted(iter_context_files(root), key=lambda p: p.relative_to(root).as_posix())
+        if not norm_prefix or path.relative_to(root).as_posix().startswith(norm_prefix)
     ]
     summary = _context_summary(name, meta, repos=repos, user_id=user_id)
     # Compute used_by and worker_count when repos is available.
@@ -6254,13 +6266,17 @@ def create_context(
 @app.get("/contexts/{name}", response_model=ContextDetail)
 def get_context(
     name: str,
+    path_prefix: Optional[str] = None,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextDetail:
     safe_name, metadata = _require_readable_context_for_user(
         name, user_id=auth.user_id, repos=repos
     )
-    return _context_detail(safe_name, metadata, repos=repos, user_id=auth.user_id)
+    # #783: ?path_prefix=reports filters the file list to that subfolder.
+    return _context_detail(
+        safe_name, metadata, repos=repos, user_id=auth.user_id, path_prefix=path_prefix
+    )
 
 
 @app.put("/contexts/{name}/visibility", response_model=ContextDetail)
@@ -6446,6 +6462,59 @@ def delete_context_file(
     author_name, author_email = _git_author(auth)
     _git_commit_context(safe_name, rel, message=f"context {safe_name}: delete {rel}", author_name=author_name, author_email=author_email)
     return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
+
+
+@app.post("/contexts/{name}/files/{file_path:path}/move", response_model=ContextFileItem)
+def move_context_file(
+    name: str,
+    file_path: str,
+    payload: ContextFileMoveRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ContextFileItem:
+    """#770: move/rename a brain file within a context, preserving git history.
+
+    DELETE old + PUT new loses version history; this renames on disk and
+    commits both paths so git records it as a rename.
+    """
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    old_rel = _context_file_path_or_400(file_path)
+    new_rel = _context_file_path_or_400(payload.new_path)
+    if old_rel == new_rel:
+        raise HTTPException(status_code=400, detail="new_path is the same as the current path")
+    src = _safe_context_file_or_400(safe_name, old_rel)
+    if not src.is_file():
+        raise HTTPException(status_code=404, detail="Context file not found")
+    dst = _safe_context_file_or_400(safe_name, new_rel)
+    if dst.exists():
+        raise HTTPException(status_code=409, detail="A file already exists at new_path")
+    dst.parent.mkdir(parents=True, exist_ok=True)
+    src.rename(dst)
+    # carry metadata to the new path, clear the old
+    old_meta = (load_context_metadata().get(safe_name, {}).get("files", {}) or {}).get(old_rel, {})
+    set_context_file_metadata(
+        safe_name, new_rel,
+        tags=old_meta.get("tags", []) or [],
+        file_metadata=old_meta.get("metadata", {}) or {},
+        owner_id=auth.user_id,
+    )
+    set_context_file_metadata(safe_name, old_rel, tags=[], file_metadata={}, owner_id=auth.user_id)
+    # prune now-empty source dirs
+    for parent in src.parents:
+        if parent == context_dir(safe_name):
+            break
+        try:
+            parent.rmdir()
+        except OSError:
+            break
+    author_name, author_email = _git_author(auth)
+    _git_commit_context(
+        safe_name, message=f"context {safe_name}: move {old_rel} -> {new_rel}",
+        author_name=author_name, author_email=author_email,
+    )
+    root = context_dir(safe_name)
+    meta = load_context_metadata()
+    return ContextFileItem(**context_file_metadata(root, dst, pack_metadata=meta.get(safe_name) or {}))
 
 
 @app.post("/contexts/{name}/upload", response_model=ContextUploadResponse)
