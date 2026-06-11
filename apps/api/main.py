@@ -66,6 +66,7 @@ from dotenv import load_dotenv
 
 from auth import AuthContext, get_auth_context, get_auth_provider
 from auth.context import current_auth_context, current_auth_user_id, set_current_auth_context
+from auth.guards import _require_admin, _require_workspace_write
 from auth.local_workspaces import (
     DEFAULT_WORKSPACE_ID,
     create_local_workspace,
@@ -18297,24 +18298,6 @@ def _require_multi_member_repos(repos: Repositories):
     if repos.users is None or repos.sessions is None or repos.tokens is None:
         raise HTTPException(status_code=503, detail="multi-member not available")
     return repos.users, repos.sessions, repos.tokens
-
-
-def _require_admin(auth: AuthContext) -> None:
-    if not auth.is_admin:
-        raise HTTPException(status_code=403, detail="admin required")
-
-
-def _require_workspace_write(auth: AuthContext) -> None:
-    """#804: workspace instructions (workspace.md / workspace.base.md) are admin-write.
-
-    Members are read-only and get a server-enforced 403 — not merely a hidden UI.
-    AI worker-authoring still works: run-token auth carries role="member" by design
-    (see auth/multi_member.py), so allow auth_method=="run_token" through; those calls
-    are what the handlers record as source="ai".
-    """
-    if auth.is_admin or auth.auth_method == "run_token":
-        return
-    raise HTTPException(status_code=403, detail="admin required to edit workspace instructions")
 
 
 @app.post("/auth/setup", response_model=_UserOut, status_code=201)
