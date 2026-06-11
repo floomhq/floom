@@ -31,14 +31,15 @@ def booted(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DRAFT_RATE_HOUR", "100")
     monkeypatch.setenv("WORKEROS_RUN_CREATE_RATE_LIMIT", "100")
 
-    for name in [
-        "main", "db", "db._legacy_sqlite", "db.sqlite", "db.factory",
-        "db.dependency", "db.interface", "models", "files", "worker_registry",
-        "runner_utils", "run_service", "webhook_service", "composio_client",
-        "scheduler", "auth", "auth.context", "auth.dependency", "auth.factory",
-        "auth.interface", "auth.local", "contexts", "chat_service",
-    ]:
-        sys.modules.pop(name, None)
+    for name in list(sys.modules):
+        if name in (
+            "main", "db", "db._legacy_sqlite", "db.sqlite", "db.factory",
+            "db.dependency", "db.interface", "models", "files", "worker_registry",
+            "runner_utils", "run_service", "webhook_service", "composio_client",
+            "scheduler", "auth", "auth.context", "auth.dependency", "auth.factory",
+            "auth.interface", "auth.local", "contexts", "chat_service",
+        ) or name.startswith("routers"):
+            sys.modules.pop(name, None)
 
     db = importlib.import_module("db")
     db.init_db()

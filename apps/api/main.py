@@ -179,7 +179,7 @@ import git_ops as _git_ops
 from services.git_service import _git_workspace, _git_author
 # Small pure utilities live in core.utils; re-exported for this module's call
 # sites and for channels/* + tests that import them from `main`.
-from core.utils import row_to_dict, _parse_iso8601
+from core.utils import row_to_dict, _parse_iso8601, _positive_int_env
 # Public base-URL resolvers live in core.urls; re-exported for call sites here.
 from core.urls import (
     _short_link_base_url,
@@ -4603,21 +4603,6 @@ _UPLOAD_BLOCKED_EXTENSIONS = frozenset({
 })
 _upload_quota_lock = threading.Lock()
 _upload_quota_store: Dict[str, collections.deque] = {}
-
-
-def _positive_int_env(name: str, default: int) -> int:
-    raw = os.environ.get(name)
-    if raw is None:
-        return default
-    try:
-        value = int(raw)
-    except ValueError:
-        return default
-    return value if value > 0 else default
-
-
-def _chat_message_max_chars() -> int:
-    return _positive_int_env("WORKEROS_CHAT_MESSAGE_MAX_CHARS", DEFAULT_CHAT_MESSAGE_MAX_CHARS)
 
 
 def _upload_max_bytes() -> int:
@@ -16003,6 +15988,9 @@ from routers.cli_auth import (
 )
 app.include_router(cli_auth_router)
 
+from routers.chat import chat_router
+app.include_router(chat_router)
+
 # ---------------------------------------------------------------------------
 # WhatsApp integration — extracted to channels/whatsapp.py
 # ---------------------------------------------------------------------------
@@ -18737,30 +18725,6 @@ def rotate_webhook_secret(
 # ---------------------------------------------------------------------------
 
 
-class ChatRequest(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-
-    message: str
-    conversation_id: Optional[str] = None
-    source: Literal["web", "slack", "mcp", "whatsapp", "cli"] = "web"
-
-
-class ConversationSummary(BaseModel):
-    id: str
-    title: Optional[str] = None
-    created_at: str
-    updated_at: str
-    message_count: int
-
-
-class ConversationDetail(BaseModel):
-    id: str
-    title: Optional[str] = None
-    created_at: str
-    updated_at: str
-    messages: List[Dict[str, Any]]
-
-
 @app.get("/workspace")
 async def get_workspace(auth: AuthContext = Depends(get_auth_context)) -> PlainTextResponse:
     """Return the current workspace.md content."""
@@ -19084,197 +19048,6 @@ async def put_workspace(
     author_name, author_email = _git_author(auth)
     _git_commit_workspace_md(message=f"workspace: update instructions ({source})", author_name=author_name, author_email=author_email)
     return Response(status_code=204)
-
-
-class _ChatAttachmentOut(BaseModel):
-    name: str
-    size: int
-    type: str
-    text: Optional[str] = None
-    truncated: bool = False
-
-
-_CHAT_ATTACHMENT_TEXT_EXTS = (
-    ".txt", ".md", ".markdown", ".csv", ".json", ".yml", ".yaml", ".log",
-    ".py", ".js", ".ts", ".tsx", ".html", ".xml", ".toml", ".ini", ".sql",
-)
-
-
-@app.post("/chat/attachments", response_model=List[_ChatAttachmentOut])
-async def upload_chat_attachments(
-    files: List[UploadFile] = File(...),
-    auth: AuthContext = Depends(get_auth_context),
-) -> List[_ChatAttachmentOut]:
-    """#778: accept Emily chat attachments. Text-like files are decoded so their
-    content rides along in the next message; binaries return metadata only."""
-    max_text = 200_000  # chars of extracted text per file
-    out: List[_ChatAttachmentOut] = []
-    for f in files:
-        data = await f.read()
-        name = f.filename or "attachment"
-        ctype = (f.content_type or "").lower()
-        text: Optional[str] = None
-        truncated = False
-        is_text = ctype.startswith("text/") or name.lower().endswith(_CHAT_ATTACHMENT_TEXT_EXTS)
-        if is_text:
-            decoded = data.decode("utf-8", errors="replace")
-            if len(decoded) > max_text:
-                decoded = decoded[:max_text]
-                truncated = True
-            text = decoded
-        out.append(_ChatAttachmentOut(
-            name=name, size=len(data),
-            type=ctype or "application/octet-stream",
-            text=text, truncated=truncated,
-        ))
-    return out
-
-
-@app.post("/chat")
-async def post_chat(
-    payload: ChatRequest,
-    request: Request,
-    auth: AuthContext = Depends(get_auth_context),
-) -> StreamingResponse:
-    """Stream a workspace agent response as Server-Sent Events.
-
-    Each SSE event is a JSON-encoded AI SDK part:
-      {"type": "text", "text": "..."}
-      {"type": "tool-call", "toolName": "...", "args": {...}, "callId": "..."}
-      {"type": "tool-result", "callId": "...", "result": {...}}
-      {"type": "finish", "conversation_id": "...", "message_id": "..."}
-    """
-    import asyncio
-    from chat_service import stream_chat
-
-    message = payload.message.strip()
-    if not message:
-        raise HTTPException(status_code=400, detail="message is required")
-    max_chars = _chat_message_max_chars()
-    if len(message) > max_chars:
-        raise HTTPException(
-            status_code=413,
-            detail=f"message exceeds {max_chars} character limit",
-        )
-    # /chat calls OpenAI per request; enforce a per-user quota so a single
-    # caller cannot run up an unbounded LLM bill (the shared IP limiter is too
-    # loose for a paid-LLM path).
-    _enforce_chat_quota(auth)
-
-    part_queue: asyncio.Queue = asyncio.Queue(maxsize=1024)
-    loop = asyncio.get_running_loop()
-
-    async def _run_in_thread():
-        """Execute the agent in a thread (agent driver is sync-bridged)."""
-        try:
-            await stream_chat(
-                message=message,
-                user_id=auth.user_id,
-                conversation_id=payload.conversation_id,
-                part_queue=part_queue,
-                source=payload.source,
-            )
-        except Exception as exc:
-            logger.exception("chat background task failed")
-            try:
-                await part_queue.put({"type": "error", "error": str(exc)})
-                await part_queue.put({"type": "finish", "conversation_id": None, "message_id": None})
-            except Exception:
-                pass
-
-    task = loop.create_task(_run_in_thread())
-
-    async def event_generator():
-        while True:
-            if await request.is_disconnected():
-                task.cancel()
-                break
-            try:
-                part = await asyncio.wait_for(part_queue.get(), timeout=5.0)
-            except asyncio.TimeoutError:
-                yield ": keepalive\n\n"
-                continue
-            yield f"data: {json.dumps(part, default=str)}\n\n"
-            if part.get("type") == "finish":
-                break
-
-    return StreamingResponse(
-        event_generator(),
-        media_type="text/event-stream",
-        headers={
-            "Cache-Control": "no-cache",
-            "X-Accel-Buffering": "no",
-        },
-    )
-
-
-@app.get("/conversations", response_model=List[ConversationSummary])
-async def list_conversations(
-    auth: AuthContext = Depends(get_auth_context),
-    limit: int = Query(default=50, ge=1, le=200),
-) -> List[Dict[str, Any]]:
-    """List conversations for the authenticated user."""
-    from chat_service import list_conversations as _list
-    return _list(auth.user_id, limit=limit)
-
-
-@app.get("/conversations/{conversation_id}")
-async def get_conversation_detail(
-    conversation_id: str,
-    auth: AuthContext = Depends(get_auth_context),
-) -> Dict[str, Any]:
-    """Get a conversation with its messages."""
-    from chat_service import get_conversation, list_conversation_messages, list_conversation_tool_cards
-    conv = get_conversation(conversation_id, auth.user_id)
-    if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    messages = list_conversation_messages(conversation_id, auth.user_id)
-    tool_cards = list_conversation_tool_cards(conversation_id, auth.user_id)
-    return {**conv, "messages": messages, "tool_cards": tool_cards}
-
-
-@app.get("/conversations/{conversation_id}/export")
-async def export_conversation(
-    conversation_id: str,
-    format: str = "md",
-    auth: AuthContext = Depends(get_auth_context),
-) -> Response:
-    """#776: download a conversation transcript as a markdown attachment.
-
-    The Emily header 'Export chat' button had no backend; GET /conversations/
-    {id} returns JSON but is not a download. This renders the message turns as
-    markdown with a Content-Disposition attachment header.
-    """
-    if format != "md":
-        raise HTTPException(status_code=422, detail="only format=md is supported")
-    from chat_service import get_conversation, list_conversation_messages
-    conv = get_conversation(conversation_id, auth.user_id)
-    if not conv:
-        raise HTTPException(status_code=404, detail="Conversation not found")
-    messages = list_conversation_messages(conversation_id, auth.user_id)
-
-    title = str(conv.get("title") or "Conversation")
-    lines = [f"# {title}", ""]
-    role_label = {"user": "You", "assistant": "Emily"}
-    for msg in messages:
-        role = str(msg.get("role") or "")
-        if role == "tool":
-            continue  # tool results are represented by their cards, not transcript prose
-        content = str(msg.get("content") or "").strip()
-        if not content:
-            continue
-        who = role_label.get(role, role.capitalize() or "Unknown")
-        ts = str(msg.get("created_at") or "")
-        header = f"## {who}" + (f" — {ts}" if ts else "")
-        lines.extend([header, "", content, ""])
-    body = "\n".join(lines).rstrip() + "\n"
-
-    safe_id = re.sub(r"[^A-Za-z0-9_-]+", "-", conversation_id)[:60] or "conversation"
-    return Response(
-        content=body,
-        media_type="text/markdown; charset=utf-8",
-        headers={"Content-Disposition": f'attachment; filename="chat-{safe_id}.md"'},
-    )
 
 
 # ---------------------------------------------------------------------------
