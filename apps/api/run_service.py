@@ -3500,6 +3500,18 @@ def execute_run(
             preview = decision_required.get("preview") or ""
             decision_input_json = json.dumps(effective_inputs)
             now_ts = _now_iso()
+            # #798: pending approvals auto-expire after APPROVAL_TTL_HOURS (24h
+            # default) so a run never sits pending forever. #792: a worker may
+            # declare a typed preview (email/records/tasks) for a rich render.
+            try:
+                _ttl_hours = float(os.environ.get("APPROVAL_TTL_HOURS", "24") or "24")
+            except ValueError:
+                _ttl_hours = 24.0
+            from datetime import datetime as _dt, timedelta as _td, timezone as _tz
+            expires_at = (_dt.now(_tz.utc) + _td(hours=_ttl_hours)).isoformat()
+            preview_type = decision_required.get("preview_type") or decision_required.get("type")
+            preview_payload = decision_required.get("preview_payload")
+            preview_payload_json = json.dumps(preview_payload) if isinstance(preview_payload, (dict, list)) else None
             try:
                 repos_obj.approvals.create(
                     owner_id=owner_id,
@@ -3510,6 +3522,9 @@ def execute_run(
                     label=label,
                     preview=preview,
                     created_at=now_ts,
+                    expires_at=expires_at,
+                    preview_type=(str(preview_type) if preview_type else None),
+                    preview_payload_json=preview_payload_json,
                     decision_input_json=decision_input_json,
                 )
             except Exception as exc:
