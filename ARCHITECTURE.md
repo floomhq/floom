@@ -77,6 +77,41 @@ Every response includes: HSTS (max-age 31536000), X-Frame-Options DENY, Content-
 4. If you want to test the API surface (auth, rate limit, input validation, path traversal, etc.), point your tools at `workers-api.floom.dev`.
 5. Read this file before filing any "workers can compromise the platform" finding.
 
+## Backend module layout (`apps/api`)
+
+The FastAPI backend is being decomposed from a single large `main.py` into focused
+modules. The dependency direction is strictly downward — `main → routers → services → core`
+— so nothing in `core`/`services`/`routers` imports `main` (avoiding import cycles).
+`main.py` remains the application aggregator: it builds the FastAPI app + middleware +
+lifespan, mounts the routers, and re-exports moved names for backward compatibility.
+
+- **`core/`** — dependency-light building blocks, no app state:
+  - `config.py` — env-driven settings + static constants (rate-limit rules, stock/system
+    worker ids, system context packs, deploy-mode predicates, bootstrap user id).
+  - `utils.py` — pure helpers (`row_to_dict`, `_parse_iso8601`).
+  - `urls.py` — public base-URL resolvers (API / frontend / short-link).
+  - `net.py` — client-IP resolution with trusted-proxy handling.
+- **`services/`** — business-logic helpers shared across route groups (import `core` + the
+  leaf modules `db`/`auth`/`models`/`worker_registry`/`contexts`, never `main`):
+  - `git_service.py` — git workspace + commit-identity resolution.
+  - `worker_access.py` — worker visibility / access-control / share-grant resolution.
+  - `context_access.py` — knowledge-pack visibility, file-path validation, serializers.
+  - `public_view.py` — operator log/error redaction + public SSE/run-part shaping.
+  - `sse_streaming.py` — in-process SSE registry + run streaming pub/sub.
+  - `quota.py` — durable per-user run/chat rate quotas (DB sliding window).
+- **`routers/`** — HTTP route groups as `APIRouter`s mounted by `main` via
+  `include_router(...)` (e.g. `cli_auth.py`). See also `channels/` (Slack, etc.).
+
+### Conventions when extracting from `main.py`
+- Tests reload modules (`db`, `auth`/`auth.context`, `worker_registry`, `contexts`, `main`,
+  `routers.*`) from disk between cases. A module that is NOT reloaded must import those
+  **lazily inside functions** (resolve the live module at call time) — except names used in
+  route signatures (`Depends(...)`, annotated params), which FastAPI resolves at build time
+  and so must be real module-level imports; that router is then purged alongside `main` in
+  the relevant fixtures.
+- Some tests inspect backend source as text for security/correctness invariants. They read a
+  whole-backend corpus (`tests/_api_source.py`), so an invariant may live in any module.
+
 ## How to operate
 
 - API: `systemctl {status,restart} workeros-api.service`
