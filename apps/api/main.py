@@ -174,30 +174,10 @@ from worker_registry import (
 )
 import git_ops as _git_ops
 
+# Git workspace + commit-identity helpers live in services.git_service; re-export
+# for the many call sites in this module and for backward compatibility.
+from services.git_service import _git_workspace, _git_author
 
-def _git_workspace() -> Path:
-    """Return the git workspace root for the current request.
-
-    OSS (single-tenant): WORKEROS_WORKSPACE_DIR env var, or WORKERS_DIR.parent.
-    Cloud (multi-tenant): WORKERS_DIR / {workspace_id} — one git repo per workspace,
-    resolved via the workspace_id resolver registered by workeros-cloud at startup.
-    """
-    custom = os.environ.get("WORKEROS_WORKSPACE_DIR", "").strip()
-    if custom:
-        return Path(custom).resolve()
-    workspace_id = _git_ops.get_active_workspace_id()
-    if workspace_id:
-        # Cloud: each workspace has its own git repo under WORKERS_DIR
-        return (WORKERS_DIR / workspace_id).resolve()
-    # OSS: single workspace at WORKERS_DIR.parent
-    return WORKERS_DIR.parent.resolve()
-
-
-def _git_author(auth: "AuthContext") -> tuple[str, str]:
-    """Return (author_name, author_email) suitable for a git commit."""
-    name = getattr(auth, "username", None) or getattr(auth, "user_id", None) or "WorkerOS"
-    email = getattr(auth, "email", None) or f"{name}@workeros.local"
-    return name, email
 from run_service import (
     create_run,
     fail_interrupted_runs_on_startup,
