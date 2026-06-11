@@ -18,6 +18,12 @@ const geistMono = Geist_Mono({
 export const metadata: Metadata = {
   title: "WorkerOS",
   description: "Workers that use your tools. Run them on schedule, webhook, or approval.",
+  icons: {
+    // Single SVG favicon that adapts via prefers-color-scheme inside the SVG.
+    // Browsers that support media-query favicons get separate light/dark PNGs
+    // via the <link> tags injected in the <head> below.
+    icon: "/icon.svg",
+  },
 };
 
 export default function RootLayout({
