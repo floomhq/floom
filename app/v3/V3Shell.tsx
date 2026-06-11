@@ -44,13 +44,14 @@ const NAV = [
   ["Product", "/v3/product"],
   ["Templates", "/v3/templates"],
   ["Docs", "/v3/docs"],
+  ["About", "/v3/about"],
 ] as const;
 
 export function V3Shell({
   active,
   children,
 }: {
-  active?: "product" | "templates" | "docs";
+  active?: "product" | "templates" | "docs" | "about";
   children: React.ReactNode;
 }) {
   const [mode, setMode] = useState<ThemeMode>("system");
@@ -105,14 +106,19 @@ export function V3Shell({
       </div>
 
       <footer className="border-t border-border-soft">
-        <div className="mx-auto flex max-w-[1000px] items-center justify-between px-7 py-6 text-[12px] text-muted-foreground">
+        <div className="mx-auto flex max-w-[1000px] flex-col gap-4 px-7 py-6 text-[12px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:gap-0">
           <span>Workeros by Floom · Backed by Founders Inc</span>
-          <span className="flex gap-4">
+          <span className="flex flex-wrap gap-4">
             <Link href="/v3/product" className="transition-colors hover:text-foreground">Product</Link>
             <Link href="/v3/templates" className="transition-colors hover:text-foreground">Templates</Link>
             <Link href="/v3/docs" className="transition-colors hover:text-foreground">Docs</Link>
+            <Link href="/v3/about" className="transition-colors hover:text-foreground">About</Link>
             <Link href="/privacy" className="transition-colors hover:text-foreground">Privacy</Link>
             <Link href="/terms" className="transition-colors hover:text-foreground">Terms</Link>
+            <a href="https://github.com/floomhq/workeros" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">GitHub</a>
+            <a href="https://www.linkedin.com/company/floomhq/" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">LinkedIn</a>
+            {/* TODO(Federico): confirm official X handle — withheld rather than guessed.
+            <a href="https://x.com/floomhq" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">X</a> */}
           </span>
         </div>
       </footer>
