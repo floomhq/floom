@@ -17,7 +17,7 @@ import {
 import {
   workspacesListCommand,
   workspacesShowCommand,
-  workspacesUseCommand,
+  workspacesSwitchCommand,
 } from "./commands/workspaces.js";
 import {
   runsDownloadCommand,
@@ -34,7 +34,12 @@ import {
   connectionsImportMcpConfigCommand,
   connectionsListCommand,
 } from "./commands/connections.js";
-import { mcpInstallCommand, mcpUninstallCommand } from "./commands/mcp.js";
+import {
+  mcpInstallCommand,
+  mcpListCommand,
+  mcpSwitchCommand,
+  mcpUninstallCommand,
+} from "./commands/mcp.js";
 import { completionCommand } from "./commands/completion.js";
 import { doctorCommand } from "./commands/doctor.js";
 import { main as runServer } from "./server.js";
@@ -129,19 +134,22 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
       options: { input?: string[]; inputsFile?: string; outputDir?: string; json?: boolean },
     ) => runAction(runWorkerCommand(id, options)));
 
-  const workspaces = program.command("workspaces").description("Manage Workeros Cloud workspaces");
+  const workspaces = program.command("workspaces")
+    .alias("workspace")
+    .description("Manage workspaces");
   workspaces.command("list")
-    .description("List workspaces you can access")
+    .description("List workspaces your credentials can access")
     .option("--json", "Print raw JSON")
     .action(async (options: { json?: boolean }) => runAction(workspacesListCommand(options)));
   workspaces.command("show")
     .description("Show the currently active workspace")
     .option("--json", "Print raw JSON")
     .action(async (options: { json?: boolean }) => runAction(workspacesShowCommand(options)));
-  workspaces.command("use")
-    .description("Set the active workspace (matches by name or id)")
+  workspaces.command("switch")
+    .alias("use")
+    .description("Switch the active workspace (matches by name or id; requires authenticated access)")
     .argument("<name-or-id>", "Workspace name or id")
-    .action(async (target: string) => runAction(workspacesUseCommand(target)));
+    .action(async (target: string) => runAction(workspacesSwitchCommand(target)));
 
   const runs = program.command("runs").description("Inspect worker runs");
   runs.command("list")
@@ -195,7 +203,15 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
     .action(async (path: string, options: { json?: boolean }) =>
       runAction(connectionsImportMcpConfigCommand(path, options)));
 
-  const mcp = program.command("mcp").description("Manage MCP client config");
+  const mcp = program.command("mcp").description("Manage MCP servers and client config");
+  mcp.command("list")
+    .description("List configured MCP servers and mark the active one")
+    .option("--json", "Print raw JSON")
+    .action(async (options: { json?: boolean }) => runAction(mcpListCommand(options)));
+  mcp.command("switch")
+    .description("Switch the active MCP server (matches by label)")
+    .argument("<name>", "MCP server label")
+    .action(async (target: string) => runAction(mcpSwitchCommand(target)));
   mcp.command("add")
     .description("Add Workeros to an MCP client config")
     .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")

@@ -52,9 +52,13 @@ Cloud workspaces use the cloud login flow:
 
 ```bash
 workeros login --cloud
-workeros workspaces list
-workeros workspaces use <workspace-name-or-id>
+workeros workspace list
+workeros workspace switch <workspace-name-or-id>
 ```
+
+Workspace switching also works for OSS local workspaces. `workeros mcp list` /
+`workeros mcp switch <label>` switch the active MCP server the same way.
+`workspaces` and `use` remain as aliases.
 
 Credentials live in `~/.config/workeros/credentials.json`.
 
