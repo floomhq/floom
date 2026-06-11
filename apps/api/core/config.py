@@ -8,7 +8,28 @@ every name below for backward compatibility with existing imports.
 
 from __future__ import annotations
 
+import os
 import re
+
+
+# ---------------------------------------------------------------------------
+# Deployment mode
+# ---------------------------------------------------------------------------
+
+def _is_cloud_deploy() -> bool:
+    """True when running in multi-tenant cloud mode.
+
+    In cloud mode the shared filesystem WORKERS_DIR holds bundles from
+    multiple tenants and MUST NOT be used as a fallback list source for
+    any per-user endpoint. Defaults to False when WORKEROS_DEPLOY is unset
+    so OSS single-tenant installs keep their first-time UX (empty DB ->
+    enumerate filesystem).
+    """
+    return (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud"
+
+
+def _user_scoped_local_mode() -> bool:
+    return os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1"
 
 
 # ---------------------------------------------------------------------------

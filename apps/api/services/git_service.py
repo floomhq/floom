@@ -12,9 +12,6 @@ import os
 from pathlib import Path
 from typing import TYPE_CHECKING
 
-import git_ops as _git_ops
-from worker_registry import WORKERS_DIR
-
 if TYPE_CHECKING:
     from auth import AuthContext
 
@@ -25,7 +22,14 @@ def _git_workspace() -> Path:
     OSS (single-tenant): WORKEROS_WORKSPACE_DIR env var, or WORKERS_DIR.parent.
     Cloud (multi-tenant): WORKERS_DIR / {workspace_id} — one git repo per workspace,
     resolved via the workspace_id resolver registered by managed-deployment at startup.
+
+    git_ops and worker_registry are resolved lazily: the test suite pops and
+    re-imports worker_registry (with a temp WORKERS_DIR) between cases, so binding
+    WORKERS_DIR at module load would pin this helper to a stale directory.
     """
+    import git_ops as _git_ops
+    from worker_registry import WORKERS_DIR
+
     custom = os.environ.get("WORKEROS_WORKSPACE_DIR", "").strip()
     if custom:
         return Path(custom).resolve()
