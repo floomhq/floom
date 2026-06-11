@@ -515,3 +515,43 @@ def test_legacy_mode_dm_routes_to_bootstrap_user(monkeypatch, tmp_path):
 
     assert resp.status_code == 200
     assert routed, "legacy mode must run the agent even for unbound sender"
+
+
+# ---------------------------------------------------------------------------
+# Short claim-link host (regression: /c/ must resolve on the host that serves it)
+# ---------------------------------------------------------------------------
+
+def test_slack_short_claim_url_built_on_host_that_serves_c(monkeypatch, tmp_path):
+    """The short /c/ link MUST be built on the API host that actually serves /c/.
+
+    The /c/{token} redirect route lives on the FastAPI app
+    (workers-api.floom.dev), NOT on the Next.js web app (workers.floom.dev).
+    Building it on WORKERS_FRONTEND_URL produced a dead link. Must use the
+    public API base.
+    """
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.slack as _slack_mod
+
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    monkeypatch.setenv("WORKEROS_PUBLIC_API_URL", "https://workers-api.floom.dev")
+
+    short_url = _slack_mod._slack_short_claim_url("tok456")
+    assert short_url == "https://workers-api.floom.dev/c/tok456"
+    assert "/c/" in short_url
+    # The long claim URL still targets the frontend /settings page (unchanged).
+    assert _slack_mod._slack_claim_url("tok456") == (
+        "https://workers.floom.dev/settings?slack_claim=tok456"
+    )
+
+
+def test_slack_short_claim_url_defaults_to_api_host(monkeypatch, tmp_path):
+    """With no overrides, the short link defaults to the API host, not the web host."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.slack as _slack_mod
+
+    for var in ("WORKEROS_PUBLIC_API_URL", "WORKEROS_API_URL", "WORKERS_API_URL"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+
+    short_url = _slack_mod._slack_short_claim_url("deftok2")
+    assert short_url == "https://workers-api.floom.dev/c/deftok2"
