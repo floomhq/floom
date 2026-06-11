@@ -50,6 +50,48 @@ WORKSPACE_MD_PATH = _workspace_root() / "workspace.md"
 WORKSPACE_BASE_PERSONA_PATH = _workspace_root() / "workspace.base.md"
 WORKSPACE_MD_TEMPLATE = Path(__file__).resolve().parents[3] / "workspace.md.template"
 
+
+def _active_non_default_workspace_id() -> Optional[str]:
+    """#866: the active NON-default workspace id, or None for the default /
+    single-workspace case.
+
+    workspace.md and workspace.base.md were process-global, so a second local
+    workspace shared (and could overwrite or leak into) the first's
+    instructions. This resolves the active workspace from either the cloud
+    per-request resolver or the OSS scoped auth user id (``base__ws_<hex>``),
+    returning a validated ``ws_<14hex>`` id that can never contain path
+    traversal. Returns None for ``local-default`` so the default workspace
+    keeps using the legacy global path (zero behaviour change).
+    """
+    wsid: Optional[str] = None
+    try:
+        import git_ops as _git_ops_mod
+        wsid = _git_ops_mod.get_active_workspace_id()
+    except Exception:
+        wsid = None
+    if not wsid:
+        try:
+            from auth.context import current_auth_context
+            ctx = current_auth_context()
+            match = re.search(r"__(ws_[a-f0-9]{14})$", (ctx.user_id if ctx else "") or "")
+            if match:
+                wsid = match.group(1)
+        except Exception:
+            wsid = None
+    if not wsid or wsid == "local-default":
+        return None
+    return wsid if re.fullmatch(r"ws_[a-f0-9]{14}", str(wsid)) else None
+
+
+def _workspace_md_path() -> Path:
+    sub = _active_non_default_workspace_id()
+    return (_workspace_root() / "workspaces" / sub / "workspace.md") if sub else WORKSPACE_MD_PATH
+
+
+def _workspace_base_persona_path() -> Path:
+    sub = _active_non_default_workspace_id()
+    return (_workspace_root() / "workspaces" / sub / "workspace.base.md") if sub else WORKSPACE_BASE_PERSONA_PATH
+
 EMILY_BASE_PERSONA = """# Emily
 
 I'm Emily, your chief of staff. I get work done for you and your company.
@@ -271,34 +313,37 @@ def _ensure_bare_greeting_identity(message: str, reply: str) -> str:
 
 def get_workspace_base_persona() -> str:
     """Return the editable base persona override, or the engine default."""
-    if WORKSPACE_BASE_PERSONA_PATH.is_file():
-        return WORKSPACE_BASE_PERSONA_PATH.read_text(encoding='utf-8')
+    path = _workspace_base_persona_path()  # #866: per active workspace
+    if path.is_file():
+        return path.read_text(encoding='utf-8')
     return EMILY_BASE_PERSONA
 
 
 def set_workspace_base_persona(content: str) -> None:
     """Overwrite the optional base persona override."""
-    WORKSPACE_BASE_PERSONA_PATH.parent.mkdir(parents=True, exist_ok=True)
-    WORKSPACE_BASE_PERSONA_PATH.write_text(content, encoding='utf-8')
+    path = _workspace_base_persona_path()  # #866
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding='utf-8')
 
 
 def base_persona_is_custom() -> bool:
     """True when a saved override exists (vs the built-in engine default)."""
-    return WORKSPACE_BASE_PERSONA_PATH.is_file()
+    return _workspace_base_persona_path().is_file()  # #866
 
 
 def clear_workspace_base_persona() -> None:
     """Remove the override so the built-in engine default applies again."""
     try:
-        WORKSPACE_BASE_PERSONA_PATH.unlink(missing_ok=True)
+        _workspace_base_persona_path().unlink(missing_ok=True)  # #866
     except OSError:
         pass
 
 
 def get_workspace_md() -> str:
     """Return editable workspace custom instructions, or a custom-only default."""
-    if WORKSPACE_MD_PATH.is_file():
-        return WORKSPACE_MD_PATH.read_text(encoding='utf-8')
+    path = _workspace_md_path()  # #866: per active workspace
+    if path.is_file():
+        return path.read_text(encoding='utf-8')
     if WORKSPACE_MD_TEMPLATE.is_file():
         return WORKSPACE_MD_TEMPLATE.read_text(encoding='utf-8')
     return DEFAULT_WORKSPACE_CUSTOM_INSTRUCTIONS
@@ -339,8 +384,9 @@ def unwrap_workspace_body(body: str) -> str:
 
 def set_workspace_md(content: str) -> None:
     """Overwrite workspace.md."""
-    WORKSPACE_MD_PATH.parent.mkdir(parents=True, exist_ok=True)
-    WORKSPACE_MD_PATH.write_text(content, encoding='utf-8')
+    path = _workspace_md_path()  # #866
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(content, encoding='utf-8')
 
 
 def _settings_bool(value: Any, default: bool) -> bool:
