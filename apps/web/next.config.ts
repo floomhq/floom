@@ -120,6 +120,22 @@ const nextConfig: NextConfig = {
       },
     ];
   },
+  // Branded claim short-link: /c/:token is served by the FastAPI app (the
+  // /c/{token} route lives on workers-api.floom.dev, NOT here). Proxy it so the
+  // branded workers.floom.dev/c/:token also resolves. The upstream then 302s to
+  // /settings?whatsapp_claim= | ?slack_claim= on this web app (auth-gated, which
+  // is correct — only the short-link hop is public, via middleware below).
+  async rewrites() {
+    const apiBase = (
+      process.env.FLOOM_API_BASE || "https://workers-api.floom.dev"
+    ).replace(/\/$/, "");
+    return [
+      {
+        source: "/c/:token",
+        destination: `${apiBase}/c/:token`,
+      },
+    ];
+  },
   async headers() {
     return [
       {
