@@ -3,6 +3,12 @@
 import { useEffect, useState } from "react";
 import { ArrowLeft, Download } from "lucide-react";
 import { isImageFile } from "@/lib/runs/trace";
+import { SqliteTableView } from "@/components/file-viewer/SqliteTableView";
+import type { SqliteView } from "@/lib/types";
+
+function isDbFile(name: string): boolean {
+  return /\.(db|sqlite|sqlite3)$/i.test(name);
+}
 
 // APP-UI-V4-SPEC rule #5 / §4: ONE inline file-open pattern, shared by Brain and
 // Run outputs. Files open INLINE (breadcrumb `<root> / file`, Back, Download) —
@@ -27,12 +33,15 @@ export function InlineFileOpen({
   rootLabel,
   emptyLabel = "No files.",
   loadText,
+  loadSqlite,
 }: {
   files: InlineFile[];
   rootLabel: string;
   emptyLabel?: string;
   /** Text-content loader (Brain: readTextFile). Omitted → download-only fallback. */
   loadText?: (file: InlineFile) => Promise<string>;
+  /** #777: load a .db file's tables/rows for the inline SQLite viewer. */
+  loadSqlite?: (file: InlineFile, table?: string) => Promise<SqliteView>;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [text, setText] = useState<string | null>(null);
@@ -114,12 +123,15 @@ export function InlineFileOpen({
               {text ?? ""}
             </pre>
           )
+        ) : isDbFile(open.name) && loadSqlite ? (
+          // #777: inline SQLite table viewer (Brain supplies the loader).
+          <SqliteTableView load={(table) => loadSqlite(open, table)} />
         ) : (
           <div style={{ color: "var(--muted-foreground)", padding: 14 }}>
-            {/* TODO(#777): SQLite .db table viewer; TODO(#815): richer artifact preview. */}
-            {open.binary && open.name.endsWith(".db")
-              ? "SQLite database — an inline table viewer is coming (#777). Use Download for now."
+            {isDbFile(open.name)
+              ? "SQLite database — use Download to open this file."
               : "Preview isn't available inline yet — use Download to open this file."}
+            {/* TODO(#815): richer artifact preview. */}
           </div>
         )}
       </div>
