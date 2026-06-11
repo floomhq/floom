@@ -12909,6 +12909,71 @@ def reject_agent_tool_approval(
     return ActionResponse(status="rejected", run_id=str(approval["run_id"]))
 
 
+class _RunExportRequest(BaseModel):
+    run_ids: List[str] = Field(..., min_length=1, max_length=200)
+
+
+@app.post("/runs/export")
+def export_runs_bundle(
+    body: _RunExportRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """#796: bulk-export multiple runs as one ZIP — `run-<id>/` per run, reusing
+    the single-run bundle's redaction rules (no inputs/logs/transcripts; sensitive
+    + out-of-root artifacts skipped)."""
+    from runner_utils import ARTIFACTS_DIR
+    artifacts_root = ARTIFACTS_DIR.resolve()
+    archive_buffer = io.BytesIO()
+    included = 0
+    with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for run_id in body.run_ids:
+            run_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
+            if not run_row:
+                continue
+            run_data = row_to_dict(run_row)
+            prefix = f"run-{_sanitize_download_name(str(run_data.get('id') or run_id))}/"
+            output_payload = json.loads(run_row["output_json"] or "{}")
+            if not isinstance(output_payload, dict):
+                output_payload = {}
+            metadata = {
+                k: run_data.get(k)
+                for k in ("id", "worker_id", "status", "trigger_source", "runner",
+                          "created_at", "started_at", "completed_at", "duration_ms")
+            }
+            archive.writestr(prefix + "metadata.json", json.dumps(metadata, indent=2, sort_keys=True))
+            archive.writestr(prefix + "outputs.json", json.dumps(output_payload, indent=2, sort_keys=True))
+            primary = _extract_primary_output_file(output_payload)
+            if primary:
+                out_name, out_bytes = primary
+                archive.writestr(prefix + out_name, out_bytes)
+            for row in repos.runs.list_artifacts(user_id=auth.user_id, run_id=run_id):
+                if _is_sensitive_artifact_row(row):
+                    continue
+                try:
+                    resolved = Path(row["path"] or "").resolve()
+                    resolved.relative_to(artifacts_root)
+                except Exception:
+                    continue
+                if not resolved.is_file():
+                    continue
+                safe = _sanitize_download_name(str(row["name"] or resolved.name))
+                archive.writestr(prefix + "artifacts/" + safe, resolved.read_bytes())
+            included += 1
+        if included == 0:
+            raise HTTPException(status_code=404, detail="No exportable runs found")
+        archive.writestr(
+            "README.txt",
+            "Bulk run export. Inputs, logs and internal transcripts are omitted.\n",
+        )
+    archive_buffer.seek(0)
+    return Response(
+        content=archive_buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="runs-export.zip"'},
+    )
+
+
 @app.get("/runs/{run_id}/download")
 def download_run_bundle(
     run_id: str,
