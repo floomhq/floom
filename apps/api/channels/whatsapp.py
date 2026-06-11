@@ -46,7 +46,12 @@ from fastapi.routing import APIRouter
 from pydantic import BaseModel, ConfigDict
 
 from auth import AuthContext, get_auth_context
-from channels.common import _MAX_WEBHOOK_BODY_BYTES, collect_agent_reply
+from channels.common import (
+    _MAX_WEBHOOK_BODY_BYTES,
+    MAX_EVENTS_PER_DELIVERY,
+    MAX_INBOUND_TEXT_CHARS,
+    collect_agent_reply,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -771,14 +776,36 @@ async def _maybe_handle_approval_reply(
 
 def _parse_whatsapp_inbound(payload: Dict[str, Any]) -> List[Dict[str, str]]:
     """Normalize a Meta whatsapp_business_account webhook body into a flat list of
-    text messages: [{wa_id, text, message_id, profile_name}]. Non-text messages
-    and status callbacks are ignored gracefully."""
+    text messages: [{wa_id, text, message_id, profile_name, too_long}]. Non-text
+    messages and status callbacks are ignored gracefully.
+
+    Security / abuse hardening:
+
+    - Codex finding #5 (phone-id check): the Meta signature only proves the
+      payload came from the Meta app, not that it targets *our* number.  A
+      callback for a DIFFERENT phone number under the same Meta app would
+      otherwise enter this workspace.  Each ``change`` carries
+      ``value.metadata.phone_number_id``; when it is present and does NOT match
+      the configured ``WHATSAPP_PHONE_ID`` the whole change entry is dropped
+      (log + skip).  (Absent metadata is tolerated for legacy/test payloads;
+      real Meta deliveries always include it, so a foreign number always
+      mismatches and is dropped.)
+
+    - Codex finding #8 (caps): at most ``MAX_EVENTS_PER_DELIVERY`` message
+      events are returned per webhook delivery; the rest are skipped with a log.
+      Messages whose text exceeds ``MAX_INBOUND_TEXT_CHARS`` are returned with
+      ``too_long=True`` (and truncated text) so the caller can answer with a
+      friendly "message too long" reply instead of spawning agent work.
+    """
     if not isinstance(payload, dict):
         return []
     if str(payload.get("object") or "").strip().lower() != "whatsapp_business_account":
         return []
 
+    configured_phone_id = _whatsapp_phone_id()
+
     events: List[Dict[str, str]] = []
+    skipped_for_cap = 0
     for entry in payload.get("entry") or []:
         if not isinstance(entry, dict):
             continue
@@ -788,6 +815,18 @@ def _parse_whatsapp_inbound(payload: Dict[str, Any]) -> List[Dict[str, str]]:
             if str(change.get("field") or "").strip().lower() != "messages":
                 continue
             value = change.get("value") if isinstance(change.get("value"), dict) else {}
+
+            # Finding #5: validate this change targets our configured number.
+            metadata = value.get("metadata") if isinstance(value.get("metadata"), dict) else {}
+            inbound_phone_id = str(metadata.get("phone_number_id") or "").strip()
+            if configured_phone_id and inbound_phone_id and inbound_phone_id != configured_phone_id:
+                logger.warning(
+                    "WhatsApp webhook: dropping change for foreign phone_number_id "
+                    "%r (configured %r)",
+                    inbound_phone_id,
+                    configured_phone_id,
+                )
+                continue
 
             profiles_by_wa_id: Dict[str, str] = {}
             for contact in value.get("contacts") or []:
@@ -810,12 +849,29 @@ def _parse_whatsapp_inbound(payload: Dict[str, Any]) -> List[Dict[str, str]]:
                 text_body = str(((message.get("text") or {}) if isinstance(message.get("text"), dict) else {}).get("body") or "").strip()
                 if not wa_id or not message_id or not text_body:
                     continue
+
+                # Finding #8: per-payload event cap.
+                if len(events) >= MAX_EVENTS_PER_DELIVERY:
+                    skipped_for_cap += 1
+                    continue
+
+                # Finding #8: per-message text length cap.  Keep the event but
+                # flag it so the caller answers "too long" without an agent run.
+                too_long = len(text_body) > MAX_INBOUND_TEXT_CHARS
                 events.append({
                     "wa_id": wa_id,
-                    "text": text_body,
+                    "text": text_body[:MAX_INBOUND_TEXT_CHARS] if too_long else text_body,
                     "message_id": message_id,
                     "profile_name": profiles_by_wa_id.get(wa_id, ""),
+                    "too_long": too_long,
                 })
+
+    if skipped_for_cap:
+        logger.warning(
+            "WhatsApp webhook: capped at %d events; skipped %d additional message event(s)",
+            MAX_EVENTS_PER_DELIVERY,
+            skipped_for_cap,
+        )
     return events
 
 
@@ -1033,11 +1089,31 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks) 
 
     from main import _claim_webhook_delivery
     queued = 0
+    rejected_too_long = 0
     for event in events:
         message_id = event["message_id"]
         # Dedup on Meta's stable message id (Meta retries on timeout).
         if message_id and not _claim_webhook_delivery("whatsapp:messages", message_id):
             continue
+
+        # Finding #8: over-length inbound message — reply "too long" and do NOT
+        # spawn agent work.  The dedup claim above is intentionally consumed so
+        # Meta retries of the same oversized message do not re-trigger replies.
+        if event.get("too_long"):
+            rejected_too_long += 1
+            try:
+                send_whatsapp_text(
+                    _normalize_whatsapp_wa_id(event["wa_id"]),
+                    (
+                        f"That message is too long for me to process "
+                        f"(limit {MAX_INBOUND_TEXT_CHARS:,} characters). "
+                        "Please shorten it and send again."
+                    ),
+                )
+            except Exception:
+                logger.exception("WhatsApp too-long reply failed")
+            continue
+
         background_tasks.add_task(
             _handle_whatsapp_message,
             wa_id=event["wa_id"],
@@ -1047,4 +1123,4 @@ async def whatsapp_webhook(request: Request, background_tasks: BackgroundTasks) 
         )
         queued += 1
 
-    return JSONResponse({"ok": True, "queued": queued})
+    return JSONResponse({"ok": True, "queued": queued, "rejected_too_long": rejected_too_long})

@@ -208,6 +208,15 @@ def test_bound_dm_sender_runs_as_bound_user(monkeypatch, tmp_path):
     # Insert an active binding.
     with main.get_db() as conn:
         now = main.now_iso()
+        # A real bound user exists in the users table. With FLOOM_SECRET set
+        # (configured deployment), bound_user_is_valid now fails closed for a
+        # binding whose user_id has NO users row (Codex finding #7), so the
+        # bound user must be a genuine account for the binding to stay active.
+        conn.execute(
+            "INSERT OR IGNORE INTO users (id, username, password_hash, role, created_at, updated_at) "
+            "VALUES ('alice', 'alice', 'x', 'admin', ?, ?)",
+            (now, now),
+        )
         conn.execute(
             """
             INSERT INTO slack_sender_bindings
@@ -447,23 +456,40 @@ def test_mention_returns_pointer_not_agent_reply(monkeypatch, tmp_path):
     assert "DM" in reply_text or "direct message" in reply_text.lower()
 
 
-def test_mention_includes_claim_link_for_unbound_mentioner(monkeypatch, tmp_path):
+def test_mention_unbound_delivers_claim_link_privately_not_public(monkeypatch, tmp_path):
+    """Codex finding #2: an unbound channel @mention must NEVER post the bearer
+    claim token into the public thread (any channel reader could claim the
+    mentioner's identity first — takeover).  The public reply is generic with NO
+    token; the claim link is delivered privately via chat.postEphemeral targeted
+    at the mentioning user."""
     main = _load_api(monkeypatch, tmp_path)
     import channels.slack as _slack_mod
 
-    posts: list = []
+    public_posts: list = []
+    ephemeral_posts: list = []
+    dm_posts: list = []
     monkeypatch.setattr(_slack_mod, "collect_agent_reply", lambda **kw: "nope")
-    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply", lambda **kw: posts.append(kw))
-    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply_blocks", lambda **kw: posts.append(kw))
+    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply", lambda **kw: public_posts.append(kw))
+    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply_blocks", lambda **kw: public_posts.append(kw))
+    monkeypatch.setattr(_slack_mod, "_post_slack_ephemeral", lambda **kw: ephemeral_posts.append(kw))
+    monkeypatch.setattr(_slack_mod, "_post_slack_dm", lambda **kw: dm_posts.append(kw))
 
     body = _mention_event_body(slack_user_id="U_UNBOUND_MENTION")
     with TestClient(main.app) as client:
         client.post("/slack/events", content=body, headers=_slack_sig_headers(body))
 
-    assert posts
-    # Mention reply to unbound user should contain the short claim URL in text or blocks
-    combined = posts[0].get("text", "") + str(posts[0].get("blocks", ""))
-    assert "/c/" in combined
+    # Public thread reply exists but carries NO claim token.
+    assert public_posts
+    public_combined = public_posts[0].get("text", "") + str(public_posts[0].get("blocks", ""))
+    assert "/c/" not in public_combined
+    assert "claim" not in public_combined.lower()
+
+    # The claim link is delivered privately to the mentioning user only.
+    assert ephemeral_posts, "claim link must be delivered via ephemeral message"
+    eph = ephemeral_posts[0]
+    assert eph.get("user") == "U_UNBOUND_MENTION"
+    eph_combined = eph.get("text", "") + str(eph.get("blocks", ""))
+    assert "/c/" in eph_combined
 
 
 def test_mention_no_claim_link_for_already_bound_mentioner(monkeypatch, tmp_path):
@@ -525,6 +551,12 @@ def test_interactivity_bound_clicker_can_dismiss(monkeypatch, tmp_path):
     # Bind the clicker.
     with main.get_db() as conn:
         now = main.now_iso()
+        # Real bound user row required in configured mode (Codex finding #7).
+        conn.execute(
+            "INSERT OR IGNORE INTO users (id, username, password_hash, role, created_at, updated_at) "
+            "VALUES ('dave', 'dave', 'x', 'admin', ?, ?)",
+            (now, now),
+        )
         conn.execute(
             """
             INSERT INTO slack_sender_bindings
