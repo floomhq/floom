@@ -513,3 +513,149 @@ def test_non_owner_yes_cannot_approve(monkeypatch, tmp_path):
     assert approved_runs == []
     # The "yes" must have reached the agent pipeline.
     assert any(msg == "yes" for _, msg in agent_called)
+
+
+# ---------------------------------------------------------------------------
+# #891 — natural-language affirmations/negations (single-pending only)
+# ---------------------------------------------------------------------------
+
+def test_parse_natural_affirmations_only_when_single_pending(monkeypatch, tmp_path):
+    """Natural phrasings parse to a decision ONLY with single_pending=True."""
+    _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
+
+    # Without single_pending, natural phrasings are NOT approval commands.
+    assert _wa_mod._parse_approval_reply("yes, approve it") is None
+    assert _wa_mod._parse_approval_reply("go ahead") is None
+    assert _wa_mod._parse_approval_reply("cancel it") is None
+
+    # With single_pending=True, they are.
+    p = _wa_mod._parse_approval_reply
+    assert p("yes, approve it", single_pending=True) == {"decision": "approved", "suffix": None}
+    assert p("approve it", single_pending=True) == {"decision": "approved", "suffix": None}
+    assert p("go ahead", single_pending=True) == {"decision": "approved", "suffix": None}
+    assert p("do it", single_pending=True) == {"decision": "approved", "suffix": None}
+    assert p("no", single_pending=True) == {"decision": "rejected", "suffix": None}
+    assert p("reject it", single_pending=True) == {"decision": "rejected", "suffix": None}
+    assert p("cancel it", single_pending=True) == {"decision": "rejected", "suffix": None}
+    # "do not" / "don't run it" must read as rejection, NOT the affirmative "do it".
+    assert p("do not", single_pending=True) == {"decision": "rejected", "suffix": None}
+    assert p("don't run it", single_pending=True) == {"decision": "rejected", "suffix": None}
+    # Trailing suffix is preserved on the natural path.
+    assert p("yes approve it a1b2c3", single_pending=True) == {"decision": "approved", "suffix": "a1b2c3"}
+
+
+def test_yes_approve_it_routes_to_approval_single_pending(monkeypatch, tmp_path):
+    """'yes approve it' with exactly one pending approves it (does not hit agent)."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
+
+    sent: list[tuple[str, str]] = []
+    approved_runs: list = []
+
+    monkeypatch.setattr(_wa_mod, "_send_whatsapp_typing_indicator", lambda _: None)
+    monkeypatch.setattr(_wa_mod, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
+    monkeypatch.setattr(
+        _wa_mod, "collect_agent_reply",
+        lambda **_: (_ for _ in ()).throw(AssertionError("agent must not run")),
+    )
+
+    WA_ID = "491703000001"
+    APR_ID = "apr_natural111122"
+    RUN_ID = "run-natural-yes"
+    OWNER = "user-natural-yes"
+
+    with main.get_db() as conn:
+        now = main.now_iso()
+        _seed_bound_user(conn, WA_ID, OWNER, now)
+        _seed_approval(conn, APR_ID, RUN_ID, OWNER, now, label="Send the email")
+
+    def _fake_approve(run_id, body, auth, repos):
+        approved_runs.append(run_id)
+        return types.SimpleNamespace(run_id="run-followup-natural")
+
+    monkeypatch.setattr(main, "approve_run", _fake_approve)
+
+    asyncio.run(
+        main._handle_whatsapp_message(
+            wa_id=WA_ID, text="yes, approve it", message_id="wamid.NAT1", profile_name="Test"
+        )
+    )
+
+    assert approved_runs == [RUN_ID]
+    assert sent and ("approved" in sent[-1][1].lower())
+
+
+def test_natural_phrasing_does_not_intercept_when_nothing_pending(monkeypatch, tmp_path):
+    """'yes, approve it' with NO pending approvals falls through to the agent."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
+
+    sent: list[tuple[str, str]] = []
+    agent_called: list = []
+
+    monkeypatch.setattr(_wa_mod, "_send_whatsapp_typing_indicator", lambda _: None)
+    monkeypatch.setattr(_wa_mod, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
+
+    async def _fake_collect(*, message, user_id, conversation_id, source):
+        agent_called.append(message)
+        return "agent reply"
+
+    monkeypatch.setattr(_wa_mod, "collect_agent_reply", _fake_collect)
+
+    WA_ID = "491703000002"
+    OWNER = "user-natural-none"
+    with main.get_db() as conn:
+        now = main.now_iso()
+        _seed_bound_user(conn, WA_ID, OWNER, now)
+
+    asyncio.run(
+        main._handle_whatsapp_message(
+            wa_id=WA_ID, text="yes, approve it", message_id="wamid.NAT2", profile_name="Test"
+        )
+    )
+
+    assert "yes, approve it" in agent_called
+    assert sent and sent[-1][1] == "agent reply"
+
+
+def test_natural_phrasing_disambiguates_when_multiple_pending(monkeypatch, tmp_path):
+    """Natural phrasing with MULTIPLE pending requires disambiguation, no auto-decide."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
+
+    sent: list[tuple[str, str]] = []
+    approved_runs: list = []
+    agent_called: list = []
+
+    monkeypatch.setattr(_wa_mod, "_send_whatsapp_typing_indicator", lambda _: None)
+    monkeypatch.setattr(_wa_mod, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
+
+    async def _fake_collect(*, message, user_id, conversation_id, source):
+        agent_called.append(message)
+        return "agent reply"
+
+    monkeypatch.setattr(_wa_mod, "collect_agent_reply", _fake_collect)
+    monkeypatch.setattr(
+        main, "approve_run",
+        lambda *a, **kw: approved_runs.append(a) or types.SimpleNamespace(run_id="x"),
+    )
+
+    WA_ID = "491703000003"
+    OWNER = "user-natural-multi"
+    with main.get_db() as conn:
+        now = main.now_iso()
+        _seed_bound_user(conn, WA_ID, OWNER, now)
+        _seed_approval(conn, "apr_multi00aa11", "run-m-A", OWNER, now, label="A", worker_id="w-m1")
+        _seed_approval(conn, "apr_multi00bb22", "run-m-B", OWNER, now, label="B", worker_id="w-m2")
+
+    asyncio.run(
+        main._handle_whatsapp_message(
+            wa_id=WA_ID, text="yes, approve it", message_id="wamid.NAT3", profile_name="Test"
+        )
+    )
+
+    # With >1 pending, the natural path is NOT enabled, so the bare strict parse
+    # of "yes, approve it" fails → falls through to the agent. Nothing approved.
+    assert approved_runs == []
+    assert "yes, approve it" in agent_called
