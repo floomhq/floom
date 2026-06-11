@@ -808,14 +808,19 @@ html.dark .grain {
 .c-split .c-listcol .c-lrow.sel { background:var(--bg-2); box-shadow:none; }
 .c-split .c-listcol .c-daygrp .dh { display:none; }
 
-/* detail header + tabs (SPEC §3) */
-.c-dhead { display:flex; align-items:center; gap:11px; padding:10px 20px; border-bottom:1px solid var(--line); min-height:64px; }
+/* detail header + tabs (SPEC §3)
+   SPEC §10: detail header = exactly 56px to align with nav-top (h-14) and Emily header.
+   The collapse chevron (lcbtn) and the list-expand chevron (c-splitbar) must be
+   on the same 56px baseline so they visually align horizontally. */
+.c-dhead { display:flex; align-items:center; gap:11px; padding:8px 20px; border-bottom:1px solid var(--line); min-height:56px; height:56px; }
 .c-dhead .lcbtn, .c-dhead .x { color:var(--muted-foreground); padding:5px; border-radius:7px; flex:0 0 auto; }
 .c-dhead .lcbtn:hover, .c-dhead .x:hover { background:var(--bg-2); }
 .c-dh-main { flex:1; min-width:0; }
 .c-dh-title { display:flex; align-items:center; gap:8px; min-width:0; }
-.c-dh-title .nm { font-size:17px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
-.c-dh-sub { color:var(--muted-foreground); font-size:12.5px; margin-top:3px; display:flex; align-items:center; gap:8px; min-width:0; }
+/* Title: 15px for 56px header so title+sub both fit at 56px height */
+.c-dh-title .nm { font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
+/* Sub: badge row sits under title — 2px gap is tighter than 3px to fit 56px header */
+.c-dh-sub { color:var(--muted-foreground); font-size:12px; margin-top:2px; display:flex; align-items:center; gap:6px; min-width:0; flex-wrap:wrap; }
 .c-dh-act { display:flex; gap:7px; align-items:center; }
 .c-vpill { display:inline-flex; align-items:center; gap:5px; border:var(--bd-pill); border-radius:var(--radius-pill); font-size:10.5px; padding:2px 8px; color:var(--muted-foreground); background:var(--bg-2); white-space:nowrap; flex:0 0 auto; }
 .c-dtabs { display:flex; gap:2px; padding:7px 16px; border-bottom:1px solid var(--line); overflow:auto; }

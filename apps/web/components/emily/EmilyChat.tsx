@@ -208,7 +208,8 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
   return (
     <div className="flex items-start gap-2.5">
       <EmilyAvatar size="sm" />
-      <div className="flex-1 min-w-0 space-y-2.5">
+      {/* min-w-0 + overflow-hidden prevent long URLs and code from blowing out the rail */}
+      <div className="flex-1 min-w-0 overflow-hidden space-y-2.5">
         {msg.parts?.map((part, i) => {
           if (part.type === "text") {
             return <MarkdownText key={i} text={part.text} />;
@@ -493,9 +494,10 @@ function EmilyChatCore({ fullPage = false, onOpenRunDetails, hideControls = fals
               <MessageRow key={msg.id} msg={msg} />
             ))}
             {error && !errorAlreadyVisible && (
-              <div className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-3 text-xs text-destructive">
-                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-                <p className="leading-relaxed">{error}</p>
+              /* Quiet inline system note — muted, no alarming red. SPEC §9: "calm, not alarmed". */
+              <div className="flex items-start gap-2 rounded-lg bg-[var(--bg-2)] px-3 py-2.5 text-xs text-[var(--ink-soft)]">
+                <AlertTriangle className="mt-0.5 size-3 shrink-0 opacity-60" />
+                <p className="leading-relaxed break-words min-w-0">{error}</p>
               </div>
             )}
             {isStreaming && <TypingIndicator />}
@@ -518,13 +520,9 @@ function EmilyChatCore({ fullPage = false, onOpenRunDetails, hideControls = fals
         )}
       </div>
 
-      {/* Input */}
+      {/* Input — error intentionally NOT repeated here; it already shows as an
+          inline system note in the message thread (errorAlreadyVisible guard above). */}
       <div className={cn("shrink-0", fullPage ? "px-6 pb-6 pt-3" : "px-3 pb-3 pt-0")}>
-        {error && (
-          <div className="mb-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {error}
-          </div>
-        )}
         <Separator className="mb-3" />
         <PromptInput
           value={input}
@@ -575,7 +573,7 @@ export function EmilyDock({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex h-full flex-col bg-background shrink-0",
+        "flex h-full flex-col bg-background shrink-0 overflow-hidden",
         mode !== "full" && "border-l border-border",
         DOCK_WIDTH[mode],
         className
