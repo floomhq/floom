@@ -78,7 +78,11 @@ def test_platform_config_marks_missing_required_names(tmp_path):
     main = _load_api(tmp_path)
     client = TestClient(main.app)
 
+    # #814: PLATFORM_OPENAI_API_KEY is the canonical required platform key now
+    # (OPENAI_API_KEY is only a back-compat fallback in PLATFORM_SECRET_SPECS),
+    # so pop both to make the canonical key resolve as missing.
     os.environ.pop("OPENAI_API_KEY", None)
+    os.environ.pop("PLATFORM_OPENAI_API_KEY", None)
     os.environ["E2B_API_KEY"] = "e2b-test"
     os.environ["COMPOSIO_API_KEY"] = "cmp-test"
     os.environ["COMPOSIO_WEBHOOK_SIGNING_KEY"] = "whsec-test"
@@ -90,5 +94,5 @@ def test_platform_config_marks_missing_required_names(tmp_path):
     body = resp.json()
 
     assert body["all_required_set"] is False
-    assert "OPENAI_API_KEY" in body["missing"]
+    assert "PLATFORM_OPENAI_API_KEY" in body["missing"]
     assert body["set_count"] < body["required_count"]
