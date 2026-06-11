@@ -45,6 +45,12 @@ def _load_api(monkeypatch, tmp_path):
         "auth.local_workspaces",
     ]:
         sys.modules.pop(name, None)
+    # routers.* must reload in lockstep with main/auth: a cached router pins the
+    # previous auth.dependency instance, so dependency_overrides keyed on the
+    # fresh main.get_auth_context would miss its routes (/me), and module-level
+    # router caches (integrations trigger catalog) would leak across tests.
+    for name in [n for n in list(sys.modules) if n.startswith("routers")]:
+        sys.modules.pop(name, None)
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
         stop_scheduler=lambda: None,
