@@ -2473,6 +2473,7 @@ export default function WorkerDetailPage() {
 // S34: dedicated About tab — long_description + use_cases + how_it_works.
 // Federico — "this page about this worker and run should be different tabs.
 // These are completely different content and it's confusing."
+// P4 / #815: output-first ordering (spec §4): "Latest output" THEN "What it does".
 function AboutSection({ worker }: { worker: WorkerDetail }) {
   const hasContent = !!(
     worker.long_description ||
@@ -2527,6 +2528,27 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
     </div>
   ) : null;
 
+  // P4 / #815: latest output preview — shown FIRST before "What it does" (spec §4).
+  // Only rendered when the API returns a non-empty preview string.
+  const latestOutputPanel = worker.latest_output ? (
+    <div className="max-w-2xl space-y-2">
+      <div className="flex items-center justify-between">
+        <h2 className="text-sm font-semibold text-foreground">Latest output</h2>
+        {worker.latest_output_run_id && (
+          <Link
+            href={`/runs?id=${worker.latest_output_run_id}`}
+            className="text-xs text-[var(--text-muted)] hover:text-foreground"
+          >
+            All runs →
+          </Link>
+        )}
+      </div>
+      <pre className="whitespace-pre-wrap rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3 text-xs font-mono text-foreground leading-relaxed overflow-x-auto">
+        {worker.latest_output}
+      </pre>
+    </div>
+  ) : null;
+
   if (!hasContent) {
     // The Flow diagram is a fixed-width monospace grid that can be wider than
     // the prose column; it spans the full content width (with its own internal
@@ -2535,6 +2557,7 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
     return (
       <div className="space-y-6">
         {attentionBanner}
+        {latestOutputPanel}
         {diagram}
         <p className="max-w-2xl text-sm text-muted-foreground">
           {worker.description || "No description provided."}
@@ -2545,6 +2568,7 @@ function AboutSection({ worker }: { worker: WorkerDetail }) {
   return (
     <div className="space-y-6">
       {attentionBanner}
+      {latestOutputPanel}
       {diagram}
       <div className="max-w-2xl space-y-6">
       {worker.long_description && (
