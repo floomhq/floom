@@ -121,6 +121,14 @@ describe("middleware auth gate", () => {
     }
   });
 
+  it("keeps the branded claim short-link /c/:token reachable without login", async () => {
+    // /c/:token is rewritten to the API /c/{token} redirect (public hop). It
+    // must NOT be auth-gated, or the WhatsApp/Slack claim flow bounces to /login.
+    const { middleware } = await import("@/middleware");
+    const res = await middleware(req("/c/sometoken123"));
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+  });
+
   it("allows authed users into app pages", async () => {
     const { middleware } = await import("@/middleware");
     const res = await middleware(req("/connections", await validCookie()));

@@ -308,12 +308,66 @@ def test_bound_user_is_valid_returns_true_for_bootstrap_id(monkeypatch, tmp_path
     assert _cm.bound_user_is_valid("federico") is True
 
 
-def test_bound_user_is_valid_returns_true_for_empty_table(monkeypatch, tmp_path):
-    """Empty users table → any id is valid (dev/pre-auth mode)."""
+def test_bound_user_is_valid_empty_table_configured_fails_closed(monkeypatch, tmp_path):
+    """Configured deployment (FLOOM_SECRET set) + empty users table + non-bootstrap
+    id → INVALID (Codex finding #7 fail-closed).  Previously this returned True,
+    which let any binding ride through a misconfigured/empty users table.  Only
+    the bootstrap owner stays valid in a configured deployment."""
     main = _load_api(monkeypatch, tmp_path, bootstrap_id="federico")
     import channels.common as _cm
 
+    # _load_api sets FLOOM_SECRET → configured deployment.
     # Table is empty — no rows at all (no UUID accounts).
+    assert _cm.bound_user_is_valid("some-uuid-user") is False
+    # Bootstrap owner is still valid even with an empty table (#845 preserved).
+    assert _cm.bound_user_is_valid("federico") is True
+
+
+def test_bound_user_is_valid_empty_table_legacy_mode_is_valid(monkeypatch, tmp_path):
+    """Genuine legacy/dev mode (no FLOOM_SECRET, local deploy) + empty users table
+    → any id is valid (clone-and-run-locally).  This is the only branch that
+    permits the legacy single-user pass (Codex finding #7)."""
+    main = _load_api(monkeypatch, tmp_path, bootstrap_id="federico")
+    import channels.common as _cm
+
+    # Drop into genuine legacy/dev mode for the validation call.
+    monkeypatch.delenv("FLOOM_SECRET", raising=False)
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    assert _cm.bound_user_is_valid("some-uuid-user") is True
+
+
+def test_bound_user_is_valid_db_error_configured_fails_closed(monkeypatch, tmp_path):
+    """DB error during validation in a configured deployment → INVALID
+    (fail closed, Codex finding #7).  A binding must not stay authorized just
+    because the validation query blew up."""
+    main = _load_api(monkeypatch, tmp_path, bootstrap_id="federico")
+    import channels.common as _cm
+    import db as _db
+
+    def _boom():
+        raise RuntimeError("simulated DB outage")
+
+    monkeypatch.setattr(_db, "get_db", _boom)
+    # Configured deployment (FLOOM_SECRET set by _load_api) → fail closed.
+    assert _cm.bound_user_is_valid("some-uuid-user") is False
+    # Bootstrap owner short-circuits before any DB access → still valid.
+    assert _cm.bound_user_is_valid("federico") is True
+
+
+def test_bound_user_is_valid_db_error_legacy_mode_proceeds(monkeypatch, tmp_path):
+    """DB error in genuine legacy/dev mode → still valid (proceed optimistically).
+    Legacy mode is unaffected by the fail-closed hardening (Codex finding #7)."""
+    main = _load_api(monkeypatch, tmp_path, bootstrap_id="federico")
+    import channels.common as _cm
+    import db as _db
+
+    monkeypatch.delenv("FLOOM_SECRET", raising=False)
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+
+    def _boom():
+        raise RuntimeError("simulated DB outage")
+
+    monkeypatch.setattr(_db, "get_db", _boom)
     assert _cm.bound_user_is_valid("some-uuid-user") is True
 
 
