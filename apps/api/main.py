@@ -6576,6 +6576,8 @@ def list_workers(
     include_system: bool = False,
     include_archived: bool = False,
     shape: str = "full",
+    visibility: Optional[str] = None,
+    q: Optional[str] = None,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[WorkerListSummary]:
@@ -6606,6 +6608,24 @@ def list_workers(
     # _list_operator_workers exactly (shared filter, see 1.5.4).
     if not include_archived:
         workers = [w for w in workers if not w.get("archived", False)]
+    # #771: optional visibility-tier filter. Does NOT change access control —
+    # only shapes the already-authorized list. "all" is the default no-op.
+    if visibility and visibility != "all":
+        if visibility not in ("private", "workspace", "public"):
+            raise HTTPException(status_code=422, detail="visibility must be private, workspace, public, or all")
+        workers = [
+            w for w in workers
+            if str(w.get("visibility") or "private") == visibility
+        ]
+    # #779: server-side substring search on name + description (case-insensitive),
+    # so large workspaces don't ship the full list to the client to filter.
+    if q and q.strip():
+        needle = q.strip().lower()
+        workers = [
+            w for w in workers
+            if needle in str(w.get("name") or "").lower()
+            or needle in str(w.get("description") or "").lower()
+        ]
     worker_ids = [w["id"] for w in workers]
     stats_by_id = _get_stats_batch(worker_ids, user_id=worker_user_id, repos=repos)
     # S44 Win 3: skip expensive timeseries fetch when list shape requested.
