@@ -33,7 +33,7 @@ export function Hl({ children }: { children: React.ReactNode }) {
 
 function Mark({ size = 22 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" aria-label="Workeros" style={{ borderRadius: "27%" }}>
+    <svg width={size} height={size} viewBox="0 0 100 100" aria-label="WorkerOS" style={{ borderRadius: "27%" }}>
       <rect width="100" height="100" rx="24" fill="var(--primary)" />
       <path d="M30 22 h20 l22 22 a3 3 0 0 1 0 4 l-22 22 h-20 a6 6 0 0 1 -6 -6 v-36 a6 6 0 0 1 6 -6 z" fill="var(--primary-text)" />
     </svg>
@@ -75,7 +75,7 @@ export function V3Shell({
         <nav className="flex h-[64px] items-center justify-between">
           <Link href="/v3" className="flex items-center gap-2.5 text-[14px] font-semibold">
             <Mark />
-            Workeros
+            WorkerOS
           </Link>
           <div className="flex items-center gap-0.5 text-[13px] text-muted-foreground">
             {NAV.map(([label, href]) => (
@@ -106,8 +106,8 @@ export function V3Shell({
       </div>
 
       <footer className="border-t border-border-soft">
-        <div className="mx-auto flex max-w-[1000px] flex-col gap-4 px-7 py-6 text-[12px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between sm:gap-0">
-          <span>Workeros by Floom · Backed by Founders Inc</span>
+        <div className="mx-auto flex max-w-[1000px] flex-col gap-4 px-7 py-6 text-[12px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <span>WorkerOS by Floom · Backed by Founders Inc</span>
           <span className="flex flex-wrap gap-4">
             <Link href="/v3/product" className="transition-colors hover:text-foreground">Product</Link>
             <Link href="/v3/templates" className="transition-colors hover:text-foreground">Templates</Link>

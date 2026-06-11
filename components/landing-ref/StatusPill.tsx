@@ -1,7 +1,7 @@
 export type PillTone = "default" | "success" | "warning" | "pending" | "muted";
 
 const TONES: Record<PillTone, string> = {
-  default: "bg-accent text-foreground border-border",
+  default: "bg-secondary text-foreground border-border",
   success: "bg-[oklch(0.95_0.05_150)] text-[oklch(0.42_0.13_150)] border-[oklch(0.85_0.07_150)]",
   warning: "bg-[oklch(0.95_0.08_30)] text-[oklch(0.50_0.18_30)] border-[oklch(0.85_0.10_30)]",
   pending: "bg-[oklch(0.96_0.07_80)] text-[oklch(0.45_0.13_80)] border-[oklch(0.88_0.09_80)]",

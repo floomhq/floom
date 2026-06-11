@@ -88,9 +88,9 @@ export function V3AboutBody() {
         </Reveal>
 
         <Reveal>
-          <div className="mt-10 pl-6 sm:pl-10 text-[19px] sm:text-[22px] font-medium leading-[1.6] tracking-[-0.015em] text-foreground">
+          <div className="mt-5 text-[13px] leading-[1.7] text-muted-foreground">
             <p>Floom builds the bridge between the work that must be done and the life that must be lived.</p>
-            <p className="mt-3">WorkerOS finishes the work on this side. You walk across.</p>
+            <p className="mt-1">WorkerOS finishes the work on this side. You walk across.</p>
           </div>
         </Reveal>
 

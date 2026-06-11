@@ -103,7 +103,7 @@ export function V3TemplatesBody() {
         </div>
         {filtered.length === 0 && (
           <div className="py-16 text-center text-[13.5px] text-muted-foreground">
-            Nothing matches. Describe it below and Workeros drafts it for you.
+            Nothing matches. Describe it below and WorkerOS drafts it for you.
           </div>
         )}
 
@@ -111,7 +111,7 @@ export function V3TemplatesBody() {
         <div className="mt-20 text-center">
           <h2 className="text-[26px] font-semibold tracking-[-0.022em]">Don&apos;t see your job?</h2>
           <p className="mx-auto mt-2 max-w-[400px] text-[13.5px] text-muted-foreground">
-            Describe it in one sentence. Workeros drafts the worker for review.
+            Describe it in one sentence. WorkerOS drafts the worker for review.
           </p>
           <div className="mt-6">
             <V3Composer placeholder="Describe the job…" />

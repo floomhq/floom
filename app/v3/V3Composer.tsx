@@ -11,6 +11,17 @@ import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { ArrowUp } from "lucide-react";
+import {
+  GCalLogo,
+  GmailLogo,
+  GitHubSVG,
+  GranolaLogo,
+  HubSpotLogo,
+  NotionLogo,
+  SheetsLogo,
+  SlackLogo,
+  WhatsAppLogo,
+} from "@/components/landing-icons";
 
 const KNOWN_TOOLS: Array<{ keys: string[] }> = [
   { keys: ["slack"] },
@@ -26,6 +37,23 @@ const KNOWN_TOOLS: Array<{ keys: string[] }> = [
 ];
 
 type Match = { start: number; end: number };
+
+/* map from lowercase key → logo component */
+const TOOL_LOGOS: Record<string, React.ReactNode> = {
+  slack: <SlackLogo />,
+  whatsapp: <WhatsAppLogo />,
+  gmail: <GmailLogo />,
+  "google calendar": <GCalLogo />,
+  gcal: <GCalLogo />,
+  "hubspot crm": <HubSpotLogo />,
+  hubspot: <HubSpotLogo />,
+  "google sheets": <SheetsLogo />,
+  sheets: <SheetsLogo />,
+  notion: <NotionLogo />,
+  granola: <GranolaLogo />,
+  github: <GitHubSVG />,
+  linear: null,
+};
 
 function detectMatches(text: string): Match[] {
   if (!text) return [];
@@ -61,8 +89,15 @@ function Mirror({ text, matches }: { text: string; matches: Match[] }) {
   let cursor = 0;
   for (const m of matches) {
     if (m.start > cursor) out.push(safe.slice(cursor, m.start));
+    const key = safe.slice(m.start, m.end).toLowerCase();
+    const logo = TOOL_LOGOS[key] ?? null;
     out.push(
-      <span key={`hl-${m.start}`} className="v3-hl">
+      <span key={`hl-${m.start}`} className="v3-hl inline-flex items-center gap-[3px] align-baseline whitespace-nowrap">
+        {logo && (
+          <span className="inline-flex h-[13px] w-[13px] shrink-0 items-center justify-center [&_svg]:h-[13px] [&_svg]:w-[13px]">
+            {logo}
+          </span>
+        )}
         {safe.slice(m.start, m.end)}
       </span>,
     );

@@ -22,6 +22,8 @@ import { Check } from "lucide-react";
 import {
   GCalLogo,
   GmailLogo,
+  GitHubSVG,
+  GranolaLogo,
   HubSpotLogo,
   NotionLogo,
   SheetsLogo,
@@ -35,13 +37,30 @@ import "./theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
+/* ── inline tool highlight with real brand logo ─────────────── */
+function ToolHl({
+  logo,
+  children,
+}: {
+  logo: React.ReactNode;
+  children: React.ReactNode;
+}) {
+  return (
+    <span className="v3-hl inline-flex items-center gap-[3px] align-baseline whitespace-nowrap">
+      <span className="inline-flex h-[13px] w-[13px] shrink-0 items-center justify-center [&_svg]:h-[13px] [&_svg]:w-[13px]">
+        {logo}
+      </span>
+      {children}
+    </span>
+  );
+}
 
 /* ───────────────── the one story: four beats ───────────────── */
 
 const BEATS = [
   {
     t: "Describe the job",
-    p: "One sentence, plain English. Workeros recognises your tools as you type and drafts the worker.",
+    p: "One sentence, plain English. WorkerOS recognises your tools as you type and drafts the worker.",
   },
   {
     t: "Approve the draft",
@@ -57,10 +76,13 @@ const BEATS = [
 
 function BeatDescribe() {
   return (
-    <div className="w-full max-w-[460px] rounded-[18px] bg-card p-6">
+    <div className="w-full max-w-[460px] rounded-[18px] bg-card p-6 ring-1 ring-border">
       <div className="text-[16px] leading-relaxed">
-        Summarise my <span className="v3-hl">Granola</span> meetings and post action items to{" "}
-        <span className="v3-hl">HubSpot</span> daily
+        Summarise my{" "}
+        <ToolHl logo={<GranolaLogo />}>Granola</ToolHl>
+        {" "}meetings and post action items to{" "}
+        <ToolHl logo={<HubSpotLogo />}>HubSpot</ToolHl>
+        {" "}daily
         <span
           aria-hidden
           className="v3-caret ml-px inline-block h-[16px] w-[1.5px] translate-y-[2px] bg-foreground"
@@ -73,7 +95,7 @@ function BeatDescribe() {
         className="mt-5 flex items-center justify-between border-t border-border-soft pt-4"
       >
         <span className="text-[12px] text-muted-foreground">Recognised: Granola, HubSpot</span>
-        <span className="rounded-[10px] px-4 py-2 text-[13px] font-medium text-white" style={{ background: "var(--v3-accent)" }}>Hire</span>
+        <span className="whitespace-nowrap rounded-[10px] px-4 py-2 text-[13px] font-medium text-white" style={{ background: "var(--v3-accent)" }}>Hire</span>
       </motion.div>
     </div>
   );
@@ -81,7 +103,7 @@ function BeatDescribe() {
 
 function BeatApprove() {
   return (
-    <div className="w-full max-w-[460px] rounded-[18px] bg-card p-6">
+    <div className="w-full max-w-[460px] rounded-[18px] bg-card p-6 ring-1 ring-border">
       <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Email draft · to Sarah at Acme</div>
       <div className="mt-3 text-[17px] font-medium tracking-[-0.01em]">Next steps from today&apos;s call</div>
       <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
@@ -120,12 +142,12 @@ function BeatApprove() {
 
 function BeatRecord() {
   return (
-    <div className="w-full max-w-[460px] rounded-[18px] bg-card p-6">
+    <div className="w-full max-w-[460px] rounded-[18px] bg-card p-6 ring-1 ring-border">
       <div className="flex items-center justify-between">
         <span className="text-[14px] font-medium">This week</span>
         <span className="font-mono text-[10.5px] text-muted-foreground">5 runs</span>
       </div>
-      <div className="mt-3.5 space-y-px">
+      <div className="mt-3.5">
         {[
           ["Mon", "Posted to HubSpot", true],
           ["Tue", "Posted to HubSpot", true],
@@ -138,14 +160,16 @@ function BeatRecord() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.12 + i * 0.08, duration: 0.35 }}
-            className="flex items-center gap-3 border-b border-border-soft py-2 text-[13px] last:border-0"
+            className="flex items-center border-b border-border-soft py-2.5 text-[13px] last:border-0"
           >
-            <span className="w-11 font-mono text-[10.5px] text-muted-foreground">{d as string}</span>
+            {/* Fixed-width day column so text aligns perfectly */}
+            <span className="w-10 shrink-0 font-mono text-[10.5px] text-muted-foreground">{d as string}</span>
             <span className="flex-1 text-muted-foreground">{s as string}</span>
+            {/* Checkmark inline at row end, not floating */}
             {done ? (
-              <Check className="h-3.5 w-3.5 text-muted-foreground/60" />
+              <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
             ) : (
-              <span className="h-2 w-2 rounded-full" style={{ background: "var(--v3-accent)" }} />
+              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: "var(--v3-accent)" }} />
             )}
           </motion.div>
         ))}

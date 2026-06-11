@@ -301,7 +301,7 @@ export function AppFrame({ standalone = false }: { standalone?: boolean }) {
                 <span className="flex h-5 w-5 items-center justify-center rounded-[6px] bg-primary">
                   <svg width="11" height="11" viewBox="0 0 100 100"><path d="M30 22 h20 l22 22 a3 3 0 0 1 0 4 l-22 22 h-20 a6 6 0 0 1 -6 -6 v-36 a6 6 0 0 1 6 -6 z" fill="var(--primary-text)" /></svg>
                 </span>
-                <span className="text-[12.5px] font-semibold">Workeros</span>
+                <span className="text-[12.5px] font-semibold">WorkerOS</span>
               </div>
               <div className="flex flex-col gap-px px-2.5">
                 {NAV_ITEMS.map((n) => (
@@ -335,7 +335,7 @@ export function AppFrame({ standalone = false }: { standalone?: boolean }) {
                     <div className="flex items-center gap-2.5">
                       <span className="truncate text-[13px] font-medium">{w.nm}</span>
                       <span className="ml-auto">
-                        <StatusPill tone={w.st === "ok" ? "success" : w.st === "warn" ? "warning" : "default"}>
+                        <StatusPill tone={w.st === "ok" ? "success" : w.st === "warn" ? "warning" : "pending"}>
                           {w.st === "ok" ? "Live" : w.st === "warn" ? "Needs you" : "Running"}
                         </StatusPill>
                       </span>

@@ -179,6 +179,18 @@ export const HubSpotLogo = () => (
   </svg>
 );
 
+/* Granola — brand color #1E1E1E. Concentric-arc mark approximating granola.ai brand.
+   v3-sel chip background ensures the near-black icon reads as logo, not blob. */
+export const GranolaLogo = () => (
+  <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true" fill="none" stroke="#1E1E1E" strokeWidth="1.8" strokeLinecap="round">
+    <path d="M12 4a8 8 0 0 1 8 8" />
+    <path d="M12 7a5 5 0 0 1 5 5" />
+    <path d="M12 10a2 2 0 0 1 2 2" />
+    <line x1="12" y1="12" x2="12" y2="20" />
+    <circle cx="12" cy="21" r="1" fill="#1E1E1E" stroke="none" />
+  </svg>
+);
+
 /* Google Analytics - SimpleIcons (googleanalytics) */
 export const AnalyticsLogo = () => (
   <svg viewBox="0 0 24 24" width="14" height="14" aria-hidden="true">

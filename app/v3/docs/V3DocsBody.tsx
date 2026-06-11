@@ -50,6 +50,8 @@ const MCP_TARGETS = [
   ["claude", "Claude Code"],
   ["cursor", "Cursor"],
   ["vscode", "VS Code"],
+  ["codex", "Codex"],
+  ["windsurf", "Windsurf"],
 ] as const;
 
 function McpInstall() {
@@ -62,7 +64,7 @@ function McpInstall() {
             key={id}
             type="button"
             onClick={() => setTarget(id)}
-            className="rounded-full px-3 py-1 text-[12px] font-medium transition-colors"
+            className="rounded-[8px] px-3 py-1.5 text-[12px] font-medium transition-colors"
             style={
               target === id
                 ? { background: "var(--v3-sel)", color: "var(--v3-accent)" }
@@ -121,7 +123,7 @@ export function V3DocsBody() {
           <div className="min-w-0 max-w-[620px]">
             <H2 id="quickstart">Quickstart</H2>
             <ol className="flex flex-col gap-2.5 text-[13.5px] leading-relaxed text-foreground/85">
-              <li><b className="font-semibold">1. Describe the job.</b> One sentence, plain English. Workeros recognises your tools as you type.</li>
+              <li><b className="font-semibold">1. Describe the job.</b> One sentence, plain English. WorkerOS recognises your tools as you type.</li>
               <li><b className="font-semibold">2. Review the draft.</b> Tools, schedule, approval rules and company brain, assembled for review. Edit anything, then hire.</li>
               <li><b className="font-semibold">3. Approve the first run.</b> The worker drafts, you approve. After that it runs in the background and asks before anything ships.</li>
             </ol>
@@ -131,7 +133,7 @@ export function V3DocsBody() {
 
             <H2 id="channels">Install in your channel</H2>
             <p className="text-[13.5px] leading-relaxed text-muted-foreground">
-              You never have to open the dashboard. Install Workeros where your team already talks and hire, approve, and redirect from there.
+              You never have to open the dashboard. Install WorkerOS where your team already talks and hire, approve, and redirect from there.
             </p>
             <div className="mt-2 flex flex-col">
               <div className="flex items-center gap-3 border-b border-border-soft py-3.5 last:border-0">
@@ -162,7 +164,7 @@ export function V3DocsBody() {
 
             <H2 id="mcp">Use from any agent (MCP)</H2>
             <p className="mb-3 text-[13.5px] leading-relaxed text-muted-foreground">
-              Workeros speaks MCP. Add it to Claude Code, Cursor, Codex, or any client and drive workers from where you already work.
+              WorkerOS speaks MCP. Add it to Claude Code, Cursor, Codex, or any client and drive workers from where you already work.
             </p>
             <McpInstall />
             <p className="mt-2 text-[12px] text-muted-foreground">Ships the `workeros-mcp` stdio server from the `@floomhq/workeros` package.</p>
@@ -186,7 +188,7 @@ export function V3DocsBody() {
                 ["Which models does it use?", "Any. Bring your own keys or use the defaults. Model choice is per worker."],
                 ["Where do my tokens live?", "Encrypted at rest, used only for the workers you build. Revoke at the source any time."],
                 ["Can my team share workers?", "Yes. Workspaces share workers, brain, and the run record."],
-                ["What does it cost?", "Workeros Cloud is in early access. Pricing is being finalised with the first teams."],
+                ["What does it cost?", "WorkerOS Cloud is in early access. Pricing is being finalised with the first teams."],
               ].map(([q, a]) => (
                 <div key={q}>
                   <div className="text-[13.5px] font-semibold">{q}</div>

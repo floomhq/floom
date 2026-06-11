@@ -11,7 +11,7 @@ export async function generateMetadata({ params }: { params: Promise<{ slug: str
   const { slug } = await params;
   const t = getTemplate(slug);
   return {
-    title: t ? `${t.name} · Workeros v3 preview` : "Template · Workeros v3 preview",
+    title: t ? `${t.name} · WorkerOS v3 preview` : "Template · WorkerOS v3 preview",
     robots: { index: false, follow: false },
   };
 }
