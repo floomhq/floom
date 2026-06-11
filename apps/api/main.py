@@ -237,8 +237,50 @@ _sweep_task: Optional[asyncio.Task] = None
 _SWEEP_INTERVAL_SECONDS = 3600  # Hourly
 
 
+def _expire_stale_approvals() -> int:
+    """#798: mark pending approvals past their expires_at as 'expired' and move
+    the run off pending_approval, so a paused run never sits pending forever.
+    Returns the number expired. Best-effort."""
+    from datetime import datetime as _dt, timezone as _tz
+
+    now_iso_str = _dt.now(_tz.utc).isoformat()
+    expired = 0
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, run_id, owner_id FROM approvals
+                WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at < ?
+                """,
+                (now_iso_str,),
+            ).fetchall()
+            for r in rows:
+                conn.execute(
+                    "UPDATE approvals SET status = 'expired', decided_at = ?, "
+                    "reason = COALESCE(reason, 'Approval expired') WHERE id = ?",
+                    (now_iso_str, r["id"]),
+                )
+                conn.execute(
+                    "UPDATE runs SET status = ? WHERE id = ? AND status = ?",
+                    (RunStatus.FAILED.value, r["run_id"], RunStatus.PENDING_APPROVAL.value),
+                )
+                expired += 1
+        for r in rows:
+            try:
+                _sse_publish(r["run_id"], {
+                    "type": "approval_decided", "run_id": r["run_id"], "decision": "expired",
+                })
+            except Exception:
+                pass
+    except Exception:
+        logger.warning("approval expiry sweep failed (non-fatal)", exc_info=True)
+    if expired:
+        logger.info("Expired %d stale pending approvals", expired)
+    return expired
+
+
 async def _hourly_sweep_loop() -> None:
-    """Run the connection health sweep every hour in the background."""
+    """Run the connection health sweep + approval-expiry sweep every hour."""
     # Delay first run by 60s to let startup finish
     await asyncio.sleep(60)
     while True:
@@ -246,6 +288,10 @@ async def _hourly_sweep_loop() -> None:
             await _run_connection_sweep()
         except Exception as exc:
             logger.warning("Connection sweep error: %s", exc)
+        try:
+            _expire_stale_approvals()  # #798
+        except Exception as exc:
+            logger.warning("Approval expiry sweep error: %s", exc)
         await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
 
 
@@ -12598,6 +12644,17 @@ def _approval_response(
         except Exception:
             parsed_annotations = None
     response["annotations"] = parsed_annotations
+    # #792: surface the typed preview payload as a parsed object (email/records/
+    # tasks) so the UI can render a rich preview; drop the raw JSON column.
+    raw_preview_payload = response.pop("preview_payload_json", None)
+    parsed_preview_payload: Optional[Any] = None
+    if raw_preview_payload:
+        try:
+            parsed_preview_payload = json.loads(raw_preview_payload)
+        except Exception:
+            parsed_preview_payload = None
+    response["preview_payload"] = parsed_preview_payload
+    # expires_at (#798) + preview_type (#792) pass through from the row as-is.
     # Standalone share/review link for the authenticated owner. The token is the
     # same deterministic HMAC the /approvals/public/* routes verify, so the owner
     # can copy this URL to open the approval full-page (no app chrome) or share it
