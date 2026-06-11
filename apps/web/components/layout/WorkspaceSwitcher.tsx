@@ -2,7 +2,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, ChevronsUpDown, Copy, Download, Link2, Plus, Settings2, Upload, Users } from "lucide-react";
+import { Check, ChevronsUpDown, Copy, Download, Link2, Pencil, Plus, Settings2, Upload, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
@@ -52,6 +52,9 @@ export function WorkspaceSwitcher() {
   const [createCompany, setCreateCompany] = useState("");
   const [nameTouched, setNameTouched] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameName, setRenameName] = useState("");
+  const [renaming, setRenaming] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -109,6 +112,27 @@ export function WorkspaceSwitcher() {
     } catch (err) {
       setError((err as Error).message || "Failed to create workspace");
       setCreating(false);
+    }
+  }
+
+  // #791: rename the active workspace.
+  async function handleRename() {
+    const name = renameName.trim();
+    if (!name || !state) return;
+    setRenaming(true);
+    try {
+      const updated = await api.workspace.rename(state.activeId, name);
+      setState({
+        ...state,
+        workspaces: state.workspaces.map((w) =>
+          w.id === state.activeId ? { ...w, name: updated.name } : w
+        ),
+      });
+      setRenameOpen(false);
+    } catch (err) {
+      setError((err as Error).message || "Failed to rename workspace");
+    } finally {
+      setRenaming(false);
     }
   }
 
@@ -280,6 +304,20 @@ export function WorkspaceSwitcher() {
             >
               <Plus className="size-4" />
               New workspace
+            </DropdownMenuItem>
+            {/* #791: rename the active workspace. */}
+            <DropdownMenuItem
+              closeOnClick={false}
+              onClick={() => {
+                setRenameName(
+                  state.workspaces.find((w) => w.id === state.activeId)?.name ?? ""
+                );
+                setRenameOpen(true);
+              }}
+              className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+            >
+              <Pencil className="size-4" />
+              Rename workspace
             </DropdownMenuItem>
             {/* G10 (Federico 2026-06-03): Members lives in the workspace cluster,
                 peer to "New workspace". One model both products: on the OS it
@@ -461,6 +499,39 @@ export function WorkspaceSwitcher() {
               disabled={!createName.trim() || creating}
             >
               {creating ? "Creating..." : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* #791: rename the active workspace. */}
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename workspace</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="workspace-rename">Name</Label>
+            <Input
+              id="workspace-rename"
+              value={renameName}
+              onChange={(event) => setRenameName(event.target.value)}
+              maxLength={80}
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && renameName.trim() && !renaming) {
+                  event.preventDefault();
+                  handleRename();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" type="button" onClick={() => setRenameOpen(false)} disabled={renaming}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleRename} disabled={!renameName.trim() || renaming}>
+              {renaming ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>
