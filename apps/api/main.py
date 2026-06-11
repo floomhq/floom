@@ -188,6 +188,9 @@ from core.urls import (
     _api_public_base,
     _frontend_public_base,
 )
+# Client-IP / trusted-proxy resolution lives in core.net; re-exported for the
+# rate-limit + auth middleware and the cli-auth/audit call sites.
+from core.net import _client_ip, _trusted_proxy_peer, _valid_ip_literal
 
 from run_service import (
     create_run,
@@ -1184,61 +1187,6 @@ def _rate_limit_for_path(path: str) -> tuple[int, float]:
         if pattern.fullmatch(path):
             return limit
     return DEFAULT_RATE_LIMIT
-
-
-def _client_ip(request: Request) -> str:
-    peer = request.client.host if request.client else ""
-    if _trusted_proxy_peer(peer):
-        cf_connecting_ip = (request.headers.get("cf-connecting-ip") or "").strip()
-        if _valid_ip_literal(cf_connecting_ip):
-            return cf_connecting_ip
-
-        forwarded_for = (request.headers.get("x-forwarded-for") or "").split(",", 1)[0].strip()
-        if _valid_ip_literal(forwarded_for):
-            return forwarded_for
-
-    if _slowapi_get_remote_address is not None:
-        return _slowapi_get_remote_address(request) or peer or "unknown"
-    return peer or "unknown"
-
-
-def _trusted_proxy_peer(peer: str) -> bool:
-    configured = (
-        os.environ.get("trusted_proxies")
-        or os.environ.get("TRUSTED_PROXIES")
-        or os.environ.get("WORKEROS_TRUSTED_PROXIES")
-        or ""
-    )
-    entries = [entry.strip() for entry in configured.split(",") if entry.strip()]
-    if not entries:
-        return peer in {"testclient", "127.0.0.1", "::1", "localhost"}
-    if "*" in entries:
-        return True
-    if peer in entries:
-        return True
-    try:
-        peer_ip = ipaddress.ip_address(peer)
-    except ValueError:
-        return False
-    for entry in entries:
-        try:
-            if "/" in entry and peer_ip in ipaddress.ip_network(entry, strict=False):
-                return True
-            if "/" not in entry and peer_ip == ipaddress.ip_address(entry):
-                return True
-        except ValueError:
-            continue
-    return False
-
-
-def _valid_ip_literal(value: str) -> bool:
-    if not value:
-        return False
-    try:
-        ipaddress.ip_address(value)
-        return True
-    except ValueError:
-        return False
 
 
 def _body_limit_for_request(request: Request) -> Optional[int]:
