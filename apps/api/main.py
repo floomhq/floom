@@ -14898,6 +14898,8 @@ class ConnectionItem(BaseModel):
     display_name: Optional[str] = None
     last_checked_at: Optional[str] = None
     last_check_status: Optional[str] = None
+    last_used_at: Optional[str] = None  # #802: most recent run using this connection
+    last_used_by: Optional[str] = None  # #802: worker name of that run
     mcp_label: Optional[str] = None
     mcp_url: Optional[str] = None
     mcp_transport: str = "streamable_http"
@@ -15613,6 +15615,33 @@ def list_connection_tool_presets(
     return {"presets": read_only_presets()}
 
 
+def _connections_last_used(user_id: str, repos: Repositories) -> Dict[str, tuple[str, str]]:
+    """#802: map connection slug -> (last_used_at, worker_name) from the most
+    recent run of any worker declaring that connection. One pass over visible
+    workers; O(workers) recent-run lookups."""
+    last_used: Dict[str, tuple[str, str]] = {}
+    try:
+        for w in _list_visible_workers(user_id=user_id, repos=repos, use_cache=True):
+            slugs = [s.lower() for s in _worker_connection_slugs(w)]
+            if not slugs:
+                continue
+            recent = repos.runs.list_for_worker(user_id=user_id, worker_id=w["id"], limit=1, offset=0)
+            if not recent:
+                continue
+            run = recent[0]
+            ts = str(run.get("created_at") or "")
+            if not ts:
+                continue
+            wname = str(w.get("name") or w["id"])
+            for slug in slugs:
+                prev = last_used.get(slug)
+                if prev is None or ts > prev[0]:
+                    last_used[slug] = (ts, wname)
+    except Exception:
+        logger.debug("connection last-used computation failed", exc_info=True)
+    return last_used
+
+
 @app.get("/connections", response_model=List[ConnectionItem])
 def list_connections(
     auth: AuthContext = Depends(get_auth_context),
@@ -15620,12 +15649,16 @@ def list_connections(
 ) -> List[ConnectionItem]:
     rows = repos.connections.list(user_id=auth.user_id)
     now = datetime.now(timezone.utc)
+    last_used = _connections_last_used(auth.user_id, repos)  # #802
 
     refreshed: List[Dict[str, Any]] = []
     for row in rows:
         d = row_to_dict(row)
         d = _refresh_connection_status_for_list(d, user_id=auth.user_id, repos=repos, now=now)
         d["scopes"] = _parse_scopes_json(d.pop("scopes_json", None))
+        used = last_used.get(str(d.get("app_name") or "").lower())
+        if used:
+            d["last_used_at"], d["last_used_by"] = used
         refreshed.append(d)
 
     # Hide superseded dead rows: once an app has a live (active/valid) composio
