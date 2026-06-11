@@ -19808,6 +19808,50 @@ async def get_conversation_detail(
     return {**conv, "messages": messages, "tool_cards": tool_cards}
 
 
+@app.get("/conversations/{conversation_id}/export")
+async def export_conversation(
+    conversation_id: str,
+    format: str = "md",
+    auth: AuthContext = Depends(get_auth_context),
+) -> Response:
+    """#776: download a conversation transcript as a markdown attachment.
+
+    The Emily header 'Export chat' button had no backend; GET /conversations/
+    {id} returns JSON but is not a download. This renders the message turns as
+    markdown with a Content-Disposition attachment header.
+    """
+    if format != "md":
+        raise HTTPException(status_code=422, detail="only format=md is supported")
+    from chat_service import get_conversation, list_conversation_messages
+    conv = get_conversation(conversation_id, auth.user_id)
+    if not conv:
+        raise HTTPException(status_code=404, detail="Conversation not found")
+    messages = list_conversation_messages(conversation_id, auth.user_id)
+
+    title = str(conv.get("title") or "Conversation")
+    lines = [f"# {title}", ""]
+    role_label = {"user": "You", "assistant": "Emily"}
+    for msg in messages:
+        role = str(msg.get("role") or "")
+        if role == "tool":
+            continue  # tool results are represented by their cards, not transcript prose
+        content = str(msg.get("content") or "").strip()
+        if not content:
+            continue
+        who = role_label.get(role, role.capitalize() or "Unknown")
+        ts = str(msg.get("created_at") or "")
+        header = f"## {who}" + (f" — {ts}" if ts else "")
+        lines.extend([header, "", content, ""])
+    body = "\n".join(lines).rstrip() + "\n"
+
+    safe_id = re.sub(r"[^A-Za-z0-9_-]+", "-", conversation_id)[:60] or "conversation"
+    return Response(
+        content=body,
+        media_type="text/markdown; charset=utf-8",
+        headers={"Content-Disposition": f'attachment; filename="chat-{safe_id}.md"'},
+    )
+
+
 # ---------------------------------------------------------------------------
 # MCP tool CRUD endpoints
 # ---------------------------------------------------------------------------
