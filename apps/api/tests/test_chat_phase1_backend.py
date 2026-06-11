@@ -659,8 +659,11 @@ def test_chat_sse_endpoint_preserves_contract_order(booted, monkeypatch):
 
 def test_public_run_sse_enriches_artifact_and_terminal_events(booted, monkeypatch):
     main = booted["main"]
+    # _run_event_metadata moved to services.public_view alongside _public_sse_event,
+    # which calls it directly; patch it at its new home so the injection takes effect.
+    import services.public_view as _public_view
     monkeypatch.setattr(
-        main,
+        _public_view,
         "_run_event_metadata",
         lambda run_id: {
             "worker_id": "csv_enricher",
