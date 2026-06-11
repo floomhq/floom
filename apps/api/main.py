@@ -8198,6 +8198,60 @@ def update_worker(
     return detail
 
 
+def _set_worker_enabled(
+    worker_id: str,
+    *,
+    enabled: bool,
+    auth: AuthContext,
+    repos: Repositories,
+    request: Request,
+) -> WorkerDetail:
+    # #788 shared body for pause/resume. enabled is a real DB column; toggling
+    # it (plus clearing next_run_at on pause) takes the worker in/out of the
+    # scheduler without a full worker.yml rewrite.
+    _require_worker_write_workspace_context(request)
+    worker_id = _canonical_worker_id(worker_id)
+    _raise_if_protected_worker_mutation(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    update_fields: Dict[str, Any] = {"enabled": enabled}
+    if not enabled:
+        update_fields["next_run_at"] = None  # unschedule pending cron fire
+    repos.workers.update(user_id=auth.user_id, worker_id=worker_id, **update_fields)
+    # Re-reconcile triggers so resume re-enqueues and pause tears down.
+    try:
+        triggers = (worker.get("config") or {}).get("triggers") or worker.get("triggers_json") or []
+        if triggers:
+            repos.workers.reconcile_triggers(worker_id=worker_id, triggers=triggers, enabled=enabled)
+    except Exception:
+        logger.debug("reconcile_triggers on enabled-toggle failed (non-fatal)", exc_info=True)
+    invalidate_worker_cache()
+    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+
+@app.post("/workers/{worker_id}/pause", response_model=WorkerDetail)
+def pause_worker(
+    worker_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """#788: pause a worker (enabled=false) so it stops running on schedule."""
+    return _set_worker_enabled(worker_id, enabled=False, auth=auth, repos=repos, request=request)
+
+
+@app.post("/workers/{worker_id}/resume", response_model=WorkerDetail)
+def resume_worker(
+    worker_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """#788: resume a paused worker (enabled=true) and re-enqueue its schedule."""
+    return _set_worker_enabled(worker_id, enabled=True, auth=auth, repos=repos, request=request)
+
+
 # ---------------------------------------------------------------------------
 # DELETE /workers/{worker_id}
 # ---------------------------------------------------------------------------
