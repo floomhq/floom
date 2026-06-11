@@ -69,8 +69,8 @@ AWS_REGION_NAME=us-west-2
 
 Anthropic models on Bedrock require submitting the one-time "use case details" form
 in the Bedrock console (per region). Prompt caching of the static system prompt is
-applied automatically on Anthropic/Bedrock codegen calls; OpenAI caches prefixes
-server-side.
+applied automatically on Anthropic/Bedrock for both codegen and agent (worker +
+Emily) calls; OpenAI caches prefixes server-side.
 
 **Recommended for production:**
 - `FLOOM_SECRET` — operator secret that gates all API requests. Omit entirely for unauthenticated local dev.

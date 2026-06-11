@@ -4908,15 +4908,17 @@ async def stream_chat(
 
         import llm as _llm
 
+        _emily_model = _llm.agent_model(os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL)
         agent = Agent(
             name=WORKSPACE_AGENT_ID,
             instructions=system_prompt,
             tools=all_tools,
             mcp_servers=mcp_servers,
-            model=_llm.agent_model(os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL),
+            model=_emily_model,
             model_settings=ModelSettings(
                 max_tokens=4096,
                 include_usage=True,
+                extra_args=_llm.cache_control_extra_args(_emily_model),
             ),
             tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs"]},
         )
