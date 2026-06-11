@@ -704,41 +704,6 @@ async def require_secret(request: Request) -> str:
     return ctx.user_id
 
 
-class LocalWorkspaceCreateRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=80)
-
-
-class LocalWorkspaceRenameRequest(BaseModel):
-    # #791: name optional so region/timezone can be updated alone.
-    name: Optional[str] = Field(None, min_length=1, max_length=80)
-    region: Optional[str] = None
-    timezone: Optional[str] = None
-
-
-class LocalWorkspaceOut(BaseModel):
-    id: str
-    name: str
-    owner_user_id: str
-    created_at: str
-    region: Optional[str] = None  # #791
-    timezone: Optional[str] = None  # #791
-
-
-class LocalWorkspaceListResponse(BaseModel):
-    workspaces: List[LocalWorkspaceOut]
-    active_id: str
-
-
-class CurrentUserResponse(BaseModel):
-    user_id: str
-    email: Optional[str] = None
-    display_name: Optional[str] = None
-    workspace_id: Optional[str] = None
-    scopes: List[str] = []
-    role: str = "admin"
-    username: Optional[str] = None
-
-
 class WorkspaceAgentSettingsUpdate(BaseModel):
     model_config = ConfigDict(extra="forbid")
 
@@ -747,164 +712,6 @@ class WorkspaceAgentSettingsUpdate(BaseModel):
     connections_read: Optional[bool] = None
     connections_use: Optional[bool] = None
     connections_add: Optional[bool] = None
-
-
-def _local_workspace_out(row: Dict[str, Any]) -> LocalWorkspaceOut:
-    return LocalWorkspaceOut(
-        id=str(row["id"]),
-        name=str(row["name"]),
-        owner_user_id=str(row["owner_user_id"]),
-        created_at=str(row["created_at"]),
-        region=(row.get("region") if isinstance(row, dict) else None) or None,  # #791
-        timezone=(row.get("timezone") if isinstance(row, dict) else None) or None,  # #791
-    )
-
-
-def _active_local_workspace_id(auth: AuthContext) -> str:
-    base_user_id = local_workspace_base_user_id(auth.user_id)
-    if auth.user_id == base_user_id:
-        return DEFAULT_WORKSPACE_ID
-    marker = "__"
-    return auth.user_id.split(marker, 1)[1]
-
-
-def _require_local_workspace_mode() -> None:
-    if _is_cloud_deploy():
-        raise HTTPException(status_code=404, detail="not found")
-
-
-@app.get("/me", response_model=CurrentUserResponse)
-def get_current_user(auth: AuthContext = Depends(get_auth_context)) -> CurrentUserResponse:
-    return CurrentUserResponse(
-        user_id=auth.user_id,
-        email=auth.email,
-        display_name=auth.email or auth.username or auth.user_id,
-        workspace_id=_active_local_workspace_id(auth) if not _is_cloud_deploy() else None,
-        scopes=list(auth.scopes or ()),
-        role=auth.role,
-        username=auth.username,
-    )
-
-
-@app.get("/workspaces", response_model=LocalWorkspaceListResponse)
-def list_workspaces(auth: AuthContext = Depends(get_auth_context)) -> LocalWorkspaceListResponse:
-    """List local OSS workspaces for the single-user dashboard."""
-    _require_local_workspace_mode()
-    base_user_id = local_workspace_base_user_id(auth.user_id)
-    rows = list_local_workspaces(base_user_id)
-    return LocalWorkspaceListResponse(
-        workspaces=[_local_workspace_out(row) for row in rows],
-        active_id=_active_local_workspace_id(auth),
-    )
-
-
-@app.post("/workspaces", response_model=LocalWorkspaceOut)
-def create_workspace(
-    payload: LocalWorkspaceCreateRequest,
-    auth: AuthContext = Depends(get_auth_context),
-) -> LocalWorkspaceOut:
-    """Create a local OSS workspace.
-
-    Selection is client-side for OSS: the web app stores the active workspace id
-    and sends it as x-workeros-workspace on every proxied request.
-    """
-    _require_local_workspace_mode()
-    base_user_id = local_workspace_base_user_id(auth.user_id)
-    return _local_workspace_out(create_local_workspace(base_user_id, payload.name))
-
-
-@app.patch("/workspaces/{workspace_id}", response_model=LocalWorkspaceOut)
-def rename_workspace(
-    workspace_id: str,
-    payload: LocalWorkspaceRenameRequest,
-    auth: AuthContext = Depends(get_auth_context),
-) -> LocalWorkspaceOut:
-    """#791: update a local OSS workspace's name/region/timezone (owner-scoped)."""
-    _require_local_workspace_mode()
-    if payload.name is None and payload.region is None and payload.timezone is None:
-        raise HTTPException(status_code=422, detail="nothing to update")
-    base_user_id = local_workspace_base_user_id(auth.user_id)
-    try:
-        updated = update_local_workspace(
-            base_user_id, workspace_id,
-            name=payload.name, region=payload.region, timezone=payload.timezone,
-        )
-    except ValueError as exc:
-        raise HTTPException(status_code=422, detail=str(exc)) from exc
-    if updated is None:
-        raise HTTPException(status_code=404, detail="workspace not found")
-    return _local_workspace_out(updated)
-
-
-@app.post("/workspaces/{workspace_id}/select", response_model=LocalWorkspaceOut)
-def select_workspace(
-    workspace_id: str,
-    auth: AuthContext = Depends(get_auth_context),
-) -> LocalWorkspaceOut:
-    """Validate and echo a local OSS workspace selection."""
-    _require_local_workspace_mode()
-    base_user_id = local_workspace_base_user_id(auth.user_id)
-    workspace = get_local_workspace(base_user_id, workspace_id)
-    if workspace is None:
-        raise HTTPException(status_code=404, detail="workspace not found")
-    return _local_workspace_out(workspace)
-
-
-@app.delete("/workspaces/{workspace_id}")
-def delete_workspace(
-    workspace_id: str,
-    auth: AuthContext = Depends(get_auth_context),
-) -> Dict[str, bool]:
-    """#805: delete a local OSS workspace (Settings > Danger).
-
-    Owner-scoped (404 for another owner's / unknown workspace). The default
-    workspace cannot be deleted (409) — there must always be one. On this
-    single-tenant engine workers/knowledge live in a shared on-disk pool, so
-    deleting a workspace removes only the workspace row + its selection, not
-    the shared assets.
-    """
-    _require_local_workspace_mode()
-    if workspace_id == DEFAULT_WORKSPACE_ID:
-        raise HTTPException(status_code=409, detail="The default workspace cannot be deleted")
-    base_user_id = local_workspace_base_user_id(auth.user_id)
-    if get_local_workspace(base_user_id, workspace_id) is None:
-        raise HTTPException(status_code=404, detail="workspace not found")
-    delete_local_workspace(base_user_id, workspace_id)
-    return {"deleted": True}
-
-
-def _duplicate_workspace_name(name: str) -> str:
-    """``"Acme"`` -> ``"Acme (copy)"`` (clamped to the 80-char name limit)."""
-    base = (name or "").strip() or "Untitled"
-    suffix = " (copy)"
-    if len(base) + len(suffix) > 80:
-        base = base[: 80 - len(suffix)].rstrip()
-    return f"{base}{suffix}"
-
-
-@app.post("/workspaces/{workspace_id}/duplicate", response_model=LocalWorkspaceOut)
-def duplicate_workspace(
-    workspace_id: str,
-    auth: AuthContext = Depends(get_auth_context),
-) -> LocalWorkspaceOut:
-    """Duplicate a local OSS workspace into a new ``"<name> (copy)"`` sibling.
-
-    Owner-scoped: the source workspace must belong to the caller's local base
-    user, otherwise 404. On this single-tenant OSS instance, workers and
-    knowledge packs live in a shared on-disk pool (not per-workspace storage),
-    so duplication mints a new workspace row that surfaces the same worker pool.
-    Use Export → Import (the template round-trip) to move workers between
-    instances.
-    """
-    _require_local_workspace_mode()
-    base_user_id = local_workspace_base_user_id(auth.user_id)
-    source = get_local_workspace(base_user_id, workspace_id)
-    if source is None:
-        raise HTTPException(status_code=404, detail="workspace not found")
-    created = create_local_workspace(
-        base_user_id, _duplicate_workspace_name(source.get("name") or "")
-    )
-    return _local_workspace_out(created)
 
 
 # ---------------------------------------------------------------------------
@@ -15990,6 +15797,27 @@ app.include_router(cli_auth_router)
 
 from routers.chat import chat_router
 app.include_router(chat_router)
+
+from routers.workspaces import (
+    workspaces_router,
+    LocalWorkspaceCreateRequest,
+    LocalWorkspaceRenameRequest,
+    LocalWorkspaceOut,
+    LocalWorkspaceListResponse,
+    CurrentUserResponse,
+    _local_workspace_out,
+    _active_local_workspace_id,
+    _require_local_workspace_mode,
+    _duplicate_workspace_name,
+    get_current_user,
+    list_workspaces,
+    create_workspace,
+    rename_workspace,
+    select_workspace,
+    delete_workspace,
+    duplicate_workspace,
+)
+app.include_router(workspaces_router)
 
 # ---------------------------------------------------------------------------
 # WhatsApp integration — extracted to channels/whatsapp.py
