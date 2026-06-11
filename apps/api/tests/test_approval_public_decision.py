@@ -68,7 +68,21 @@ _APPROVAL_B = {
     "decision_input_json": "{}",
     "created_at": "2026-06-03T10:05:00Z",
 }
-_BY_ID = {"apr_A": _APPROVAL_A, "apr_B": _APPROVAL_B}
+# #769: a destructive-delete approval — the public approve path routes these to
+# approve_destructive_action, which previously DROPPED the reviewer's reason.
+_APPROVAL_C = {
+    "id": "apr_C",
+    "run_id": "run_C",
+    "owner_id": "user_C",
+    "worker_id": "worker_C",
+    "worker_name": "Worker C",
+    "status": "pending",
+    "label": "Delete file",
+    "preview": "rm data/old.csv",
+    "decision_input_json": '{"kind": "destructive_delete", "path": "data/old.csv"}',
+    "created_at": "2026-06-03T10:10:00Z",
+}
+_BY_ID = {"apr_A": _APPROVAL_A, "apr_B": _APPROVAL_B, "apr_C": _APPROVAL_C}
 
 
 class _ApprovalsRepo:
@@ -115,8 +129,20 @@ def _client_and_calls(monkeypatch):
         )
         return main.ActionResponse(status="rejected", run_id=run_id)
 
+    def _fake_approve_destructive(approval_id, auth, repos, annotations=None, reason=None, **kw):
+        calls.append(
+            {
+                "kind": "approve_destructive",
+                "approval_id": approval_id,
+                "owner_id": auth.user_id,
+                "reason": reason,
+            }
+        )
+        return {"status": "approved", "executed": "data/old.csv"}
+
     monkeypatch.setattr(main, "approve_run", _fake_approve_run)
     monkeypatch.setattr(main, "reject_run", _fake_reject_run)
+    monkeypatch.setattr(main, "approve_destructive_action", _fake_approve_destructive)
     main.app.dependency_overrides[main.get_repos] = lambda: _Repos()
     return TestClient(main.app), calls
 
@@ -190,6 +216,26 @@ def test_public_approve_anonymous_with_valid_token(monkeypatch):
     # The decision runs under the APPROVAL OWNER's identity, derived from the
     # signed row — not from any client-supplied auth.
     assert calls[0] == {"kind": "approve", "run_id": "run_A", "owner_id": "user_A"}
+
+
+def test_public_approve_destructive_forwards_reason(monkeypatch):
+    # #769: the public destructive-delete approve path must forward the
+    # reviewer's plain-text reason (was silently dropped before the fix).
+    client, calls = _client_and_calls(monkeypatch)
+    token = _token_for(_APPROVAL_C)
+    try:
+        response = client.post(
+            f"/approvals/public/apr_C/approve?token={token}",
+            json={"reason": "approved for cleanup"},
+        )
+    finally:
+        main.app.dependency_overrides.clear()
+
+    assert response.status_code == 200, response.text
+    assert len(calls) == 1
+    assert calls[0]["kind"] == "approve_destructive"
+    assert calls[0]["owner_id"] == "user_C"
+    assert calls[0]["reason"] == "approved for cleanup"
 
 
 def test_public_reject_anonymous_with_valid_token_and_reason(monkeypatch):
