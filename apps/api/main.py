@@ -6723,6 +6723,7 @@ def scan_context_for_secrets(
 class WorkerListSummary(WorkerSummary):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+    starred: bool = False  # #782: per-user star state
 
 
 @app.get("/workers", response_model=List[WorkerListSummary])
@@ -6790,6 +6791,7 @@ def list_workers(
     )
     available_secret_names = _available_secret_names_for_user(worker_user_id, repos)
     available_conn_slugs = _available_connection_slugs_for_user(worker_user_id, repos)
+    starred_ids = _starred_worker_ids(auth.user_id)  # #782
     result: List[WorkerListSummary] = []
     for w in workers:
         last_run_row = _get_last_run_for_worker(w["id"], user_id=worker_user_id, repos=repos)
@@ -6856,6 +6858,7 @@ def list_workers(
                 name=w["name"],
                 created_at=w.get("created_at"),
                 updated_at=w.get("updated_at"),
+                starred=w["id"] in starred_ids,
                 description=w.get("description"),
                 # S44 Win 3: omit detail-only fields in list shape.
                 long_description=None if list_shape else w.get("long_description"),
@@ -7661,6 +7664,51 @@ def import_worker_from_share(
         raise HTTPException(status_code=409, detail="Worker share is missing worker.yml")
     new_id = _register_worker_from_files(draft_files, user_id=auth.user_id, repos=repos, dedupe_id=True)
     return {"worker_id": new_id, "url": f"/workers/{new_id}"}
+
+
+def _starred_worker_ids(user_id: str) -> set:
+    """#782: the set of worker ids this user has starred."""
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT worker_id FROM worker_stars WHERE user_id = ?", (user_id,)
+            ).fetchall()
+        return {str(r["worker_id"]) for r in rows}
+    except Exception:
+        return set()
+
+
+@app.post("/workers/{worker_id}/star", status_code=204)
+def star_worker(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    """#782: star a worker for the current user (idempotent)."""
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=_worker_access_user_id(auth), repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    with get_db() as conn:
+        conn.execute(
+            "INSERT OR IGNORE INTO worker_stars (user_id, worker_id, created_at) VALUES (?, ?, ?)",
+            (auth.user_id, worker_id, now_iso()),
+        )
+
+
+@app.delete("/workers/{worker_id}/star", status_code=204)
+def unstar_worker(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    """#782: remove a star (idempotent)."""
+    worker_id = _canonical_worker_id(worker_id)
+    with get_db() as conn:
+        conn.execute(
+            "DELETE FROM worker_stars WHERE user_id = ? AND worker_id = ?",
+            (auth.user_id, worker_id),
+        )
 
 
 @app.post("/workers/{worker_id}/share-link")

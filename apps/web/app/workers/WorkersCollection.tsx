@@ -33,7 +33,6 @@ import {
   contentTagOptions,
   orderedSourceFiles,
 } from "@/lib/workers/derive";
-import { getFavorites, saveFavorites } from "@/lib/workers/favorites";
 import { sortWorkersByRecentActivity } from "@/lib/worker-list-order";
 
 function rel(ts?: string | null): string {
@@ -472,23 +471,39 @@ export default function WorkersCollection({
   initialWorkers: WorkerSummary[];
 }) {
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
-  const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  // #782: star state is server-backed — seed from the list's `starred` field.
+  const [favorites, setFavorites] = useState<Set<string>>(
+    () => new Set(initialWorkers.filter((w) => w.starred).map((w) => w.id))
+  );
 
   useEffect(() => {
-    setFavorites(getFavorites());
     api.workers
       .list({ include_archived: true })
-      .then((all) => setWorkers(all.filter((w) => !isSystemWorker(w))))
+      .then((all) => {
+        setWorkers(all.filter((w) => !isSystemWorker(w)));
+        setFavorites(new Set(all.filter((w) => w.starred).map((w) => w.id)));
+      })
       .catch(() => {});
   }, []);
 
   const toggleStar = useCallback((id: string) => {
+    // #782: optimistic toggle, persist server-side, revert on failure.
+    let willStar = false;
     setFavorites((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
-      saveFavorites(next);
+      willStar = !next.has(id);
+      if (willStar) next.add(id);
+      else next.delete(id);
       return next;
+    });
+    (willStar ? api.workers.star(id) : api.workers.unstar(id)).catch(() => {
+      setFavorites((cur) => {
+        const rb = new Set(cur);
+        if (willStar) rb.delete(id);
+        else rb.add(id);
+        return rb;
+      });
+      toast.error("Could not update star.");
     });
   }, []);
 

@@ -272,6 +272,7 @@ export interface WorkerSummary {
   name: string;
   created_at?: string | null;
   updated_at?: string | null;
+  starred?: boolean; // #782: per-user star state
   description?: string;
   long_description?: string;
   use_cases?: string[];
