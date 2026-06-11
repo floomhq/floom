@@ -370,6 +370,10 @@ export interface WorkerDetail {
   owner_id?: string | null;
   visibility?: AssetVisibility;
   permissions?: AssetPermissions;
+  // P4 / #815: latest run output preview surfaced on the worker detail About tab.
+  // Text excerpt of the most recent successful run's result (≤500 chars).
+  latest_output?: string | null;
+  latest_output_run_id?: string | null;
 }
 
 // A feedback comment left on a worker (SPEC §12). Anyone who can SEE the worker

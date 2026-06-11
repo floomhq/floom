@@ -2,6 +2,11 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+const overviewSrc = readFileSync(
+  resolve(__dirname, "../components/overview/OverviewDashboard.tsx"),
+  "utf8"
+);
+
 // APP-UI-V4-SPEC rule #2: "Flat by token, never by component." All collection
 // surface borders come from the --bd-* CSS variables; a hardcoded
 // `border: 1px solid` on a collection surface is a review-blocker (this exact
@@ -223,5 +228,28 @@ describe("Phase 2 — Textarea primitive (v4 flat, APP-UI-V4-SPEC §1)", () => {
   it("fill is --bg-2, not bg-transparent", () => {
     expect(textarea).toContain("bg-[var(--bg-2)]");
     expect(textarea).not.toContain("bg-transparent");
+  });
+});
+
+// P5: OverviewDashboard metric tiles must use --bd-card token (spec rule #2).
+// The tiles must not have a hardcoded `border border-[var(--border-default)]`.
+describe("P5 — OverviewDashboard metric tiles are flat by token (spec rule #2)", () => {
+  it("cardClass uses --bd-card token, not border-[var(--border-default)]", () => {
+    // The metric tile cardClass const must use `border-[var(--bd-card)]`
+    expect(overviewSrc).toContain("border-[var(--bd-card)]");
+    // Must NOT hardcode border-[var(--border-default)]
+    expect(overviewSrc).not.toContain("border border-[var(--border-default)]");
+  });
+
+  it("metric tile hover uses bg lift, not border-strong", () => {
+    // Hover must be a bg change, not a border-color change (spec §4 tiles)
+    expect(overviewSrc).not.toContain("hover:border-[var(--border-strong)]");
+    expect(overviewSrc).toContain("hover:bg-[var(--bg-2)]");
+  });
+
+  it("metric tile grid has 2 cols at mobile (spec §5c: 2×2 tiles)", () => {
+    // Must not default to 1-col at small screens (grid-cols-1 md:grid-cols-2)
+    expect(overviewSrc).not.toContain("grid-cols-1 gap-3 md:grid-cols-2");
+    expect(overviewSrc).toContain("grid-cols-2");
   });
 });
