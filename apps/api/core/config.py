@@ -32,6 +32,12 @@ def _user_scoped_local_mode() -> bool:
     return os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") == "1"
 
 
+def _bootstrap_user_id() -> str:
+    """The single operator's user id in OSS single-tenant mode (env-overridable)."""
+    configured = (os.environ.get("WORKEROS_USER_ID") or "").strip()
+    return configured or "federico"
+
+
 # ---------------------------------------------------------------------------
 # Public sharing
 # ---------------------------------------------------------------------------
