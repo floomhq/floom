@@ -318,7 +318,7 @@ class TestPromptIncludesSnapshot:
 
 
 # ---------------------------------------------------------------------------
-# Snapshot: user-benefit tone (BUG 2 — do not recite internal guardrails)
+# Snapshot: user-benefit tone (BUG 2 -- do not recite internal guardrails)
 # ---------------------------------------------------------------------------
 
 class TestSnapshotUserBenefitTone:
@@ -330,15 +330,8 @@ class TestSnapshotUserBenefitTone:
     def test_snapshot_contains_do_not_recite_guidance(self):
         """The snapshot block must contain guidance telling Emily NOT to expose
         internal rules verbatim to end users."""
-        # Build a real snapshot via monkeypatching DB calls away.
         import chat_service as cs
-        # We test the real _build_capabilities_snapshot return value.
-        # Monkeypatch DB helpers to return empty state so we get a clean snapshot.
-        import sys
-        import importlib
-
-        # Patch only the DB layer inside the function so it returns empty data.
-        original = cs._build_capabilities_snapshot
+        import db as _db_mod
 
         class _FakeRepos:
             class connections:
@@ -351,7 +344,6 @@ class TestSnapshotUserBenefitTone:
                     return []
             members = None
 
-        import db as _db_mod
         orig_get_repos = _db_mod.get_repositories
         orig_owner_brain = cs._owner_brain_pack_names
 
@@ -394,9 +386,17 @@ class TestSnapshotUserBenefitTone:
             _db_mod.get_repositories = orig_get_repos
             cs._owner_brain_pack_names = orig_owner_brain
 
-        # Should guide Emily to speak about what she can DO FOR the user.
-        assert "user-benefit" in snap.lower() or "do for" in snap.lower() or "benefit" in snap.lower(), (
-            "snapshot must include user-benefit framing instruction"
+        # Should guide Emily to speak about outcomes she gets DONE for the user,
+        # in chief-of-staff terms, not a tool inventory.
+        lower = snap.lower()
+        assert (
+            "chief of staff" in lower or "outcomes" in lower
+            or "get done" in lower or "user-benefit" in lower or "benefit" in lower
+        ), (
+            "snapshot must include chief-of-staff / outcome framing instruction"
+        )
+        assert "tool inventory" in lower, (
+            "snapshot must tell Emily NOT to answer as a tool inventory"
         )
 
     def test_snapshot_instructs_not_to_expose_security_constraints(self):
@@ -428,9 +428,155 @@ class TestSnapshotUserBenefitTone:
 
         lower = snap.lower()
         assert (
-            "do not recite" in lower or "not recite" in lower
+            "do not recite" in lower or "not recite" in lower or "never recite" in lower
             or "do not expose" in lower or "not expose" in lower
             or "security rules" in lower or "permission models" in lower
         ), (
             "snapshot must explicitly instruct Emily not to recite security constraints to users"
         )
+        # New: must forbid reciting tool/plumbing terms (secrets, MCP, connections,
+        # debug workers) and naming connected apps unless explicitly asked.
+        for forbidden_term in ("secrets", "mcp", "connections", "debug workers"):
+            assert forbidden_term in lower, (
+                f"snapshot must name {forbidden_term!r} among the plumbing terms Emily must not recite"
+            )
+        assert "list connected apps" in lower or "connected apps by name" in lower, (
+            "snapshot must forbid listing connected apps by name"
+        )
+
+
+# ---------------------------------------------------------------------------
+# Prompt-improvement regression tests (feat/emily-prompt-improvements)
+# ---------------------------------------------------------------------------
+
+class TestPromptImprovements:
+    """Assert all three priority improvements are present and no prior fixes regressed."""
+
+    @pytest.fixture
+    def stubbed(self, monkeypatch):
+        monkeypatch.setattr(
+            chat_service,
+            "_build_capabilities_snapshot",
+            lambda uid: "## What you can do here (capabilities snapshot)\n- Workers: 0",
+        )
+        monkeypatch.setattr(chat_service, "get_workspace_md", lambda: "")
+        monkeypatch.setattr(chat_service, "_build_workspace_preamble", lambda uid: "## Workspace snapshot\n(none)")
+        monkeypatch.setattr(chat_service, "_owner_brain_pack_names", lambda uid: [])
+
+    # --- Finish contract ---
+
+    def test_finish_contract_in_persona(self):
+        persona = chat_service.EMILY_BASE_PERSONA
+        assert any(p in persona.lower() for p in ("finish the job", "keep going", "genuine blocker")), (
+            "Finish contract must be in EMILY_BASE_PERSONA"
+        )
+
+    # --- Tools before text ---
+
+    def test_tools_before_text_first_rule_in_global(self):
+        rules = chat_service.GLOBAL_COMMUNICATION_RULES
+        # Strip header line; first substantive sentence must mention tools/investigate.
+        body = rules.split("\n", 1)[-1]  # skip the '## Communication rules' header line
+        first_sentence = body.strip().split(".")[0].lower()
+        assert "tool" in first_sentence or "investigate" in first_sentence, (
+            f"Tools-before-text must be first sentence in GLOBAL_COMMUNICATION_RULES; got: {first_sentence!r}"
+        )
+
+    # --- WhatsApp hard constraints ---
+
+    def test_whatsapp_char_limit_stated(self):
+        note = chat_service._environment_note("whatsapp")
+        assert "1500" in note or "char" in note.lower(), (
+            "WhatsApp note must state a hard character limit"
+        )
+
+    def test_whatsapp_forbids_double_asterisk(self):
+        note = chat_service._environment_note("whatsapp")
+        assert "**" in note or "double asterisk" in note.lower(), (
+            "WhatsApp note must explicitly forbid **double-asterisk** bold"
+        )
+
+    def test_whatsapp_forbids_code_fences(self):
+        note = chat_service._environment_note("whatsapp")
+        assert "code" in note.lower() or "```" in note or "fence" in note.lower(), (
+            "WhatsApp note must forbid code fences"
+        )
+
+    # --- Regression: injection-safe workspace delimiter still present ---
+
+    def test_workspace_delimiter_still_present(self, stubbed, monkeypatch):
+        monkeypatch.setattr(chat_service, "get_workspace_md", lambda: "Be careful.")
+        prompt = chat_service._build_system_prompt("u1")
+        assert "Workspace instructions (set by the user):" in prompt, (
+            "Injection-safe workspace delimiter must still be present"
+        )
+        assert "end workspace instructions" in prompt
+
+    # --- Regression: surface awareness still distinct ---
+
+    def test_surface_notes_still_distinct(self):
+        notes = {s: chat_service._environment_note(s) for s in ALL_SOURCES}
+        from itertools import combinations
+        for a, b in combinations(ALL_SOURCES, 2):
+            assert notes[a] != notes[b], f"surface notes for {a!r} and {b!r} must be distinct"
+
+
+# ---------------------------------------------------------------------------
+# Identity: chief-of-staff persona (non-technical, outcome-framed)
+# ---------------------------------------------------------------------------
+
+class TestChiefOfStaffIdentity:
+    """EMILY_BASE_PERSONA must present Emily as a chief of staff for a
+    non-technical buyer: autonomous, always-on, runs a team of workers, has a
+    memory. NOT a developer tool inventory.
+    """
+
+    def test_identity_is_chief_of_staff(self):
+        persona = chat_service.EMILY_BASE_PERSONA.lower()
+        assert "chief of staff" in persona, (
+            "identity must frame Emily as a chief of staff"
+        )
+
+    def test_identity_conveys_autonomous_always_on(self):
+        persona = chat_service.EMILY_BASE_PERSONA.lower()
+        assert "autonomous" in persona or "around the clock" in persona or "always-on" in persona, (
+            "identity must convey autonomous / always-on operation"
+        )
+
+    def test_identity_conveys_team_and_memory(self):
+        persona = chat_service.EMILY_BASE_PERSONA.lower()
+        assert "team of" in persona and ("worker" in persona), (
+            "identity must convey that Emily runs a team of workers"
+        )
+        assert "memory" in persona or "remember" in persona, (
+            "identity must convey that Emily has a brain/memory for what matters"
+        )
+
+    def test_identity_loops_in_only_for_decisions(self):
+        persona = chat_service.EMILY_BASE_PERSONA.lower()
+        assert "decision" in persona or "loop you in" in persona, (
+            "identity must convey she handles work end to end and loops in for decisions"
+        )
+
+    def test_identity_uses_relatable_outcome_examples(self):
+        """The identity should give a founder-relatable everyday example, not a
+        tool catalog."""
+        persona = chat_service.EMILY_BASE_PERSONA.lower()
+        assert (
+            "morning brief" in persona or "inbox" in persona or "chasing" in persona
+            or "replies" in persona
+        ), (
+            "identity must give concrete everyday outcome examples"
+        )
+
+    def test_identity_has_no_technical_plumbing(self):
+        """The user-facing identity must not recite internal plumbing terms."""
+        persona = chat_service.EMILY_BASE_PERSONA.lower()
+        for term in ("mcp", "secret", "debug worker", "register", "missing config"):
+            assert term not in persona, (
+                f"identity must not contain technical plumbing term {term!r}"
+            )
+
+    def test_identity_has_no_em_dashes(self):
+        assert "—" not in chat_service.EMILY_BASE_PERSONA
+        assert "–" not in chat_service.EMILY_BASE_PERSONA

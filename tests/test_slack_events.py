@@ -85,10 +85,31 @@ def test_slack_events_rejects_invalid_signature(monkeypatch, tmp_path):
 
 def test_slack_commands_help_uses_signed_form_without_api_secret(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
+
+    # Codex finding #1: slash commands resolve the actor from the Slack user_id
+    # via the binding. Bind U123 to a real user so `help` returns the help text
+    # rather than an unbound claim nudge.
+    with main.get_db() as conn:
+        now = main.now_iso()
+        conn.execute(
+            "INSERT OR IGNORE INTO users (id, username, password_hash, role, created_at, updated_at) "
+            "VALUES ('cmd-user-1', 'cmduser', 'x', 'admin', ?, ?)",
+            (now, now),
+        )
+        conn.execute(
+            """
+            INSERT INTO slack_sender_bindings
+                (slack_team_id, slack_user_id, user_id, profile_name, status, created_at, updated_at)
+            VALUES ('T123', 'U123', 'cmd-user-1', 'Cmd User', 'active', ?, ?)
+            """,
+            (now, now),
+        )
+
     body = _form_body(
         {
             "team_id": "T123",
             "channel_id": "C123",
+            "user_id": "U123",
             "text": "help",
             "response_url": "https://hooks.slack.test/response",
         }
@@ -102,6 +123,79 @@ def test_slack_commands_help_uses_signed_form_without_api_secret(monkeypatch, tm
     assert "/floom approvals" in response.json()["text"]
 
 
+def test_slack_commands_unbound_sender_does_not_run_as_owner(monkeypatch, tmp_path):
+    """Codex finding #1: a slash command from an unbound (or other) Slack user
+    must NOT execute as the bootstrap owner. It must (a) never list the owner's
+    approvals and (b) reply with a claim link delivered privately (ephemeral
+    response_type, so no token is exposed to other channel members)."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.slack as _slack_mod
+
+    owner_id = "slack-test-user"  # WORKEROS_USER_ID / bootstrap owner
+    list_calls: list = []
+
+    # Spy on the owner-scoped approvals lookup — it must NEVER be called for an
+    # unbound sender invoking `/floom approvals`.
+    import db as _db
+    repos = _db.get_repositories()
+    orig_list_pending = repos.approvals.list_pending
+
+    def _spy_list_pending(*, owner_id):  # noqa: A002 - mirror real signature
+        list_calls.append(owner_id)
+        return orig_list_pending(owner_id=owner_id)
+
+    monkeypatch.setattr(repos.approvals, "list_pending", _spy_list_pending)
+    # The handler does `from db import get_repositories` lazily, so patch the
+    # module-level symbol to return the same spied repos.
+    monkeypatch.setattr(_db, "get_repositories", lambda: repos)
+
+    # Capture any background agent dispatch — must not run for an unbound user.
+    dispatched: list = []
+    monkeypatch.setattr(
+        _slack_mod, "_handle_slack_command_message",
+        lambda **kw: dispatched.append(kw),
+    )
+
+    # `/floom approvals` from an unbound sender U_OUTSIDER.
+    body = _form_body(
+        {
+            "team_id": "T123",
+            "channel_id": "C123",
+            "user_id": "U_OUTSIDER",
+            "text": "approvals",
+            "response_url": "https://hooks.slack.test/response",
+        }
+    )
+    with TestClient(main.app) as client:
+        response = client.post("/slack/commands", data=body, headers=_slack_form_headers(body))
+
+    assert response.status_code == 200, response.text
+    payload = response.json()
+    # Private ephemeral claim-link reply, NOT the owner's approvals list.
+    assert payload.get("response_type") == "ephemeral"
+    assert "Link your account" in payload.get("text", "")
+    assert list_calls == [], "owner approvals must NOT be listed for unbound sender"
+
+    # And a free-text command from an unbound sender must not dispatch agent work
+    # as the owner.
+    body2 = _form_body(
+        {
+            "team_id": "T123",
+            "channel_id": "C123",
+            "user_id": "U_OUTSIDER",
+            "text": "delete all my workers",
+            "response_url": "https://hooks.slack.test/response",
+        }
+    )
+    with TestClient(main.app) as client:
+        response2 = client.post("/slack/commands", data=body2, headers=_slack_form_headers(body2))
+
+    assert response2.status_code == 200, response2.text
+    assert response2.json().get("response_type") == "ephemeral"
+    assert dispatched == [], "no agent dispatch may run as owner for an unbound sender"
+    assert owner_id not in [c for c in list_calls]
+
+
 def test_slack_interactivity_dismisses_signed_approval_action(monkeypatch, tmp_path):
     """Dismiss requires a bound identity. The clicker (U123) is pre-bound here."""
     main = _load_api(monkeypatch, tmp_path)
@@ -110,6 +204,13 @@ def test_slack_interactivity_dismisses_signed_approval_action(monkeypatch, tmp_p
     # Bind the clicker so the action is permitted.
     with main.get_db() as conn:
         now = main.now_iso()
+        # Real bound user row required in configured mode (Codex finding #7
+        # fail-closed binding validation).
+        conn.execute(
+            "INSERT OR IGNORE INTO users (id, username, password_hash, role, created_at, updated_at) "
+            "VALUES ('bound-user-1', 'bounduser', 'x', 'admin', ?, ?)",
+            (now, now),
+        )
         conn.execute(
             """
             INSERT INTO slack_sender_bindings

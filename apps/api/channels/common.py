@@ -20,6 +20,21 @@ logger = logging.getLogger(__name__)
 # ---------------------------------------------------------------------------
 _MAX_WEBHOOK_BODY_BYTES = 1 * 1024 * 1024  # 1 MB
 
+# ---------------------------------------------------------------------------
+# Per-message and per-delivery inbound caps (Codex finding #8).
+#
+# The 1 MB body cap above still allows a single huge message, or hundreds of
+# small messages in one delivery, each of which would spawn an agent run.
+# These bound the work a single signed webhook delivery can trigger:
+#   - reject inbound message text over MAX_INBOUND_TEXT_CHARS with a friendly
+#     "message too long" reply (no agent run),
+#   - process at most MAX_EVENTS_PER_DELIVERY message events per payload and
+#     skip the rest with a log.
+# In-process / per-request only — no Redis, no new infra.
+# ---------------------------------------------------------------------------
+MAX_INBOUND_TEXT_CHARS = 8000
+MAX_EVENTS_PER_DELIVERY = 25
+
 
 # ---------------------------------------------------------------------------
 # WhatsApp approval notification (outbound fan-out hook)
@@ -97,6 +112,20 @@ def notify_pending_approval_via_whatsapp(
         )
 
 
+def _auth_is_configured() -> bool:
+    """True when this deployment has real auth configured (NOT legacy/dev mode).
+
+    Legacy / pure-dev mode is the narrow case the #845 bootstrap-owner behavior
+    targets: ``WORKEROS_DEPLOY=local`` AND no ``FLOOM_SECRET``.  Everything else
+    (a secret is set, or a non-local deploy) is a configured deployment where a
+    binding validation failure MUST fail closed (Codex finding #7).
+    """
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy != "local":
+        return True
+    return bool((os.environ.get("FLOOM_SECRET") or "").strip())
+
+
 def bound_user_is_valid(user_id: str) -> bool:
     """Return True if ``user_id`` should be treated as an existing, valid binding owner.
 
@@ -107,19 +136,28 @@ def bound_user_is_valid(user_id: str) -> bool:
        (``WORKEROS_USER_ID`` env var, defaulting to ``"federico"``).  Legacy
        single-user installs bind under this id, which pre-dates the ``users``
        table.  Resetting that binding when there is no matching users row would
-       disconnect a valid owner — exactly the bug this helper fixes.
-    3. The ``users`` table is absent or empty (pure dev / pre-auth mode); treat
-       every binding as valid to avoid false resets on fresh installs.
+       disconnect a valid owner (preserves #845 legacy-bootstrap-owner behavior).
+    3. The ``users`` table is absent or empty AND we are genuinely in legacy/dev
+       mode (no FLOOM_SECRET, local deploy).  This is the "clone and run locally"
+       case where no accounts are registered yet.
 
-    Non-fatal: any DB error returns True (proceed optimistically, same as the
-    per-channel catch blocks).
+    Fail-closed (Codex finding #7): in a CONFIGURED deployment (FLOOM_SECRET set
+    or non-local deploy), a DB error or a missing ``users`` table during this
+    check returns ``False`` (invalid) rather than granting access.  A stale or
+    deleted binding must not stay authorized just because the validation query
+    failed.  The legacy/dev single-user pass is an explicit branch, not a
+    catch-all ``except``.
     """
-    try:
-        # Resolve bootstrap id without importing main (avoids circular import).
-        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
-        if user_id == bootstrap_id:
-            return True
+    # Bootstrap/legacy owner id is always valid — this id pre-dates the users
+    # table and represents the single-tenant owner (#845).  Resolved without
+    # importing main to avoid a circular import.
+    bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+    if user_id == bootstrap_id:
+        return True
 
+    configured = _auth_is_configured()
+
+    try:
         from db import get_db as _get_db  # lazy — avoids circular import at module level
 
         with _get_db() as conn:
@@ -127,11 +165,26 @@ def bound_user_is_valid(user_id: str) -> bool:
                 count_row = conn.execute("SELECT COUNT(*) FROM users").fetchone()
                 user_count = count_row[0] if count_row else 0
             except Exception:
-                # Table may not exist yet on a fresh dev install.
+                # users table is absent / unreadable.
+                if configured:
+                    # Configured deployment with a broken users table: fail
+                    # closed.  We cannot prove the binding is valid.
+                    logger.exception(
+                        "bound_user_is_valid: users table unreadable in configured "
+                        "deployment for %r; failing closed",
+                        user_id,
+                    )
+                    return False
+                # Genuine legacy/dev mode (no secret, local): table not created
+                # yet on a fresh install — treat bindings as valid.
                 return True
 
             if user_count == 0:
-                # Pre-auth / dev mode — no accounts registered; all bindings valid.
+                if configured:
+                    # Configured deployment with zero users is anomalous (auth is
+                    # set up but no accounts) — do not grant a non-bootstrap id.
+                    return False
+                # Legacy/dev pre-auth mode — no accounts registered; valid.
                 return True
 
             exists = conn.execute(
@@ -139,7 +192,19 @@ def bound_user_is_valid(user_id: str) -> bool:
             ).fetchone()
             return exists is not None
     except Exception:
-        logger.exception("bound_user_is_valid check failed for %r; proceeding optimistically", user_id)
+        # Connection/query failure.
+        if configured:
+            logger.exception(
+                "bound_user_is_valid check failed for %r in configured deployment; "
+                "failing closed",
+                user_id,
+            )
+            return False
+        logger.exception(
+            "bound_user_is_valid check failed for %r in legacy/dev mode; "
+            "proceeding optimistically",
+            user_id,
+        )
         return True
 
 
