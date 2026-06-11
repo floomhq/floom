@@ -2155,7 +2155,7 @@ def _resolve_runnable_worker(conn: Any, raw_ref: str, user_id: str) -> Dict[str,
     Returns ``{"ok": True, "worker_id": <id>}`` on a confident match, or
     ``{"ok": False, ...}`` otherwise.
     """
-    from main import _canonical_worker_id
+    from services.worker_access import _canonical_worker_id
 
     ref = (raw_ref or "").strip()
     if not ref:
@@ -2266,7 +2266,7 @@ def _tool_workers_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     worker_id = str(args.get("id") or "")
     if not worker_id:
         return {"ok": False, "error": "id is required"}
-    from main import _canonical_worker_id
+    from services.worker_access import _canonical_worker_id
     worker_id = _canonical_worker_id(worker_id)
     with _get_db() as conn:
         # Security: enforce ownership/visibility before fetching full details.
@@ -2865,7 +2865,8 @@ def _enforce_worker_author_chat_throttles(user_id: str, workspace_id: str) -> Op
 
 def _ensure_worker_author_registered(user_id: str) -> Optional[str]:
     try:
-        from main import _WORKER_AUTHOR_ID, _get_db_worker
+        from main import _WORKER_AUTHOR_ID
+        from services.worker_access import _get_db_worker
         from worker_registry import discover_workers, get_worker, invalidate_worker_cache
         from db import get_repositories
         from main import _persist_discovered_workers
@@ -3187,7 +3188,7 @@ def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     yaml_text = str(args.get("yaml_text") or "")
     if not worker_id or not yaml_text:
         return {"ok": False, "error": "id and yaml_text are required"}
-    from main import _canonical_worker_id
+    from services.worker_access import _canonical_worker_id
     worker_id = _canonical_worker_id(worker_id)
 
     from db import get_db as _get_db
