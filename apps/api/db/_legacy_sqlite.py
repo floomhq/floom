@@ -1868,6 +1868,17 @@ MIGRATIONS: list[Migration] = [
     SET workspace_id = 'local-default'
     WHERE status = 'active' AND workspace_id IS NULL;
     """,
+    # -- migration 66: per-user appearance settings (#773) --------------------
+    # Theme (day/dark/system) + accent are per-user preferences, distinct from
+    # workspace settings. Keyed by user_id, one row per user.
+    """
+    CREATE TABLE IF NOT EXISTS user_settings (
+        user_id    TEXT PRIMARY KEY,
+        theme      TEXT NOT NULL DEFAULT 'system',
+        accent     TEXT,
+        updated_at TEXT NOT NULL
+    );
+    """,
 ]
 
 
