@@ -416,6 +416,11 @@ RATE_LIMIT_RULES = [
     (re.compile(r"^/workers$"), (20, 60.0)),
     (re.compile(r"^/connections/connect/[^/]+$"), (10, 60.0)),
     (re.compile(r"^/connections$"), (20, 60.0)),
+    # #839: the MCP serve endpoint grants workspace-wide capability from a
+    # single secret; the 60/min default was generous enough for secret
+    # brute-forcing and runs.watch connection-pinning. 10/min matches the
+    # other sensitive endpoints above.
+    (re.compile(r"^/mcp-tools/serve$"), (10, 60.0)),
 ]
 
 
@@ -2047,7 +2052,22 @@ def healthz():
 
 @app.get("/health")
 def health():
-    """Readiness probe with cached dependency checks."""
+    """Readiness probe — public, minimal.
+
+    #853 RCA: this endpoint returned the full dependency-check payload (disk
+    free space, E2B/OpenAI/Composio status, scheduler thread name) without
+    auth — infrastructure reconnaissance for free. Probes only need the
+    aggregate status; the detailed checks moved to GET /health/details
+    (admin-only).
+    """
+    payload = _run_health_checks()
+    return {"status": payload["status"], "checked_at": payload["checked_at"]}
+
+
+@app.get("/health/details")
+def health_details(auth: AuthContext = Depends(get_auth_context)):
+    """Full dependency checks — admin only (#853)."""
+    _require_admin(auth)
     return _run_health_checks()
 
 
@@ -17297,7 +17317,7 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
             "description": "Poll a Workeros run until terminal status or timeout.",
             "inputSchema": _mcp_json_schema({
                 "id": {"type": "string"},
-                "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 600000, "default": 120000},
+                "timeout_ms": {"type": "integer", "minimum": 1000, "maximum": 30000, "default": 30000},
             }, ["id"]),
         },
         {
@@ -17447,10 +17467,27 @@ def _mcp_call_runs_get(arguments: Dict[str, Any], auth: AuthContext, repos: Repo
     return _mcp_call_result(data)
 
 
+# #834 RCA: runs.watch accepted timeout_ms up to 600000 (10 minutes) and held
+# the HTTP connection open the whole time, polling internally — ~60 concurrent
+# tools/call requests (the old default rate limit) could pin workers and
+# generate hundreds of internal requests each. Cap all MCP watch/poll waits at
+# 30s; clients needing longer poll runs.get between calls.
+_MCP_WATCH_MAX_TIMEOUT_MS = 30000
+
+
+def _mcp_watch_timeout_seconds(raw: Any) -> float:
+    """Clamp a client-supplied timeout_ms to [1s, 30s] (#834)."""
+    try:
+        requested = int(raw) if raw is not None else _MCP_WATCH_MAX_TIMEOUT_MS
+    except (TypeError, ValueError, OverflowError):
+        # OverflowError: JSON `1e999` parses to float('inf'); int(inf) raises.
+        requested = _MCP_WATCH_MAX_TIMEOUT_MS
+    return min(max(requested, 1000), _MCP_WATCH_MAX_TIMEOUT_MS) / 1000.0
+
+
 async def _mcp_call_runs_watch(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
     run_id = _mcp_arg(arguments, "id")
-    timeout_ms = min(max(int(arguments.get("timeout_ms") or 120000), 1000), 600000)
-    deadline = time.monotonic() + (timeout_ms / 1000)
+    deadline = time.monotonic() + _mcp_watch_timeout_seconds(arguments.get("timeout_ms"))
     last: Dict[str, Any] = {}
     while True:
         row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
@@ -17559,6 +17596,17 @@ def _mcp_call_contexts_write(arguments: Dict[str, Any], auth: AuthContext, repos
 async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     auth = _workspace_agent_mcp_auth_context()
     repos = get_repositories()
+    # #833/#838/#840: this surface dispatches a subset of the same tools as
+    # /mcp-tools/serve and must enforce the same per-tool gates and audit
+    # trail — otherwise the serve-side gating is bypassable via /api/mcp
+    # (e.g. connections.add_mcp callable here while disabled there).
+    logger.info(
+        "mcp tools/call (workspace-agent): tool=%r user=%s role=%s",
+        tool_name, auth.user_id, auth.role,
+    )
+    denied = _mcp_access_error(tool_name, auth)
+    if denied is not None:
+        return _mcp_tool_error(denied)
     try:
         if tool_name in {_WORKSPACE_AGENT_MCP_TOOL_NAME, _WORKSPACE_AGENT_MCP_LEGACY_TOOL_NAME, "workspace.chat"}:
             return await _mcp_call_workspace_agent(arguments)
@@ -17642,7 +17690,14 @@ async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Option
             },
         )
     if method == "tools/list":
-        return _mcp_result(request_id, {"tools": _workeros_remote_mcp_tool_definitions()})
+        # #833/#838/#840: advertise only what tools/call would accept for this
+        # auth context — same predicate as /mcp-tools/serve.
+        auth = _workspace_agent_mcp_auth_context()
+        tools = [
+            t for t in _workeros_remote_mcp_tool_definitions()
+            if _mcp_access_error(t["name"], auth) is None
+        ]
+        return _mcp_result(request_id, {"tools": tools})
     if method != "tools/call":
         return _mcp_error(request_id, -32601, f"Unsupported MCP method: {method or 'unknown'}")
 
@@ -18539,12 +18594,18 @@ def platform_config(auth: AuthContext = Depends(get_auth_context)):
 
 @app.get("/system/info")
 def system_info(auth: AuthContext = Depends(get_auth_context)):
-    return {
+    # #837 RCA: python_version and started_at (process uptime) were returned to
+    # every authenticated caller — recon data that maps the runtime for
+    # interpreter-specific exploits and restart tracking. Admins keep the full
+    # payload; everyone else gets version + runner only.
+    info: Dict[str, Any] = {
         "version": app.version,
-        "started_at": _PROCESS_STARTED_AT,
-        "python_version": sys.version.split()[0],
         "runner": "e2b",
     }
+    if auth.is_admin:
+        info["started_at"] = _PROCESS_STARTED_AT
+        info["python_version"] = sys.version.split()[0]
+    return info
 
 
 @app.get("/system/workspace-agent")
@@ -19615,7 +19676,12 @@ def _frontend_public_base() -> str:
     return (os.environ.get("WORKERS_FRONTEND_URL") or "https://workers.floom.dev").rstrip("/")
 
 
-def _issue_cli_auth_pat(*, user_id: str, client_name: str, repos: Repositories) -> str:
+def _issue_cli_auth_pat(*, user_id: str, client_name: str, repos: Repositories, role: str) -> str:
+    # #847 RCA: this used to hardcode role="admin", so ANY member approving a
+    # CLI device minted themselves an admin token (member → admin escalation).
+    # Fix: the token inherits the approver's role, never more. Unknown role
+    # strings clamp to "member" so a bad value can't widen privileges.
+    token_role = role if role in ("admin", "member") else "member"
     raw = "wos_" + _secrets_mod.token_urlsafe(32)
     token_id = str(_uuid_mod.uuid4())
     token_name = f"CLI device: {(client_name or 'unknown').strip() or 'unknown'}"
@@ -19627,7 +19693,7 @@ def _issue_cli_auth_pat(*, user_id: str, client_name: str, repos: Repositories) 
                     (id, token_hash, user_id, role, name, created_at, last_used_at, revoked_at)
                 VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)
                 """,
-                (token_id, _hash_pat(raw), user_id, "admin", token_name, now_iso()),
+                (token_id, _hash_pat(raw), user_id, token_role, token_name, now_iso()),
             )
     except Exception as exc:
         logger.exception("Could not issue CLI auth token for user %s", user_id)
@@ -19742,6 +19808,9 @@ def approve_cli_device(
         user_id=auth.user_id,
         client_name=str(record.get("client_name") or "unknown"),
         repos=repos,
+        # #847: CLI token carries the approver's own role — a member approving
+        # a device gets a member token, not admin.
+        role=auth.role,
     )
     repos.cli_auth.update(
         device_code=record["device_code"],
@@ -20417,6 +20486,38 @@ def _enc(s: str) -> str:
     return quote(str(s), safe="")
 
 
+def _api_call_response_data(resp: Any) -> Any:
+    """Parse an internal proxy response for MCP clients.
+
+    #836 RCA: a non-JSON internal response (HTML error page, stack trace,
+    proxy timeout page) used to be forwarded verbatim as {"detail": resp.text}
+    — leaking server internals to external MCP clients. The raw body is now
+    logged server-side and the client gets a generic message.
+    """
+    try:
+        return resp.json()
+    except Exception:
+        logger.warning(
+            "MCP proxy: non-JSON internal response (status %s): %.300s",
+            getattr(resp, "status_code", "?"),
+            getattr(resp, "text", ""),
+        )
+        return {"detail": "Internal server error"}
+
+
+# Auth headers forwarded by the internal MCP proxy. #851: x-api-key was
+# missing, so any internal path authenticating via x-api-key saw the proxied
+# request as unauthenticated.
+_API_CALL_AUTH_HEADERS = frozenset({
+    "x-floom-secret",
+    "x-floom-token",
+    "x-api-key",
+    "authorization",
+    "cookie",
+    "x-workeros-workspace",
+})
+
+
 async def _api_call(
     method: str,
     path: str,
@@ -20426,8 +20527,7 @@ async def _api_call(
     params: dict | None = None,
 ) -> tuple[Any, int]:
     import httpx
-    _AUTH_HEADERS = {"x-floom-secret", "x-floom-token", "authorization", "cookie", "x-workeros-workspace"}
-    auth_headers = {k: v for k, v in request.headers.items() if k.lower() in _AUTH_HEADERS}
+    auth_headers = {k: v for k, v in request.headers.items() if k.lower() in _API_CALL_AUTH_HEADERS}
     if "x-workeros-workspace" not in auth_headers:
         auth_headers["x-workeros-workspace"] = DEFAULT_WORKSPACE_ID
     clean_params = {k: str(v) for k, v in (params or {}).items() if v is not None}
@@ -20436,11 +20536,7 @@ async def _api_call(
         base_url="http://asgi",
     ) as client:
         resp = await client.request(method, path, headers=auth_headers, json=body, params=clean_params)
-    try:
-        data = resp.json()
-    except Exception:
-        data = {"detail": resp.text}
-    return data, resp.status_code
+    return _api_call_response_data(resp), resp.status_code
 
 
 _MCP_DEFAULT_TOOLS: List[dict] = [
@@ -20469,7 +20565,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "runs.get", "description": "Get a Workeros run by id, including logs, outputs, artifacts, and approval status.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "runs.cancel", "description": "Cancel an in-progress run.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}}, "required": ["id"]}},
     {"name": "runs.replay", "description": "Replay a completed or failed run with the same inputs.", "inputSchema": {"type": "object", "properties": {"worker_id": {"type": "string"}, "run_id": {"type": "string"}}, "required": ["worker_id", "run_id"]}},
-    {"name": "runs.watch", "description": "Poll a run until it reaches a terminal status. Blocks up to timeout_ms.", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "timeout_ms": {"type": "integer", "default": 120000}}, "required": ["id"]}},
+    {"name": "runs.watch", "description": "Poll a run until it reaches a terminal status. Blocks up to timeout_ms (capped at 30s — poll runs.get for longer waits).", "inputSchema": {"type": "object", "properties": {"id": {"type": "string"}, "timeout_ms": {"type": "integer", "default": 30000, "maximum": 30000}}, "required": ["id"]}},
     # --- secrets ---
     {"name": "secrets.list", "description": "List configured secret names and status.", "inputSchema": {"type": "object", "properties": {}}},
     {"name": "secrets.set", "description": "Create or update a secret value.", "inputSchema": {"type": "object", "properties": {"key": {"type": "string"}, "value": {"type": "string"}}, "required": ["key", "value"]}},
@@ -20518,6 +20614,83 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "tools_delete", "description": "Delete a custom MCP tool by name.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}}, "required": ["name"]}},
     {"name": "tools_update", "description": "Update an existing custom MCP tool. Only the fields you provide are changed.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string", "description": "Name of the tool to update."}, "description": {"type": "string", "description": "New description."}, "worker_id": {"type": "string", "description": "New worker ID or name to back this tool."}, "input_schema": {"type": "object", "description": "New JSON Schema for inputs."}}, "required": ["name"]}},
 ]
+
+
+# --- #833: scope + exposure controls for the MCP serve surface -------------
+# RCA: /mcp-tools/serve exposed every default tool to any authenticated
+# caller with no per-tool permission check — one leaked secret or member PAT
+# was full workspace-destruction capability (workers.delete, secrets.set,
+# contexts.delete, ...). The REST layer the tools proxy to has its own
+# checks, but the MCP surface itself granted member tokens admin-shaped
+# reach. Three controls, all enforced in tools/list AND tools/call:
+#   1. _MCP_ADMIN_ONLY_TOOLS    — destructive tools require auth.is_admin.
+#   2. WORKEROS_MCP_ENABLED_TOOLS — optional comma-separated allow-list; when
+#      set, only the named default tools are served at all.
+#   3. _MCP_OFF_BY_DEFAULT_TOOLS — tools with remote-takeover potential are
+#      not served unless WORKEROS_MCP_ENABLE_DESTRUCTIVE=1 (#838, #840).
+# Every tools/call is audit-logged with tool, user, and role.
+
+_MCP_ADMIN_ONLY_TOOLS = frozenset({
+    "workers.delete",
+    "workers.reload",
+    "workers.archive",
+    "workers.restore",
+    "workers.rollback",
+    "secrets.set",
+    "secrets.delete",
+    "connections.add_mcp",
+    "connections.delete",
+    "contexts.delete",
+    "contexts.delete_file",
+    "contexts.rollback",
+    "workspace.instructions.set",
+    "workspace.rollback",
+    "approvals.approve",
+    "approvals.reject",
+})
+
+# #838/#840: exposed only when WORKEROS_MCP_ENABLE_DESTRUCTIVE=1.
+# - connections.add_mcp (#838): registers arbitrary external MCP servers
+#   (url/command/env) that workers later invoke — a remote-config C2 /
+#   exfiltration channel if the serve secret leaks.
+# - workers.reload (#840): reloads ALL workers from disk with zero
+#   confirmation — mass worker interruption from one remote call.
+_MCP_OFF_BY_DEFAULT_TOOLS: frozenset = frozenset({
+    "connections.add_mcp",
+    "workers.reload",
+})
+
+
+def _mcp_destructive_tools_enabled() -> bool:
+    return os.environ.get("WORKEROS_MCP_ENABLE_DESTRUCTIVE") == "1"
+
+
+def _mcp_enabled_tool_names() -> set | None:
+    """Parse WORKEROS_MCP_ENABLED_TOOLS; None means 'no allow-list set'."""
+    raw = (os.environ.get("WORKEROS_MCP_ENABLED_TOOLS") or "").strip()
+    if not raw:
+        return None
+    return {part.strip() for part in raw.split(",") if part.strip()}
+
+
+def _mcp_tool_served(name: str) -> bool:
+    """Is this default tool exposed at all on this deployment?"""
+    if name in _MCP_OFF_BY_DEFAULT_TOOLS and not _mcp_destructive_tools_enabled():
+        return False
+    allowed = _mcp_enabled_tool_names()
+    if allowed is not None and name not in allowed:
+        return False
+    return True
+
+
+def _mcp_access_error(name: str, auth: AuthContext) -> str | None:
+    """Return an error string if this auth context may not call the tool."""
+    is_default_tool = any(t["name"] == name for t in _MCP_DEFAULT_TOOLS)
+    if is_default_tool and not _mcp_tool_served(name):
+        return f"Tool {name!r} is not enabled on this deployment"
+    if name in _MCP_ADMIN_ONLY_TOOLS and not auth.is_admin:
+        return f"Tool {name!r} requires admin role"
+    return None
 
 
 def _mcp_ok(rpc_id: Any, result: Any) -> dict:
@@ -20623,7 +20796,7 @@ async def _mcp_dispatch(
         return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
     if name == "runs.watch":
         run_id = a["id"]
-        timeout = min(int(a.get("timeout_ms", 120000)), 600000) / 1000
+        timeout = _mcp_watch_timeout_seconds(a.get("timeout_ms"))  # #834: 30s cap
         deadline = _time.monotonic() + timeout
         run = None
         while _time.monotonic() < deadline:
@@ -20817,13 +20990,18 @@ async def _mcp_dispatch(
         updated = repos.mcp_tools.update(user_id=auth.user_id, tool_id=tool["id"], **updates)
         return _mcp_content(json.dumps(updated, indent=2, default=str))
 
-    # --- custom workspace tools — trigger backing worker, wait, return output ---
+    # --- custom workspace tools — trigger backing worker, wait briefly, return output ---
     custom = repos.mcp_tools.get_by_name(user_id=auth.user_id, name=name)
     if custom:
         worker_id = custom["worker_id"]
         run_id = create_run(worker_id, a, "mcp", user_id=auth.user_id, repos=repos)
         start_run(run_id, worker_id, a, user_id=auth.user_id, repos=repos)
-        deadline = _time.monotonic() + 120
+        # #835 RCA: this loop blocked the HTTP connection for up to 120s per
+        # call — concurrent custom-tool calls exhausted the connection pool.
+        # Fix: wait at most the shared 30s MCP cap so fast tools still return
+        # their output inline; slow runs return the run_id (NOT an error) so
+        # the client polls runs.get / runs.watch for the result.
+        deadline = _time.monotonic() + _mcp_watch_timeout_seconds(None)
         run = None
         while _time.monotonic() < deadline:
             await asyncio.sleep(1.0)
@@ -20831,7 +21009,17 @@ async def _mcp_dispatch(
             if run and run["status"] in ("completed", "failed"):
                 break
         if not run or run["status"] not in ("completed", "failed"):
-            return _mcp_content(f"Tool timed out after 120s (run_id={run_id})", is_error=True)
+            return _mcp_content(
+                json.dumps(
+                    {
+                        "status": "running",
+                        "run_id": run_id,
+                        "detail": "Run still in progress. Poll runs.get or runs.watch with this run_id for the result.",
+                    },
+                    indent=2,
+                ),
+                is_error=False,
+            )
         if run["status"] == "failed":
             return _mcp_content(run.get("error") or "Worker run failed", is_error=True)
         output = run.get("output_json") or run.get("output") or {}
@@ -20860,7 +21048,12 @@ async def _mcp_handle_request(
 
     if method == "tools/list":
         custom = repos.mcp_tools.list(user_id=auth.user_id)
-        tools = list(_MCP_DEFAULT_TOOLS) + [
+        # #833: only advertise tools this deployment serves and this caller
+        # may invoke — same predicate tools/call enforces.
+        tools = [
+            t for t in _MCP_DEFAULT_TOOLS
+            if _mcp_tool_served(t["name"]) and _mcp_access_error(t["name"], auth) is None
+        ] + [
             {"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]}
             for t in custom
         ]
@@ -20869,8 +21062,17 @@ async def _mcp_handle_request(
     if method == "tools/call":
         if request is None:
             return _mcp_err(rpc_id, -32603, "Internal error: request context unavailable")
+        tool_name = params.get("name", "")
+        # #833: audit trail for every MCP tool invocation.
+        logger.info(
+            "mcp tools/call: tool=%r user=%s role=%s auth_method=%s",
+            tool_name, auth.user_id, auth.role, auth.auth_method,
+        )
+        denied = _mcp_access_error(tool_name, auth)
+        if denied is not None:
+            return _mcp_ok(rpc_id, _mcp_content(denied, is_error=True))
         result = await _mcp_dispatch(
-            params.get("name", ""),
+            tool_name,
             params.get("arguments") or {},
             auth,
             repos,
@@ -20905,6 +21107,103 @@ _SESSION_TTL_SECONDS = 7 * 24 * 3600  # 7 days
 # Per-process fallback HMAC key for magic links when no env var is set (local dev only).
 # Tokens signed with this key are valid only for the lifetime of the process.
 _MAGIC_LINK_FALLBACK_SECRET: str = pysecrets.token_hex(32)
+
+# #850: 12+ characters per NIST SP 800-63B (length over composition rules —
+# arbitrary complexity requirements are intentionally omitted). 800-63B does
+# call for rejecting commonly-used passwords, repetitive/sequential strings,
+# and context-specific words (the username), so those checks are below.
+# Applies to new/changed passwords only; existing shorter passwords keep
+# working at login.
+_MIN_PASSWORD_LENGTH = 12
+
+# Starter blocklist: common breach-corpus passwords that pass the 12-char
+# minimum. Compared lowercase.
+_COMMON_PASSWORDS = frozenset({
+    "password1234",
+    "password12345",
+    "password123456",
+    "passwordpassword",
+    "123456789012",
+    "1234567890123",
+    "12345678901234",
+    "qwertyuiop123",
+    "qwerty123456",
+    "1q2w3e4r5t6y",
+    "abc123456789",
+    "iloveyou1234",
+    "administrator",
+    "adminpassword",
+    "welcome123456",
+    "letmein123456",
+    "passw0rd1234",
+})
+
+
+def _is_sequential_password(lowered: str) -> bool:
+    """True when every step is the same/next character (e.g. 123456789012,
+    abcdefghijkl, aaaaaaaaaaaa)."""
+    return all(0 <= ord(b) - ord(a) <= 1 for a, b in zip(lowered, lowered[1:]))
+
+
+def _validate_new_password(password: str | None, *, username: str | None = None) -> None:
+    if not password or len(password) < _MIN_PASSWORD_LENGTH:
+        raise HTTPException(
+            status_code=422,
+            detail=f"password must be at least {_MIN_PASSWORD_LENGTH} characters",
+        )
+    lowered = password.lower()
+    if lowered in _COMMON_PASSWORDS or _is_sequential_password(lowered):
+        raise HTTPException(
+            status_code=422,
+            detail="password is too common or predictable; choose something less guessable",
+        )
+    if username and len(username) >= 4 and username.lower() in lowered:
+        raise HTTPException(
+            status_code=422,
+            detail="password must not contain your username",
+        )
+
+
+def _prune_expired_sessions(session_repo) -> None:
+    # #849 RCA: SqliteUserSessionRepository.prune_expired existed but was never
+    # called, so expired sessions accumulated forever. Called on every
+    # session-creating endpoint (setup/login/magic-link) — those already hit
+    # the DB, and pruning is one indexed DELETE. Best-effort: a prune failure
+    # must never block a login.
+    from datetime import datetime, timezone as _tz
+
+    try:
+        session_repo.prune_expired(now_iso=datetime.now(_tz.utc).isoformat())
+    except Exception:
+        logger.warning("session prune failed (non-fatal)", exc_info=True)
+
+
+# #850: per-username lockout after repeated failed logins. The 5/min per-IP
+# rate limit does not stop distributed credential-stuffing; this does. Keyed
+# by username only (an attacker rotating IPs still locks out), which trades a
+# bounded 15-minute targeted-DoS window for brute-force protection.
+_FAILED_LOGIN_WINDOW_SECONDS = 15 * 60
+_FAILED_LOGIN_LOCKOUT_THRESHOLD = 5
+_failed_login_attempts: Dict[str, List[float]] = {}
+_failed_login_lock = threading.Lock()
+
+
+def _login_locked_out(username: str) -> bool:
+    cutoff = time.time() - _FAILED_LOGIN_WINDOW_SECONDS
+    with _failed_login_lock:
+        attempts = [t for t in _failed_login_attempts.get(username, []) if t > cutoff]
+        _failed_login_attempts[username] = attempts
+        return len(attempts) >= _FAILED_LOGIN_LOCKOUT_THRESHOLD
+
+
+def _record_failed_login(username: str) -> None:
+    with _failed_login_lock:
+        _failed_login_attempts.setdefault(username, []).append(time.time())
+
+
+def _clear_failed_logins(username: str) -> None:
+    with _failed_login_lock:
+        _failed_login_attempts.pop(username, None)
 
 
 def _session_cookie_secure() -> bool:
@@ -21028,8 +21327,7 @@ def auth_setup(
     if not username:
         raise HTTPException(status_code=422, detail="username required")
     password = payload.password
-    if not password or len(password) < 6:
-        raise HTTPException(status_code=422, detail="password must be at least 6 characters")
+    _validate_new_password(password, username=username)
     user_id = str(_uuid_mod.uuid4())
     pw_hash = _bcrypt_hash(password)
     row = user_repo.create(
@@ -21050,6 +21348,7 @@ def auth_setup(
     except Exception:
         logger.warning("claim-on-setup failed (non-fatal)", exc_info=True)
     # Auto-login: issue a session cookie so the browser is immediately logged in
+    _prune_expired_sessions(session_repo)  # #849
     session_id = _secrets_mod.token_urlsafe(32)
     from datetime import datetime, timedelta, timezone as _tz
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
@@ -21067,15 +21366,31 @@ def auth_login(
 ) -> dict:
     """Authenticate with username+password; sets a session cookie."""
     user_repo, session_repo, _ = _require_multi_member_repos(repos)
-    user = user_repo.get_by_username(username=payload.username)
+    username = payload.username
+    # #850: per-username lockout — checked before the credential comparison so
+    # a locked account does not keep burning bcrypt work for an attacker.
+    if _login_locked_out(username):
+        raise HTTPException(
+            status_code=429,
+            detail="too many failed login attempts; try again later",
+        )
+    user = user_repo.get_by_username(username=username)
     if user is None or not _bcrypt_verify(payload.password, user.get("password_hash") or ""):
+        _record_failed_login(username)
         raise HTTPException(status_code=401, detail="invalid credentials")
     if user.get("disabled"):
         raise HTTPException(status_code=403, detail="account disabled")
+    _clear_failed_logins(username)
+    _prune_expired_sessions(session_repo)  # #849
     session_id = _secrets_mod.token_urlsafe(32)
     from datetime import datetime, timedelta, timezone as _tz
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
-    session_repo.create(session_id=session_id, user_id=user["id"], expires_at=expires)
+    try:
+        session_repo.create(session_id=session_id, user_id=user["id"], expires_at=expires)
+    except ValueError:
+        # #848: user was disabled between the credential check above and the
+        # session insert (TOCTOU) — the atomic guard in create() caught it.
+        raise HTTPException(status_code=403, detail="account disabled")
     _set_session_cookie(response, session_id)
     return {
         "id": user["id"],
@@ -21177,10 +21492,16 @@ def auth_consume_magic_link(
         raise HTTPException(status_code=404, detail="User not found")
     if user.get("disabled"):
         raise HTTPException(status_code=403, detail="Account disabled")
+    _prune_expired_sessions(session_repo)  # #849
     from datetime import datetime, timedelta, timezone as _tz
     session_id = pysecrets.token_urlsafe(32)
     expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
-    session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
+    try:
+        session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
+    except ValueError:
+        # #848: user was disabled between the check above and the session
+        # insert (TOCTOU) — the atomic guard in create() caught it.
+        raise HTTPException(status_code=403, detail="Account disabled")
     _set_session_cookie(response, session_id)
     return {"ok": True, "redirect_to": "/overview"}
 
@@ -21236,8 +21557,7 @@ def create_user(
         raise HTTPException(status_code=422, detail="username required")
     if payload.role not in ("admin", "member"):
         raise HTTPException(status_code=422, detail="role must be admin or member")
-    if not payload.password or len(payload.password) < 6:
-        raise HTTPException(status_code=422, detail="password must be at least 6 characters")
+    _validate_new_password(payload.password, username=username)
     if user_repo.get_by_username(username=username) is not None:
         raise HTTPException(status_code=409, detail="username already taken")
     user_id = str(_uuid_mod.uuid4())
@@ -21272,8 +21592,11 @@ def update_user(
     if payload.disabled is not None:
         updates["disabled"] = 1 if payload.disabled else 0
     if payload.password is not None:
-        if len(payload.password) < 6:
-            raise HTTPException(status_code=422, detail="password must be at least 6 characters")
+        existing_user = user_repo.get(user_id=uid)
+        _validate_new_password(
+            payload.password,
+            username=(existing_user or {}).get("username"),
+        )
         updates["password_hash"] = _bcrypt_hash(payload.password)
     row = user_repo.update(user_id=uid, **updates)
     if row is None:

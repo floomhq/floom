@@ -720,12 +720,15 @@ def _slack_claim_url(token: str) -> str:
 
 
 def _slack_short_claim_url(token: str) -> str:
-    """Return the short /c/{token} redirect URL for use in outbound messages."""
-    base = (
-        os.environ.get("WORKERS_FRONTEND_URL")
-        or os.environ.get("WORKEROS_PUBLIC_URL")
-        or "https://workers.floom.dev"
-    ).rstrip("/")
+    """Return the short /c/{token} redirect URL for use in outbound messages.
+
+    Built on the API public base (_public_api_base_url) because the /c/ route
+    is served by the FastAPI app (workers-api.floom.dev), not the Next.js web
+    app (workers.floom.dev).  The route 302s cross-domain to the frontend
+    /settings?slack_claim= URL.  Building it on the frontend base produced a
+    dead link that 404'd / bounced to /login.
+    """
+    base = _public_api_base_url()
     return f"{base}/c/{urllib.parse.quote(token)}"
 
 
@@ -981,6 +984,21 @@ def claim_slack_sender(
             )
         except Exception:
             logger.exception("Slack rebind notification failed (best-effort)")
+
+    # Welcome the newly bound user from Emily (best-effort; never block the claim).
+    # Chief-of-staff persona; Slack mrkdwn uses single *asterisk* emphasis.
+    try:
+        _post_slack_dm(
+            slack_user_id=slack_user_id,
+            team_id=team_id,
+            text=(
+                "Hi, it's *Emily*, your chief of staff. We're connected. "
+                "Tell me what you want handled and I'll take it from here."
+            ),
+            bot_token=_slack_bot_token_for_team(team_id),
+        )
+    except Exception:
+        logger.exception("Slack welcome DM failed (best-effort)")
 
     return {
         "ok": True,

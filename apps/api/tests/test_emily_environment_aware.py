@@ -60,11 +60,11 @@ class TestEnvironmentNote:
             chat_service._environment_note("web")
 
     def test_notes_are_short(self):
-        # Each per-surface block must stay under ~80 words and fit in a few lines.
+        # Each per-surface block must stay under ~90 words and fit in a few lines.
         for source in ALL_SOURCES:
             note = chat_service._environment_note(source)
             word_count = len(note.split())
-            assert word_count <= 90, f"{source!r} note is too long ({word_count} words)"
+            assert word_count <= 110, f"{source!r} note is too long ({word_count} words)"
 
     # --- per-surface format cues ---
 
@@ -72,6 +72,34 @@ class TestEnvironmentNote:
         note = chat_service._environment_note("whatsapp")
         assert "plain text" in note.lower() or "no markdown" in note.lower()
         assert "WhatsApp" in note
+
+    def test_whatsapp_note_single_asterisk_bold(self):
+        """WhatsApp uses *single asterisk* for bold -- the note must teach this explicitly."""
+        note = chat_service._environment_note("whatsapp")
+        assert "*single asterisk*" in note or "single asterisk" in note.lower(), (
+            "WhatsApp note must teach *single asterisk* for bold"
+        )
+
+    def test_whatsapp_note_has_char_limit(self):
+        note = chat_service._environment_note("whatsapp")
+        # Must state a hard character limit (1500 or similar).
+        assert "1500" in note or "char" in note.lower(), (
+            "WhatsApp note must state a hard character limit"
+        )
+
+    def test_whatsapp_note_forbids_double_asterisk(self):
+        """The note must explicitly forbid **double asterisk** to prevent the papaya77 bug."""
+        note = chat_service._environment_note("whatsapp")
+        assert "**" in note or "double asterisk" in note.lower() or "NEVER **" in note, (
+            "WhatsApp note must forbid **double asterisk** bold"
+        )
+
+    def test_whatsapp_note_forbids_code_fences(self):
+        note = chat_service._environment_note("whatsapp")
+        # Must mention code fences/blocks are forbidden.
+        assert "code" in note.lower() or "fence" in note.lower() or "```" in note, (
+            "WhatsApp note must forbid code fences"
+        )
 
     def test_slack_note_mrkdwn(self):
         note = chat_service._environment_note("slack")
@@ -108,13 +136,57 @@ class TestGlobalCommunicationRules:
         # Extract a unique substring that appears only in the global rules.
         # "Communication rules" is a safe anchor.
         assert "Communication rules" in rules, (
-            "GLOBAL_COMMUNICATION_RULES header missing — update this test anchor"
+            "GLOBAL_COMMUNICATION_RULES header missing -- update this test anchor"
         )
         for source in ALL_SOURCES:
             prompt = chat_service.build_system_prompt_for_source("u1", source)
             assert "Communication rules" in prompt, (
                 f"GLOBAL_COMMUNICATION_RULES missing from assembled prompt for source={source!r}"
             )
+
+    def test_tools_before_text_is_first_substantive_rule(self):
+        """'Use your tools to investigate' must be the first instruction in GLOBAL_COMMUNICATION_RULES."""
+        rules = chat_service.GLOBAL_COMMUNICATION_RULES
+        # Strip the header line and check the first substantive content.
+        lines = [l.strip() for l in rules.splitlines() if l.strip()]
+        # First non-header line should mention tools/investigate.
+        content_lines = [l for l in lines if not l.startswith("#")]
+        first_rule_text = content_lines[0].lower() if content_lines else ""
+        assert "tool" in first_rule_text or "investigate" in first_rule_text, (
+            "Tools-before-text instruction must be first in GLOBAL_COMMUNICATION_RULES; "
+            f"got: {content_lines[0]!r}"
+        )
+
+
+class TestFinishContract:
+    """Finish contract: Emily must be instructed to keep going until the task is done."""
+
+    def test_finish_contract_in_persona(self):
+        """EMILY_BASE_PERSONA must contain a finish-contract instruction."""
+        persona = chat_service.EMILY_BASE_PERSONA
+        assert (
+            "finish" in persona.lower()
+            or "keep going" in persona.lower()
+            or "blocker" in persona.lower()
+        ), (
+            "EMILY_BASE_PERSONA must contain a finish-contract rule "
+            "(keep going until done / stop only at genuine blocker)"
+        )
+
+    def test_finish_contract_phrase_present(self):
+        """A recognizable finish-contract phrase must be present."""
+        persona = chat_service.EMILY_BASE_PERSONA
+        # Accept any of the expected phrases from the brief.
+        indicators = [
+            "finish the job",
+            "keep going",
+            "genuine blocker",
+            "multiple steps",
+        ]
+        found = any(ind in persona.lower() for ind in indicators)
+        assert found, (
+            f"None of the finish-contract phrases {indicators!r} found in EMILY_BASE_PERSONA"
+        )
 
 
 class TestBuildSystemPromptForSource:

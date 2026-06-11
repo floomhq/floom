@@ -480,7 +480,13 @@ class PersonalAccessTokenRepository(Protocol):
 class UserSessionRepository(Protocol):
     """Server-side sessions for cookie-based web UI auth (migration 59)."""
 
-    def create(self, *, session_id: str, user_id: str, expires_at: str) -> RowDict: ...
+    def create(self, *, session_id: str, user_id: str, expires_at: str) -> RowDict:
+        """Atomically create a session for an *enabled* user.
+
+        Raises ValueError if the user is disabled or missing — the enabled
+        check must be atomic with the insert, not a caller pre-check (#848).
+        """
+        ...
 
     def get(self, *, session_id: str) -> RowDict | None: ...
 

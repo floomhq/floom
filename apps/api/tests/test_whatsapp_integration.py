@@ -564,6 +564,90 @@ def test_reclaim_notifies_old_bound_user(monkeypatch, tmp_path):
     assert any("49170222" == to and "linked to a different" in msg for to, msg in sent)
 
 
+def test_claim_sends_emily_welcome_to_bound_sender(monkeypatch, tmp_path):
+    """A successful claim sends exactly one Emily welcome to the bound wa_id."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
+
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(_wa_mod, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
+
+    # Seed a pending binding with NO prior owner (fresh link, no rebind notice).
+    with main.get_db() as conn:
+        now = main.now_iso()
+        expires = "2099-01-01T00:00:00+00:00"
+        conn.execute(
+            """
+            INSERT INTO whatsapp_sender_bindings
+                (wa_id, user_id, profile_name, status, claim_token,
+                 claim_expires_at, created_at, updated_at)
+            VALUES ('49170666', NULL, 'Test', 'pending', 'tok-welcome', ?, ?, ?)
+            """,
+            (expires, now, now),
+        )
+
+    with TestClient(main.app) as client:
+        resp = client.post(
+            "/whatsapp/bindings/claim",
+            json={"token": "tok-welcome"},
+            headers={"x-floom-secret": "test-api-secret"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    # Exactly one send, to the bound number, with the Emily welcome copy.
+    welcomes = [(to, msg) for to, msg in sent if to == "49170666"]
+    assert len(welcomes) == 1, f"expected one welcome send, got {sent}"
+    to, msg = welcomes[0]
+    assert "Emily" in msg
+    assert "chief of staff" in msg.lower()
+    assert "connected" in msg.lower()
+    # WhatsApp dialect: single-asterisk emphasis only, never markdown bold (**).
+    assert "**" not in msg
+
+
+def test_claim_welcome_failure_does_not_break_claim(monkeypatch, tmp_path):
+    """If the Emily welcome send raises, the claim still succeeds (best-effort)."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
+
+    def _boom(to, text):
+        raise RuntimeError("graph api down")
+
+    monkeypatch.setattr(_wa_mod, "send_whatsapp_text", _boom)
+
+    with main.get_db() as conn:
+        now = main.now_iso()
+        expires = "2099-01-01T00:00:00+00:00"
+        conn.execute(
+            """
+            INSERT INTO whatsapp_sender_bindings
+                (wa_id, user_id, profile_name, status, claim_token,
+                 claim_expires_at, created_at, updated_at)
+            VALUES ('49170777', NULL, 'Test', 'pending', 'tok-welcome-fail', ?, ?, ?)
+            """,
+            (expires, now, now),
+        )
+
+    with TestClient(main.app) as client:
+        resp = client.post(
+            "/whatsapp/bindings/claim",
+            json={"token": "tok-welcome-fail"},
+            headers={"x-floom-secret": "test-api-secret"},
+        )
+    # Claim must still return ok despite the welcome send blowing up.
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    # And the binding must be active.
+    with main.get_db() as conn:
+        row = conn.execute(
+            "SELECT status, claim_token FROM whatsapp_sender_bindings WHERE wa_id = '49170777'"
+        ).fetchone()
+    assert row["status"] == "active"
+    assert row["claim_token"] is None
+
+
 def test_scoped_run_uses_workspace_pinned_user_id(monkeypatch, tmp_path):
     """_handle_whatsapp_message calls collect_agent_reply with the workspace-scoped user_id."""
     main = _load_api(monkeypatch, tmp_path)
@@ -771,6 +855,45 @@ def test_shortlink_returns_404_for_expired_token(monkeypatch, tmp_path):
     with TestClient(main.app) as client:
         resp = client.get("/c/expiredtok")
     assert resp.status_code == 404
+
+
+def test_whatsapp_short_claim_url_built_on_host_that_serves_c(monkeypatch, tmp_path):
+    """The short /c/ link MUST be built on the API host that actually serves /c/.
+
+    Regression guard: the /c/{token} redirect route lives on the FastAPI app
+    (workers-api.floom.dev), NOT on the Next.js web app (workers.floom.dev).
+    Building it on WORKERS_FRONTEND_URL produced a dead link that 404'd /
+    bounced to /login. It must use the public API base.
+    """
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as wa
+
+    # Frontend (web) base and API (public) base are deliberately different hosts.
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    monkeypatch.setenv("WORKEROS_PUBLIC_API_URL", "https://workers-api.floom.dev")
+
+    short_url = wa._whatsapp_short_claim_url("tok123")
+    # Built on the API host (serves /c/), NOT the web host (does not).
+    assert short_url == "https://workers-api.floom.dev/c/tok123"
+    assert "/c/" in short_url
+    # The long claim URL still targets the frontend /settings page (unchanged).
+    assert wa._whatsapp_claim_url("tok123") == (
+        "https://workers.floom.dev/settings?whatsapp_claim=tok123"
+    )
+
+
+def test_whatsapp_short_claim_url_defaults_to_api_host(monkeypatch, tmp_path):
+    """With no overrides, the short link defaults to the API host, not the web host."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as wa
+
+    for var in ("WORKEROS_PUBLIC_API_URL", "WORKEROS_API_URL", "WORKERS_API_URL"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+
+    short_url = wa._whatsapp_short_claim_url("deftok")
+    assert short_url == "https://workers-api.floom.dev/c/deftok"
+    assert "workers.floom.dev/c/" not in short_url.replace("workers-api.floom.dev", "")
 
 
 # --------------------------------------------------------------------------- #

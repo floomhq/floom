@@ -255,7 +255,7 @@ def test_federico_login_maps_to_legacy_worker_owner(client_and_db):
 
     setup = client.post(
         "/auth/setup",
-        json={"username": "federico", "password": "federico-pass"},
+        json={"username": "federico", "password": "ramen-stapler-42"},
     )
     assert setup.status_code == 201, setup.text
     me = client.get("/auth/me", headers={"x-floom-secret": ""})
