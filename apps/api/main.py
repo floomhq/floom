@@ -176,7 +176,14 @@ import git_ops as _git_ops
 
 # Git workspace + commit-identity helpers live in services.git_service; re-export
 # for the many call sites in this module and for backward compatibility.
-from services.git_service import _git_workspace, _git_author
+from services.git_service import (
+    _git_workspace,
+    _git_author,
+    _git_ops_lock,
+    _ensure_git_workspace_ready,
+    _WORKSPACE_TOOLS_FILENAME,
+    _sync_workspace_tools_yml,
+)
 
 # Upload pipeline (validation/quota/signing/blob GC) lives in services.uploads;
 # re-exported here for the approval upload routes, runs artifact ownership
@@ -652,7 +659,6 @@ def _context_upload_too_large_response() -> JSONResponse:
 
 _worker_create_locks_guard = threading.Lock()
 _worker_create_locks: Dict[str, threading.Lock] = {}
-_git_ops_lock = threading.Lock()
 
 
 def _acquire_worker_create_lock(worker_id: str) -> threading.Lock:
@@ -2384,17 +2390,6 @@ def _context_git_path(name: str, rel_path: Optional[str] = None) -> str:
         return _git_join(base, rel_path or "")
     except Exception:
         return _git_join(_contexts_git_prefix(), name, rel_path or "")
-
-
-def _ensure_git_workspace_ready(workspace: Path) -> None:
-    """Initialize the git workspace before path-level commit helpers run."""
-    remote = os.environ.get("WORKEROS_GIT_REMOTE", "").strip()
-    if remote and not (workspace / ".git").exists():
-        _git_ops.clone_or_init(workspace, remote)
-    else:
-        _git_ops.ensure_repo(workspace)
-        if remote:
-            _git_ops.configure_remote(workspace, remote)
 
 
 def _git_commit_worker(
@@ -18187,47 +18182,6 @@ def delete_mcp_tool(
     repos.mcp_tools.delete(user_id=auth.user_id, tool_id=tool_id)
     _sync_workspace_tools_yml(auth.user_id, repos)
     return ActionResponse(status="deleted")
-
-
-_WORKSPACE_TOOLS_FILENAME = "workspace-tools.yml"
-
-
-def _sync_workspace_tools_yml(user_id: str, repos: Repositories) -> None:
-    """Write all MCP tools to workspace-tools.yml and commit to git.
-
-    Called after every create/update/delete so the file is always the
-    authoritative source of truth for the workspace's tool registrations.
-    """
-    import yaml as pyyaml
-    try:
-        tools = repos.mcp_tools.list(user_id=user_id)
-        doc = {
-            "version": 1,
-            "tools": [
-                {
-                    "id": t["id"],
-                    "name": t["name"],
-                    "worker_id": t["worker_id"],
-                    "description": t.get("description", ""),
-                }
-                for t in tools
-            ],
-        }
-        workspace = _git_workspace()
-        yml_path = workspace / _WORKSPACE_TOOLS_FILENAME
-        yml_path.write_text(
-            pyyaml.safe_dump(doc, sort_keys=False, default_flow_style=False, allow_unicode=True),
-            encoding="utf-8",
-        )
-        with _git_ops_lock:
-            _ensure_git_workspace_ready(workspace)
-            _git_ops.commit_paths(
-                workspace, [_WORKSPACE_TOOLS_FILENAME],
-                f"tools: update workspace-tools.yml ({len(tools)} tool{'s' if len(tools) != 1 else ''})",
-            )
-            _git_ops.push_background(workspace)
-    except Exception as exc:
-        logger.warning("Failed to sync %s: %s", _WORKSPACE_TOOLS_FILENAME, exc)
 
 
 def _load_workspace_tools_yml(user_id: str, repos: Repositories) -> int:
