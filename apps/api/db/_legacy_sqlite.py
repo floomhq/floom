@@ -1893,6 +1893,30 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_user_worker_prefs_user
         ON user_worker_prefs(user_id, starred);
     """,
+    # -- migration 68: workspace settings KV (#794 toggles, #797 model defaults) -
+    """
+    CREATE TABLE IF NOT EXISTS workspace_settings (
+        workspace_id TEXT NOT NULL,
+        key          TEXT NOT NULL,
+        value        TEXT NOT NULL,
+        updated_at   TEXT NOT NULL,
+        PRIMARY KEY (workspace_id, key)
+    );
+    """,
+    # -- migration 69: specific-people share grants (#767/#768) ----------------
+    """
+    CREATE TABLE IF NOT EXISTS asset_grants (
+        id            TEXT PRIMARY KEY,
+        asset_type    TEXT NOT NULL,
+        asset_id      TEXT NOT NULL,
+        owner_id      TEXT NOT NULL,
+        grantee_email TEXT NOT NULL,
+        created_at    TEXT NOT NULL,
+        UNIQUE(asset_type, asset_id, owner_id, grantee_email)
+    );
+    CREATE INDEX IF NOT EXISTS idx_asset_grants_asset
+        ON asset_grants(asset_type, asset_id, owner_id);
+    """,
 ]
 
 
