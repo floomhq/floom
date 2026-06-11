@@ -83,6 +83,7 @@ function MetricCard({
   warning,
   loading,
   sparkline,
+  href,
 }: {
   value: number | string;
   label: string;
@@ -91,10 +92,17 @@ function MetricCard({
   warning?: boolean;
   loading: boolean;
   sparkline?: OverviewSparklineBucket[];
+  /** Wireframe §4: tiles navigate (runs/workers). */
+  href?: string;
 }) {
   const hasSparkline = Boolean(sparkline && sparkline.length > 0);
-  return (
-    <div className={cn(cardClass, "flex flex-col overflow-hidden")}>
+  const className = cn(
+    cardClass,
+    "flex flex-col overflow-hidden",
+    href && "cursor-pointer transition-colors hover:border-[var(--border-strong)]",
+  );
+  const body = (
+    <>
       {/* Stat at the top */}
       <div className="px-4 pt-3">
         {loading ? (
@@ -134,7 +142,14 @@ function MetricCard({
           />
         ) : null}
       </div>
-    </div>
+    </>
+  );
+  return href ? (
+    <Link href={href} className={className}>
+      {body}
+    </Link>
+  ) : (
+    <div className={className}>{body}</div>
   );
 }
 
@@ -332,7 +347,12 @@ function ComingUp({
   const visibleItems = items.slice(0, Math.max(3, visibleRows - 1));
   return (
     <section className={cn(cardClass, "flex flex-col p-4")}>
-      <h2 className="mb-2 text-sm font-semibold text-[var(--text-primary)] shrink-0">Coming up today</h2>
+      <div className="mb-2 flex items-center justify-between shrink-0">
+        <h2 className="text-sm font-semibold text-[var(--text-primary)]">Coming up today</h2>
+        <Link href="/runs" className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+          See all
+        </Link>
+      </div>
       {loading ? (
         <div className="space-y-2">
           {Array.from({ length: 3 }).map((_, index) => (
@@ -476,6 +496,7 @@ export function OverviewDashboard({
       {
         value: completedThisWeek,
         label: "Runs completed",
+        href: "/runs",
         // Backend scopes this to active, real workers (excludes paused/example/
         // system/listener churn) so the flagship metric reflects real outcomes,
         // not failing internal listeners. Failing listeners stay in Needs
@@ -490,6 +511,7 @@ export function OverviewDashboard({
       {
         value: runsToday,
         label: "Runs today",
+        href: "/runs",
         // completed/failed breakdown is scoped to active, real workers (matches
         // "Runs completed" above); the runsToday total is raw activity volume.
         context: hasRunBreakdown
@@ -501,12 +523,14 @@ export function OverviewDashboard({
       {
         value: data?.stats.active_workers_count ?? 0,
         label: "Workers active",
+        href: "/workers",
         context: `${data?.stats.paused_workers_count ?? 0} paused`,
         sparkline: runs7dSparkline,
       },
       {
         value: data?.stats.scheduled_24h_count ?? data?.scheduled_today?.length ?? 0,
         label: "Coming up today",
+        href: "/runs",
         context: nextScheduled,
         sparkline: runs7dSparkline,
       },
