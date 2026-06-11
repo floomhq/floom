@@ -57,8 +57,8 @@ export interface StatusPillSpec {
 
 /** One rendered list row (SPEC §2a canonical row). */
 export interface ListRowSpec {
-  /** Brand logo node (white chip) or seeded avatar. */
-  leading: ReactNode;
+  /** Brand logo node or semantic icon. Omit for non-person entities (V4 SPEC rule 3). */
+  leading?: ReactNode;
   primary: ReactNode;
   secondary?: ReactNode;
   /** Collection-specific middle columns (between sub and status). */
@@ -151,9 +151,10 @@ export interface CollectionConfig<T> {
   banner?: ReactNode;
 }
 
-/** Grid card (SPEC §2b — avatar+name, 1-line desc, one status line). */
+/** Grid card (SPEC §2b — name, 2-line desc, status pill + tool logos). */
 export interface CardSpec {
-  leading: ReactNode;
+  /** Optional leading element (lock icon when private). Omit for non-person entities (V4 rule 3). */
+  leading?: ReactNode;
   name: ReactNode;
   description?: ReactNode;
   status?: StatusPillSpec | null;
