@@ -473,6 +473,10 @@ class PersonalAccessTokenRepository(Protocol):
 
     def touch_last_used(self, *, token_id: str, last_used_at: str) -> None: ...
 
+    def rotate(self, *, token_id: str, user_id: str, token_hash: str) -> RowDict | None:
+        """Replace the secret hash in place, keeping the same token row (#784)."""
+        ...
+
 
 class UserSessionRepository(Protocol):
     """Server-side sessions for cookie-based web UI auth (migration 59)."""

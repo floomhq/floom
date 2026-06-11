@@ -290,6 +290,46 @@ def test_revoked_pat_returns_401(monkeypatch, tmp_path):
         assert resp.status_code == 401
 
 
+def test_rotate_pat_in_place(monkeypatch, tmp_path):
+    # #784: rotate issues a new raw value, keeps the same id/name, and
+    # invalidates the old value.
+    from fastapi.testclient import TestClient
+    main = load_main(monkeypatch, tmp_path)
+    with TestClient(main.app, base_url="https://testserver") as c:
+        c.post("/auth/setup", json={"username": "alice", "password": "password123-long"})
+        created = c.post("/auth/tokens", json={"name": "rotate-me"}).json()
+        old_raw = created["token"]
+        token_id = created["pat"]["id"]
+
+        rotated = c.post(f"/auth/tokens/{token_id}/rotate")
+        assert rotated.status_code == 200, rotated.text
+        new_raw = rotated.json()["token"]
+        assert new_raw.startswith("wos_")
+        assert new_raw != old_raw
+        # same record: id and name preserved
+        assert rotated.json()["pat"]["id"] == token_id
+        assert rotated.json()["pat"]["name"] == "rotate-me"
+
+        # old value rejected, new value accepted
+        c2 = TestClient(main.app, base_url="https://testserver")
+        assert c2.get("/auth/me", headers={"Authorization": f"Bearer {old_raw}"}).status_code == 401
+        ok = c2.get("/auth/me", headers={"Authorization": f"Bearer {new_raw}"})
+        assert ok.status_code == 200
+        assert ok.json()["username"] == "alice"
+
+        # listing still shows exactly one token with that id
+        tokens = c.get("/auth/tokens").json()
+        assert sum(1 for t in tokens if t["id"] == token_id) == 1
+
+
+def test_rotate_unknown_token_404(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    main = load_main(monkeypatch, tmp_path)
+    with TestClient(main.app, base_url="https://testserver") as c:
+        c.post("/auth/setup", json={"username": "alice", "password": "password123-long"})
+        assert c.post("/auth/tokens/nonexistent/rotate").status_code == 404
+
+
 # ---------------------------------------------------------------------------
 # User management (admin only)
 # ---------------------------------------------------------------------------
