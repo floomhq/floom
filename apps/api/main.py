@@ -12041,6 +12041,60 @@ def list_runs(
     return [_make_run_summary(r) for r in visible_rows]
 
 
+@app.get("/runs/export.csv")
+def export_runs_csv(
+    worker_id: Optional[str] = None,
+    status: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    limit: int = Query(1000, ge=1, le=10000),
+    include_system: bool = Query(False),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """#796: bulk-export the run list as a CSV attachment, with the same
+    filters as GET /runs (worker_id, status, since, until). Owner/visibility
+    scoped via _list_visible_runs."""
+    statuses = _resolve_run_status_filters(status)
+    since_dt = _parse_iso8601(since) if since else None
+    if since and since_dt is None:
+        raise HTTPException(status_code=400, detail="Invalid since value")
+    until_dt = _parse_iso8601(until) if until else None
+    if until and until_dt is None:
+        raise HTTPException(status_code=400, detail="Invalid until value")
+    rows, _total = _list_visible_runs(
+        user_id=auth.user_id,
+        repos=repos,
+        worker_id=worker_id,
+        statuses=statuses,
+        since=since_dt.isoformat() if since_dt else None,
+        until=until_dt.isoformat() if until_dt else None,
+        limit=limit,
+        offset=0,
+        include_system=include_system,
+    )
+    import csv as _csv
+    import io as _io
+    out = _io.StringIO()
+    writer = _csv.writer(out)
+    writer.writerow([
+        "id", "worker_id", "worker_name", "status", "trigger_source",
+        "created_at", "started_at", "completed_at", "duration_ms", "error_code",
+    ])
+    for r in rows:
+        d = row_to_dict(r)
+        writer.writerow([
+            d.get("id"), d.get("worker_id"), d.get("worker_name"), d.get("status"),
+            d.get("trigger_source"), d.get("created_at"), d.get("started_at"),
+            d.get("completed_at"), d.get("duration_ms"), d.get("error_code"),
+        ])
+    return Response(
+        content=out.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="runs.csv"'},
+    )
+
+
 _DEFAULT_PRECLEAR_BACKUP_DIR = "/root/backups/manual"
 
 
