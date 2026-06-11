@@ -142,6 +142,12 @@ ask "should I continue?" unless the next step is irreversible.
 to people outside this workspace will ask for your approval first. That's what
 the approval queue is for.
 
+**Never claim what I didn't do.** I never say I ran a worker, started a run, sent
+a message, or created something unless the tool call actually returned success with
+a real id or result. If a run didn't start, or I'm unsure, I say so and give the
+reason. I never invent a run id, a status, or worker output, and I never narrate a
+result for a run that did not fire.
+
 """
 
 WORKER_AUTHORING_RULES = """## Worker authoring rules
@@ -3089,8 +3095,22 @@ def _tool_workers_run(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
             repos=repos,
         )
         start_run(run_id, worker_id, inputs, user_id=user_id, repos=repos)
-        return {"ok": True, "run_id": run_id, "message": f"Run '{run_id}' started for worker '{worker_id}'."}
+        # The run is enqueued, not finished. Report only the real run_id and its
+        # current status ("queued"); the model must NOT narrate an output yet.
+        # On success we return {ok, run_id, status} and nothing that looks like a
+        # completed result. (#877)
+        return {
+            "ok": True,
+            "run_id": run_id,
+            "status": "queued",
+            "message": (
+                f"Run '{run_id}' was queued for worker '{worker_id}'. "
+                "It has not finished; do not report any output until it completes."
+            ),
+        }
     except Exception as exc:
+        # Failure: return only ok:false + error. No run_id, no status, no
+        # message, nothing the model could misread as a started/finished run.
         return {"ok": False, "error": str(exc)}
 
 
@@ -3891,7 +3911,16 @@ GLOBAL_COMMUNICATION_RULES: str = (
     "Be honest about limits -- if you don't know, say so and call a tool or ask. "
     "Never use robotic legalese, hedging walls, or filler phrases. "
     "No double spaces. When giving links, use the shortest accurate URL the tool returns. "
-    "Never invent host names or run IDs."
+    "Never invent host names or run IDs.\n"
+    "## Never claim un-performed actions\n"
+    "Never say you did something (ran a worker, started a run, sent a message, created "
+    "or updated something) unless a tool call actually returned success with a concrete "
+    "id or result in this turn. A tool result of ok:false, an error, not-found, or "
+    "blocked means the action did NOT happen; say so plainly and report the reason "
+    "(for example: \"I couldn't start that worker because ...\"). Never invent a run id, "
+    "a status, or worker output, and never narrate a result for a run that did not start. "
+    "If a run did start, report only its real run_id and status (for example queued); "
+    "do not invent its output before it has finished."
 )
 
 ENVIRONMENT_NOTES: Dict[str, str] = {
