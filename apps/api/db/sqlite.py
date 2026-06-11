@@ -2488,6 +2488,8 @@ class SqliteApprovalRepository:
             "created_at", "decided_at", "reason",
             "decision_input_json", "edited_output_json", "follow_up_run_id",
             "annotations_json",
+            "expires_at",  # #798
+            "preview_type", "preview_payload_json",  # #792
         }
         cols = list(allowed & fields.keys())
         cols_str = ", ".join(cols + ["owner_id"])

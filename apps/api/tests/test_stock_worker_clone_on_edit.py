@@ -54,16 +54,17 @@ exec:
 """
 
 # An UNDERSCORE-named stock worker (in PROTECTED_STOCK_WORKER_IDS). Its clone id
-# is `<id>-copy` = `weekly_update-copy`, which is NOT a valid SLUG_PATTERN id
-# (underscores forbidden) — the clone must slugify the base to `weekly-update`.
+# is `<id>-copy` = `csv_enricher-copy`, which is NOT a valid SLUG_PATTERN id
+# (underscores forbidden) — the clone must slugify the base to `csv-enricher`.
 # Carries `is_example: true` so the test can assert the copy clears it to false.
-_USCORE_STOCK_ID = "weekly_update"
+# (#872 curated the stock sets; csv_enricher is a genuine kept template.)
+_USCORE_STOCK_ID = "csv_enricher"
 _USCORE_STOCK_WORKER_YML = """\
 schema_version: "0.3"
-name: "weekly_update"
+name: "csv_enricher"
 is_example: true
-title: "Weekly Update"
-description: "Stock weekly update worker."
+title: "CSV Enricher"
+description: "Stock CSV enricher worker."
 version: "0.1.0"
 trigger:
   type: "manual"
@@ -223,7 +224,7 @@ class TestStockWorkerWriteProtection:
         assert r.status_code == 200, r.text
         body = r.json()
 
-        assert body["id"] == "weekly-update-copy"
+        assert body["id"] == "csv-enricher-copy"
         assert "_" not in body["id"]
 
         # The copy is a real owned worker, not a stock example.
@@ -253,11 +254,11 @@ class TestStockWorkerWriteProtection:
 
         first = c.post("/workers", json=payload, headers=HEADERS)
         assert first.status_code == 200, first.text
-        assert first.json()["id"] == "weekly-update-copy"
+        assert first.json()["id"] == "csv-enricher-copy"
 
         second = c.post("/workers", json=payload, headers=HEADERS)
         assert second.status_code == 200, second.text
-        assert second.json()["id"] == "weekly-update-copy-2"
+        assert second.json()["id"] == "csv-enricher-copy-2"
 
     # ----- X6: add tool when none declared + two-way sync --------------------
 

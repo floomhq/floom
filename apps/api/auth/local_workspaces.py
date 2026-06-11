@@ -56,7 +56,7 @@ def ensure_default_workspace(owner_user_id: str) -> dict[str, Any]:
         )
         row = conn.execute(
             """
-            SELECT id, owner_user_id, name, created_at
+            SELECT id, owner_user_id, name, created_at, region, timezone
             FROM local_workspaces
             WHERE owner_user_id = ? AND id = ?
             LIMIT 1
@@ -73,7 +73,7 @@ def list_local_workspaces(owner_user_id: str) -> list[dict[str, Any]]:
     with get_db() as conn:
         rows = conn.execute(
             """
-            SELECT id, owner_user_id, name, created_at
+            SELECT id, owner_user_id, name, created_at, region, timezone
             FROM local_workspaces
             WHERE owner_user_id = ?
             ORDER BY created_at, id
@@ -88,7 +88,7 @@ def get_local_workspace(owner_user_id: str, workspace_id: str) -> dict[str, Any]
     with get_db() as conn:
         row = conn.execute(
             """
-            SELECT id, owner_user_id, name, created_at
+            SELECT id, owner_user_id, name, created_at, region, timezone
             FROM local_workspaces
             WHERE owner_user_id = ? AND id = ?
             LIMIT 1
@@ -130,19 +130,46 @@ def delete_local_workspace(owner_user_id: str, workspace_id: str) -> bool:
     return cursor.rowcount > 0
 
 
-def rename_local_workspace(owner_user_id: str, workspace_id: str, name: str) -> dict[str, Any] | None:
-    """#791: rename a workspace. Returns the updated row, or None if not found."""
-    clean_name = (name or "").strip()
-    if not clean_name:
-        raise ValueError("workspace name required")
+def update_local_workspace(
+    owner_user_id: str,
+    workspace_id: str,
+    *,
+    name: str | None = None,
+    region: str | None = None,
+    timezone: str | None = None,
+) -> dict[str, Any] | None:
+    """#791: update a workspace's name/region/timezone. Only provided fields
+    change. Returns the updated row, or None if not found."""
+    sets: list[str] = []
+    params: list[Any] = []
+    if name is not None:
+        clean_name = name.strip()
+        if not clean_name:
+            raise ValueError("workspace name required")
+        sets.append("name = ?")
+        params.append(clean_name)
+    if region is not None:
+        sets.append("region = ?")
+        params.append(region.strip() or None)
+    if timezone is not None:
+        sets.append("timezone = ?")
+        params.append(timezone.strip() or None)
+    if not sets:
+        return get_local_workspace(owner_user_id, workspace_id)
+    params += [owner_user_id, workspace_id]
     with get_db() as conn:
         cur = conn.execute(
-            "UPDATE local_workspaces SET name = ? WHERE owner_user_id = ? AND id = ?",
-            (clean_name, owner_user_id, workspace_id),
+            f"UPDATE local_workspaces SET {', '.join(sets)} WHERE owner_user_id = ? AND id = ?",
+            tuple(params),
         )
         if cur.rowcount == 0:
             return None
     return get_local_workspace(owner_user_id, workspace_id)
+
+
+def rename_local_workspace(owner_user_id: str, workspace_id: str, name: str) -> dict[str, Any] | None:
+    """#791: rename a workspace (back-compat shim over update_local_workspace)."""
+    return update_local_workspace(owner_user_id, workspace_id, name=name)
 
 
 def requested_local_workspace_id(request: Request) -> str | None:
