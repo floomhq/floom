@@ -599,6 +599,12 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}/sqlite/${path.split("/").map(encodeURIComponent).join("/")}${qs}`
       );
     },
+    // #770: move/rename a brain file (matches the backend's {new_path} contract).
+    moveFile: (name: string, path: string, newPath: string) =>
+      fetchJson<import("./types").ContextFileItem>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/move`,
+        { method: "POST", body: JSON.stringify({ new_path: newPath }) }
+      ),
     readTextFile: async (name: string, path: string) => {
       const res = await fetchRaw(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`
