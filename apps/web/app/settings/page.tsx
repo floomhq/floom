@@ -549,6 +549,11 @@ function SettingsContent() {
           </section>
 
           <section className="space-y-3">
+            <h2 className="text-sm font-medium text-muted-foreground">Model defaults &amp; limits</h2>
+            <ModelDefaults />
+          </section>
+
+          <section className="space-y-3">
             <h2 className="text-sm font-medium text-muted-foreground">Platform configuration</h2>
             <div className="space-y-3">
               {!platformConfig ? (
@@ -788,6 +793,61 @@ export function BehaviourSettings() {
           checked={values[t.key] === "true"}
           onCheckedChange={(v) => toggle(t.key, v)}
         />
+      ))}
+    </div>
+  );
+}
+
+// #797: workspace model defaults & limits, persisted to the same workspace
+// settings KV. Free-text/number inputs save on blur (admin-only writes; the
+// server enforces #804).
+const MODEL_DEFAULT_FIELDS: {
+  key: string;
+  label: string;
+  placeholder: string;
+  type: "text" | "number";
+  hint: string;
+}[] = [
+  { key: "default_model", label: "Default model", placeholder: "e.g. claude-opus-4-8", type: "text", hint: "Used by new workers that don't pin a model." },
+  { key: "max_output_tokens", label: "Max output tokens", placeholder: "e.g. 4096", type: "number", hint: "Per-run output ceiling." },
+  { key: "spend_cap_usd", label: "Monthly spend cap (USD)", placeholder: "e.g. 100", type: "number", hint: "Soft cap for run costs this month." },
+];
+
+export function ModelDefaults() {
+  const [values, setValues] = useState<Record<string, string> | null>(null);
+
+  useEffect(() => {
+    api.workspace.getSettings().then(setValues).catch(() => setValues({}));
+  }, []);
+
+  const save = (key: string, value: string) => {
+    api.workspace.setSetting(key, value).catch((err) => {
+      toast.error((err as Error).message || "Could not save setting");
+    });
+  };
+
+  if (values === null) return <Skeleton className="h-28 w-full" />;
+  return (
+    <div className="space-y-4">
+      {MODEL_DEFAULT_FIELDS.map((f) => (
+        <div key={f.key} className="space-y-1.5">
+          <Label htmlFor={`md-${f.key}`} className="text-sm">{f.label}</Label>
+          <Input
+            id={`md-${f.key}`}
+            type={f.type}
+            defaultValue={values[f.key] ?? ""}
+            placeholder={f.placeholder}
+            className="max-w-xs"
+            onBlur={(e) => {
+              const v = e.target.value.trim();
+              if (v !== (values[f.key] ?? "")) {
+                setValues((prev) => ({ ...(prev ?? {}), [f.key]: v }));
+                save(f.key, v);
+              }
+            }}
+          />
+          <p className="text-xs text-muted-foreground">{f.hint}</p>
+        </div>
       ))}
     </div>
   );
