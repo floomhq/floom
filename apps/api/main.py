@@ -8079,6 +8079,35 @@ def get_worker_detail(
     )
 
 
+@app.get("/workers/{worker_id}/bundle.zip")
+def download_worker_bundle(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """#816: download a worker as a skill bundle (zip of its on-disk files:
+    worker.yml, run.py, SKILL.md, requirements.txt). Importable via
+    POST /workers/from-bundle. Visible-worker scoped (404 otherwise)."""
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    buf = io.BytesIO()
+    file_count = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for rel, data in _iter_worker_dir_files(worker_id):
+            zf.writestr(f"{worker_id}/{rel}", data)
+            file_count += 1
+    if file_count == 0:
+        raise HTTPException(status_code=409, detail="Worker has no exportable files")
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "-", worker_id)[:60] or "worker"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe}.zip"'},
+    )
+
+
 @app.put("/workers/{worker_id}/visibility", response_model=WorkerDetail)
 def set_worker_visibility(
     worker_id: str,
