@@ -14720,6 +14720,7 @@ class ConnectionTestResult(BaseModel):
     status: str  # "valid" | "failed" | "expired"
     reason: str
     tested_at: str
+    tools: Optional[List[str]] = None  # #789: live-enumerated MCP tool names
 
 
 class ConnectionInitResponse(BaseModel):
@@ -16247,6 +16248,7 @@ def test_connection(
                     status="valid",
                     reason=f"MCP server reachable{extra_tools}{allowed_tools_note}.",
                     tested_at=tested_at,
+                    tools=tool_names,  # #789: live tool list
                 )
             except Exception as exc:
                 _write_connection_check(connection_id, "failed", str(exc), tested_at, status="failed", repos=repos)
