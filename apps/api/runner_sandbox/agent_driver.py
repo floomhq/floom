@@ -35,6 +35,7 @@ from models import (
     WorkerConfig,
     WorkerResult,
 )
+import llm as _llm
 from runner_utils import ARTIFACTS_DIR
 from worker_registry import WORKERS_DIR
 
@@ -411,7 +412,7 @@ class AgentDriver(SandboxDriver):
                     instructions=system_prompt,
                     tools=self._sdk_tools(config, state),
                     mcp_servers=mcp_servers,
-                    model=config.runtime.model or DEFAULT_WORKER_AGENT_MODEL,
+                    model=_llm.agent_model(config.runtime.model or DEFAULT_WORKER_AGENT_MODEL),
                     model_settings=ModelSettings(
                         max_tokens=limits.max_output_tokens,
                         include_usage=True,

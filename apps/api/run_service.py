@@ -1205,22 +1205,15 @@ def _repair_run_py(
 
     Returns the corrected file, or None if no key / call failed / no change.
     """
-    # Codegen prefers the worker owner's own key, then the platform key
-    # (PLATFORM_OPENAI_API_KEY, falling back to OPENAI_API_KEY for back-compat).
-    api_key = (
-        secrets.get("OPENAI_API_KEY")
-        or os.environ.get("PLATFORM_OPENAI_API_KEY")
-        or os.environ.get("OPENAI_API_KEY")
-    )
-    if not api_key:
-        log_fn("Smoke repair skipped: no OPENAI_API_KEY available", level="warning")
+    import llm
+    from codegen_model import chat_completion_codegen, codegen_model
+
+    # Repair uses the platform-configured codegen model and provider credentials from
+    # the environment (OpenAI key, or AWS creds for Bedrock), resolved by the seam.
+    if not llm.provider_credentials_present(codegen_model()):
+        log_fn("Smoke repair skipped: no LLM provider credentials available", level="warning")
         return None
     try:
-        from openai import OpenAI
-
-        from codegen_model import chat_completion_codegen
-
-        client = OpenAI(api_key=api_key)
         user_content = (
             "This run.py failed its first run with:\n"
             f"{failure[:1500]}\n\n"
@@ -1238,7 +1231,6 @@ def _repair_run_py(
             "of them, not just the first."
         )
         resp = chat_completion_codegen(
-            client,
             messages=[
                 {"role": "system", "content": _SMOKE_REPAIR_SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
