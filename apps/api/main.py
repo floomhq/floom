@@ -21519,6 +21519,42 @@ def delete_token(
         raise HTTPException(status_code=404, detail="token not found")
 
 
+class _UserSettingValue(BaseModel):
+    value: str = Field(..., max_length=2000)
+
+
+@app.get("/me/settings")
+def get_user_settings(
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, str]:
+    """#773: per-user settings (e.g. theme). Returns a {key: value} map."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT key, value FROM user_settings WHERE user_id = ?", (auth.user_id,)
+        ).fetchall()
+    return {str(r["key"]): str(r["value"]) for r in rows}
+
+
+@app.put("/me/settings/{key}", status_code=204)
+def put_user_setting(
+    key: str,
+    body: _UserSettingValue,
+    auth: AuthContext = Depends(get_auth_context),
+) -> None:
+    """#773: upsert a single per-user setting."""
+    if not key or len(key) > 64:
+        raise HTTPException(status_code=422, detail="invalid setting key")
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO user_settings (user_id, key, value, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(user_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (auth.user_id, key, body.value, now_iso()),
+        )
+
+
 @app.post("/auth/tokens/{token_id}/rotate", response_model=_PATCreateResponse)
 def rotate_token(
     token_id: str = PathParam(...),

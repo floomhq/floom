@@ -1881,6 +1881,16 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_worker_stars_user
         ON worker_stars(user_id);
     """,
+    # -- migration 67: per-user settings KV (#773 theme, future prefs) ----------
+    """
+    CREATE TABLE IF NOT EXISTS user_settings (
+        user_id    TEXT NOT NULL,
+        key        TEXT NOT NULL,
+        value      TEXT NOT NULL,
+        updated_at TEXT NOT NULL,
+        PRIMARY KEY (user_id, key)
+    );
+    """,
 ]
 
 
