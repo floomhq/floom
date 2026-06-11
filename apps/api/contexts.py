@@ -266,6 +266,7 @@ def set_context_metadata(
     writeable: bool | None = None,
     owner_id: str | None = None,
     sensitive: bool | None = None,
+    category: str | None = None,
 ) -> None:
     safe_name = validate_context_name(name)
     metadata = load_context_metadata()
@@ -278,9 +279,26 @@ def set_context_metadata(
             existing["owner_id"] = owner_value
     if sensitive is not None:
         existing["sensitive"] = bool(sensitive)
+    if category is not None:
+        # #780: content-category tag (e.g. marketing/accounting/research/data);
+        # empty string clears it.
+        cat = str(category).strip()
+        if cat:
+            existing["category"] = cat
+        else:
+            existing.pop("category", None)
     existing["updated_at"] = now_iso()
     metadata[safe_name] = existing
     save_context_metadata(metadata)
+
+
+def get_context_category(name: str) -> str | None:
+    """#780: read a context pack's content-category tag, or None."""
+    try:
+        safe_name = validate_context_name(name)
+        return load_context_metadata().get(safe_name, {}).get("category") or None
+    except Exception:
+        return None
 
 
 def is_context_sensitive(name: str) -> bool:
