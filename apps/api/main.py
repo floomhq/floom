@@ -8088,6 +8088,124 @@ def delete_share_grant(
         raise HTTPException(status_code=404, detail="Grant not found")
 
 
+class _AssetAccessEntry(BaseModel):
+    user_id: Optional[str] = None
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    role: str  # "owner" | "editor" | "viewer"
+    source: str  # "owner" | "workspace" | "grant"
+
+
+def _asset_access_list(
+    *,
+    asset_type: str,
+    asset_id: str,
+    owner_id: str,
+    visibility: str,
+    auth: AuthContext,
+    repos: Repositories,
+) -> List[_AssetAccessEntry]:
+    """#768: who can access this asset and why. Always the owner; workspace
+    members when visibility=workspace; grantees when visibility=specific_people
+    (grants are also surfaced if any exist, since they confer access)."""
+    entries: List[_AssetAccessEntry] = []
+    seen_emails: set[str] = set()
+
+    # owner (resolve display info from the users table if available)
+    owner_email = None
+    owner_name = None
+    try:
+        if repos.users is not None:
+            urow = repos.users.get(user_id=owner_id)
+            if urow:
+                owner_email = urow.get("email")
+                owner_name = urow.get("display_name") or urow.get("username")
+    except Exception:
+        pass
+    entries.append(_AssetAccessEntry(
+        user_id=owner_id, email=owner_email, display_name=owner_name,
+        role="owner", source="owner",
+    ))
+    if owner_email:
+        seen_emails.add(owner_email.lower())
+
+    if visibility == "workspace":
+        try:
+            members_repo = _require_members_repo(repos)
+            workspace_id = _active_local_workspace_id(auth)
+            for m in members_repo.list(workspace_id=workspace_id):
+                if str(m.get("user_id")) == str(owner_id):
+                    continue
+                email = (m.get("email") or "")
+                role = "editor" if str(m.get("role")) in ("owner", "admin") else "viewer"
+                entries.append(_AssetAccessEntry(
+                    user_id=str(m.get("user_id")), email=email or None,
+                    display_name=m.get("display_name"), role=role, source="workspace",
+                ))
+                if email:
+                    seen_emails.add(email.lower())
+        except Exception:
+            logger.debug("access list: workspace members lookup failed", exc_info=True)
+
+    # grants (always surfaced — a grant confers access regardless of the tier)
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT grantee_email FROM asset_grants "
+                "WHERE asset_type=? AND asset_id=? AND owner_id=? ORDER BY created_at",
+                (asset_type, asset_id, owner_id),
+            ).fetchall()
+        for r in rows:
+            email = str(r["grantee_email"] or "")
+            if not email or email.lower() in seen_emails:
+                continue
+            seen_emails.add(email.lower())
+            entries.append(_AssetAccessEntry(
+                user_id=None, email=email, display_name=None,
+                role="viewer", source="grant",
+            ))
+    except Exception:
+        logger.debug("access list: grant lookup failed", exc_info=True)
+
+    return entries
+
+
+@app.get("/workers/{worker_id}/access", response_model=List[_AssetAccessEntry])
+def list_worker_access(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[_AssetAccessEntry]:
+    """#768: people-with-access listing for a worker (owner/workspace/grant)."""
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    return _asset_access_list(
+        asset_type="worker", asset_id=worker_id,
+        owner_id=str(worker.get("owner_id") or auth.user_id),
+        visibility=str(worker.get("visibility") or "private"),
+        auth=auth, repos=repos,
+    )
+
+
+@app.get("/contexts/{name}/access", response_model=List[_AssetAccessEntry])
+def list_context_access(
+    name: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[_AssetAccessEntry]:
+    """#768: people-with-access listing for a brain pack."""
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    summary = _context_summary(safe_name, _metadata, repos=repos, user_id=auth.user_id)
+    return _asset_access_list(
+        asset_type="brain_pack", asset_id=safe_name,
+        owner_id=str(getattr(summary, "owner_id", None) or auth.user_id),
+        visibility=str(getattr(summary, "visibility", "private")),
+        auth=auth, repos=repos,
+    )
+
+
 @app.post("/workers/{worker_id}/share-link")
 def create_worker_share_link(
     worker_id: str,
