@@ -103,3 +103,15 @@ def test_completion_bridges_platform_key_for_openai(monkeypatch):
         llm.completion(model="gpt-5.5", messages=[{"role": "user", "content": "u"}], max_tokens=5)
     # Reserved platform key name is bridged onto the standard key litellm reads.
     assert captured["api_key"] == "sk-platform"
+
+
+def test_cache_control_extra_args():
+    # Anthropic/Bedrock: inject a system-message cache breakpoint for litellm so the
+    # static system prompt is cached across agent-loop turns.
+    args = llm.cache_control_extra_args("litellm/bedrock/us.anthropic.claude-sonnet-4-6")
+    assert args == {
+        "cache_control_injection_points": [{"location": "message", "role": "system"}]
+    }
+    # OpenAI caches prefixes automatically -> no extra args.
+    assert llm.cache_control_extra_args("gpt-5.5") is None
+    assert llm.cache_control_extra_args("gpt-5.4-mini") is None
