@@ -6829,6 +6829,100 @@ class WorkerListSummary(WorkerSummary):
     updated_at: Optional[str] = None
 
 
+class SearchResultItem(BaseModel):
+    type: str  # "worker" | "run" | "brain" | "connection"
+    id: str
+    title: str
+    subtitle: Optional[str] = None
+    url: Optional[str] = None
+
+
+class SearchResponse(BaseModel):
+    results: List[SearchResultItem]
+
+
+@app.get("/search", response_model=SearchResponse)
+def global_search(
+    q: str = Query(..., min_length=1),
+    types: str = "workers,runs,brain,connections",
+    limit: int = Query(20, ge=1, le=100),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> SearchResponse:
+    """#806: global ⌘K search across workers, runs, brain packs, and
+    connections (case-insensitive substring), owner/visibility scoped. Each
+    type is capped so one source can't crowd out the others."""
+    needle = q.strip().lower()
+    wanted = {t.strip() for t in types.split(",") if t.strip()}
+    per_type = max(3, limit // max(1, len(wanted)))
+    results: List[SearchResultItem] = []
+
+    if "workers" in wanted:
+        for w in _list_visible_workers(user_id=auth.user_id, repos=repos, use_cache=True):
+            if needle in str(w.get("name") or "").lower() or needle in str(w.get("description") or "").lower():
+                results.append(SearchResultItem(
+                    type="worker", id=str(w["id"]),
+                    title=str(w.get("name") or w["id"]),
+                    subtitle=(str(w.get("description") or "") or None),
+                    url=f"/workers/{w['id']}",
+                ))
+                if sum(1 for r in results if r.type == "worker") >= per_type:
+                    break
+
+    if "brain" in wanted:
+        try:
+            for c in list_contexts(auth=auth, repos=repos):
+                if needle in c.name.lower() or needle in str(c.description or "").lower():
+                    results.append(SearchResultItem(
+                        type="brain", id=c.name, title=c.name,
+                        subtitle=(c.description or None), url=f"/brain/{c.name}",
+                    ))
+                    if sum(1 for r in results if r.type == "brain") >= per_type:
+                        break
+        except Exception:
+            logger.debug("search: brain enumeration failed", exc_info=True)
+
+    if "connections" in wanted:
+        try:
+            for row in repos.connections.list(user_id=auth.user_id):
+                d = row_to_dict(row)
+                app = str(d.get("app_name") or "")
+                label = str(d.get("mcp_label") or "")
+                if needle in app.lower() or needle in label.lower():
+                    results.append(SearchResultItem(
+                        type="connection", id=str(d.get("id")),
+                        title=label or app, subtitle=(app or None),
+                        url="/connections",
+                    ))
+                    if sum(1 for r in results if r.type == "connection") >= per_type:
+                        break
+        except Exception:
+            logger.debug("search: connection enumeration failed", exc_info=True)
+
+    if "runs" in wanted:
+        try:
+            rows, _ = _list_visible_runs(
+                user_id=auth.user_id, repos=repos, worker_id=None, statuses=None,
+                since=None, until=None, limit=200, offset=0, include_system=False,
+            )
+            for r in rows:
+                d = row_to_dict(r)
+                rid = str(d.get("id") or "")
+                wname = str(d.get("worker_name") or "")
+                if needle in rid.lower() or needle in wname.lower():
+                    results.append(SearchResultItem(
+                        type="run", id=rid, title=(wname or rid),
+                        subtitle=str(d.get("status") or "") or None,
+                        url=f"/runs/{rid}",
+                    ))
+                    if sum(1 for r2 in results if r2.type == "run") >= per_type:
+                        break
+        except Exception:
+            logger.debug("search: run enumeration failed", exc_info=True)
+
+    return SearchResponse(results=results[:limit])
+
+
 def _starred_worker_ids(user_id: str) -> set[str]:
     """#782: the set of worker ids the user has starred."""
     try:
