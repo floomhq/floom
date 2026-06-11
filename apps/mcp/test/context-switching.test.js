@@ -9,7 +9,7 @@ import test from "node:test";
 import { readCredentials, writeCredentials } from "../dist/lib/credentials.js";
 import { WorkerosApiClient } from "../dist/lib/api.js";
 import { workspacesSwitchCommand, workspacesListCommand } from "../dist/commands/workspaces.js";
-import { mcpInstallCommand, mcpListCommand, mcpSwitchCommand } from "../dist/commands/mcp.js";
+import { mcpInstallCommand, mcpListCommand, mcpSwitchCommand, mcpTestCommand } from "../dist/commands/mcp.js";
 
 async function withTempHome(fn) {
   const home = await mkdtemp(join(tmpdir(), "workeros-cli-ctx-"));
@@ -45,10 +45,15 @@ const WORKSPACES = [
 ];
 
 const CONNECTIONS = [
-  { kind: "mcp", mcp_label: "github", mcp_transport: "streamable_http", status: "active" },
-  { kind: "mcp", mcp_label: "linear", mcp_transport: "sse", status: "active" },
-  { kind: "composio", app_name: "gmail", status: "active" },
+  { id: "conn-github", kind: "mcp", mcp_label: "github", mcp_transport: "streamable_http", status: "active" },
+  { id: "conn-linear", kind: "mcp", mcp_label: "linear", mcp_transport: "sse", status: "active" },
+  { id: "conn-gmail", kind: "composio", app_name: "gmail", status: "active" },
 ];
+
+const TEST_RESULTS = {
+  "conn-github": { status: "valid", reason: "ok", tested_at: "2026-06-11T00:00:00Z", tools: ["search_issues"] },
+  "conn-linear": { status: "failed", reason: "HTTP 401 from MCP server", tested_at: "2026-06-11T00:00:00Z" },
+};
 
 // Minimal OSS API stub: /workspaces, /workspaces/:id/select, /connections.
 async function withStubServer(fn, { cloud = false } = {}) {
@@ -70,6 +75,11 @@ async function withStubServer(fn, { cloud = false } = {}) {
     }
     if (req.method === "GET" && req.url === `${prefix}/connections`) {
       res.end(JSON.stringify(CONNECTIONS));
+      return;
+    }
+    const connTest = req.url.match(/^\/connections\/([^/]+)\/test$/);
+    if (!cloud && req.method === "POST" && connTest && TEST_RESULTS[connTest[1]]) {
+      res.end(JSON.stringify(TEST_RESULTS[connTest[1]]));
       return;
     }
     res.statusCode = 404;
@@ -241,6 +251,46 @@ test("mcp switch fails with exit 1 when not logged in", async () => {
   await withTempHome(async () => {
     const code = await mcpSwitchCommand("github");
     assert.equal(code, 1);
+  });
+});
+
+test("mcp test defaults to the active server and exits 0 when valid", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base) => {
+      await writeOssCreds(base, { active_mcp_label: "github" });
+      const captured = captureStdout();
+      let code;
+      try {
+        code = await mcpTestCommand(undefined, { json: true });
+      } finally {
+        captured.restore();
+      }
+      assert.equal(code, 0);
+      const result = JSON.parse(captured.text());
+      assert.equal(result.label, "github");
+      assert.equal(result.status, "valid");
+      assert.deepEqual(result.tools, ["search_issues"]);
+    });
+  });
+});
+
+test("mcp test exits 1 when the probed server fails", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base) => {
+      await writeOssCreds(base);
+      const code = await mcpTestCommand("linear", {});
+      assert.equal(code, 1);
+    });
+  });
+});
+
+test("mcp test exits 1 when no name given and no active server set", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base) => {
+      await writeOssCreds(base);
+      const code = await mcpTestCommand(undefined, {});
+      assert.equal(code, 1);
+    });
   });
 });
 

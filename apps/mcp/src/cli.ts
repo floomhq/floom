@@ -38,6 +38,7 @@ import {
   mcpInstallCommand,
   mcpListCommand,
   mcpSwitchCommand,
+  mcpTestCommand,
   mcpUninstallCommand,
 } from "./commands/mcp.js";
 import { completionCommand } from "./commands/completion.js";
@@ -212,6 +213,12 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
     .description("Switch the active MCP server (matches by label)")
     .argument("<name>", "MCP server label")
     .action(async (target: string) => runAction(mcpSwitchCommand(target)));
+  mcp.command("test")
+    .description("Probe an MCP server (initialize + tools/list); defaults to the active one")
+    .argument("[name]", "MCP server label (defaults to the active server)")
+    .option("--json", "Print raw JSON")
+    .action(async (target: string | undefined, options: { json?: boolean }) =>
+      runAction(mcpTestCommand(target, options)));
   mcp.command("add")
     .description("Add Workeros to an MCP client config")
     .option("--target <target>", "claude | cursor | vscode | windsurf | continue | generic")
