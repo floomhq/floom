@@ -13,12 +13,13 @@ Dependency direction is strictly downward: this module imports from ``core.confi
 from __future__ import annotations
 
 import logging
+import os
 import re
 import sqlite3
 import subprocess
 from functools import lru_cache
 from pathlib import Path
-from typing import TYPE_CHECKING, Any, Dict, Optional
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from fastapi import HTTPException
 
@@ -383,3 +384,178 @@ def _worker_permissions(
         can_delete=is_owner,
         can_share=is_owner,
     )
+
+
+# ---------------------------------------------------------------------------
+# Worker listing / visibility composition (DB + stock + filesystem + grants)
+# ---------------------------------------------------------------------------
+
+def _list_db_workers(
+    *,
+    user_id: str,
+    repos: "Repositories",
+    role: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    try:
+        return repos.workers.list(user_id=user_id, role=role)
+    except sqlite3.OperationalError:
+        return []
+
+
+def _worker_access_user_id(auth: "AuthContext") -> str:
+    """Resolve the engine owner id for worker visibility checks."""
+    from auth.local_workspaces import DEFAULT_WORKSPACE_ID, local_workspace_base_user_id
+    from db import get_db
+
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy == "local" and auth.user_id != local_workspace_base_user_id(auth.user_id):
+        return auth.user_id
+    username = (auth.username or "").strip()
+    if deploy != "local" or not username or username == auth.user_id:
+        return auth.user_id
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM workspace_members
+                WHERE workspace_id = ?
+                  AND user_id = ?
+                  AND role IN ('owner', 'admin')
+                  AND status = 'active'
+                LIMIT 1
+                """,
+                (DEFAULT_WORKSPACE_ID, username),
+            ).fetchone()
+            if row is not None:
+                return username
+            row = conn.execute(
+                """
+                SELECT 1
+                FROM local_workspaces
+                WHERE id = ? AND owner_user_id = ?
+                LIMIT 1
+                """,
+                (DEFAULT_WORKSPACE_ID, username),
+            ).fetchone()
+            if row is not None:
+                return username
+    except Exception:
+        logger.debug("worker access user-id compatibility lookup failed", exc_info=True)
+    return auth.user_id
+
+
+def _worker_repo_role(auth: "AuthContext") -> str | None:
+    """Return the worker-repo role for the current auth context.
+
+    Local OSS secret auth uses the shared backdoor but still needs workspace
+    boundaries, so it must not bypass the repo with admin visibility. Session /
+    PAT / cloud auth keep their declared role semantics.
+    """
+    if (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() == "local" and auth.auth_method == "secret":
+        return None
+    return auth.role
+
+
+def _build_owned_tracked_ids() -> frozenset[str]:
+    """Return the set of git-tracked worker IDs that have a DB owner.
+
+    Called once before a list loop to pre-load ownership for all tracked
+    workers in a single query, eliminating the N+1 problem in
+    _worker_hidden_from_api().
+    """
+    tracked = _tracked_worker_ids()
+    if not tracked:
+        return frozenset()
+    from db import get_repositories
+    try:
+        placeholders = ",".join("?" * len(tracked))
+        from db import get_db
+        with get_db() as conn:
+            rows = conn.execute(
+                f"SELECT id FROM workers WHERE id IN ({placeholders}) AND owner_id IS NOT NULL",
+                tuple(tracked),
+            ).fetchall()
+        return frozenset(str(r["id"]) for r in rows)
+    except Exception:
+        return frozenset(tracked)  # Fail open: treat all as owned
+
+
+def _worker_source_visible_to_api(worker_id: str) -> bool:
+    if _worker_hidden_from_api(worker_id):
+        return False
+    # Public stock/example workers ship their source on purpose — the Source
+    # tab is meant to show run.py / SKILL.md / worker.yml so users can learn
+    # from and fork them. These are git-tracked, so the generic
+    # "not tracked" rule below would hide them (R3: /workers/<stock>#code was
+    # empty for every example worker). Make stock source explicitly visible.
+    if worker_id in PUBLIC_STOCK_WORKER_IDS:
+        return True
+    return worker_id not in _tracked_worker_ids()
+
+
+def _stock_workers_from_filesystem(*, use_cache: bool = True) -> List[Dict[str, Any]]:
+    from worker_registry import discover_workers
+
+    return [
+        worker
+        for worker in discover_workers(use_cache=use_cache)
+        if worker["id"] in PUBLIC_STOCK_WORKER_IDS
+    ]
+
+
+def _list_visible_workers(
+    *,
+    user_id: str,
+    repos: "Repositories",
+    use_cache: bool = True,
+    role: Optional[str] = None,
+) -> List[Dict[str, Any]]:
+    # Admin sees all, member sees own + shared; default from the request context
+    # so the owner-scoped fallback below doesn't hide admin/shared workers.
+    from worker_registry import discover_workers
+
+    role = _visibility_role(role)
+    # Pre-load ownership for all git-tracked workers in one query so
+    # _worker_hidden_from_api() inside the loop doesn't fire N extra SELECTs.
+    _owned = _build_owned_tracked_ids()
+    visible = {
+        worker["id"]: worker
+        for worker in _list_db_workers(user_id=user_id, repos=repos, role=role)
+        if not str(worker.get("id") or "").startswith(".")
+        and not _worker_hidden_from_api(str(worker.get("id") or ""), _owned)
+    }
+    for worker in _stock_workers_from_filesystem(use_cache=use_cache):
+        visible.setdefault(worker["id"], worker)
+    if _shared_filesystem_fallback_allowed():
+        # Owner-scope the fallback so it never leaks another member's runtime
+        # worker. Only unowned on-disk workers (true first-run orphans) and the
+        # requesting user's own workers are surfaced here; curated shipped
+        # templates already came in via _stock_workers_from_filesystem() above.
+        # This keeps single-operator first-run UX intact (you still see all your
+        # own + shipped workers) while making worker visibility consistent with
+        # the per-member run/secret isolation.
+        _owners = _db_worker_owners()
+        for worker in discover_workers(use_cache=use_cache):
+            worker_id = str(worker.get("id") or "")
+            if not worker_id or _worker_hidden_from_api(worker_id, _owned):
+                continue
+            owner = _owners.get(worker_id)
+            if owner is not None and owner != user_id:
+                continue  # belongs to another member — do not surface
+            visible.setdefault(worker_id, worker)
+    # #767/#768 enforcement: surface workers explicitly shared with this viewer
+    # (by email) even when visibility (private/specific_people) would otherwise
+    # hide them. get_any bypasses owner/visibility scoping — the grant IS the
+    # authorization. This is read access only; repo UPDATE/DELETE stay
+    # owner-scoped (WHERE owner_id=?), so a grantee cannot edit or delete.
+    for gid in _granted_worker_ids():
+        if gid in visible or _worker_hidden_from_api(gid, _owned):
+            continue
+        try:
+            granted = repos.workers.get_any(worker_id=gid)
+        except Exception:
+            granted = None
+        if granted is not None:
+            visible[gid] = granted
+    return list(visible.values())
