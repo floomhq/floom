@@ -121,6 +121,12 @@ TWO groups with labels: **Workspace · {name}** (System, Channels, Assistant, Me
 - **New workspace modal**: ONE company field — typing it fetches the company logo automatically (favicon/logo service) and prefills the workspace name; name stays overridable (one company can run several workspaces). Smooth, not bulky: two fields + live logo preview, nothing else. Backend: workspace create BUILT; storing company domain + logo needs a field (extend #791).
 - **Casing: it's "WorkerOS"**, never "Workeros", in every user-visible string (#824). Package/identifiers stay lowercase.
 
+## 5a3. Shipped on the live landing meanwhile (2026-06-11) — do not re-do
+
+- workeros-cloud PR #166: **/v3/about Manifesto page** (manifesto copy is VERBATIM-SACRED — never edit it), bridge photo + small-caption bridge quote, footer About + GitHub + LinkedIn (linkedin.com/company/floomhq confirmed; X handle still withheld).
+- workeros-cloud PR #167: the 7 landing polish fixes — incl. inline tool logos (closes #823), artifact-card rhythm (closes #822), and the **WorkerOS** casing on the landing (#824's landing half; the app half lands with this v4 build).
+- The landing lives in **floomhq/workeros-cloud** — never add landing pages to this repo (a wrong-repo rebuild was closed as workeros#896).
+
 ## 5b. Landing ↔ App continuity (Federico 2026-06-10)
 
 - **One design system.** Landing and app share the tokens in §1 (palette, radii, flat border system). Theme: day/night/system exists on the landing exactly like in the app, same storage key, carried across the transition (#820 — theme toggle half SHIPPED in PR #160, `floom-theme` key is canonical).
