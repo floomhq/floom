@@ -307,3 +307,45 @@ def _load_secrets_from_enc(user_id: str, repos, pat: str, repo_full_name: str) -
     except Exception as exc:
         logger.warning("Failed to load secrets from %s: %s", _SECRETS_ENC_FILENAME, exc)
         return 0
+
+
+def _load_workspace_tools_yml(user_id: str, repos) -> int:
+    """Parse workspace-tools.yml and sync missing tools into the DB.
+
+    Called on startup after a fresh clone so MCP tool registrations
+    are restored automatically. Returns count of tools loaded.
+    """
+    import yaml as pyyaml
+
+    from services.worker_access import _mcp_input_schema_from_worker_record
+    yml_path = _git_workspace() / _WORKSPACE_TOOLS_FILENAME
+    if not yml_path.is_file():
+        return 0
+    try:
+        doc = pyyaml.safe_load(yml_path.read_text(encoding="utf-8")) or {}
+        tools_in_file = doc.get("tools") or []
+        existing_names = {t["name"] for t in repos.mcp_tools.list(user_id=user_id)}
+        loaded = 0
+        for t in tools_in_file:
+            name = t.get("name", "").strip()
+            worker_id = t.get("worker_id", "").strip()
+            if not name or not worker_id or name in existing_names:
+                continue
+            worker = repos.workers.get(user_id=user_id, worker_id=worker_id)
+            if not worker:
+                continue
+            input_schema = _mcp_input_schema_from_worker_record(worker)
+            repos.mcp_tools.create(
+                user_id=user_id,
+                name=name,
+                description=t.get("description", ""),
+                input_schema=input_schema,
+                worker_id=worker_id,
+            )
+            loaded += 1
+        if loaded:
+            logger.info("Loaded %d MCP tools from %s", loaded, _WORKSPACE_TOOLS_FILENAME)
+        return loaded
+    except Exception as exc:
+        logger.warning("Failed to load %s: %s", _WORKSPACE_TOOLS_FILENAME, exc)
+        return 0
