@@ -75,6 +75,7 @@ from auth.local_workspaces import (
     local_workspace_base_user_id,
     local_workspace_user_id,
     rename_local_workspace,
+    update_local_workspace,
     requested_local_workspace_id,
 )
 from contexts import (
@@ -236,8 +237,50 @@ _sweep_task: Optional[asyncio.Task] = None
 _SWEEP_INTERVAL_SECONDS = 3600  # Hourly
 
 
+def _expire_stale_approvals() -> int:
+    """#798: mark pending approvals past their expires_at as 'expired' and move
+    the run off pending_approval, so a paused run never sits pending forever.
+    Returns the number expired. Best-effort."""
+    from datetime import datetime as _dt, timezone as _tz
+
+    now_iso_str = _dt.now(_tz.utc).isoformat()
+    expired = 0
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT id, run_id, owner_id FROM approvals
+                WHERE status = 'pending' AND expires_at IS NOT NULL AND expires_at < ?
+                """,
+                (now_iso_str,),
+            ).fetchall()
+            for r in rows:
+                conn.execute(
+                    "UPDATE approvals SET status = 'expired', decided_at = ?, "
+                    "reason = COALESCE(reason, 'Approval expired') WHERE id = ?",
+                    (now_iso_str, r["id"]),
+                )
+                conn.execute(
+                    "UPDATE runs SET status = ? WHERE id = ? AND status = ?",
+                    (RunStatus.FAILED.value, r["run_id"], RunStatus.PENDING_APPROVAL.value),
+                )
+                expired += 1
+        for r in rows:
+            try:
+                _sse_publish(r["run_id"], {
+                    "type": "approval_decided", "run_id": r["run_id"], "decision": "expired",
+                })
+            except Exception:
+                pass
+    except Exception:
+        logger.warning("approval expiry sweep failed (non-fatal)", exc_info=True)
+    if expired:
+        logger.info("Expired %d stale pending approvals", expired)
+    return expired
+
+
 async def _hourly_sweep_loop() -> None:
-    """Run the connection health sweep every hour in the background."""
+    """Run the connection health sweep + approval-expiry sweep every hour."""
     # Delay first run by 60s to let startup finish
     await asyncio.sleep(60)
     while True:
@@ -245,6 +288,10 @@ async def _hourly_sweep_loop() -> None:
             await _run_connection_sweep()
         except Exception as exc:
             logger.warning("Connection sweep error: %s", exc)
+        try:
+            _expire_stale_approvals()  # #798
+        except Exception as exc:
+            logger.warning("Approval expiry sweep error: %s", exc)
         await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
 
 
@@ -453,35 +500,31 @@ def _context_upload_too_large_response() -> JSONResponse:
         },
     )
 
+# #872 SECURITY: PROTECTED_STOCK_WORKER_IDS is also consulted by Emily's
+# _worker_can_view (chat_service) as a visibility bypass — so the same tenant
+# private workers leaked here too. Curated to genuine ship-with-product
+# templates + engine/system workers only; the named-private workers (and the
+# Gmail/CRM tenant-specific entries that only appeared here) are removed so a
+# non-owner member can neither view nor run them. Removing them from this set
+# also correctly makes them owner-deletable (they were never real stock).
 PROTECTED_STOCK_WORKER_IDS = frozenset(
     {
+        # genuine ship-with-product example/demo templates
         "csv_enricher",
-        "cv_writeup",
-        "dach_compliance",
         "github-digest",
         "gmail-summarize-latest",
-        "gmail_intake_brief",
-        "gmail_inbox_manager",
-        "kugelaudio-bug-intake",
-        "kugelaudio-meeting-pipeline",
-        "linkedin-post-engagements",
         "node-smoke-test",
         "openblog",
         "opendraft",
+        "openpaper-posthog-daily",
         "outbound-approval-demo",
         "research_brief",
-        "reverse_match_crm",
-        "search_console_insights",
+        "seo-opportunity-digest",
+        # engine/system workers
         "slack-listener",
-        "weekly_update",
         "whatsapp-listener",
         "worker-author",
         "workspace-agent",
-        "canopy-crm-sync",
-        "gmail-inbox-manager-plus",
-        "gmail-smart-replies",
-        "openpaper-posthog-daily",
-        "seo-opportunity-digest",
     }
 )
 
@@ -500,26 +543,24 @@ def _acquire_worker_create_lock(worker_id: str) -> threading.Lock:
     return lock
 
 
+# #872 SECURITY: PUBLIC_STOCK_WORKER_IDS are returned to ANY member regardless
+# of visibility=private (the ownership guards check stock IDs first, by design
+# for genuine ship-with-product templates). This set previously included a
+# tenant's REAL private workers (Gmail/DACH/kugelaudio/CV/GSC/LinkedIn/CRM/
+# weekly_update), leaking their existence and letting members trigger runs.
+# Curated down to genuinely-shareable example/demo templates only. Stock =
+# ships-with-product examples, never a tenant's data. A removed worker now
+# correctly 404s for a non-owner member.
 PUBLIC_STOCK_WORKER_IDS = frozenset(
     {
         "csv_enricher",
-        "cv_writeup",
-        "dach_compliance",
         "github-digest",
         "gmail-summarize-latest",
-        "gmail_intake_brief",
-        "gmail_inbox_manager",
-        "kugelaudio-bug-intake",
-        "kugelaudio-meeting-pipeline",
-        "linkedin-post-engagements",
         "node-smoke-test",
         "openblog",
         "opendraft",
         "outbound-approval-demo",
         "research_brief",
-        "reverse_match_crm",
-        "search_console_insights",
-        "weekly_update",
     }
 )
 
@@ -653,7 +694,10 @@ class LocalWorkspaceCreateRequest(BaseModel):
 
 
 class LocalWorkspaceRenameRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=80)
+    # #791: name optional so region/timezone can be updated alone.
+    name: Optional[str] = Field(None, min_length=1, max_length=80)
+    region: Optional[str] = None
+    timezone: Optional[str] = None
 
 
 class LocalWorkspaceOut(BaseModel):
@@ -661,6 +705,8 @@ class LocalWorkspaceOut(BaseModel):
     name: str
     owner_user_id: str
     created_at: str
+    region: Optional[str] = None  # #791
+    timezone: Optional[str] = None  # #791
 
 
 class LocalWorkspaceListResponse(BaseModel):
@@ -694,6 +740,8 @@ def _local_workspace_out(row: Dict[str, Any]) -> LocalWorkspaceOut:
         name=str(row["name"]),
         owner_user_id=str(row["owner_user_id"]),
         created_at=str(row["created_at"]),
+        region=(row.get("region") if isinstance(row, dict) else None) or None,  # #791
+        timezone=(row.get("timezone") if isinstance(row, dict) else None) or None,  # #791
     )
 
 
@@ -756,11 +804,16 @@ def rename_workspace(
     payload: LocalWorkspaceRenameRequest,
     auth: AuthContext = Depends(get_auth_context),
 ) -> LocalWorkspaceOut:
-    """#791: rename a local OSS workspace (owner-scoped)."""
+    """#791: update a local OSS workspace's name/region/timezone (owner-scoped)."""
     _require_local_workspace_mode()
+    if payload.name is None and payload.region is None and payload.timezone is None:
+        raise HTTPException(status_code=422, detail="nothing to update")
     base_user_id = local_workspace_base_user_id(auth.user_id)
     try:
-        updated = rename_local_workspace(base_user_id, workspace_id, payload.name)
+        updated = update_local_workspace(
+            base_user_id, workspace_id,
+            name=payload.name, region=payload.region, timezone=payload.timezone,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if updated is None:
@@ -3071,6 +3124,7 @@ class ContextSummary(BaseModel):
     # edit or delete them. Operator-created packs have system=False.
     system: bool = False
     read_only: bool = False
+    category: Optional[str] = None  # #780: content-category tag
     # Sensitive packs are never committed to git or pushed to GitHub.
     # Sensitive is the DEFAULT — set sensitive=False to opt in to git tracking.
     sensitive: bool = True
@@ -3132,6 +3186,11 @@ class ContextCreateRequest(BaseModel):
     # hold credentials. Set false to opt the context into git history (versions,
     # rollback). See contexts.is_context_sensitive.
     sensitive: bool = True
+    category: Optional[str] = None  # #780: content-category tag
+
+
+class ContextCategoryRequest(BaseModel):
+    category: Optional[str] = None  # #780; empty/null clears it
 
 
 class ContextTextWriteRequest(BaseModel):
@@ -6114,6 +6173,7 @@ def _context_summary(
         updated_at=context_updated_at(root),
         writeable=bool(metadata.get(name, {}).get("writeable", False)),
         sensitive=bool(metadata.get(name, {}).get("sensitive", True)),
+        category=(metadata.get(name, {}).get("category") or None),  # #780
         worker_count=worker_count,
         description=description,
         system=is_system,
@@ -6369,10 +6429,25 @@ def create_context(
         writeable=bool(payload.writeable) if payload else False,
         sensitive=bool(payload.sensitive) if payload else True,
         owner_id=auth.user_id,
+        category=(payload.category if payload else None),  # #780
     )
     # Materialize the access-control mirror row (default private) so the Share
     # control + permission checks work immediately. Members STEP 4.
     _ensure_brain_pack_row(safe_name, owner_id=auth.user_id, repos=repos)
+    return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
+
+
+@app.put("/contexts/{name}/category", response_model=ContextDetail)
+def set_context_category(
+    name: str,
+    payload: ContextCategoryRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ContextDetail:
+    """#780: set/clear a brain pack's content-category tag (marketing,
+    accounting, research, data, ...). Empty/null clears it."""
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    set_context_metadata(safe_name, category=(payload.category or ""))
     return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
 
 
@@ -6811,6 +6886,100 @@ def scan_context_for_secrets(
 class WorkerListSummary(WorkerSummary):
     created_at: Optional[str] = None
     updated_at: Optional[str] = None
+
+
+class SearchResultItem(BaseModel):
+    type: str  # "worker" | "run" | "brain" | "connection"
+    id: str
+    title: str
+    subtitle: Optional[str] = None
+    url: Optional[str] = None
+
+
+class SearchResponse(BaseModel):
+    results: List[SearchResultItem]
+
+
+@app.get("/search", response_model=SearchResponse)
+def global_search(
+    q: str = Query(..., min_length=1),
+    types: str = "workers,runs,brain,connections",
+    limit: int = Query(20, ge=1, le=100),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> SearchResponse:
+    """#806: global ⌘K search across workers, runs, brain packs, and
+    connections (case-insensitive substring), owner/visibility scoped. Each
+    type is capped so one source can't crowd out the others."""
+    needle = q.strip().lower()
+    wanted = {t.strip() for t in types.split(",") if t.strip()}
+    per_type = max(3, limit // max(1, len(wanted)))
+    results: List[SearchResultItem] = []
+
+    if "workers" in wanted:
+        for w in _list_visible_workers(user_id=auth.user_id, repos=repos, use_cache=True):
+            if needle in str(w.get("name") or "").lower() or needle in str(w.get("description") or "").lower():
+                results.append(SearchResultItem(
+                    type="worker", id=str(w["id"]),
+                    title=str(w.get("name") or w["id"]),
+                    subtitle=(str(w.get("description") or "") or None),
+                    url=f"/workers/{w['id']}",
+                ))
+                if sum(1 for r in results if r.type == "worker") >= per_type:
+                    break
+
+    if "brain" in wanted:
+        try:
+            for c in list_contexts(auth=auth, repos=repos):
+                if needle in c.name.lower() or needle in str(c.description or "").lower():
+                    results.append(SearchResultItem(
+                        type="brain", id=c.name, title=c.name,
+                        subtitle=(c.description or None), url=f"/brain/{c.name}",
+                    ))
+                    if sum(1 for r in results if r.type == "brain") >= per_type:
+                        break
+        except Exception:
+            logger.debug("search: brain enumeration failed", exc_info=True)
+
+    if "connections" in wanted:
+        try:
+            for row in repos.connections.list(user_id=auth.user_id):
+                d = row_to_dict(row)
+                app = str(d.get("app_name") or "")
+                label = str(d.get("mcp_label") or "")
+                if needle in app.lower() or needle in label.lower():
+                    results.append(SearchResultItem(
+                        type="connection", id=str(d.get("id")),
+                        title=label or app, subtitle=(app or None),
+                        url="/connections",
+                    ))
+                    if sum(1 for r in results if r.type == "connection") >= per_type:
+                        break
+        except Exception:
+            logger.debug("search: connection enumeration failed", exc_info=True)
+
+    if "runs" in wanted:
+        try:
+            rows, _ = _list_visible_runs(
+                user_id=auth.user_id, repos=repos, worker_id=None, statuses=None,
+                since=None, until=None, limit=200, offset=0, include_system=False,
+            )
+            for r in rows:
+                d = row_to_dict(r)
+                rid = str(d.get("id") or "")
+                wname = str(d.get("worker_name") or "")
+                if needle in rid.lower() or needle in wname.lower():
+                    results.append(SearchResultItem(
+                        type="run", id=rid, title=(wname or rid),
+                        subtitle=str(d.get("status") or "") or None,
+                        url=f"/runs/{rid}",
+                    ))
+                    if sum(1 for r2 in results if r2.type == "run") >= per_type:
+                        break
+        except Exception:
+            logger.debug("search: run enumeration failed", exc_info=True)
+
+    return SearchResponse(results=results[:limit])
 
 
 def _starred_worker_ids(user_id: str) -> set[str]:
@@ -7359,6 +7528,25 @@ def _build_worker_detail(
         )
     ]
 
+    # #815: latest output — the most recent COMPLETED run's output, fetched once
+    # so the detail page renders an output-first overview without a second call.
+    latest_output: Optional[Dict[str, Any]] = None
+    latest_output_run_id: Optional[str] = None
+    _latest_completed = next(
+        (r for r in recent_runs if str(getattr(r, "status", "")).lower().endswith("completed")),
+        None,
+    )
+    if _latest_completed is not None:
+        try:
+            _run_row = repos.runs.get(user_id=user_id, run_id=_latest_completed.id)
+            if _run_row:
+                parsed = json.loads(_run_row.get("output_json") or "{}")
+                if isinstance(parsed, dict):
+                    latest_output = parsed
+                    latest_output_run_id = _latest_completed.id
+        except Exception:
+            logger.debug("latest-output fetch failed for worker %s", worker_id, exc_info=True)
+
     config_dict = worker.get("config", {})
     try:
         config = WorkerConfig(**config_dict)
@@ -7464,6 +7652,8 @@ def _build_worker_detail(
         runner=worker["runner"],
         config=config,
         recent_runs=recent_runs,
+        latest_output=latest_output,  # #815
+        latest_output_run_id=latest_output_run_id,  # #815
         recent_stats=_get_stats_batch([worker_id], user_id=user_id, repos=repos).get(worker_id),
         manifest_yaml=manifest_yaml,
         run_py=run_py,
@@ -7898,6 +8088,124 @@ def delete_share_grant(
         raise HTTPException(status_code=404, detail="Grant not found")
 
 
+class _AssetAccessEntry(BaseModel):
+    user_id: Optional[str] = None
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    role: str  # "owner" | "editor" | "viewer"
+    source: str  # "owner" | "workspace" | "grant"
+
+
+def _asset_access_list(
+    *,
+    asset_type: str,
+    asset_id: str,
+    owner_id: str,
+    visibility: str,
+    auth: AuthContext,
+    repos: Repositories,
+) -> List[_AssetAccessEntry]:
+    """#768: who can access this asset and why. Always the owner; workspace
+    members when visibility=workspace; grantees when visibility=specific_people
+    (grants are also surfaced if any exist, since they confer access)."""
+    entries: List[_AssetAccessEntry] = []
+    seen_emails: set[str] = set()
+
+    # owner (resolve display info from the users table if available)
+    owner_email = None
+    owner_name = None
+    try:
+        if repos.users is not None:
+            urow = repos.users.get(user_id=owner_id)
+            if urow:
+                owner_email = urow.get("email")
+                owner_name = urow.get("display_name") or urow.get("username")
+    except Exception:
+        pass
+    entries.append(_AssetAccessEntry(
+        user_id=owner_id, email=owner_email, display_name=owner_name,
+        role="owner", source="owner",
+    ))
+    if owner_email:
+        seen_emails.add(owner_email.lower())
+
+    if visibility == "workspace":
+        try:
+            members_repo = _require_members_repo(repos)
+            workspace_id = _active_local_workspace_id(auth)
+            for m in members_repo.list(workspace_id=workspace_id):
+                if str(m.get("user_id")) == str(owner_id):
+                    continue
+                email = (m.get("email") or "")
+                role = "editor" if str(m.get("role")) in ("owner", "admin") else "viewer"
+                entries.append(_AssetAccessEntry(
+                    user_id=str(m.get("user_id")), email=email or None,
+                    display_name=m.get("display_name"), role=role, source="workspace",
+                ))
+                if email:
+                    seen_emails.add(email.lower())
+        except Exception:
+            logger.debug("access list: workspace members lookup failed", exc_info=True)
+
+    # grants (always surfaced — a grant confers access regardless of the tier)
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT grantee_email FROM asset_grants "
+                "WHERE asset_type=? AND asset_id=? AND owner_id=? ORDER BY created_at",
+                (asset_type, asset_id, owner_id),
+            ).fetchall()
+        for r in rows:
+            email = str(r["grantee_email"] or "")
+            if not email or email.lower() in seen_emails:
+                continue
+            seen_emails.add(email.lower())
+            entries.append(_AssetAccessEntry(
+                user_id=None, email=email, display_name=None,
+                role="viewer", source="grant",
+            ))
+    except Exception:
+        logger.debug("access list: grant lookup failed", exc_info=True)
+
+    return entries
+
+
+@app.get("/workers/{worker_id}/access", response_model=List[_AssetAccessEntry])
+def list_worker_access(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[_AssetAccessEntry]:
+    """#768: people-with-access listing for a worker (owner/workspace/grant)."""
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    return _asset_access_list(
+        asset_type="worker", asset_id=worker_id,
+        owner_id=str(worker.get("owner_id") or auth.user_id),
+        visibility=str(worker.get("visibility") or "private"),
+        auth=auth, repos=repos,
+    )
+
+
+@app.get("/contexts/{name}/access", response_model=List[_AssetAccessEntry])
+def list_context_access(
+    name: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[_AssetAccessEntry]:
+    """#768: people-with-access listing for a brain pack."""
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    summary = _context_summary(safe_name, _metadata, repos=repos, user_id=auth.user_id)
+    return _asset_access_list(
+        asset_type="brain_pack", asset_id=safe_name,
+        owner_id=str(getattr(summary, "owner_id", None) or auth.user_id),
+        visibility=str(getattr(summary, "visibility", "private")),
+        auth=auth, repos=repos,
+    )
+
+
 @app.post("/workers/{worker_id}/share-link")
 def create_worker_share_link(
     worker_id: str,
@@ -8082,6 +8390,35 @@ def get_worker_detail(
         repos=repos,
         role=_worker_repo_role(auth),
         include_grants=True,
+    )
+
+
+@app.get("/workers/{worker_id}/bundle.zip")
+def download_worker_bundle(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """#816: download a worker as a skill bundle (zip of its on-disk files:
+    worker.yml, run.py, SKILL.md, requirements.txt). Importable via
+    POST /workers/from-bundle. Visible-worker scoped (404 otherwise)."""
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    buf = io.BytesIO()
+    file_count = 0
+    with zipfile.ZipFile(buf, "w", zipfile.ZIP_DEFLATED) as zf:
+        for rel, data in _iter_worker_dir_files(worker_id):
+            zf.writestr(f"{worker_id}/{rel}", data)
+            file_count += 1
+    if file_count == 0:
+        raise HTTPException(status_code=409, detail="Worker has no exportable files")
+    safe = re.sub(r"[^A-Za-z0-9_-]+", "-", worker_id)[:60] or "worker"
+    return Response(
+        content=buf.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": f'attachment; filename="{safe}.zip"'},
     )
 
 
@@ -8710,6 +9047,132 @@ def toggle_worker_star(
     if _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos) is None:
         raise HTTPException(status_code=404, detail="Worker not found")
     return {"starred": _toggle_worker_star(auth.user_id, worker_id)}
+
+
+class _WorkerContextAttachRequest(BaseModel):
+    name: str
+    writeable: bool = False
+
+
+class _WorkerContextUpdateRequest(BaseModel):
+    writeable: bool
+
+
+def _mutate_worker_contexts(
+    worker_id: str,
+    mutate,
+    *,
+    auth: AuthContext,
+    repos: Repositories,
+) -> WorkerDetail:
+    """#790: apply a mutation to a worker's mounted contexts (attach/detach/
+    set-writeable) by patching the DB manifest (drives detail + runs) and the
+    on-disk worker.yml (survives reload), without a full YAML rewrite."""
+    worker_id = _canonical_worker_id(worker_id)
+    _raise_if_protected_worker_mutation(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    manifest = dict(worker.get("manifest") or {})
+    raw = manifest.get("contexts")
+    if not isinstance(raw, list):
+        exec_block = manifest.get("exec")
+        raw = exec_block.get("contexts") if isinstance(exec_block, dict) else None
+    current: List[Dict[str, Any]] = []
+    for c in (raw or []):
+        if isinstance(c, str):
+            current.append({"name": c, "writeable": False})
+        elif isinstance(c, dict) and c.get("name"):
+            current.append({"name": str(c["name"]), "writeable": bool(c.get("writeable", False))})
+    new_contexts = mutate(current)
+    manifest["contexts"] = new_contexts
+    if isinstance(manifest.get("exec"), dict):
+        manifest["exec"].pop("contexts", None)  # avoid top-level vs exec ambiguity
+    repos.workers.update(user_id=auth.user_id, worker_id=worker_id, manifest_json=manifest)
+    invalidate_worker_cache()
+    # Best-effort worker.yml write-back so the change survives a registry reload.
+    try:
+        from worker_registry import WORKERS_DIR
+        import yaml as _pyyaml
+        wpath = WORKERS_DIR / worker_id / "worker.yml"
+        if wpath.exists():
+            doc = _pyyaml.safe_load(wpath.read_text(encoding="utf-8")) or {}
+            if isinstance(doc, dict):
+                doc["contexts"] = new_contexts
+                if isinstance(doc.get("exec"), dict):
+                    doc["exec"].pop("contexts", None)
+                wpath.write_text(_pyyaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    except Exception:
+        logger.warning("PATCH %s: could not write contexts to worker.yml", worker_id, exc_info=True)
+    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+
+@app.post("/workers/{worker_id}/contexts", response_model=WorkerDetail)
+def attach_worker_context(
+    worker_id: str,
+    payload: _WorkerContextAttachRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """#790: attach a brain folder to a worker (or update its writeable flag)."""
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="context name required")
+
+    def _add(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        for c in contexts:
+            if c["name"] == name:
+                c["writeable"] = payload.writeable
+                return contexts
+        contexts.append({"name": name, "writeable": payload.writeable})
+        return contexts
+
+    return _mutate_worker_contexts(worker_id, _add, auth=auth, repos=repos)
+
+
+@app.patch("/workers/{worker_id}/contexts/{context_name}", response_model=WorkerDetail)
+def update_worker_context(
+    worker_id: str,
+    context_name: str,
+    payload: _WorkerContextUpdateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """#790: change a mounted brain folder's read/write access."""
+    found = {"hit": False}
+
+    def _update(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        for c in contexts:
+            if c["name"] == context_name:
+                c["writeable"] = payload.writeable
+                found["hit"] = True
+        return contexts
+
+    detail = _mutate_worker_contexts(worker_id, _update, auth=auth, repos=repos)
+    if not found["hit"]:
+        raise HTTPException(status_code=404, detail="Context not attached to this worker")
+    return detail
+
+
+@app.delete("/workers/{worker_id}/contexts/{context_name}", response_model=WorkerDetail)
+def detach_worker_context(
+    worker_id: str,
+    context_name: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """#790: detach a brain folder from a worker."""
+    found = {"hit": False}
+
+    def _remove(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        kept = [c for c in contexts if c["name"] != context_name]
+        found["hit"] = len(kept) != len(contexts)
+        return kept
+
+    detail = _mutate_worker_contexts(worker_id, _remove, auth=auth, repos=repos)
+    if not found["hit"]:
+        raise HTTPException(status_code=404, detail="Context not attached to this worker")
+    return detail
 
 
 @app.post("/workers/{worker_id}/pause", response_model=WorkerDetail)
@@ -12018,6 +12481,60 @@ def list_runs(
     return [_make_run_summary(r) for r in visible_rows]
 
 
+@app.get("/runs/export.csv")
+def export_runs_csv(
+    worker_id: Optional[str] = None,
+    status: Optional[str] = None,
+    since: Optional[str] = None,
+    until: Optional[str] = None,
+    limit: int = Query(1000, ge=1, le=10000),
+    include_system: bool = Query(False),
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """#796: bulk-export the run list as a CSV attachment, with the same
+    filters as GET /runs (worker_id, status, since, until). Owner/visibility
+    scoped via _list_visible_runs."""
+    statuses = _resolve_run_status_filters(status)
+    since_dt = _parse_iso8601(since) if since else None
+    if since and since_dt is None:
+        raise HTTPException(status_code=400, detail="Invalid since value")
+    until_dt = _parse_iso8601(until) if until else None
+    if until and until_dt is None:
+        raise HTTPException(status_code=400, detail="Invalid until value")
+    rows, _total = _list_visible_runs(
+        user_id=auth.user_id,
+        repos=repos,
+        worker_id=worker_id,
+        statuses=statuses,
+        since=since_dt.isoformat() if since_dt else None,
+        until=until_dt.isoformat() if until_dt else None,
+        limit=limit,
+        offset=0,
+        include_system=include_system,
+    )
+    import csv as _csv
+    import io as _io
+    out = _io.StringIO()
+    writer = _csv.writer(out)
+    writer.writerow([
+        "id", "worker_id", "worker_name", "status", "trigger_source",
+        "created_at", "started_at", "completed_at", "duration_ms", "error_code",
+    ])
+    for r in rows:
+        d = row_to_dict(r)
+        writer.writerow([
+            d.get("id"), d.get("worker_id"), d.get("worker_name"), d.get("status"),
+            d.get("trigger_source"), d.get("created_at"), d.get("started_at"),
+            d.get("completed_at"), d.get("duration_ms"), d.get("error_code"),
+        ])
+    return Response(
+        content=out.getvalue(),
+        media_type="text/csv; charset=utf-8",
+        headers={"Content-Disposition": 'attachment; filename="runs.csv"'},
+    )
+
+
 _DEFAULT_PRECLEAR_BACKUP_DIR = "/root/backups/manual"
 
 
@@ -12392,6 +12909,17 @@ def _approval_response(
         except Exception:
             parsed_annotations = None
     response["annotations"] = parsed_annotations
+    # #792: surface the typed preview payload as a parsed object (email/records/
+    # tasks) so the UI can render a rich preview; drop the raw JSON column.
+    raw_preview_payload = response.pop("preview_payload_json", None)
+    parsed_preview_payload: Optional[Any] = None
+    if raw_preview_payload:
+        try:
+            parsed_preview_payload = json.loads(raw_preview_payload)
+        except Exception:
+            parsed_preview_payload = None
+    response["preview_payload"] = parsed_preview_payload
+    # expires_at (#798) + preview_type (#792) pass through from the row as-is.
     # Standalone share/review link for the authenticated owner. The token is the
     # same deterministic HMAC the /approvals/public/* routes verify, so the owner
     # can copy this URL to open the approval full-page (no app chrome) or share it
@@ -14904,6 +15432,8 @@ class ConnectionItem(BaseModel):
     display_name: Optional[str] = None
     last_checked_at: Optional[str] = None
     last_check_status: Optional[str] = None
+    last_used_at: Optional[str] = None  # #802: most recent run using this connection
+    last_used_by: Optional[str] = None  # #802: worker name of that run
     mcp_label: Optional[str] = None
     mcp_url: Optional[str] = None
     mcp_transport: str = "streamable_http"
@@ -15619,6 +16149,33 @@ def list_connection_tool_presets(
     return {"presets": read_only_presets()}
 
 
+def _connections_last_used(user_id: str, repos: Repositories) -> Dict[str, tuple[str, str]]:
+    """#802: map connection slug -> (last_used_at, worker_name) from the most
+    recent run of any worker declaring that connection. One pass over visible
+    workers; O(workers) recent-run lookups."""
+    last_used: Dict[str, tuple[str, str]] = {}
+    try:
+        for w in _list_visible_workers(user_id=user_id, repos=repos, use_cache=True):
+            slugs = [s.lower() for s in _worker_connection_slugs(w)]
+            if not slugs:
+                continue
+            recent = repos.runs.list_for_worker(user_id=user_id, worker_id=w["id"], limit=1, offset=0)
+            if not recent:
+                continue
+            run = recent[0]
+            ts = str(run.get("created_at") or "")
+            if not ts:
+                continue
+            wname = str(w.get("name") or w["id"])
+            for slug in slugs:
+                prev = last_used.get(slug)
+                if prev is None or ts > prev[0]:
+                    last_used[slug] = (ts, wname)
+    except Exception:
+        logger.debug("connection last-used computation failed", exc_info=True)
+    return last_used
+
+
 @app.get("/connections", response_model=List[ConnectionItem])
 def list_connections(
     auth: AuthContext = Depends(get_auth_context),
@@ -15626,12 +16183,16 @@ def list_connections(
 ) -> List[ConnectionItem]:
     rows = repos.connections.list(user_id=auth.user_id)
     now = datetime.now(timezone.utc)
+    last_used = _connections_last_used(auth.user_id, repos)  # #802
 
     refreshed: List[Dict[str, Any]] = []
     for row in rows:
         d = row_to_dict(row)
         d = _refresh_connection_status_for_list(d, user_id=auth.user_id, repos=repos, now=now)
         d["scopes"] = _parse_scopes_json(d.pop("scopes_json", None))
+        used = last_used.get(str(d.get("app_name") or "").lower())
+        if used:
+            d["last_used_at"], d["last_used_by"] = used
         refreshed.append(d)
 
     # Hide superseded dead rows: once an app has a live (active/valid) composio
@@ -16630,6 +17191,24 @@ async def _run_connection_sweep(*, user_id: str | None = None) -> None:
 
 
 _connection_sweep_gate_lock = threading.Lock()
+@app.get("/connections/{connection_id}/tools")
+def get_connection_tools(
+    connection_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """#789: live tool list advertised by an MCP connection's server.
+
+    Dials the server (reusing the test path) and returns the live tools/list,
+    distinct from the operator-configured mcp_allowed_tools allowlist. Returns
+    503 when the server is unreachable so the UI degrades gracefully.
+    """
+    result = test_connection(connection_id, auth=auth, repos=repos)
+    if result.status != "valid" or result.tools is None:
+        raise HTTPException(status_code=503, detail=result.reason or "MCP server unreachable")
+    return {"tools": result.tools}
+
+
 _connection_sweep_last_started_at_by_user: Dict[str, float] = {}
 
 
@@ -20169,6 +20748,73 @@ def list_workspace_versions(
         rows = _git_ops.get_log(workspace, rel_path=rel, limit=min(limit, 100),
                                 asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE, asset_id="default")
     return [VersionSummary(**r) for r in rows]
+
+
+class ChangelogEntry(BaseModel):
+    asset_type: str  # "worker" | "context" | "workspace_instructions"
+    asset_id: str
+    asset_name: str
+    sha: str
+    message: str
+    committed_at: str
+
+
+@app.get("/workspace/changelog", response_model=List[ChangelogEntry])
+def workspace_changelog(
+    limit: int = 50,
+    asset_types: str = "worker,context,workspace_instructions",
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[ChangelogEntry]:
+    """#772: unified workspace changelog — merges the git history of all
+    workers, brain packs, and the workspace prompt into one timeline (newest
+    first). Each asset's log is bounded and the merged result is capped."""
+    wanted = {t.strip() for t in asset_types.split(",") if t.strip()}
+    limit = min(max(limit, 1), 200)
+    per_asset = min(limit, 20)
+    workspace = _git_workspace()
+    entries: List[ChangelogEntry] = []
+
+    def _collect(rel_path: str, asset_type: str, asset_id: str, asset_name: str) -> None:
+        try:
+            rows = _git_ops.get_log(workspace, rel_path=rel_path, limit=per_asset,
+                                    asset_type=asset_type, asset_id=asset_id)
+        except Exception:
+            return
+        for r in rows:
+            entries.append(ChangelogEntry(
+                asset_type=asset_type, asset_id=asset_id, asset_name=asset_name,
+                sha=str(r.get("sha") or r.get("id") or ""),
+                message=str(r.get("message") or ""),
+                committed_at=str(r.get("timestamp") or ""),
+            ))
+
+    if "worker" in wanted:
+        prefix = _workers_git_prefix()
+        for w in _list_visible_workers(user_id=auth.user_id, repos=repos, use_cache=True)[:60]:
+            _collect(f"{prefix}/{w['id']}", "worker", str(w["id"]), str(w.get("name") or w["id"]))
+    if "context" in wanted:
+        cprefix = _contexts_git_prefix()
+        try:
+            for c in list_contexts(auth=auth, repos=repos)[:60]:
+                if getattr(c, "sensitive", True):
+                    continue  # sensitive packs are never git-tracked
+                _collect(f"{cprefix}/{c.name}", "context", c.name, c.name)
+        except Exception:
+            logger.debug("changelog: context enumeration failed", exc_info=True)
+    if "workspace_instructions" in wanted:
+        try:
+            from chat_service import WORKSPACE_MD_PATH
+            try:
+                rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
+            except ValueError:
+                rel = "workspace.md"
+            _collect(rel, "workspace_instructions", "default", "Workspace instructions")
+        except Exception:
+            logger.debug("changelog: workspace.md log failed", exc_info=True)
+
+    entries.sort(key=lambda e: e.committed_at, reverse=True)
+    return entries[:limit]
 
 
 @app.get("/workspace/versions/{sha}")

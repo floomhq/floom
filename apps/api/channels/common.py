@@ -68,17 +68,36 @@ def notify_pending_approval_via_whatsapp(
         if not _whatsapp_configured():
             return
 
-        # Reverse-lookup: find active wa_id bound to this owner_id.
+        # Reverse-lookup: find active wa_id bound to this owner.
+        # #871: an admin/FLOOM_SECRET-created run is owned by the bootstrap id
+        # ('federico'), but the human's binding is keyed to their real user
+        # uuid (and a legacy binding may be under bootstrap). Match the binding
+        # against the bootstrap<->uuid alternates so the owner still gets pinged.
+        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+        candidate_ids = [owner_id]
         wa_id: Optional[str] = None
         try:
             with get_db() as conn:
+                if owner_id == bootstrap_id:
+                    try:
+                        admin_rows = conn.execute(
+                            "SELECT id FROM users WHERE role = 'admin'"
+                        ).fetchall()
+                        candidate_ids += [str(r["id"]) for r in admin_rows]
+                    except Exception:
+                        pass  # no users table (legacy single-user) — owner_id alone is fine
+                else:
+                    candidate_ids.append(bootstrap_id)
+                seen: set[str] = set()
+                candidate_ids = [c for c in candidate_ids if c and not (c in seen or seen.add(c))]
+                placeholders = ",".join("?" * len(candidate_ids))
                 row = conn.execute(
-                    """
+                    f"""
                     SELECT wa_id FROM whatsapp_sender_bindings
-                    WHERE user_id = ? AND status = 'active'
+                    WHERE user_id IN ({placeholders}) AND status = 'active'
                     LIMIT 1
                     """,
-                    (owner_id,),
+                    tuple(candidate_ids),
                 ).fetchone()
             if row:
                 wa_id = str(row["wa_id"])
