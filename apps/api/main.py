@@ -3065,6 +3065,7 @@ class ContextSummary(BaseModel):
     # edit or delete them. Operator-created packs have system=False.
     system: bool = False
     read_only: bool = False
+    category: Optional[str] = None  # #780: content-category tag
     # Sensitive packs are never committed to git or pushed to GitHub.
     # Sensitive is the DEFAULT — set sensitive=False to opt in to git tracking.
     sensitive: bool = True
@@ -3126,6 +3127,11 @@ class ContextCreateRequest(BaseModel):
     # hold credentials. Set false to opt the context into git history (versions,
     # rollback). See contexts.is_context_sensitive.
     sensitive: bool = True
+    category: Optional[str] = None  # #780: content-category tag
+
+
+class ContextCategoryRequest(BaseModel):
+    category: Optional[str] = None  # #780; empty/null clears it
 
 
 class ContextTextWriteRequest(BaseModel):
@@ -6108,6 +6114,7 @@ def _context_summary(
         updated_at=context_updated_at(root),
         writeable=bool(metadata.get(name, {}).get("writeable", False)),
         sensitive=bool(metadata.get(name, {}).get("sensitive", True)),
+        category=(metadata.get(name, {}).get("category") or None),  # #780
         worker_count=worker_count,
         description=description,
         system=is_system,
@@ -6363,10 +6370,25 @@ def create_context(
         writeable=bool(payload.writeable) if payload else False,
         sensitive=bool(payload.sensitive) if payload else True,
         owner_id=auth.user_id,
+        category=(payload.category if payload else None),  # #780
     )
     # Materialize the access-control mirror row (default private) so the Share
     # control + permission checks work immediately. Members STEP 4.
     _ensure_brain_pack_row(safe_name, owner_id=auth.user_id, repos=repos)
+    return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
+
+
+@app.put("/contexts/{name}/category", response_model=ContextDetail)
+def set_context_category(
+    name: str,
+    payload: ContextCategoryRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> ContextDetail:
+    """#780: set/clear a brain pack's content-category tag (marketing,
+    accounting, research, data, ...). Empty/null clears it."""
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    set_context_metadata(safe_name, category=(payload.category or ""))
     return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
 
 
