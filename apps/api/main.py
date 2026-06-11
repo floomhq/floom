@@ -453,35 +453,31 @@ def _context_upload_too_large_response() -> JSONResponse:
         },
     )
 
+# #872 SECURITY: PROTECTED_STOCK_WORKER_IDS is also consulted by Emily's
+# _worker_can_view (chat_service) as a visibility bypass — so the same tenant
+# private workers leaked here too. Curated to genuine ship-with-product
+# templates + engine/system workers only; the named-private workers (and the
+# Gmail/CRM tenant-specific entries that only appeared here) are removed so a
+# non-owner member can neither view nor run them. Removing them from this set
+# also correctly makes them owner-deletable (they were never real stock).
 PROTECTED_STOCK_WORKER_IDS = frozenset(
     {
+        # genuine ship-with-product example/demo templates
         "csv_enricher",
-        "cv_writeup",
-        "dach_compliance",
         "github-digest",
         "gmail-summarize-latest",
-        "gmail_intake_brief",
-        "gmail_inbox_manager",
-        "kugelaudio-bug-intake",
-        "kugelaudio-meeting-pipeline",
-        "linkedin-post-engagements",
         "node-smoke-test",
         "openblog",
         "opendraft",
+        "openpaper-posthog-daily",
         "outbound-approval-demo",
         "research_brief",
-        "reverse_match_crm",
-        "search_console_insights",
+        "seo-opportunity-digest",
+        # engine/system workers
         "slack-listener",
-        "weekly_update",
         "whatsapp-listener",
         "worker-author",
         "workspace-agent",
-        "canopy-crm-sync",
-        "gmail-inbox-manager-plus",
-        "gmail-smart-replies",
-        "openpaper-posthog-daily",
-        "seo-opportunity-digest",
     }
 )
 
@@ -500,26 +496,24 @@ def _acquire_worker_create_lock(worker_id: str) -> threading.Lock:
     return lock
 
 
+# #872 SECURITY: PUBLIC_STOCK_WORKER_IDS are returned to ANY member regardless
+# of visibility=private (the ownership guards check stock IDs first, by design
+# for genuine ship-with-product templates). This set previously included a
+# tenant's REAL private workers (Gmail/DACH/kugelaudio/CV/GSC/LinkedIn/CRM/
+# weekly_update), leaking their existence and letting members trigger runs.
+# Curated down to genuinely-shareable example/demo templates only. Stock =
+# ships-with-product examples, never a tenant's data. A removed worker now
+# correctly 404s for a non-owner member.
 PUBLIC_STOCK_WORKER_IDS = frozenset(
     {
         "csv_enricher",
-        "cv_writeup",
-        "dach_compliance",
         "github-digest",
         "gmail-summarize-latest",
-        "gmail_intake_brief",
-        "gmail_inbox_manager",
-        "kugelaudio-bug-intake",
-        "kugelaudio-meeting-pipeline",
-        "linkedin-post-engagements",
         "node-smoke-test",
         "openblog",
         "opendraft",
         "outbound-approval-demo",
         "research_brief",
-        "reverse_match_crm",
-        "search_console_insights",
-        "weekly_update",
     }
 )
 
