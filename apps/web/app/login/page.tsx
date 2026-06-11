@@ -11,6 +11,61 @@ import { FloomMark } from "@/components/layout/sidebar";
 
 type LoginMode = "loading" | "setup" | "username" | "secret";
 
+// §5a2: the sign-in page is SPLIT — a dark product-proof panel on the left
+// (mark + "Hire AI workers." + a real-looking "This week" artifact card, never
+// a bare form) and the form on the right. Industry pattern; no centered card.
+function ProofPanel() {
+  return (
+    <div className="relative hidden flex-col justify-between overflow-hidden bg-[#16171A] p-10 text-white lg:flex">
+      <div className="flex items-center gap-2">
+        <FloomMark size={22} />
+        <span className="text-base font-semibold tracking-tight">WorkerOS</span>
+      </div>
+
+      <div className="space-y-6">
+        <h2 className="max-w-sm text-3xl font-semibold leading-tight tracking-tight">
+          Hire AI workers.
+        </h2>
+        <p className="max-w-sm text-sm text-white/60">
+          Jobs that run themselves — on a schedule, from a message, or on demand. You get the
+          output, not the mechanics.
+        </p>
+
+        {/* "This week" artifact card — show what they get. */}
+        <div className="max-w-sm rounded-2xl bg-white/[0.06] p-5 ring-1 ring-white/10">
+          <p className="text-[11px] font-medium uppercase tracking-wide text-white/40">This week</p>
+          <div className="mt-3 grid grid-cols-3 gap-4">
+            {[
+              { n: "142", l: "runs" },
+              { n: "8", l: "workers" },
+              { n: "3", l: "approved" },
+            ].map((s) => (
+              <div key={s.l}>
+                <div className="text-2xl font-semibold tracking-tight">{s.n}</div>
+                <div className="text-[11px] text-white/40">{s.l}</div>
+              </div>
+            ))}
+          </div>
+          <div className="mt-4 space-y-2 border-t border-white/10 pt-4">
+            {[
+              { w: "Weekly sales summary", t: "2h ago" },
+              { w: "Invoice reconciliation", t: "5h ago" },
+              { w: "Standup digest", t: "yesterday" },
+            ].map((r) => (
+              <div key={r.w} className="flex items-center justify-between text-xs">
+                <span className="text-white/80">{r.w}</span>
+                <span className="text-white/35">{r.t}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+      </div>
+
+      <p className="text-xs text-white/30">Your first sign-in creates your workspace.</p>
+    </div>
+  );
+}
+
 function LoginContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -36,15 +91,10 @@ function LoginContent() {
   useEffect(() => {
     void (async () => {
       try {
-        // Check if backend multi-member is active
         const res = await fetch("/api/auth/setup", { cache: "no-store" });
         if (res.ok) {
           const data = (await res.json()) as { required?: boolean };
-          if (data.required) {
-            setMode("setup");
-          } else {
-            setMode("username");
-          }
+          setMode(data.required ? "setup" : "username");
           return;
         }
       } catch {
@@ -84,7 +134,6 @@ function LoginContent() {
           return;
         }
       } else {
-        // secret mode
         const res = await fetch("/api/auth/login", {
           method: "POST",
           headers: { "Content-Type": "application/json" },
@@ -106,122 +155,113 @@ function LoginContent() {
     }
   }
 
-  if (mode === "loading") {
-    return (
-      <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-10">
-        <div className="mb-6 flex items-center gap-2">
-          <FloomMark size={22} />
-          <span className="text-base font-semibold tracking-tight">WorkerOS</span>
-        </div>
-        <p className="text-sm text-muted-foreground">Loading…</p>
-      </div>
-    );
-  }
+  const heading =
+    mode === "setup" ? "Create your workspace" : "Sign in";
+  const sub =
+    mode === "setup"
+      ? "Set up the first admin account for this WorkerOS instance."
+      : mode === "username"
+      ? "Enter your username and password to continue."
+      : "Enter your access secret to continue.";
 
   return (
-    <div className="mx-auto flex min-h-screen w-full max-w-md flex-col justify-center px-4 py-10">
-      <div className="mb-6 flex items-center gap-2">
-        <FloomMark size={22} />
-        <span className="text-base font-semibold tracking-tight">WorkerOS</span>
-      </div>
+    <div className="grid min-h-screen w-full lg:grid-cols-2">
+      <ProofPanel />
 
-      {mode === "setup" ? (
-        <>
-          <h1 className="text-xl font-semibold tracking-tight">Create your workspace</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Set up the first admin account for this WorkerOS instance.
-          </p>
-        </>
-      ) : mode === "username" ? (
-        <>
-          <h1 className="text-xl font-semibold tracking-tight">Sign in</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Enter your username and password to continue.
-          </p>
-        </>
-      ) : (
-        <>
-          <h1 className="text-xl font-semibold tracking-tight">Sign in</h1>
-          <p className="mt-1 text-sm text-muted-foreground">
-            Enter your access secret to continue.
-          </p>
-        </>
-      )}
-
-      <form onSubmit={handleSubmit} className="mt-6 space-y-4">
-        {mode === "secret" ? (
-          <div className="space-y-2">
-            <Label htmlFor="access-secret" className="text-xs font-medium text-muted-foreground">
-              Access secret
-            </Label>
-            <Input
-              id="access-secret"
-              type="password"
-              autoComplete="current-password"
-              autoFocus
-              placeholder="••••••••••••"
-              value={secret}
-              onChange={(e) => setSecret(e.target.value)}
-            />
+      {/* Right: the form. */}
+      <div className="flex flex-col justify-center px-6 py-10 sm:px-12">
+        <div className="mx-auto w-full max-w-sm">
+          {/* Mark shows on mobile (where the proof panel is hidden). */}
+          <div className="mb-8 flex items-center gap-2 lg:hidden">
+            <FloomMark size={22} />
+            <span className="text-base font-semibold tracking-tight">WorkerOS</span>
           </div>
-        ) : (
-          <>
-            {mode === "setup" && (
-              <div className="space-y-2">
-                <Label htmlFor="display-name" className="text-xs font-medium text-muted-foreground">
-                  Display name <span className="text-muted-foreground/60">(optional)</span>
-                </Label>
-                <Input
-                  id="display-name"
-                  type="text"
-                  autoComplete="name"
-                  autoFocus
-                  placeholder="Alice"
-                  value={displayName}
-                  onChange={(e) => setDisplayName(e.target.value)}
-                />
-              </div>
-            )}
-            <div className="space-y-2">
-              <Label htmlFor="username" className="text-xs font-medium text-muted-foreground">
-                Username
-              </Label>
-              <Input
-                id="username"
-                type="text"
-                autoComplete="username"
-                autoFocus={mode === "username"}
-                placeholder="alice"
-                value={username}
-                onChange={(e) => setUsername(e.target.value)}
-              />
-            </div>
-            <div className="space-y-2">
-              <Label htmlFor="password" className="text-xs font-medium text-muted-foreground">
-                Password
-              </Label>
-              <Input
-                id="password"
-                type="password"
-                autoComplete={mode === "setup" ? "new-password" : "current-password"}
-                placeholder="••••••••••••"
-                value={password}
-                onChange={(e) => setPassword(e.target.value)}
-              />
-            </div>
-          </>
-        )}
 
-        {error && <p className="text-sm text-destructive">{error}</p>}
+          {mode === "loading" ? (
+            <p className="text-sm text-muted-foreground">Loading…</p>
+          ) : (
+            <>
+              <h1 className="text-xl font-semibold tracking-tight">{heading}</h1>
+              <p className="mt-1 text-sm text-muted-foreground">{sub}</p>
 
-        <Button
-          type="submit"
-          disabled={busy || (mode === "secret" ? !secret : (!username.trim() || !password))}
-          className="w-full"
-        >
-          {busy ? (mode === "setup" ? "Creating…" : "Signing in…") : (mode === "setup" ? "Create workspace" : "Sign in")}
-        </Button>
-      </form>
+              <form onSubmit={handleSubmit} className="mt-6 space-y-4">
+                {mode === "secret" ? (
+                  <div className="space-y-2">
+                    <Label htmlFor="access-secret" className="text-xs font-medium text-muted-foreground">
+                      Access secret
+                    </Label>
+                    <Input
+                      id="access-secret"
+                      type="password"
+                      autoComplete="current-password"
+                      autoFocus
+                      placeholder="••••••••••••"
+                      value={secret}
+                      onChange={(e) => setSecret(e.target.value)}
+                    />
+                  </div>
+                ) : (
+                  <>
+                    {mode === "setup" && (
+                      <div className="space-y-2">
+                        <Label htmlFor="display-name" className="text-xs font-medium text-muted-foreground">
+                          Display name <span className="text-muted-foreground/60">(optional)</span>
+                        </Label>
+                        <Input
+                          id="display-name"
+                          type="text"
+                          autoComplete="name"
+                          autoFocus
+                          placeholder="Alice"
+                          value={displayName}
+                          onChange={(e) => setDisplayName(e.target.value)}
+                        />
+                      </div>
+                    )}
+                    <div className="space-y-2">
+                      <Label htmlFor="username" className="text-xs font-medium text-muted-foreground">
+                        Username
+                      </Label>
+                      <Input
+                        id="username"
+                        type="text"
+                        autoComplete="username"
+                        autoFocus={mode === "username"}
+                        placeholder="alice"
+                        value={username}
+                        onChange={(e) => setUsername(e.target.value)}
+                      />
+                    </div>
+                    <div className="space-y-2">
+                      <Label htmlFor="password" className="text-xs font-medium text-muted-foreground">
+                        Password
+                      </Label>
+                      <Input
+                        id="password"
+                        type="password"
+                        autoComplete={mode === "setup" ? "new-password" : "current-password"}
+                        placeholder="••••••••••••"
+                        value={password}
+                        onChange={(e) => setPassword(e.target.value)}
+                      />
+                    </div>
+                  </>
+                )}
+
+                {error && <p className="text-sm text-destructive">{error}</p>}
+
+                <Button
+                  type="submit"
+                  disabled={busy || (mode === "secret" ? !secret : (!username.trim() || !password))}
+                  className="w-full"
+                >
+                  {busy ? (mode === "setup" ? "Creating…" : "Signing in…") : (mode === "setup" ? "Create workspace" : "Sign in")}
+                </Button>
+              </form>
+            </>
+          )}
+        </div>
+      </div>
     </div>
   );
 }
