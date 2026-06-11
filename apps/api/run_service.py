@@ -690,6 +690,26 @@ def _normalize_authored_worker_yml(worker_yml: str, log_fn: Callable[..., None])
 
     changed = False
 
+    # #717: the worker-author LLM intermittently emits two REQUIRED-field
+    # mistakes that hard-fail WorkerContract validation and dead-end the
+    # create-from-prompt flow (worker_creation_failed=true, no worker added):
+    #   1. schema_version as a YAML number (0.3) instead of the string "0.3".
+    #   2. a missing top-level `version`.
+    # Coerce both here (the engine, not the non-deterministic prompt) so a
+    # functionally-valid drafted worker registers.
+    sv = raw.get("schema_version")
+    if sv is not None and not isinstance(sv, str):
+        # 0.3 (float) -> "0.3"; 1 (int) -> "1"
+        raw["schema_version"] = (
+            ("%g" % sv) if isinstance(sv, float) else str(sv)
+        )
+        changed = True
+        log_fn("Coerced numeric schema_version to string on drafted worker (#717)", level="warning")
+    if not str(raw.get("version") or "").strip():
+        raw["version"] = "0.1.0"
+        changed = True
+        log_fn("Backfilled missing version on drafted worker (#717)", level="warning")
+
     use_cases = raw.get("use_cases")
     if use_cases is not None:
         ok = (
