@@ -34,7 +34,7 @@ def _load_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_SECRET", "test-secret")
     for name in list(sys.modules):
-        if name == "main" or name == "db" or name.startswith("db.") or name == "auth" or name.startswith("auth."):
+        if name == "main" or name == "db" or name.startswith("db.") or name == "auth" or name.startswith("auth.") or name.startswith("routers"):
             sys.modules.pop(name, None)
     db = importlib.import_module("db")
     db.init_db()
