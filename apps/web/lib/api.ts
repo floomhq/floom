@@ -885,6 +885,11 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ value }),
       }),
+    rename: (id: string, name: string) => // #791
+      fetchJson<import("./types").LocalWorkspace>(`/workspaces/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
+      }),
     // Duplicate a workspace into a new "<name> (copy)" sibling. On the
     // single-tenant OSS instance, workers/knowledge live in a shared pool, so
     // this mints a new workspace that surfaces the same pool (use Export/Import

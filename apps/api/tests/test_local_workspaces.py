@@ -348,3 +348,21 @@ def test_connections_are_scoped_to_the_active_workspace(client_and_db):
     assert by_app.status_code == 200, by_app.text
     assert by_app.json()["connected"] is True
     assert {row["id"] for row in by_app.json()["accounts"]} == {"side-gmail"}
+
+
+
+def test_rename_workspace(client_and_db):
+    # #791: PATCH /workspaces/{id} renames an owner's workspace.
+    client, _db = client_and_db
+    wid = client.post("/workspaces", json={"name": "Old name"}).json()["id"]
+
+    renamed = client.patch(f"/workspaces/{wid}", json={"name": "New name"})
+    assert renamed.status_code == 200, renamed.text
+    assert renamed.json()["name"] == "New name"
+
+    listing = client.get("/workspaces").json()["workspaces"]
+    assert any(w["id"] == wid and w["name"] == "New name" for w in listing)
+
+    assert client.patch("/workspaces/ws_doesnotexist", json={"name": "x"}).status_code == 404
+    assert client.patch(f"/workspaces/{wid}", json={"name": ""}).status_code == 422
+

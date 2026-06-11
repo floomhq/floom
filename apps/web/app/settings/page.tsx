@@ -544,6 +544,11 @@ function SettingsContent() {
           </section>
 
           <section className="space-y-3">
+            <h2 className="text-sm font-medium text-muted-foreground">Workspace</h2>
+            <WorkspaceInfoSettings />
+          </section>
+
+          <section className="space-y-3">
             <h2 className="text-sm font-medium text-muted-foreground">Behaviour</h2>
             <BehaviourSettings />
           </section>
@@ -812,6 +817,53 @@ const MODEL_DEFAULT_FIELDS: {
   { key: "max_output_tokens", label: "Max output tokens", placeholder: "e.g. 4096", type: "number", hint: "Per-run output ceiling." },
   { key: "spend_cap_usd", label: "Monthly spend cap (USD)", placeholder: "e.g. 100", type: "number", hint: "Soft cap for run costs this month." },
 ];
+
+// #791: workspace region / timezone / company domain, persisted to the
+// workspace settings KV (rename lives in the switcher).
+const WORKSPACE_INFO_FIELDS: { key: string; label: string; placeholder: string; hint: string }[] = [
+  { key: "region", label: "Region", placeholder: "e.g. us-east / eu-west", hint: "Where workers run (informational on OSS)." },
+  { key: "timezone", label: "Timezone", placeholder: "e.g. America/New_York", hint: "Default timezone for schedules & display." },
+  { key: "company_domain", label: "Company domain", placeholder: "e.g. acme.com", hint: "Used for the workspace logo." },
+];
+
+export function WorkspaceInfoSettings() {
+  const [values, setValues] = useState<Record<string, string> | null>(null);
+
+  useEffect(() => {
+    api.workspace.getSettings().then(setValues).catch(() => setValues({}));
+  }, []);
+
+  const save = (key: string, value: string) => {
+    api.workspace.setSetting(key, value).catch((err) => {
+      toast.error((err as Error).message || "Could not save setting");
+    });
+  };
+
+  if (values === null) return <Skeleton className="h-28 w-full" />;
+  return (
+    <div className="space-y-4">
+      {WORKSPACE_INFO_FIELDS.map((f) => (
+        <div key={f.key} className="space-y-1.5">
+          <Label htmlFor={`ws-${f.key}`} className="text-sm">{f.label}</Label>
+          <Input
+            id={`ws-${f.key}`}
+            defaultValue={values[f.key] ?? ""}
+            placeholder={f.placeholder}
+            className="max-w-xs"
+            onBlur={(e) => {
+              const v = e.target.value.trim();
+              if (v !== (values[f.key] ?? "")) {
+                setValues((prev) => ({ ...(prev ?? {}), [f.key]: v }));
+                save(f.key, v);
+              }
+            }}
+          />
+          <p className="text-xs text-muted-foreground">{f.hint}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
 
 export function ModelDefaults() {
   const [values, setValues] = useState<Record<string, string> | null>(null);
