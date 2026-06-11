@@ -67,6 +67,16 @@ AWS_SECRET_ACCESS_KEY=...
 AWS_REGION_NAME=us-west-2
 ```
 
+Other litellm providers work the same way — set a role's model id to a provider-prefixed
+id and supply that provider's key. Tool-call reliability and prompt caching vary by
+provider (caching auto-applies on OpenAI and Anthropic/Bedrock only):
+
+| Provider | Model id example | Key |
+| --- | --- | --- |
+| Anthropic (direct) | `anthropic/claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
+| Google Gemini | `gemini/gemini-2.5-pro` | `GEMINI_API_KEY` |
+| Groq | `groq/llama-3.3-70b-versatile` | `GROQ_API_KEY` |
+
 Anthropic models on Bedrock require submitting the one-time "use case details" form
 in the Bedrock console (per region). Prompt caching of the static system prompt is
 applied automatically on Anthropic/Bedrock for both codegen and agent (worker +
