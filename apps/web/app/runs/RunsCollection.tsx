@@ -9,7 +9,7 @@ import { api } from "@/lib/api";
 import { formatRelative } from "@/lib/formatters";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
-import { Collection, Avatar } from "@/components/collection";
+import { Collection } from "@/components/collection";
 import { InlineFileOpen } from "@/components/file-viewer/InlineFileOpen";
 import { traceSteps } from "@/lib/runs/trace";
 import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
@@ -305,7 +305,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       headers: ["Worker", "Trigger", "Duration", "Started", "Status", ""],
     },
     row: (r) => ({
-      leading: <Avatar name={r.worker_name ?? r.worker_id} />,
+      // V4 SPEC rule 3: no avatar for runs — non-person entity.
       primary: r.worker_name ?? r.worker_id,
       cols: [
         formatTrigger(r.trigger_source),
@@ -319,14 +319,15 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
           : [{ label: "Open full run", onSelect: () => (window.location.href = `/runs/${r.id}`) }],
     }),
     card: (r) => ({
-      leading: <Avatar name={r.worker_name ?? r.worker_id} size={38} />,
+      // V4 SPEC rule 3: no avatar monogram for runs.
       name: r.worker_name ?? r.worker_id,
       description: `${formatTrigger(r.trigger_source)} · ${formatDuration(r.duration_ms)}`,
       status: runStatusPill(r.status),
     }),
     detail: (r) => ({
       header: {
-        leading: <Avatar name={r.worker_name ?? r.worker_id} size={42} />,
+        // V4 SPEC rule 3: no avatar in detail header for runs.
+        leading: undefined,
         title: r.worker_name ?? r.worker_id,
         sub: (
           <span className="c-dh-sub" style={{ margin: 0 }}>

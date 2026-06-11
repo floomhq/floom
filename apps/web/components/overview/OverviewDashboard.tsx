@@ -8,7 +8,6 @@ import Link from "next/link";
 import {
   ArrowUp,
   CalendarClock,
-  ChevronRight,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -305,30 +304,29 @@ function WorkerActivity({
               <Link
                 key={run.run_id}
                 href={`/runs?sel=${run.run_id}`}
-                className="flex items-center justify-between gap-3 px-2 py-1.5 transition-colors hover:bg-[var(--active-nav-bg)]"
+                className="flex items-center gap-3 px-2 py-1.5 transition-colors hover:bg-[var(--active-nav-bg)]"
               >
-                <div className="min-w-0">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: meta.color }} />
-                    <span className="text-xs font-medium" style={{ color: meta.color }}>
-                      {meta.label}
-                    </span>
-                    <WorkerRowIcon workerId={run.worker_id} workerName={run.worker_name} />
-                    <span className="truncate text-sm font-medium text-[var(--text-primary)]">
-                      {run.worker_name || humanizeSlug(run.worker_id, "Worker")}
-                    </span>
-                  </div>
-                  <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-[var(--text-muted)]">
+                <WorkerRowIcon workerId={run.worker_id} workerName={run.worker_name} />
+                <div className="min-w-0 flex-1">
+                  <span className="truncate text-sm font-medium text-[var(--text-primary)]">
+                    {run.worker_name || humanizeSlug(run.worker_id, "Worker")}
+                  </span>
+                  <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-[var(--text-muted)]">
                     <span>{run.started_at ? formatRelative(run.started_at) : "Queued"}</span>
                     <span aria-hidden="true">·</span>
                     <span>{formatDuration(run.duration_ms)}</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="rounded-full border border-[var(--border-soft)] px-2 py-0.5">
-                      {formatTriggerSource(run.trigger_source)}
-                    </span>
                   </p>
                 </div>
-                <ChevronRight className="size-4 shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
+                {/* V4 SPEC §4: status pill right-aligned, no inline colored status word */}
+                <span
+                  className="shrink-0 rounded-[var(--radius-pill)] px-2 py-0.5 text-[11px] font-medium leading-none"
+                  style={{
+                    color: meta.color,
+                    background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
+                  }}
+                >
+                  {meta.label}
+                </span>
               </Link>
             );
           })}

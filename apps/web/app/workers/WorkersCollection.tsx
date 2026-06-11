@@ -17,7 +17,8 @@ import { WORKER_DETAIL_TABS, type WorkerDetailTab } from "@/lib/workers/tabs";
 import { formatDuration } from "@/lib/runs/format";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
-import { Collection, Avatar } from "@/components/collection";
+import { Collection } from "@/components/collection";
+import { Lock } from "lucide-react";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import { CodeBlock } from "@/components/file-viewer/code-block";
@@ -535,7 +536,8 @@ export default function WorkersCollection({
       headers: ["Worker", "Tools", "Last run", "Status", ""],
     },
     row: (w) => ({
-      leading: <Avatar name={w.name} />,
+      // V4 SPEC rule 3: no avatar for workers; lock icon shown when private only.
+      leading: w.visibility === "private" ? <Lock className="size-4 text-[var(--muted-foreground)]" /> : undefined,
       primary: w.name,
       secondary: w.description,
       cols: [
@@ -546,7 +548,9 @@ export default function WorkersCollection({
       menu: [{ label: "Open", onSelect: () => (window.location.href = `/workers/${w.id}`) }],
     }),
     card: (w) => ({
-      leading: <Avatar name={w.name} size={38} />,
+      // V4 SPEC rule 3: no avatar monogram; name carries lock icon inline when private.
+      // Lock is surfaced via `leading` only when private; workspace is silent default.
+      leading: w.visibility === "private" ? <Lock className="size-3.5 text-[var(--muted-foreground)]" /> : undefined,
       name: w.name,
       description: w.description,
       status: workerStatusPill(w),
@@ -577,7 +581,8 @@ export default function WorkersCollection({
       );
       return {
         header: {
-          leading: <Avatar name={w.name} size={42} />,
+          // V4 SPEC rule 3: no avatar monogram in detail header either.
+          leading: w.visibility === "private" ? <Lock className="size-4 text-[var(--muted-foreground)]" /> : undefined,
           title: w.name,
           actions,
           sub: (

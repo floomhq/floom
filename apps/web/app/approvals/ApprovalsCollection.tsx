@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ApprovalRow, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
-import { Collection, Avatar } from "@/components/collection";
+import { Collection } from "@/components/collection";
 import { contentTagOptions } from "@/lib/workers/derive";
 import {
   ApprovalActionItems,
@@ -96,7 +96,7 @@ export default function ApprovalsCollection() {
       headers: ["Worker", "Wants to", "Waiting", ""],
     },
     row: (a) => ({
-      leading: <Avatar name={a.worker_name ?? a.worker_id} />,
+      // V4 SPEC rule 3: no avatar for approvals — non-person entity.
       primary: a.worker_name ?? a.worker_id,
       cols: [approvalActionLine(a.label, parseDecisionInput(a.decision_input_json))],
       status: {
@@ -109,7 +109,7 @@ export default function ApprovalsCollection() {
       ],
     }),
     card: (a) => ({
-      leading: <Avatar name={a.worker_name ?? a.worker_id} />,
+      // V4 SPEC rule 3: no avatar monogram for approvals.
       name: a.worker_name ?? a.worker_id,
       description: approvalActionLine(a.label, parseDecisionInput(a.decision_input_json)),
       status: {
@@ -121,7 +121,8 @@ export default function ApprovalsCollection() {
       const di = parseDecisionInput(a.decision_input_json);
       return {
         header: {
-          leading: <Avatar name={a.worker_name ?? a.worker_id} size={42} />,
+          // V4 SPEC rule 3: no avatar in detail header for approvals.
+          leading: undefined,
           title: a.worker_name ?? a.worker_id,
           sub: <span className="c-dh-sub" style={{ margin: 0 }}>{approvalActionLine(a.label, di)}</span>,
           actions: (
