@@ -208,6 +208,15 @@ def test_bound_dm_sender_runs_as_bound_user(monkeypatch, tmp_path):
     # Insert an active binding.
     with main.get_db() as conn:
         now = main.now_iso()
+        # A real bound user exists in the users table. With FLOOM_SECRET set
+        # (configured deployment), bound_user_is_valid now fails closed for a
+        # binding whose user_id has NO users row (Codex finding #7), so the
+        # bound user must be a genuine account for the binding to stay active.
+        conn.execute(
+            "INSERT OR IGNORE INTO users (id, username, password_hash, role, created_at, updated_at) "
+            "VALUES ('alice', 'alice', 'x', 'admin', ?, ?)",
+            (now, now),
+        )
         conn.execute(
             """
             INSERT INTO slack_sender_bindings
@@ -277,6 +286,65 @@ def test_claim_endpoint_binds_sender(monkeypatch, tmp_path):
         ).fetchone()
     assert row["status"] == "active"
     assert row["claim_token"] is None, "token must be cleared after claim (single-use)"
+
+
+def test_claim_sends_emily_welcome_dm(monkeypatch, tmp_path):
+    """A successful Slack claim DMs an Emily welcome to the bound user."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.slack as _slack_mod
+
+    dms: list[dict] = []
+    monkeypatch.setattr(_slack_mod, "_post_slack_dm", lambda **kw: dms.append(kw))
+
+    claim = _slack_mod._slack_create_claim(SLACK_TEAM_ID, "U_WELCOME", "Welcome")
+    token = claim["claim_token"]
+
+    with TestClient(main.app) as client:
+        resp = client.post(
+            "/slack/bindings/claim",
+            json={"token": token},
+            headers={"x-floom-secret": "test-api-secret"},
+        )
+    assert resp.status_code == 200
+
+    welcomes = [d for d in dms if d.get("slack_user_id") == "U_WELCOME"]
+    assert len(welcomes) == 1, f"expected one welcome DM, got {dms}"
+    text = welcomes[0]["text"]
+    assert "Emily" in text
+    assert "chief of staff" in text.lower()
+    assert "connected" in text.lower()
+    assert "**" not in text
+
+
+def test_claim_welcome_dm_failure_does_not_break_claim(monkeypatch, tmp_path):
+    """If the Emily welcome DM raises, the Slack claim still succeeds."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.slack as _slack_mod
+
+    def _boom(**kw):
+        raise RuntimeError("slack api down")
+
+    monkeypatch.setattr(_slack_mod, "_post_slack_dm", _boom)
+
+    claim = _slack_mod._slack_create_claim(SLACK_TEAM_ID, "U_WELCOME_FAIL", "WelcomeFail")
+    token = claim["claim_token"]
+
+    with TestClient(main.app) as client:
+        resp = client.post(
+            "/slack/bindings/claim",
+            json={"token": token},
+            headers={"x-floom-secret": "test-api-secret"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    with main.get_db() as conn:
+        row = conn.execute(
+            "SELECT status, claim_token FROM slack_sender_bindings WHERE slack_team_id=? AND slack_user_id=?",
+            (SLACK_TEAM_ID, "U_WELCOME_FAIL"),
+        ).fetchone()
+    assert row["status"] == "active"
+    assert row["claim_token"] is None
 
 
 def test_claim_token_is_single_use(monkeypatch, tmp_path):
@@ -388,23 +456,40 @@ def test_mention_returns_pointer_not_agent_reply(monkeypatch, tmp_path):
     assert "DM" in reply_text or "direct message" in reply_text.lower()
 
 
-def test_mention_includes_claim_link_for_unbound_mentioner(monkeypatch, tmp_path):
+def test_mention_unbound_delivers_claim_link_privately_not_public(monkeypatch, tmp_path):
+    """Codex finding #2: an unbound channel @mention must NEVER post the bearer
+    claim token into the public thread (any channel reader could claim the
+    mentioner's identity first — takeover).  The public reply is generic with NO
+    token; the claim link is delivered privately via chat.postEphemeral targeted
+    at the mentioning user."""
     main = _load_api(monkeypatch, tmp_path)
     import channels.slack as _slack_mod
 
-    posts: list = []
+    public_posts: list = []
+    ephemeral_posts: list = []
+    dm_posts: list = []
     monkeypatch.setattr(_slack_mod, "collect_agent_reply", lambda **kw: "nope")
-    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply", lambda **kw: posts.append(kw))
-    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply_blocks", lambda **kw: posts.append(kw))
+    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply", lambda **kw: public_posts.append(kw))
+    monkeypatch.setattr(_slack_mod, "_post_slack_thread_reply_blocks", lambda **kw: public_posts.append(kw))
+    monkeypatch.setattr(_slack_mod, "_post_slack_ephemeral", lambda **kw: ephemeral_posts.append(kw))
+    monkeypatch.setattr(_slack_mod, "_post_slack_dm", lambda **kw: dm_posts.append(kw))
 
     body = _mention_event_body(slack_user_id="U_UNBOUND_MENTION")
     with TestClient(main.app) as client:
         client.post("/slack/events", content=body, headers=_slack_sig_headers(body))
 
-    assert posts
-    # Mention reply to unbound user should contain the short claim URL in text or blocks
-    combined = posts[0].get("text", "") + str(posts[0].get("blocks", ""))
-    assert "/c/" in combined
+    # Public thread reply exists but carries NO claim token.
+    assert public_posts
+    public_combined = public_posts[0].get("text", "") + str(public_posts[0].get("blocks", ""))
+    assert "/c/" not in public_combined
+    assert "claim" not in public_combined.lower()
+
+    # The claim link is delivered privately to the mentioning user only.
+    assert ephemeral_posts, "claim link must be delivered via ephemeral message"
+    eph = ephemeral_posts[0]
+    assert eph.get("user") == "U_UNBOUND_MENTION"
+    eph_combined = eph.get("text", "") + str(eph.get("blocks", ""))
+    assert "/c/" in eph_combined
 
 
 def test_mention_no_claim_link_for_already_bound_mentioner(monkeypatch, tmp_path):
@@ -466,6 +551,12 @@ def test_interactivity_bound_clicker_can_dismiss(monkeypatch, tmp_path):
     # Bind the clicker.
     with main.get_db() as conn:
         now = main.now_iso()
+        # Real bound user row required in configured mode (Codex finding #7).
+        conn.execute(
+            "INSERT OR IGNORE INTO users (id, username, password_hash, role, created_at, updated_at) "
+            "VALUES ('dave', 'dave', 'x', 'admin', ?, ?)",
+            (now, now),
+        )
         conn.execute(
             """
             INSERT INTO slack_sender_bindings
@@ -515,3 +606,43 @@ def test_legacy_mode_dm_routes_to_bootstrap_user(monkeypatch, tmp_path):
 
     assert resp.status_code == 200
     assert routed, "legacy mode must run the agent even for unbound sender"
+
+
+# ---------------------------------------------------------------------------
+# Short claim-link host (regression: /c/ must resolve on the host that serves it)
+# ---------------------------------------------------------------------------
+
+def test_slack_short_claim_url_built_on_host_that_serves_c(monkeypatch, tmp_path):
+    """The short /c/ link MUST be built on the API host that actually serves /c/.
+
+    The /c/{token} redirect route lives on the FastAPI app
+    (workers-api.floom.dev), NOT on the Next.js web app (workers.floom.dev).
+    Building it on WORKERS_FRONTEND_URL produced a dead link. Must use the
+    public API base.
+    """
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.slack as _slack_mod
+
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    monkeypatch.setenv("WORKEROS_PUBLIC_API_URL", "https://workers-api.floom.dev")
+
+    short_url = _slack_mod._slack_short_claim_url("tok456")
+    assert short_url == "https://workers-api.floom.dev/c/tok456"
+    assert "/c/" in short_url
+    # The long claim URL still targets the frontend /settings page (unchanged).
+    assert _slack_mod._slack_claim_url("tok456") == (
+        "https://workers.floom.dev/settings?slack_claim=tok456"
+    )
+
+
+def test_slack_short_claim_url_defaults_to_api_host(monkeypatch, tmp_path):
+    """With no overrides, the short link defaults to the API host, not the web host."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.slack as _slack_mod
+
+    for var in ("WORKEROS_PUBLIC_API_URL", "WORKEROS_API_URL", "WORKERS_API_URL"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+
+    short_url = _slack_mod._slack_short_claim_url("deftok2")
+    assert short_url == "https://workers-api.floom.dev/c/deftok2"

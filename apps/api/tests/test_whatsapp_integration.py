@@ -397,6 +397,199 @@ def test_parse_ignores_non_text_and_wrong_object(monkeypatch, tmp_path):
     assert main._parse_whatsapp_inbound(image_payload) == []
 
 
+# --------------------------------------------------------------------------- #
+# Codex finding #5: phone_number_id must match the configured WHATSAPP_PHONE_ID
+# --------------------------------------------------------------------------- #
+
+def _text_payload_with_phone_id(
+    phone_number_id: str,
+    *,
+    wa_id: str = "491701234567",
+    text: str = "hello emily",
+    message_id: str = "wamid.PID",
+) -> dict:
+    return {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "WABA_ID",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "metadata": {
+                                "display_phone_number": "1555000",
+                                "phone_number_id": phone_number_id,
+                            },
+                            "contacts": [{"wa_id": wa_id, "profile": {"name": "Tester"}}],
+                            "messages": [
+                                {
+                                    "from": wa_id,
+                                    "id": message_id,
+                                    "timestamp": "1700000000",
+                                    "type": "text",
+                                    "text": {"body": text},
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+
+def test_parse_drops_foreign_phone_number_id(monkeypatch, tmp_path):
+    """A change targeting a DIFFERENT phone number under the same Meta app is
+    dropped (Codex finding #5)."""
+    main = _load_api(monkeypatch, tmp_path)
+    foreign = _text_payload_with_phone_id("9999999999", message_id="wamid.FOREIGN")
+    assert main._parse_whatsapp_inbound(foreign) == []
+
+
+def test_parse_keeps_matching_phone_number_id(monkeypatch, tmp_path):
+    """A change with our configured phone_number_id passes through."""
+    main = _load_api(monkeypatch, tmp_path)
+    mine = _text_payload_with_phone_id(PHONE_ID, message_id="wamid.MINE")
+    events = main._parse_whatsapp_inbound(mine)
+    assert len(events) == 1
+    assert events[0]["message_id"] == "wamid.MINE"
+
+
+def test_webhook_drops_foreign_phone_number_id_no_side_effects(monkeypatch, tmp_path):
+    """End-to-end: a signed payload with a mismatched phone_number_id returns 200,
+    queues nothing, runs no agent, and creates no binding (Codex finding #5)."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
+
+    handled: list = []
+
+    async def _fake_handle(*, wa_id, text, message_id, profile_name=""):
+        handled.append((wa_id, message_id))
+
+    monkeypatch.setattr(main, "_handle_whatsapp_message", _fake_handle)
+    monkeypatch.setattr(_wa_mod, "_handle_whatsapp_message", _fake_handle)
+
+    # Distinctive wa_id so the no-binding assertion is robust on a shared CI DB.
+    foreign_wa_id = "999000111222333"
+    with main.get_db() as conn:
+        before = conn.execute(
+            "SELECT COUNT(*) AS c FROM whatsapp_sender_bindings WHERE wa_id = ?",
+            (foreign_wa_id,),
+        ).fetchone()["c"]
+
+    body = json.dumps(
+        _text_payload_with_phone_id(
+            "9999999999", wa_id=foreign_wa_id, message_id="wamid.FOREIGN2"
+        )
+    ).encode("utf-8")
+    with TestClient(main.app) as client:
+        resp = client.post(
+            "/whatsapp/webhook",
+            content=body,
+            headers={"Content-Type": "application/json", "X-Hub-Signature-256": _sign(body)},
+        )
+    assert resp.status_code == 200
+    # All change entries dropped -> no events -> the webhook ACKs as ignored.
+    assert resp.json().get("ignored") is True
+    assert resp.json().get("queued") in (None, 0)
+    assert handled == [], "no agent run for a foreign phone_number_id"
+    # No binding side effect for the foreign sender's wa_id (delta == 0).
+    with main.get_db() as conn:
+        after = conn.execute(
+            "SELECT COUNT(*) AS c FROM whatsapp_sender_bindings WHERE wa_id = ?",
+            (foreign_wa_id,),
+        ).fetchone()["c"]
+    assert after == before == 0
+
+
+# --------------------------------------------------------------------------- #
+# Codex finding #8: per-message length cap + per-payload event cap
+# --------------------------------------------------------------------------- #
+
+def test_parse_flags_over_length_text(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    from channels.common import MAX_INBOUND_TEXT_CHARS
+
+    huge = "x" * (MAX_INBOUND_TEXT_CHARS + 500)
+    events = main._parse_whatsapp_inbound(_text_payload(text=huge, message_id="wamid.HUGE"))
+    assert len(events) == 1
+    assert events[0]["too_long"] is True
+    assert len(events[0]["text"]) == MAX_INBOUND_TEXT_CHARS
+
+
+def test_webhook_over_length_text_replies_no_agent(monkeypatch, tmp_path):
+    """Over-length inbound text gets a friendly reply and does NOT spawn agent
+    work (Codex finding #8)."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
+    from channels.common import MAX_INBOUND_TEXT_CHARS
+
+    handled: list = []
+    sent: list = []
+
+    async def _fake_handle(*, wa_id, text, message_id, profile_name=""):
+        handled.append(message_id)
+
+    monkeypatch.setattr(main, "_handle_whatsapp_message", _fake_handle)
+    monkeypatch.setattr(_wa_mod, "_handle_whatsapp_message", _fake_handle)
+    monkeypatch.setattr(_wa_mod, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
+
+    huge = "y" * (MAX_INBOUND_TEXT_CHARS + 1000)
+    body = json.dumps(_text_payload(text=huge, message_id="wamid.HUGE2")).encode("utf-8")
+    with TestClient(main.app) as client:
+        resp = client.post(
+            "/whatsapp/webhook",
+            content=body,
+            headers={"Content-Type": "application/json", "X-Hub-Signature-256": _sign(body)},
+        )
+    assert resp.status_code == 200
+    assert resp.json().get("queued") == 0
+    assert resp.json().get("rejected_too_long") == 1
+    assert handled == [], "no agent run for an over-length message"
+    assert sent and "too long" in sent[0][1].lower()
+
+
+def test_parse_caps_events_per_payload(monkeypatch, tmp_path):
+    """At most MAX_EVENTS_PER_DELIVERY message events are returned per payload;
+    the rest are skipped (Codex finding #8)."""
+    main = _load_api(monkeypatch, tmp_path)
+    from channels.common import MAX_EVENTS_PER_DELIVERY
+
+    n = MAX_EVENTS_PER_DELIVERY + 10
+    messages = [
+        {
+            "from": "49170000000",
+            "id": f"wamid.M{i}",
+            "timestamp": "1700000000",
+            "type": "text",
+            "text": {"body": f"msg {i}"},
+        }
+        for i in range(n)
+    ]
+    payload = {
+        "object": "whatsapp_business_account",
+        "entry": [
+            {
+                "id": "WABA",
+                "changes": [
+                    {
+                        "field": "messages",
+                        "value": {
+                            "messaging_product": "whatsapp",
+                            "metadata": {"phone_number_id": PHONE_ID},
+                            "messages": messages,
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+    events = main._parse_whatsapp_inbound(payload)
+    assert len(events) == MAX_EVENTS_PER_DELIVERY
+
+
 def test_signature_verify_unit(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
 
@@ -562,6 +755,90 @@ def test_reclaim_notifies_old_bound_user(monkeypatch, tmp_path):
     assert resp.status_code == 200
     # Notification must have been sent to the wa_id (same number).
     assert any("49170222" == to and "linked to a different" in msg for to, msg in sent)
+
+
+def test_claim_sends_emily_welcome_to_bound_sender(monkeypatch, tmp_path):
+    """A successful claim sends exactly one Emily welcome to the bound wa_id."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
+
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(_wa_mod, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
+
+    # Seed a pending binding with NO prior owner (fresh link, no rebind notice).
+    with main.get_db() as conn:
+        now = main.now_iso()
+        expires = "2099-01-01T00:00:00+00:00"
+        conn.execute(
+            """
+            INSERT INTO whatsapp_sender_bindings
+                (wa_id, user_id, profile_name, status, claim_token,
+                 claim_expires_at, created_at, updated_at)
+            VALUES ('49170666', NULL, 'Test', 'pending', 'tok-welcome', ?, ?, ?)
+            """,
+            (expires, now, now),
+        )
+
+    with TestClient(main.app) as client:
+        resp = client.post(
+            "/whatsapp/bindings/claim",
+            json={"token": "tok-welcome"},
+            headers={"x-floom-secret": "test-api-secret"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    # Exactly one send, to the bound number, with the Emily welcome copy.
+    welcomes = [(to, msg) for to, msg in sent if to == "49170666"]
+    assert len(welcomes) == 1, f"expected one welcome send, got {sent}"
+    to, msg = welcomes[0]
+    assert "Emily" in msg
+    assert "chief of staff" in msg.lower()
+    assert "connected" in msg.lower()
+    # WhatsApp dialect: single-asterisk emphasis only, never markdown bold (**).
+    assert "**" not in msg
+
+
+def test_claim_welcome_failure_does_not_break_claim(monkeypatch, tmp_path):
+    """If the Emily welcome send raises, the claim still succeeds (best-effort)."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
+
+    def _boom(to, text):
+        raise RuntimeError("graph api down")
+
+    monkeypatch.setattr(_wa_mod, "send_whatsapp_text", _boom)
+
+    with main.get_db() as conn:
+        now = main.now_iso()
+        expires = "2099-01-01T00:00:00+00:00"
+        conn.execute(
+            """
+            INSERT INTO whatsapp_sender_bindings
+                (wa_id, user_id, profile_name, status, claim_token,
+                 claim_expires_at, created_at, updated_at)
+            VALUES ('49170777', NULL, 'Test', 'pending', 'tok-welcome-fail', ?, ?, ?)
+            """,
+            (expires, now, now),
+        )
+
+    with TestClient(main.app) as client:
+        resp = client.post(
+            "/whatsapp/bindings/claim",
+            json={"token": "tok-welcome-fail"},
+            headers={"x-floom-secret": "test-api-secret"},
+        )
+    # Claim must still return ok despite the welcome send blowing up.
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    # And the binding must be active.
+    with main.get_db() as conn:
+        row = conn.execute(
+            "SELECT status, claim_token FROM whatsapp_sender_bindings WHERE wa_id = '49170777'"
+        ).fetchone()
+    assert row["status"] == "active"
+    assert row["claim_token"] is None
 
 
 def test_scoped_run_uses_workspace_pinned_user_id(monkeypatch, tmp_path):
@@ -771,6 +1048,45 @@ def test_shortlink_returns_404_for_expired_token(monkeypatch, tmp_path):
     with TestClient(main.app) as client:
         resp = client.get("/c/expiredtok")
     assert resp.status_code == 404
+
+
+def test_whatsapp_short_claim_url_built_on_host_that_serves_c(monkeypatch, tmp_path):
+    """The short /c/ link MUST be built on the API host that actually serves /c/.
+
+    Regression guard: the /c/{token} redirect route lives on the FastAPI app
+    (workers-api.floom.dev), NOT on the Next.js web app (workers.floom.dev).
+    Building it on WORKERS_FRONTEND_URL produced a dead link that 404'd /
+    bounced to /login. It must use the public API base.
+    """
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as wa
+
+    # Frontend (web) base and API (public) base are deliberately different hosts.
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    monkeypatch.setenv("WORKEROS_PUBLIC_API_URL", "https://workers-api.floom.dev")
+
+    short_url = wa._whatsapp_short_claim_url("tok123")
+    # Built on the API host (serves /c/), NOT the web host (does not).
+    assert short_url == "https://workers-api.floom.dev/c/tok123"
+    assert "/c/" in short_url
+    # The long claim URL still targets the frontend /settings page (unchanged).
+    assert wa._whatsapp_claim_url("tok123") == (
+        "https://workers.floom.dev/settings?whatsapp_claim=tok123"
+    )
+
+
+def test_whatsapp_short_claim_url_defaults_to_api_host(monkeypatch, tmp_path):
+    """With no overrides, the short link defaults to the API host, not the web host."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as wa
+
+    for var in ("WORKEROS_PUBLIC_API_URL", "WORKEROS_API_URL", "WORKERS_API_URL"):
+        monkeypatch.delenv(var, raising=False)
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+
+    short_url = wa._whatsapp_short_claim_url("deftok")
+    assert short_url == "https://workers-api.floom.dev/c/deftok"
+    assert "workers.floom.dev/c/" not in short_url.replace("workers-api.floom.dev", "")
 
 
 # --------------------------------------------------------------------------- #

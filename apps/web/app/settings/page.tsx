@@ -21,6 +21,7 @@ import { CliCommandPanel } from "@/components/CliCommandPanel";
 import { GitWorkspacePanel } from "@/components/GitWorkspacePanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { SlackConnect } from "@/components/assistant/SlackConnect";
+import { ClaimSuccessOverlay, type ClaimChannel } from "@/components/channels/ClaimSuccessOverlay";
 import { AlertTriangle, CheckCircle2, Copy, Trash2 } from "lucide-react";
 
 function PersonalAccessTokensPanel() {
@@ -240,6 +241,9 @@ function SettingsContent() {
   const [waClaimBanner, setWaClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
   const [claimedSlackToken, setClaimedSlackToken] = useState<string | null>(null);
   const [slackClaimBanner, setSlackClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
+  // Federico 2026-06-11: a successful claim shows a full-screen confirmation,
+  // not just an inline banner. Channel-aware copy; null = no overlay.
+  const [claimSuccess, setClaimSuccess] = useState<ClaimChannel | null>(null);
   const [fromInstallChannel, setFromInstallChannel] = useState<string | null>(null);
   // SPEC §6: the Danger zone is admin-only. Default to shown so single-tenant
   // (no role) and admins never lose it; hide once we learn the viewer is a member.
@@ -280,8 +284,7 @@ function SettingsContent() {
     void (async () => {
       try {
         await api.whatsapp.claim(token);
-        toast.success("WhatsApp number linked to this workspace");
-        setWaClaimBanner({ ok: true, message: "WhatsApp number linked to this workspace." });
+        setClaimSuccess("whatsapp");
       } catch (e: unknown) {
         const raw = e instanceof Error ? e.message : "";
         const friendly =
@@ -311,8 +314,7 @@ function SettingsContent() {
     void (async () => {
       try {
         await api.slack.claim(token);
-        toast.success("Slack identity linked to this workspace");
-        setSlackClaimBanner({ ok: true, message: "Slack identity linked to this workspace." });
+        setClaimSuccess("slack");
       } catch (e: unknown) {
         const raw = e instanceof Error ? e.message : "";
         const friendly =
@@ -416,6 +418,16 @@ function SettingsContent() {
 
   return (
     <div className="space-y-6">
+      {claimSuccess && (
+        <ClaimSuccessOverlay
+          channel={claimSuccess}
+          onContinue={() => {
+            setClaimSuccess(null);
+            window.location.href = "/";
+          }}
+        />
+      )}
+
       <div>
         <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
         <p className="mt-1 text-sm text-muted-foreground">
@@ -432,6 +444,18 @@ function SettingsContent() {
           )}
           <AlertTitle>{waClaimBanner.ok ? "WhatsApp linked" : "WhatsApp link failed"}</AlertTitle>
           <AlertDescription>{waClaimBanner.message}</AlertDescription>
+        </Alert>
+      )}
+
+      {slackClaimBanner && (
+        <Alert variant={slackClaimBanner.ok ? "default" : "destructive"}>
+          {slackClaimBanner.ok ? (
+            <CheckCircle2 className="size-4" />
+          ) : (
+            <AlertTriangle className="size-4" />
+          )}
+          <AlertTitle>{slackClaimBanner.ok ? "Slack linked" : "Slack link failed"}</AlertTitle>
+          <AlertDescription>{slackClaimBanner.message}</AlertDescription>
         </Alert>
       )}
 
