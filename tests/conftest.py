@@ -214,6 +214,13 @@ def _clear_router_caches() -> None:
     if isinstance(cache, dict):
         cache["items"] = None
         cache["expires_at"] = 0.0
+    # Same class of state: the upload hourly-quota store moved from main into
+    # services.uploads — without this reset, quota consumed by one test would
+    # bleed into later tests' caps (e.g. test_r5_security_fixes).
+    uploads = sys.modules.get("services.uploads")
+    store = getattr(uploads, "_upload_quota_store", None)
+    if isinstance(store, dict):
+        store.clear()
 
 
 def _module_pinned_db(request) -> str | None:

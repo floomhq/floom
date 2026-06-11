@@ -177,6 +177,38 @@ import git_ops as _git_ops
 # Git workspace + commit-identity helpers live in services.git_service; re-export
 # for the many call sites in this module and for backward compatibility.
 from services.git_service import _git_workspace, _git_author
+
+# Upload pipeline (validation/quota/signing/blob GC) lives in services.uploads;
+# re-exported here for the approval upload routes, runs artifact ownership
+# checks, _gc_orphan_blobs, and approval public-link signing still in main.
+from services.uploads import (
+    _DEFAULT_UPLOAD_MAX_BYTES,
+    _DEFAULT_UPLOAD_HOURLY_CAP_BYTES,
+    _UPLOAD_HOURLY_WINDOW_SECONDS,
+    _UPLOAD_ALLOWED_MEDIA_TYPES,
+    _UPLOAD_ALLOWED_EXTENSIONS,
+    _UPLOAD_DANGEROUS_MEDIA_TYPES,
+    _UPLOAD_BLOCKED_EXTENSIONS,
+    _upload_quota_lock,
+    _upload_quota_store,
+    _upload_max_bytes,
+    _upload_hourly_cap_bytes,
+    _format_bytes,
+    _upload_quota_key,
+    _claim_upload_quota,
+    _validate_upload_filename,
+    _upload_url_ttl_seconds,
+    _upload_signing_key,
+    _b64url_encode,
+    _b64url_decode,
+    _make_upload_download_token,
+    _verify_upload_download_token,
+    _user_owns_uploaded_file,
+    _parse_accepts,
+    _delete_blob_file,
+    _store_uploaded_blob,
+)
+
 # Small pure utilities live in core.utils; re-exported for this module's call
 # sites and for channels/* + tests that import them from `main`.
 from core.utils import row_to_dict, _parse_iso8601, _positive_int_env
@@ -3909,18 +3941,6 @@ def _list_visible_runs(
 # ---------------------------------------------------------------------------
 
 
-def _parse_accepts(value: Optional[str]) -> set[str]:
-    if not value:
-        return set()
-    try:
-        parsed = json.loads(value)
-        if isinstance(parsed, list):
-            return {normalize_media_type(str(item)) for item in parsed if str(item).strip()}
-    except json.JSONDecodeError:
-        pass
-    return {normalize_media_type(part) for part in value.split(",") if part.strip()}
-
-
 _WORKER_FILE_IGNORE = frozenset({
     "__pycache__",
     ".DS_Store",
@@ -4321,532 +4341,6 @@ def _validate_file_input_references(
             )
         if not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]*", inp.name):
             raise HTTPException(status_code=400, detail=f"Invalid file input name: {inp.name}")
-
-
-_DEFAULT_UPLOAD_MAX_BYTES = 25 * 1024 * 1024
-_DEFAULT_UPLOAD_HOURLY_CAP_BYTES = 1024 * 1024 * 1024
-_UPLOAD_HOURLY_WINDOW_SECONDS = 3600.0
-_UPLOAD_ALLOWED_MEDIA_TYPES = frozenset({
-    "application/json",
-    "application/pdf",
-    "application/rtf",
-    "application/sql",
-    "application/toml",
-    "application/typescript",
-    "application/vnd.openxmlformats-officedocument.presentationml.presentation",
-    "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
-    "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-    "application/x-yaml",
-    "application/xml",
-    "application/yaml",
-    "application/zip",
-    "image/gif",
-    "image/jpeg",
-    "image/png",
-    "image/webp",
-    "text/css",
-    "text/csv",
-    "text/html",
-    "text/markdown",
-    "text/plain",
-    "text/tab-separated-values",
-    "text/x-python",
-    "text/xml",
-    "text/yaml",
-})
-# Text/code/data/doc/image formats a worker can read as context or a user can
-# attach. Mirrors what Mac/GitHub treat as ordinary repo files. True
-# executables / scripts stay in the blocklist below.
-_UPLOAD_ALLOWED_EXTENSIONS = frozenset({
-    ".c", ".cpp", ".cc", ".h", ".hpp",
-    ".csv", ".tsv",
-    ".css", ".scss",
-    ".docx", ".pptx", ".xlsx", ".rtf", ".odt",
-    ".gif", ".jpeg", ".jpg", ".png", ".webp",
-    ".go", ".rs", ".rb", ".java", ".kt", ".swift",
-    ".htm", ".html", ".xml",
-    ".ini", ".toml", ".env", ".conf", ".cfg",
-    ".ipynb",
-    ".json", ".jsonl", ".ndjson",
-    ".log",
-    ".md", ".markdown", ".mdx", ".rst",
-    ".pdf",
-    ".py",
-    ".sql",
-    ".ts", ".tsx", ".jsx",
-    ".txt", ".text",
-    ".yaml", ".yml",
-    ".zip",
-})
-# Declared media types we reject outright (defense-in-depth), even when the
-# file extension is benign — these signal an executable/script payload.
-_UPLOAD_DANGEROUS_MEDIA_TYPES = frozenset({
-    "application/javascript",
-    "image/svg+xml",
-    "image/svg",
-    "application/x-dosexec",
-    "application/x-executable",
-    "application/x-msdownload",
-    "application/x-msdos-program",
-    "application/x-sh",
-    "application/x-shellscript",
-    "application/vnd.microsoft.portable-executable",
-    "text/javascript",
-})
-# Active/executable formats: blocked regardless of the allowlist (a blocked
-# extension always wins, see _validate_upload_filename).
-_UPLOAD_BLOCKED_EXTENSIONS = frozenset({
-    ".bat",
-    ".svg",
-    ".cmd",
-    ".com",
-    ".dll",
-    ".exe",
-    ".js",
-    ".mjs",
-    ".php",
-    ".ps1",
-    ".scr",
-    ".sh",
-})
-_upload_quota_lock = threading.Lock()
-_upload_quota_store: Dict[str, collections.deque] = {}
-
-
-def _upload_max_bytes() -> int:
-    return _positive_int_env("WORKEROS_UPLOAD_MAX_BYTES", _DEFAULT_UPLOAD_MAX_BYTES)
-
-
-def _upload_hourly_cap_bytes() -> int:
-    return _positive_int_env("WORKEROS_UPLOAD_HOURLY_CAP_BYTES", _DEFAULT_UPLOAD_HOURLY_CAP_BYTES)
-
-
-def _format_bytes(value: int) -> str:
-    if value % (1024 * 1024) == 0:
-        return f"{value // (1024 * 1024)} MiB"
-    return f"{value} bytes"
-
-
-def _upload_quota_key(request: Request) -> str:
-    secret = request.headers.get("x-floom-secret") or ""
-    if not secret:
-        return "anon"
-    return "s:" + hashlib.sha256(secret.encode()).hexdigest()[:16]
-
-
-def _claim_upload_quota(request: Request, size: int) -> Optional[int]:
-    now = time.monotonic()
-    cutoff = now - _UPLOAD_HOURLY_WINDOW_SECONDS
-    cap = _upload_hourly_cap_bytes()
-    key = _upload_quota_key(request)
-    with _upload_quota_lock:
-        dq = _upload_quota_store.setdefault(key, collections.deque())
-        while dq and dq[0][0] <= cutoff:
-            dq.popleft()
-        used = sum(entry_size for _entry_ts, entry_size in dq)
-        if used + size > cap:
-            return cap
-        dq.append((now, size))
-        return None
-
-
-def _validate_upload_filename(raw_filename: str) -> None:
-    if not raw_filename:
-        raise HTTPException(status_code=400, detail="filename is required")
-    if (
-        "%00" in raw_filename.lower()
-        or any(ord(char) < 32 or ord(char) == 127 for char in raw_filename)
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="filename must not contain control characters",
-        )
-    if (
-        "/" in raw_filename
-        or "\\" in raw_filename
-        or raw_filename.startswith(".")
-        or ".." in raw_filename.split("/")
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail="filename must not contain path separators, leading dots, or '..' segments",
-        )
-    suffixes = [suffix.lower() for suffix in Path(raw_filename).suffixes]
-    for inner_suffix in suffixes[:-1]:
-        if inner_suffix in _UPLOAD_BLOCKED_EXTENSIONS:
-            raise HTTPException(
-                status_code=400,
-                detail=f"Upload filename contains blocked inner extension {inner_suffix!r}",
-            )
-    suffix = Path(raw_filename).suffix.lower()
-    if suffix in _UPLOAD_BLOCKED_EXTENSIONS or suffix not in _UPLOAD_ALLOWED_EXTENSIONS:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Upload filename extension {suffix or '<none>'!r} is not allowed",
-        )
-
-
-def _upload_url_ttl_seconds() -> int:
-    try:
-        return max(60, int(os.environ.get("WORKEROS_UPLOAD_URL_TTL_SECONDS", "3600")))
-    except ValueError:
-        return 3600
-
-
-def _upload_signing_key() -> bytes:
-    key = (
-        os.environ.get("WORKEROS_UPLOAD_URL_SIGNING_SECRET")
-        or os.environ.get("FLOOM_SECRET")
-        or "local-dev-upload-url-signing"
-    )
-    return key.encode("utf-8")
-
-
-def _b64url_encode(data: bytes) -> str:
-    return base64.urlsafe_b64encode(data).decode("ascii").rstrip("=")
-
-
-def _b64url_decode(data: str) -> bytes:
-    padding = "=" * (-len(data) % 4)
-    return base64.urlsafe_b64decode(data + padding)
-
-
-def _make_upload_download_token(file_id: str, uploaded_by: str) -> str:
-    expires_at = int(time.time()) + _upload_url_ttl_seconds()
-    payload = _b64url_encode(
-        json.dumps(
-            {"file_id": file_id, "uploaded_by": uploaded_by, "expires_at": expires_at},
-            separators=(",", ":"),
-        ).encode("utf-8")
-    )
-    signature = hmac.new(_upload_signing_key(), payload.encode("ascii"), hashlib.sha256).hexdigest()
-    return f"{payload}.{signature}"
-
-
-def _verify_upload_download_token(file_id: str, token: str) -> str:
-    try:
-        payload, signature = token.split(".", 1)
-    except ValueError as exc:
-        raise HTTPException(status_code=404, detail="Uploaded file not found") from exc
-
-    expected = hmac.new(_upload_signing_key(), payload.encode("ascii"), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(signature, expected):
-        raise HTTPException(status_code=404, detail="Uploaded file not found")
-
-    try:
-        claims = json.loads(_b64url_decode(payload).decode("utf-8"))
-    except Exception as exc:
-        raise HTTPException(status_code=404, detail="Uploaded file not found") from exc
-
-    if claims.get("file_id") != file_id:
-        raise HTTPException(status_code=404, detail="Uploaded file not found")
-    expires_at = int(claims.get("expires_at") or 0)
-    if expires_at < int(time.time()):
-        raise HTTPException(status_code=404, detail="Uploaded file not found")
-    uploaded_by = str(claims.get("uploaded_by") or "")
-    if not uploaded_by:
-        raise HTTPException(status_code=404, detail="Uploaded file not found")
-    return uploaded_by
-
-
-def _user_owns_uploaded_file(conn: sqlite3.Connection, file_id: str, user_id: str) -> bool:
-    owner_row = conn.execute(
-        "SELECT 1 FROM file_owners WHERE file_id = ? AND user_id = ? LIMIT 1",
-        (file_id, user_id),
-    ).fetchone()
-    if owner_row is not None:
-        return True
-    legacy_row = conn.execute(
-        "SELECT 1 FROM files WHERE id = ? AND COALESCE(uploaded_by, 'anonymous') = ? LIMIT 1",
-        (file_id, user_id),
-    ).fetchone()
-    return legacy_row is not None
-
-
-async def _store_uploaded_blob(
-    request: Request,
-    file: UploadFile,
-    uploaded_by: str,
-    *,
-    max_size_mb: Optional[float] = None,
-    accepts: Optional[str] = None,
-    allowed_media_prefixes: Optional[tuple[str, ...]] = None,
-) -> Dict[str, Any]:
-    """Validate + content-address one uploaded file under `uploaded_by`.
-
-    Shared by the authed `/uploads` route and the approval-scoped upload routes
-    (authed owner + signed-link public reviewer). The same extension allowlist,
-    size/quota caps, and content-addressed dedup apply on every path, so the
-    public no-auth reviewer cannot smuggle in an executable or oversized blob.
-    `allowed_media_prefixes` further restricts the upload to e.g. image/* only.
-    """
-    if max_size_mb is not None and max_size_mb <= 0:
-        raise HTTPException(status_code=400, detail="max_size_mb must be greater than 0")
-
-    raw_filename = file.filename or ""
-    _validate_upload_filename(raw_filename)
-
-    media_type = normalize_media_type(
-        file.content_type or mimetypes.guess_type(raw_filename)[0]
-    )
-    suffix = Path(raw_filename).suffix.lower()
-    if media_type in _UPLOAD_DANGEROUS_MEDIA_TYPES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Upload media type {media_type!r} is not allowed",
-        )
-    media_type_ok = (
-        media_type in _UPLOAD_ALLOWED_MEDIA_TYPES
-        or suffix in _UPLOAD_ALLOWED_EXTENSIONS
-        or media_type in {"application/octet-stream", ""}
-        or media_type.startswith("text/")
-    )
-    if not media_type_ok:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Upload media type {media_type!r} is not allowed",
-        )
-
-    if allowed_media_prefixes is not None and not any(
-        media_type.startswith(prefix) for prefix in allowed_media_prefixes
-    ):
-        raise HTTPException(
-            status_code=400,
-            detail=f"Upload media type {media_type!r} is not accepted here",
-        )
-
-    accepted = _parse_accepts(accepts)
-    if accepted and media_type not in accepted:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Upload media type {media_type!r} is not accepted",
-        )
-
-    configured_max_bytes = _upload_max_bytes()
-    if max_size_mb is not None:
-        max_bytes = min(int(max_size_mb * 1024 * 1024), configured_max_bytes)
-    else:
-        max_bytes = configured_max_bytes
-
-    hasher = hashlib.sha256()
-    size = 0
-    from files import BLOBS_DIR as _BLOBS_DIR
-    _BLOBS_DIR.mkdir(parents=True, exist_ok=True)
-    tmp_upload = None
-    try:
-        with tempfile.NamedTemporaryFile(
-            dir=_BLOBS_DIR,
-            prefix=".upload.",
-            suffix=".tmp",
-            delete=False,
-        ) as tmp_out:
-            tmp_upload = Path(tmp_out.name)
-            while True:
-                chunk = await file.read(1024 * 1024)
-                if not chunk:
-                    break
-                size += len(chunk)
-                if size > max_bytes:
-                    tmp_out.flush()
-                    raise HTTPException(
-                        status_code=400,
-                        detail=f"Uploaded file exceeds {_format_bytes(max_bytes)} limit",
-                    )
-                hasher.update(chunk)
-                tmp_out.write(chunk)
-    except HTTPException:
-        if tmp_upload is not None:
-            tmp_upload.unlink(missing_ok=True)
-        raise
-
-    exceeded_cap = _claim_upload_quota(request, size)
-    if exceeded_cap is not None:
-        if tmp_upload is not None:
-            tmp_upload.unlink(missing_ok=True)
-        raise HTTPException(
-            status_code=400,
-            detail=f"Upload hourly cap exceeded: {_format_bytes(exceeded_cap)} per hour",
-        )
-
-    sha256 = hasher.hexdigest()
-    target = ensure_blob_dir(sha256)
-    if not target.exists():
-        final_tmp = target.parent / f".{sha256}.tmp.{os.getpid()}.{threading.get_ident()}"
-        try:
-            os.replace(tmp_upload, final_tmp)
-            os.replace(final_tmp, target)
-        finally:
-            final_tmp.unlink(missing_ok=True)
-            tmp_upload.unlink(missing_ok=True)
-    else:
-        tmp_upload.unlink(missing_ok=True)
-
-    uploaded_at = now_iso()
-    filename = file.filename or sha256
-    with get_db() as conn:
-        conn.execute(
-            """
-            INSERT INTO files
-                (id, filename, media_type, size_bytes, uploaded_by, uploaded_at, ref_count)
-            VALUES (?, ?, ?, ?, ?, ?, 0)
-            ON CONFLICT(id) DO UPDATE SET
-                filename=files.filename,
-                media_type=files.media_type,
-                size_bytes=files.size_bytes,
-                uploaded_by=files.uploaded_by,
-                uploaded_at=files.uploaded_at,
-                ref_count=files.ref_count
-            """,
-            (sha256, filename, media_type, size, uploaded_by, uploaded_at),
-        )
-        conn.execute(
-            """
-            INSERT INTO file_owners (file_id, user_id, first_uploaded_at)
-            VALUES (?, ?, ?)
-            ON CONFLICT(file_id, user_id) DO NOTHING
-            """,
-            (sha256, uploaded_by, uploaded_at),
-        )
-
-    download_token = _make_upload_download_token(sha256, uploaded_by)
-    upload_url = f"/uploads/{sha256}?download_token={download_token}"
-    return {
-        "id": sha256,
-        "sha256": sha256,
-        "size": size,
-        "media_type": media_type,
-        "url": upload_url,
-    }
-
-
-@app.post("/uploads")
-async def upload_file(
-    request: Request,
-    file: UploadFile = File(...),
-    max_size_mb: Optional[float] = Form(None),
-    accepts: Optional[str] = Form(None),
-    auth: AuthContext = Depends(get_auth_context),
-) -> Dict[str, Any]:
-    return await _store_uploaded_blob(
-        request,
-        file,
-        auth.user_id or "anonymous",
-        max_size_mb=max_size_mb,
-        accepts=accepts,
-    )
-
-
-@app.get("/uploads/{file_id}")
-def download_upload(
-    file_id: str,
-    request: Request,
-    auth: AuthContext = Depends(get_auth_context),
-) -> FileResponse:
-    if not is_sha256(file_id):
-        raise HTTPException(status_code=404, detail="Uploaded file not found")
-
-    download_token = request.query_params.get("download_token", "")
-    token_user_id = _verify_upload_download_token(file_id, download_token)
-    if auth.user_id != token_user_id:
-        raise HTTPException(status_code=404, detail="Uploaded file not found")
-    with get_db() as conn:
-        row = conn.execute(
-            """
-            SELECT filename, media_type
-            FROM files
-            WHERE id = ?
-            """,
-            (file_id,),
-        ).fetchone()
-        if row is not None and not _user_owns_uploaded_file(conn, file_id, auth.user_id):
-            raise HTTPException(status_code=404, detail="Uploaded file not found")
-
-    path = blob_path(file_id)
-    if row is None or not path.exists():
-        raise HTTPException(status_code=404, detail="Uploaded file not found")
-
-    filename = row["filename"] or file_id
-    media_type = normalize_media_type(row["media_type"])
-    return FileResponse(
-        path,
-        filename=filename,
-        media_type=media_type,
-        headers={"Cache-Control": "no-store"},
-    )
-
-
-@app.delete("/uploads/{file_id}", status_code=204)
-def delete_upload(
-    file_id: str,
-    auth: AuthContext = Depends(get_auth_context),
-):
-    """Owner-scoped delete of an uploaded blob.
-
-    F4 (2026-06-03): uploaded blobs (approval screenshots, file inputs) with
-    ``ref_count = 0`` previously lingered on disk forever — no cleanup route
-    existed, so orphaned blobs accumulated. This route lets an owner release a
-    blob and GCs it when it is truly unreferenced.
-
-    Semantics (blobs are content-addressed + can be shared across owners and
-    bound to runs):
-      - The caller MUST own the file (file_owners row, or legacy uploaded_by).
-      - The caller's ownership is dropped.
-      - The physical blob + files row are deleted ONLY when no owners remain AND
-        ``ref_count == 0`` (i.e. not bound to any run). If another owner holds it
-        or a run still references it, the blob is kept; the caller simply no
-        longer owns it.
-
-    Returns 204 on success (idempotent for the caller's own ownership);
-    404 if the caller does not own the file (no existence oracle for others'
-    files — same 404 as a genuinely-missing file).
-    """
-    if not is_sha256(file_id):
-        raise HTTPException(status_code=404, detail="Uploaded file not found")
-
-    user_id = auth.user_id or "anonymous"
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT ref_count FROM files WHERE id = ? LIMIT 1",
-            (file_id,),
-        ).fetchone()
-        if row is None or not _user_owns_uploaded_file(conn, file_id, user_id):
-            raise HTTPException(status_code=404, detail="Uploaded file not found")
-
-        # Drop the caller's ownership (both the explicit row and any legacy
-        # uploaded_by anchor that made them an owner).
-        conn.execute(
-            "DELETE FROM file_owners WHERE file_id = ? AND user_id = ?",
-            (file_id, user_id),
-        )
-        conn.execute(
-            "UPDATE files SET uploaded_by = NULL WHERE id = ? AND COALESCE(uploaded_by, 'anonymous') = ?",
-            (file_id, user_id),
-        )
-
-        remaining_owners = conn.execute(
-            "SELECT 1 FROM file_owners WHERE file_id = ? LIMIT 1",
-            (file_id,),
-        ).fetchone()
-        ref_count = int(row["ref_count"] or 0)
-
-        if remaining_owners is None and ref_count <= 0:
-            # No owners + not bound to any run → safe to GC the blob + row.
-            conn.execute("DELETE FROM files WHERE id = ?", (file_id,))
-            _delete_blob_file(file_id)
-
-    return Response(status_code=204)
-
-
-def _delete_blob_file(file_id: str) -> None:
-    """Best-effort removal of a content-addressed blob from disk."""
-    try:
-        path = blob_path(file_id)
-    except ValueError:
-        return
-    try:
-        path.unlink(missing_ok=True)
-    except OSError as exc:
-        logger.warning("Failed to remove orphan blob %s: %s", file_id, exc)
 
 
 def _gc_orphan_blobs(*, limit: int = 500) -> int:
@@ -15512,6 +15006,14 @@ from routers.integrations import (
     list_integration_triggers,
 )
 app.include_router(integrations_router)
+
+from routers.uploads import (
+    uploads_router,
+    upload_file,
+    download_upload,
+    delete_upload,
+)
+app.include_router(uploads_router)
 
 # ---------------------------------------------------------------------------
 # WhatsApp integration — extracted to channels/whatsapp.py
