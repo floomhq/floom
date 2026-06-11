@@ -231,7 +231,7 @@ def _append_slack_allowed_team_id(team_id: str) -> None:
     if team_id in allowed:
         return
     allowed.add(team_id)
-    from main import _upsert_env_var
+    from services.secrets_env import _upsert_env_var
     _upsert_env_var("SLACK_ALLOWED_TEAM_IDS", ",".join(sorted(allowed)))
 
 
@@ -479,7 +479,8 @@ def slack_oauth_install(
 @slack_router.get("/slack/oauth/callback")
 def slack_oauth_callback(code: str = "", state: str = "", error: str = ""):
     from fastapi.responses import RedirectResponse
-    from main import _bootstrap_user_id, _upsert_env_var
+    from core.config import _bootstrap_user_id
+    from services.secrets_env import _upsert_env_var
 
     frontend_url = _frontend_base_url()
     if error:
