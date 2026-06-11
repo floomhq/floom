@@ -402,6 +402,20 @@ def claim_whatsapp_sender(
                 "WhatsApp rebind notify to old user %s failed", old_user_id, exc_info=True
             )
 
+    # Welcome the newly bound sender from Emily (best-effort; never block the claim).
+    # Chief-of-staff persona, WhatsApp dialect: warm, 1-2 short lines, single *asterisk*
+    # emphasis only, no markdown headers/links, no feature list.
+    try:
+        send_whatsapp_text(
+            wa_id,
+            "Hi, it's *Emily*, your chief of staff. We're connected.\n"
+            "Tell me what you want handled and I'll take it from here.",
+        )
+    except Exception:
+        logger.warning(
+            "WhatsApp welcome send to %s failed", wa_id, exc_info=True
+        )
+
     return {
         "ok": True,
         "wa_id": wa_id,
