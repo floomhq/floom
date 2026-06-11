@@ -185,6 +185,61 @@ describe("Emily chat tool cards", () => {
     expect(getAutoOpenRunDetailsHref(card)).toBe("/runs/run_123?tab=logs");
   });
 
+  it("recovers View run from the live nested runs.get result shape", () => {
+    const call: ChatSSEEvent = {
+      type: "tool-call",
+      callId: "call_live_run_details",
+      toolName: "runs__get",
+      args: { run_id: "run_live_123" },
+      args_preview: { run_id: "run_live_123" },
+      card: {
+        id: "card_call_live_run_details",
+        kind: "run",
+        title: "runs.get",
+        status: "starting",
+      },
+      actions: [],
+    };
+    const result: ChatSSEEvent = {
+      type: "tool-result",
+      callId: "call_live_run_details",
+      toolName: "runs__get",
+      isError: false,
+      result: {
+        ok: true,
+        run: {
+          id: "run_live_123",
+          worker_id: "research_brief",
+          status: "completed",
+        },
+      },
+      card: {
+        id: "card_call_live_run_details",
+        kind: "run",
+        title: "Opened run details",
+        status: "completed",
+      },
+      actions: [],
+    };
+
+    const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), result, "assistant_1");
+    const card = toolCards(messages)[0]?.card;
+
+    if (card?.kind !== "run") throw new Error("expected run card");
+    expect(card.runId).toBe("run_live_123");
+    expect(card.workerId).toBe("research_brief");
+    expect(card.actions).toEqual([
+      {
+        id: "open_run",
+        label: "View run",
+        method: "GET",
+        href: "/runs/run_live_123?tab=logs",
+      },
+    ]);
+    expect(shouldAutoOpenRunDetails(card)).toBe(true);
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs/run_live_123?tab=logs");
+  });
+
   it("does not auto-open run cards from worker runs", () => {
     const call: ChatSSEEvent = {
       type: "tool-call",

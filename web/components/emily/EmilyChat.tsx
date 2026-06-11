@@ -249,11 +249,12 @@ function EmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
 
 interface EmilyChatCoreProps {
   fullPage?: boolean;
+  onOpenRunDetails?: () => void;
 }
 
 const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
 
-function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
+function EmilyChatCore({ fullPage = false, onOpenRunDetails }: EmilyChatCoreProps) {
   const {
     messages,
     conversationId,
@@ -364,11 +365,12 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
         if (!runId) continue;
         if (openedRunDetailsRef.current.has(runId)) continue;
         openedRunDetailsRef.current.add(runId);
+        onOpenRunDetails?.();
         router.push(href);
         return;
       }
     }
-  }, [messages, router, fullPage, isHydrating]);
+  }, [messages, router, fullPage, isHydrating, onOpenRunDetails]);
 
   const handleSubmit = useCallback(() => {
     const text = input.trim();
@@ -496,10 +498,11 @@ function EmilyChatCore({ fullPage = false }: EmilyChatCoreProps) {
 // overlay, via the expand control + collapse button.
 type DockMode = "collapsed" | "rail" | "wide" | "full";
 
+// Widths per APP-UI-V4-SPEC §2: rail 330px (collapse 46px), widen 560px, full.
 const DOCK_WIDTH: Record<DockMode, string> = {
-  collapsed: "w-12",
-  rail: "w-full md:w-[380px] md:max-w-[30vw]",
-  wide: "w-full md:w-[640px] md:max-w-[52vw]",
+  collapsed: "w-[46px]",
+  rail: "w-full md:w-[330px] md:max-w-[30vw]",
+  wide: "w-full md:w-[560px] md:max-w-[52vw]",
   full: "fixed inset-0 z-50 w-full", // full-screen overlay
 };
 
@@ -508,6 +511,7 @@ export function EmilyDock({ className }: { className?: string }) {
   const open = mode !== "collapsed";
   const cycleExpand = () =>
     setMode((m) => (m === "rail" ? "wide" : m === "wide" ? "full" : "rail"));
+  const collapseForRunDetails = useCallback(() => setMode("collapsed"), []);
 
   return (
     <div
@@ -574,7 +578,7 @@ export function EmilyDock({ className }: { className?: string }) {
 
       {/* Chat content — ALWAYS mounted so useChatStream state survives collapse */}
       <div className={cn("flex-1 min-h-0 overflow-hidden", !open && "hidden")}>
-        <EmilyChatCore />
+        <EmilyChatCore onOpenRunDetails={collapseForRunDetails} />
       </div>
     </div>
   );
