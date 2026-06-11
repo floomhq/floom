@@ -253,7 +253,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
             </div>
           </div>
           {config.tags && (
-            <div style={{ padding: `12px ${PAGE_X}px 2px` }}>
+            <div className="c-tagbar-wrap" style={{ padding: `12px ${PAGE_X}px 2px` }}>
               <TagBar
                 families={config.tags}
                 active={state.tags}

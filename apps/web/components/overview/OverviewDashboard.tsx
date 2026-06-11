@@ -33,8 +33,11 @@ import { BrandLogo } from "@/components/connections/BrandLogo";
 
 export type { SystemOverviewAttentionItem };
 
+// Spec rule 2: flat-by-token — all borders from CSS variables, never hardcoded.
+// --bd-card is `none` per design tokens; use `border border-[var(--bd-card)]`
+// so a token-level change propagates everywhere automatically.
 const cardClass =
-  "rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
+  "rounded-[var(--radius-card)] border border-[var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
 
 const providerNameAliases: Record<string, string> = {
   github: "GitHub",
@@ -99,7 +102,7 @@ function MetricCard({
   const className = cn(
     cardClass,
     "flex flex-col overflow-hidden",
-    href && "cursor-pointer transition-colors hover:border-[var(--border-strong)]",
+    href && "cursor-pointer transition-colors hover:bg-[var(--bg-2)]",
   );
   const body = (
     <>
@@ -549,7 +552,9 @@ export function OverviewDashboard({
       </section>
 
       {/* Metric tiles with sparklines — S45 */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 xl:[&>*]:min-h-[118px]">
+      {/* Spec §5c: 2×2 grid at <880px, 4-col at xl. Using `sm:` (640px) as the
+          first breakpoint keeps the 2×2 layout on all mobile/tablet sizes. */}
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4 xl:[&>*]:min-h-[118px]">
         {metrics.map((metric) => (
           <MetricCard key={metric.label} {...metric} loading={loading} />
         ))}
