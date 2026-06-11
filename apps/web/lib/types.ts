@@ -761,6 +761,7 @@ export interface CurrentUser {
   scopes?: string[];
   // Multi-member fields (populated when using username/password or PAT auth)
   role?: string;
+  is_admin?: boolean;
   username?: string | null;
 }
 
