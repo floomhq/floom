@@ -559,3 +559,43 @@ def _list_visible_workers(
         if granted is not None:
             visible[gid] = granted
     return list(visible.values())
+
+
+def _mcp_input_schema_from_worker_record(worker: Dict[str, Any]) -> Dict[str, Any]:
+    config = worker.get("config") or {}
+    inputs = config.get("inputs") if isinstance(config, dict) else []
+    if not isinstance(inputs, list):
+        return {"type": "object", "properties": {}}
+    properties: Dict[str, Any] = {}
+    required: List[str] = []
+    type_map = {
+        "string": "string",
+        "text": "string",
+        "markdown": "string",
+        "number": "number",
+        "integer": "integer",
+        "boolean": "boolean",
+        "bool": "boolean",
+        "object": "object",
+        "json": "object",
+        "array": "array",
+    }
+    for item in inputs:
+        if not isinstance(item, dict):
+            continue
+        name = str(item.get("name") or "").strip()
+        if not name:
+            continue
+        raw_type = str(item.get("type") or item.get("kind") or "string").lower()
+        prop: Dict[str, Any] = {"type": type_map.get(raw_type, "string")}
+        if item.get("description"):
+            prop["description"] = str(item["description"])
+        if isinstance(item.get("options"), list):
+            prop["enum"] = [str(option) for option in item["options"]]
+        properties[name] = prop
+        if item.get("required"):
+            required.append(name)
+    schema: Dict[str, Any] = {"type": "object", "properties": properties}
+    if required:
+        schema["required"] = required
+    return schema
