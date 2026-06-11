@@ -18156,6 +18156,18 @@ def platform_config(auth: AuthContext = Depends(get_auth_context)):
     )
 
 
+@app.get("/channels/email")
+def channels_email_status(auth: AuthContext = Depends(get_auth_context)):
+    """#799: email-channel connection status for Settings > Channels.
+
+    OSS has no separate linked email identity; the channel is "connected"
+    when the authenticated user has an email on file (the address run-failure
+    notifications would go to). Returns { connected, email? }.
+    """
+    email = (auth.email or "").strip()
+    return {"connected": bool(email), "email": email or None}
+
+
 @app.get("/system/info")
 def system_info(auth: AuthContext = Depends(get_auth_context)):
     # #837 RCA: python_version and started_at (process uptime) were returned to
