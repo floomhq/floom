@@ -33,6 +33,10 @@ const PUBLIC_PAGE_PREFIXES = [
   "/c/", // branded claim short-link; rewritten to the API /c/{token} route,
   //       which 302s to the (auth-gated) /settings?…_claim= URL. The short-link
   //       hop itself carries no session, so it must stay public here.
+  "/v3", // marketing landing page (no auth required)
+  "/docs", // documentation page (no auth required)
+  "/terms",
+  "/privacy",
 ];
 
 // /api/proxy sub-paths that map to PUBLIC upstream endpoints and must stay
