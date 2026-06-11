@@ -982,6 +982,21 @@ def claim_slack_sender(
         except Exception:
             logger.exception("Slack rebind notification failed (best-effort)")
 
+    # Welcome the newly bound user from Emily (best-effort; never block the claim).
+    # Chief-of-staff persona; Slack mrkdwn uses single *asterisk* emphasis.
+    try:
+        _post_slack_dm(
+            slack_user_id=slack_user_id,
+            team_id=team_id,
+            text=(
+                "Hi, it's *Emily*, your chief of staff. We're connected. "
+                "Tell me what you want handled and I'll take it from here."
+            ),
+            bot_token=_slack_bot_token_for_team(team_id),
+        )
+    except Exception:
+        logger.exception("Slack welcome DM failed (best-effort)")
+
     return {
         "ok": True,
         "slack_team_id": team_id,

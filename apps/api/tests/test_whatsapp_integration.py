@@ -564,6 +564,90 @@ def test_reclaim_notifies_old_bound_user(monkeypatch, tmp_path):
     assert any("49170222" == to and "linked to a different" in msg for to, msg in sent)
 
 
+def test_claim_sends_emily_welcome_to_bound_sender(monkeypatch, tmp_path):
+    """A successful claim sends exactly one Emily welcome to the bound wa_id."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
+
+    sent: list[tuple[str, str]] = []
+    monkeypatch.setattr(_wa_mod, "send_whatsapp_text", lambda to, text: sent.append((to, text)))
+
+    # Seed a pending binding with NO prior owner (fresh link, no rebind notice).
+    with main.get_db() as conn:
+        now = main.now_iso()
+        expires = "2099-01-01T00:00:00+00:00"
+        conn.execute(
+            """
+            INSERT INTO whatsapp_sender_bindings
+                (wa_id, user_id, profile_name, status, claim_token,
+                 claim_expires_at, created_at, updated_at)
+            VALUES ('49170333', NULL, 'Test', 'pending', 'tok-welcome', ?, ?, ?)
+            """,
+            (expires, now, now),
+        )
+
+    with TestClient(main.app) as client:
+        resp = client.post(
+            "/whatsapp/bindings/claim",
+            json={"token": "tok-welcome"},
+            headers={"x-floom-secret": "test-api-secret"},
+        )
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    # Exactly one send, to the bound number, with the Emily welcome copy.
+    welcomes = [(to, msg) for to, msg in sent if to == "49170333"]
+    assert len(welcomes) == 1, f"expected one welcome send, got {sent}"
+    to, msg = welcomes[0]
+    assert "Emily" in msg
+    assert "chief of staff" in msg.lower()
+    assert "connected" in msg.lower()
+    # WhatsApp dialect: single-asterisk emphasis only, never markdown bold (**).
+    assert "**" not in msg
+
+
+def test_claim_welcome_failure_does_not_break_claim(monkeypatch, tmp_path):
+    """If the Emily welcome send raises, the claim still succeeds (best-effort)."""
+    main = _load_api(monkeypatch, tmp_path)
+    import channels.whatsapp as _wa_mod
+
+    def _boom(to, text):
+        raise RuntimeError("graph api down")
+
+    monkeypatch.setattr(_wa_mod, "send_whatsapp_text", _boom)
+
+    with main.get_db() as conn:
+        now = main.now_iso()
+        expires = "2099-01-01T00:00:00+00:00"
+        conn.execute(
+            """
+            INSERT INTO whatsapp_sender_bindings
+                (wa_id, user_id, profile_name, status, claim_token,
+                 claim_expires_at, created_at, updated_at)
+            VALUES ('49170444', NULL, 'Test', 'pending', 'tok-welcome-fail', ?, ?, ?)
+            """,
+            (expires, now, now),
+        )
+
+    with TestClient(main.app) as client:
+        resp = client.post(
+            "/whatsapp/bindings/claim",
+            json={"token": "tok-welcome-fail"},
+            headers={"x-floom-secret": "test-api-secret"},
+        )
+    # Claim must still return ok despite the welcome send blowing up.
+    assert resp.status_code == 200
+    assert resp.json()["ok"] is True
+
+    # And the binding must be active.
+    with main.get_db() as conn:
+        row = conn.execute(
+            "SELECT status, claim_token FROM whatsapp_sender_bindings WHERE wa_id = '49170444'"
+        ).fetchone()
+    assert row["status"] == "active"
+    assert row["claim_token"] is None
+
+
 def test_scoped_run_uses_workspace_pinned_user_id(monkeypatch, tmp_path):
     """_handle_whatsapp_message calls collect_agent_reply with the workspace-scoped user_id."""
     main = _load_api(monkeypatch, tmp_path)
