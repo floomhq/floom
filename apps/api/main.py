@@ -16657,6 +16657,24 @@ async def _run_connection_sweep(*, user_id: str | None = None) -> None:
 
 
 _connection_sweep_gate_lock = threading.Lock()
+@app.get("/connections/{connection_id}/tools")
+def get_connection_tools(
+    connection_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """#789: live tool list advertised by an MCP connection's server.
+
+    Dials the server (reusing the test path) and returns the live tools/list,
+    distinct from the operator-configured mcp_allowed_tools allowlist. Returns
+    503 when the server is unreachable so the UI degrades gracefully.
+    """
+    result = test_connection(connection_id, auth=auth, repos=repos)
+    if result.status != "valid" or result.tools is None:
+        raise HTTPException(status_code=503, detail=result.reason or "MCP server unreachable")
+    return {"tools": result.tools}
+
+
 _connection_sweep_last_started_at_by_user: Dict[str, float] = {}
 
 
