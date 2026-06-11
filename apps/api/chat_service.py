@@ -1563,11 +1563,19 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
         ),
         _make_tool(
             "workers__run",
-            "Trigger a worker run. Returns the run_id.",
+            (
+                "Trigger a worker run. Returns the run_id. The 'id' accepts an "
+                "exact worker id or an exact worker name. If the reference is "
+                "ambiguous or doesn't clearly match a worker, this returns "
+                "{ok:false, ambiguous:true, candidates:[...]} INSTEAD of running "
+                "anything — when that happens, ask the user which worker (by id) "
+                "they mean and do NOT call this tool again until they confirm. "
+                "Never guess a worker id."
+            ),
             {
                 "type": "object",
                 "properties": {
-                    "id": {"type": "string"},
+                    "id": {"type": "string", "description": "Exact worker id or exact worker name."},
                     "inputs_json": {"type": "string", "description": "JSON-encoded inputs dict (optional)"},
                 },
                 "required": ["id"],
@@ -1739,6 +1747,46 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
             ),
             {"type": "object", "properties": {}, "required": []},
             _tool_approvals_list_pending,
+        ),
+        _make_tool(
+            "approvals__approve",
+            (
+                "Approve a pending approval the user owns, by approval_id OR run_id. "
+                "Use this whenever the user says to approve a run in any phrasing "
+                "('yes, approve it', 'approve run X', 'go ahead'). Only approvals the "
+                "user owns can be approved. On success returns "
+                "{ok:true, status:'approved', run_id}. If run_id has multiple pending "
+                "approvals it returns {ambiguous:true, candidates:[...]} — then ask "
+                "which approval_id."
+            ),
+            {
+                "type": "object",
+                "properties": {
+                    "approval_id": {"type": "string", "description": "The approval id to approve."},
+                    "run_id": {"type": "string", "description": "The run id whose pending approval to approve (used if approval_id is omitted)."},
+                },
+                "required": [],
+            },
+            _tool_approvals_approve,
+        ),
+        _make_tool(
+            "approvals__reject",
+            (
+                "Reject a pending approval the user owns, by approval_id OR run_id. "
+                "Use this whenever the user says to reject/decline/cancel a run in any "
+                "phrasing ('no', 'reject it', 'don't run it'). Only approvals the user "
+                "owns can be rejected. On success returns "
+                "{ok:true, status:'rejected', run_id}."
+            ),
+            {
+                "type": "object",
+                "properties": {
+                    "approval_id": {"type": "string", "description": "The approval id to reject."},
+                    "run_id": {"type": "string", "description": "The run id whose pending approval to reject (used if approval_id is omitted)."},
+                },
+                "required": [],
+            },
+            _tool_approvals_reject,
         ),
         _make_tool(
             "slack__list_channels",
@@ -2003,6 +2051,214 @@ def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
     except Exception:
         return False
     return member_row is not None
+
+
+# Filler tokens stripped before comparing worker references (#892). These are
+# words a human adds around a worker name ("run THE node smoke test WORKER")
+# that carry no identity, so they must not block an otherwise-exact match nor
+# create false token-overlap candidates.
+_WORKER_FILLER_TOKENS = {"worker", "workers", "the", "a", "an", "run", "my", "agent", "please"}
+
+
+def _normalize_worker_token(value: str) -> str:
+    """Collapse an arbitrary worker reference to a comparison token.
+
+    Lowercase, replace every run of non-alphanumeric chars (spaces, hyphens,
+    underscores, punctuation) with a single hyphen, strip leading/trailing
+    hyphens. So "Node Smoke Test", "node_smoke_test", "node-smoke-test" all
+    normalize to the same token "node-smoke-test". This is the canonical
+    comparison key used by the run resolver (#892) — it does NOT do fuzzy /
+    prefix matching, only exact-after-normalization equality.
+    """
+    return re.sub(r"[^a-z0-9]+", "-", (value or "").lower()).strip("-")
+
+
+def _worker_match_key(value: str) -> str:
+    """Normalized token of *value* with filler words removed (#892).
+
+    "the node smoke test worker" and "node smoke test" both yield
+    "node-smoke-test", so a human's natural phrasing matches the worker id
+    without the trailing "worker"/leading "the" blocking the equality.
+    """
+    tokens = [t for t in _normalize_worker_token(value).split("-") if t and t not in _WORKER_FILLER_TOKENS]
+    return "-".join(tokens)
+
+
+def _list_viewable_workers(conn: Any, user_id: str) -> List[Dict[str, str]]:
+    """Return [{id, name}] for every worker *user_id* may run.
+
+    Mirrors _worker_can_view's visibility model (own + workspace-shared +
+    stock/public, with admins seeing all) but, unlike _tool_workers_list_all,
+    does NOT hide system/example workers — a by-id run of a stock worker must
+    still resolve. Used only by the run resolver to build candidate sets, so it
+    is intentionally permissive about WHICH workers exist; the run path itself
+    re-checks _worker_can_view before firing.
+    """
+    from main import PUBLIC_STOCK_WORKER_IDS, PROTECTED_STOCK_WORKER_IDS
+
+    try:
+        role_row = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+        is_admin = bool(role_row) and str(role_row["role"]).lower() == "admin"
+    except Exception:
+        is_admin = False
+
+    base_select = "SELECT w.id, w.name FROM workers w "
+    rows: List[Any] = []
+    try:
+        if is_admin:
+            rows = conn.execute(base_select + "ORDER BY w.name").fetchall()
+        else:
+            rows = conn.execute(
+                base_select
+                + "WHERE w.owner_id = ? "
+                + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                + "ORDER BY w.name",
+                (user_id,),
+            ).fetchall()
+    except Exception:
+        rows = []
+
+    seen: set[str] = set()
+    out: List[Dict[str, str]] = []
+    for r in rows:
+        wid = str(r["id"])
+        if wid in seen:
+            continue
+        seen.add(wid)
+        out.append({"id": wid, "name": str(r["name"] or wid)})
+
+    # Stock/public workers are runnable by everyone even without a DB row.
+    for sid in sorted(PUBLIC_STOCK_WORKER_IDS | PROTECTED_STOCK_WORKER_IDS):
+        if sid not in seen:
+            seen.add(sid)
+            out.append({"id": sid, "name": sid})
+    return out
+
+
+def _resolve_runnable_worker(conn: Any, raw_ref: str, user_id: str) -> Dict[str, Any]:
+    """Map a natural-language worker reference to a single worker id, SAFELY.
+
+    #892: "run the node smoke test worker" must resolve to `node-smoke-test`
+    (or ask), and must NEVER silently fire a different worker (e.g. the live
+    proof run fuzzy-matched it to `approval-smoke-e2e` and fired it). The fix:
+    only return a worker when the match is HIGH-CONFIDENCE and UNAMBIGUOUS:
+
+      - exact id match, OR
+      - exact name match (case-insensitive), OR
+      - exactly one worker whose normalized id/name equals the normalized ref.
+
+    On low confidence or ambiguity, return ``{"ok": False, "ambiguous": True,
+    "candidates": [...]}`` listing the closest worker ids so the model can ask
+    the user which one — it does NOT pick one. The caller must NOT run on an
+    ambiguous result.
+
+    Returns ``{"ok": True, "worker_id": <id>}`` on a confident match, or
+    ``{"ok": False, ...}`` otherwise.
+    """
+    from main import _canonical_worker_id
+
+    ref = (raw_ref or "").strip()
+    if not ref:
+        return {"ok": False, "error": "id is required"}
+
+    workers = _list_viewable_workers(conn, user_id)
+    by_id = {w["id"]: w for w in workers}
+
+    # 1. Exact id match — the model passed a real worker id verbatim, or the
+    #    canonical slug of the ref IS an existing viewable worker id. This is an
+    #    EXACT id path only (_canonical_worker_id is a deterministic slugify, not
+    #    a fuzzy match), so it can never misroute "node smoke test" to an
+    #    unrelated worker. We require the slug to be a REAL enumerated worker
+    #    (``in by_id``); we do NOT trust _worker_can_view's dev-mode filesystem
+    #    permissiveness here, because that would happily accept a non-existent
+    #    slug like "node-smoke-test-worker" and bypass the safe name match below.
+    canonical = _canonical_worker_id(ref)
+    if ref in by_id:
+        return {"ok": True, "worker_id": ref}
+    if canonical and canonical in by_id:
+        return {"ok": True, "worker_id": canonical}
+
+    # 2. Exact name match (case-insensitive, unambiguous).
+    ref_lower = ref.lower()
+    name_hits = [w for w in workers if w["name"].lower() == ref_lower]
+    if len(name_hits) == 1:
+        return {"ok": True, "worker_id": name_hits[0]["id"]}
+
+    # 3. Filler-stripped normalized equality against id OR name (handles "the
+    #    node smoke test worker" -> node-smoke-test, "Weekly Update" ->
+    #    weekly_update, etc.). Exact-after-normalization only — never a prefix or
+    #    substring guess — so it stays high-confidence.
+    match_ref = _worker_match_key(ref)
+    if match_ref:
+        norm_hits: List[Dict[str, str]] = []
+        norm_seen: set[str] = set()
+        for w in workers:
+            if w["id"] in norm_seen:
+                continue
+            if (
+                _worker_match_key(w["id"]) == match_ref
+                or _worker_match_key(w["name"]) == match_ref
+            ):
+                norm_hits.append(w)
+                norm_seen.add(w["id"])
+        if len(norm_hits) == 1:
+            return {"ok": True, "worker_id": norm_hits[0]["id"]}
+        if len(norm_hits) > 1:
+            return {
+                "ok": False,
+                "ambiguous": True,
+                "error": (
+                    f"{len(norm_hits)} workers match {ref!r}. Ask the user which "
+                    "one to run; do NOT run any until they confirm."
+                ),
+                "candidates": [{"id": w["id"], "name": w["name"]} for w in norm_hits],
+            }
+
+    # 3b. Exact-id fallback for a viewable worker not in the enumeration window
+    #     (e.g. a fresh on-disk worker in dev/single-user mode). Reached ONLY
+    #     after every name/normalized match above has failed, so it can never
+    #     shadow a safe name match — the #892 misroute lived in the name path,
+    #     not here. This preserves the pre-#892 ability to run a worker by its
+    #     exact canonical id.
+    if canonical and canonical not in by_id and _worker_can_view(conn, canonical, user_id):
+        return {"ok": True, "worker_id": canonical}
+
+    # 4. No confident match → offer the closest candidates by shared normalized
+    #    tokens, but DO NOT run. Rank by token overlap so the suggestions are
+    #    relevant ("node smoke test" surfaces node-smoke-test even when an
+    #    unrelated approval-smoke worker also contains "smoke"). Generic filler
+    #    tokens ("worker", "the", "run") are ignored so a bare "ghost-worker"
+    #    doesn't false-match every worker via the ubiquitous "worker" token.
+    ref_tokens = set(t for t in match_ref.split("-") if t)
+    scored: List[tuple[int, Dict[str, str]]] = []
+    for w in workers:
+        w_tokens = set(
+            t for t in (
+                _worker_match_key(w["id"]).split("-")
+                + _worker_match_key(w["name"]).split("-")
+            ) if t
+        )
+        overlap = len(ref_tokens & w_tokens)
+        if overlap:
+            scored.append((overlap, w))
+    scored.sort(key=lambda x: (-x[0], x[1]["id"]))
+    candidates = [{"id": w["id"], "name": w["name"]} for _, w in scored[:5]]
+    if not candidates:
+        # Truly unknown reference (no viewable worker shares any token). Preserve
+        # the pre-#892 "not found" contract — the model must surface a clean
+        # not-found, never narrate a started/finished run (#877). No success
+        # fields, no candidates to guess from.
+        return {"ok": False, "error": f"Worker not found: {ref}"}
+    return {
+        "ok": False,
+        "ambiguous": True,
+        "error": (
+            f"No worker clearly matches {ref!r}. Ask the user to confirm which of "
+            "these they mean (use the exact id); do NOT run any worker until they "
+            "confirm."
+        ),
+        "candidates": candidates,
+    }
 
 
 def _tool_workers_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
@@ -3034,32 +3290,36 @@ def _tool_workers_update(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 
 
 def _tool_workers_run(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
-    worker_id = str(args.get("id") or "")
-    if not worker_id:
+    raw_ref = str(args.get("id") or "")
+    if not raw_ref:
         return {"ok": False, "error": "id is required"}
-    from main import _canonical_worker_id
-    worker_id = _canonical_worker_id(worker_id)
     inputs_json = args.get("inputs_json") or "{}"
     try:
         inputs = json.loads(inputs_json) if isinstance(inputs_json, str) else dict(inputs_json or {})
     except json.JSONDecodeError as exc:
         return {"ok": False, "error": f"Invalid inputs_json: {exc}"}
 
-    # Security (#748): actor must own the worker or the worker must be
-    # workspace-visible and the actor an active workspace member.
+    # #892: resolve the natural-language reference to a worker id SAFELY. The
+    # previous behaviour slugified the ref and ran whatever id came out, letting
+    # "run the node smoke test worker" silently fire the WRONG worker (proof run
+    # hit approval-smoke-e2e instead of node-smoke-test). _resolve_runnable_worker
+    # only returns a worker on a HIGH-CONFIDENCE, UNAMBIGUOUS match; on ambiguity
+    # it returns candidate ids for the model to confirm — it NEVER auto-picks.
     from db import get_db as _get_db
     with _get_db() as conn:
+        resolution = _resolve_runnable_worker(conn, raw_ref, user_id)
+        if not resolution.get("ok"):
+            return resolution
+        worker_id = str(resolution["worker_id"])
+        # Security (#748): actor must own the worker or it must be workspace-
+        # visible and the actor an active workspace member.
         if not _worker_can_view(conn, worker_id, user_id):
             return {"ok": False, "error": f"Worker not found: {worker_id}"}
 
-    # #627: validate required inputs before firing the run. Previously this
-    # function called create_run/start_run immediately, launching a run that
-    # would fail at execution time if required inputs were absent. Emily had
-    # no way to surface the gap — it just reported a failure after the fact.
-    #
-    # Now we load the worker's declared input schema and return a structured
-    # error listing the missing fields + their descriptions, so Emily can ask
-    # the user for the missing values before retrying.
+    # #627: validate required inputs BEFORE firing the run (was: create_run ran
+    # first and the run failed at execution time). Load the declared input schema
+    # and return a structured error listing missing fields so Emily can ask the
+    # user for them before retrying.
     from run_service import get_worker_config_for_run
     run_config = get_worker_config_for_run(worker_id)
     if run_config is not None:
@@ -3549,6 +3809,181 @@ def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str
     except Exception as exc:
         logger.exception("approvals__list_pending failed")
         return {"ok": False, "error": str(exc)}
+
+
+def _resolve_pending_approval_for_actor(
+    *, approval_id: Optional[str], run_id: Optional[str], user_id: str
+) -> Dict[str, Any]:
+    """Find the actor's single pending approval by approval_id or run_id.
+
+    OWNER-SCOPED (#891): only approvals owned by *user_id* are visible; an actor
+    can never approve/reject another user's run. Returns
+    ``{"ok": True, "approval": <row>}`` on success or ``{"ok": False, ...}`` with
+    a model-readable error (not found / not owned / ambiguous / already decided).
+    """
+    from db import get_db as _get_db
+
+    approval_id = (approval_id or "").strip() or None
+    run_id = (run_id or "").strip() or None
+    if not approval_id and not run_id:
+        return {"ok": False, "error": "approval_id or run_id is required."}
+
+    with _get_db() as conn:
+        if approval_id:
+            row = conn.execute(
+                "SELECT id, run_id, owner_id, status FROM approvals "
+                "WHERE id = ? AND owner_id = ? LIMIT 1",
+                (approval_id, user_id),
+            ).fetchone()
+            if row is None:
+                # Distinguish "not yours" from "doesn't exist" without leaking
+                # another user's approval — both collapse to a single message.
+                return {
+                    "ok": False,
+                    "error": f"No pending approval {approval_id!r} found for you.",
+                }
+        else:
+            rows = conn.execute(
+                "SELECT id, run_id, owner_id, status FROM approvals "
+                "WHERE run_id = ? AND owner_id = ? ORDER BY created_at DESC",
+                (run_id, user_id),
+            ).fetchall()
+            if not rows:
+                return {
+                    "ok": False,
+                    "error": f"No approval for run {run_id!r} found for you.",
+                }
+            pending_rows = [r for r in rows if str(r["status"]) == "pending"]
+            if not pending_rows:
+                return {
+                    "ok": False,
+                    "error": f"The approval for run {run_id!r} is no longer pending.",
+                }
+            if len(pending_rows) > 1:
+                return {
+                    "ok": False,
+                    "ambiguous": True,
+                    "error": (
+                        f"Run {run_id!r} has {len(pending_rows)} pending approvals; "
+                        "pass approval_id to choose one."
+                    ),
+                    "candidates": [str(r["id"]) for r in pending_rows],
+                }
+            row = pending_rows[0]
+
+    if str(row["status"]) != "pending":
+        return {"ok": False, "error": "That approval is no longer pending (already decided)."}
+    return {
+        "ok": True,
+        "approval": {
+            "id": str(row["id"]),
+            "run_id": str(row["run_id"] or ""),
+            "owner_id": str(row["owner_id"] or ""),
+        },
+    }
+
+
+def _decide_approval(
+    *, decision: str, approval_id: Optional[str], run_id: Optional[str], user_id: str
+) -> Dict[str, Any]:
+    """Approve or reject the actor's pending approval (#891).
+
+    Reuses the SAME canonical decision functions the HTTP endpoints POST to
+    (approve_run/reject_run for run-level approvals, approve/reject agent-tool
+    approvals for kind=agent_tool, destructive-action for kind=destructive_delete),
+    constructing an owner-scoped AuthContext exactly like the public-link path in
+    main.py does. OWNER-SCOPED: the approval is resolved only within the actor's
+    own approvals, so an actor can never decide another user's run.
+    """
+    resolved = _resolve_pending_approval_for_actor(
+        approval_id=approval_id, run_id=run_id, user_id=user_id
+    )
+    if not resolved.get("ok"):
+        return resolved
+    approval_id = resolved["approval"]["id"]
+    target_run_id = resolved["approval"]["run_id"]
+
+    from db import get_repositories
+    from main import (
+        AuthContext,
+        ApproveRequest,
+        RejectRequest,
+        approve_run,
+        reject_run,
+        approve_agent_tool_approval,
+        reject_agent_tool_approval,
+        approve_destructive_action,
+        reject_destructive_action,
+    )
+
+    repos = get_repositories()
+    auth = AuthContext(user_id=user_id, email=None, scopes=("chat", "approval"))
+
+    # Determine the approval kind to route to the correct canonical path,
+    # mirroring approve_public_approval/reject_public_approval in main.py.
+    kind = ""
+    try:
+        approval_row = repos.approvals.get(owner_id=user_id, approval_id=approval_id)
+        if approval_row is not None:
+            kind = (json.loads(approval_row.get("decision_input_json") or "{}") or {}).get("kind") or ""
+    except Exception:
+        kind = ""
+
+    try:
+        if decision == "approved":
+            if kind == "destructive_delete":
+                result = approve_destructive_action(approval_id, auth, repos)
+                status = str((result or {}).get("status") or "approved")
+            elif kind == "agent_tool":
+                result = approve_agent_tool_approval(approval_id, ApproveRequest(), auth, repos)
+                status = getattr(result, "status", "approved")
+            else:
+                result = approve_run(target_run_id, ApproveRequest(), auth, repos)
+                status = getattr(result, "status", "approved")
+        else:
+            reason = f"Rejected via chat by {user_id}"
+            if kind == "destructive_delete":
+                result = reject_destructive_action(
+                    approval_id, RejectRequest(reason=reason), auth, repos
+                )
+                status = str((result or {}).get("status") or "rejected")
+            elif kind == "agent_tool":
+                result = reject_agent_tool_approval(
+                    approval_id, RejectRequest(reason=reason), auth, repos
+                )
+                status = getattr(result, "status", "rejected")
+            else:
+                result = reject_run(target_run_id, RejectRequest(reason=reason), auth, repos)
+                status = getattr(result, "status", "rejected")
+    except Exception as exc:
+        detail = getattr(exc, "detail", None) or str(exc)
+        low = str(detail).lower()
+        if "not awaiting approval" in low or "already decided" in low:
+            return {"ok": False, "error": "That approval is no longer pending (already decided)."}
+        if "not found" in low:
+            return {"ok": False, "error": "That approval is no longer available."}
+        logger.exception("approvals__%s failed for approval %s", decision, approval_id)
+        return {"ok": False, "error": str(detail)}
+
+    return {"ok": True, "status": status, "run_id": target_run_id, "approval_id": approval_id}
+
+
+def _tool_approvals_approve(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    return _decide_approval(
+        decision="approved",
+        approval_id=args.get("approval_id"),
+        run_id=args.get("run_id"),
+        user_id=user_id,
+    )
+
+
+def _tool_approvals_reject(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
+    return _decide_approval(
+        decision="rejected",
+        approval_id=args.get("approval_id"),
+        run_id=args.get("run_id"),
+        user_id=user_id,
+    )
 
 
 # ---------------------------------------------------------------------------
