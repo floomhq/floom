@@ -270,6 +270,8 @@ export interface TimeseriesDay {
 export interface WorkerSummary {
   id: string;
   name: string;
+  created_at?: string | null;
+  updated_at?: string | null;
   description?: string;
   long_description?: string;
   use_cases?: string[];
@@ -443,6 +445,29 @@ export interface PublicSharePack {
   file_count: number;
   total_size_bytes: number;
   updated_at?: string | null;
+}
+
+export interface ChatAttachment {
+  name: string;
+  size: number;
+  type: string;
+  text?: string | null;
+  truncated?: boolean;
+}
+
+export interface ShareGrant {
+  id: string;
+  email: string;
+  created_at: string;
+}
+
+export interface SqliteView {
+  tables: string[];
+  table?: string | null;
+  columns?: string[] | null;
+  rows?: (string | number | boolean | null)[][] | null;
+  row_count?: number | null;
+  truncated?: boolean | null;
 }
 
 export interface StandaloneShare {
@@ -664,6 +689,14 @@ export interface SlackSetupConfigResponse {
   updated: string[];
   setup: SlackSetupStatus;
 }
+
+export type SlackBindingMe =
+  | { linked: true; slack_user_id: string; slack_team_id: string; profile_name?: string | null; linked_at: string; last_seen_at?: string | null }
+  | { linked: false };
+
+export type WhatsAppBindingMe =
+  | { linked: true; wa_id_masked: string; workspace_id: string; profile_name?: string | null; linked_at: string; last_seen_at?: string | null }
+  | { linked: false };
 
 export interface WorkspaceAgentTool {
   name: string;
@@ -888,6 +921,7 @@ export interface ConnectionTestResult {
   status: "valid" | "failed" | "expired";
   reason: string;
   tested_at: string;
+  tools?: string[]; // #789: live-enumerated MCP tool names
 }
 
 export interface ConnectedAccountMetadata {

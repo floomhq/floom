@@ -24,6 +24,7 @@ import {
   clearStoredConversationId,
 } from "./emily-chat-storage";
 import { rehydrateConversation } from "./emily-chat-rehydrate";
+import { buildMessageWithAttachments } from "./emily/attachments";
 
 export interface ChatStreamState {
   messages: ChatMessage[];
@@ -290,7 +291,8 @@ export function useChatStream(): ChatStreamState {
             headers["x-workeros-workspace"] = workspaceId;
           }
 
-          const body: Record<string, unknown> = { message: text };
+          // #778: ride attachment text along in the message so Emily sees it.
+          const body: Record<string, unknown> = { message: buildMessageWithAttachments(text, files) };
           if (currentConversationId) {
             body.conversation_id = currentConversationId;
           }
@@ -648,13 +650,13 @@ function normalizeCardStatus(status: unknown): CardStatus {
   return "completed";
 }
 
-function asRecord(value: unknown): Record<string, unknown> | null {
+export function asRecord(value: unknown): Record<string, unknown> | null {
   return value && typeof value === "object" && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
 }
 
-function optionalString(value: unknown): string | undefined {
+export function optionalString(value: unknown): string | undefined {
   return typeof value === "string" && value.trim() ? value : undefined;
 }
 
@@ -690,16 +692,42 @@ function appendAssistantError(
   ];
 }
 
+/**
+ * Map a workers.list_all tool result (live SSE or persisted result_preview)
+ * to WorkerListCard rows. Returns null when the value has no workers array.
+ * Shared with rehydration (#842) so a reloaded conversation reconstructs the
+ * same interactive card the live stream produced.
+ */
+export function workerRowsFromResult(
+  result: unknown
+): WorkerListCard["workers"] | null {
+  const workers = asRecord(result)?.workers;
+  if (!Array.isArray(workers)) return null;
+  return workers.reduce<WorkerListCard["workers"]>((acc, worker) => {
+    const row = asRecord(worker);
+    const id = optionalString(row?.id);
+    if (!id) return acc;
+    const trigger = optionalString(row?.trigger);
+    acc.push({
+      id,
+      name: optionalString(row?.title) ?? optionalString(row?.name) ?? id,
+      ...(trigger ? { trigger } : {}),
+      enabled: row?.enabled === undefined ? true : Boolean(row.enabled),
+    });
+    return acc;
+  }, []);
+}
+
 function workerListCardFromResult(
   event: Extract<ChatSSEEvent, { type: "tool-result" }>,
   existing: ToolCard
 ): WorkerListCard | null {
-  const result = asRecord(event.result);
-  const workers = result?.workers;
   const normalizedTool = event.toolName ? normalizeToolName(event.toolName) : "";
   const isWorkerList =
     event.card?.kind === "worker-list" || normalizedTool === "workers.list_all";
-  if (!isWorkerList || !Array.isArray(workers)) return null;
+  if (!isWorkerList) return null;
+  const workers = workerRowsFromResult(event.result);
+  if (!workers) return null;
 
   return {
     kind: "worker-list",
@@ -708,19 +736,7 @@ function workerListCardFromResult(
     status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "completed")),
     actions: event.actions,
     streams: event.streams,
-    workers: workers.reduce<WorkerListCard["workers"]>((acc, worker) => {
-      const row = asRecord(worker);
-      const id = optionalString(row?.id);
-      if (!id) return acc;
-      const trigger = optionalString(row?.trigger);
-      acc.push({
-        id,
-        name: optionalString(row?.title) ?? optionalString(row?.name) ?? id,
-        ...(trigger ? { trigger } : {}),
-        enabled: row?.enabled === undefined ? true : Boolean(row.enabled),
-      });
-      return acc;
-    }, []),
+    workers,
   };
 }
 
@@ -729,24 +745,48 @@ function runCardFromResult(
   existing: ToolCard
 ): RunCard | null {
   const result = asRecord(event.result);
+  const nestedRun = asRecord(result?.run);
   const normalizedTool = event.toolName ? normalizeToolName(event.toolName) : "";
-  const isRun = event.card?.kind === "run" || normalizedTool === "workers.run";
+  const isRun =
+    event.card?.kind === "run" ||
+    normalizedTool === "workers.run" ||
+    normalizedTool === "runs.get";
   const resource = event.resource?.kind === "run" ? event.resource : null;
-  const runId = optionalString(result?.run_id) ?? optionalString(resource?.run_id);
+  const runId =
+    optionalString(result?.run_id) ??
+    optionalString(nestedRun?.run_id) ??
+    optionalString(nestedRun?.id) ??
+    optionalString(resource?.run_id);
   if (!isRun || !runId) return null;
 
   const preview = "preview" in existing ? existing.preview : undefined;
   const workerId =
     optionalString(resource?.worker_id) ??
+    optionalString(nestedRun?.worker_id) ??
     optionalString(asRecord(preview)?.id);
   const workerName = optionalString(resource?.worker_name) ?? workerId ?? "Worker run";
+  const actions =
+    event.actions && event.actions.length > 0
+      ? event.actions
+      : existing.actions && existing.actions.length > 0
+        ? existing.actions
+        : normalizedTool === "runs.get"
+          ? [
+              {
+                id: "open_run",
+                label: "View run",
+                method: "GET" as const,
+                href: `/runs/${runId}?tab=logs`,
+              },
+            ]
+          : event.actions;
 
   return {
     kind: "run",
     callId: existing.callId,
     card_id: existing.card_id,
     status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "running")),
-    actions: event.actions,
+    actions,
     streams: event.streams,
     toolName: normalizedTool || event.toolName,
     runId,
@@ -980,4 +1020,28 @@ export function shouldAutoOpenRunDetails(card: ToolCard): card is RunCard {
 
 export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
   return shouldAutoOpenRunDetails(card) ? `/runs/${card.runId}?tab=logs` : null;
+}
+
+// #825: Emily's answers link to app pages as REAL router hrefs (no DOM access /
+// page driving — links only). Generalizes getAutoOpenRunDetailsHref across every
+// card kind to its in-app route, or null when there's nothing concrete to open.
+export function getCardHref(card: ToolCard): string | null {
+  switch (card.kind) {
+    case "worker-create":
+      return card.workerId ? `/workers/${card.workerId}` : null;
+    case "run":
+      return card.runId ? `/runs/${card.runId}` : null;
+    case "artifact":
+      return card.runId ? `/runs/${card.runId}?tab=Output` : null;
+    case "approval":
+      return card.approvalId ? `/approvals?sel=${card.approvalId}` : "/approvals";
+    case "connect-service":
+      return "/connections";
+    case "worker-list":
+      return "/workers";
+    case "runs-list":
+      return "/runs";
+    default:
+      return null;
+  }
 }

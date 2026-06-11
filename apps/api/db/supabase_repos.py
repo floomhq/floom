@@ -266,6 +266,15 @@ def _response_rows(response: Any) -> list[dict[str, Any]]:
     return []
 
 
+def _as_aware_utc(value: datetime) -> datetime:
+    """Coerce a datetime to timezone-aware UTC so cross-source timestamps
+    (Postgres timestamptz vs an engine-generated ISO cutoff) compare safely.
+    A naive datetime is assumed to already be UTC."""
+    if value.tzinfo is None:
+        return value.replace(tzinfo=timezone.utc)
+    return value.astimezone(timezone.utc)
+
+
 def _first_row(response: Any) -> dict[str, Any] | None:
     rows = _response_rows(response)
     return rows[0] if rows else None
@@ -1889,6 +1898,91 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             self.update(user_id=user_id, run_id=run_id, **updates)
             failed_ids.append(run_id)
         return failed_ids
+
+    def fail_stale_running(
+        self,
+        *,
+        cutoff_iso: str,
+        exclude_run_ids: Iterable[str] = (),
+        error: str,
+        error_code: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fail abandoned ``running`` runs older than *cutoff_iso*, across ALL owners.
+
+        Mirrors :meth:`SqliteRunRepository.fail_stale_running` (engine
+        ``apps/api/db/sqlite.py``). This is a process-wide reaper — deliberately
+        NOT workspace/user scoped — because a server restart abandons every
+        in-flight run regardless of owner. The engine's ``reap_abandoned_runs``
+        calls it with the active-run ids excluded; the UPDATE is status-gated
+        (``status='running'``) so a run that finishes between the SELECT and the
+        UPDATE is not clobbered. PostgREST has no COALESCE filter, so the small
+        running set is fetched and the cutoff applied in Python, matching the
+        engine's ``COALESCE(started_at, created_at) < cutoff`` predicate.
+        """
+        excluded = {str(r) for r in exclude_run_ids if str(r)}
+        try:
+            cutoff_dt = _as_aware_utc(datetime.fromisoformat(cutoff_iso))
+        except ValueError:
+            return []
+        response = (
+            self._client.table("runs")
+            .select("id,user_id,started_at,created_at")
+            .eq("status", RunStatus.RUNNING.value)
+            .execute()
+        )
+        rows = _response_rows(response)
+        if not rows:
+            return []
+        completed_at_str = datetime.now(timezone.utc).isoformat()
+        completed_dt = datetime.fromisoformat(completed_at_str)
+        failed: list[dict[str, Any]] = []
+        for row in rows:
+            run_id = str(row.get("id") or "")
+            if not run_id or run_id in excluded:
+                continue
+            effective = row.get("started_at") or row.get("created_at")
+            if not effective:
+                continue
+            try:
+                effective_dt = _as_aware_utc(datetime.fromisoformat(str(effective)))
+            except ValueError:
+                continue
+            if effective_dt >= cutoff_dt:
+                continue
+            updates: dict[str, Any] = {
+                "status": RunStatus.FAILED.value,
+                "error": error,
+                "error_code": error_code,
+                "completed_at": completed_at_str,
+            }
+            started_at = row.get("started_at")
+            if started_at:
+                try:
+                    started_dt = datetime.fromisoformat(str(started_at))
+                    updates["duration_ms"] = int(
+                        (completed_dt - _as_aware_utc(started_dt)).total_seconds() * 1000
+                    )
+                except Exception:
+                    pass
+            result = (
+                self._client.table("runs")
+                .update(updates)
+                .eq("id", run_id)
+                .eq("status", RunStatus.RUNNING.value)
+                .execute()
+            )
+            if _response_rows(result):
+                failed.append(
+                    {
+                        "id": run_id,
+                        "run_id": run_id,
+                        "user_id": row.get("user_id"),
+                        "started_at": row.get("started_at"),
+                        "created_at": row.get("created_at"),
+                        "completed_at": completed_at_str,
+                    }
+                )
+        return failed
 
     def count_running_for_worker(self, *, user_id: str, worker_id: str) -> int:
         # Scoped by workspace_id when called inside a web request; falls

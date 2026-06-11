@@ -160,6 +160,15 @@
   --glass-edge: var(--border-soft);
   --hairline: 0 0 0 1px var(--border-default);
   --edge: none;
+  /* v4 border system (APP-UI-V4-SPEC §1, rule #2: "flat by token, never by
+     component"). To change a surface class, change the token here — a hardcoded
+     `border: 1px solid` in a component is a review-blocker. */
+  --bd-card: none;
+  --bd-pill: none;
+  --bd-input: none;
+  --bd-list: none;
+  --bd-div: 1px solid var(--line-soft);
+  --bd-btn: none;
   --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.04), 0 0 0 1px var(--border-soft);
   --shadow-md: var(--shadow-card);
   --shadow-pop: 0 16px 36px hsl(0 0% 0% / 0.10), 0 0 0 1px var(--border-default);
@@ -725,9 +734,10 @@ html.dark .grain {
 .c-tag .ct { opacity:.55; font-size:11px; }
 
 /* canonical list (SPEC §2a) */
-.c-ltable { border:1px solid var(--line); border-radius:var(--radius-card); overflow:hidden; background:var(--bg-card); box-shadow:var(--shadow-card); }
-.c-lhead { display:grid; gap:14px; padding:11px 18px; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted-foreground); background:var(--bg-2); border-bottom:1px solid var(--line); }
-.c-lrow { display:grid; gap:14px; align-items:center; padding:0 18px; min-height:64px; border-bottom:1px solid var(--line-soft); cursor:pointer; text-align:left; width:100%; background:none; }
+/* §3: list rows on hairline dividers, NO outer container border/shadow. */
+.c-ltable { border:var(--bd-list); border-radius:var(--radius-card); overflow:hidden; background:var(--bg-card); box-shadow:none; }
+.c-lhead { display:grid; gap:14px; padding:11px 18px; font-size:11px; text-transform:uppercase; letter-spacing:.04em; color:var(--muted-foreground); background:var(--bg-2); border-bottom:var(--bd-div); }
+.c-lrow { display:grid; gap:14px; align-items:center; padding:0 18px; min-height:64px; border-bottom:var(--bd-div); cursor:pointer; text-align:left; width:100%; background:none; }
 .c-lrow:last-child { border-bottom:0; }
 .c-lrow:hover { background:var(--bg-2); }
 .c-lrow.sel { background:var(--accent-soft); box-shadow:inset 3px 0 0 var(--accent); }
@@ -753,9 +763,10 @@ html.dark .grain {
 
 /* grid cards (SPEC §2b — calm: avatar+name, desc, one status line) */
 .c-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:14px; }
-.c-gcard { border:1px solid var(--line); background:var(--bg-card); border-radius:var(--radius-card); padding:15px; display:flex; flex-direction:column; min-height:150px; cursor:pointer; position:relative; box-shadow:var(--shadow-card); text-align:left; }
-.c-gcard:hover { border-color:var(--border-default); }
-.c-gcard.sel { border-color:var(--accent); box-shadow:0 0 0 1px var(--accent); }
+/* §3 + rule #10: flat by token, uniform 148px, hover = bg lift (no border/shadow). */
+.c-gcard { border:var(--bd-card); background:var(--bg-card); border-radius:var(--radius-card); padding:15px; display:flex; flex-direction:column; min-height:148px; cursor:pointer; position:relative; box-shadow:none; text-align:left; transition:background .12s; }
+.c-gcard:hover { background:var(--bg-2); }
+.c-gcard.sel { box-shadow:0 0 0 1px var(--accent); }
 .c-gcard .star { position:absolute; top:13px; right:13px; color:var(--muted-foreground); opacity:0; transition:opacity .12s; }
 .c-gcard:hover .star { opacity:1; }
 .c-gcard .star.on { opacity:1; color:var(--pending); }

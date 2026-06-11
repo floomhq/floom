@@ -78,7 +78,7 @@ const CATEGORY_FILTERS = [
 ];
 
 function shortDescription(item: IntegrationCatalogItem) {
-  return item.description || `${item.name} integration for your Workeros workers.`;
+  return item.description || `${item.name} integration for your WorkerOS workers.`;
 }
 
 function CatalogSkeleton() {

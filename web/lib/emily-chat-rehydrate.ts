@@ -31,10 +31,17 @@ import type {
   GenericToolCard,
   MsgPart,
   CardStatus,
+  RunCard,
+  ToolCard,
+  WorkerListCard,
 } from "./emily-chat-types";
 import {
+  asRecord,
   getToolCardTitle,
   isInternalToolName,
+  normalizeToolName,
+  optionalString,
+  workerRowsFromResult,
 } from "./useChatStream";
 
 type TimelineItem =
@@ -64,6 +71,89 @@ function toGenericCard(row: ConversationToolCardRow): GenericToolCard {
       ? { actions: row.actions as GenericToolCard["actions"] }
       : {}),
   };
+}
+
+/**
+ * #842 RCA: rehydration always produced a static GenericToolCard ("Listed
+ * your workers" + checkmark) and ignored the persisted result_preview, so the
+ * interactive WorkerListCard disappeared after navigation/refresh. This
+ * rebuilds the specialised card from result_preview using the same row mapper
+ * the live SSE path uses.
+ */
+function toWorkerListCard(row: ConversationToolCardRow): WorkerListCard | null {
+  const normalized = row.toolName ? normalizeToolName(row.toolName) : "";
+  const persistedKind = (row.card as { kind?: unknown } | null)?.kind;
+  if (persistedKind !== "worker-list" && normalized !== "workers.list_all") {
+    return null;
+  }
+  const workers = workerRowsFromResult(row.result_preview);
+  if (!workers) return null;
+  const callId = row.callId || row.id;
+  return {
+    kind: "worker-list",
+    callId,
+    card_id: row.id || callId,
+    status: normalizeStatus(row.status),
+    workers,
+    ...(row.streams ? { streams: row.streams } : {}),
+    ...(row.actions && row.actions.length
+      ? { actions: row.actions as WorkerListCard["actions"] }
+      : {}),
+  };
+}
+
+/**
+ * #842 (follow-through): rebuild RunCard rows the same way — from the
+ * persisted run_id/worker_id columns plus result_preview — mirroring the
+ * detection rules of the live runCardFromResult.
+ */
+function toRunCard(row: ConversationToolCardRow): RunCard | null {
+  const normalized = row.toolName ? normalizeToolName(row.toolName) : "";
+  const persistedKind = (row.card as { kind?: unknown } | null)?.kind;
+  const isRun =
+    persistedKind === "run" ||
+    normalized === "workers.run" ||
+    normalized === "runs.get";
+  if (!isRun) return null;
+  const result = asRecord(row.result_preview);
+  const nestedRun = asRecord(result?.run);
+  const runId =
+    optionalString(row.run_id) ??
+    optionalString(result?.run_id) ??
+    optionalString(nestedRun?.run_id) ??
+    optionalString(nestedRun?.id);
+  if (!runId) return null;
+  const workerId =
+    optionalString(row.worker_id) ?? optionalString(nestedRun?.worker_id);
+  const workerName =
+    optionalString(nestedRun?.worker_name) ?? workerId ?? "Worker run";
+  const callId = row.callId || row.id;
+  return {
+    kind: "run",
+    callId,
+    card_id: row.id || callId,
+    status: normalizeStatus(row.status),
+    toolName: normalized || row.toolName || undefined,
+    runId,
+    ...(workerId ? { workerId } : {}),
+    workerName,
+    ...(row.streams ? { streams: row.streams } : {}),
+    actions:
+      row.actions && row.actions.length
+        ? (row.actions as RunCard["actions"])
+        : [
+            {
+              id: "open_run",
+              label: "View run",
+              method: "GET",
+              href: `/runs/${runId}?tab=logs`,
+            },
+          ],
+  };
+}
+
+function toCard(row: ConversationToolCardRow): ToolCard {
+  return toWorkerListCard(row) ?? toRunCard(row) ?? toGenericCard(row);
 }
 
 export function rehydrateConversation(detail: ConversationDetail): ChatMessage[] {
@@ -107,7 +197,7 @@ export function rehydrateConversation(detail: ConversationDetail): ChatMessage[]
       // role === "tool": represented by its persisted card; skip.
     } else {
       // tool card → append to the active assistant turn (open one if needed)
-      const part: MsgPart = { type: "tool-card", card: toGenericCard(item.row) };
+      const part: MsgPart = { type: "tool-card", card: toCard(item.row) };
       if (!activeAssistant) {
         activeAssistant = {
           id: `a-rehydrate-${item.row.id}`,

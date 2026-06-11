@@ -1,11 +1,19 @@
 import { describe, expect, it } from "vitest";
-import { sortWorkersByRecentActivity } from "@/lib/worker-list-order";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
+import { hasWorkerActivity, sortWorkersByRecentActivity } from "@/lib/worker-list-order";
 import type { WorkerSummary } from "@/lib/types";
 
-function worker(id: string, name: string, lastRunAt?: string | null): WorkerSummary {
+function worker(
+  id: string,
+  name: string,
+  lastRunAt?: string | null,
+  timestamps: Pick<WorkerSummary, "created_at" | "updated_at"> = {}
+): WorkerSummary {
   return {
     id,
     name,
+    ...timestamps,
     tags: [],
     status: "healthy",
     trigger_type: "manual",
@@ -28,5 +36,46 @@ describe("worker list order", () => {
     ]);
 
     expect(ordered.map((w) => w.id)).toEqual(["newer", "older", "never"]);
+  });
+
+  it("uses updated and created timestamps for workers that have never run", () => {
+    const newlyCreated = worker("newly-created", "Newly Created", null, {
+      created_at: "2026-06-09T10:00:00Z",
+    });
+    const ordered = sortWorkersByRecentActivity([
+      worker("older-run", "Older Run", "2026-06-05T10:00:00Z"),
+      newlyCreated,
+      worker("recently-updated", "Recently Updated", null, {
+        created_at: "2026-06-01T10:00:00Z",
+        updated_at: "2026-06-10T10:00:00Z",
+      }),
+    ]);
+
+    expect(hasWorkerActivity(newlyCreated)).toBe(true);
+    expect(ordered.map((w) => w.id)).toEqual([
+      "recently-updated",
+      "newly-created",
+      "older-run",
+    ]);
+  });
+});
+
+describe("WorkersCollection wiring", () => {
+  it("WorkersCollection imports sortWorkersByRecentActivity from worker-list-order", () => {
+    const src = readFileSync(
+      resolve(__dirname, "../app/workers/WorkersCollection.tsx"),
+      "utf8",
+    );
+    // Verify the import is present
+    expect(src).toMatch(/import\s.*sortWorkersByRecentActivity.*from\s+["']@\/lib\/worker-list-order["']/);
+  });
+
+  it("WorkersCollection passes sortWorkersByRecentActivity(visible) as items in the Collection config", () => {
+    const src = readFileSync(
+      resolve(__dirname, "../app/workers/WorkersCollection.tsx"),
+      "utf8",
+    );
+    // The All-tab base list must go through the sort function
+    expect(src).toMatch(/items:\s*sortWorkersByRecentActivity\s*\(\s*visible\s*\)/);
   });
 });
