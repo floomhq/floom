@@ -1,6 +1,6 @@
-/* v2 preview theme — tokens from the FINAL wireframe spec (localhost:8899).
-   Scoped: overrides the source vars that globals.css derives everything from,
-   so every existing landing-ref component re-skins without modification. */
+/* v3/v4 cool landing theme — design tokens from APP-UI-V4-SPEC.md §1.
+   Scoped to .theme-v3: overrides the warm :root tokens in globals.css so
+   every v3 component renders the cool palette without modification. */
 
 .theme-v3.theme-v3 {
   /* source tokens */

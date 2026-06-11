@@ -128,7 +128,7 @@ export function V3DocsBody() {
               <li><b className="font-semibold">3. Approve the first run.</b> The worker drafts, you approve. After that it runs in the background and asks before anything ships.</li>
             </ol>
             <div className="mt-4">
-              <Link href="/v3" className="text-[13px] font-medium" style={{ color: "var(--v2-accent)" }}>Hire your first worker →</Link>
+              <Link href="/v3" className="text-[13px] font-medium" style={{ color: "var(--v3-accent)" }}>Hire your first worker →</Link>
             </div>
 
             <H2 id="channels">Install in your channel</H2>

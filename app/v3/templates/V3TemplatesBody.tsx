@@ -76,7 +76,7 @@ export function V3TemplatesBody() {
                 className="rounded-full border px-3 py-1.5 text-[12.5px] font-medium transition-colors"
                 style={
                   cat === c
-                    ? { background: "var(--v2-accent)", borderColor: "var(--v2-accent)", color: "#fff" }
+                    ? { background: "var(--v3-accent)", borderColor: "var(--v3-accent)", color: "#fff" }
                     : { borderColor: "transparent", background: "var(--bg-2)", color: "var(--text-muted)" }
                 }
               >
