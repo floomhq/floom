@@ -434,6 +434,38 @@ def get_whatsapp_binding_me(auth: AuthContext = Depends(get_auth_context)) -> Di
     }
 
 
+@whatsapp_router.get("/whatsapp/status")
+def whatsapp_status(auth: AuthContext = Depends(get_auth_context)) -> Dict[str, Any]:
+    """#801: connection-status shape for Settings > Channels.
+
+    Returns { connected: bool, wa_id?: str, status?: "active"|"pending" } for
+    the authenticated user, derived from whatsapp_sender_bindings. Distinct
+    from /whatsapp/bindings/me (which returns a richer, masked binding object).
+    """
+    from db import get_db
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT wa_id, status
+            FROM whatsapp_sender_bindings
+            WHERE user_id = ?
+            ORDER BY CASE status WHEN 'active' THEN 0 ELSE 1 END, updated_at DESC
+            LIMIT 1
+            """,
+            (auth.user_id,),
+        ).fetchone()
+    if not row:
+        return {"connected": False}
+    status = str(row["status"] or "")
+    wa_id = str(row["wa_id"] or "")
+    masked = ("*" * max(0, len(wa_id) - 4) + wa_id[-4:]) if len(wa_id) > 4 else wa_id
+    return {
+        "connected": status == "active",
+        "wa_id": masked or None,
+        "status": status or None,
+    }
+
+
 @whatsapp_router.delete("/whatsapp/bindings/me")
 def delete_whatsapp_binding_me(auth: AuthContext = Depends(get_auth_context)) -> Dict[str, Any]:
     """Unlink the caller's active WhatsApp sender binding.
