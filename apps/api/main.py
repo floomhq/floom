@@ -75,6 +75,7 @@ from auth.local_workspaces import (
     local_workspace_base_user_id,
     local_workspace_user_id,
     rename_local_workspace,
+    update_local_workspace,
     requested_local_workspace_id,
 )
 from contexts import (
@@ -647,7 +648,10 @@ class LocalWorkspaceCreateRequest(BaseModel):
 
 
 class LocalWorkspaceRenameRequest(BaseModel):
-    name: str = Field(..., min_length=1, max_length=80)
+    # #791: name optional so region/timezone can be updated alone.
+    name: Optional[str] = Field(None, min_length=1, max_length=80)
+    region: Optional[str] = None
+    timezone: Optional[str] = None
 
 
 class LocalWorkspaceOut(BaseModel):
@@ -655,6 +659,8 @@ class LocalWorkspaceOut(BaseModel):
     name: str
     owner_user_id: str
     created_at: str
+    region: Optional[str] = None  # #791
+    timezone: Optional[str] = None  # #791
 
 
 class LocalWorkspaceListResponse(BaseModel):
@@ -688,6 +694,8 @@ def _local_workspace_out(row: Dict[str, Any]) -> LocalWorkspaceOut:
         name=str(row["name"]),
         owner_user_id=str(row["owner_user_id"]),
         created_at=str(row["created_at"]),
+        region=(row.get("region") if isinstance(row, dict) else None) or None,  # #791
+        timezone=(row.get("timezone") if isinstance(row, dict) else None) or None,  # #791
     )
 
 
@@ -750,11 +758,16 @@ def rename_workspace(
     payload: LocalWorkspaceRenameRequest,
     auth: AuthContext = Depends(get_auth_context),
 ) -> LocalWorkspaceOut:
-    """#791: rename a local OSS workspace (owner-scoped)."""
+    """#791: update a local OSS workspace's name/region/timezone (owner-scoped)."""
     _require_local_workspace_mode()
+    if payload.name is None and payload.region is None and payload.timezone is None:
+        raise HTTPException(status_code=422, detail="nothing to update")
     base_user_id = local_workspace_base_user_id(auth.user_id)
     try:
-        updated = rename_local_workspace(base_user_id, workspace_id, payload.name)
+        updated = update_local_workspace(
+            base_user_id, workspace_id,
+            name=payload.name, region=payload.region, timezone=payload.timezone,
+        )
     except ValueError as exc:
         raise HTTPException(status_code=422, detail=str(exc)) from exc
     if updated is None:

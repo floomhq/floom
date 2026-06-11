@@ -1924,6 +1924,16 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_asset_grants_grantee
         ON asset_grants(asset_type, grantee_email);
     """,
+    # -- migration 71: workspace region/timezone (#791) + approval expiry (#798)
+    #    + approval preview typing (#792). Grouped ADD COLUMNs (idempotent set).
+    """
+    ALTER TABLE local_workspaces ADD COLUMN region TEXT;
+    ALTER TABLE local_workspaces ADD COLUMN timezone TEXT;
+    ALTER TABLE approvals ADD COLUMN expires_at TEXT;
+    ALTER TABLE approvals ADD COLUMN preview_type TEXT;
+    ALTER TABLE approvals ADD COLUMN preview_payload_json TEXT;
+    CREATE INDEX IF NOT EXISTS idx_approvals_expires_at ON approvals(expires_at);
+    """,
 ]
 
 
@@ -1951,7 +1961,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50, 65} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50, 65, 71} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",
