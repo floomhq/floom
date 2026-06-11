@@ -2,11 +2,12 @@
 
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
-import { Check, ChevronsUpDown, Copy, Download, Link2, Plus, Settings2, Upload, Users } from "lucide-react";
+import { Check, ChevronsUpDown, Copy, Download, Link2, Pencil, Plus, Settings2, Upload, Users } from "lucide-react";
 import { toast } from "sonner";
 
 import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-logo";
 import type { LocalWorkspace } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -48,7 +49,12 @@ export function WorkspaceSwitcher() {
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
+  const [createCompany, setCreateCompany] = useState("");
+  const [nameTouched, setNameTouched] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameName, setRenameName] = useState("");
+  const [renaming, setRenaming] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
   const [importing, setImporting] = useState(false);
@@ -106,6 +112,27 @@ export function WorkspaceSwitcher() {
     } catch (err) {
       setError((err as Error).message || "Failed to create workspace");
       setCreating(false);
+    }
+  }
+
+  // #791: rename the active workspace.
+  async function handleRename() {
+    const name = renameName.trim();
+    if (!name || !state) return;
+    setRenaming(true);
+    try {
+      const updated = await api.workspace.rename(state.activeId, name);
+      setState({
+        ...state,
+        workspaces: state.workspaces.map((w) =>
+          w.id === state.activeId ? { ...w, name: updated.name } : w
+        ),
+      });
+      setRenameOpen(false);
+    } catch (err) {
+      setError((err as Error).message || "Failed to rename workspace");
+    } finally {
+      setRenaming(false);
     }
   }
 
@@ -269,12 +296,28 @@ export function WorkspaceSwitcher() {
             <DropdownMenuItem
               onClick={() => {
                 setCreateName("");
+                setCreateCompany("");
+                setNameTouched(false);
                 setCreateOpen(true);
               }}
               className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
             >
               <Plus className="size-4" />
               New workspace
+            </DropdownMenuItem>
+            {/* #791: rename the active workspace. */}
+            <DropdownMenuItem
+              closeOnClick={false}
+              onClick={() => {
+                setRenameName(
+                  state.workspaces.find((w) => w.id === state.activeId)?.name ?? ""
+                );
+                setRenameOpen(true);
+              }}
+              className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+            >
+              <Pencil className="size-4" />
+              Rename workspace
             </DropdownMenuItem>
             {/* G10 (Federico 2026-06-03): Members lives in the workspace cluster,
                 peer to "New workspace". One model both products: on the OS it
@@ -385,22 +428,61 @@ export function WorkspaceSwitcher() {
               isolated on this local WorkerOS instance.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 py-2">
-            <Label htmlFor="workspace-name">Name</Label>
-            <Input
-              id="workspace-name"
-              value={createName}
-              onChange={(event) => setCreateName(event.target.value)}
-              placeholder="e.g. Side project"
-              maxLength={80}
-              autoFocus
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && createName.trim() && !creating) {
-                  event.preventDefault();
-                  handleCreate();
-                }
-              }}
-            />
+          <div className="space-y-3 py-2">
+            {/* §5a2: ONE company field — derives a logo + prefills the name. */}
+            <div className="space-y-2">
+              <Label htmlFor="workspace-company">Company</Label>
+              <div className="flex items-center gap-2.5">
+                <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md bg-[var(--bg-2)]">
+                  {companyLogoUrl(createCompany) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={companyLogoUrl(createCompany) as string}
+                      alt=""
+                      className="size-5"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
+                      }}
+                    />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      {(createName || createCompany || "?").slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                <Input
+                  id="workspace-company"
+                  value={createCompany}
+                  onChange={(event) => {
+                    const v = event.target.value;
+                    setCreateCompany(v);
+                    if (!nameTouched) setCreateName(prefillWorkspaceName(v));
+                  }}
+                  placeholder="e.g. Acme or acme.com"
+                  maxLength={80}
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="workspace-name">Workspace name</Label>
+              <Input
+                id="workspace-name"
+                value={createName}
+                onChange={(event) => {
+                  setNameTouched(true);
+                  setCreateName(event.target.value);
+                }}
+                placeholder="e.g. Acme"
+                maxLength={80}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && createName.trim() && !creating) {
+                    event.preventDefault();
+                    handleCreate();
+                  }
+                }}
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button
@@ -417,6 +499,39 @@ export function WorkspaceSwitcher() {
               disabled={!createName.trim() || creating}
             >
               {creating ? "Creating..." : "Create"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      {/* #791: rename the active workspace. */}
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename workspace</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="workspace-rename">Name</Label>
+            <Input
+              id="workspace-rename"
+              value={renameName}
+              onChange={(event) => setRenameName(event.target.value)}
+              maxLength={80}
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && renameName.trim() && !renaming) {
+                  event.preventDefault();
+                  handleRename();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" type="button" onClick={() => setRenameOpen(false)} disabled={renaming}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleRename} disabled={!renameName.trim() || renaming}>
+              {renaming ? "Saving..." : "Save"}
             </Button>
           </DialogFooter>
         </DialogContent>

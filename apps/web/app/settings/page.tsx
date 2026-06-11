@@ -544,6 +544,21 @@ function SettingsContent() {
           </section>
 
           <section className="space-y-3">
+            <h2 className="text-sm font-medium text-muted-foreground">Workspace</h2>
+            <WorkspaceInfoSettings />
+          </section>
+
+          <section className="space-y-3">
+            <h2 className="text-sm font-medium text-muted-foreground">Behaviour</h2>
+            <BehaviourSettings />
+          </section>
+
+          <section className="space-y-3">
+            <h2 className="text-sm font-medium text-muted-foreground">Model defaults &amp; limits</h2>
+            <ModelDefaults />
+          </section>
+
+          <section className="space-y-3">
             <h2 className="text-sm font-medium text-muted-foreground">Platform configuration</h2>
             <div className="space-y-3">
               {!platformConfig ? (
@@ -708,10 +723,14 @@ function ToggleRow({
   title,
   description,
   disabled,
+  checked,
+  onCheckedChange,
 }: {
   title: string;
   description: string;
   disabled?: boolean;
+  checked?: boolean;
+  onCheckedChange?: (value: boolean) => void;
 }) {
   return (
     <div className="flex items-start justify-between gap-4">
@@ -719,12 +738,169 @@ function ToggleRow({
         <p className="text-sm font-medium">{title}</p>
         <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
       </div>
-      <Switch disabled={disabled} />
+      <Switch disabled={disabled} checked={checked} onCheckedChange={onCheckedChange} />
       {disabled ? (
         <Badge variant="outline" className="text-xs">
           Soon
         </Badge>
       ) : null}
+    </div>
+  );
+}
+
+// #794: workspace behaviour toggles, backed by the workspace-settings KV
+// (admin-only writes — the server enforces #804). Members see them read-only.
+const BEHAVIOUR_TOGGLES: { key: string; title: string; description: string }[] = [
+  {
+    key: "approval_default",
+    title: "Require approval by default",
+    description: "New workers pause for review before taking external actions.",
+  },
+  {
+    key: "auto_pause",
+    title: "Auto-pause on repeated failures",
+    description: "Pause a worker automatically after consecutive failed runs.",
+  },
+  {
+    key: "failure_emails",
+    title: "Email me on run failures",
+    description: "Send a notification when a run ends in error.",
+  },
+];
+
+export function BehaviourSettings() {
+  const [values, setValues] = useState<Record<string, string> | null>(null);
+
+  useEffect(() => {
+    api.workspace
+      .getSettings()
+      .then(setValues)
+      .catch(() => setValues({}));
+  }, []);
+
+  const toggle = (key: string, next: boolean) => {
+    setValues((prev) => ({ ...(prev ?? {}), [key]: next ? "true" : "false" }));
+    api.workspace.setSetting(key, next ? "true" : "false").catch((err) => {
+      toast.error((err as Error).message || "Could not save setting");
+      // Re-sync from the server on failure.
+      api.workspace.getSettings().then(setValues).catch(() => {});
+    });
+  };
+
+  if (values === null) return <Skeleton className="h-24 w-full" />;
+  return (
+    <div className="space-y-4">
+      {BEHAVIOUR_TOGGLES.map((t) => (
+        <ToggleRow
+          key={t.key}
+          title={t.title}
+          description={t.description}
+          checked={values[t.key] === "true"}
+          onCheckedChange={(v) => toggle(t.key, v)}
+        />
+      ))}
+    </div>
+  );
+}
+
+// #797: workspace model defaults & limits, persisted to the same workspace
+// settings KV. Free-text/number inputs save on blur (admin-only writes; the
+// server enforces #804).
+const MODEL_DEFAULT_FIELDS: {
+  key: string;
+  label: string;
+  placeholder: string;
+  type: "text" | "number";
+  hint: string;
+}[] = [
+  { key: "default_model", label: "Default model", placeholder: "e.g. claude-opus-4-8", type: "text", hint: "Used by new workers that don't pin a model." },
+  { key: "max_output_tokens", label: "Max output tokens", placeholder: "e.g. 4096", type: "number", hint: "Per-run output ceiling." },
+  { key: "spend_cap_usd", label: "Monthly spend cap (USD)", placeholder: "e.g. 100", type: "number", hint: "Soft cap for run costs this month." },
+];
+
+// #791: workspace region / timezone / company domain, persisted to the
+// workspace settings KV (rename lives in the switcher).
+const WORKSPACE_INFO_FIELDS: { key: string; label: string; placeholder: string; hint: string }[] = [
+  { key: "region", label: "Region", placeholder: "e.g. us-east / eu-west", hint: "Where workers run (informational on OSS)." },
+  { key: "timezone", label: "Timezone", placeholder: "e.g. America/New_York", hint: "Default timezone for schedules & display." },
+  { key: "company_domain", label: "Company domain", placeholder: "e.g. acme.com", hint: "Used for the workspace logo." },
+];
+
+export function WorkspaceInfoSettings() {
+  const [values, setValues] = useState<Record<string, string> | null>(null);
+
+  useEffect(() => {
+    api.workspace.getSettings().then(setValues).catch(() => setValues({}));
+  }, []);
+
+  const save = (key: string, value: string) => {
+    api.workspace.setSetting(key, value).catch((err) => {
+      toast.error((err as Error).message || "Could not save setting");
+    });
+  };
+
+  if (values === null) return <Skeleton className="h-28 w-full" />;
+  return (
+    <div className="space-y-4">
+      {WORKSPACE_INFO_FIELDS.map((f) => (
+        <div key={f.key} className="space-y-1.5">
+          <Label htmlFor={`ws-${f.key}`} className="text-sm">{f.label}</Label>
+          <Input
+            id={`ws-${f.key}`}
+            defaultValue={values[f.key] ?? ""}
+            placeholder={f.placeholder}
+            className="max-w-xs"
+            onBlur={(e) => {
+              const v = e.target.value.trim();
+              if (v !== (values[f.key] ?? "")) {
+                setValues((prev) => ({ ...(prev ?? {}), [f.key]: v }));
+                save(f.key, v);
+              }
+            }}
+          />
+          <p className="text-xs text-muted-foreground">{f.hint}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function ModelDefaults() {
+  const [values, setValues] = useState<Record<string, string> | null>(null);
+
+  useEffect(() => {
+    api.workspace.getSettings().then(setValues).catch(() => setValues({}));
+  }, []);
+
+  const save = (key: string, value: string) => {
+    api.workspace.setSetting(key, value).catch((err) => {
+      toast.error((err as Error).message || "Could not save setting");
+    });
+  };
+
+  if (values === null) return <Skeleton className="h-28 w-full" />;
+  return (
+    <div className="space-y-4">
+      {MODEL_DEFAULT_FIELDS.map((f) => (
+        <div key={f.key} className="space-y-1.5">
+          <Label htmlFor={`md-${f.key}`} className="text-sm">{f.label}</Label>
+          <Input
+            id={`md-${f.key}`}
+            type={f.type}
+            defaultValue={values[f.key] ?? ""}
+            placeholder={f.placeholder}
+            className="max-w-xs"
+            onBlur={(e) => {
+              const v = e.target.value.trim();
+              if (v !== (values[f.key] ?? "")) {
+                setValues((prev) => ({ ...(prev ?? {}), [f.key]: v }));
+                save(f.key, v);
+              }
+            }}
+          />
+          <p className="text-xs text-muted-foreground">{f.hint}</p>
+        </div>
+      ))}
     </div>
   );
 }

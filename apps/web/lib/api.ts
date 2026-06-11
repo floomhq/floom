@@ -203,6 +203,34 @@ export const api = {
     }
     return res.json() as Promise<import("./types").CurrentUser>;
   },
+  // #778: Emily chat attachments — upload to extract text for the next message.
+  chat: {
+    uploadAttachments: async (files: File[]): Promise<import("./types").ChatAttachment[]> => {
+      const fd = new FormData();
+      for (const f of files) fd.append("files", f);
+      const res = await fetch(`${API_BASE}${withWorkspaceQuery("/chat/attachments")}`, {
+        method: "POST",
+        headers: withWorkspaceHeaders(), // no Content-Type — browser sets the multipart boundary
+        body: fd,
+      });
+      if (!res.ok) throw new Error(await apiErrorFromResponse(res));
+      return res.json();
+    },
+  },
+  // #767/#768: specific-people share grants.
+  share: {
+    listGrants: (assetType: string, assetId: string) =>
+      fetchJson<import("./types").ShareGrant[]>(
+        `/share/grants?asset_type=${encodeURIComponent(assetType)}&asset_id=${encodeURIComponent(assetId)}`
+      ),
+    addGrant: (assetType: string, assetId: string, email: string) =>
+      fetchJson<import("./types").ShareGrant>("/share/grants", {
+        method: "POST",
+        body: JSON.stringify({ asset_type: assetType, asset_id: assetId, email }),
+      }),
+    revokeGrant: (grantId: string) =>
+      fetchJson<null>(`/share/grants/${encodeURIComponent(grantId)}`, { method: "DELETE" }),
+  },
   workers: {
     // S44 Win 3: use list shape (~15 KB vs 47 KB full) for the web UI.
     // CLI consumers that call GET /workers directly get full payload (no ?shape=list).
@@ -359,6 +387,16 @@ export const api = {
         `/workers/${encodeURIComponent(workerId)}/runs/${encodeURIComponent(runId)}/replay`,
         { method: "POST" }
       ),
+    // #796: bulk-export the given runs as one ZIP blob.
+    exportBundle: async (runIds: string[]): Promise<Blob> => {
+      const res = await fetch(`${API_BASE}${withWorkspaceQuery("/runs/export")}`, {
+        method: "POST",
+        headers: { ...withWorkspaceHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ run_ids: runIds }),
+      });
+      if (!res.ok) throw new Error(await apiErrorFromResponse(res));
+      return res.blob();
+    },
     downloadUrl: (id: string) =>
       `${API_BASE}${withWorkspaceQuery(`/runs/${encodeURIComponent(id)}/download`)}`,
     artifactUrl: (id: string, artifactId: string) =>
@@ -528,10 +566,10 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
         { method: "DELETE" }
       ),
-    saveTextFile: (name: string, path: string, content: string) =>
+    saveTextFile: (name: string, path: string, content: string, tags?: string[]) =>
       fetchJson<import("./types").ContextFileItem>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
-        { method: "PUT", body: JSON.stringify({ content }) }
+        { method: "PUT", body: JSON.stringify(tags ? { content, tags } : { content }) } // #780
       ),
     deleteFile: (name: string, path: string) =>
       fetchJson<import("./types").ContextDetail>(
@@ -542,6 +580,19 @@ export const api = {
       fetchJson<import("./types").StandaloneShareLink>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/share-link`,
         { method: "POST" }
+      ),
+    // #777: inspect a brain .db file — tables list, or a table's rows.
+    sqlite: (name: string, path: string, table?: string) => {
+      const qs = table ? `?table=${encodeURIComponent(table)}` : "";
+      return fetchJson<import("./types").SqliteView>(
+        `/contexts/${encodeURIComponent(name)}/sqlite/${path.split("/").map(encodeURIComponent).join("/")}${qs}`
+      );
+    },
+    // #770: move/rename a brain file (matches the backend's {new_path} contract).
+    moveFile: (name: string, path: string, newPath: string) =>
+      fetchJson<import("./types").ContextFileItem>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/move`,
+        { method: "POST", body: JSON.stringify({ new_path: newPath }) }
       ),
     readTextFile: async (name: string, path: string) => {
       const res = await fetchRaw(
@@ -821,6 +872,18 @@ export const api = {
     select: (id: string) =>
       fetchJson<import("./types").LocalWorkspace>(`/workspaces/${encodeURIComponent(id)}/select`, {
         method: "POST",
+      }),
+    // #794/#797: workspace behaviour toggles + model defaults (admin-only PUT).
+    getSettings: () => fetchJson<Record<string, string>>("/workspace/settings"),
+    setSetting: (key: string, value: string) =>
+      fetchJson<null>(`/workspace/settings/${encodeURIComponent(key)}`, {
+        method: "PUT",
+        body: JSON.stringify({ value }),
+      }),
+    rename: (id: string, name: string) => // #791
+      fetchJson<import("./types").LocalWorkspace>(`/workspaces/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
       }),
     // Duplicate a workspace into a new "<name> (copy)" sibling. On the
     // single-tenant OSS instance, workers/knowledge live in a shared pool, so

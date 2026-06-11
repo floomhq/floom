@@ -74,6 +74,7 @@ from auth.local_workspaces import (
     list_local_workspaces,
     local_workspace_base_user_id,
     local_workspace_user_id,
+    rename_local_workspace,
     requested_local_workspace_id,
 )
 from contexts import (
@@ -651,6 +652,10 @@ class LocalWorkspaceCreateRequest(BaseModel):
     name: str = Field(..., min_length=1, max_length=80)
 
 
+class LocalWorkspaceRenameRequest(BaseModel):
+    name: str = Field(..., min_length=1, max_length=80)
+
+
 class LocalWorkspaceOut(BaseModel):
     id: str
     name: str
@@ -743,6 +748,24 @@ def create_workspace(
     _require_local_workspace_mode()
     base_user_id = local_workspace_base_user_id(auth.user_id)
     return _local_workspace_out(create_local_workspace(base_user_id, payload.name))
+
+
+@app.patch("/workspaces/{workspace_id}", response_model=LocalWorkspaceOut)
+def rename_workspace(
+    workspace_id: str,
+    payload: LocalWorkspaceRenameRequest,
+    auth: AuthContext = Depends(get_auth_context),
+) -> LocalWorkspaceOut:
+    """#791: rename a local OSS workspace (owner-scoped)."""
+    _require_local_workspace_mode()
+    base_user_id = local_workspace_base_user_id(auth.user_id)
+    try:
+        updated = rename_local_workspace(base_user_id, workspace_id, payload.name)
+    except ValueError as exc:
+        raise HTTPException(status_code=422, detail=str(exc)) from exc
+    if updated is None:
+        raise HTTPException(status_code=404, detail="workspace not found")
+    return _local_workspace_out(updated)
 
 
 @app.post("/workspaces/{workspace_id}/select", response_model=LocalWorkspaceOut)
@@ -6489,6 +6512,66 @@ def delete_context_file(
     return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
 
 
+class _SqliteView(BaseModel):
+    tables: List[str] = Field(default_factory=list)
+    table: Optional[str] = None
+    columns: Optional[List[str]] = None
+    rows: Optional[List[List[Any]]] = None
+    row_count: Optional[int] = None
+    truncated: Optional[bool] = None
+
+
+@app.get("/contexts/{name}/sqlite/{file_path:path}", response_model=_SqliteView)
+def view_context_sqlite(
+    name: str,
+    file_path: str,
+    table: Optional[str] = None,
+    limit: int = 100,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> _SqliteView:
+    """#777: inspect a brain .db file — list tables, or read a table's rows.
+    Opens the file READ-ONLY; table name is validated against the real table
+    list before use (no injection); rows are capped and BLOBs are summarised."""
+    safe_name, _meta = _require_context_for_user(name, user_id=auth.user_id)
+    rel = _context_file_path_or_400(file_path)
+    target = _safe_context_file_or_400(safe_name, rel)
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Context file not found")
+    if not rel.lower().endswith((".db", ".sqlite", ".sqlite3")):
+        raise HTTPException(status_code=400, detail="Not a SQLite database file")
+    capped = max(1, min(int(limit or 100), 500))
+
+    def _cell(v: Any) -> Any:
+        return f"<{len(v)} bytes>" if isinstance(v, (bytes, bytearray)) else v
+
+    try:
+        conn = sqlite3.connect(f"file:{target}?mode=ro", uri=True)
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail=f"Could not open database: {exc}") from exc
+    try:
+        names = [
+            str(r[0]) for r in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table' AND name NOT LIKE 'sqlite_%' ORDER BY name"
+            ).fetchall()
+        ]
+        if not table:
+            return _SqliteView(tables=names)
+        if table not in names:
+            raise HTTPException(status_code=404, detail="Table not found")
+        cur = conn.execute(f'SELECT * FROM "{table}" LIMIT ?', (capped + 1,))
+        columns = [str(d[0]) for d in cur.description] if cur.description else []
+        fetched = cur.fetchall()
+        truncated = len(fetched) > capped
+        rows = [[_cell(c) for c in row] for row in fetched[:capped]]
+        return _SqliteView(
+            tables=names, table=table, columns=columns,
+            rows=rows, row_count=len(rows), truncated=truncated,
+        )
+    finally:
+        conn.close()
+
+
 @app.post("/contexts/{name}/files/{file_path:path}/move", response_model=ContextFileItem)
 def move_context_file(
     name: str,
@@ -7641,6 +7724,94 @@ def import_worker_from_share(
         raise HTTPException(status_code=409, detail="Worker share is missing worker.yml")
     new_id = _register_worker_from_files(draft_files, user_id=auth.user_id, repos=repos, dedupe_id=True)
     return {"worker_id": new_id, "url": f"/workers/{new_id}"}
+
+
+class _GrantRequest(BaseModel):
+    asset_type: str = Field(..., max_length=32)
+    asset_id: str = Field(..., max_length=256)
+    email: str = Field(..., max_length=256)
+
+
+class _GrantOut(BaseModel):
+    id: str
+    email: str
+    created_at: str
+
+
+def _assert_can_share_asset(asset_type: str, asset_id: str, auth: AuthContext, repos: Repositories) -> None:
+    """#767: only someone who can share the asset may grant access to it."""
+    if asset_type == "worker":
+        worker = _get_visible_worker(_canonical_worker_id(asset_id), user_id=auth.user_id, repos=repos)
+        if not worker:
+            raise HTTPException(status_code=404, detail="Asset not found")
+        if not _worker_permissions(worker, user_id=auth.user_id, repos=repos).can_share:
+            raise HTTPException(status_code=403, detail="You cannot share this asset")
+    # brain/run/workspace grants are owner-scoped — the auth check suffices.
+
+
+@app.post("/share/grants", response_model=_GrantOut, status_code=201)
+def add_share_grant(
+    body: _GrantRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> _GrantOut:
+    """#767: grant a person (by email) access to an asset."""
+    email = body.email.strip().lower()
+    if "@" not in email or "." not in email.split("@")[-1]:
+        raise HTTPException(status_code=422, detail="A valid email is required")
+    _assert_can_share_asset(body.asset_type, body.asset_id, auth, repos)
+    ts = now_iso()
+    gid = str(_uuid_mod.uuid4())
+    with get_db() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO asset_grants (id, asset_type, asset_id, owner_id, grantee_email, created_at) "
+                "VALUES (?, ?, ?, ?, ?, ?)",
+                (gid, body.asset_type, body.asset_id, auth.user_id, email, ts),
+            )
+        except sqlite3.IntegrityError:
+            existing = conn.execute(
+                "SELECT id, created_at FROM asset_grants "
+                "WHERE asset_type=? AND asset_id=? AND owner_id=? AND grantee_email=?",
+                (body.asset_type, body.asset_id, auth.user_id, email),
+            ).fetchone()
+            return _GrantOut(id=str(existing["id"]), email=email, created_at=str(existing["created_at"]))
+    return _GrantOut(id=gid, email=email, created_at=ts)
+
+
+@app.get("/share/grants", response_model=List[_GrantOut])
+def list_share_grants(
+    asset_type: str,
+    asset_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[_GrantOut]:
+    """#768: list the people granted access to an asset (owner-scoped)."""
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, grantee_email, created_at FROM asset_grants "
+            "WHERE asset_type=? AND asset_id=? AND owner_id=? ORDER BY created_at",
+            (asset_type, asset_id, auth.user_id),
+        ).fetchall()
+    return [
+        _GrantOut(id=str(r["id"]), email=str(r["grantee_email"]), created_at=str(r["created_at"]))
+        for r in rows
+    ]
+
+
+@app.delete("/share/grants/{grant_id}", status_code=204)
+def delete_share_grant(
+    grant_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    """#767: revoke a person's access grant."""
+    with get_db() as conn:
+        cur = conn.execute(
+            "DELETE FROM asset_grants WHERE id = ? AND owner_id = ?", (grant_id, auth.user_id)
+        )
+    if cur.rowcount == 0:
+        raise HTTPException(status_code=404, detail="Grant not found")
 
 
 @app.post("/workers/{worker_id}/share-link")
@@ -12849,6 +13020,71 @@ def reject_agent_tool_approval(
     return ActionResponse(status="rejected", run_id=str(approval["run_id"]))
 
 
+class _RunExportRequest(BaseModel):
+    run_ids: List[str] = Field(..., min_length=1, max_length=200)
+
+
+@app.post("/runs/export")
+def export_runs_bundle(
+    body: _RunExportRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Response:
+    """#796: bulk-export multiple runs as one ZIP — `run-<id>/` per run, reusing
+    the single-run bundle's redaction rules (no inputs/logs/transcripts; sensitive
+    + out-of-root artifacts skipped)."""
+    from runner_utils import ARTIFACTS_DIR
+    artifacts_root = ARTIFACTS_DIR.resolve()
+    archive_buffer = io.BytesIO()
+    included = 0
+    with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
+        for run_id in body.run_ids:
+            run_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
+            if not run_row:
+                continue
+            run_data = row_to_dict(run_row)
+            prefix = f"run-{_sanitize_download_name(str(run_data.get('id') or run_id))}/"
+            output_payload = json.loads(run_row["output_json"] or "{}")
+            if not isinstance(output_payload, dict):
+                output_payload = {}
+            metadata = {
+                k: run_data.get(k)
+                for k in ("id", "worker_id", "status", "trigger_source", "runner",
+                          "created_at", "started_at", "completed_at", "duration_ms")
+            }
+            archive.writestr(prefix + "metadata.json", json.dumps(metadata, indent=2, sort_keys=True))
+            archive.writestr(prefix + "outputs.json", json.dumps(output_payload, indent=2, sort_keys=True))
+            primary = _extract_primary_output_file(output_payload)
+            if primary:
+                out_name, out_bytes = primary
+                archive.writestr(prefix + out_name, out_bytes)
+            for row in repos.runs.list_artifacts(user_id=auth.user_id, run_id=run_id):
+                if _is_sensitive_artifact_row(row):
+                    continue
+                try:
+                    resolved = Path(row["path"] or "").resolve()
+                    resolved.relative_to(artifacts_root)
+                except Exception:
+                    continue
+                if not resolved.is_file():
+                    continue
+                safe = _sanitize_download_name(str(row["name"] or resolved.name))
+                archive.writestr(prefix + "artifacts/" + safe, resolved.read_bytes())
+            included += 1
+        if included == 0:
+            raise HTTPException(status_code=404, detail="No exportable runs found")
+        archive.writestr(
+            "README.txt",
+            "Bulk run export. Inputs, logs and internal transcripts are omitted.\n",
+        )
+    archive_buffer.seek(0)
+    return Response(
+        content=archive_buffer.getvalue(),
+        media_type="application/zip",
+        headers={"Content-Disposition": 'attachment; filename="runs-export.zip"'},
+    )
+
+
 @app.get("/runs/{run_id}/download")
 def download_run_bundle(
     run_id: str,
@@ -14595,6 +14831,7 @@ class ConnectionTestResult(BaseModel):
     status: str  # "valid" | "failed" | "expired"
     reason: str
     tested_at: str
+    tools: Optional[List[str]] = None  # #789: live-enumerated MCP tool names
 
 
 class ConnectionInitResponse(BaseModel):
@@ -16122,6 +16359,7 @@ def test_connection(
                     status="valid",
                     reason=f"MCP server reachable{extra_tools}{allowed_tools_note}.",
                     tested_at=tested_at,
+                    tools=tool_names,  # #789: live tool list
                 )
             except Exception as exc:
                 _write_connection_check(connection_id, "failed", str(exc), tested_at, status="failed", repos=repos)
@@ -19914,6 +20152,50 @@ async def put_workspace(
     return Response(status_code=204)
 
 
+class _ChatAttachmentOut(BaseModel):
+    name: str
+    size: int
+    type: str
+    text: Optional[str] = None
+    truncated: bool = False
+
+
+_CHAT_ATTACHMENT_TEXT_EXTS = (
+    ".txt", ".md", ".markdown", ".csv", ".json", ".yml", ".yaml", ".log",
+    ".py", ".js", ".ts", ".tsx", ".html", ".xml", ".toml", ".ini", ".sql",
+)
+
+
+@app.post("/chat/attachments", response_model=List[_ChatAttachmentOut])
+async def upload_chat_attachments(
+    files: List[UploadFile] = File(...),
+    auth: AuthContext = Depends(get_auth_context),
+) -> List[_ChatAttachmentOut]:
+    """#778: accept Emily chat attachments. Text-like files are decoded so their
+    content rides along in the next message; binaries return metadata only."""
+    max_text = 200_000  # chars of extracted text per file
+    out: List[_ChatAttachmentOut] = []
+    for f in files:
+        data = await f.read()
+        name = f.filename or "attachment"
+        ctype = (f.content_type or "").lower()
+        text: Optional[str] = None
+        truncated = False
+        is_text = ctype.startswith("text/") or name.lower().endswith(_CHAT_ATTACHMENT_TEXT_EXTS)
+        if is_text:
+            decoded = data.decode("utf-8", errors="replace")
+            if len(decoded) > max_text:
+                decoded = decoded[:max_text]
+                truncated = True
+            text = decoded
+        out.append(_ChatAttachmentOut(
+            name=name, size=len(data),
+            type=ctype or "application/octet-stream",
+            text=text, truncated=truncated,
+        ))
+    return out
+
+
 @app.post("/chat")
 async def post_chat(
     payload: ChatRequest,
@@ -21513,6 +21795,52 @@ def delete_token(
     _, _, token_repo = _require_multi_member_repos(repos)
     if not token_repo.delete(token_id=token_id, user_id=auth.user_id):
         raise HTTPException(status_code=404, detail="token not found")
+
+
+class _WorkspaceSettingValue(BaseModel):
+    value: str = Field(..., max_length=4000)
+
+
+def _active_workspace_id(request: Request) -> str:
+    return requested_local_workspace_id(request) or DEFAULT_WORKSPACE_ID
+
+
+@app.get("/workspace/settings")
+def get_workspace_settings(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> Dict[str, str]:
+    """#794/#797: workspace behaviour toggles + model defaults (key→value map)."""
+    ws = _active_workspace_id(request)
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT key, value FROM workspace_settings WHERE workspace_id = ?", (ws,)
+        ).fetchall()
+    return {str(r["key"]): str(r["value"]) for r in rows}
+
+
+@app.put("/workspace/settings/{key}", status_code=204)
+def put_workspace_setting(
+    key: str,
+    body: _WorkspaceSettingValue,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> None:
+    """#794/#797: upsert a workspace setting. Admin-guarded (the #804 model:
+    members must not change workspace behaviour, enforced server-side)."""
+    _require_workspace_write(auth)
+    if not key or len(key) > 64:
+        raise HTTPException(status_code=422, detail="invalid setting key")
+    ws = _active_workspace_id(request)
+    with get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO workspace_settings (workspace_id, key, value, updated_at)
+            VALUES (?, ?, ?, ?)
+            ON CONFLICT(workspace_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
+            """,
+            (ws, key, body.value, now_iso()),
+        )
 
 
 @app.post("/auth/tokens/{token_id}/rotate", response_model=_PATCreateResponse)
