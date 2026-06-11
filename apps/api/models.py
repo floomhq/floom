@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from enum import Enum
 
 
-DEFAULT_WORKER_AGENT_MODEL = "gpt-5.1"
+DEFAULT_WORKER_AGENT_MODEL = "gpt-5.5"
 
 
 def _model_data(value: Any) -> Any:
