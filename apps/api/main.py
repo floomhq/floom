@@ -122,6 +122,7 @@ from models import (
     WorkerVisibilityUpdate,
     WorkerSummary,
     WorkerDetail,
+    WorkerDetailLastRun,
     PublicWorker,
     PublicWorkerInput,
     PublicWorkerOutput,
@@ -2426,6 +2427,96 @@ def _make_run_summary(row: Any) -> RunSummary:
         duration_ms=d.get("duration_ms"),
         error=_operator_error_message(d.get("error"), d.get("error_code")),
         error_code=d.get("error_code"),
+    )
+
+
+def _run_output_preview_from_json(raw_output_json: Any, *, limit: int = 280) -> Optional[str]:
+    if raw_output_json is None:
+        return None
+    try:
+        parsed = json.loads(raw_output_json) if isinstance(raw_output_json, str) else raw_output_json
+    except Exception:
+        parsed = raw_output_json
+
+    value: Any = parsed
+    if isinstance(parsed, dict):
+        if not parsed:
+            return None
+        for key in ("result", "summary", "output", "text", "answer", "body"):
+            candidate = parsed.get(key)
+            if candidate not in (None, ""):
+                value = candidate
+                break
+    elif isinstance(parsed, list) and not parsed:
+        return None
+
+    if value in (None, ""):
+        return None
+    if isinstance(value, str):
+        text = value
+    elif isinstance(value, (int, float, bool)):
+        text = str(value)
+    else:
+        try:
+            text = json.dumps(value, ensure_ascii=False, separators=(",", ":"), sort_keys=True)
+        except Exception:
+            text = str(value)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text[:limit] if text else None
+
+
+def _worker_detail_artifact_previews(
+    *,
+    user_id: str,
+    run_id: str,
+    repos: Repositories,
+) -> List[Dict[str, Any]]:
+    try:
+        rows = repos.runs.list_artifacts(user_id=user_id, run_id=run_id)
+    except Exception:
+        logger.debug("artifact preview fetch failed for run %s", run_id, exc_info=True)
+        return []
+    previews: List[Dict[str, Any]] = []
+    for row in rows:
+        if _is_sensitive_artifact_row(row):
+            continue
+        data = row_to_dict(row)
+        name = str(data.get("name") or Path(str(data.get("path") or "")).name or "artifact")
+        previews.append({"name": name, "size": data.get("size_bytes")})
+    return previews
+
+
+def _make_worker_detail_last_run(
+    summary: Optional[RunSummary],
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> Optional[WorkerDetailLastRun]:
+    if summary is None:
+        return None
+    output_preview: Optional[str] = None
+    try:
+        run_row = repos.runs.get(user_id=user_id, run_id=summary.id)
+        if run_row:
+            output_preview = _run_output_preview_from_json(run_row.get("output_json"))
+    except Exception:
+        logger.debug("last-run preview fetch failed for run %s", summary.id, exc_info=True)
+
+    return WorkerDetailLastRun(
+        id=summary.id,
+        worker_id=summary.worker_id,
+        worker_name=summary.worker_name,
+        status=summary.status,
+        trigger_source=summary.trigger_source,
+        created_at=summary.created_at,
+        started_at=summary.started_at,
+        completed_at=summary.completed_at,
+        finished_at=summary.completed_at,
+        duration_ms=summary.duration_ms,
+        error=summary.error,
+        error_code=summary.error_code,
+        output_preview=output_preview,
+        artifacts=_worker_detail_artifact_previews(user_id=user_id, run_id=summary.id, repos=repos),
     )
 
 
@@ -7533,7 +7624,7 @@ def _build_worker_detail(
     latest_output: Optional[Dict[str, Any]] = None
     latest_output_run_id: Optional[str] = None
     _latest_completed = next(
-        (r for r in recent_runs if str(getattr(r, "status", "")).lower().endswith("completed")),
+        (r for r in recent_runs if r.status == RunStatus.COMPLETED),
         None,
     )
     if _latest_completed is not None:
@@ -7632,6 +7723,12 @@ def _build_worker_detail(
     if config and config.runtime and config.runtime.bundle_path:
         config.runtime.bundle_path = Path(config.runtime.bundle_path).name
 
+    last_run_detail = _make_worker_detail_last_run(
+        recent_runs[0] if recent_runs else None,
+        user_id=user_id,
+        repos=repos,
+    )
+
     return WorkerDetail(
         id=worker["id"],
         name=worker["name"],
@@ -7651,6 +7748,7 @@ def _build_worker_detail(
         trigger_type=worker["trigger_type"],
         runner=worker["runner"],
         config=config,
+        last_run=last_run_detail,
         recent_runs=recent_runs,
         latest_output=latest_output,  # #815
         latest_output_run_id=latest_output_run_id,  # #815
