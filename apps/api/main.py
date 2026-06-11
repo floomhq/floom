@@ -7528,6 +7528,25 @@ def _build_worker_detail(
         )
     ]
 
+    # #815: latest output — the most recent COMPLETED run's output, fetched once
+    # so the detail page renders an output-first overview without a second call.
+    latest_output: Optional[Dict[str, Any]] = None
+    latest_output_run_id: Optional[str] = None
+    _latest_completed = next(
+        (r for r in recent_runs if str(getattr(r, "status", "")).lower().endswith("completed")),
+        None,
+    )
+    if _latest_completed is not None:
+        try:
+            _run_row = repos.runs.get(user_id=user_id, run_id=_latest_completed.id)
+            if _run_row:
+                parsed = json.loads(_run_row.get("output_json") or "{}")
+                if isinstance(parsed, dict):
+                    latest_output = parsed
+                    latest_output_run_id = _latest_completed.id
+        except Exception:
+            logger.debug("latest-output fetch failed for worker %s", worker_id, exc_info=True)
+
     config_dict = worker.get("config", {})
     try:
         config = WorkerConfig(**config_dict)
@@ -7633,6 +7652,8 @@ def _build_worker_detail(
         runner=worker["runner"],
         config=config,
         recent_runs=recent_runs,
+        latest_output=latest_output,  # #815
+        latest_output_run_id=latest_output_run_id,  # #815
         recent_stats=_get_stats_batch([worker_id], user_id=user_id, repos=repos).get(worker_id),
         manifest_yaml=manifest_yaml,
         run_py=run_py,
