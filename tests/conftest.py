@@ -201,6 +201,21 @@ def _clear_rate_buckets() -> None:
             store.clear()
 
 
+def _clear_router_caches() -> None:
+    """Reset module-level mutable caches living in routers.* between tests.
+
+    The integrations trigger-catalog cache moved from main (reset by every main
+    reload) into routers.integrations (NOT reloaded by most fixtures), so a
+    catalog populated by one test would otherwise serve cached 200s to a later
+    test expecting the uncached path (e.g. the missing-COMPOSIO_API_KEY 503).
+    """
+    integrations = sys.modules.get("routers.integrations")
+    cache = getattr(integrations, "_trigger_catalog_cache", None)
+    if isinstance(cache, dict):
+        cache["items"] = None
+        cache["expires_at"] = 0.0
+
+
 def _module_pinned_db(request) -> str | None:
     """The DB path a test's module pinned at import via a module-level _tmp_db.
 
@@ -258,7 +273,12 @@ def _isolate_global_state(request):
         if wr_mod is not None and hasattr(wr_mod, "WORKERS_DIR"):
             wr_mod.WORKERS_DIR = _pathlib.Path(_target_workers_dir).resolve()
 
-    tracked_prefixes = ("auth.", "db.")
+    # "routers" covers the routers package + routers.* route-group modules: a
+    # router module pins the auth.dependency/auth.factory instances it imported
+    # at load time, so it must be snapshot/restored IN LOCKSTEP with main/auth —
+    # a stale router otherwise routes requests through a previous test file's
+    # auth provider (cached FLOOM_SECRET -> spurious 401s).
+    tracked_prefixes = ("auth.", "db.", "routers")
     module_snapshot = {}
     for name in list(sys.modules):
         if name in _API_MODULE_NAMES or name.startswith(tracked_prefixes):
@@ -288,6 +308,7 @@ def _isolate_global_state(request):
                     pass
 
     _clear_rate_buckets()
+    _clear_router_caches()
 
     try:
         yield
