@@ -644,50 +644,127 @@ _APPROVAL_KEYWORD_RE = re.compile(
     re.IGNORECASE,
 )
 
+# #891: natural affirmation / negation phrasings accepted ONLY when the bound
+# sender has EXACTLY ONE pending approval (the unambiguous case). These are
+# deliberately matched against the WHOLE trimmed message (after stripping a
+# trailing approval-id suffix) so "yes, approve it", "go ahead", "do it",
+# "cancel it" route to the single pending approval instead of falling through
+# to the agent (which could then only show a link — the #891 P0). When NOTHING
+# is pending, NONE of this runs (the caller short-circuits), so a conversational
+# "yes" is never eaten.
+_NATURAL_AFFIRM_RE = re.compile(
+    r"^(?:yes|yep|yeah|yup|ok|okay|sure|approve(?:d|s)?|approve\s+it|"
+    r"go\s+ahead|do\s+it|run\s+it|confirm(?:ed)?|sounds\s+good|"
+    r"please\s+do|proceed|accept(?:ed)?)\b.*$",
+    re.IGNORECASE,
+)
+_NATURAL_NEGATE_RE = re.compile(
+    r"^(?:no|nope|nah|reject(?:ed|s)?|reject\s+it|decline(?:d)?|"
+    r"cancel(?:\s+it)?|don'?t(?:\s+run\s+it)?|do\s+not|stop|abort|"
+    r"deny|denied)\b.*$",
+    re.IGNORECASE,
+)
 
-def _parse_approval_reply(text: str) -> Optional[Dict[str, Any]]:
+# Trailing approval-id suffix (4-8 hex) the sender may append to target one of
+# several pending approvals, e.g. "yes approve it a1b2c3".
+_TRAILING_SUFFIX_RE = re.compile(r"\b(?P<suffix>[0-9a-f]{4,8})\s*$", re.IGNORECASE)
+
+
+def _parse_approval_reply(text: str, *, single_pending: bool = False) -> Optional[Dict[str, Any]]:
     """Return {decision: 'approved'|'rejected', suffix: str|None} or None.
 
-    Only matches if the entire trimmed message is a keyword (+ optional suffix).
-    This is intentionally conservative so normal sentences starting with 'yes'
-    are never silently eaten when no approvals are pending.
+    Two acceptance modes:
+
+    - Strict (always): the entire trimmed message is a bare keyword
+      (yes/approve/no/reject) optionally followed by a hex suffix. Conservative
+      so normal sentences starting with 'yes' are never eaten — this is what
+      runs when multiple approvals are pending or none are.
+
+    - Natural (``single_pending=True`` only, #891): when the sender has EXACTLY
+      ONE pending approval, accept natural affirmations ("yes, approve it",
+      "go ahead", "do it") and negations ("no", "reject it", "cancel it"). Still
+      conservative: only enabled by the caller when a single approval is pending.
     """
     stripped = (text or "").strip()
-    m = _APPROVAL_KEYWORD_RE.fullmatch(stripped)
-    if not m:
+    if not stripped:
         return None
-    keyword = m.group("keyword").lower()
-    suffix = (m.group("suffix") or "").lower() or None
-    decision = "approved" if keyword in ("yes", "approve") else "rejected"
-    return {"decision": decision, "suffix": suffix}
+
+    # Strict path first — preserves the existing suffix-targeting behaviour.
+    m = _APPROVAL_KEYWORD_RE.fullmatch(stripped)
+    if m:
+        keyword = m.group("keyword").lower()
+        suffix = (m.group("suffix") or "").lower() or None
+        decision = "approved" if keyword in ("yes", "approve") else "rejected"
+        return {"decision": decision, "suffix": suffix}
+
+    if not single_pending:
+        return None
+
+    # Natural path (single pending only). Pull off a trailing id-suffix if the
+    # user added one, then classify the affirmation/negation.
+    suffix = None
+    suffix_match = _TRAILING_SUFFIX_RE.search(stripped)
+    body = stripped
+    if suffix_match:
+        suffix = suffix_match.group("suffix").lower()
+        body = stripped[: suffix_match.start()].strip()
+    # Negation is checked first so "do not" / "don't run it" never read as the
+    # affirmative "do it".
+    if _NATURAL_NEGATE_RE.match(body):
+        return {"decision": "rejected", "suffix": suffix}
+    if _NATURAL_AFFIRM_RE.match(body):
+        return {"decision": "approved", "suffix": suffix}
+    return None
 
 
-def _approve_pending_run_for_whatsapp(*, run_id: str, user_id: str, repos: Any) -> Any:
-    """Approve a pending run as the bound WhatsApp user.
+def _approval_kind(target: Any) -> str:
+    """Best-effort kind of an approval row ('agent_tool'/'destructive_delete'/'')."""
+    import json as _json
+    try:
+        di = _json.loads((target or {}).get("decision_input_json") or "{}") or {}
+        return str(di.get("kind") or "")
+    except Exception:
+        return ""
 
-    Reuses the same canonical approve_run path as Slack so the approval
-    decision, follow-up run, and SSE broadcast go through a single code path.
+
+def _approve_pending_run_for_whatsapp(
+    *, run_id: str, user_id: str, repos: Any, approval_id: str = "", kind: str = ""
+) -> Any:
+    """Approve a pending approval as the bound WhatsApp user.
+
+    Reuses the SAME canonical decision functions as Slack / the chat tools /
+    the public-link path so the decision, follow-up run, and SSE broadcast go
+    through a single code path. Kind-aware (#891): an ``agent_tool`` approval is
+    resumed in-place via approve_agent_tool_approval rather than approve_run
+    (which only handles run-level approvals and rejects agent-tool ones).
     """
+    from auth import AuthContext
+    auth = AuthContext(user_id=user_id, email=None, scopes=("whatsapp",))
+    if kind == "agent_tool" and approval_id:
+        from main import approve_agent_tool_approval, ApproveRequest
+        return approve_agent_tool_approval(approval_id, ApproveRequest(), auth, repos)
+    if kind == "destructive_delete" and approval_id:
+        from main import approve_destructive_action
+        return approve_destructive_action(approval_id, auth, repos)
     from main import approve_run, ApproveRequest
-    from auth import AuthContext
-    return approve_run(
-        run_id,
-        ApproveRequest(),
-        AuthContext(user_id=user_id, email=None, scopes=("whatsapp",)),
-        repos,
-    )
+    return approve_run(run_id, ApproveRequest(), auth, repos)
 
 
-def _reject_pending_run_for_whatsapp(*, run_id: str, user_id: str, repos: Any, reason: str) -> Any:
-    """Reject a pending run as the bound WhatsApp user."""
-    from main import reject_run, RejectRequest
+def _reject_pending_run_for_whatsapp(
+    *, run_id: str, user_id: str, repos: Any, reason: str, approval_id: str = "", kind: str = ""
+) -> Any:
+    """Reject a pending approval as the bound WhatsApp user (kind-aware, #891)."""
     from auth import AuthContext
-    return reject_run(
-        run_id,
-        RejectRequest(reason=reason),
-        AuthContext(user_id=user_id, email=None, scopes=("whatsapp",)),
-        repos,
-    )
+    from main import RejectRequest
+    auth = AuthContext(user_id=user_id, email=None, scopes=("whatsapp",))
+    if kind == "agent_tool" and approval_id:
+        from main import reject_agent_tool_approval
+        return reject_agent_tool_approval(approval_id, RejectRequest(reason=reason), auth, repos)
+    if kind == "destructive_delete" and approval_id:
+        from main import reject_destructive_action
+        return reject_destructive_action(approval_id, RejectRequest(reason=reason), auth, repos)
+    from main import reject_run
+    return reject_run(run_id, RejectRequest(reason=reason), auth, repos)
 
 
 async def _maybe_handle_approval_reply(
@@ -709,9 +786,13 @@ async def _maybe_handle_approval_reply(
       their id-suffixes; do NOT approve anything.
     - Already-resolved or not-found approval → graceful "no longer pending" reply.
     """
-    parsed = _parse_approval_reply(text)
-    if parsed is None:
-        return None
+    # #891: a fast strict parse decides whether this even LOOKS like an approval
+    # command without touching the DB. Only when it doesn't strictly match do we
+    # load pending approvals to see if the single-pending natural-language path
+    # applies (e.g. "yes, approve it"). This keeps the no-pending common case
+    # cheap and guarantees a conversational 'yes' is never intercepted unless an
+    # approval is actually pending.
+    strict = _parse_approval_reply(text)
 
     try:
         from db import get_repositories
@@ -723,6 +804,17 @@ async def _maybe_handle_approval_reply(
 
     if not pending:
         # No pending approvals for this user — do NOT intercept; pass to agent.
+        # This is the guard that prevents eating a conversational 'yes'.
+        return None
+
+    parsed = strict
+    if parsed is None:
+        # Strict parse failed. Accept natural affirmations/negations ONLY when
+        # exactly one approval is pending (the unambiguous case).
+        if len(pending) == 1:
+            parsed = _parse_approval_reply(text, single_pending=True)
+    if parsed is None:
+        # Not an approval command — fall through to the agent.
         return None
 
     decision = parsed["decision"]
@@ -768,16 +860,26 @@ async def _maybe_handle_approval_reply(
         )
 
     run_id = str(target.get("run_id") or "")
+    approval_id = str(target.get("id") or "")
+    kind = _approval_kind(target)
     worker_name = str(target.get("worker_name") or target.get("worker_id") or "Worker")
     label = str(target.get("label") or "Approval requested")
 
     try:
         if decision == "approved":
             result = _approve_pending_run_for_whatsapp(
-                run_id=run_id, user_id=scoped_user_id, repos=repos
+                run_id=run_id, user_id=scoped_user_id, repos=repos,
+                approval_id=approval_id, kind=kind,
             )
             follow_up = getattr(result, "run_id", None) or (result.get("run_id") if isinstance(result, dict) else None)
-            suffix_info = f" Follow-up run: `{follow_up}`." if follow_up else ""
+            # Only a run-level approval spawns a NEW follow-up run; for agent-tool
+            # approvals the returned run_id is the same in-place run, so don't
+            # mislabel it as a follow-up.
+            suffix_info = (
+                f" Follow-up run: `{follow_up}`."
+                if follow_up and kind not in ("agent_tool", "destructive_delete")
+                else ""
+            )
             return f"Approved *{worker_name}* — {label}.{suffix_info}"
         else:
             _reject_pending_run_for_whatsapp(
@@ -785,6 +887,8 @@ async def _maybe_handle_approval_reply(
                 user_id=scoped_user_id,
                 repos=repos,
                 reason=f"Rejected via WhatsApp by {wa_id}",
+                approval_id=approval_id,
+                kind=kind,
             )
             return f"Rejected *{worker_name}* — {label}."
     except Exception as exc:
