@@ -40,6 +40,7 @@ export function ShareWorkerButton({
         setVisibility(v);
       }}
       getShareLink={async () => (await api.workers.shareLink(workerId)).url}
+      grantAsset={{ type: "worker", id: workerId }}
     />
   );
 

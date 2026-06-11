@@ -203,6 +203,20 @@ export const api = {
     }
     return res.json() as Promise<import("./types").CurrentUser>;
   },
+  // #767/#768: specific-people share grants.
+  share: {
+    listGrants: (assetType: string, assetId: string) =>
+      fetchJson<import("./types").ShareGrant[]>(
+        `/share/grants?asset_type=${encodeURIComponent(assetType)}&asset_id=${encodeURIComponent(assetId)}`
+      ),
+    addGrant: (assetType: string, assetId: string, email: string) =>
+      fetchJson<import("./types").ShareGrant>("/share/grants", {
+        method: "POST",
+        body: JSON.stringify({ asset_type: assetType, asset_id: assetId, email }),
+      }),
+    revokeGrant: (grantId: string) =>
+      fetchJson<null>(`/share/grants/${encodeURIComponent(grantId)}`, { method: "DELETE" }),
+  },
   workers: {
     // S44 Win 3: use list shape (~15 KB vs 47 KB full) for the web UI.
     // CLI consumers that call GET /workers directly get full payload (no ?shape=list).
