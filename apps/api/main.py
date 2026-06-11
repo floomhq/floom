@@ -20060,6 +20060,50 @@ async def put_workspace(
     return Response(status_code=204)
 
 
+class _ChatAttachmentOut(BaseModel):
+    name: str
+    size: int
+    type: str
+    text: Optional[str] = None
+    truncated: bool = False
+
+
+_CHAT_ATTACHMENT_TEXT_EXTS = (
+    ".txt", ".md", ".markdown", ".csv", ".json", ".yml", ".yaml", ".log",
+    ".py", ".js", ".ts", ".tsx", ".html", ".xml", ".toml", ".ini", ".sql",
+)
+
+
+@app.post("/chat/attachments", response_model=List[_ChatAttachmentOut])
+async def upload_chat_attachments(
+    files: List[UploadFile] = File(...),
+    auth: AuthContext = Depends(get_auth_context),
+) -> List[_ChatAttachmentOut]:
+    """#778: accept Emily chat attachments. Text-like files are decoded so their
+    content rides along in the next message; binaries return metadata only."""
+    max_text = 200_000  # chars of extracted text per file
+    out: List[_ChatAttachmentOut] = []
+    for f in files:
+        data = await f.read()
+        name = f.filename or "attachment"
+        ctype = (f.content_type or "").lower()
+        text: Optional[str] = None
+        truncated = False
+        is_text = ctype.startswith("text/") or name.lower().endswith(_CHAT_ATTACHMENT_TEXT_EXTS)
+        if is_text:
+            decoded = data.decode("utf-8", errors="replace")
+            if len(decoded) > max_text:
+                decoded = decoded[:max_text]
+                truncated = True
+            text = decoded
+        out.append(_ChatAttachmentOut(
+            name=name, size=len(data),
+            type=ctype or "application/octet-stream",
+            text=text, truncated=truncated,
+        ))
+    return out
+
+
 @app.post("/chat")
 async def post_chat(
     payload: ChatRequest,

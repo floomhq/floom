@@ -24,6 +24,7 @@ import {
   clearStoredConversationId,
 } from "./emily-chat-storage";
 import { rehydrateConversation } from "./emily-chat-rehydrate";
+import { buildMessageWithAttachments } from "./emily/attachments";
 
 export interface ChatStreamState {
   messages: ChatMessage[];
@@ -290,7 +291,8 @@ export function useChatStream(): ChatStreamState {
             headers["x-workeros-workspace"] = workspaceId;
           }
 
-          const body: Record<string, unknown> = { message: text };
+          // #778: ride attachment text along in the message so Emily sees it.
+          const body: Record<string, unknown> = { message: buildMessageWithAttachments(text, files) };
           if (currentConversationId) {
             body.conversation_id = currentConversationId;
           }
