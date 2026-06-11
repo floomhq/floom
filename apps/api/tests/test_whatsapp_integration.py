@@ -581,7 +581,7 @@ def test_claim_sends_emily_welcome_to_bound_sender(monkeypatch, tmp_path):
             INSERT INTO whatsapp_sender_bindings
                 (wa_id, user_id, profile_name, status, claim_token,
                  claim_expires_at, created_at, updated_at)
-            VALUES ('49170333', NULL, 'Test', 'pending', 'tok-welcome', ?, ?, ?)
+            VALUES ('49170666', NULL, 'Test', 'pending', 'tok-welcome', ?, ?, ?)
             """,
             (expires, now, now),
         )
@@ -596,7 +596,7 @@ def test_claim_sends_emily_welcome_to_bound_sender(monkeypatch, tmp_path):
     assert resp.json()["ok"] is True
 
     # Exactly one send, to the bound number, with the Emily welcome copy.
-    welcomes = [(to, msg) for to, msg in sent if to == "49170333"]
+    welcomes = [(to, msg) for to, msg in sent if to == "49170666"]
     assert len(welcomes) == 1, f"expected one welcome send, got {sent}"
     to, msg = welcomes[0]
     assert "Emily" in msg
@@ -624,7 +624,7 @@ def test_claim_welcome_failure_does_not_break_claim(monkeypatch, tmp_path):
             INSERT INTO whatsapp_sender_bindings
                 (wa_id, user_id, profile_name, status, claim_token,
                  claim_expires_at, created_at, updated_at)
-            VALUES ('49170444', NULL, 'Test', 'pending', 'tok-welcome-fail', ?, ?, ?)
+            VALUES ('49170777', NULL, 'Test', 'pending', 'tok-welcome-fail', ?, ?, ?)
             """,
             (expires, now, now),
         )
@@ -642,7 +642,7 @@ def test_claim_welcome_failure_does_not_break_claim(monkeypatch, tmp_path):
     # And the binding must be active.
     with main.get_db() as conn:
         row = conn.execute(
-            "SELECT status, claim_token FROM whatsapp_sender_bindings WHERE wa_id = '49170444'"
+            "SELECT status, claim_token FROM whatsapp_sender_bindings WHERE wa_id = '49170777'"
         ).fetchone()
     assert row["status"] == "active"
     assert row["claim_token"] is None
