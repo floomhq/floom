@@ -4906,12 +4906,14 @@ async def stream_chat(
             _cap_log(f"MCP unavailable, continuing without it: {exc}", "warning")
             mcp_servers = []
 
+        import llm as _llm
+
         agent = Agent(
             name=WORKSPACE_AGENT_ID,
             instructions=system_prompt,
             tools=all_tools,
             mcp_servers=mcp_servers,
-            model=os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL,
+            model=_llm.agent_model(os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL),
             model_settings=ModelSettings(
                 max_tokens=4096,
                 include_usage=True,
