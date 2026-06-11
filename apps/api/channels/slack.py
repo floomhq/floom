@@ -591,6 +591,40 @@ def _slack_reaction(action: str, *, channel: str, ts: str, emoji: str, bot_token
         pass
 
 
+def markdown_to_slack_mrkdwn(text: str) -> str:
+    """#876: convert common CommonMark to Slack mrkdwn so Emily's replies don't
+    render raw ``**bold**`` / ``# headers`` in Slack.
+
+    - ``**bold**`` / ``__bold__`` -> ``*bold*`` (Slack uses single asterisks)
+    - ``# Heading`` lines        -> ``*Heading*`` (Slack has no headers)
+    - ``[label](url)``           -> ``<url|label>`` (Slack link syntax)
+    Inline ``code`` and ``- bullets`` already render fine and are left alone.
+    Fenced code blocks are passed through untouched so their contents aren't
+    mangled.
+    """
+    if not text:
+        return text
+    import re as _re
+
+    # Split out fenced code blocks so we never rewrite inside them.
+    parts = _re.split(r"(```.*?```)", text, flags=_re.DOTALL)
+    out: list[str] = []
+    for i, part in enumerate(parts):
+        if i % 2 == 1:  # a ```...``` block
+            out.append(part)
+            continue
+        seg = part
+        # markdown links [label](url) -> <url|label>
+        seg = _re.sub(r"\[([^\]]+)\]\((https?://[^)\s]+)\)", r"<\2|\1>", seg)
+        # bold: **x** or __x__ -> *x*  (before single-* handling; non-greedy)
+        seg = _re.sub(r"\*\*(.+?)\*\*", r"*\1*", seg)
+        seg = _re.sub(r"__(.+?)__", r"*\1*", seg)
+        # headings: leading # ... -> bold line
+        seg = _re.sub(r"(?m)^\s{0,3}#{1,6}\s+(.+?)\s*#*\s*$", r"*\1*", seg)
+        out.append(seg)
+    return "".join(out)
+
+
 def _post_slack_thread_reply(*, channel: str, thread_ts: str, text: str, bot_token: Optional[str] = None) -> None:
     bot_token = (bot_token or os.environ.get("SLACK_BOT_TOKEN", "")).strip()
     if not bot_token:
@@ -604,7 +638,7 @@ def _post_slack_thread_reply(*, channel: str, thread_ts: str, text: str, bot_tok
         json={
             "channel": channel,
             "thread_ts": thread_ts,
-            "text": text or "(No reply)",
+            "text": markdown_to_slack_mrkdwn(text) or "(No reply)",  # #876
             "unfurl_links": False,
             "unfurl_media": False,
         },
