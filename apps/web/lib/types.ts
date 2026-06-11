@@ -447,6 +447,14 @@ export interface PublicSharePack {
   updated_at?: string | null;
 }
 
+export interface ChatAttachment {
+  name: string;
+  size: number;
+  type: string;
+  text?: string | null;
+  truncated?: boolean;
+}
+
 export interface ShareGrant {
   id: string;
   email: string;
