@@ -8029,6 +8029,19 @@ def update_worker(
     if payload.input_values is not None:
         updates["input_values_json"] = payload.input_values
 
+    # #785: name/description edits. name is a DB column; description lives in the
+    # manifest (skill_versions.manifest_json). Both are also patched into
+    # worker.yml on disk below so they survive a registry reload.
+    if payload.name is not None:
+        new_name = payload.name.strip()
+        if not new_name:
+            raise HTTPException(status_code=422, detail="name cannot be empty")
+        updates["name"] = new_name
+    if payload.description is not None:
+        manifest = dict(worker.get("manifest") or {})
+        manifest["description"] = payload.description
+        updates["manifest_json"] = manifest
+
     # capabilities field is declared-not-enforced per T1c flip — just accept it
     # No DB column to write to currently; stored in manifest only.
 
@@ -8150,6 +8163,28 @@ def update_worker(
                     worker_id,
                     exc,
                 )
+
+    # #785: persist name/description to worker.yml so they survive a registry
+    # reload (DB stays authoritative; disk write is best-effort, like triggers).
+    if payload.name is not None or payload.description is not None:
+        from worker_registry import WORKERS_DIR
+        worker_yml_path = WORKERS_DIR / worker_id / "worker.yml"
+        if worker_yml_path.exists():
+            try:
+                lines = worker_yml_path.read_text(encoding="utf-8").split("\n")
+                def _patch_scalar(field: str, value: str) -> None:
+                    safe = value.replace('"', '\\"')
+                    for i, ln in enumerate(lines):
+                        if re.match(rf"^{field}:\s", ln):
+                            lines[i] = f'{field}: "{safe}"'
+                            return
+                if payload.name is not None:
+                    _patch_scalar("name", payload.name.strip())
+                if payload.description is not None:
+                    _patch_scalar("description", payload.description)
+                worker_yml_path.write_text("\n".join(lines), encoding="utf-8")
+            except Exception as exc:
+                logger.warning("PATCH %s: could not update name/description in worker.yml: %s", worker_id, exc)
 
     detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
     if new_raw_secret is not None:

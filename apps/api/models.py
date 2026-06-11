@@ -1630,6 +1630,10 @@ class WorkerUpdateRequest(BaseModel):
     webhook_secret_rotate: Optional[bool] = None  # True → rotate secret, return new raw once
     input_values: Optional[Dict[str, Any]] = None
     capabilities: Optional[Dict[str, Any]] = None  # declared-not-enforced per T1c flip
+    # #785: edit name/description from the worker detail modal without a full
+    # PUT /workers/{id} YAML rewrite.
+    name: Optional[str] = None
+    description: Optional[str] = None
 
 
 class RunCreate(BaseModel):
