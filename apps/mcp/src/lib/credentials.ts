@@ -20,10 +20,12 @@ export type StoredCredentials = {
   supabase_url?: string;
   // Cloud mode: Supabase anon key (needed for the /auth/v1/token refresh call).
   supabase_anon_key?: string;
-  // Cloud mode: currently-active workspace id. Sent as X-Workeros-Workspace.
+  // Currently-active workspace id (cloud or OSS). Sent as X-Workeros-Workspace.
   workspace_id?: string;
-  // Cloud mode: human-readable workspace name (for `floom workspaces show`).
+  // Human-readable workspace name (for `floom workspaces show`).
   workspace_name?: string;
+  // Label of the active MCP server connection (`floom mcp switch`).
+  active_mcp_label?: string;
   authed_at: string;
 };
 
@@ -65,6 +67,8 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
       api_base: envApiBase(DEFAULT_OSS_API_BASE),
       mode: "oss",
       api_secret: envOssSecret,
+      workspace_id: process.env.WORKEROS_WORKSPACE_ID?.trim() || undefined,
+      workspace_name: process.env.WORKEROS_WORKSPACE_NAME?.trim() || undefined,
       authed_at: new Date().toISOString(),
     };
   }
@@ -97,6 +101,7 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
     supabase_anon_key: parsed.supabase_anon_key,
     workspace_id: parsed.workspace_id,
     workspace_name: parsed.workspace_name,
+    active_mcp_label: parsed.active_mcp_label,
     authed_at: parsed.authed_at || new Date().toISOString(),
   };
 }

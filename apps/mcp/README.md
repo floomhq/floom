@@ -20,8 +20,8 @@ The CLI targets both deployments:
 ```bash
 npm i -g @floomhq/workeros@latest
 workeros login --cloud           # opens workeros.floom.dev/app/cli-auth
-workeros workspaces list
-workeros workspaces use <name>   # persists to ~/.config/workeros/credentials.json
+workeros workspace list             # auth status + active marker
+workeros workspace switch <name>    # persists to ~/.config/workeros/credentials.json
 workeros workers list
 workeros run <worker-id> --input key=value
 ```
@@ -46,6 +46,17 @@ workeros mcp install --target windsurf   # ~/.codeium/windsurf/mcp_config.json
 workeros mcp install --target continue   # ~/.continue/.continuerc.json
 workeros mcp install --target generic    # prints JSON snippet for manual paste
 ```
+
+## Switching the active context
+
+```bash
+workeros workspace list             # all workspaces your credentials can access, active marked with *
+workeros workspace switch <name>    # by name or id; fails (exit 1) if not authenticated for it
+workeros mcp list                   # configured MCP servers (connections of kind "mcp")
+workeros mcp switch <name>          # set the active MCP server by label
+```
+
+Switches persist in `~/.config/workeros/credentials.json` and apply to every later CLI invocation. `workspaces`/`use` remain as aliases of `workspace`/`switch`. Workspace switching works in both modes: cloud scopes by membership, OSS scopes local workspaces via the `x-workeros-workspace` header (which the CLI now sends on every request, and `mcp install` bakes into the client config — re-run `mcp install` after switching to repoint installed MCP clients).
 
 Re-running the installer updates the existing `workeros` entry instead of duplicating it.
 

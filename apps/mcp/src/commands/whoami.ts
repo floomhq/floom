@@ -28,9 +28,9 @@ export async function runWhoamiCommand(options: { json?: boolean } = {}): Promis
       log.heading("Identity");
       log.kv("Mode", credentials.mode);
       log.kv("API base", credentials.api_base);
+      const ws = credentials.workspace_name || credentials.workspace_id;
+      log.kv("Workspace", ws ? ws : "(none, run `floom workspace switch <name>`)");
       if (credentials.mode === "cloud") {
-        const ws = credentials.workspace_name || credentials.workspace_id;
-        log.kv("Workspace", ws ? ws : "(none, run `floom workspaces use <name>`)");
         log.kv("Refresh token", maskSecret(credentials.refresh_token || ""));
       } else {
         log.kv("API secret", maskSecret(credentials.api_secret || ""));

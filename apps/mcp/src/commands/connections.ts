@@ -1,5 +1,6 @@
 import { readFile } from "node:fs/promises";
-import { createAuthenticatedClient, WorkerosApiError } from "../lib/api.js";
+import { createAuthenticatedClient } from "../lib/api.js";
+import { handleAuthError } from "../lib/cli-errors.js";
 import { log, printJson, renderTable } from "../lib/output.js";
 
 type McpTransport = "streamable_http" | "sse" | "stdio";
@@ -13,21 +14,6 @@ type ParsedMcpServer = {
   env?: Record<string, string>;
   cwd?: string | null;
 };
-
-function handleAuthError(error: unknown): number | null {
-  const message = error instanceof Error ? error.message : String(error);
-  if (message.includes("Not logged in")) {
-    log.err("Not authenticated.");
-    process.stderr.write("Run: floom login\n");
-    return 1;
-  }
-  if (error instanceof WorkerosApiError && (error.status === 401 || error.status === 403)) {
-    log.err("Your session expired.");
-    process.stderr.write("Re-run: floom login\n");
-    return 1;
-  }
-  return null;
-}
 
 function isRecord(value: unknown): value is Record<string, unknown> {
   return typeof value === "object" && value !== null && !Array.isArray(value);

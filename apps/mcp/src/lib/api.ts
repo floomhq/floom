@@ -192,7 +192,11 @@ export class WorkerosApiClient {
     if (!this.credentials.api_secret) {
       throw new Error("Not logged in. Run floom login first.");
     }
-    return { "x-floom-secret": this.credentials.api_secret };
+    const headers: Record<string, string> = { "x-floom-secret": this.credentials.api_secret };
+    if (this.credentials.workspace_id) {
+      headers["x-workeros-workspace"] = this.credentials.workspace_id;
+    }
+    return headers;
   }
 
   async requestJson(method: string, path: string, options: RequestOptions = {}): Promise<unknown> {

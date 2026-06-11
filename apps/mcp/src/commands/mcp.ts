@@ -1,9 +1,10 @@
 import { existsSync, readFileSync } from "node:fs";
 import { mkdir, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
-import { WorkerosApiClient } from "../lib/api.js";
-import { readCredentials } from "../lib/credentials.js";
-import { log } from "../lib/output.js";
+import { createAuthenticatedClient, WorkerosApiClient } from "../lib/api.js";
+import { handleAuthError } from "../lib/cli-errors.js";
+import { readCredentials, updateCredentials } from "../lib/credentials.js";
+import { log, printJson, renderTable } from "../lib/output.js";
 
 type JsonObject = Record<string, unknown>;
 
@@ -138,9 +139,15 @@ async function resolveMcpConfig(
     if (!credentials.api_secret) {
       throw new Error("OSS credentials missing api_secret. Run: floom login");
     }
+    const headers: Record<string, string> = { "x-floom-secret": credentials.api_secret };
+    // OSS scopes by header, not URL: bake the active workspace in so the MCP
+    // session lands on the selected workspace instead of the default one.
+    if (credentials.workspace_id) {
+      headers["x-workeros-workspace"] = credentials.workspace_id;
+    }
     return {
       mcpUrl: `${apiBase}/mcp-tools/serve`,
-      headers: { "x-floom-secret": credentials.api_secret },
+      headers,
     };
   }
 
@@ -289,4 +296,90 @@ export async function mcpUninstallCommand(options: { target?: ClientTarget }): P
   log.warn("No Workeros MCP config entries were found.");
   log.info("Install first: floom mcp install");
   return 0;
+}
+
+type McpConnectionRow = {
+  kind?: string;
+  mcp_label?: string;
+  app_name?: string;
+  display_name?: string;
+  status?: string;
+  mcp_transport?: string;
+};
+
+function mcpRowLabel(row: McpConnectionRow): string {
+  return String(row.mcp_label || row.display_name || row.app_name || "");
+}
+
+async function fetchMcpConnections(client: WorkerosApiClient): Promise<McpConnectionRow[]> {
+  const rows = (await client.requestJson("GET", "/connections")) as McpConnectionRow[];
+  return (Array.isArray(rows) ? rows : []).filter((row) => (row.kind || "composio") === "mcp");
+}
+
+export async function mcpListCommand(options: { json?: boolean }): Promise<number> {
+  try {
+    const { client, credentials } = await createAuthenticatedClient();
+    const servers = await fetchMcpConnections(client);
+    const active = (credentials.active_mcp_label || "").toLowerCase();
+    if (options.json) {
+      printJson(servers.map((row) => ({
+        ...row,
+        active: !!active && mcpRowLabel(row).toLowerCase() === active,
+      })));
+      return 0;
+    }
+    if (servers.length === 0) {
+      log.info("No MCP servers configured.");
+      log.info("Add one: floom connections import-mcp-config <path>");
+      return 0;
+    }
+    process.stdout.write(renderTable(
+      servers.map((row) => ({
+        Active: mcpRowLabel(row).toLowerCase() === active && active ? "*" : " ",
+        Label: mcpRowLabel(row),
+        Transport: row.mcp_transport || "streamable_http",
+        Status: row.status || "-",
+      })),
+      [
+        { key: "Active", label: " " },
+        { key: "Label", label: "Label" },
+        { key: "Transport", label: "Transport" },
+        { key: "Status", label: "Status" },
+      ],
+    ) + "\n");
+    return 0;
+  } catch (error) {
+    const handled = handleAuthError(error);
+    if (handled !== null) return handled;
+    throw error;
+  }
+}
+
+export async function mcpSwitchCommand(target: string): Promise<number> {
+  try {
+    const { client } = await createAuthenticatedClient();
+    const needle = target.trim().toLowerCase();
+    if (!needle) {
+      log.err("MCP server name is required");
+      return 1;
+    }
+    const servers = await fetchMcpConnections(client);
+    const match = servers.find((row) => mcpRowLabel(row).toLowerCase() === needle);
+    if (!match) {
+      log.err(`No configured MCP server matches "${target}".`);
+      process.stderr.write(
+        "Run `floom mcp list` to see configured servers, or add one with " +
+        "`floom connections import-mcp-config <path>`.\n",
+      );
+      return 1;
+    }
+    const label = mcpRowLabel(match);
+    await updateCredentials({ active_mcp_label: label });
+    log.ok(`Active MCP server set to ${label}.`);
+    return 0;
+  } catch (error) {
+    const handled = handleAuthError(error);
+    if (handled !== null) return handled;
+    throw error;
+  }
 }
