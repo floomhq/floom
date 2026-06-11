@@ -8910,6 +8910,132 @@ def toggle_worker_star(
     return {"starred": _toggle_worker_star(auth.user_id, worker_id)}
 
 
+class _WorkerContextAttachRequest(BaseModel):
+    name: str
+    writeable: bool = False
+
+
+class _WorkerContextUpdateRequest(BaseModel):
+    writeable: bool
+
+
+def _mutate_worker_contexts(
+    worker_id: str,
+    mutate,
+    *,
+    auth: AuthContext,
+    repos: Repositories,
+) -> WorkerDetail:
+    """#790: apply a mutation to a worker's mounted contexts (attach/detach/
+    set-writeable) by patching the DB manifest (drives detail + runs) and the
+    on-disk worker.yml (survives reload), without a full YAML rewrite."""
+    worker_id = _canonical_worker_id(worker_id)
+    _raise_if_protected_worker_mutation(worker_id)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    manifest = dict(worker.get("manifest") or {})
+    raw = manifest.get("contexts")
+    if not isinstance(raw, list):
+        exec_block = manifest.get("exec")
+        raw = exec_block.get("contexts") if isinstance(exec_block, dict) else None
+    current: List[Dict[str, Any]] = []
+    for c in (raw or []):
+        if isinstance(c, str):
+            current.append({"name": c, "writeable": False})
+        elif isinstance(c, dict) and c.get("name"):
+            current.append({"name": str(c["name"]), "writeable": bool(c.get("writeable", False))})
+    new_contexts = mutate(current)
+    manifest["contexts"] = new_contexts
+    if isinstance(manifest.get("exec"), dict):
+        manifest["exec"].pop("contexts", None)  # avoid top-level vs exec ambiguity
+    repos.workers.update(user_id=auth.user_id, worker_id=worker_id, manifest_json=manifest)
+    invalidate_worker_cache()
+    # Best-effort worker.yml write-back so the change survives a registry reload.
+    try:
+        from worker_registry import WORKERS_DIR
+        import yaml as _pyyaml
+        wpath = WORKERS_DIR / worker_id / "worker.yml"
+        if wpath.exists():
+            doc = _pyyaml.safe_load(wpath.read_text(encoding="utf-8")) or {}
+            if isinstance(doc, dict):
+                doc["contexts"] = new_contexts
+                if isinstance(doc.get("exec"), dict):
+                    doc["exec"].pop("contexts", None)
+                wpath.write_text(_pyyaml.safe_dump(doc, sort_keys=False), encoding="utf-8")
+    except Exception:
+        logger.warning("PATCH %s: could not write contexts to worker.yml", worker_id, exc_info=True)
+    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+
+@app.post("/workers/{worker_id}/contexts", response_model=WorkerDetail)
+def attach_worker_context(
+    worker_id: str,
+    payload: _WorkerContextAttachRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """#790: attach a brain folder to a worker (or update its writeable flag)."""
+    name = payload.name.strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="context name required")
+
+    def _add(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        for c in contexts:
+            if c["name"] == name:
+                c["writeable"] = payload.writeable
+                return contexts
+        contexts.append({"name": name, "writeable": payload.writeable})
+        return contexts
+
+    return _mutate_worker_contexts(worker_id, _add, auth=auth, repos=repos)
+
+
+@app.patch("/workers/{worker_id}/contexts/{context_name}", response_model=WorkerDetail)
+def update_worker_context(
+    worker_id: str,
+    context_name: str,
+    payload: _WorkerContextUpdateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """#790: change a mounted brain folder's read/write access."""
+    found = {"hit": False}
+
+    def _update(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        for c in contexts:
+            if c["name"] == context_name:
+                c["writeable"] = payload.writeable
+                found["hit"] = True
+        return contexts
+
+    detail = _mutate_worker_contexts(worker_id, _update, auth=auth, repos=repos)
+    if not found["hit"]:
+        raise HTTPException(status_code=404, detail="Context not attached to this worker")
+    return detail
+
+
+@app.delete("/workers/{worker_id}/contexts/{context_name}", response_model=WorkerDetail)
+def detach_worker_context(
+    worker_id: str,
+    context_name: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """#790: detach a brain folder from a worker."""
+    found = {"hit": False}
+
+    def _remove(contexts: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+        kept = [c for c in contexts if c["name"] != context_name]
+        found["hit"] = len(kept) != len(contexts)
+        return kept
+
+    detail = _mutate_worker_contexts(worker_id, _remove, auth=auth, repos=repos)
+    if not found["hit"]:
+        raise HTTPException(status_code=404, detail="Context not attached to this worker")
+    return detail
+
+
 @app.post("/workers/{worker_id}/pause", response_model=WorkerDetail)
 def pause_worker(
     worker_id: str,
