@@ -260,6 +260,7 @@ from services.worker_access import (
     _get_db_worker,
     _archived_tracked_worker,
     _get_visible_worker,
+    _worker_permissions,
 )
 
 # Context (knowledge-pack) access-control + serialization cluster lives in
@@ -6145,61 +6146,6 @@ def _worker_short_link_response(worker: Dict[str, Any]) -> Dict[str, str]:
             if not short_id:
                 raise HTTPException(status_code=500, detail="Could not mint short link")
     return {"short_id": short_id, "short_url": f"{_short_link_base_url()}/{short_id}"}
-
-
-def _worker_permissions(
-    worker: Dict[str, Any],
-    *,
-    user_id: str,
-    repos: Repositories,
-) -> AssetPermissions:
-    """Compute the requesting user's access matrix for a worker.
-
-    Delegates to the AssetAccessRepository when available (the engine-owned,
-    Cloud-mirrorable rule). Falls back to an owner-permissive default for
-    filesystem/stock workers that have no DB row (the caller is the de-facto
-    owner of a stock worker they can see), so the OSS single-owner UX is
-    unchanged. Never raises — a permission probe must not break a list/detail.
-    """
-    asset_access = getattr(repos, "asset_access", None)
-    worker_id = str(worker.get("id") or "")
-    owner_id = worker.get("owner_id")
-    visibility = str(worker.get("visibility") or "private")
-    # #767/#768: a specific-people grant adds VIEW access for the grantee, never
-    # run/edit/delete/share (those stay with the owner / workspace admins). The
-    # engine asset_access rule does not know about the app-level asset_grants
-    # table, so the grant is layered in here.
-    granted = bool(worker_id) and _canonical_worker_id(worker_id) in _granted_worker_ids()
-    if asset_access is not None and worker_id and owner_id:
-        try:
-            perms = asset_access.get_permissions(
-                workspace_id=str(worker.get("workspace_id") or "local-default"),
-                user_id=user_id,
-                asset_type="worker",
-                asset_id=worker_id,
-            )
-            return AssetPermissions(
-                is_owner=bool(perms.get("is_owner", owner_id == user_id)),
-                can_view=bool(perms.get("can_view", True)) or granted,
-                can_edit=bool(perms.get("can_edit", True)),
-                can_run=bool(perms.get("can_run", True)),
-                can_delete=bool(perms.get("can_delete", True)),
-                can_share=bool(perms.get("can_share", True)),
-            )
-        except Exception:
-            logger.debug("permission probe failed for worker %s", worker_id, exc_info=True)
-    # Fallback: stock/FS worker (no DB row) — the viewer who can see it is the
-    # de-facto owner on the single-owner engine.
-    is_owner = (not owner_id) or owner_id == user_id
-    shared = visibility == "workspace"
-    return AssetPermissions(
-        is_owner=is_owner,
-        can_view=is_owner or shared or granted,
-        can_edit=is_owner,
-        can_run=is_owner or shared,
-        can_delete=is_owner,
-        can_share=is_owner,
-    )
 
 
 def _public_connection_labels(config: WorkerConfig) -> List[str]:
