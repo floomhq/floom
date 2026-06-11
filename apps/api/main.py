@@ -20632,6 +20632,73 @@ def list_workspace_versions(
     return [VersionSummary(**r) for r in rows]
 
 
+class ChangelogEntry(BaseModel):
+    asset_type: str  # "worker" | "context" | "workspace_instructions"
+    asset_id: str
+    asset_name: str
+    sha: str
+    message: str
+    committed_at: str
+
+
+@app.get("/workspace/changelog", response_model=List[ChangelogEntry])
+def workspace_changelog(
+    limit: int = 50,
+    asset_types: str = "worker,context,workspace_instructions",
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[ChangelogEntry]:
+    """#772: unified workspace changelog — merges the git history of all
+    workers, brain packs, and the workspace prompt into one timeline (newest
+    first). Each asset's log is bounded and the merged result is capped."""
+    wanted = {t.strip() for t in asset_types.split(",") if t.strip()}
+    limit = min(max(limit, 1), 200)
+    per_asset = min(limit, 20)
+    workspace = _git_workspace()
+    entries: List[ChangelogEntry] = []
+
+    def _collect(rel_path: str, asset_type: str, asset_id: str, asset_name: str) -> None:
+        try:
+            rows = _git_ops.get_log(workspace, rel_path=rel_path, limit=per_asset,
+                                    asset_type=asset_type, asset_id=asset_id)
+        except Exception:
+            return
+        for r in rows:
+            entries.append(ChangelogEntry(
+                asset_type=asset_type, asset_id=asset_id, asset_name=asset_name,
+                sha=str(r.get("sha") or r.get("id") or ""),
+                message=str(r.get("message") or ""),
+                committed_at=str(r.get("timestamp") or ""),
+            ))
+
+    if "worker" in wanted:
+        prefix = _workers_git_prefix()
+        for w in _list_visible_workers(user_id=auth.user_id, repos=repos, use_cache=True)[:60]:
+            _collect(f"{prefix}/{w['id']}", "worker", str(w["id"]), str(w.get("name") or w["id"]))
+    if "context" in wanted:
+        cprefix = _contexts_git_prefix()
+        try:
+            for c in list_contexts(auth=auth, repos=repos)[:60]:
+                if getattr(c, "sensitive", True):
+                    continue  # sensitive packs are never git-tracked
+                _collect(f"{cprefix}/{c.name}", "context", c.name, c.name)
+        except Exception:
+            logger.debug("changelog: context enumeration failed", exc_info=True)
+    if "workspace_instructions" in wanted:
+        try:
+            from chat_service import WORKSPACE_MD_PATH
+            try:
+                rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
+            except ValueError:
+                rel = "workspace.md"
+            _collect(rel, "workspace_instructions", "default", "Workspace instructions")
+        except Exception:
+            logger.debug("changelog: workspace.md log failed", exc_info=True)
+
+    entries.sort(key=lambda e: e.committed_at, reverse=True)
+    return entries[:limit]
+
+
 @app.get("/workspace/versions/{sha}")
 def get_workspace_version(
     sha: str,
