@@ -18,7 +18,7 @@ OpenAI-shaped responses. One code path serves every provider.
 """
 from __future__ import annotations
 
-from typing import Any, Dict, List, Sequence
+from typing import Any, Dict, List, Optional, Sequence
 
 
 def is_litellm_model(model: str) -> bool:
@@ -103,6 +103,21 @@ def with_prompt_cache(
             cached = True
         out.append(msg)
     return out
+
+
+def cache_control_extra_args(model: str) -> Optional[Dict[str, Any]]:
+    """``ModelSettings.extra_args`` that cache the static system prompt in agent loops.
+
+    For Anthropic / Bedrock (cached input billed separately), tell litellm to inject a
+    cache_control breakpoint on the system message, so the large static system prompt
+    and tool context is cached and re-read across the agent loop's turns (up to ~90%
+    off those input tokens). The Agents SDK ``LitellmModel`` forwards ``extra_args``
+    straight to ``litellm.acompletion``. Returns None for providers that cache
+    automatically (OpenAI), so it is safe to pass unconditionally.
+    """
+    if not _is_anthropic_model(model):
+        return None
+    return {"cache_control_injection_points": [{"location": "message", "role": "system"}]}
 
 
 def completion(

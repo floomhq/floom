@@ -407,16 +407,18 @@ class AgentDriver(SandboxDriver):
                     )
 
                 force_finish = corrective_retry_used
+                _agent_model = _llm.agent_model(config.runtime.model or DEFAULT_WORKER_AGENT_MODEL)
                 agent = Agent(
                     name=worker_id,
                     instructions=system_prompt,
                     tools=self._sdk_tools(config, state),
                     mcp_servers=mcp_servers,
-                    model=_llm.agent_model(config.runtime.model or DEFAULT_WORKER_AGENT_MODEL),
+                    model=_agent_model,
                     model_settings=ModelSettings(
                         max_tokens=limits.max_output_tokens,
                         include_usage=True,
                         tool_choice="finish_with_outputs" if force_finish else None,
+                        extra_args=_llm.cache_control_extra_args(_agent_model),
                     ),
                     tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs"]},
                 )
