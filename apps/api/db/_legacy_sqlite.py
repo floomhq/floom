@@ -1917,6 +1917,13 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_asset_grants_asset
         ON asset_grants(asset_type, asset_id, owner_id);
     """,
+    # -- migration 70: grantee lookup index for grant enforcement (#767/#768) ---
+    # The enforcement path resolves "which assets is this viewer granted?" by
+    # grantee_email; index it so the per-request lookup stays O(log n).
+    """
+    CREATE INDEX IF NOT EXISTS idx_asset_grants_grantee
+        ON asset_grants(asset_type, grantee_email);
+    """,
 ]
 
 
