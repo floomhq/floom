@@ -203,6 +203,25 @@ from services.secrets_env import (
     _available_secret_names_for_user,
 )
 
+# GitHub workspace config + encrypted secrets vault live in services.git_service;
+# re-exported for the /system/git routes, startup restore, and tests. Cloud
+# registers its Supabase key resolver via the re-exported setter (which mutates
+# the service module's global, keeping one source of truth).
+from services.git_service import (
+    _git_workspace_key,
+    _git_cfg_get,
+    _git_cfg_upsert,
+    _git_cfg_delete,
+    _SECRETS_ENC_FILENAME,
+    set_secrets_key_resolver,
+    _LOCAL_KEY_PATH,
+    _get_or_create_secrets_key,
+    _encrypt_secrets_blob,
+    _decrypt_secrets_blob,
+    _sync_secrets_to_enc,
+    _load_secrets_from_enc,
+)
+
 # Upload pipeline (validation/quota/signing/blob GC) lives in services.uploads;
 # re-exported here for the approval upload routes, runs artifact ownership
 # checks, _gc_orphan_blobs, and approval public-link signing still in main.
@@ -16659,187 +16678,6 @@ class _GitRepoItem(BaseModel):
     pushed_at: Optional[str] = None
 
 
-def _git_workspace_key(user_id: str) -> str:
-    """Return the key for git_workspace_config rows.
-
-    Cloud: workspace_id — all members of a workspace share one GitHub repo.
-    OSS:   user_id — single-user or first-admin owns the config.
-    """
-    return _git_ops.get_active_workspace_id() or user_id
-
-
-def _git_cfg_get(user_id: str) -> dict | None:
-    key = _git_workspace_key(user_id)
-    with get_db() as conn:
-        row = conn.execute(
-            """SELECT github_pat, github_username, repo_full_name, repo_url,
-                      remote_url, connected_at, last_pushed_at
-               FROM git_workspace_config WHERE user_id = ?""",
-            (key,),
-        ).fetchone()
-    return dict(row) if row else None
-
-
-def _git_cfg_upsert(user_id: str, **fields: str) -> None:
-    key = _git_workspace_key(user_id)
-    with get_db() as conn:
-        existing = conn.execute(
-            "SELECT 1 FROM git_workspace_config WHERE user_id = ?", (key,)
-        ).fetchone()
-        if existing:
-            set_clause = ", ".join(f"{k} = ?" for k in fields)
-            conn.execute(
-                f"UPDATE git_workspace_config SET {set_clause} WHERE user_id = ?",
-                [*fields.values(), key],
-            )
-        else:
-            fields["user_id"] = key
-            keys = ", ".join(fields)
-            placeholders = ", ".join("?" * len(fields))
-            conn.execute(
-                f"INSERT INTO git_workspace_config ({keys}) VALUES ({placeholders})",
-                list(fields.values()),
-            )
-
-
-def _git_cfg_delete(user_id: str) -> None:
-    key = _git_workspace_key(user_id)
-    with get_db() as conn:
-        conn.execute("DELETE FROM git_workspace_config WHERE user_id = ?", (key,))
-
-
-_SECRETS_ENC_FILENAME = ".secrets.enc"
-
-# Cloud hook — registered by managed-deployment startup.py to return the
-# workspace's AES key from Supabase Vault (pgsodium DARE) instead of
-# reading from GitHub Variables.
-_secrets_key_resolver: Optional[Any] = None
-
-
-def set_secrets_key_resolver(fn: Optional[Any]) -> None:
-    """Register a callable returning the active workspace's AES-256 key bytes.
-
-    Cloud registers this at startup — keys come from Supabase Vault (pgsodium).
-    Pass None to clear (OSS fallback).
-    """
-    global _secrets_key_resolver
-    _secrets_key_resolver = fn
-
-
-_LOCAL_KEY_PATH = Path.home() / ".config" / "workeros" / "secrets.key"
-
-
-def _get_or_create_secrets_key(pat: str, repo_full_name: str) -> bytes:
-    """Return the AES-256 key for .secrets.enc.
-
-    Lookup order:
-      1. Cloud: _secrets_key_resolver() — Supabase Vault, never touches GitHub.
-      2. OSS + GitHub: GitHub repo Variable (WORKEROS_SECRETS_KEY). Generates
-         and stores a random key on first use.
-      3. Local git (no GitHub): ~/.config/workeros/secrets.key. Generates and
-         writes a random key with mode 600 on first use — same model as SSH keys.
-    """
-    import github_api as _gh
-
-    # 1. Cloud resolver (Supabase Vault)
-    if _secrets_key_resolver is not None:
-        return _secrets_key_resolver()
-
-    # 2. OSS + GitHub: key lives in the GitHub repo as an Actions Variable
-    if repo_full_name:
-        key = _gh.get_secrets_key(pat, repo_full_name)
-        if key is None:
-            key = os.urandom(32)
-            _gh.set_secrets_key(pat, repo_full_name, key)
-            logger.info("Generated new secrets key for %s", repo_full_name)
-        return key
-
-    # 3. Local git (no GitHub): key lives in ~/.config/workeros/secrets.key
-    if _LOCAL_KEY_PATH.exists():
-        return _LOCAL_KEY_PATH.read_bytes()
-    _LOCAL_KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
-    key = os.urandom(32)
-    _LOCAL_KEY_PATH.write_bytes(key)
-    _LOCAL_KEY_PATH.chmod(0o600)
-    logger.info("Generated local secrets key at %s", _LOCAL_KEY_PATH)
-    return key
-
-
-def _encrypt_secrets_blob(secrets: dict, key: bytes) -> bytes:
-    """Encrypt a secrets dict to bytes using AES-256-GCM."""
-    import json as _json
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    nonce = os.urandom(12)
-    ct = AESGCM(key).encrypt(nonce, _json.dumps(secrets).encode("utf-8"), None)
-    return nonce + ct  # 12-byte nonce prepended for decryption
-
-
-def _decrypt_secrets_blob(blob: bytes, key: bytes) -> dict:
-    """Decrypt bytes produced by _encrypt_secrets_blob."""
-    import json as _json
-    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
-    nonce, ct = blob[:12], blob[12:]
-    plaintext = AESGCM(key).decrypt(nonce, ct, None)
-    return _json.loads(plaintext.decode("utf-8"))
-
-
-def _sync_secrets_to_enc(user_id: str, repos: Repositories, pat: str, repo_full_name: str) -> None:
-    """Encrypt all workspace secrets and commit .secrets.enc to git.
-
-    Called on every secret save/delete when GitHub is connected.
-    """
-    try:
-        secrets: dict[str, str] = {}
-        for row in repos.secrets.list(user_id=user_id):
-            val = repos.secrets.read_value(user_id=user_id, name=row["name"])
-            if val is not None:
-                secrets[row["name"]] = val
-        if not secrets:
-            return
-        key = _get_or_create_secrets_key(pat, repo_full_name)
-        blob = _encrypt_secrets_blob(secrets, key)
-        workspace = _git_workspace()
-        enc_path = workspace / _SECRETS_ENC_FILENAME
-        enc_path.write_bytes(blob)
-        with _git_ops_lock:
-            _ensure_git_workspace_ready(workspace)
-            _git_ops.commit_paths(
-                workspace, [_SECRETS_ENC_FILENAME],
-                "secrets: update encrypted vault",
-            )
-            _git_ops.push_background(workspace)
-        logger.debug("Encrypted %d secrets to %s", len(secrets), _SECRETS_ENC_FILENAME)
-    except Exception as exc:
-        logger.warning("Failed to sync secrets to %s: %s", _SECRETS_ENC_FILENAME, exc)
-
-
-def _load_secrets_from_enc(user_id: str, repos: Repositories, pat: str, repo_full_name: str) -> int:
-    """Decrypt .secrets.enc and load secrets into WorkerOS. Returns count loaded.
-
-    Called on startup (if already connected) and after linking a repo (fresh install).
-    """
-    try:
-        enc_path = _git_workspace() / _SECRETS_ENC_FILENAME
-        if not enc_path.is_file():
-            return 0
-        key = _get_or_create_secrets_key(pat, repo_full_name)
-        blob = enc_path.read_bytes()
-        secrets = _decrypt_secrets_blob(blob, key)
-        loaded = 0
-        for name, value in secrets.items():
-            try:
-                repos.secrets.set(user_id=user_id, name=name, value=str(value))
-                loaded += 1
-            except Exception:
-                pass
-        if loaded:
-            logger.info("Loaded %d secrets from %s", loaded, _SECRETS_ENC_FILENAME)
-        return loaded
-    except Exception as exc:
-        logger.warning("Failed to load secrets from %s: %s", _SECRETS_ENC_FILENAME, exc)
-        return 0
-
-
 @app.get("/system/git", response_model=_GitStatus)
 def get_git_status(auth: AuthContext = Depends(get_auth_context)) -> _GitStatus:
     """Return current GitHub connection + linked repo status."""
@@ -17133,8 +16971,11 @@ def import_git_workspace(
             except Exception:
                 pass
 
-        # Import secrets from .secrets.enc (OSS only — cloud uses Supabase)
-        if _secrets_key_resolver is None:
+        # Import secrets from .secrets.enc (OSS only — cloud uses Supabase).
+        # Read the resolver from the live service module — it is mutable state
+        # registered at startup via set_secrets_key_resolver.
+        from services import git_service as _git_service
+        if _git_service._secrets_key_resolver is None:
             loaded_secrets = _load_secrets_from_enc(auth.user_id, repos, pat, repo_full_name)
             imported["secrets"] = loaded_secrets
 
