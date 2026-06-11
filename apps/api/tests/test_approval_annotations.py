@@ -202,6 +202,26 @@ def test_authed_reject_persists_annotations_visible_to_owner():
     assert "annotations_json" not in row
 
 
+def test_authed_approve_persists_reason_visible_to_owner():
+    # #769: an approve decision can carry a plain-text reviewer comment
+    # (distinct from structured annotations), stored in the same `reason`
+    # column reject uses and surfaced back on the approval.
+    _seed_pending_approval("apr_approve_reason", "run_approve_reason")
+    client = _client()
+    resp = client.post(
+        "/runs/run_approve_reason/approve",
+        headers=_AUTH,
+        json={"reason": "looks good, shipped after a quick scan"},
+    )
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["status"] == "approved"
+
+    listed = client.get("/approvals?status=approved", headers=_AUTH)
+    assert listed.status_code == 200, listed.text
+    row = next(r for r in listed.json() if r["id"] == "apr_approve_reason")
+    assert row["reason"] == "looks good, shipped after a quick scan"
+
+
 # ---------------------------------------------------------------------------
 # 3. Public signed-link reviewer: upload a screenshot + reject with annotations.
 # ---------------------------------------------------------------------------

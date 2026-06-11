@@ -11888,6 +11888,7 @@ def _annotations_json_or_none(raw: Any) -> Optional[str]:
 class ApproveRequest(BaseModel):
     edited_output: Optional[Dict[str, Any]] = None
     annotations: Optional[Dict[str, Any]] = None
+    reason: Optional[str] = None  # #769: optional plain-text approve comment
 
 
 class RejectRequest(BaseModel):
@@ -12192,13 +12193,14 @@ def approve_public_approval(
     if decision_input.get("kind") == "agent_tool":
         return approve_agent_tool_approval(
             approval_id,
-            ApproveRequest(edited_output=body.edited_output, annotations=body.annotations),
+            # #769: forward the public approver's plain-text reason (was dropped)
+            ApproveRequest(edited_output=body.edited_output, annotations=body.annotations, reason=body.reason),
             auth,
             repos,
         )
     return approve_run(
         str(approval["run_id"]),
-        ApproveRequest(edited_output=body.edited_output, annotations=body.annotations),
+        ApproveRequest(edited_output=body.edited_output, annotations=body.annotations, reason=body.reason),
         auth,
         repos,
     )
@@ -12409,6 +12411,7 @@ def approve_run(
         edited_output_json=edited_output_json,
         follow_up_run_id=follow_up_run_id,
         annotations_json=annotations_json,
+        reason=getattr(body, "reason", None),  # #769
     )
 
     # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
