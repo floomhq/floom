@@ -15819,6 +15819,15 @@ from routers.workspaces import (
 )
 app.include_router(workspaces_router)
 
+from routers.user_settings import (
+    user_settings_router,
+    _UserSettings,
+    _UserSettingsUpdate,
+    get_user_settings,
+    put_user_settings,
+)
+app.include_router(user_settings_router)
+
 # ---------------------------------------------------------------------------
 # WhatsApp integration — extracted to channels/whatsapp.py
 # ---------------------------------------------------------------------------
@@ -20118,56 +20127,6 @@ def auth_me(auth: AuthContext = Depends(get_auth_context)) -> dict:
         "auth_method": auth.auth_method,
         "is_admin": auth.is_admin,
     }
-
-
-class _UserSettings(BaseModel):
-    theme: Literal["day", "dark", "system"] = "system"
-    accent: Optional[str] = None
-
-
-class _UserSettingsUpdate(BaseModel):
-    model_config = ConfigDict(extra="forbid")
-    theme: Optional[Literal["day", "dark", "system"]] = None
-    accent: Optional[str] = None
-
-
-@app.get("/user/settings", response_model=_UserSettings)
-def get_user_settings(auth: AuthContext = Depends(get_auth_context)) -> _UserSettings:
-    """#773: per-user appearance prefs (theme/accent), scoped to the caller."""
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT theme, accent FROM user_settings WHERE user_id = ?",
-            (auth.user_id,),
-        ).fetchone()
-    if row is None:
-        return _UserSettings()
-    return _UserSettings(theme=row["theme"] or "system", accent=row["accent"])
-
-
-@app.put("/user/settings", response_model=_UserSettings)
-def put_user_settings(
-    payload: _UserSettingsUpdate,
-    auth: AuthContext = Depends(get_auth_context),
-) -> _UserSettings:
-    """#773: upsert the caller's appearance prefs. Partial — only provided
-    fields change."""
-    with get_db() as conn:
-        existing = conn.execute(
-            "SELECT theme, accent FROM user_settings WHERE user_id = ?",
-            (auth.user_id,),
-        ).fetchone()
-        theme = payload.theme if payload.theme is not None else (existing["theme"] if existing else "system")
-        accent = payload.accent if payload.accent is not None else (existing["accent"] if existing else None)
-        conn.execute(
-            """
-            INSERT INTO user_settings (user_id, theme, accent, updated_at)
-            VALUES (?, ?, ?, ?)
-            ON CONFLICT(user_id) DO UPDATE SET theme = excluded.theme,
-                accent = excluded.accent, updated_at = excluded.updated_at
-            """,
-            (auth.user_id, theme, accent, now_iso()),
-        )
-    return _UserSettings(theme=theme, accent=accent)
 
 
 @app.get("/auth/setup-required")
