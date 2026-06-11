@@ -4411,6 +4411,37 @@ def _db_worker_owners() -> Dict[str, str]:
         return {}
 
 
+def _granted_asset_ids(asset_type: str) -> frozenset[str]:
+    """Asset ids of ``asset_type`` granted to the CURRENT request's viewer.
+
+    #767/#768 enforcement hook. A ``specific_people`` grant records a grantee by
+    email (``asset_grants.grantee_email``); this resolves the active request's
+    auth-context email to the set of assets shared with them so the visibility
+    resolvers can surface those assets. Returns an empty set outside a request
+    (no auth context) or for an email-less context — fail CLOSED (no grant)
+    rather than open. Never raises: a grant probe must not break a list/detail.
+    """
+    ctx = current_auth_context()
+    email = ((ctx.email if ctx else None) or "").strip().lower()
+    if not email:
+        return frozenset()
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT asset_id FROM asset_grants "
+                "WHERE asset_type = ? AND lower(grantee_email) = ?",
+                (asset_type, email),
+            ).fetchall()
+    except sqlite3.OperationalError:
+        return frozenset()
+    return frozenset(str(r[0]) for r in rows if r and r[0])
+
+
+def _granted_worker_ids() -> frozenset[str]:
+    """Canonical worker ids the current viewer has been granted (#767/#768)."""
+    return frozenset(_canonical_worker_id(wid) for wid in _granted_asset_ids("worker"))
+
+
 def _list_visible_workers(
     *,
     user_id: str,
@@ -4449,6 +4480,20 @@ def _list_visible_workers(
             if owner is not None and owner != user_id:
                 continue  # belongs to another member — do not surface
             visible.setdefault(worker_id, worker)
+    # #767/#768 enforcement: surface workers explicitly shared with this viewer
+    # (by email) even when visibility (private/specific_people) would otherwise
+    # hide them. get_any bypasses owner/visibility scoping — the grant IS the
+    # authorization. This is read access only; repo UPDATE/DELETE stay
+    # owner-scoped (WHERE owner_id=?), so a grantee cannot edit or delete.
+    for gid in _granted_worker_ids():
+        if gid in visible or _worker_hidden_from_api(gid, _owned):
+            continue
+        try:
+            granted = repos.workers.get_any(worker_id=gid)
+        except Exception:
+            granted = None
+        if granted is not None:
+            visible[gid] = granted
     return list(visible.values())
 
 
@@ -4512,10 +4557,16 @@ def _get_visible_worker(
     user_id: str,
     repos: Repositories,
     role: Optional[str] = None,
+    include_grants: bool = False,
 ) -> Optional[Dict[str, Any]]:
     # Admin sees all, member sees own + shared; default from the request context
     # so the owner-scoped filesystem fallback below doesn't 404 an admin or a
     # worker shared with this member.
+    #
+    # include_grants (#767/#768) is OFF by default so EVERY mutation endpoint
+    # that gates on this helper keeps owner/workspace-only semantics — a
+    # specific-people grantee 404s there and can never edit/delete/run. Only the
+    # read path (GET /workers/{id} detail) opts in, giving a grantee VIEW access.
     role = _visibility_role(role)
     worker = _get_db_worker(worker_id, user_id=user_id, repos=repos, role=role)
     if worker is not None:
@@ -4537,6 +4588,20 @@ def _get_visible_worker(
         return None
     if worker_id in PUBLIC_STOCK_WORKER_IDS:
         return get_worker(worker_id)
+    # #767/#768 enforcement: a viewer explicitly granted this worker can fetch it
+    # even when visibility (private/specific_people) hides it from the owner-scoped
+    # repo query above. get_any bypasses owner/visibility scoping; the grant IS the
+    # authorization. VIEW only and opt-in (include_grants): only the read path
+    # passes it, so a grantee never reaches a mutation endpoint's owner-scoped
+    # write or the delete orphan-reap. Checked before the filesystem fallback so it
+    # works in cloud (fallback disabled) too.
+    if include_grants and _canonical_worker_id(worker_id) in _granted_worker_ids():
+        try:
+            granted = repos.workers.get_any(worker_id=worker_id)
+        except Exception:
+            granted = None
+        if granted is not None:
+            return granted
     if _shared_filesystem_fallback_allowed():
         # Owner-scope the filesystem fallback so one member cannot fetch — and,
         # via the endpoints that gate on this (run/edit/delete/files), act on —
@@ -7169,6 +7234,11 @@ def _worker_permissions(
     worker_id = str(worker.get("id") or "")
     owner_id = worker.get("owner_id")
     visibility = str(worker.get("visibility") or "private")
+    # #767/#768: a specific-people grant adds VIEW access for the grantee, never
+    # run/edit/delete/share (those stay with the owner / workspace admins). The
+    # engine asset_access rule does not know about the app-level asset_grants
+    # table, so the grant is layered in here.
+    granted = bool(worker_id) and _canonical_worker_id(worker_id) in _granted_worker_ids()
     if asset_access is not None and worker_id and owner_id:
         try:
             perms = asset_access.get_permissions(
@@ -7179,7 +7249,7 @@ def _worker_permissions(
             )
             return AssetPermissions(
                 is_owner=bool(perms.get("is_owner", owner_id == user_id)),
-                can_view=bool(perms.get("can_view", True)),
+                can_view=bool(perms.get("can_view", True)) or granted,
                 can_edit=bool(perms.get("can_edit", True)),
                 can_run=bool(perms.get("can_run", True)),
                 can_delete=bool(perms.get("can_delete", True)),
@@ -7193,7 +7263,7 @@ def _worker_permissions(
     shared = visibility == "workspace"
     return AssetPermissions(
         is_owner=is_owner,
-        can_view=is_owner or shared,
+        can_view=is_owner or shared or granted,
         can_edit=is_owner,
         can_run=is_owner or shared,
         can_delete=is_owner,
@@ -7271,8 +7341,11 @@ def _build_worker_detail(
     user_id: str,
     repos: Repositories,
     role: Optional[str] = None,
+    include_grants: bool = False,
 ) -> WorkerDetail:
-    worker = _get_visible_worker(worker_id, user_id=user_id, repos=repos, role=role)
+    worker = _get_visible_worker(
+        worker_id, user_id=user_id, repos=repos, role=role, include_grants=include_grants
+    )
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -7738,6 +7811,13 @@ class _GrantOut(BaseModel):
     created_at: str
 
 
+def _canonical_grant_asset_id(asset_type: str, asset_id: str) -> str:
+    """Normalize a grant's asset id. Worker ids are canonicalized so a grant
+    stored under any alias resolves the same id the enforcement path looks up;
+    other asset types are stored verbatim."""
+    return _canonical_worker_id(asset_id) if asset_type == "worker" else asset_id
+
+
 def _assert_can_share_asset(asset_type: str, asset_id: str, auth: AuthContext, repos: Repositories) -> None:
     """#767: only someone who can share the asset may grant access to it."""
     if asset_type == "worker":
@@ -7760,6 +7840,9 @@ def add_share_grant(
     if "@" not in email or "." not in email.split("@")[-1]:
         raise HTTPException(status_code=422, detail="A valid email is required")
     _assert_can_share_asset(body.asset_type, body.asset_id, auth, repos)
+    # Store the canonical worker id so the enforcement path (which canonicalizes
+    # the requested id) finds the grant regardless of the alias the caller used.
+    asset_id = _canonical_grant_asset_id(body.asset_type, body.asset_id)
     ts = now_iso()
     gid = str(_uuid_mod.uuid4())
     with get_db() as conn:
@@ -7767,13 +7850,13 @@ def add_share_grant(
             conn.execute(
                 "INSERT INTO asset_grants (id, asset_type, asset_id, owner_id, grantee_email, created_at) "
                 "VALUES (?, ?, ?, ?, ?, ?)",
-                (gid, body.asset_type, body.asset_id, auth.user_id, email, ts),
+                (gid, body.asset_type, asset_id, auth.user_id, email, ts),
             )
         except sqlite3.IntegrityError:
             existing = conn.execute(
                 "SELECT id, created_at FROM asset_grants "
                 "WHERE asset_type=? AND asset_id=? AND owner_id=? AND grantee_email=?",
-                (body.asset_type, body.asset_id, auth.user_id, email),
+                (body.asset_type, asset_id, auth.user_id, email),
             ).fetchone()
             return _GrantOut(id=str(existing["id"]), email=email, created_at=str(existing["created_at"]))
     return _GrantOut(id=gid, email=email, created_at=ts)
@@ -7787,6 +7870,7 @@ def list_share_grants(
     repos: Repositories = Depends(get_repos),
 ) -> List[_GrantOut]:
     """#768: list the people granted access to an asset (owner-scoped)."""
+    asset_id = _canonical_grant_asset_id(asset_type, asset_id)
     with get_db() as conn:
         rows = conn.execute(
             "SELECT id, grantee_email, created_at FROM asset_grants "
@@ -7989,11 +8073,15 @@ def get_worker_detail(
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
     canonical_id = _canonical_worker_id(worker_id)
+    # include_grants=True: a specific-people grantee (#767/#768) can VIEW the
+    # worker detail. This is the only caller that opts in; mutation endpoints
+    # keep owner/workspace-only access.
     return _build_worker_detail(
         canonical_id,
         user_id=_worker_access_user_id(auth),
         repos=repos,
         role=_worker_repo_role(auth),
+        include_grants=True,
     )
 
 
