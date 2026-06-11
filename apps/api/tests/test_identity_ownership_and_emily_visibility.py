@@ -52,6 +52,7 @@ def test_claim_on_setup_transfers_workers_and_connections(tmp_path, monkeypatch)
         "INSERT INTO composio_connections (id, user_id, app_name) VALUES ('c1','boot','gmail');"
     )
     c.commit(); c.close()
+    monkeypatch.setenv("WORKEROS_DB", str(db))
     monkeypatch.setenv("FLOOM_DB", str(db))
     monkeypatch.setenv("WORKEROS_USER_ID", "boot")
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
@@ -72,6 +73,7 @@ def test_claim_on_setup_transfers_workers_and_connections(tmp_path, monkeypatch)
 def test_claim_on_setup_copies_bootstrap_secrets(tmp_path, monkeypatch):
     db = tmp_path / "claim2.db"
     _mk_workers_db(db)
+    monkeypatch.setenv("WORKEROS_DB", str(db))
     monkeypatch.setenv("FLOOM_DB", str(db))
     monkeypatch.setenv("WORKEROS_USER_ID", "boot")
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
@@ -93,6 +95,7 @@ def test_claim_on_setup_copies_bootstrap_secrets(tmp_path, monkeypatch):
 def test_claim_on_setup_noop_when_admin_is_bootstrap(tmp_path, monkeypatch):
     db = tmp_path / "claim3.db"
     _mk_workers_db(db)
+    monkeypatch.setenv("WORKEROS_DB", str(db))
     monkeypatch.setenv("FLOOM_DB", str(db))
     monkeypatch.setenv("WORKEROS_USER_ID", "admin-1")  # bootstrap IS the admin
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
@@ -108,6 +111,7 @@ def test_claim_on_setup_noop_in_cloud(tmp_path, monkeypatch):
     c = sqlite3.connect(db)
     c.execute("INSERT INTO workers (id, owner_id) VALUES ('w1','boot')")
     c.commit(); c.close()
+    monkeypatch.setenv("WORKEROS_DB", str(db))
     monkeypatch.setenv("FLOOM_DB", str(db))
     monkeypatch.setenv("WORKEROS_USER_ID", "boot")
     monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")  # multi-tenant: no single owner to claim
@@ -141,6 +145,7 @@ def _seed_visibility_db(path: Path) -> None:
 def test_emily_list_admin_sees_all(tmp_path, monkeypatch):
     db = tmp_path / "vis1.db"
     _seed_visibility_db(db)
+    monkeypatch.setenv("WORKEROS_DB", str(db))
     monkeypatch.setenv("FLOOM_DB", str(db))
     import chat_service
     res = chat_service._tool_workers_list_all({}, "admin-1")
@@ -151,6 +156,7 @@ def test_emily_list_admin_sees_all(tmp_path, monkeypatch):
 def test_emily_list_member_sees_own_and_shared_only(tmp_path, monkeypatch):
     db = tmp_path / "vis2.db"
     _seed_visibility_db(db)
+    monkeypatch.setenv("WORKEROS_DB", str(db))
     monkeypatch.setenv("FLOOM_DB", str(db))
     import chat_service
     res = chat_service._tool_workers_list_all({}, "member-1")
@@ -164,6 +170,7 @@ def test_emily_list_member_sees_own_and_shared_only(tmp_path, monkeypatch):
 def test_worker_can_view_admin_vs_isolated_member(tmp_path, monkeypatch):
     db = tmp_path / "vis3.db"
     _seed_visibility_db(db)
+    monkeypatch.setenv("WORKEROS_DB", str(db))
     monkeypatch.setenv("FLOOM_DB", str(db))
     # Simulate multi-user mode so filesystem fallback is disabled and an
     # unknown worker ID correctly returns False instead of True.
