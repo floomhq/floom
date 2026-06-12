@@ -349,3 +349,20 @@ def _load_workspace_tools_yml(user_id: str, repos) -> int:
     except Exception as exc:
         logger.warning("Failed to load %s: %s", _WORKSPACE_TOOLS_FILENAME, exc)
         return 0
+
+
+def _workers_git_prefix() -> str:
+    """Relative path of the workers dir within the workspace git root.
+
+    OSS: git root is WORKERS_DIR.parent, so workers are at 'workers/'.
+    Cloud: git root IS WORKERS_DIR/workspace_id, so workers sit at root — prefix is ''.
+    """
+    import git_ops as _git_ops
+    from worker_registry import WORKERS_DIR
+
+    if _git_ops.get_active_workspace_id():
+        return ""  # Cloud: worker_id/ is directly under the git root
+    try:
+        return WORKERS_DIR.relative_to(_git_workspace()).as_posix()
+    except ValueError:
+        return "workers"
