@@ -143,10 +143,18 @@ def _client_and_calls(monkeypatch):
     # The public-approval route handlers live in routers.approvals and call
     # approve_run / reject_run / approve_destructive_action by bare name (resolved
     # in that module), so patch there — not on main's re-export.
-    import routers.approvals as _appr
-    monkeypatch.setattr(_appr, "approve_run", _fake_approve_run)
-    monkeypatch.setattr(_appr, "reject_run", _fake_reject_run)
-    monkeypatch.setattr(_appr, "approve_destructive_action", _fake_approve_destructive)
+    # Patch the EXACT namespace the mounted handlers resolve these names in:
+    # the public-approval routes call approve_run/reject_run/approve_destructive_action
+    # by bare name out of routers.approvals' module globals. A sibling test that
+    # reloads main+purges routers makes this module's top-level `main` stale, so
+    # `import routers.approvals` (or inspect.getmodule, which matches by name in
+    # sys.modules) grabs the RELOADED module whose __dict__ is a different object
+    # than the stale handlers' __globals__. Patch the handlers' own __globals__
+    # dict via setitem — bulletproof regardless of reload generation.
+    _ns = main.approve_public_approval.__globals__
+    monkeypatch.setitem(_ns, "approve_run", _fake_approve_run)
+    monkeypatch.setitem(_ns, "reject_run", _fake_reject_run)
+    monkeypatch.setitem(_ns, "approve_destructive_action", _fake_approve_destructive)
     main.app.dependency_overrides[main.get_repos] = lambda: _Repos()
     return TestClient(main.app), calls
 
