@@ -59,6 +59,63 @@ function isPublicProxy(pathname: string): boolean {
   return PUBLIC_PROXY_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
+// #947 — CSRF defence-in-depth. The /api/proxy/* surface injects the server
+// secret and forwards mutations to the backend; SameSite=lax is the only thing
+// stopping a cross-site POST today. Validate Origin (falling back to Referer)
+// against the app's own host on every state-changing method.
+//
+// The proxy is browser-only: server components call the backend directly via
+// lib/server-api, and CLI/MCP clients hit the API with x-floom-secret, never
+// this route. So a browser fetch always carries Origin on a mutating request —
+// its absence is anomalous and rejected.
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+function allowedHosts(req: NextRequest): Set<string> {
+  const hosts = new Set<string>();
+  // The request's own host, plus the forwarded host (the public domain when a
+  // platform rewrite/proxy fronts the function, e.g. the Cloud /app rewrite).
+  const add = (h: string | null | undefined) => {
+    if (h) hosts.add(h.split(",")[0].trim().toLowerCase());
+  };
+  add(req.nextUrl.host);
+  add(req.headers.get("host"));
+  add(req.headers.get("x-forwarded-host"));
+  // Optional explicit allowlist for extra legitimate origins (comma-separated
+  // host[:port] or full origins).
+  for (const entry of (process.env.CSRF_TRUSTED_ORIGINS || "").split(",")) {
+    const v = entry.trim();
+    if (!v) continue;
+    try {
+      hosts.add(new URL(v.includes("://") ? v : `https://${v}`).host.toLowerCase());
+    } catch {
+      /* ignore malformed entry */
+    }
+  }
+  return hosts;
+}
+
+function hostOf(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+/** True when a mutating proxy request is same-origin (or absent of risk). */
+function isCsrfSafe(req: NextRequest): boolean {
+  if (!MUTATING_METHODS.has(req.method.toUpperCase())) return true;
+  const allowed = allowedHosts(req);
+  const originHost = hostOf(req.headers.get("origin"));
+  if (originHost) return allowed.has(originHost);
+  // No Origin (some browsers omit it on same-origin in older versions): fall
+  // back to Referer's host. If neither is present on a mutating request, reject.
+  const refererHost = hostOf(req.headers.get("referer"));
+  if (refererHost) return allowed.has(refererHost);
+  return false;
+}
+
 // #926 — per-request nonce CSP. script-src drops 'unsafe-inline' and the broad
 // https: allowance; 'strict-dynamic' lets nonce'd Next bootstrap scripts load
 // their chunk graph. connect-src is same-origin (client API calls go through
@@ -132,6 +189,15 @@ export async function middleware(req: NextRequest) {
 
   // ----- /api/proxy/* : the dangerous surface -----
   if (pathname.startsWith("/api/proxy")) {
+    // #947: reject cross-site mutations before anything else. Applies even to
+    // the public token-gated endpoints — they're called from same-origin pages,
+    // so a legitimate request always passes; a cross-site forgery never does.
+    if (!isCsrfSafe(req)) {
+      return NextResponse.json(
+        { detail: "Cross-origin request blocked." },
+        { status: 403 },
+      );
+    }
     if (isPublicProxy(pathname)) {
       // Public, token-gated upstream endpoint (signed-link approvals). Allow.
       return pageResponse();
