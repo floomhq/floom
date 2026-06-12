@@ -129,7 +129,7 @@ function UsedByTab({ folder }: { folder: ContextSummary }) {
       {used.map((ref) => (
         <Link
           key={ref.worker_id}
-          href={`/workers/${encodeURIComponent(ref.worker_id)}`}
+          href={`/workers?sel=${encodeURIComponent(ref.worker_id)}`}
           className="c-lrow"
           style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
         >

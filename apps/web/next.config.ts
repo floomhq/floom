@@ -108,14 +108,13 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
-  // S42: /workers/<id>/edit is gone; redirect bookmarks to the unified detail
-  // page with edit mode toggled on via ?edit=1.
+  // /workers/<id>/edit is gone; redirect bookmarks to the split-pane detail.
   async redirects() {
     return [
       ...cloudApexRedirects(),
       {
         source: "/workers/:id/edit",
-        destination: "/workers/:id?edit=1",
+        destination: "/workers?sel=:id&tab=Config",
         permanent: true,
       },
     ];

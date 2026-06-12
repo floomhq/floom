@@ -165,9 +165,8 @@ function testRunPagesWireRefreshCallback() {
   const workerPage = readSrc("app/workers/[id]/page.tsx");
   assert(runPage.includes("streamUnavailable"), "#587: run detail page must read streamUnavailable from the hook");
   assert(runPage.includes("onRefresh={refresh}"), "#587: run detail page must wire the refresh callback");
-  assert(workerPage.includes("streamUnavailable={activeRunStream.streamUnavailable}"), "#587: worker page must pass streamUnavailable to RunDetailSplitPane");
-  assert(workerPage.includes("onRefresh={activeRunStream.refresh}"), "#587: worker page must pass the refresh callback");
-  console.log("✓ #587 run pages wire the recovery callback");
+  assert(workerPage.includes("redirect") && workerPage.includes("/workers?sel="), "#587: legacy worker detail route must redirect to split-pane detail");
+  console.log("✓ #587 run page wires the recovery callback; worker detail route redirects to split-pane detail");
 }
 
 // ---------------------------------------------------------------------------

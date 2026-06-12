@@ -339,7 +339,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
         actions: (
           <>
             {/* SPEC §4: ↑ worker link (worker_id on every run — BUILT). */}
-            <Link href={`/workers/${r.worker_id}`} className="c-vpill" style={{ padding: "6px 11px" }}>
+            <Link href={`/workers?sel=${encodeURIComponent(r.worker_id)}`} className="c-vpill" style={{ padding: "6px 11px" }}>
               ↑ Open worker
             </Link>
             <button

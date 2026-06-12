@@ -19,7 +19,7 @@ import { formatDuration } from "@/lib/runs/format";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
-import { Lock } from "lucide-react";
+import { FileText, Folder, Lock } from "lucide-react";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import { CodeBlock } from "@/components/file-viewer/code-block";
@@ -322,8 +322,63 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
   );
 }
 
-// SPEC §11: Source is file SUB-TABS (worker.yml/SKILL.md/run.py/requirements.txt),
-// NOT a left-sidebar file list.
+function sourceFolder(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length <= 1) return "Root";
+  return parts.slice(0, -1).join("/");
+}
+
+function sourceFileName(path: string): string {
+  return path.split("/").filter(Boolean).pop() || path;
+}
+
+function SourceFileTree({
+  files,
+  activePath,
+  onSelect,
+}: {
+  files: ReturnType<typeof orderedSourceFiles>;
+  activePath: string;
+  onSelect: (path: string) => void;
+}) {
+  const groups = new Map<string, typeof files>();
+  for (const file of files) {
+    const folder = sourceFolder(file.path);
+    const list = groups.get(folder) ?? [];
+    list.push(file);
+    groups.set(folder, list);
+  }
+
+  return (
+    <div className="max-h-[min(58vh,520px)] overflow-y-auto rounded-[var(--radius-card)] bg-[var(--bg-2)] p-2">
+      {Array.from(groups.entries()).map(([folder, group]) => (
+        <div key={folder} className="mb-2 last:mb-0">
+          <div className="flex min-w-0 items-center gap-1.5 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
+            <Folder className="size-3.5 shrink-0" />
+            <span className="truncate">{folder}</span>
+          </div>
+          <div className="space-y-0.5">
+            {group.map((file) => (
+              <button
+                key={file.path}
+                type="button"
+                className={`flex w-full min-w-0 items-center gap-2 rounded-[var(--radius-button)] px-2 py-1.5 text-left text-xs transition-colors ${
+                  file.path === activePath ? "bg-[var(--bg-card)] text-foreground" : "text-muted-foreground hover:bg-[var(--bg-3)] hover:text-foreground"
+                }`}
+                title={file.path}
+                onClick={() => onSelect(file.path)}
+              >
+                <FileText className="size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate font-mono">{sourceFileName(file.path)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SourceTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
   const [active, setActive] = useState<string | null>(null);
@@ -332,20 +387,19 @@ function SourceTab({ w }: { w: WorkerSummary }) {
   if (ordered.length === 0) return <div style={muted}>No source files.</div>;
   const file = ordered.find((f) => f.path === active) ?? ordered[0];
   return (
-    <div>
-      <div style={{ display: "flex", gap: 2, marginBottom: 12, flexWrap: "wrap" }}>
-        {ordered.map((f) => (
-          <button
-            key={f.path}
-            type="button"
-            className={`c-dtab ${f.path === file.path ? "on" : ""}`}
-            onClick={() => setActive(f.path)}
-          >
-            {f.path}
-          </button>
-        ))}
+    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(180px,240px)_minmax(0,1fr)]">
+      <SourceFileTree files={ordered} activePath={file.path} onSelect={setActive} />
+      <div className="min-w-0">
+        <div className="mb-2 flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0 truncate font-mono text-xs text-muted-foreground" title={file.path}>
+            {file.path}
+          </div>
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            {ordered.length} {ordered.length === 1 ? "file" : "files"}
+          </span>
+        </div>
+        <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} />
       </div>
-      <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} />
     </div>
   );
 }
@@ -550,7 +604,7 @@ export default function WorkersCollection({
         rel(w.recent_stats?.last_run_at),
       ],
       status: workerStatusPill(w),
-      menu: [{ label: "Open", onSelect: () => (window.location.href = `/workers/${w.id}`) }],
+      menu: [{ label: "Open", onSelect: () => (window.location.href = `/workers?sel=${encodeURIComponent(w.id)}`) }],
     }),
     card: (w) => ({
       // V4 SPEC rule 3: no avatar monogram. Lock is small+muted inline after name.
@@ -568,21 +622,16 @@ export default function WorkersCollection({
       const viewOnly = isViewOnly(w);
       const actions = (
         <>
-          {/* SPEC §4: Run opens the inputs flow on the full worker page (the
-              dedicated Run-with-inputs modal is §5). */}
           {can("run", w) && (
-            <Link href={`/workers/${w.id}#run`} className="c-addbtn" style={pillBtn}>
+            <Link href={`/workers?sel=${encodeURIComponent(w.id)}`} className="c-addbtn" style={pillBtn}>
               Run
             </Link>
           )}
           {editable && (
-            <Link href={`/workers/${w.id}?edit=1`} className="c-vpill" style={pillBtn}>
+            <Link href={`/workers?sel=${encodeURIComponent(w.id)}&tab=Config`} className="c-vpill" style={pillBtn}>
               Edit
             </Link>
           )}
-          <Link href={`/workers/${w.id}`} className="c-vpill" style={pillBtn}>
-            Open full page →
-          </Link>
         </>
       );
       return {
@@ -601,7 +650,7 @@ export default function WorkersCollection({
                   View only
                 </span>
               )}
-              <span className="c-dh-sub" style={{ margin: 0 }}>
+              <span className="c-dh-desc">
                 {w.description}
               </span>
             </>

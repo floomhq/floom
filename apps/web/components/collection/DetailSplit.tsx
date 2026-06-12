@@ -43,7 +43,7 @@ export function DetailPane({
           </div>
           {header.sub != null && <div className="c-dh-sub">{header.sub}</div>}
         </div>
-        <div className="c-dh-act">
+        <div className="c-dh-act" aria-label="Detail actions">
           {header.actions}
           <button type="button" className="x" aria-label="Close detail" onClick={onClose}>
             <X size={16} />

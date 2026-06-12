@@ -155,7 +155,7 @@ function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
   // worker-author run the BACKEND now registers the drafted bundle as a worker
   // (run completion hook) and reports the new worker id via SSE
   // (`created_worker_id`) + on the run output. We navigate to
-  // `/workers/<id>?edit=1` so the operator reviews/saves/runs it. We only land
+  // `/workers?sel=<id>&tab=Config` so the operator reviews it in the split pane. We only land
   // on `/runs/<id>` when the run FAILED (so the operator can see why) or when
   // — defensively — no worker id ever materialises.
   //
@@ -187,7 +187,7 @@ function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
       sseRef.current = null;
     }
     toast.success("Worker created");
-    router.push(`/workers/${workerId}?edit=1`);
+    router.push(`/workers?sel=${encodeURIComponent(workerId)}&tab=Config`);
   }
 
   // A worker-author run COMPLETED. Resolve the real worker id and open the
@@ -222,7 +222,7 @@ function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
   // still being drafted — that strands the operator on a run page and the
   // editor never opens. Instead we keep the drafting panel up and poll the run
   // until it reaches a terminal state, then route correctly:
-  //   completed -> /workers/<id>?edit=1 (the registered worker)
+  //   completed -> /workers?sel=<id>&tab=Config (the registered worker)
   //   failed    -> /runs/<id> (so the operator can see why)
   // Bounded so a wedged run can't poll forever; on timeout we open the run view.
   async function pollRunUntilTerminalThenRoute(runId: string) {
@@ -362,7 +362,7 @@ function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
           ],
         });
         setUploadState("navigating");
-        router.push(`/workers/${result.worker_id}?edit=1`);
+        router.push(`/workers?sel=${encodeURIComponent(result.worker_id)}&tab=Config`);
       } catch (e: unknown) {
         toast.error(e instanceof Error ? e.message : "Failed to create worker from file");
         setUploadState("idle");
@@ -384,7 +384,7 @@ function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
           ],
         });
         setUploadState("navigating");
-        router.push(`/workers/${result.worker_id}?edit=1`);
+        router.push(`/workers?sel=${encodeURIComponent(result.worker_id)}&tab=Config`);
       } catch (e: unknown) {
         toast.error(e instanceof Error ? e.message : "Failed to create worker from file");
         setUploadState("idle");
@@ -400,7 +400,7 @@ function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
     try {
       const worker = await api.workers.createFromBundle(file);
       setUploadState("navigating");
-      router.push(`/workers/${worker.id}?edit=1`);
+      router.push(`/workers?sel=${encodeURIComponent(worker.id)}&tab=Config`);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to create worker from bundle");
       setUploadState("idle");
@@ -419,7 +419,7 @@ function NewWorkerContent({ initialPrompt = "" }: { initialPrompt?: string }) {
       const blob = await zip.generateAsync({ type: "blob" });
       const worker = await api.workers.createFromBundle(blob);
       setUploadState("navigating");
-      router.push(`/workers/${worker.id}?edit=1`);
+      router.push(`/workers?sel=${encodeURIComponent(worker.id)}&tab=Config`);
     } catch (e: unknown) {
       toast.error(e instanceof Error ? e.message : "Failed to create worker from folder");
       setUploadState("idle");

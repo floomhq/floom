@@ -94,8 +94,8 @@ export function CodeBlock({
   }, [text, lang]);
 
   return (
-    <div className="p-4">
-      <pre className="overflow-auto rounded-[var(--radius-button)] border border-line bg-[var(--bg-2)] p-3 font-mono text-xs leading-6 text-foreground dark:bg-[#1a1a1a]">
+    <div className="p-0">
+      <pre className="max-w-full overflow-auto rounded-[var(--radius-button)] bg-[var(--bg-2)] p-3 font-mono text-xs leading-6 text-foreground dark:bg-[#1a1a1a]">
         {highlighted ? (
           <code
             className={`hljs language-${lang}`}
