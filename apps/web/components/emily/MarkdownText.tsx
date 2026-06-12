@@ -1,6 +1,7 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { cn } from "@/lib/utils";
+import { sanitizeHref } from "@/lib/safe-url";
 
 /**
  * MarkdownText -- renders assistant message text as real markdown.
@@ -50,7 +51,7 @@ export function MarkdownText({
           pre: ({ children }) => <>{children}</>,
           a: ({ href, children }) => (
             <a
-              href={href}
+              href={sanitizeHref(href)}
               target="_blank"
               rel="noopener noreferrer"
               className="underline underline-offset-2 text-foreground hover:text-muted-foreground transition-colors break-all"
