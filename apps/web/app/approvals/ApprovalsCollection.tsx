@@ -198,7 +198,7 @@ export default function ApprovalsCollection() {
                 </span>
                 <span style={kvK}>Worker</span>
                 <span>
-                  <Link href={`/workers/${a.worker_id}`} style={{ color: "var(--accent)" }}>
+                  <Link href={`/workers?sel=${encodeURIComponent(a.worker_id)}`} style={{ color: "var(--accent)" }}>
                     {a.worker_name ?? a.worker_id}
                   </Link>
                 </span>

@@ -1033,7 +1033,7 @@ export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
 export function getCardHref(card: ToolCard): string | null {
   switch (card.kind) {
     case "worker-create":
-      return card.workerId ? `/workers/${card.workerId}` : null;
+      return card.workerId ? `/workers?sel=${encodeURIComponent(card.workerId)}` : null;
     case "run":
       return card.runId ? `/runs/${card.runId}` : null;
     case "artifact":

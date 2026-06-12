@@ -23,7 +23,7 @@ describe("next.config redirects", () => {
     expect(redirects).toEqual([
       {
         source: "/workers/:id/edit",
-        destination: "/workers/:id?edit=1",
+        destination: "/workers?sel=:id&tab=Config",
         permanent: true,
       },
     ]);

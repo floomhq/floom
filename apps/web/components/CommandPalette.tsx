@@ -130,7 +130,7 @@ export function CommandPalette() {
                 <CommandItem
                   key={worker.id}
                   value={`worker ${worker.name} ${worker.id} ${worker.description ?? ""}`}
-                  onSelect={() => go(`/workers/${worker.id}`)}
+                  onSelect={() => go(`/workers?sel=${encodeURIComponent(worker.id)}`)}
                 >
                   <Box />
                   <span className="truncate">{worker.name}</span>

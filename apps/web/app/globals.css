@@ -845,14 +845,14 @@ html.dark .grain {
 /* split detail (SPEC §3, §8c) */
 .c-body { flex:1; min-height:0; display:flex; overflow:hidden; }
 .c-listcol { flex:1; min-width:0; overflow:auto; }
-.c-split .c-listcol { flex:0 0 30%; min-width:240px; border-right:1px solid var(--line); padding:0; display:flex; flex-direction:column; overflow:hidden; }
+.c-split .c-listcol { flex:0 0 30%; min-width:240px; border-right:var(--bd-div); padding:0; display:flex; flex-direction:column; overflow:hidden; }
 .c-split.lc .c-listcol { flex:0 0 46px; min-width:46px; }
 .c-split.lc .c-listcol > .lcin, .c-split.lc .c-listcol > .c-splitbar { display:none; }
 .c-sliver { display:none; }
 .c-split.lc .c-listcol .c-sliver { display:flex; flex-direction:column; align-items:center; gap:8px; padding-top:14px; color:var(--muted-foreground); }
 .c-split .c-listcol .lcin { flex:1; overflow:auto; padding:14px 16px; }
 .c-splitbar { display:none; }
-.c-split .c-splitbar { display:flex; align-items:center; min-height:56px; padding:8px 14px; border-bottom:1px solid var(--line); flex:0 0 auto; }
+.c-split .c-splitbar { display:flex; align-items:center; min-height:56px; padding:8px 14px; border-bottom:var(--bd-div); flex:0 0 auto; }
 .c-detailcol { display:none; }
 .c-split .c-detailcol { display:flex; flex:1; min-width:0; flex-direction:column; overflow:hidden; }
 /* split-left list = the SAME connected list, just single-column + no cols/pills */
@@ -866,23 +866,25 @@ html.dark .grain {
    SPEC §10: detail header = exactly 56px to align with nav-top (h-14) and Emily header.
    The collapse chevron (lcbtn) and the list-expand chevron (c-splitbar) must be
    on the same 56px baseline so they visually align horizontally. */
-.c-dhead { display:flex; align-items:center; gap:11px; padding:8px 20px; border-bottom:1px solid var(--line); min-height:56px; height:56px; }
+.c-dhead { display:flex; align-items:center; gap:11px; padding:7px 20px; border-bottom:var(--bd-div); min-height:56px; height:56px; flex:0 0 56px; overflow:hidden; }
 .c-dhead .lcbtn, .c-dhead .x { color:var(--muted-foreground); padding:5px; border-radius:7px; flex:0 0 auto; }
 .c-dhead .lcbtn:hover, .c-dhead .x:hover { background:var(--bg-2); }
-.c-dh-main { flex:1; min-width:0; }
+.c-dh-main { flex:1 1 auto; min-width:0; overflow:hidden; }
 .c-dh-title { display:flex; align-items:center; gap:8px; min-width:0; }
 /* Title: 15px for 56px header so title+sub both fit at 56px height */
-.c-dh-title .nm { font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
+.c-dh-title .nm { display:block; min-width:0; max-width:100%; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
 /* Sub: badge row sits under title — 2px gap is tighter than 3px to fit 56px header */
-.c-dh-sub { color:var(--muted-foreground); font-size:12px; margin-top:2px; display:flex; align-items:center; gap:6px; min-width:0; flex-wrap:wrap; }
-.c-dh-act { display:flex; gap:7px; align-items:center; }
+.c-dh-sub { color:var(--muted-foreground); font-size:12px; margin-top:2px; display:flex; align-items:center; gap:6px; min-width:0; max-width:100%; overflow:hidden; flex-wrap:nowrap; }
+.c-dh-sub .c-dh-desc { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.c-dh-act { display:flex; gap:7px; align-items:center; flex:0 0 auto; min-width:0; }
 .c-vpill { display:inline-flex; align-items:center; gap:5px; border:var(--bd-pill); border-radius:var(--radius-pill); font-size:10.5px; padding:2px 8px; color:var(--muted-foreground); background:var(--bg-2); white-space:nowrap; flex:0 0 auto; }
-.c-dtabs { display:flex; gap:2px; padding:7px 16px; border-bottom:1px solid var(--line); overflow:auto; }
+.c-dtabs { display:flex; gap:2px; padding:7px 16px; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; }
+.c-dtabs::-webkit-scrollbar { height:0; display:none; }
 .c-dtab { display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border-radius:9px; color:var(--muted-foreground); font-size:13px; white-space:nowrap; }
 .c-dtab:hover { background:var(--bg-2); }
 .c-dtab.on { background:var(--bg-2); color:var(--ink); font-weight:500; }
 .c-dtab .cb { background:var(--bg-3); color:var(--ink-soft); font-size:10.5px; border-radius:var(--radius-pill); padding:0 6px; }
-.c-dbody { flex:1; overflow:auto; padding:18px 20px; }
+.c-dbody { flex:1; min-width:0; overflow:auto; overflow-x:hidden; padding:18px 20px; }
 
 /* states (SPEC §7) */
 .c-statebox { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; color:var(--muted-foreground); padding:50px; }
