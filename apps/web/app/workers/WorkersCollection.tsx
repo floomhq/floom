@@ -550,7 +550,15 @@ const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }
   Config: ConfigTab,
 };
 
-function WorkerDetailActions({ w, onUpdated }: { w: WorkerSummary; onUpdated: (w: WorkerSummary) => void }) {
+function WorkerDetailActions({
+  w,
+  onUpdated,
+  canManage = false,
+}: {
+  w: WorkerSummary;
+  onUpdated: (w: WorkerSummary) => void;
+  canManage?: boolean;
+}) {
   const [d, applyDetail] = useWorkerDetail(w.id);
   const [runOpen, setRunOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -628,12 +636,12 @@ function WorkerDetailActions({ w, onUpdated }: { w: WorkerSummary; onUpdated: (w
 
   return (
     <>
-      {can("run", w) && (
+      {(canManage || can("run", w)) && (
         <button type="button" className="c-addbtn" style={pillBtn} onClick={() => setRunOpen(true)}>
           Run
         </button>
       )}
-      {can("edit", w) && (
+      {(canManage || can("edit", w)) && (
         <button type="button" className="c-vpill" style={pillBtn} onClick={() => setEditOpen(true)}>
           Edit
         </button>
@@ -736,10 +744,21 @@ export default function WorkersCollection({
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(initialWorkers.length === 0);
+  const [canManageWorkers, setCanManageWorkers] = useState(false);
 
   useEffect(() => {
     let alive = true;
     setFavorites(getFavorites());
+    const meRequest = typeof api.me === "function" ? api.me() : Promise.resolve(null);
+    meRequest
+      .then((user) => {
+        if (alive) {
+          setCanManageWorkers(
+            user?.is_admin ?? (user?.role === "admin" || user?.role === "owner"),
+          );
+        }
+      })
+      .catch(() => {});
     api.workers
       .list({ include_archived: true })
       .then((all) => {
@@ -834,10 +853,11 @@ export default function WorkersCollection({
       star: { on: favorites.has(w.id), onToggle: () => toggleStar(w.id) },
     }),
     detail: (w) => {
-      const viewOnly = isViewOnly(w);
+      const viewOnly = !canManageWorkers && isViewOnly(w);
       const actions = (
         <WorkerDetailActions
           w={w}
+          canManage={canManageWorkers}
           onUpdated={(updated) =>
             setWorkers((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)))
           }
