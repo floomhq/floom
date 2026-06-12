@@ -5,7 +5,9 @@ import { fetchWorkerList } from "@/lib/server-api";
 import WorkersCollection from "./WorkersCollection";
 import WorkersLoadingSkeleton from "./WorkersLoadingSkeleton";
 
-export const revalidate = 30;
+// #945: was `revalidate = N` (ISR) — an authenticated, per-user data fetch
+// must not be baked into a statically-cached shell shared across requests.
+export const dynamic = "force-dynamic";
 
 export default async function WorkersPage() {
   return (
