@@ -18,17 +18,30 @@ if str(API_DIR) not in sys.path:
 
 def _reset_modules() -> None:
     for name in list(sys.modules):
-        if name in ("chat_service", "main", "contexts") or name == "db" or name.startswith("db."):
+        if (
+            name in ("chat_service", "main", "contexts", "worker_registry", "runner_utils")
+            or name == "db"
+            or name.startswith("db.")
+        ):
             sys.modules.pop(name, None)
 
 
-def _configure_env(monkeypatch, *, db_path: Path, contexts_dir: Path) -> None:
+def _configure_env(
+    monkeypatch,
+    *,
+    db_path: Path,
+    contexts_dir: Path,
+    workers_dir: Path | None = None,
+) -> None:
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
     monkeypatch.setenv("WORKEROS_USER_ID", "federico")
     monkeypatch.setenv("WORKEROS_DB", str(db_path))
     monkeypatch.setenv("FLOOM_DB", str(db_path))
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))
+    resolved_workers_dir = workers_dir or db_path.parent / "workers"
+    resolved_workers_dir.mkdir(parents=True, exist_ok=True)
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(resolved_workers_dir))
 
 
 def _manifest(worker_id: str, *, system_worker: bool = False) -> dict:
@@ -154,6 +167,44 @@ def test_emily_worker_list_resolves_uuid_session_to_legacy_default_owner(tmp_pat
         "legacy-system",
     }
     assert "other-private" not in {worker["id"] for worker in include_system["workers"]}
+
+
+def test_emily_worker_list_resolves_header_alias_to_user_with_workers(tmp_path, monkeypatch):
+    session_user_id = "9b1a5065-3ab9-493a-8220-b6c139d9c1b7"
+    db_path = tmp_path / "workeros.db"
+    contexts_dir = tmp_path / "contexts"
+    _configure_env(monkeypatch, db_path=db_path, contexts_dir=contexts_dir)
+    _reset_modules()
+
+    import db
+
+    db.init_db()
+    db.get_repositories.cache_clear()
+    now = db.now_iso()
+    with db.get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO users
+                (id, username, password_hash, role, disabled, created_at, updated_at)
+            VALUES (?, 'fede', 'test-hash', 'admin', 0, ?, ?)
+            """,
+            (session_user_id, now, now),
+        )
+    db.get_repositories().workers.create(
+        user_id=session_user_id,
+        worker_id="alias-real",
+        name="alias-real",
+        manifest_json=json.dumps(_manifest("alias-real")),
+        bundle_path="workers/alias-real",
+        workspace_id="local-default",
+        visibility="private",
+    )
+    chat_service = _load_chat_service()
+
+    result = chat_service._tool_workers_list_all({}, "fede")
+
+    assert result["count"] == 1
+    assert {worker["id"] for worker in result["workers"]} == {"alias-real"}
 
 
 def test_emily_worker_list_does_not_widen_admin_to_all_users_by_default(tmp_path, monkeypatch):
