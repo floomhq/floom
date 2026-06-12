@@ -1,8 +1,5 @@
 /**
- * #843 — WorkerListCard's play button linked to /workers/{id}/runs, a route
- * with no Next.js page (only /workers/[id]/page.tsx exists) — clicking it
- * 404'd. Fix: the play button links to the worker detail page, where a run
- * can be started.
+ * WorkerListCard opens worker detail in the Workers split pane.
  *
  * Run: cd apps/web && npx vitest run tests/worker-list-card-routes.dom.test.tsx
  */
@@ -29,11 +26,11 @@ describe("WorkerListCard routes (#843)", () => {
     expect(hrefs.some((h) => h?.endsWith("/runs"))).toBe(false);
   });
 
-  it("play button targets the worker detail page", () => {
+  it("play button targets the worker split-pane detail", () => {
     const { container } = render(<WorkerListCard card={card} />);
     const play = Array.from(container.querySelectorAll("a")).find(
       (a) => a.getAttribute("title") === "Run"
     );
-    expect(play?.getAttribute("href")).toBe("/workers/w1");
+    expect(play?.getAttribute("href")).toBe("/workers?sel=w1");
   });
 });

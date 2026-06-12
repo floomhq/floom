@@ -97,11 +97,11 @@ function test556TypesUpdated(): void {
 // ---------------------------------------------------------------------------
 
 function test556WorkerDetailShowsSecretNames(): void {
-  const s = src("app/workers/[id]/page.tsx");
-  assert(s.includes("worker.missing_secrets"),
-    "Worker detail must render worker.missing_secrets in the warning block");
-  assert(s.includes("prefill="),
-    "Missing secret links must pre-fill the secret name in the add form");
+  const s = src("components/overview/AlertsBell.tsx");
+  assert(s.includes('type === "setup_incomplete"') || s.includes('type === \\"setup_incomplete\\"'),
+    "Setup alerts must render setup_incomplete items from the overview flow");
+  assert(s.includes("/connections/secrets"),
+    "Missing secret links must route to the secrets manager");
 }
 
 // ---------------------------------------------------------------------------

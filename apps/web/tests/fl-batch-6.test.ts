@@ -82,23 +82,21 @@ function test540CountdownShownInBanner(): void {
 // ---------------------------------------------------------------------------
 
 function test539PrimaryNavSplit(): void {
-  const s = src("app/workers/[id]/page.tsx");
-  assert(s.includes("PRIMARY_NAV") && s.includes("SETUP_NAV"),
-    "Worker detail must split NAV_ITEMS into PRIMARY_NAV (view) and SETUP_NAV (setup)");
+  const s = src("app/workers/WorkersCollection.tsx");
+  assert(s.includes("WORKER_DETAIL_TABS") && s.includes("WORKER_TAB_COMPONENT"),
+    "Worker split-pane detail must derive its tab set from WORKER_DETAIL_TABS");
 }
 
 function test539SetupInDropdown(): void {
   const s = src("app/workers/[id]/page.tsx");
-  assert(s.includes("SETUP_NAV.map"), "Setup nav items must be rendered inside a dropdown menu");
-  assert(s.includes("DropdownMenuContent"),
-    "Worker detail must use DropdownMenuContent for setup nav");
+  assert(s.includes("redirect") && s.includes("/workers?sel="),
+    "Legacy worker full-page route must redirect into the split-pane detail");
 }
 
 function test539PrimaryTabsOnly4(): void {
-  const s = src("app/workers/[id]/page.tsx");
-  // PRIMARY_NAV should contain 4 items (about, run, runs, code)
-  assert(s.includes("PRIMARY_NAV = NAV_ITEMS.filter"),
-    "PRIMARY_NAV must be derived by filtering view group from NAV_ITEMS");
+  const s = src("lib/workers/tabs.ts");
+  assert(s.includes("Overview") && s.includes("History") && s.includes("Source") && s.includes("Versions") && s.includes("Config"),
+    "Worker split-pane tabs must expose the v4 detail tab set");
 }
 
 // ---------------------------------------------------------------------------
