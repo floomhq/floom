@@ -725,13 +725,19 @@ html.dark .grain {
 
 /* control bar */
 .c-toolbar { display:flex; align-items:center; gap:10px; }
-.c-srch { flex:1; display:flex; align-items:center; gap:9px; border:var(--bd-input); border-radius:var(--radius-button); padding:9px 12px; color:var(--muted-foreground); background:var(--bg-2); max-width:480px; }
+.c-srch { flex:1; min-width:0; display:flex; align-items:center; gap:9px; border:var(--bd-input); border-radius:var(--radius-button); padding:9px 12px; color:var(--muted-foreground); background:var(--bg-2); max-width:480px; }
 .c-srch input { flex:1; border:0; background:none; outline:none; color:var(--ink); font:inherit; min-width:0; }
 .c-srch input::placeholder { color:var(--muted-foreground); }
 /* Joined segmented control on bg-2 track — ONE visual unit, no gap between segments */
 .c-vtog { display:inline-flex; border:var(--bd-input); border-radius:var(--radius-button); padding:2px; background:var(--bg-2); }
 .c-vtog button { width:30px; height:26px; border-radius:8px; color:var(--muted-foreground); display:flex; align-items:center; justify-content:center; transition:background .1s,color .1s; }
 .c-vtog button.on { background:var(--bg-card,#fff); color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.07); }
+@media (max-width:640px) {
+  .c-toolbar { flex-wrap:wrap; }
+  .c-toolbar .c-srch { flex:1 0 100%; max-width:none; }
+  .c-toolbar .c-vtog { order:2; }
+  .c-toolbar > div:last-child { order:3; margin-left:auto !important; }
+}
 .c-addbtn { display:flex; align-items:center; gap:6px; background:var(--primary); color:var(--primary-text); border-radius:var(--radius-button); padding:9px 14px; font-weight:500; font-size:13px; white-space:nowrap; }
 
 /* tag bar — small chips, single scrollable row, families divided */
