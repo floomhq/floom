@@ -132,7 +132,7 @@ describe("Settings Collection (Phase 3)", () => {
 
     await waitFor(() => expect(screen.getByText("System")).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByText("Workspace defaults")).toBeInTheDocument();
-    expect(screen.getByText("Slack, email & agent install")).toBeInTheDocument();
+    expect(screen.getByText("Slack, email & WhatsApp")).toBeInTheDocument();
     expect(screen.getByText("Configure Emily")).toBeInTheDocument();
     expect(screen.getByText("People & roles")).toBeInTheDocument();
     expect(screen.getByText("Git-tracked workspace changelog")).toBeInTheDocument();

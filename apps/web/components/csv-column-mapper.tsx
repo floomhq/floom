@@ -232,8 +232,8 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
       <div>
         {label && <p className="text-sm font-medium mb-1.5">{label}</p>}
         <div
-          className={`relative border-2 border-dashed rounded-lg p-6 text-center transition-colors cursor-pointer ${
-            dragging ? "border-[var(--accent)] bg-muted" : "border-line hover:border-muted-foreground/40"
+          className={`relative rounded-[var(--radius-card)] [border:var(--bd-input)] p-6 text-center transition-colors cursor-pointer ${
+            dragging ? "bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]" : "hover:bg-muted/40"
           }`}
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
           onDragLeave={() => setDragging(false)}
@@ -280,12 +280,12 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
         )}
       </p>
 
-      <div className="border border-border rounded-lg overflow-hidden">
-        <div className="grid grid-cols-2 gap-0 bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground border-b border-border">
+      <div className="[border:var(--bd-card)] rounded-lg overflow-hidden">
+        <div className="grid grid-cols-2 gap-0 bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground [border-bottom:var(--bd-div)]">
           <span>Required column</span>
           <span>Your CSV column</span>
         </div>
-        <div className="divide-y divide-[#f0f0f0]">
+        <div className="[&>*+*]:[border-top:var(--bd-div)]">
           {requiredColumns.map((col) => (
             <div key={col} className="grid grid-cols-2 gap-0 items-center px-4 py-2">
               <span className="text-sm font-mono text-foreground">{col}</span>
@@ -294,7 +294,7 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
                   value={mapping[col] || ""}
                   onValueChange={(val: string | null) => setMapping((prev) => ({ ...prev, [col]: val ?? "" }))}
                 >
-                  <SelectTrigger className="h-7 text-xs border-border w-full">
+                  <SelectTrigger className="h-7 text-xs [border:var(--bd-card)] w-full">
                     <SelectValue placeholder="(skip)" />
                   </SelectTrigger>
                   <SelectContent>

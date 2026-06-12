@@ -212,9 +212,9 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
           ref={panelRef}
           role="dialog"
           aria-label="Worker notifications"
-          className="absolute right-0 top-full z-50 mt-2 w-[380px] rounded-[var(--radius-card)] border border-[var(--line)] bg-[var(--paper)] shadow-[var(--shadow-pop)] outline-none"
+          className="absolute right-0 top-full z-50 mt-2 w-[380px] rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--paper)] shadow-[var(--shadow-pop)] outline-none"
         >
-          <div className="border-b border-[var(--line)] px-4 py-3">
+          <div className="[border-bottom:var(--bd-div)] px-4 py-3">
             <p className="text-sm font-semibold text-[var(--ink)]">
               {count > 0 ? `${count} item${count === 1 ? "" : "s"} need attention` : "Notifications"}
             </p>
@@ -227,7 +227,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                 <p className="text-sm text-[var(--ink-soft)]">All workers running normally</p>
               </div>
             ) : (
-              <div className="divide-y divide-[var(--line-soft)]">
+              <div className="[&>*+*]:[border-top:var(--bd-div)]">
                 {failures.map((item) => (
                   <div key={`failure-${item.worker_id}`} className="px-4 py-3">
                     <div className="flex items-start gap-3">
@@ -254,7 +254,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                             <Link
                               href={`/workers?sel=${encodeURIComponent(item.worker_id)}`}
                               onClick={() => setOpen(false)}
-                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] border border-[var(--line)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                             >
                               View worker
                             </Link>
@@ -262,7 +262,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                           <Link
                             href={`/runs?worker=${item.worker_id}&status=failed`}
                             onClick={() => setOpen(false)}
-                            className="inline-flex h-6 items-center rounded-[var(--radius-button)] border border-[var(--line)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                            className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                           >
                             View logs
                           </Link>
@@ -271,7 +271,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                               type="button"
                               onClick={() => retry(item.worker_id!)}
                               disabled={busy === `retry:${item.worker_id}`}
-                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] border border-[var(--line)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors disabled:opacity-40"
+                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors disabled:opacity-40"
                             >
                               Retry
                             </button>
@@ -281,7 +281,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                               type="button"
                               onClick={() => disable(item.worker_id!)}
                               disabled={busy === `disable:${item.worker_id}`}
-                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] border border-[var(--line)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors disabled:opacity-40"
+                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors disabled:opacity-40"
                             >
                               Disable
                             </button>
@@ -319,7 +319,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                           <Link
                             href="/connections"
                             onClick={() => setOpen(false)}
-                            className="inline-flex h-6 items-center rounded-[var(--radius-button)] border border-[var(--line)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                            className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                           >
                             Reconnect all
                           </Link>
@@ -350,7 +350,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                                 key={item.worker_id}
                                 href="/connections"
                                 onClick={() => setOpen(false)}
-                                className="inline-flex h-6 items-center rounded-[var(--radius-button)] border border-[var(--line)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                                className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                               >
                                 Add connection
                               </Link>
@@ -359,7 +359,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                                 key={item.worker_id}
                                 href="/connections/secrets"
                                 onClick={() => setOpen(false)}
-                                className="inline-flex h-6 items-center rounded-[var(--radius-button)] border border-[var(--line)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                                className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                               >
                                 Add secret
                               </Link>
@@ -389,7 +389,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                           <Link
                             href="/approvals"
                             onClick={() => setOpen(false)}
-                            className="inline-flex h-6 items-center rounded-[var(--radius-button)] border border-[var(--line)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                            className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                           >
                             Review approvals
                           </Link>

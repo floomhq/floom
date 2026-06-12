@@ -67,7 +67,7 @@ describe("Emily ToolCardRenderer", () => {
     );
 
     expect(screen.getByText("Research Brief")).toBeTruthy();
-    expect(screen.getByRole("link", { name: /Open in app/i })).toHaveAttribute("href", "/runs/run_123");
+    expect(screen.getByRole("link", { name: /Open in app/i })).toHaveAttribute("href", "/runs?sel=run_123");
 
     await userEvent.click(screen.getByText("Research Brief"));
 

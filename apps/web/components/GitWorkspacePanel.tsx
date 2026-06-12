@@ -36,10 +36,10 @@ function PATForm({ onConnected }: { onConnected: (username: string) => void }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Connect a GitHub Personal Access Token so WorkerOS can push your workspace — workers, contexts, and instructions — to a private repo. Every save becomes a commit.
+        Connect a GitHub Personal Access Token so Floom can push your workspace — workers, contexts, and instructions — to a private repo. Every save becomes a commit.
       </p>
 
-      <div className="rounded-[var(--radius-card)] border border-border bg-muted/40 px-4 py-3 space-y-1">
+      <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/40 px-4 py-3 space-y-1">
         <p className="text-xs font-medium text-muted-foreground">Required PAT scope</p>
         <code className="text-xs text-foreground">repo</code>
         <p className="text-xs text-muted-foreground">
@@ -48,7 +48,7 @@ function PATForm({ onConnected }: { onConnected: (username: string) => void }) {
       </div>
 
       <a
-        href="https://github.com/settings/tokens/new?scopes=repo&description=WorkerOS+Workspace"
+        href="https://github.com/settings/tokens/new?scopes=repo&description=Floom+Workspace"
         target="_blank"
         rel="noopener noreferrer"
         className="inline-flex items-center gap-1.5 text-xs text-primary hover:underline"
@@ -161,14 +161,14 @@ function RepoSelector({
           <Loader2 className="size-4 animate-spin" /> Loading repos…
         </div>
       ) : (
-        <div className="divide-y divide-border rounded-[var(--radius-card)] border border-border overflow-hidden">
+        <div className="[&>*+*]:[border-top:var(--bd-div)] rounded-[var(--radius-card)] [border:var(--bd-card)] overflow-hidden">
           {repos.map((r) => (
             <div key={r.full_name} className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="text-sm font-medium truncate">{r.full_name}</span>
-                  <span className="text-[10px] text-muted-foreground border border-border rounded px-1 py-0.5 shrink-0">
+                  <span className="text-[10px] text-muted-foreground [border:var(--bd-card)] rounded px-1 py-0.5 shrink-0">
                     {r.private ? "private" : "public"}
                   </span>
                 </div>
@@ -250,7 +250,7 @@ function ConnectedView({
   }
 
   async function handleDisconnect() {
-    if (!confirm("Disconnect GitHub? The local git history is kept, but WorkerOS will stop pushing to GitHub.")) return;
+    if (!confirm("Disconnect GitHub? The local git history is kept, but Floom will stop pushing to GitHub.")) return;
     setDisconnecting(true);
     try {
       await api.system.gitDisconnect();
@@ -265,10 +265,10 @@ function ConnectedView({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3 rounded-[var(--radius-card)] border border-border bg-muted/30 px-4 py-3">
+      <div className="flex items-start justify-between gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/30 px-4 py-3">
         <div className="space-y-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="size-2 rounded-full bg-green-500 shrink-0" />
+            <span className="size-2 rounded-[var(--radius-pill)] bg-green-500 shrink-0" />
             <a
               href={status.repo_url ?? "#"}
               target="_blank"
@@ -334,8 +334,8 @@ function MemberView({ status }: { status: GitWorkspaceStatus | null }) {
   }
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 rounded-[var(--radius-card)] border border-border bg-muted/30 px-4 py-3">
-        <span className="size-2 rounded-full bg-green-500 shrink-0" />
+      <div className="flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/30 px-4 py-3">
+        <span className="size-2 rounded-[var(--radius-pill)] bg-green-500 shrink-0" />
         <div className="min-w-0">
           <a
             href={status.repo_url ?? "#"}
@@ -412,7 +412,7 @@ export function GitWorkspacePanel() {
           <GitBranch className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-medium">GitHub workspace</h2>
           {status?.connected && (
-            <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
+            <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
               <Check className="size-2.5" /> Connected
             </span>
           )}
@@ -428,7 +428,7 @@ export function GitWorkspacePanel() {
         <GitBranch className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-medium">GitHub workspace</h2>
         {step === "connected" && (
-          <span className="inline-flex items-center gap-1 rounded-full bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
+          <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
             <Check className="size-2.5" /> Connected
           </span>
         )}

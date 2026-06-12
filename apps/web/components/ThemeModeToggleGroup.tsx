@@ -48,7 +48,7 @@ export function ThemeModeToggleGroup() {
   }, []);
 
   return (
-    <div className="inline-flex items-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-card)] p-0.5">
+    <div className="inline-flex items-center rounded-lg [border:var(--bd-card)] bg-[var(--bg-card)] p-0.5">
       {OPTIONS.map((opt) => {
         const Icon = opt.icon;
         const active = mode === opt.value;

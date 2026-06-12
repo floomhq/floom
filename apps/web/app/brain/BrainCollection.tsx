@@ -256,15 +256,6 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
             <span className="c-vpill">{formatBytes(c.total_size_bytes)}</span>
           </>
         ),
-        actions: (
-          <Link
-            href={`/contexts?pack=${encodeURIComponent(c.name)}`}
-            className="c-vpill"
-            style={{ padding: "6px 11px" }}
-          >
-            Open full page →
-          </Link>
-        ),
       },
       tabs: [
         { key: "Files", label: "Files", count: c.file_count, render: () => <FilesTab folder={c} /> },

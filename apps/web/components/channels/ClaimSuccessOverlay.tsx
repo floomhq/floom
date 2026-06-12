@@ -41,7 +41,7 @@ export function ClaimSuccessOverlay({ channel, onContinue }: ClaimSuccessOverlay
     >
       <div className="flex w-full max-w-sm flex-col items-center">
         <div
-          className="flex size-16 items-center justify-center rounded-full"
+          className="flex size-16 items-center justify-center rounded-[var(--radius-pill)]"
           style={{
             backgroundColor: "color-mix(in srgb, var(--success) 12%, var(--background))",
           }}

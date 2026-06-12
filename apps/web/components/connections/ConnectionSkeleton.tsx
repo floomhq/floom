@@ -6,7 +6,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 // a different shape when data arrives.
 export function ConnectionSkeleton() {
   return (
-    <div className="grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(0,1.5fr)_minmax(0,1fr)_120px_140px_auto] gap-3 md:gap-4 items-center px-3 py-2.5 border-b border-line last:border-b-0">
+    <div className="grid grid-cols-[40px_1fr_auto] md:grid-cols-[40px_minmax(0,1.5fr)_minmax(0,1fr)_120px_140px_auto] gap-3 md:gap-4 items-center px-3 py-2.5 [border-bottom:var(--bd-div)] last:[border-bottom:0]">
       <Skeleton className="size-8 rounded-[var(--radius-button)]" />
       <div className="min-w-0 space-y-1.5">
         <Skeleton className="h-3.5 w-32" />

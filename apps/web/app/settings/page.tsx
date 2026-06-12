@@ -21,7 +21,6 @@ import type {
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import {
   Dialog,
   DialogContent,
@@ -41,7 +40,6 @@ import { emptyState } from "@/lib/collection/url-state";
 import type { CollectionConfig, CollectionState } from "@/lib/collection/types";
 import { SETTINGS_NAV, settingsGroup, groupLabel } from "@/lib/settings/nav-groups";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
-import { CliCommandPanel } from "@/components/CliCommandPanel";
 import { GitWorkspacePanel } from "@/components/GitWorkspacePanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { SlackConnect } from "@/components/assistant/SlackConnect";
@@ -49,6 +47,7 @@ import { ClaimSuccessOverlay, type ClaimChannel } from "@/components/channels/Cl
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
 import { EmilyAvatar } from "@/components/emily/EmilyAvatar";
+import { modelLabel } from "@/lib/model-labels";
 import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
@@ -60,6 +59,7 @@ import {
   History,
   MessageSquare,
   Palette,
+  QrCode,
   RotateCcw,
   Save,
   Settings,
@@ -171,7 +171,7 @@ function PersonalAccessTokensPanel() {
       {tokens.length > 0 ? (
         <div className="space-y-1">
           {tokens.map((t) => (
-            <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm">
+            <div key={t.id} className="flex items-center gap-3 rounded-lg [border:var(--bd-card)] px-3 py-2 text-sm">
               <div className="flex-1 min-w-0">
                 <span className="font-medium">{t.name}</span>
                 {t.last_used_at && (
@@ -302,7 +302,7 @@ function SettingsContent() {
           raw === "WhatsApp claim not found"
             ? "This link was not found or the number is already linked."
             : raw === "WhatsApp claim expired"
-              ? "This link has expired. Text the WorkerOS number again to get a new one."
+              ? "This link has expired. Text the Floom number again to get a new one."
               : raw || "Failed to link WhatsApp.";
         toast.error(friendly);
         setWaClaimBanner({ ok: false, message: friendly });
@@ -419,12 +419,18 @@ function SettingsContent() {
       items,
       idOf: (item) => item.key,
       searchOf: (item) => `${item.label} ${item.description} ${item.scope}`,
-      tags: {},
+      tagsOf: (item) => ({ type: [item.scope] }),
+      tags: {
+        type: [
+          { value: "workspace", label: "Workspace" },
+          { value: "account", label: "Account" },
+        ],
+      },
       counts: [
         { value: settingsGroup("workspace").length, label: "workspace" },
         { value: settingsGroup("account").length, label: "account" },
       ],
-      view: { default: "list", grid: false },
+      view: { default: "list", grid: true },
       group: (item) =>
         item.scope === "workspace"
           ? groupLabel("workspace", workspaceName)
@@ -435,6 +441,18 @@ function SettingsContent() {
         primary: item.label,
         secondary: item.description,
         cols: [<ChevronRight key="chevron" className="size-4 text-[var(--muted-foreground)]" />],
+      }),
+      card: (item) => ({
+        leading: <SettingsIcon icon={item.icon} />,
+        name: item.label,
+        description: (
+          <>
+            {item.scope === "workspace" ? groupLabel("workspace", workspaceName) : groupLabel("account", accountName)}
+            {" · "}
+            {item.description}
+          </>
+        ),
+        status: { tone: "idle", label: item.scope === "workspace" ? "Workspace" : "Account" },
       }),
       detail: (item) => ({
         header: {
@@ -629,7 +647,7 @@ function SystemSection({
       {!canEdit ? <ReadOnlyNotice /> : null}
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-muted-foreground">System info</h2>
-        <div className="space-y-3 text-sm">
+        <div className="c-ltable text-sm">
           {info ? (
             <>
               <Row label="Version" value={info.version} mono />
@@ -715,16 +733,74 @@ function SystemSection({
   );
 }
 
+const MCP_INSTALL_SNIPPET = `{
+  "mcpServers": {
+    "floom": { "command": "npx", "args": ["-y", "@floomhq/workeros", "mcp"] }
+  }
+}`;
+
+const CLI_INSTALL_SNIPPET = `npm i -g @floomhq/workeros
+workeros login
+workeros run <worker>`;
+
+function CopyCodeCard({ title, description, value }: { title: string; description: string; value: string }) {
+  async function copy() {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success("Copied");
+    } catch {
+      toast.error("Could not copy");
+    }
+  }
+  return (
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-medium">{title}</h2>
+          <p className="text-xs text-muted-foreground">{description}</p>
+        </div>
+        <Button type="button" variant="outline" onClick={() => void copy()}>
+          <Copy className="size-3.5" />
+          Copy
+        </Button>
+      </div>
+      <pre className="overflow-auto rounded-[var(--radius-button)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]">
+        {value}
+      </pre>
+    </div>
+  );
+}
+
 function DeveloperSection() {
   return (
-    <div className="space-y-8">
-      <CliCommandPanel />
-      <PersonalAccessTokensPanel />
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Git workspace</h2>
+    <Tabs defaultValue="mcp">
+      <TabsList>
+        <TabsTrigger value="mcp">MCP</TabsTrigger>
+        <TabsTrigger value="cli">CLI</TabsTrigger>
+        <TabsTrigger value="tokens">Tokens</TabsTrigger>
+        <TabsTrigger value="git">Git</TabsTrigger>
+      </TabsList>
+      <TabsContent value="mcp" className="space-y-4">
+        <CopyCodeCard
+          title="Agent install"
+          description="Copy this into Claude Desktop, Cursor, VS Code, Windsurf, Cline, or any MCP client."
+          value={MCP_INSTALL_SNIPPET}
+        />
+      </TabsContent>
+      <TabsContent value="cli" className="space-y-4">
+        <CopyCodeCard
+          title="CLI install"
+          description="Install the CLI, authenticate, and run a worker from your terminal."
+          value={CLI_INSTALL_SNIPPET}
+        />
+      </TabsContent>
+      <TabsContent value="tokens" className="space-y-4">
+        <PersonalAccessTokensPanel />
+      </TabsContent>
+      <TabsContent value="git" className="space-y-4">
         <GitWorkspacePanel />
-      </section>
-    </div>
+      </TabsContent>
+    </Tabs>
   );
 }
 
@@ -733,7 +809,7 @@ function AppearanceSection() {
     <div className="space-y-3">
       <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
       <p className="text-sm text-muted-foreground">
-        Choose how WorkerOS looks. System follows your operating system.
+        Choose how Floom looks. System follows your operating system.
       </p>
       <ThemeModeToggleGroup />
     </div>
@@ -808,9 +884,9 @@ function Row({
   mono?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="c-lrow" style={{ gridTemplateColumns: "minmax(120px,.35fr) 1fr", cursor: "default" }}>
       <span className="text-muted-foreground">{label}</span>
-      <span className={`font-medium ${mono ? "font-mono" : ""}`}>{value}</span>
+      <span className={`truncate font-medium ${mono ? "font-mono" : ""}`}>{value}</span>
     </div>
   );
 }
@@ -993,6 +1069,17 @@ export function ModelDefaults({ canEdit = true }: { canEdit?: boolean }) {
   return (
     <div className="space-y-4">
       {MODEL_DEFAULT_FIELDS.map((f) => (
+        f.key === "default_model" ? (
+          <div key={f.key} className="c-ltable">
+            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
+              <div className="c-lp-tx">
+                <div className="nm">{f.label}</div>
+                <div className="sub">{f.hint}</div>
+              </div>
+              <span className="c-vpill">{modelLabel(values[f.key])}</span>
+            </div>
+          </div>
+        ) : (
         <div key={f.key} className="space-y-1.5">
           <Label htmlFor={`md-${f.key}`} className="text-sm">{f.label}</Label>
           <Input
@@ -1013,6 +1100,7 @@ export function ModelDefaults({ canEdit = true }: { canEdit?: boolean }) {
           />
           <p className="text-xs text-muted-foreground">{f.hint}</p>
         </div>
+        )
       ))}
     </div>
   );
@@ -1225,7 +1313,7 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
           <h2 className="text-sm font-medium">Emily</h2>
           <p className="text-xs text-muted-foreground">Persona, workspace notes, and compiled prompt.</p>
         </div>
-        {agent?.model ? <Badge variant="outline" className="font-mono text-xs">{agent.model}</Badge> : null}
+        {agent?.model ? <Badge variant="outline" className="text-xs">{modelLabel(agent.model)}</Badge> : null}
         {agent ? (
           <span className="ml-auto">
             <AssetVisibilityControl
@@ -1414,12 +1502,22 @@ function RoleBadge({ role }: { role: WorkspaceRole }) {
   );
 }
 
-function memberLabel(m: WorkspaceMember): string {
-  return m.display_name?.trim() || m.email?.trim() || m.user_id;
+function looksLikeUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
 }
 
-function memberInitial(m: WorkspaceMember): string {
-  const base = m.display_name?.trim() || m.email?.trim() || m.user_id || "?";
+function memberLabel(m: WorkspaceMember, currentUser?: CurrentUser | null, isMe?: boolean): string {
+  const fallbackUser =
+    isMe
+      ? currentUser?.display_name?.trim() || currentUser?.username?.trim() || currentUser?.email?.trim()
+      : null;
+  const label = m.display_name?.trim() || m.email?.trim() || fallbackUser || "";
+  if (label) return label;
+  return looksLikeUuid(m.user_id) ? "Workspace member" : m.user_id;
+}
+
+function memberInitial(m: WorkspaceMember, currentUser?: CurrentUser | null, isMe?: boolean): string {
+  const base = memberLabel(m, currentUser, isMe);
   return base.slice(0, 2).toUpperCase();
 }
 
@@ -1430,6 +1528,7 @@ function MembersSettingsPanel() {
   const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
   const [inviting, setInviting] = useState(false);
   const [busyUser, setBusyUser] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   const [pendingAction, setPendingAction] = useState<
     | { kind: "remove"; member: WorkspaceMember }
     | { kind: "transfer"; member: WorkspaceMember }
@@ -1448,11 +1547,17 @@ function MembersSettingsPanel() {
 
   useEffect(() => {
     void load();
+    api.me().then(setCurrentUser).catch(() => setCurrentUser(null));
   }, [load]);
 
   const myRole = data?.my_role ?? null;
-  const canManage = myRole === "owner" || myRole === "admin";
-  const isOwner = myRole === "owner";
+  const myMember = data?.members.find((m) => m.user_id === data.my_user_id) ?? null;
+  const effectiveMyRole =
+    myRole ??
+    myMember?.role ??
+    (currentUser?.is_admin || currentUser?.role === "admin" || currentUser?.role === "owner" ? "admin" : null);
+  const canManage = effectiveMyRole === "owner" || effectiveMyRole === "admin";
+  const isOwner = effectiveMyRole === "owner" || myMember?.role === "owner";
   const sortedMembers = data?.members ?? [];
 
   async function handleInvite(e: React.FormEvent) {
@@ -1477,7 +1582,7 @@ function MembersSettingsPanel() {
     setBusyUser(m.user_id);
     try {
       await api.members.setRole(m.user_id, role);
-      toast.success(`${memberLabel(m)} is now ${ROLE_LABEL[role]}`);
+      toast.success(`${memberLabel(m, currentUser, m.user_id === data?.my_user_id)} is now ${ROLE_LABEL[role]}`);
       await load();
     } catch (err) {
       toast.error((err as Error).message || "Failed to change role");
@@ -1494,10 +1599,10 @@ function MembersSettingsPanel() {
     try {
       if (action.kind === "remove") {
         await api.members.remove(action.member.user_id);
-        toast.success(`Removed ${memberLabel(action.member)}`);
+        toast.success(`Removed ${memberLabel(action.member, currentUser, action.member.user_id === data?.my_user_id)}`);
       } else {
         await api.members.transferOwner(action.member.user_id);
-        toast.success(`${memberLabel(action.member)} is now the Owner`);
+        toast.success(`${memberLabel(action.member, currentUser, action.member.user_id === data?.my_user_id)} is now the Owner`);
       }
       await load();
     } catch (err) {
@@ -1564,19 +1669,19 @@ function MembersSettingsPanel() {
             canManage &&
             m.role !== "owner" &&
             !isMe &&
-            !(myRole === "admin" && m.role === "admin");
+            !(effectiveMyRole === "admin" && m.role === "admin");
           const canTransfer = isOwner && m.role !== "owner" && m.status === "active";
           return (
-            <div key={m.user_id} className="flex flex-wrap items-center gap-3 border-b border-[var(--line-soft)] py-3 last:border-b-0">
-              <div className="grid size-9 shrink-0 place-items-center rounded-full bg-[var(--bg-2)] text-[11px] font-medium text-foreground">
-                {memberInitial(m)}
+            <div key={m.user_id} className="flex flex-wrap items-center gap-3 [border-bottom:var(--bd-div)] py-3 last:[border-bottom:0]">
+              <div className="grid size-9 shrink-0 place-items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] text-[11px] font-medium text-foreground">
+                {memberInitial(m, currentUser, isMe)}
               </div>
               <div className="min-w-0 flex-1">
                 <div className="flex items-center gap-2">
-                  <span className="truncate text-sm font-medium text-foreground">{memberLabel(m)}</span>
+                  <span className="truncate text-sm font-medium text-foreground">{memberLabel(m, currentUser, isMe)}</span>
                   {isMe ? <span className="text-[11px] text-[var(--ink-mute)]">You</span> : null}
                 </div>
-                {m.email && m.email !== memberLabel(m) ? (
+                {m.email && m.email !== memberLabel(m, currentUser, isMe) ? (
                   <p className="truncate text-xs text-[var(--ink-mute)]">{m.email}</p>
                 ) : null}
               </div>
@@ -1623,8 +1728,8 @@ function MembersSettingsPanel() {
           </DialogHeader>
           <DialogDescription>
             {pendingAction?.kind === "transfer"
-              ? `Transfer ownership to ${pendingAction ? memberLabel(pendingAction.member) : "this member"}? You will be demoted to Admin.`
-              : `Remove ${pendingAction ? memberLabel(pendingAction.member) : "this member"} from this workspace?`}
+              ? `Transfer ownership to ${pendingAction ? memberLabel(pendingAction.member, currentUser, pendingAction.member.user_id === data?.my_user_id) : "this member"}? You will be demoted to Admin.`
+              : `Remove ${pendingAction ? memberLabel(pendingAction.member, currentUser, pendingAction.member.user_id === data?.my_user_id) : "this member"} from this workspace?`}
           </DialogDescription>
           <DialogFooter>
             <Button variant="outline" onClick={() => setPendingAction(null)}>Cancel</Button>
@@ -1678,7 +1783,7 @@ function VersionList({ title, versions }: { title: string; versions: VersionSumm
       ) : (
         <div className="space-y-1">
           {versions.map((v, index) => (
-            <div key={`${v.asset_type}-${v.id}-${index}`} className="flex items-center justify-between gap-3 border-b border-[var(--line-soft)] py-2 text-sm last:border-b-0">
+            <div key={`${v.asset_type}-${v.id}-${index}`} className="flex items-center justify-between gap-3 [border-bottom:var(--bd-div)] py-2 text-sm last:[border-bottom:0]">
               <div className="min-w-0">
                 <p className="truncate font-medium">{v.message}</p>
                 <p className="text-xs text-muted-foreground">
@@ -1720,7 +1825,7 @@ function WhatsAppQR() {
         shapeRendering="crispEdges"
         aria-label="WhatsApp QR code"
         role="img"
-        className="rounded-md border border-[var(--border-default)]"
+        className="rounded-[var(--radius-button)] [border:var(--bd-card)]"
       >
         <rect width="29" height="29" fill="white" />
         <path fill="black" d={WA_QR_PATH} />
@@ -1782,7 +1887,7 @@ function SlackBindingStatus() {
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-muted/40 px-3 py-2">
+    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] bg-muted/40 px-3 py-2">
       <div className="min-w-0">
         <p className="text-xs font-medium text-foreground truncate">
           {binding.profile_name
@@ -1849,7 +1954,7 @@ function WhatsAppBindingStatus() {
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-muted/40 px-3 py-2">
+    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] bg-muted/40 px-3 py-2">
       <div className="min-w-0">
         <p className="text-xs font-medium text-foreground truncate">
           {binding.profile_name
@@ -1875,103 +1980,73 @@ function WhatsAppBindingStatus() {
 // ChannelsTab — Slack + WhatsApp + Agent install
 // ---------------------------------------------------------------------------
 function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
+  const [qrOpen, setQrOpen] = useState(false);
   return (
-    <>
-      <section className="space-y-3">
-        <div>
-          <h2 className="text-sm font-medium">Messaging</h2>
-          <p className="text-xs text-muted-foreground">
-            Where workers reach you and where Emily can be reached.
-          </p>
-        </div>
-
-        {/* Slack card */}
-        <div className="space-y-3 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-card p-4">
-          <div className="flex items-center gap-2.5">
-            <svg viewBox="0 0 256 256" className="size-5 shrink-0" aria-hidden="true" focusable="false">
-              <path fill="#E01E5A" d="M53.8,161.3c0,14.8-12,26.8-26.8,26.8S0,176.2,0,161.3s12-26.8,26.8-26.8h26.8V161.3z M67.3,161.3 c0-14.8,12-26.8,26.8-26.8s26.8,12,26.8,26.8v67.1c0,14.8-12,26.8-26.8,26.8s-26.8-12-26.8-26.8V161.3z" />
-              <path fill="#36C5F0" d="M94.1,53.6c-14.8,0-26.8-12-26.8-26.8S79.3,0,94.1,0s26.8,12,26.8,26.8v26.8H94.1z M94.1,67.3 c14.8,0,26.8,12,26.8,26.8s-12,26.8-26.8,26.8H26.8C12,120.9,0,108.9,0,94.1s12-26.8,26.8-26.8H94.1z" />
-              <path fill="#2EB67D" d="M201.5,94.1c0-14.8,12-26.8,26.8-26.8s26.8,12,26.8,26.8s-12,26.8-26.8,26.8h-26.8V94.1z M188.1,94.1 c0,14.8-12,26.8-26.8,26.8s-26.8-12-26.8-26.8V26.8C134.4,12,146.4,0,161.3,0s26.8,12,26.8,26.8V94.1z" />
-              <path fill="#ECB22E" d="M161.3,201.5c14.8,0,26.8,12,26.8,26.8s-12,26.8-26.8,26.8s-26.8-12-26.8-26.8v-26.8H161.3z M161.3,188.1 c-14.8,0-26.8-12-26.8-26.8s12-26.8,26.8-26.8h67.3c14.8,0,26.8,12,26.8,26.8s-12,26.8-26.8,26.8H161.3z" />
-            </svg>
-            <h3 className="text-sm font-medium">Slack</h3>
+    <div className="space-y-4">
+      <Tabs defaultValue="slack">
+        <TabsList>
+          <TabsTrigger value="slack">Slack</TabsTrigger>
+          <TabsTrigger value="email">Email</TabsTrigger>
+          <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
+        </TabsList>
+        <TabsContent value="slack" className="space-y-4">
+          <div className="c-ltable">
+            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
+              <div className="c-lp-tx">
+                <div className="nm">Slack workspace</div>
+                <div className="sub">Add Emily to Slack, then DM her to link your identity.</div>
+              </div>
+              {canManageWorkspace ? (
+                <SlackConnect />
+              ) : (
+                <span className="c-vpill">View only</span>
+              )}
+            </div>
           </div>
-          <p className="text-xs text-muted-foreground">
-            Install Emily to your Slack workspace, then DM her to link your identity.
-          </p>
-          {canManageWorkspace ? (
-            <SlackConnect />
-          ) : (
-            <ReadOnlyNotice message="Slack workspace install controls are hidden because this account is not Owner or Admin." />
-          )}
           <div className="space-y-1.5">
             <p className="text-xs font-medium text-muted-foreground">Your link status</p>
             <SlackBindingStatus />
           </div>
-        </div>
-
-        {/* WhatsApp card */}
-        <div className="space-y-3 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-card p-4">
-          <div className="flex items-center gap-2.5">
-            <svg viewBox="0 0 24 24" className="size-5 shrink-0 text-[#25D366]" aria-hidden="true" focusable="false">
-              <use href="#brand-whatsapp" />
-            </svg>
-            <h3 className="text-sm font-medium">WhatsApp</h3>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Text Emily on WhatsApp. She&apos;ll reply with a link to bind your number to this account.
-          </p>
-          <div className="flex flex-wrap items-start gap-6">
-            <WhatsAppQR />
-            <div className="flex-1 min-w-[160px] space-y-3">
-              <ol className="space-y-1.5 text-xs text-muted-foreground">
-                <li>1. Scan the QR or text <span className="font-medium text-foreground">+1 650-399-9709</span>.</li>
-                <li>2. Emily replies with a claim link — tap it.</li>
-                <li>3. Your number is bound to this account.</li>
-              </ol>
-              <div className="space-y-1.5">
-                <p className="text-xs font-medium text-muted-foreground">Your link status</p>
-                <WhatsAppBindingStatus />
+        </TabsContent>
+        <TabsContent value="email" className="space-y-4">
+          <div className="c-ltable">
+            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
+              <div className="c-lp-tx">
+                <div className="nm">Email</div>
+                <div className="sub">Email channel setup is not connected for this workspace yet.</div>
               </div>
+              <span className="c-vpill">Not connected</span>
             </div>
           </div>
-        </div>
-      </section>
-
-      <section className="space-y-3">
-        <div>
-          <h2 className="text-sm font-medium">Agent install</h2>
-          <p className="text-xs text-muted-foreground">
-            Let an external AI agent operate your workers over MCP, or drive them from the CLI.
-          </p>
-        </div>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">MCP (Claude Desktop, Cursor, VS Code)</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <pre className="overflow-auto rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]">
-{`{
-  "mcpServers": {
-    "workeros": { "command": "npx", "args": ["-y", "@floomhq/workeros", "mcp"] }
-  }
-}`}
-            </pre>
-          </CardContent>
-        </Card>
-        <Card>
-          <CardHeader>
-            <CardTitle className="text-sm font-medium">CLI</CardTitle>
-          </CardHeader>
-          <CardContent>
-            <pre className="overflow-auto rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]">
-{`npm i -g @floomhq/workeros
-workeros login
-workeros run <worker>`}
-            </pre>
-          </CardContent>
-        </Card>
-      </section>
-    </>
+        </TabsContent>
+        <TabsContent value="whatsapp" className="space-y-4">
+          <div className="c-ltable">
+            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
+              <div className="c-lp-tx">
+                <div className="nm">WhatsApp</div>
+                <div className="sub">Scan the QR code to start a chat and bind your number.</div>
+              </div>
+              <Button type="button" variant="outline" onClick={() => setQrOpen(true)}>
+                <QrCode className="size-3.5" />
+                Show QR
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">Your link status</p>
+            <WhatsAppBindingStatus />
+          </div>
+        </TabsContent>
+      </Tabs>
+      <Dialog open={qrOpen} onOpenChange={setQrOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Link WhatsApp</DialogTitle>
+            <DialogDescription>Scan this QR code, send Emily a message, then open the claim link she replies with.</DialogDescription>
+          </DialogHeader>
+          <WhatsAppQR />
+        </DialogContent>
+      </Dialog>
+    </div>
   );
 }

@@ -1,6 +1,6 @@
 // Shared v6 share-card primitives. Every standalone share surface (worker,
 // brain file/pack, approval) uses ONE card with the SAME fixed body height and
-// the same WorkerOS nav — Federico's HARD rule. No emoji; the brand mark is a
+// the same Floom nav — Federico's HARD rule. No emoji; the brand mark is a
 // real SVG, never a text-in-circle.
 import Link from "next/link";
 import type { ReactNode } from "react";
@@ -8,8 +8,8 @@ import type { ReactNode } from "react";
 /** Fixed share-card body height. All share surfaces match this (spec: 480px). */
 export const SHARE_CARD_BODY_HEIGHT = 480;
 
-/** WorkerOS wordmark + SVG mark (matches the v6 spec #workeros-mark symbol). */
-export function WorkerosMark({ size = 22, label = "WorkerOS" }: { size?: number; label?: string }) {
+/** Floom wordmark + SVG mark (matches the v6 spec #workeros-mark symbol). */
+export function FloomMark({ size = 22, label = "Floom" }: { size?: number; label?: string }) {
   return (
     <Link href="/" className="inline-flex items-center gap-2 text-[15px] font-semibold text-[var(--ink)] no-underline">
       <svg
@@ -18,7 +18,7 @@ export function WorkerosMark({ size = 22, label = "WorkerOS" }: { size?: number;
         viewBox="0 0 100 100"
         xmlns="http://www.w3.org/2000/svg"
         role="img"
-        aria-label="WorkerOS"
+        aria-label="Floom"
         style={{ borderRadius: "22%", color: "var(--ink)" }}
       >
         <rect width="100" height="100" rx="22" fill="currentColor" />
@@ -32,11 +32,11 @@ export function WorkerosMark({ size = 22, label = "WorkerOS" }: { size?: number;
   );
 }
 
-/** Standalone top nav for a share page: WorkerOS mark on the left, a slot on the right. */
+/** Standalone top nav for a share page: Floom mark on the left, a slot on the right. */
 export function ShareNav({ right }: { right?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between rounded-t-[var(--radius-card)] border-b border-[var(--border-soft)] bg-[var(--bg-card)] px-5 py-3">
-      <WorkerosMark />
+    <div className="flex items-center justify-between rounded-t-[var(--radius-card)] [border-bottom:var(--bd-div)] bg-[var(--bg-card)] px-5 py-3">
+      <FloomMark />
       {right}
     </div>
   );
@@ -59,7 +59,7 @@ export function ShareCardShell({
 }) {
   return (
     <div className="mx-auto w-full px-3 py-10" style={{ maxWidth }}>
-      <div className="rounded-[var(--radius-card)] border border-[var(--card-border)] bg-[var(--bg-app)] shadow-[var(--shadow-pop)]">
+      <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-app)] shadow-[var(--shadow-pop)]">
         <ShareNav right={navRight} />
         {children}
       </div>

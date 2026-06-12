@@ -23,15 +23,20 @@ export async function serverFetch<T>(
   const { next, includeWorkspace = true, ...fetchOptions } = options ?? {};
   const cookieStore = await cookies();
   const workspaceCookie = cookieStore.get(ACTIVE_WORKSPACE_COOKIE_KEY)?.value || "";
+  const backendSession = cookieStore.get("wos_session")?.value || "";
   const activeWorkspace = workspaceCookie ? decodeURIComponent(workspaceCookie) : "local-default";
+  const headers = new Headers(fetchOptions.headers);
+  headers.set("content-type", "application/json");
+  headers.set("x-floom-secret", API_SECRET);
+  if (includeWorkspace && activeWorkspace) {
+    headers.set("x-workeros-workspace", activeWorkspace);
+  }
+  if (backendSession) {
+    headers.set("cookie", `wos_session=${backendSession}`);
+  }
   const res = await fetch(`${API_BASE}${path}`, {
     ...fetchOptions,
-    headers: {
-      "content-type": "application/json",
-      "x-floom-secret": API_SECRET,
-      ...(includeWorkspace && activeWorkspace ? { "x-workeros-workspace": activeWorkspace } : {}),
-      ...fetchOptions?.headers,
-    },
+    headers,
     // next.js cache config — passed through as NextFetchRequestConfig
     ...(next ? { next } : {}),
   });

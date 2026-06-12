@@ -16,7 +16,18 @@ import type {
 import { formatVersionRows } from "@/lib/workers/versions";
 import { WORKER_DETAIL_TABS, type WorkerDetailTab } from "@/lib/workers/tabs";
 import { formatDuration } from "@/lib/runs/format";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { FileText, Folder, Lock } from "lucide-react";
@@ -96,6 +107,23 @@ async function persistYml(d: WorkerDetail, patchedYml: string): Promise<WorkerDe
     ? text.map((f) => (f.path === "worker.yml" ? { ...f, content: patchedYml } : f))
     : [{ path: "worker.yml", content: patchedYml }, ...text];
   return api.workers.updateFiles(d.id, files);
+}
+
+function patchTopLevelScalar(yaml: string, key: string, value: string): string {
+  const line = `${key}: ${JSON.stringify(value)}`;
+  const re = new RegExp(`^${key}:.*$`, "m");
+  if (re.test(yaml)) return yaml.replace(re, line);
+  return `${line}\n${yaml.trimStart()}`;
+}
+
+function coerceInputValue(value: string, type?: string): unknown {
+  const kind = (type ?? "string").toLowerCase();
+  if (kind === "number" || kind === "integer") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : value;
+  }
+  if (kind === "boolean") return value === "true";
+  return value;
 }
 
 function Loading() {
@@ -522,6 +550,183 @@ const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }
   Config: ConfigTab,
 };
 
+function WorkerDetailActions({ w, onUpdated }: { w: WorkerSummary; onUpdated: (w: WorkerSummary) => void }) {
+  const [d, applyDetail] = useWorkerDetail(w.id);
+  const [runOpen, setRunOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [runInputs, setRunInputs] = useState<Record<string, string>>({});
+  const [name, setName] = useState(w.name);
+  const [description, setDescription] = useState(w.description ?? "");
+
+  const inputs = d?.config?.inputs ?? w.inputs ?? [];
+
+  useEffect(() => {
+    if (!runOpen) return;
+    const next: Record<string, string> = {};
+    for (const input of inputs) {
+      const fallback = input.default == null ? "" : String(input.default);
+      next[input.name] = runInputs[input.name] ?? fallback;
+    }
+    setRunInputs(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runOpen, d?.id]);
+
+  useEffect(() => {
+    if (!editOpen) return;
+    setName(d?.name ?? w.name);
+    setDescription(d?.description ?? w.description ?? "");
+  }, [editOpen, d?.description, d?.name, w.description, w.name]);
+
+  async function submitRun(event: React.FormEvent) {
+    event.preventDefault();
+    if (running) return;
+    setRunning(true);
+    try {
+      const payload: Record<string, unknown> = {};
+      for (const input of inputs) {
+        const raw = runInputs[input.name] ?? "";
+        if (raw !== "") payload[input.name] = coerceInputValue(raw, input.type);
+      }
+      const result = await api.workers.run(w.id, payload);
+      toast.success("Run queued");
+      setRunOpen(false);
+      if (result.run_id) window.location.href = `/runs?sel=${encodeURIComponent(result.run_id)}`;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not run worker");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function submitEdit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!d || saving) return;
+    const nextName = name.trim();
+    const nextDescription = description.trim();
+    if (!nextName) {
+      toast.error("Worker name is required.");
+      return;
+    }
+    setSaving(true);
+    try {
+      let yaml = workerYml(d);
+      yaml = patchTopLevelScalar(yaml, "name", nextName);
+      yaml = patchTopLevelScalar(yaml, "description", nextDescription);
+      const updated = await persistYml(d, yaml);
+      applyDetail(updated);
+      onUpdated({ ...w, name: updated.name, description: updated.description });
+      toast.success("Worker updated");
+      setEditOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update worker");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      {can("run", w) && (
+        <button type="button" className="c-addbtn" style={pillBtn} onClick={() => setRunOpen(true)}>
+          Run
+        </button>
+      )}
+      {can("edit", w) && (
+        <button type="button" className="c-vpill" style={pillBtn} onClick={() => setEditOpen(true)}>
+          Edit
+        </button>
+      )}
+
+      <Dialog open={runOpen} onOpenChange={setRunOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <form onSubmit={(event) => void submitRun(event)} className="space-y-4">
+            <DialogHeader>
+              <DialogTitle>Run {w.name}</DialogTitle>
+              <DialogDescription>Provide inputs for this manual run.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              {inputs.length === 0 ? (
+                <p className="rounded-[var(--radius-card)] bg-[var(--bg-2)] p-3 text-sm text-muted-foreground">
+                  This worker has no required inputs.
+                </p>
+              ) : (
+                inputs.map((input) => (
+                  <div key={input.name} className="space-y-1.5">
+                    <Label htmlFor={`run-${w.id}-${input.name}`}>{input.label || input.name}</Label>
+                    <Input
+                      id={`run-${w.id}-${input.name}`}
+                      value={runInputs[input.name] ?? ""}
+                      placeholder={input.placeholder || input.description || input.name}
+                      onChange={(event) =>
+                        setRunInputs((prev) => ({ ...prev, [input.name]: event.target.value }))
+                      }
+                    />
+                    {input.description ? (
+                      <p className="text-xs text-muted-foreground">{input.description}</p>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setRunOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={running}>
+                {running ? "Running..." : "Run"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <form onSubmit={(event) => void submitEdit(event)} className="space-y-4">
+            <DialogHeader>
+              <DialogTitle>Edit worker</DialogTitle>
+              <DialogDescription>Update the worker identity without leaving the split detail.</DialogDescription>
+            </DialogHeader>
+            {!d ? (
+              <Loading />
+            ) : (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor={`edit-${w.id}-name`}>Name</Label>
+                  <Input
+                    id={`edit-${w.id}-name`}
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`edit-${w.id}-description`}>Description</Label>
+                  <Textarea
+                    id={`edit-${w.id}-description`}
+                    value={description}
+                    onChange={(event) => setDescription(event.target.value)}
+                    className="min-h-24"
+                  />
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!d || saving}>
+                {saving ? "Saving..." : "Save"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export default function WorkersCollection({
   initialWorkers,
 }: {
@@ -629,21 +834,14 @@ export default function WorkersCollection({
       star: { on: favorites.has(w.id), onToggle: () => toggleStar(w.id) },
     }),
     detail: (w) => {
-      const editable = can("edit", w);
       const viewOnly = isViewOnly(w);
       const actions = (
-        <>
-          {can("run", w) && (
-            <Link href={`/workers?sel=${encodeURIComponent(w.id)}`} className="c-addbtn" style={pillBtn}>
-              Run
-            </Link>
-          )}
-          {editable && (
-            <Link href={`/workers?sel=${encodeURIComponent(w.id)}&tab=Config`} className="c-vpill" style={pillBtn}>
-              Edit
-            </Link>
-          )}
-        </>
+        <WorkerDetailActions
+          w={w}
+          onUpdated={(updated) =>
+            setWorkers((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)))
+          }
+        />
       );
       return {
         header: {
