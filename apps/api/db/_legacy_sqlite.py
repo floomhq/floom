@@ -2013,6 +2013,20 @@ MIGRATIONS: list[Migration] = [
         ON edit_access_requests(worker_id, requester_id)
         WHERE status = 'pending';
     """,
+    # -- migration 79: persistent workspace-export audit trail (#925). Every
+    # full-workspace download is recorded (who/when/role) as a queryable row,
+    # not just a log line, so exfiltration via a compromised admin session is
+    # reviewable after the fact.
+    """
+    CREATE TABLE IF NOT EXISTS workspace_export_audit (
+        id          TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL,
+        role        TEXT,
+        exported_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_export_audit_time
+        ON workspace_export_audit(exported_at);
+    """,
 ]
 
 
