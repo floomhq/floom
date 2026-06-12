@@ -959,6 +959,10 @@ class WorkerLimits(BaseModel):
     max_output_tokens: int = Field(default=1000000, ge=1)
     max_total_tokens: int = Field(default=1000000, ge=1)
     timeout_seconds: int = Field(default=300, ge=1)
+    # #793: per-worker monthly spend cap in USD. None = unlimited. Enforced at
+    # dispatch: a run is refused (failed, error_code=spend_cap_exceeded) when
+    # the worker's month-to-date cost has already reached the cap.
+    max_monthly_cost_usd: Optional[float] = Field(default=None, ge=0)
 
 
 _SCRIPT_ENTRY_SUFFIXES: tuple[str, ...] = (".py", ".sh", ".js")
