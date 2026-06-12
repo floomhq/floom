@@ -36,7 +36,7 @@ import json
 import os
 import secrets as _pysecrets
 import time
-from typing import Any
+from typing import Any, Callable
 
 MAX_TTL_SECONDS = 14_400  # 4 hours
 
@@ -119,14 +119,46 @@ class WorkerCallSecretMissing(ValueError):
     """
 
 
+# #992: the worker-call signing secret is decoupled from FLOOM_SECRET so a
+# multi-tenant host (workeros-cloud) that deliberately strips FLOOM_SECRET (to
+# keep the x-floom-secret gate off; auth is Supabase JWT/PAT) can still sign
+# wrt_ tokens with a real secret. Resolution order:
+#   1. explicit `secret` arg
+#   2. registered resolver (host sets it at startup; mirrors
+#      contexts.set_context_scope_resolver)
+#   3. WORKEROS_WORKER_CALL_SECRET env var
+#   4. FLOOM_SECRET env var (OSS default)
+#   5. none -> raise (preserves #972 fail-closed: never sign with a constant)
+_worker_call_secret_resolver: "Callable[[], str | None] | None" = None
+
+
+def set_worker_call_secret_resolver(resolver: "Callable[[], str | None] | None") -> None:
+    """Register a callable returning the worker-call signing secret, or None.
+
+    The host (e.g. workeros-cloud) registers this at startup so wrt_ tokens are
+    signed with a real secret derived from its own config, without re-enabling
+    the FLOOM_SECRET / x-floom-secret gate. Pass None to clear (OSS mode).
+    """
+    global _worker_call_secret_resolver
+    _worker_call_secret_resolver = resolver
+
+
 def _worker_call_signing_key(secret: str | None = None) -> str:
-    if secret is None:
-        secret = os.environ.get("FLOOM_SECRET")
-    key = (secret or "").strip()
+    candidate = secret
+    if candidate is None and _worker_call_secret_resolver is not None:
+        try:
+            candidate = _worker_call_secret_resolver()
+        except Exception:
+            candidate = None
+    if candidate is None:
+        candidate = os.environ.get("WORKEROS_WORKER_CALL_SECRET") or os.environ.get("FLOOM_SECRET")
+    key = (candidate or "").strip()
     if not key:
         raise WorkerCallSecretMissing(
-            "FLOOM_SECRET is not configured; worker-call tokens cannot be "
-            "issued or validated without a real signing secret."
+            "No worker-call signing secret is configured. Set "
+            "WORKEROS_WORKER_CALL_SECRET (or FLOOM_SECRET), or register a "
+            "resolver via set_worker_call_secret_resolver(); worker-call tokens "
+            "are never signed with a public constant (#972)."
         )
     return key
 
