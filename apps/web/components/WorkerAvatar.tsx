@@ -46,7 +46,7 @@ export function WorkerAvatar({ seed, name, className, size = "size-9", avatarUrl
         alt={`${display} avatar`}
         referrerPolicy="no-referrer"
         className={cn(
-          "shrink-0 rounded-[var(--radius-button)] object-cover [border:var(--bd-card)]",
+          "shrink-0 rounded-[var(--radius-button)] object-cover",
           size,
           className,
         )}
@@ -57,7 +57,7 @@ export function WorkerAvatar({ seed, name, className, size = "size-9", avatarUrl
   return (
     <div
       className={cn(
-        "shrink-0 rounded-[var(--radius-button)] grid place-items-center font-medium tracking-tight bg-muted text-foreground [border:var(--bd-card)]",
+        "shrink-0 rounded-[var(--radius-button)] grid place-items-center font-medium tracking-tight bg-muted text-foreground",
         size,
         className,
       )}

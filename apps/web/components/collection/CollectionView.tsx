@@ -85,6 +85,11 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
 
   // ---- keyboard nav (SPEC §8c) ----
   const onKeyDown = (e: React.KeyboardEvent) => {
+    const target = e.target as HTMLElement | null;
+    const dialogOpen =
+      target?.closest?.('[role="dialog"], [data-slot="dialog-content"]') ||
+      document.querySelector('[role="dialog"], [data-slot="dialog-content"]');
+    if (e.key === "Escape" && dialogOpen) return;
     if (e.key === "Escape" && isOpen) {
       close();
       return;
