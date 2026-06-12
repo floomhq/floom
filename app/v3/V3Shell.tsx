@@ -116,7 +116,7 @@ export function V3Shell({
             {/* #821: session-aware — Dashboard when a session exists. */}
             <Link
               href={authed ? "/app/overview" : "/login"}
-              className="hidden rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground sm:block"
+              className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground"
             >
               {authed ? "Open app →" : "Sign in"}
             </Link>
