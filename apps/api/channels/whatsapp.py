@@ -343,9 +343,11 @@ def claim_whatsapp_sender(
         # so downstream consumers that use local_workspace_user_id round-trip correctly.
         scoped_user_id = local_workspace_user_id(base_user_id, workspace_id)
     else:
-        # Cloud: workspace is carried in auth context; no scoping needed here.
+        # Cloud: workspace is carried in the cloud's own auth context and
+        # resolved by the cloud repository. #865: persist NULL instead of a
+        # fabricated 'local-default' that downstream code then ignores.
         scoped_user_id = auth.user_id
-        workspace_id = _DEFAULT_WORKSPACE_ID  # cloud uses its own workspace field
+        workspace_id = None
 
     with get_db() as conn:
         row = conn.execute(
@@ -1152,14 +1154,17 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, pr
             source="whatsapp",
         )
         send_whatsapp_text(normalized_wa_id, reply)
-    except Exception:
+    except Exception as exc:
         logger.exception("WhatsApp message processing failed")
         if os.environ.get("WHATSAPP_POST_ERRORS_TO_CHAT", "1").strip().lower() not in {"0", "false", "no", "off"}:
             try:
-                send_whatsapp_text(
-                    normalized_wa_id,
-                    "Something went wrong on my end. Try again in a moment.",
-                )
+                from llm import is_llm_provider_outage, safe_llm_error_message
+
+                if is_llm_provider_outage(exc):
+                    error_text = safe_llm_error_message(exc, action="Chat")
+                else:
+                    error_text = "Something went wrong on my end. Try again in a moment."
+                send_whatsapp_text(normalized_wa_id, error_text)
             except Exception:
                 logger.exception("WhatsApp error reply failed")
 

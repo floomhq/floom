@@ -325,6 +325,7 @@ async def lifespan(app: FastAPI):
                 logger.info("Migration #603: converted %d workers from exec.mode=hybrid to pure-script", _rows_updated)
     except Exception as _mig_exc:
         logger.warning("Migration #603 (hybrid→pure-script) failed (non-fatal): %s", _mig_exc)
+    _warn_if_composio_webhook_unconfigured()
     # Ensure the git workspace repo is initialized (idempotent)
     try:
         _wgit = _git_workspace()
@@ -724,6 +725,37 @@ def _validate_startup_configuration() -> None:
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
     if deploy != "local":
         get_auth_provider()
+
+
+def _warn_if_composio_webhook_unconfigured() -> None:
+    """#908: without COMPOSIO_WEBHOOK_SIGNING_KEY the /composio-events receiver
+    503s every delivery, so composio-triggered workers silently never fire.
+    Surface that loudly at startup instead of letting it fail again."""
+    if os.environ.get("COMPOSIO_WEBHOOK_SIGNING_KEY", "").strip():
+        return
+    count = 0
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) AS cnt FROM workers "
+                "WHERE composio_trigger_id IS NOT NULL AND composio_trigger_id != ''"
+            ).fetchone()
+            count = int(row["cnt"] or 0) if row else 0
+    except Exception:
+        count = 0
+    if count:
+        logger.error(
+            "COMPOSIO_WEBHOOK_SIGNING_KEY is not configured but %d worker(s) have "
+            "enabled Composio event triggers — deliveries are rejected with 503 at "
+            "/composio-events and those workers will NEVER fire. Set the key and "
+            "register the webhook URL in the Composio dashboard (#908).",
+            count,
+        )
+    elif os.environ.get("COMPOSIO_API_KEY", "").strip():
+        logger.warning(
+            "COMPOSIO_WEBHOOK_SIGNING_KEY is not configured; Composio event "
+            "triggers cannot be enabled until it is set (#908)."
+        )
 
 
 def _is_cloud_deploy() -> bool:
@@ -4145,6 +4177,17 @@ def _enable_composio_trigger(config: WorkerConfig, worker_id: str) -> str:
     signature = _composio_trigger_signature(config)
     if not signature:
         raise RuntimeError(f"Worker {worker_id} does not declare trigger.composio")
+    # #908: without the signing key the /composio-events receiver 503s every
+    # delivery, so an enabled trigger is shipped-but-broken. Fail at enable
+    # time with the operator fix instead of silently never firing.
+    if not os.environ.get("COMPOSIO_WEBHOOK_SIGNING_KEY", "").strip():
+        raise RuntimeError(
+            f"Cannot enable Composio trigger for worker {worker_id}: "
+            "COMPOSIO_WEBHOOK_SIGNING_KEY is not configured, so the "
+            "/composio-events receiver rejects all deliveries (503). Set the "
+            "env var from the Composio dashboard webhook settings and register "
+            f"the webhook URL ({_composio_webhook_url()}) there, then retry."
+        )
     try:
         from composio_client import enable_trigger
         return enable_trigger(
@@ -10165,7 +10208,13 @@ def _call_draft_llm(
         )
     except Exception as exc:
         logger.exception("OpenAI call failed in draft-from-prompt")
-        raise HTTPException(status_code=502, detail=f"LLM call failed: {exc}") from exc
+        # #951: never echo raw provider errors (quota status, key fragments).
+        from llm import safe_llm_error_message
+
+        raise HTTPException(
+            status_code=502,
+            detail=safe_llm_error_message(exc, action="Worker generation"),
+        ) from exc
 
     raw_content = (response.choices[0].message.content or "").strip()
     if raw_content.startswith("```"):
@@ -21439,7 +21488,9 @@ async def post_chat(
         except Exception as exc:
             logger.exception("chat background task failed")
             try:
-                await part_queue.put({"type": "error", "error": str(exc)})
+                from llm import safe_llm_error_message
+
+                await part_queue.put({"type": "error", "error": safe_llm_error_message(exc, action="Chat")})
                 await part_queue.put({"type": "finish", "conversation_id": None, "message_id": None})
             except Exception:
                 pass

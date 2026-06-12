@@ -97,7 +97,9 @@ def test_skill_prompt_loading_and_tool_schema(tmp_path):
         "log",
         "composio__gmail__execute",
     }.issubset(tool_names)
-    assert any(tool.__class__.__name__ == "WebSearchTool" for tool in first_call["agent"].tools)
+    # 79fdf03e: OpenAI's hosted WebSearchTool was replaced by the
+    # provider-agnostic `web_search` FunctionTool (works on Bedrock/litellm).
+    assert any(getattr(tool, "name", None) == "web_search" for tool in first_call["agent"].tools)
     assert log_entries
 
 
