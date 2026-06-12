@@ -1898,6 +1898,50 @@ def _snapshot_worker_bundle(run_id: str, worker_id: str, config: Optional[Worker
         logger.warning("Run %s bundle snapshot failed for worker %s: %s", run_id, worker_id, exc)
         return None
 
+class SpendCapExceeded(ValueError):
+    """#793: the worker's month-to-date cost has reached its monthly spend cap."""
+
+
+def _persist_run_cost(run_id: str) -> None:
+    """Compute + store total_tokens/total_cost_usd for a terminal run (#793/#795)."""
+    from db import get_db
+    from cost import estimate_cost_usd, total_tokens_from_transcript
+
+    tokens = total_tokens_from_transcript(run_id)
+    cost = estimate_cost_usd(tokens)
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE runs SET total_tokens = ?, total_cost_usd = ? WHERE id = ?",
+            (tokens, cost, run_id),
+        )
+
+
+def _worker_month_to_date_cost_usd(worker_id: str) -> float:
+    """Sum of total_cost_usd for this worker's runs in the current UTC month."""
+    from db import get_db
+
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(total_cost_usd), 0.0) AS spent FROM runs "
+                "WHERE worker_id = ? "
+                "AND created_at >= strftime('%Y-%m-01T00:00:00+00:00', 'now')",
+                (worker_id,),
+            ).fetchone()
+        return float(row["spent"] or 0.0) if row else 0.0
+    except Exception:
+        logger.debug("month-to-date cost lookup failed for %s", worker_id, exc_info=True)
+        return 0.0
+
+
+def _spend_cap_for_config(config: Any) -> Optional[float]:
+    try:
+        cap = config.runtime.limits.max_monthly_cost_usd if config and config.runtime and config.runtime.limits else None
+    except Exception:
+        return None
+    return float(cap) if cap is not None else None
+
+
 def create_run(
     worker_id: str,
     inputs: Dict[str, Any],
@@ -1916,6 +1960,15 @@ def create_run(
     if not owner_id:
         raise ValueError(f"Worker {worker_id} owner not found")
     config = loaded[1] if loaded else None
+    # #793: refuse dispatch when the worker has already spent its monthly cap.
+    _cap = _spend_cap_for_config(config)
+    if _cap is not None:
+        _spent = _worker_month_to_date_cost_usd(worker_id)
+        if _spent >= _cap:
+            raise SpendCapExceeded(
+                f"Worker {worker_id} has reached its monthly spend cap "
+                f"(${_spent:.2f} of ${_cap:.2f}). Raise the cap or wait for next month."
+            )
     instance = loaded[2] if loaded else None
     if instance and not instance.get("enabled", True):
         raise ValueError(f"Worker {worker_id} is disabled")
@@ -2018,6 +2071,13 @@ def update_run_status(
     )
 
     if worker_id and status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
+        # #793/#795: persist per-run cost at terminal status (best-effort) so
+        # the monthly-spend aggregate and approval cost-so-far don't have to
+        # re-read transcripts later. Never let cost accounting break a run.
+        try:
+            _persist_run_cost(run_id)
+        except Exception:
+            logger.debug("run cost persistence failed for %s", run_id, exc_info=True)
         _dispatch_terminal_run_alerts(
             run_id=run_id,
             worker_id=worker_id,
