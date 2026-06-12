@@ -61,7 +61,7 @@ function isPublicProxy(pathname: string): boolean {
 
 // #947 — CSRF defence-in-depth. The /api/proxy/* surface injects the server
 // secret and forwards mutations to the backend; SameSite=lax is the only thing
-// stopping a cross-site POST today. Validate Origin (falling back to Referer)
+// stopping a cross-site POST today. Validate Origin (#986: no Referer fallback)
 // against the app's own host on every state-changing method.
 //
 // The proxy is browser-only: server components call the backend directly via
@@ -109,10 +109,12 @@ function isCsrfSafe(req: NextRequest): boolean {
   const allowed = allowedHosts(req);
   const originHost = hostOf(req.headers.get("origin"));
   if (originHost) return allowed.has(originHost);
-  // No Origin (some browsers omit it on same-origin in older versions): fall
-  // back to Referer's host. If neither is present on a mutating request, reject.
-  const refererHost = hostOf(req.headers.get("referer"));
-  if (refererHost) return allowed.has(refererHost);
+  // #986: absent Origin is treated as cross-origin and BLOCKED. We used to
+  // fall back to Referer, but Referer is spoofable by non-browser clients and
+  // modern browsers always send Origin on a mutating cross-site request, so
+  // the fallback only weakened the check. Programmatic clients that need to
+  // POST must use an API token (wos_*) instead of a session cookie — those
+  // bypass this gate via the Bearer path, not via a forged Referer.
   return false;
 }
 

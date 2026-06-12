@@ -80,7 +80,10 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
     expect(res.status).toBe(403);
   });
 
-  it("falls back to a same-origin Referer when Origin is absent", async () => {
+  it("#986: BLOCKS a mutating request with a correct Referer but NO Origin", async () => {
+    // Referer is spoofable and modern browsers always send Origin on a
+    // mutating cross-site request, so an absent Origin is treated as
+    // cross-origin and blocked regardless of Referer.
     const { middleware } = await import("@/middleware");
     const res = await middleware(
       req("/api/proxy/workers", {
@@ -88,7 +91,18 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
         cookie: await validCookie(),
       }),
     );
-    expect(res.status).toBe(200);
+    expect(res.status).toBe(403);
+  });
+
+  it("#986: a forged same-origin Referer cannot bypass the Origin check", async () => {
+    const { middleware } = await import("@/middleware");
+    const res = await middleware(
+      req("/api/proxy/auth/tokens", {
+        referer: `https://${HOST}/settings`, // attacker spoofs Referer, omits Origin
+        cookie: await validCookie(),
+      }),
+    );
+    expect(res.status).toBe(403);
   });
 
   it("does NOT block safe methods (GET) regardless of Origin", async () => {
