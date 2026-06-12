@@ -3480,17 +3480,11 @@ def list_worker_versions(
         asset_type="worker",
         asset_id=worker_id,
     )
-    if not rows:
-        # First time viewing versions for a pre-existing worker — commit its
-        # current files as the initial baseline so history isn't empty.
-        _git_commit_worker(worker_id, message=f"baseline: snapshot existing {worker_id}")
-        rows = _git_ops.get_log(
-            workspace,
-            rel_path=f"{prefix}/{worker_id}",
-            limit=min(limit, 100),
-            asset_type="worker",
-            asset_id=worker_id,
-        )
+    # #979: a GET must be side-effect free. The old path committed a baseline
+    # when history was empty, so a read (incl. a browser prefetch or crawler)
+    # mutated server-side git state and could snapshot a wrongly-visible
+    # private worker. Baseline creation now happens on worker
+    # create/update/import; an empty history just returns [].
     return [VersionSummary(**r) for r in rows]
 
 
