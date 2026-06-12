@@ -39,7 +39,7 @@ def _worker_yml(worker_id: str, repo_url: str, context_name: str) -> str:
         f"""
         schema_version: "0.3"
         id: "{worker_id}"
-        name: "Git Context Smoke"
+        name: "{worker_id}"
         title: "Git Context Smoke"
         description: "Smoke test for git-backed brain pack staging in E2B."
         version: "0.1.0"
