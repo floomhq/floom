@@ -8,11 +8,12 @@ visibility='workspace' for all system_worker:true workers at persist time.
 
 import sqlite3
 from pathlib import Path
+from tests._api_source import api_source
 
 
 def test_system_worker_flag_maps_to_workspace_visibility():
     """The source must derive visibility='workspace' from system_worker=True."""
-    src = (Path(__file__).parents[1] / "main.py").read_text(encoding="utf-8")
+    src = api_source()
     fn_start = src.find("def _persist_discovered_workers")
     assert fn_start != -1
     fn_body = src[fn_start: fn_start + 5000]
@@ -24,7 +25,7 @@ def test_system_worker_flag_maps_to_workspace_visibility():
 
 def test_non_system_worker_maps_to_private_visibility():
     """The source must assign visibility='private' for non-system workers."""
-    src = (Path(__file__).parents[1] / "main.py").read_text(encoding="utf-8")
+    src = api_source()
     fn_start = src.find("def _persist_discovered_workers")
     assert fn_start != -1
     fn_body = src[fn_start: fn_start + 5000]
@@ -67,7 +68,7 @@ def test_workspace_agent_is_workspace_visible_in_db():
 
 def test_persist_discovered_workers_includes_visibility_column():
     """The INSERT in _persist_discovered_workers must include the visibility column."""
-    src = (Path(__file__).parents[1] / "main.py").read_text(encoding="utf-8")
+    src = api_source()
     fn_start = src.find("def _persist_discovered_workers")
     assert fn_start != -1
     fn_body = src[fn_start: fn_start + 4000]
