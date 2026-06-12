@@ -10,13 +10,14 @@ import {
 // its TabsList from, so these assertions guard the live strip.
 
 describe("Settings nav groups (§4)", () => {
-  it("Workspace group is System·Channels·Assistant·Members·Version history·Danger", () => {
+  it("Workspace group is System·Channels·Assistant·Members·Version history·Workspace token·Danger", () => {
     expect(settingsGroup("workspace").map((i) => i.label)).toEqual([
       "System",
       "Channels",
       "Assistant",
       "Members",
       "Version history",
+      "Workspace token",
       "Danger",
     ]);
   });
@@ -26,7 +27,7 @@ describe("Settings nav groups (§4)", () => {
   });
 
   it("count strip reflects the live groups", () => {
-    expect(settingsCounts()).toBe("6 workspace · 2 account");
+    expect(settingsCounts()).toBe("7 workspace · 2 account");
   });
 
   it("group labels carry the name when known", () => {

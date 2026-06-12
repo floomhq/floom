@@ -1111,6 +1111,25 @@ export interface PersonalAccessTokenCreate {
   pat: PersonalAccessToken;
 }
 
+// Workspace token (prefix wst_): API access to workspace-shared workers only.
+// Admin-only; the token value is returned once on create.
+export interface WorkspaceToken {
+  id: string;
+  name: string;
+  created_by?: string | null;
+  created_at: string;
+  last_used_at?: string | null;
+  expires_at?: string | null;
+  revoked_at?: string | null;
+}
+
+export interface WorkspaceTokenCreate {
+  id: string;
+  name: string;
+  token: string;
+  expires_at?: string | null;
+}
+
 export interface AuthMe {
   user_id: string;
   username?: string | null;
