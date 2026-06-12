@@ -179,3 +179,68 @@ def _get_run_by_explicit_id(
     if worker_id in _OPERATOR_REACHABLE_HIDDEN_WORKER_IDS:
         return row
     return None
+
+
+_OPERATOR_TRIGGER_SOURCES = frozenset({
+    "manual",
+    "schedule",
+    "approval",
+    "composio",
+    "webhook",
+    "workspace-agent",
+})
+
+
+def _is_operator_run(row: Any) -> bool:
+    source = (row_to_dict(row).get("trigger_source") or "").strip().lower()
+    # Treat unknown/empty as operator-facing only if explicitly allowlisted;
+    # blank trigger_source is legacy "manual" and stays visible.
+    if not source:
+        return True
+    return source in _OPERATOR_TRIGGER_SOURCES
+
+
+def _list_visible_runs(
+    *,
+    user_id: str,
+    repos: "Repositories",
+    worker_id: str | None = None,
+    statuses: list[str] | None = None,
+    since: str | None = None,
+    until: str | None = None,
+    limit: int = 50,
+    offset: int = 0,
+    include_system: bool = False,
+) -> tuple[list[Any], int]:
+    batch_size = max(limit, 100)
+    raw_offset = 0
+    raw_total_count: int | None = None
+    visible_total = 0
+    visible_rows: list[Any] = []
+
+    while raw_total_count is None or raw_offset < raw_total_count:
+        rows, raw_total_count = repos.runs.list(
+            user_id=user_id,
+            worker_id=worker_id,
+            statuses=statuses,
+            since=since,
+            until=until,
+            limit=batch_size,
+            offset=raw_offset,
+        )
+        if not rows:
+            break
+        raw_offset += len(rows)
+        for row in rows:
+            if not _run_visible_to_api(row, user_id=user_id, repos=repos):
+                continue
+            # 1.5.2: hide audit/system/test telemetry from the default
+            # operator view unless explicitly requested.
+            if not include_system and not _is_operator_run(row):
+                continue
+            visible_total += 1
+            if visible_total <= offset:
+                continue
+            if len(visible_rows) < limit:
+                visible_rows.append(row)
+    return visible_rows, visible_total
