@@ -449,6 +449,10 @@ DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024
 # A workspace template bundles every operator worker + knowledge pack, so it is
 # larger than a single worker bundle. Cap it generously but bounded.
 WORKSPACE_IMPORT_BODY_LIMIT_BYTES = 50 * 1024 * 1024
+# #931: zip-bomb guards for /workspace/import — uncompressed expansion and
+# entry count are bounded independently of the compressed body size.
+_MAX_IMPORT_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
+_MAX_IMPORT_ENTRIES = 5000
 DEFAULT_CHAT_MESSAGE_MAX_CHARS = 20_000
 DEFAULT_RATE_LIMIT = (60, 60.0)
 BODYLESS_METHODS = {"GET", "HEAD", "OPTIONS"}
@@ -466,7 +470,9 @@ RATE_LIMIT_RULES = [
     (re.compile(r"^/cli-auth/devices$"), (5, 60.0)),
     (re.compile(r"^/workers/from-bundle$"), (10, 60.0)),
     (re.compile(r"^/workspace/import$"), (10, 60.0)),
-    (re.compile(r"^/workspace/export$"), (20, 60.0)),
+    # #948: a full-workspace ZIP per request — keep bulk re-download slow.
+    # 5 per hour is generous for humans and starves scripted exfiltration.
+    (re.compile(r"^/workspace/export$"), (5, 3600.0)),
     (re.compile(r"^/workers$"), (20, 60.0)),
     (re.compile(r"^/connections/connect/[^/]+$"), (10, 60.0)),
     (re.compile(r"^/connections$"), (20, 60.0)),
@@ -658,28 +664,48 @@ def _cors_allowed_origins() -> List[str]:
     if configured.strip():
         return [origin.strip() for origin in configured.split(",") if origin.strip()]
 
-    origins = ["https://workers.floom.dev"]
+    # #921: explicit production origins only — no wildcard subdomain match.
+    origins = ["https://workers.floom.dev", "https://workeros.floom.dev"]
     if os.environ.get("WORKEROS_DEV"):
         origins.extend(["http://localhost:3000", "http://localhost:3011"])
     return origins
 
 
-def _cors_allowed_origin_regex() -> str:
+def _cors_allowed_origin_regex() -> Optional[str]:
     configured = os.environ.get("ALLOWED_ORIGIN_REGEX", "")
     if configured.strip():
         return configured.strip()
     if os.environ.get("WORKEROS_DEV"):
         return r"^https://[a-z0-9-]+\.workeros-[a-z0-9-]+\.vercel\.app$"
-    return r"^https://([a-z0-9-]+\.)*floom\.dev$"
+    # #921: the old default `^https://([a-z0-9-]+\.)*floom\.dev$` allowed ANY
+    # floom.dev subdomain to make credentialed requests — one compromised
+    # subdomain meant workspace-wide CSRF. Production now relies on the
+    # explicit allowlist above; set ALLOWED_ORIGIN_REGEX to opt back in.
+    return None
 
+
+# #921: with allow_credentials=True, enumerate methods and headers instead of
+# reflecting whatever a cross-origin attacker asks for.
+_CORS_ALLOWED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+_CORS_ALLOWED_HEADERS = [
+    "Authorization",
+    "Content-Type",
+    "Accept",
+    "Cache-Control",
+    "X-Requested-With",
+    "X-Floom-Secret",
+    "X-Floom-User",
+    "X-Workeros-Workspace",
+    "X-Workeros-Run-Token",
+]
 
 app.add_middleware(
     CORSMiddleware,
     allow_origins=_cors_allowed_origins(),
     allow_origin_regex=_cors_allowed_origin_regex(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=_CORS_ALLOWED_METHODS,
+    allow_headers=_CORS_ALLOWED_HEADERS,
 )
 
 
@@ -2188,8 +2214,12 @@ def health_details(auth: AuthContext = Depends(get_auth_context)):
 
 @app.exception_handler(ValueError)
 async def value_error_handler(_request, exc: ValueError):
-    logger.warning("Validation error: %s", exc)
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
+    # #920: ValueErrors bubble up from arbitrary internal code and can carry
+    # filesystem paths, config values, or provider internals. Log the detail
+    # server-side; clients get a generic message. Field-level validation
+    # errors reach clients via the Pydantic handler, not this one.
+    logger.warning("Validation error: %s", exc, exc_info=exc)
+    return JSONResponse(status_code=400, content={"detail": "Invalid request"})
 
 
 def _redacted_validation_errors(
@@ -3423,6 +3453,18 @@ def get_worker_version(
     return {"files": files}
 
 
+def _require_sha_in_asset_history(workspace: Path, sha: str, rel_path: str) -> None:
+    """#928: rollback/restore SHAs must come from the target asset's own git
+    history. The workspace repo is shared across users and assets, so an
+    arbitrary commit id would let a caller materialize file states from other
+    users' workers or brain packs into an asset they control."""
+    if not _git_ops.sha_in_path_history(workspace, sha, rel_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Commit {sha!r} not found in this asset's history",
+        )
+
+
 @app.post("/workers/{worker_id}/rollback/{sha}", response_model=WorkerDetail)
 def rollback_worker(
     worker_id: str,
@@ -3440,6 +3482,7 @@ def rollback_worker(
     prefix = _workers_git_prefix()
     worker_git_path = f"{prefix}/{worker_id}"
 
+    _require_sha_in_asset_history(workspace, sha, worker_git_path)
     try:
         _git_ops.checkout_path(workspace, sha, worker_git_path)
     except _git_ops.GitOpsError as exc:
@@ -3594,6 +3637,7 @@ def restore_context_file_version(
     workspace = _git_workspace()
     git_path = _context_git_path(safe_name, rel)
 
+    _require_sha_in_asset_history(workspace, sha, git_path)
     try:
         _git_ops.checkout_path(workspace, sha, git_path)
     except _git_ops.GitOpsError as exc:
@@ -3631,6 +3675,7 @@ def rollback_context(
     workspace = _git_workspace()
     ctx_git_path = _context_git_path(safe_name)
 
+    _require_sha_in_asset_history(workspace, sha, ctx_git_path)
     try:
         _git_ops.checkout_path(workspace, sha, ctx_git_path)
     except _git_ops.GitOpsError as exc:
@@ -5833,11 +5878,17 @@ def download_upload(
 
     filename = row["filename"] or file_id
     media_type = normalize_media_type(row["media_type"])
+    # #929: uploads may be HTML/XML. FileResponse(filename=...) already forces
+    # Content-Disposition: attachment; nosniff stops browsers from second-
+    # guessing the media type and executing stored markup same-origin.
     return FileResponse(
         path,
         filename=filename,
         media_type=media_type,
-        headers={"Cache-Control": "no-store"},
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 
@@ -7405,23 +7456,57 @@ def _mint_standalone_share_token() -> str:
     return f"fls_{pysecrets.token_urlsafe(18).replace('-', '').replace('_', '')[:24]}"
 
 
+def _hash_share_token(token: str) -> str:
+    """#934: share tokens are bearer credentials — store only their SHA-256."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+_SHARE_LINKS_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS standalone_share_links (
+        token_hash TEXT PRIMARY KEY,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        file_path TEXT NOT NULL DEFAULT '',
+        owner_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(entity_type, entity_id, file_path, owner_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_standalone_share_links_entity
+        ON standalone_share_links(entity_type, entity_id, file_path, owner_id);
+"""
+
+
 def _ensure_standalone_share_links_table() -> None:
     with get_db() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS standalone_share_links (
-                token TEXT PRIMARY KEY,
-                entity_type TEXT NOT NULL,
-                entity_id TEXT NOT NULL,
-                file_path TEXT NOT NULL DEFAULT '',
-                owner_id TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                UNIQUE(entity_type, entity_id, file_path, owner_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_standalone_share_links_entity
-                ON standalone_share_links(entity_type, entity_id, file_path, owner_id);
-            """
-        )
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(standalone_share_links)")}
+        if "token" in cols and "token_hash" not in cols:
+            # #934 migration: legacy rows stored the raw token. Hash them in
+            # place so a database dump no longer hands out every active link.
+            rows = conn.execute(
+                "SELECT token, entity_type, entity_id, file_path, owner_id, created_at "
+                "FROM standalone_share_links"
+            ).fetchall()
+            conn.execute("ALTER TABLE standalone_share_links RENAME TO standalone_share_links_legacy")
+            conn.executescript(_SHARE_LINKS_TABLE_SQL)
+            for row in rows:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO standalone_share_links
+                        (token_hash, entity_type, entity_id, file_path, owner_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        _hash_share_token(str(row["token"])),
+                        row["entity_type"],
+                        row["entity_id"],
+                        row["file_path"],
+                        row["owner_id"],
+                        row["created_at"],
+                    ),
+                )
+            conn.execute("DROP TABLE standalone_share_links_legacy")
+            return
+        conn.executescript(_SHARE_LINKS_TABLE_SQL)
 
 
 def _create_or_get_standalone_share_link(
@@ -7435,47 +7520,34 @@ def _create_or_get_standalone_share_link(
     if not entity_id or not owner_id:
         raise HTTPException(status_code=409, detail="Item cannot be shared")
     _ensure_standalone_share_links_table()
+    # #934: only SHA-256(token) is stored, so the raw value of an existing row
+    # cannot be returned — re-sharing ROTATES the link (the old URL stops
+    # resolving). Revocation already deleted-and-reminted, so rotation is the
+    # established product semantic for share links.
+    token = ""
+    ts = now_iso()
     with get_db() as conn:
-        existing = conn.execute(
-            """
-            SELECT token FROM standalone_share_links
-            WHERE entity_type = ? AND entity_id = ? AND file_path = ? AND owner_id = ?
-            LIMIT 1
-            """,
-            (entity_type, entity_id, safe_file_path, owner_id),
-        ).fetchone()
-        if existing:
-            token = str(existing["token"])
-        else:
-            token = ""
-            ts = now_iso()
-            for _ in range(8):
-                candidate = _mint_standalone_share_token()
-                try:
-                    conn.execute(
-                        """
-                        INSERT INTO standalone_share_links
-                            (token, entity_type, entity_id, file_path, owner_id, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (candidate, entity_type, entity_id, safe_file_path, owner_id, ts),
-                    )
-                    token = candidate
-                    break
-                except sqlite3.IntegrityError:
-                    dup = conn.execute(
-                        """
-                        SELECT token FROM standalone_share_links
-                        WHERE entity_type = ? AND entity_id = ? AND file_path = ? AND owner_id = ?
-                        LIMIT 1
-                        """,
-                        (entity_type, entity_id, safe_file_path, owner_id),
-                    ).fetchone()
-                    if dup:
-                        token = str(dup["token"])
-                        break
-            if not token:
-                raise HTTPException(status_code=500, detail="Could not create share link")
+        for _ in range(8):
+            candidate = _mint_standalone_share_token()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO standalone_share_links
+                        (token_hash, entity_type, entity_id, file_path, owner_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(entity_type, entity_id, file_path, owner_id) DO UPDATE SET
+                        token_hash = excluded.token_hash,
+                        created_at = excluded.created_at
+                    """,
+                    (_hash_share_token(candidate), entity_type, entity_id, safe_file_path, owner_id, ts),
+                )
+                token = candidate
+                break
+            except sqlite3.IntegrityError:
+                # token_hash PK collision (astronomically unlikely) — retry.
+                continue
+    if not token:
+        raise HTTPException(status_code=500, detail="Could not create share link")
     return {
         "token": token,
         "url": _standalone_share_url(token),
@@ -8096,14 +8168,16 @@ def _load_standalone_share_row(token: str) -> Optional[Dict[str, Any]]:
         raise HTTPException(status_code=404, detail="Share link not found")
     _ensure_standalone_share_links_table()
     with get_db() as conn:
+        # #934: lookup is by SHA-256 of the presented token — the raw value is
+        # never stored, so a DB dump can't be replayed as live share links.
         row = conn.execute(
             """
-            SELECT token, entity_type, entity_id, file_path, owner_id, created_at
+            SELECT entity_type, entity_id, file_path, owner_id, created_at
             FROM standalone_share_links
-            WHERE token = ?
+            WHERE token_hash = ?
             LIMIT 1
             """,
-            (token,),
+            (_hash_share_token(token),),
         ).fetchone()
     return dict(row) if row else None
 
@@ -11508,6 +11582,13 @@ async def create_worker_from_bundle(
             parts = rel.split("/")
             if any(p in ("", "..") for p in parts):
                 raise HTTPException(status_code=400, detail=f"Invalid path in bundle: {rel!r}")
+            # #932: strip secret-bearing files (.env, credentials.json, *.key,
+            # ...) — export filters them out, so import must too, or a crafted
+            # bundle can plant secrets that later leak via worker detail/share
+            # endpoints or get committed to the workspace git repo.
+            if _is_secret_bearing_export_path(rel):
+                logger.info("from-bundle: stripped secret-bearing file %r", rel)
+                continue
             data = zf.read(zip_name)
             # Re-guard the running total in case a ZipInfo header under-reported
             # the real uncompressed size (defends against a lying header).
@@ -11856,6 +11937,11 @@ def export_workspace(
     NO secret values or connection tokens are ever written — only the NAMES of
     required secrets/connections so the importer knows what to reconnect.
     """
+    # #925: a full-workspace download is an admin capability — a compromised
+    # member session must not be able to exfiltrate the whole workspace.
+    _require_admin(auth)
+    # #925/#948: every export is audit-logged with the actor.
+    logger.info("workspace export by user=%s role=%s", auth.user_id, auth.role)
     payload = _build_workspace_template_zip(
         user_id=auth.user_id, repos=repos, exported_at=exported_at
     )
@@ -11981,13 +12067,33 @@ async def import_workspace(
     except zipfile.BadZipFile as exc:
         raise HTTPException(status_code=400, detail=f"Not a valid zip file: {exc}")
 
-    # Reject symlink members (security).
-    for info in zf.infolist():
+    # #931: zip-bomb guards, mirroring POST /workers/from-bundle. The 50 MB
+    # compressed cap alone let a highly-compressed archive expand to gigabytes
+    # in memory. Enforce entry count + declared uncompressed size up front,
+    # then re-guard the running total during extraction (lying headers).
+    infolist = zf.infolist()
+    if len(infolist) > _MAX_IMPORT_ENTRIES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Template has too many entries ({len(infolist)} > {_MAX_IMPORT_ENTRIES})",
+        )
+    declared_total = 0
+    for info in infolist:
+        # Reject symlink members (security).
         file_type = (info.external_attr >> 16) & 0o170000
         if file_type == 0o120000:
             raise HTTPException(
                 status_code=400,
                 detail=f"Template contains unsupported symlink: {info.filename!r}",
+            )
+        declared_total += info.file_size
+        if declared_total > _MAX_IMPORT_UNCOMPRESSED_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Template too large: uncompressed size exceeds "
+                    f"{_MAX_IMPORT_UNCOMPRESSED_BYTES // (1024 * 1024)} MB"
+                ),
             )
 
     names = zf.namelist()
@@ -11995,6 +12101,22 @@ async def import_workspace(
     # ---- group members by worker id / context name ---------------------
     worker_files: Dict[str, List[DraftFile]] = collections.OrderedDict()
     context_files: Dict[str, List[tuple[str, bytes]]] = collections.OrderedDict()
+    extracted_total = 0
+
+    def _read_member_guarded(member_name: str) -> bytes:
+        nonlocal extracted_total
+        data = zf.read(member_name)
+        extracted_total += len(data)
+        if extracted_total > _MAX_IMPORT_UNCOMPRESSED_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Template too large: uncompressed size exceeds "
+                    f"{_MAX_IMPORT_UNCOMPRESSED_BYTES // (1024 * 1024)} MB"
+                ),
+            )
+        return data
+
     for name in names:
         rel = _safe_zip_rel(name)
         if rel is None:
@@ -12005,7 +12127,7 @@ async def import_workspace(
             inner = "/".join(parts[2:])
             # Decode worker bundle files as text (they are YAML/py/md/txt).
             try:
-                content = zf.read(name).decode("utf-8")
+                content = _read_member_guarded(name).decode("utf-8")
             except UnicodeDecodeError:
                 raise HTTPException(
                     status_code=400,
@@ -12015,7 +12137,7 @@ async def import_workspace(
         elif parts[0] == "contexts" and len(parts) >= 3:
             cname = parts[1]
             inner = "/".join(parts[2:])
-            context_files.setdefault(cname, []).append((inner, zf.read(name)))
+            context_files.setdefault(cname, []).append((inner, _read_member_guarded(name)))
         # workspace.md / workspace.json and anything else are intentionally
         # ignored for import (workspace.md is operator-agent config that the
         # importer reviews, not auto-overwritten).
@@ -15373,6 +15495,25 @@ def _delete_env_var(name: str) -> bool:
     return removed
 
 
+def _require_secret_mutation_allowed(auth: AuthContext, existing: Optional[Dict[str, Any]], name: str) -> None:
+    """#952: members may create secrets and manage their own, but must not
+    overwrite or delete a secret someone else created.
+
+    Per-user secret repositories (OSS SQLite) never surface another user's
+    rows, so this is a no-op there. Workspace-scoped repositories (cloud)
+    return the workspace row with its creator's user_id — where, before this
+    guard, any member could replace or delete the admin's API keys.
+    """
+    if existing is None or auth.is_admin:
+        return
+    creator = str(existing.get("user_id") or "")
+    if creator and creator != auth.user_id:
+        raise HTTPException(
+            status_code=403,
+            detail=f"only an admin or the creator can modify secret {name!r}",
+        )
+
+
 @app.post("/secrets/{name}", response_model=SecretTestResult)
 def upsert_secret(
     name: SecretName,
@@ -15398,13 +15539,15 @@ def upsert_secret(
             status_code=400,
             detail="Secret value must not contain newline or control characters",
         )
+    _require_secret_mutation_allowed(auth, repos.secrets.get(user_id=auth.user_id, name=name), name)
     repos.secrets.set(
         user_id=auth.user_id,
         name=name,
         value=payload.value,
         status=SecretStatus.SET.value,
     )
-    logger.info("Secret %s upserted", name)
+    # #952: secret mutations are audit-logged with the actor (never the value).
+    logger.info("Secret %s upserted by user=%s role=%s", name, auth.user_id, auth.role)
     # Re-encrypt .secrets.enc if workspace is connected to GitHub
     _cfg = _git_cfg_get(auth.user_id)
     if _cfg and _cfg.get("github_pat") and _cfg.get("repo_full_name"):
@@ -15431,10 +15574,13 @@ def delete_secret(
                 "be deleted via the secrets API."
             ),
         )
-    if repos.secrets.get(user_id=auth.user_id, name=name) is None:
+    existing = repos.secrets.get(user_id=auth.user_id, name=name)
+    if existing is None:
         raise HTTPException(status_code=404, detail=f"Secret {name!r} not found in .env")
+    _require_secret_mutation_allowed(auth, existing, name)
     repos.secrets.delete(user_id=auth.user_id, name=name)
-    logger.info("Secret %s deleted", name)
+    # #952: secret mutations are audit-logged with the actor (never the value).
+    logger.info("Secret %s deleted by user=%s role=%s", name, auth.user_id, auth.role)
     # Re-encrypt .secrets.enc if workspace is connected to GitHub
     _cfg = _git_cfg_get(auth.user_id)
     if _cfg and _cfg.get("github_pat") and _cfg.get("repo_full_name"):
@@ -15730,6 +15876,10 @@ def integrations_catalog(
     limit: int = Query(30, ge=1, le=100),
     search: str = Query("", max_length=120),
     category: str = Query("", max_length=200),
+    # #919: requires a real auth context — without it, any Bearer token or
+    # cookie slipped past the shared-secret middleware check and could
+    # enumerate the catalog (and burn Composio quota) unauthenticated.
+    auth: AuthContext = Depends(get_auth_context),
 ) -> IntegrationCatalogResponse:
     """Return the integration catalog, with optional comma-separated category OR-filter.
 
@@ -15805,7 +15955,12 @@ class CatalogToolItem(BaseModel):
 
 
 @app.get("/integrations/catalog/{slug}/tools", response_model=List[CatalogToolItem])
-def integrations_catalog_tools(slug: str, limit: int = 100) -> List[CatalogToolItem]:
+def integrations_catalog_tools(
+    slug: str,
+    limit: int = 100,
+    # #919: same auth requirement as the catalog listing above.
+    auth: AuthContext = Depends(get_auth_context),
+) -> List[CatalogToolItem]:
     """Return up to `limit` tools for a Composio toolkit slug, cached 1 h.
 
     Designed for the Browse catalog tools modal. Default limit raised to 100
@@ -21000,6 +21155,7 @@ async def rollback_workspace_base_persona(
         rel = WORKSPACE_BASE_PERSONA_PATH.relative_to(workspace).as_posix()
     except ValueError:
         rel = "workspace.base.md"
+    _require_sha_in_asset_history(workspace, sha, rel)
     try:
         _git_ops.checkout_path(workspace, sha, rel)
     except _git_ops.GitOpsError as exc:
@@ -21157,6 +21313,7 @@ async def rollback_workspace_instructions(
         rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
     except ValueError:
         rel = "workspace.md"
+    _require_sha_in_asset_history(workspace, sha, rel)
     try:
         _git_ops.checkout_path(workspace, sha, rel)
     except _git_ops.GitOpsError as exc:
