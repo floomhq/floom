@@ -19,6 +19,13 @@
 //     signed HMAC token, so it needs no proxy exception — only page access)
 //   - /s/* : public standalone share pages for workers and Brain content
 //   - Next.js internals + static assets
+//
+// It is ALSO the CSP source (#926): a per-request nonce replaces the old
+// 'unsafe-inline' script-src from next.config.ts. Next.js reads the nonce out
+// of the request's Content-Security-Policy header during SSR and stamps it on
+// every framework/inline script, so pages must render dynamically (the root
+// layout exports `dynamic = "force-dynamic"` — see #945, which independently
+// requires that protected shells are not statically pre-rendered).
 
 import { NextRequest, NextResponse } from "next/server";
 import { SESSION_COOKIE, verifySessionToken } from "@/lib/web-session";
@@ -52,10 +59,52 @@ function isPublicProxy(pathname: string): boolean {
   return PUBLIC_PROXY_PREFIXES.some((prefix) => pathname.startsWith(prefix));
 }
 
+// #926 — per-request nonce CSP. script-src drops 'unsafe-inline' and the broad
+// https: allowance; 'strict-dynamic' lets nonce'd Next bootstrap scripts load
+// their chunk graph. connect-src is same-origin (client API calls go through
+// /api/proxy); CSP_EXTRA_CONNECT_SRC is the documented seam for self-hosted
+// instances that talk to a cross-origin API from the browser. style-src keeps
+// 'unsafe-inline' (Next/Tailwind inline styles; explicitly acceptable per the
+// audit). img/font keep https: for remote logos/fonts — they cannot execute.
+export function buildCsp(nonce: string): string {
+  const isDev = process.env.NODE_ENV === "development";
+  const extraConnect = (process.env.CSP_EXTRA_CONNECT_SRC || "").trim();
+  return [
+    "default-src 'self'",
+    "base-uri 'self'",
+    "frame-ancestors 'none'",
+    "object-src 'none'",
+    "form-action 'self'",
+    "img-src 'self' data: blob: https:",
+    "media-src 'self' blob:",
+    "frame-src 'self' blob:",
+    "font-src 'self' data: https:",
+    "style-src 'self' 'unsafe-inline'",
+    `script-src 'self' 'nonce-${nonce}' 'strict-dynamic'${isDev ? " 'unsafe-eval'" : ""}`,
+    `connect-src 'self'${extraConnect ? ` ${extraConnect}` : ""}`,
+    "worker-src 'self' blob:",
+    "upgrade-insecure-requests",
+  ].join("; ");
+}
+
 export async function middleware(req: NextRequest) {
   const { pathname } = req.nextUrl;
 
-  const withNoindex = (response: NextResponse) => {
+  // Per-request CSP nonce, threaded to Next via the request headers so SSR
+  // stamps it onto inline/framework scripts (#926).
+  const nonce = btoa(crypto.randomUUID());
+  const csp = buildCsp(nonce);
+  const requestHeaders = new Headers(req.headers);
+  requestHeaders.set("x-nonce", nonce);
+  requestHeaders.set("content-security-policy", csp);
+
+  const pageResponse = (opts?: { noStore?: boolean }) => {
+    const response = NextResponse.next({ request: { headers: requestHeaders } });
+    response.headers.set("Content-Security-Policy", csp);
+    // #945: protected/authenticated page shells must never be shared-cacheable.
+    if (opts?.noStore) {
+      response.headers.set("Cache-Control", "private, no-store, max-age=0");
+    }
     // Public, token-gated share surfaces must never be indexed: the standalone
     // share pages (/s/*) and the standalone approval review page
     // (/approvals/review). /w/* sets noindex via its page metadata.
@@ -73,7 +122,7 @@ export async function middleware(req: NextRequest) {
 
   // Auth endpoints are always reachable (you log in/out through them).
   if (pathname.startsWith("/api/auth/")) {
-    return withNoindex(NextResponse.next());
+    return pageResponse();
   }
 
   const token = req.cookies.get(SESSION_COOKIE)?.value;
@@ -85,10 +134,10 @@ export async function middleware(req: NextRequest) {
   if (pathname.startsWith("/api/proxy")) {
     if (isPublicProxy(pathname)) {
       // Public, token-gated upstream endpoint (signed-link approvals). Allow.
-      return withNoindex(NextResponse.next());
+      return pageResponse();
     }
     if (authed) {
-      return withNoindex(NextResponse.next());
+      return pageResponse();
     }
     return NextResponse.json(
       { detail: "Authentication required." },
@@ -98,10 +147,11 @@ export async function middleware(req: NextRequest) {
 
   // ----- App pages -----
   if (isPublicPage(pathname)) {
-    return withNoindex(NextResponse.next());
+    return pageResponse();
   }
   if (authed) {
-    return withNoindex(NextResponse.next());
+    // Authenticated app shell: no shared cache may store it (#945).
+    return pageResponse({ noStore: true });
   }
 
   // Not authed, non-public page -> send to login, preserving intended path.
