@@ -80,7 +80,11 @@ export async function POST(req: NextRequest) {
     const upstreamBody = await upstream.text();
     const res = new NextResponse(upstreamBody, {
       status: upstream.status,
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        // #941: auth responses are identity-bearing — never shared-cacheable
+        "cache-control": "private, no-store, max-age=0",
+      },
     });
     // Forward the wos_session cookie from the backend (#927: force Secure)
     forwardSecureSetCookies(upstream, res.headers);
@@ -105,6 +109,7 @@ export async function POST(req: NextRequest) {
 
   const token = await deriveSessionToken();
   const res = NextResponse.json({ ok: true });
+  res.headers.set("cache-control", "private, no-store, max-age=0"); // #941
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: true,
