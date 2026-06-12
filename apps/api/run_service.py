@@ -2132,13 +2132,24 @@ def _candidate_output_path(run_id: str, output: Any, outputs: Dict[str, Any], ar
     artifact = _output_artifact(output, artifacts)
     if artifact and artifact.get("path"):
         return Path(str(artifact["path"]))
-    root = ARTIFACTS_DIR / run_id
+    # #913: declared/echoed output paths are author-controlled. `root / path`
+    # with an absolute path DISCARDS root entirely (pathlib semantics), so a
+    # manifest declaring `path: /etc/passwd` pointed the validator at the host
+    # filesystem and leaked file contents through smoke-test mismatch errors.
+    # Confine both to the run's artifact directory; out-of-bounds paths are
+    # treated as "output missing", never read.
     declared_path = getattr(output, "path", None)
     if declared_path:
-        return (root / declared_path).resolve()
+        try:
+            return _safe_artifact_path(run_id, str(declared_path))
+        except ValueError:
+            return None
     value = outputs.get(getattr(output, "name", ""))
     if isinstance(value, str) and _looks_like_relative_path(value):
-        return (root / value.strip()).resolve()
+        try:
+            return _safe_artifact_path(run_id, value.strip())
+        except ValueError:
+            return None
     return None
 
 
