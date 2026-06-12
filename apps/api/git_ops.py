@@ -16,6 +16,7 @@ from __future__ import annotations
 
 import logging
 import os
+import re
 import subprocess
 from pathlib import Path
 from typing import Callable, Optional
@@ -328,6 +329,40 @@ def list_files_at_sha(
     if result.returncode != 0:
         return []
     return [p for p in result.stdout.strip().splitlines() if p]
+
+
+_SHA_RE = re.compile(r"^[0-9a-f]{4,40}$")
+
+
+def sha_in_path_history(
+    workspace_dir: Path,
+    sha: str,
+    rel_path: str,
+) -> bool:
+    """True when ``sha`` (full or short, >=4 hex chars) is a commit that
+    touched ``rel_path``.
+
+    #928: rollback/restore endpoints must only accept SHAs from the target
+    asset's own history — an arbitrary commit id from the shared workspace
+    repo would otherwise let one user inject file states from another user's
+    workers or brain packs.
+    """
+    candidate = (sha or "").strip().lower()
+    if not _SHA_RE.fullmatch(candidate):
+        return False
+    # No --follow: it requires a single-file pathspec, and rollback targets
+    # include directories (worker bundles, brain packs).
+    result = _git(
+        ["log", "--format=%H", "--", rel_path],
+        workspace_dir,
+        check=False,
+    )
+    if result.returncode != 0:
+        return False
+    return any(
+        line.startswith(candidate)
+        for line in result.stdout.strip().splitlines()
+    )
 
 
 def checkout_path(

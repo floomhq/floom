@@ -25,6 +25,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # #938: don't leave the GITHUB_TOKEN in .git/config on the
+          # self-hosted runner after the job finishes.
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
