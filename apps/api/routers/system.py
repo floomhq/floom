@@ -11,8 +11,9 @@ closures (overview serializers, rate-bucket state, connections sweep) move.
 
 Platform-secret specs come from services.secrets_env, assistant access from
 services.context_access (both never purged); chat_service/db are imported
-lazily inside handlers (purged modules). ``request.app.version`` replaces the
-module-global ``app.version`` read — same value, resolved per request.
+lazily inside handlers (purged modules). The version string comes from
+core.config.API_VERSION (also what main passes to FastAPI(version=...)), so
+the handler keeps its original (auth-only) signature for direct-call tests.
 """
 
 from __future__ import annotations
@@ -25,7 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, ConfigDict
 
 from auth import AuthContext, get_auth_context
-from core.config import _PROCESS_STARTED_AT
+from core.config import API_VERSION, _PROCESS_STARTED_AT
 from db import Repositories, get_repos
 from services.context_access import _assistant_access, _ensure_assistant_row
 from services.secrets_env import INFRA_PATH_SPECS, PLATFORM_SECRET_SPECS, PlatformSecretSpec
@@ -96,13 +97,13 @@ def channels_email_status(auth: AuthContext = Depends(get_auth_context)):
 
 
 @system_router.get("/system/info")
-def system_info(request: Request, auth: AuthContext = Depends(get_auth_context)):
+def system_info(auth: AuthContext = Depends(get_auth_context)):
     # #837 RCA: python_version and started_at (process uptime) were returned to
     # every authenticated caller — recon data that maps the runtime for
     # interpreter-specific exploits and restart tracking. Admins keep the full
     # payload; everyone else gets version + runner only.
     info: Dict[str, Any] = {
-        "version": request.app.version,
+        "version": API_VERSION,
         "runner": "e2b",
     }
     if auth.is_admin:
