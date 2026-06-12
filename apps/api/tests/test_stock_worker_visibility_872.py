@@ -38,6 +38,15 @@ PRIVATE_WORKERS = {
     "gmail-inbox-manager-plus",
     "gmail-smart-replies",
     "canopy-crm-sync",
+    # Residual leak caught in the follow-up curation pass: these read Federico's
+    # REAL connected accounts (Gmail / OpenPaper PostHog / openpaper.dev GSC +
+    # Notion) and are is_example:false. gmail-summarize-latest, openpaper-posthog
+    # -daily and seo-opportunity-digest were still in PROTECTED_STOCK_WORKER_IDS
+    # (and gmail-summarize-latest also in PUBLIC), so _worker_can_view bypassed
+    # ownership for every member until they were removed.
+    "gmail-summarize-latest",
+    "openpaper-posthog-daily",
+    "seo-opportunity-digest",
 }
 
 # genuine ship-with-product templates that MUST remain accessible

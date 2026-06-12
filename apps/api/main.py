@@ -506,27 +506,32 @@ def _context_upload_too_large_response() -> JSONResponse:
         },
     )
 
-# #872 SECURITY: PROTECTED_STOCK_WORKER_IDS is also consulted by Emily's
-# _worker_can_view (chat_service) as a visibility bypass — so the same tenant
-# private workers leaked here too. Curated to genuine ship-with-product
-# templates + engine/system workers only; the named-private workers (and the
-# Gmail/CRM tenant-specific entries that only appeared here) are removed so a
-# non-owner member can neither view nor run them. Removing them from this set
-# also correctly makes them owner-deletable (they were never real stock).
+# #872 SECURITY: PROTECTED_STOCK_WORKER_IDS is ALSO consulted by Emily's
+# _worker_can_view (chat_service) as a visibility bypass — `worker_id in
+# PUBLIC_STOCK_WORKER_IDS or worker_id in PROTECTED_STOCK_WORKER_IDS` grants
+# read/run to EVERY user regardless of owner/visibility. So curating
+# PUBLIC_STOCK_WORKER_IDS alone is NOT enough: any tenant-private worker still
+# listed here keeps leaking (a non-owner member can view AND run it). This set
+# is curated to the same standard — genuine ship-with-product example/demo
+# templates + engine/system workers only. Tenant-specific workers that read
+# Federico's real Gmail / PostHog / GSC / Notion / CRM data are removed:
+#   - gmail-summarize-latest  reads the operator's real Gmail inbox (is_example:false)
+#   - openpaper-posthog-daily reads the real OpenPaper PostHog project + emails it
+#   - seo-opportunity-digest  reads real openpaper.dev GSC data + writes to Notion
+# Removing them here also correctly makes them owner-deletable and owner-scoped
+# (they were never real stock). When unsure, EXCLUDE.
 PROTECTED_STOCK_WORKER_IDS = frozenset(
     {
-        # genuine ship-with-product example/demo templates
+        # genuine ship-with-product example/demo templates (is_example: true,
+        # generic pattern, no person-specific account data)
         "csv_enricher",
         "github-digest",
-        "gmail-summarize-latest",
         "node-smoke-test",
         "openblog",
         "opendraft",
-        "openpaper-posthog-daily",
         "outbound-approval-demo",
         "research_brief",
-        "seo-opportunity-digest",
-        # engine/system workers
+        # engine/system workers that power Workeros itself (not tenant content)
         "slack-listener",
         "whatsapp-listener",
         "worker-author",
@@ -557,16 +562,29 @@ def _acquire_worker_create_lock(worker_id: str) -> threading.Lock:
 # Curated down to genuinely-shareable example/demo templates only. Stock =
 # ships-with-product examples, never a tenant's data. A removed worker now
 # correctly 404s for a non-owner member.
+#
+# Inclusion criterion (deliberately stricter than `is_example: true`): a worker
+# belongs here ONLY if it is BOTH (a) marked `is_example: true` in worker.yml
+# AND (b) a generic pattern demo that touches no person-specific account data or
+# real client/business logic. `is_example: true` alone is NOT sufficient — many
+# of the tenant's REAL workers (cv_writeup, dach_compliance, gmail_intake_brief,
+# kugelaudio-*, reverse_match_crm, weekly_update) carry that flag yet operate on
+# Federico's actual Gmail/CRM/client data, so they are excluded. When unsure,
+# EXCLUDE: a wrongly-excluded worker merely isn't a public template; a
+# wrongly-included one leaks a tenant's private worker.
+#
+# gmail-summarize-latest is excluded: it reads the operator's real connected
+# Gmail inbox ("the latest message from your Gmail inbox") and is itself marked
+# `is_example: false` — i.e. not a ship-with-product example.
 PUBLIC_STOCK_WORKER_IDS = frozenset(
     {
-        "csv_enricher",
-        "github-digest",
-        "gmail-summarize-latest",
-        "node-smoke-test",
-        "openblog",
-        "opendraft",
-        "outbound-approval-demo",
-        "research_brief",
+        "csv_enricher",          # is_example, enriches arbitrary CSV rows — no real data source
+        "github-digest",         # is_example, digest of the runner's own GitHub — generic pattern
+        "node-smoke-test",       # is_example, benign runtime smoke (used by E2E)
+        "openblog",              # is_example, upstream OpenBlog engine demo
+        "opendraft",             # is_example, upstream OpenDraft engine demo
+        "outbound-approval-demo",# is_example, HITL two-run approval pattern demo
+        "research_brief",        # is_example, research brief on any topic — generic
     }
 )
 
@@ -1255,6 +1273,19 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
     ):
         return None
     if path.startswith("/contexts"):
+        return None
+    # #872 FINDING-3: the Slack/WhatsApp webhook handlers advertise (and enforce)
+    # a 1 MB cap via channels.common._MAX_WEBHOOK_BODY_BYTES, but the global
+    # 256 KB DEFAULT_JSON_BODY_LIMIT_BYTES below fired first — so the advertised
+    # 1 MB was a lie and any 256 KB-1 MB Slack event was 413'd before the
+    # route's own (signature-gated) size check ran. Exempt them here so each
+    # route's explicit 1 MB cap + HMAC verification governs.
+    if path in {
+        "/slack/events",
+        "/slack/commands",
+        "/slack/interactivity",
+        "/whatsapp/webhook",
+    }:
         return None
     return DEFAULT_JSON_BODY_LIMIT_BYTES
 
