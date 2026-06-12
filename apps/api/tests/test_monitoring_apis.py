@@ -117,6 +117,8 @@ def client_and_repos(monkeypatch, tmp_path):
         "run_service", "main",
     ]:
         sys.modules.pop(name, None)
+    for name in [n for n in list(sys.modules) if n.startswith("routers")]:
+        sys.modules.pop(name, None)
 
     db = importlib.import_module("db")
     db.init_db()
