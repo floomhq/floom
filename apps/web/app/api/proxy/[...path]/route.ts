@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { forwardSecureSetCookies } from "@/lib/secure-set-cookie";
 
 // PR S19 (I-1, I-6): draft-and-create makes up to 3 OpenAI calls with
 // YAML retry. On hard prompts that's 30-60s. Default 10s Vercel timeout
@@ -106,12 +107,19 @@ async function handler(
   if (cd) responseHeaders.set("content-disposition", cd);
   const cl = upstream.headers.get("content-length");
   if (cl) responseHeaders.set("content-length", cl);
+  // #941: every proxied response is authenticated user data — never let a
+  // shared/intermediary cache store it. Upstream may tighten, never loosen.
   const cacheControl = upstream.headers.get("cache-control");
-  if (cacheControl) responseHeaders.set("cache-control", cacheControl);
+  responseHeaders.set(
+    "cache-control",
+    cacheControl && /no-store|private/i.test(cacheControl)
+      ? cacheControl
+      : "private, no-store, max-age=0",
+  );
   const location = upstream.headers.get("location");
   if (location) responseHeaders.set("location", location);
-  const setCookie = upstream.headers.get("set-cookie");
-  if (setCookie) responseHeaders.set("set-cookie", setCookie);
+  // #927: force Secure on any backend cookie we hand to the browser
+  forwardSecureSetCookies(upstream, responseHeaders);
 
   return new NextResponse(upstream.body, {
     status: upstream.status,
