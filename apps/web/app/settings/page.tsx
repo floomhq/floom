@@ -17,6 +17,7 @@ import type {
   WorkspaceMember,
   WorkspaceMembersResponse,
   WorkspaceRole,
+  WorkspaceToken,
 } from "@/lib/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
@@ -57,6 +58,7 @@ import {
   Code2,
   Copy,
   History,
+  KeyRound,
   MessageSquare,
   Palette,
   QrCode,
@@ -193,6 +195,159 @@ function PersonalAccessTokensPanel() {
         </div>
       ) : (
         <p className="text-sm text-muted-foreground">No tokens yet.</p>
+      )}
+    </section>
+  );
+}
+
+// Workspace token (wst_): admin-only API access to workspace-shared workers.
+// Mirrors PersonalAccessTokensPanel; members get 403 → admins-only notice.
+export function WorkspaceTokensPanel() {
+  const [tokens, setTokens] = useState<WorkspaceToken[] | null>(null);
+  const [forbidden, setForbidden] = useState(false);
+  const [newTokenName, setNewTokenName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createdToken, setCreatedToken] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const list = await api.workspace.tokens.list();
+      setTokens(list);
+      setForbidden(false);
+    } catch {
+      // 403 (member) or 404 (endpoint not active) — show the admins-only note.
+      setForbidden(true);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    const name = newTokenName.trim();
+    if (!name || creating) return;
+    setCreating(true);
+    setCreatedToken(null);
+    try {
+      const result = await api.workspace.tokens.create(name);
+      setCreatedToken(result.token);
+      setNewTokenName("");
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to create workspace token");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleRevoke(id: string, name: string) {
+    try {
+      await api.workspace.tokens.revoke(id);
+      toast.success(`Revoked "${name}"`);
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to revoke workspace token");
+    }
+  }
+
+  async function copyToken(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success("Token copied to clipboard");
+    } catch {
+      toast.error("Could not copy to clipboard");
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-medium text-muted-foreground">Workspace token</h2>
+      {forbidden ? (
+        <p className="text-sm text-muted-foreground">
+          Only workspace admins can manage the workspace token.
+        </p>
+      ) : tokens === null ? null : (
+        <>
+          <p className="text-sm text-muted-foreground">
+            A workspace token gives API access to workspace-shared workers only — no
+            private workers. Admins only. Token values are shown once — store them
+            securely.
+          </p>
+
+          {createdToken && (
+            <Alert>
+              <CheckCircle2 className="size-4" />
+              <AlertTitle>Workspace token created</AlertTitle>
+              <AlertDescription>
+                <div className="mt-2 flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs">
+                  <span className="flex-1 break-all">{createdToken}</span>
+                  <button
+                    type="button"
+                    onClick={() => void copyToken(createdToken)}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                    aria-label="Copy workspace token"
+                  >
+                    <Copy className="size-3.5" />
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  This value won&apos;t be shown again.
+                </p>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <form onSubmit={handleCreate} className="flex gap-2">
+            <Input
+              placeholder="Token name (e.g. shared-runner)"
+              value={newTokenName}
+              onChange={(e) => setNewTokenName(e.target.value)}
+              className="max-w-xs"
+            />
+            <Button type="submit" size="sm" disabled={!newTokenName.trim() || creating}>
+              {creating ? "Creating…" : "Create token"}
+            </Button>
+          </form>
+
+          {tokens.length > 0 ? (
+            <div className="space-y-1">
+              {tokens.map((t) => (
+                <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm">
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium">{t.name}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      created {new Date(t.created_at).toLocaleDateString()}
+                    </span>
+                    {t.last_used_at && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        last used {new Date(t.last_used_at).toLocaleDateString()}
+                      </span>
+                    )}
+                    {t.expires_at && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        expires {new Date(t.expires_at).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                  {t.revoked_at ? (
+                    <span className="text-xs text-muted-foreground">revoked</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleRevoke(t.id, t.name)}
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label={`Revoke ${t.name}`}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No workspace tokens yet.</p>
+          )}
+        </>
       )}
     </section>
   );
@@ -512,6 +667,8 @@ function SettingsContent() {
         return <MembersSettingsPanel />;
       case "versions":
         return <VersionHistorySettingsPanel />;
+      case "workspace_tokens":
+        return <WorkspaceTokensPanel />;
       case "danger":
         return (
           <DangerSection
@@ -614,6 +771,8 @@ function iconForSection(key: SectionKey): SettingsIconType {
       return Users;
     case "versions":
       return History;
+    case "workspace_tokens":
+      return KeyRound;
     case "danger":
       return ShieldAlert;
     case "developer":
