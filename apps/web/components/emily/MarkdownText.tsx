@@ -53,7 +53,7 @@ export function MarkdownText({
               href={href}
               target="_blank"
               rel="noopener noreferrer"
-              className="underline underline-offset-2 text-foreground hover:text-muted-foreground transition-colors"
+              className="underline underline-offset-2 text-foreground hover:text-muted-foreground transition-colors break-all"
             >
               {children}
             </a>
