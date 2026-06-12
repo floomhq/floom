@@ -93,7 +93,7 @@ export interface DetailTab {
 
 export interface DetailHeader {
   leading: ReactNode;
-  title: string;
+  title: ReactNode;
   /** Right-aligned primary/secondary actions + overflow. */
   actions?: ReactNode;
   /** Subtitle row (visibility pill, description, app logos). */

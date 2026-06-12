@@ -291,10 +291,8 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     view: { default: "list", grid: true },
     toolbarActions: (
       <DropdownMenu>
-        <DropdownMenuTrigger asChild>
-          <button type="button" className="c-vpill" style={{ padding: "9px 12px", gap: 5 }}>
-            <Download size={14} /> Export <ChevronDown size={12} />
-          </button>
+        <DropdownMenuTrigger className="c-vpill" style={{ padding: "9px 12px", gap: 5 }}>
+          <Download size={14} /> Export <ChevronDown size={12} />
         </DropdownMenuTrigger>
         <DropdownMenuContent align="end" className="w-40 p-1">
           <DropdownMenuItem
