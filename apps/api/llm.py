@@ -18,7 +18,48 @@ OpenAI-shaped responses. One code path serves every provider.
 """
 from __future__ import annotations
 
+import logging
+import re as _re
 from typing import Any, Dict, List, Optional, Sequence
+
+logger = logging.getLogger("workeros.llm")
+
+# #951/#870: provider failure classification. Quota/auth failures get a
+# distinct degraded-mode message + an ops-alertable ERROR log; raw provider
+# text (account status, key fragments, model ids) never reaches a client.
+_PROVIDER_OUTAGE_RE = _re.compile(
+    r"insufficient_quota|invalid_api_key|incorrect api key|authenticationerror"
+    r"|billing|exceeded your current quota|rate.?limit|429|401",
+    _re.IGNORECASE,
+)
+_PROVIDER_ERROR_RE = _re.compile(
+    r"error code: \d{3}|openai|anthropic|litellm|bedrock|api.?connection",
+    _re.IGNORECASE,
+)
+
+
+def is_llm_provider_outage(exc: BaseException | str) -> bool:
+    """True for quota/auth/rate-limit failures — the 'Emily is down' class (#870)."""
+    return bool(_PROVIDER_OUTAGE_RE.search(str(exc)))
+
+
+def safe_llm_error_message(exc: BaseException | str, *, action: str = "This request") -> str:
+    """User-safe message for a failed LLM call; never echoes provider details.
+
+    Full detail goes to the server log only. Quota/auth outages additionally
+    emit an `LLM_PROVIDER_ALERT` ERROR record so ops alerting can key on it.
+    """
+    text = str(exc)
+    if is_llm_provider_outage(text):
+        logger.error("LLM_PROVIDER_ALERT quota/auth failure (%s): %s", action, text)
+        return (
+            f"{action} is temporarily unavailable because of an AI provider "
+            "account issue. The team has been alerted. Please try again soon."
+        )
+    if _PROVIDER_ERROR_RE.search(text):
+        logger.error("LLM provider error (%s): %s", action, text)
+        return f"{action} failed upstream. Please try again."
+    return f"{action} failed. Please try again."
 
 
 def is_litellm_model(model: str) -> bool:

@@ -5177,10 +5177,14 @@ async def stream_chat(
 
     except Exception as exc:
         logger.exception("stream_chat failed for conversation %s", conversation_id)
+        # #951/#870: full detail is in the log above; the client gets a safe
+        # message (degraded-mode wording + ops alert on provider quota/auth).
+        from llm import safe_llm_error_message
+
         await part_queue.put({
             "type": "error",
             "version": CHAT_EVENT_VERSION,
-            "error": str(exc),
+            "error": safe_llm_error_message(exc, action="Chat"),
             "conversation_id": conversation_id,
             "message_id": assistant_message_id,
         })
