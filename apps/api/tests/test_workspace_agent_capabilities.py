@@ -281,6 +281,8 @@ def chat_env(monkeypatch, tmp_path):
         "runner_sandbox.agent_capabilities",
     ]:
         sys.modules.pop(name, None)
+        for _rn in [n for n in list(sys.modules) if n.startswith("routers")]:
+            sys.modules.pop(_rn, None)
 
     import contexts as contexts_mod  # noqa: F401
     db = importlib.import_module("db")

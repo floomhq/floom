@@ -33,6 +33,8 @@ def main_mod(monkeypatch, tmp_path):
     for name in list(sys.modules):
         if name == "main" or name == "db" or name.startswith("db.") or name == "auth" or name.startswith("auth."):
             sys.modules.pop(name, None)
+        for _rn in [n for n in list(sys.modules) if n.startswith("routers")]:
+            sys.modules.pop(_rn, None)
     db = importlib.import_module("db")
     db.init_db()
     db.get_repositories.cache_clear()
