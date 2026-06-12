@@ -4,7 +4,14 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import Papa from "papaparse";
-import { Download } from "lucide-react";
+import { ChevronDown, Download } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { StatusPill } from "@/components/collection/StatusPill";
 import { api } from "@/lib/api";
 import { formatRelative } from "@/lib/formatters";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
@@ -229,16 +236,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     }
   };
 
-  const cancel = async (r: RunSummary) => {
-    try {
-      await api.runs.cancel(r.id);
-      toast.success("Run cancelled");
-      await refresh();
-    } catch {
-      toast.error("Could not cancel the run.");
-    }
-  };
-
   const replay = async (r: RunSummary) => {
     try {
       const res = await api.runs.replay(r.worker_id, r.id);
@@ -284,25 +281,33 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     ],
     view: { default: "list", grid: true },
     toolbarActions: (
-      <>
-        <button type="button" className="c-vpill" style={{ padding: "9px 12px" }} onClick={() => void exportCSV()}>
-          <Download size={14} /> Export CSV
-        </button>
-        <button
-          type="button"
-          className="c-vpill"
-          style={{ padding: "9px 12px" }}
-          disabled={exportingZip}
-          onClick={() => void exportZip()}
-        >
-          <Download size={14} /> {exportingZip ? "Exporting…" : "Export ZIP"}
-        </button>
-      </>
+      <DropdownMenu>
+        <DropdownMenuTrigger className="c-vpill" style={{ padding: "9px 12px", gap: 5 }}>
+          <Download size={14} /> Export <ChevronDown size={12} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40 p-1">
+          <DropdownMenuItem
+            onClick={() => void exportCSV()}
+            className="flex items-center gap-2 text-sm text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <Download size={14} /> Export CSV
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={exportingZip}
+            onClick={() => void exportZip()}
+            className="flex items-center gap-2 text-sm text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <Download size={14} /> {exportingZip ? "Exporting…" : "Export ZIP"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     ),
     group: (r) => dayLabel(r.created_at ?? r.started_at, now),
     columns: {
-      template: "1.6fr 1fr .8fr 1fr 130px 40px",
-      headers: ["Worker", "Trigger", "Duration", "Started", "Status", ""],
+      template: "1.6fr 1fr .8fr 130px 1fr",
+      headers: ["Worker", "Trigger", "Duration", "Status", "Started"],
+      statusColumn: false,
+      menuColumn: false,
     },
     row: (r) => ({
       // V4 SPEC rule 3: no avatar for runs — non-person entity.
@@ -310,13 +315,9 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       cols: [
         formatTrigger(r.trigger_source),
         formatDuration(r.duration_ms),
+        <StatusPill key="status" spec={runStatusPill(r.status)} />,
         formatRelative(r.created_at ?? r.started_at ?? ""),
       ],
-      status: runStatusPill(r.status),
-      menu:
-        r.status === "running" || r.status === "queued"
-          ? [{ label: "Cancel run", onSelect: () => void cancel(r), danger: true }]
-          : [{ label: "Open full run", onSelect: () => (window.location.href = `/runs/${r.id}`) }],
     }),
     card: (r) => ({
       // V4 SPEC rule 3: no avatar monogram for runs.

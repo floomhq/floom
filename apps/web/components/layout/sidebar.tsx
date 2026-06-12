@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight } from "lucide-react";
+import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Search, LogOut, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -117,14 +117,6 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
   };
   return (
     <div className="px-3 pb-3 space-y-1.5">
-      <Link
-        href="/workers/new"
-        onClick={onNavigate}
-        className="flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--primary)] px-2.5 text-sm font-medium text-[var(--primary-text)] shadow-[var(--shadow-btn)] hover:bg-[var(--solid-2)] transition-colors duration-150"
-      >
-        <Plus className="w-4 h-4" />
-        New worker
-      </Link>
       <button
         type="button"
         onClick={onSearch}
@@ -265,14 +257,6 @@ export function Sidebar() {
         {/* ── Icon rail (collapsed) ─────────────────────────────────────────── */}
         {collapsed && (
           <nav className="flex flex-1 flex-col items-center gap-0.5 pt-3 pb-3 overflow-y-auto" aria-label="Icon navigation">
-            {/* New worker */}
-            <Link
-              href="/workers/new"
-              title="New worker"
-              className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] bg-[var(--primary)] text-[var(--primary-text)] hover:bg-[var(--solid-2)] transition-colors mb-2"
-            >
-              <Plus className="w-4 h-4" />
-            </Link>
             {nav.map((item) => {
               const active =
                 item.href === "/overview"

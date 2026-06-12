@@ -235,8 +235,9 @@ describe("Phase 2 — Textarea primitive (v4 flat, APP-UI-V4-SPEC §1)", () => {
 // The tiles must not have a hardcoded `border border-[var(--border-default)]`.
 describe("P5 — OverviewDashboard metric tiles are flat by token (spec rule #2)", () => {
   it("cardClass uses --bd-card token, not border-[var(--border-default)]", () => {
-    // The metric tile cardClass const must use `border-[var(--bd-card)]`
-    expect(overviewSrc).toContain("border-[var(--bd-card)]");
+    // The metric tile cardClass const must use the full border shorthand token
+    // so `--bd-card:none` computes to 0px border width.
+    expect(overviewSrc).toContain("[border:var(--bd-card)]");
     // Must NOT hardcode border-[var(--border-default)]
     expect(overviewSrc).not.toContain("border border-[var(--border-default)]");
   });

@@ -1,9 +1,10 @@
 import { cn } from "@/lib/utils";
+import { Sparkles } from "lucide-react";
 
 /**
  * EmilyAvatar — the WorkerOS Emily identity mark.
  *
- * Wireframe spec: radial gradient (#7aa0ff → accent) with a white sparkle overlay
+ * Wireframe spec: radial gradient (#7aa0ff → accent) with a white sparkle icon
  * and a subtle pulse ring on the "md" size (used in empty-state and headers).
  * "sm" size (used inline in message threads) skips the pulse to avoid visual noise.
  */
@@ -32,19 +33,14 @@ export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
         }}
         aria-hidden="true"
       >
-        {/* White sparkle overlay — centred ✦ glyph */}
-        <span
-          className="absolute inset-0 flex items-center justify-center text-white select-none pointer-events-none"
-          style={{
-            fontSize: isSmall ? "9px" : "12px",
-            lineHeight: 1,
-            fontWeight: 700,
-            opacity: 0.9,
-          }}
+        <Sparkles
+          className={cn(
+            "absolute inset-0 m-auto text-white pointer-events-none",
+            isSmall ? "size-3" : "size-4"
+          )}
+          strokeWidth={2.4}
           aria-hidden="true"
-        >
-          ✦
-        </span>
+        />
       </span>
     </span>
   );

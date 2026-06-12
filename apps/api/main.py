@@ -122,7 +122,7 @@ from models import (
     WorkerVisibilityUpdate,
     WorkerSummary,
     WorkerDetail,
-    WorkerDetailLastRun,
+    DetailLastRun,
     PublicWorker,
     PublicWorkerInput,
     PublicWorkerOutput,
@@ -2527,7 +2527,7 @@ def _make_worker_detail_last_run(
     *,
     user_id: str,
     repos: Repositories,
-) -> Optional[WorkerDetailLastRun]:
+) -> Optional[DetailLastRun]:
     if summary is None:
         return None
     output_preview: Optional[str] = None
@@ -2538,7 +2538,7 @@ def _make_worker_detail_last_run(
     except Exception:
         logger.debug("last-run preview fetch failed for run %s", summary.id, exc_info=True)
 
-    return WorkerDetailLastRun(
+    return DetailLastRun(
         id=summary.id,
         worker_id=summary.worker_id,
         worker_name=summary.worker_name,
