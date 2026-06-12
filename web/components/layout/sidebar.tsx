@@ -223,7 +223,7 @@ function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
   const primary = user?.display_name?.trim() || user?.email || "Local user";
   const secondary = user?.display_name?.trim()
     ? (user?.email || "Signed in")
-    : (user?.email ? "Signed in" : "Workeros");
+    : (user?.email ? "Signed in" : "WorkerOS");
   const initial = profileInitials(primary);
   const picture = user?.picture ?? null;
 

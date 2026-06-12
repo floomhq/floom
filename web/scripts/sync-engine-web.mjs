@@ -100,10 +100,15 @@ export const OVERLAY_FILES = [
   "tests/cloud-invite-install.test.ts",
   "tests/fl-batch-6.test.ts",
   "lib/server-api.ts",
-  "lib/api.ts",
-  "lib/types.ts",
+  // lib/api.ts de-forked 2026-06-12: the engine version consumes the cloud env
+  // seams (NEXT_PUBLIC_API_PROXY_BASE / NEXT_PUBLIC_BASE_PATH) directly; the
+  // overlay copy had silently fallen behind (missing workspace.getSettings,
+  // bulk export, chat attachments) and broke those features on cloud.
+  // lib/types.ts entry was stale — the overlay file never existed.
   "lib/telemetry.ts",
   "lib/useRunStream.ts",
+  "lib/verify-session.ts",
+  "tests/verify-session-935.test.ts",
 ];
 
 const CLOUD_TAILWIND_SOURCE_MARKER = "/* workeros-cloud generated Tailwind sources */";
