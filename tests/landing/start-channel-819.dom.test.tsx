@@ -42,7 +42,7 @@ describe("pre-auth /start/<channel> pages (#819)", () => {
   it("mcp: setup is fully public (docs link, no sign-in CTA)", async () => {
     render(await StartChannelPage({ params: Promise.resolve({ channel: "mcp" }) }));
     expect(screen.getByText("Read the MCP setup").closest("a")!.getAttribute("href")).toBe(
-      "/v3/docs#mcp",
+      "/docs#mcp",
     );
   });
 

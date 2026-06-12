@@ -2,7 +2,7 @@ import type { Metadata } from "next";
 import { V3TemplatesBody } from "./V3TemplatesBody";
 
 export const metadata: Metadata = {
-  title: "Templates · WorkerOS v3 preview",
+  title: "Templates · WorkerOS",
   robots: { index: false, follow: false },
 };
 
