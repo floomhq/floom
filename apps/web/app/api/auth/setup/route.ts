@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { forwardSecureSetCookies } from "@/lib/secure-set-cookie";
 
 const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
 
@@ -35,9 +36,7 @@ export async function POST(req: NextRequest) {
   });
 
   // Forward the wos_session cookie from the backend to the browser
-  const setCookie = upstream.headers.get("set-cookie");
-  if (setCookie) {
-    res.headers.set("set-cookie", setCookie);
-  }
+  // (#927: force Secure on everything we hand to the browser)
+  forwardSecureSetCookies(upstream, res.headers);
   return res;
 }

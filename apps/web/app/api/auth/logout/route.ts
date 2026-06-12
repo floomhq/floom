@@ -30,9 +30,10 @@ export async function POST(req: NextRequest) {
     path: "/",
     maxAge: 0,
   });
-  // Clear the backend session cookie
+  // Clear the backend session cookie (#927: Secure matches how it is set)
   res.cookies.set("wos_session", "", {
     httpOnly: true,
+    secure: true,
     sameSite: "lax",
     path: "/",
     maxAge: 0,
