@@ -46,7 +46,7 @@ def _load_api(monkeypatch, tmp_path, *, stock_workers: tuple[str, ...] = ()):
     monkeypatch.delenv("ALLOWED_ORIGIN_REGEX", raising=False)
     monkeypatch.delenv("WORKEROS_DEV", raising=False)
 
-    reset_prefixes = ("auth.", "db.")
+    reset_prefixes = ("auth.", "db.", "routers")
     reset_exact = {
         "main",
         "auth",
