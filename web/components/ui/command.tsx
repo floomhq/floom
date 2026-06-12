@@ -44,7 +44,7 @@ function CommandDialog({
         />
         <DialogPrimitive.Popup
           className={cn(
-            "fixed top-[20%] left-1/2 z-50 w-full max-w-[calc(100%-2rem)] -translate-x-1/2 overflow-hidden rounded-[var(--radius-card)] bg-popover p-0 text-popover-foreground ring-1 ring-foreground/10 shadow-pop duration-100 outline-none sm:max-w-xl data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+            "fixed top-[20%] left-1/2 z-50 w-full max-w-[calc(100%-2rem)] -translate-x-1/2 overflow-hidden rounded-[var(--radius-card)] bg-popover p-0 text-popover-foreground shadow-pop duration-100 outline-none sm:max-w-xl data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
             className,
           )}
         >
@@ -68,7 +68,7 @@ function CommandInput({
     <div
       data-slot="command-input-wrapper"
       cmdk-input-wrapper=""
-      className="flex h-12 items-center gap-2 border-b border-line px-3"
+      className="flex h-12 items-center gap-2 [border-bottom:var(--bd-div)] px-3"
     >
       <Search className="size-4 shrink-0 opacity-50" />
       <CommandPrimitive.Input
@@ -162,7 +162,7 @@ function CommandShortcut({
     <span
       data-slot="command-shortcut"
       className={cn(
-        "text-muted-foreground ml-auto inline-flex items-center gap-0.5 text-[11px] tracking-widest [&>kbd]:inline-flex [&>kbd]:items-center [&>kbd]:justify-center [&>kbd]:rounded [&>kbd]:border [&>kbd]:border-line [&>kbd]:bg-bg-2 [&>kbd]:px-1.5 [&>kbd]:py-0.5 [&>kbd]:font-mono [&>kbd]:text-[10px]",
+        "text-muted-foreground ml-auto inline-flex items-center gap-0.5 text-[11px] tracking-widest [&>kbd]:inline-flex [&>kbd]:items-center [&>kbd]:justify-center [&>kbd]:rounded-[var(--radius-button)] [&>kbd]:[border:var(--bd-pill)] [&>kbd]:bg-bg-2 [&>kbd]:px-1.5 [&>kbd]:py-0.5 [&>kbd]:font-mono [&>kbd]:text-[10px]",
         className,
       )}
       {...props}

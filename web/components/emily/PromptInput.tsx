@@ -105,7 +105,7 @@ export function PromptInput({
           /workers/new (lib/prompt-detect). */}
       <PromptChips prompt={value} className="px-1" />
 
-      <div className="flex items-center gap-2 rounded-xl border border-border bg-background px-3 py-2.5 shadow-sm focus-within:ring-1 focus-within:ring-[#59AAF8]/40 transition-shadow">
+      <div className="flex items-center gap-2 rounded-xl [border:var(--bd-card)] bg-background px-3 py-2.5 shadow-sm focus-within:[border:var(--bd-card)] transition-shadow">
         {/* Attach button */}
         <button
           type="button"

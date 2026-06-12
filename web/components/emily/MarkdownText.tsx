@@ -73,7 +73,7 @@ export function MarkdownText({
             );
           },
           blockquote: ({ children }) => (
-            <blockquote className="border-l-2 border-border/60 pl-3 text-muted-foreground my-1.5">
+            <blockquote className="[border-left:var(--bd-div)] pl-3 text-muted-foreground my-1.5">
               {children}
             </blockquote>
           ),

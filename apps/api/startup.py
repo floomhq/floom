@@ -816,6 +816,58 @@ def _ensure_magic_link_secret() -> None:
     os.environ["WORKEROS_MAGIC_LINK_SECRET"] = derived
 
 
+def _install_worker_call_signing_key() -> None:
+    """Give the engine a real worker-call-token signing secret in cloud.
+
+    Engine #972 made run_token._worker_call_signing_key fail closed when
+    FLOOM_SECRET is unset (no more public "dev-secret-not-set" fallback), so
+    worker-to-worker chaining (manifest calls: + call_worker) raises
+    WorkerCallSecretMissing at run dispatch in cloud — because cloud strips
+    FLOOM_SECRET to keep the engine's x-floom-secret request gate disabled
+    (auth is Supabase JWT/PAT, see main.py).
+
+    Patch the resolver so that when no explicit secret is supplied it falls back
+    to a stable, non-public key derived from SUPABASE_SERVICE_ROLE_KEY (mirrors
+    _ensure_magic_link_secret). Both ends — issue (e2b_driver/agent_driver) and
+    validate (engine auth_middleware + cloud SupabaseAuthProvider) — funnel
+    through this one function in the same process, so they always agree, and the
+    token is signed with a REAL secret (satisfying #972) without re-enabling the
+    auth gate. An explicit FLOOM_SECRET passed by the engine still wins.
+
+    Cloud-side workaround; matching engine PR tracked to add a first-class
+    worker-call signing-secret hook so this can be deleted.
+    """
+    service_key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
+    if not service_key:
+        return  # no service key — leave the engine's fail-closed behaviour intact
+
+    import hashlib
+    import hmac as _hmac
+
+    derived = _hmac.new(
+        service_key.encode("utf-8"),
+        b"workeros-worker-call-secret-v1",
+        hashlib.sha256,
+    ).hexdigest()
+
+    try:
+        run_token = import_engine_module("run_token")
+    except Exception as exc:  # pragma: no cover - engine must be importable here
+        logger.warning("worker-call signing-key override skipped: %s", exc)
+        return
+
+    existing = getattr(run_token, "_worker_call_signing_key", None)
+    if existing is None or getattr(existing, "_workeros_cloud_patched", False):
+        return
+
+    def _cloud_worker_call_signing_key(secret: str | None = None) -> str:
+        key = (secret or "").strip()
+        return key if key else derived
+
+    _cloud_worker_call_signing_key._workeros_cloud_patched = True  # type: ignore[attr-defined]
+    run_token._worker_call_signing_key = _cloud_worker_call_signing_key
+
+
 def _register_secrets_key_resolver() -> None:
     """Tell the engine to fetch the .secrets.enc key from Supabase Vault (pgsodium).
 
@@ -862,6 +914,7 @@ def register_cloud_components() -> None:
     register_auth_provider("cloud", lambda: SupabaseAuthProvider())
     register_repositories("cloud", _cloud_repositories)
     apply_engine_overrides()
+    _install_worker_call_signing_key()
     apply_cloud_workspace_agent_overrides()
     apply_cloud_whatsapp_overrides()
     _register_contexts_scope_resolver()

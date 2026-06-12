@@ -38,12 +38,12 @@ export function RunStatusGlyph({
 }
 
 const BADGE_STYLE: Record<string, string> = {
-  success: "bg-success/10 text-success border-success/30 font-medium",
-  error: "bg-error/10 text-error border-error/30 font-semibold",
-  running: "bg-pending/10 text-pending border-pending/30 font-medium",
-  queued: "bg-muted text-muted-foreground border-border font-medium",
-  approval: "bg-muted text-muted-foreground border-border font-medium",
-  unknown: "bg-muted text-muted-foreground border-border font-medium",
+  success: "bg-success/10 text-success font-medium",
+  error: "bg-error/10 text-error font-semibold",
+  running: "bg-pending/10 text-pending font-medium",
+  queued: "bg-muted text-muted-foreground font-medium",
+  approval: "bg-muted text-muted-foreground font-medium",
+  unknown: "bg-muted text-muted-foreground font-medium",
 };
 
 // S29l (ChatGPT-audit P-2): pills are decoration when status is the

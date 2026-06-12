@@ -15,8 +15,8 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
   try {
     const share = await fetchStandaloneShare(token);
     return {
-      title: `${share.title} | WorkerOS share`,
-      description: share.description || "Standalone WorkerOS share page",
+      title: `${share.title} | Floom share`,
+      description: share.description || "Standalone Floom share page",
       robots: {
         index: false,
         follow: false,
@@ -24,7 +24,7 @@ export async function generateMetadata({ params }: Props): Promise<Metadata> {
     };
   } catch {
     return {
-      title: "WorkerOS share",
+      title: "Floom share",
       robots: {
         index: false,
         follow: false,
@@ -42,7 +42,7 @@ export default async function StandaloneSharePage({ params }: Props) {
     notFound();
   }
 
-  // v6: the share card is self-contained (it carries its own WorkerOS nav +
+  // v6: the share card is self-contained (it carries its own Floom nav +
   // sticky CTA), so the page no longer renders a separate header.
   // FL4: pass auth state so a signed-in visitor sees "Dashboard" instead of a
   // login-bound "Add to workspace".

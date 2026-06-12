@@ -12,7 +12,7 @@ export function RunCard({ card }: { card: RunCardType }) {
   const isPending = status === "pending_approval";
 
   return (
-    <div className="rounded-lg border border-border bg-card/60 overflow-hidden text-sm">
+    <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-card/60 overflow-hidden text-sm">
       <div className="flex items-center gap-2.5 px-3.5 py-2.5">
         {isCompleted && <CheckCircle2 className="size-3.5 shrink-0 text-green-600" />}
         {isRunning && <Loader2 className="size-3.5 shrink-0 text-[#59AAF8] animate-spin" />}
@@ -25,12 +25,12 @@ export function RunCard({ card }: { card: RunCardType }) {
           <span className="text-xs text-muted-foreground shrink-0">{duration}</span>
         )}
         {isPending && (
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0.5 bg-amber-500/10 text-amber-700 border-amber-500/20 font-normal">
+          <Badge variant="secondary" className="text-[10px] px-1.5 py-0.5 bg-amber-500/10 text-amber-700 [border:var(--bd-pill)] font-normal">
             Needs approval
           </Badge>
         )}
         {isRunning && (
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0.5 bg-blue-500/10 text-blue-700 border-blue-500/20 font-normal">
+          <Badge variant="secondary" className="text-[10px] px-1.5 py-0.5 bg-blue-500/10 text-blue-700 [border:var(--bd-pill)] font-normal">
             Running
           </Badge>
         )}
@@ -67,7 +67,7 @@ export function RunCard({ card }: { card: RunCardType }) {
             <a
               key={action.id}
               href={action.href}
-              className="inline-flex h-7 items-center rounded-md border border-border bg-background px-2.5 text-xs font-normal text-foreground hover:bg-accent transition-colors"
+              className="inline-flex h-7 items-center rounded-md [border:var(--bd-card)] bg-background px-2.5 text-xs font-normal text-foreground hover:bg-accent transition-colors"
             >
               {action.label ?? action.id}
             </a>

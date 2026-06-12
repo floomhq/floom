@@ -152,6 +152,7 @@
      CRITICAL (Codex trap): primary Buttons use --primary, NOT --accent —
      so a cool --accent swap does NOT turn buttons blue. See button.tsx fix. */
   --accent: #3E6FE0;
+  --emily-mark: #3E6FE0;
   --sel: #EEF3FE;
   --accent-soft: var(--sel);
   --accent-line: rgba(62,111,224,.3);
@@ -190,7 +191,7 @@
   --card-shadow: none;
   --r-xs: 4px;
   --r-sm: 6px;
-  --r-md: 8px;
+  --r-md: var(--radius-button);
   --r-lg: 10px;
   --r-xl: 16px;
   --r-2xl: 16px;
@@ -270,6 +271,7 @@ html.dark {
      --accent-soft stays as color-mix for selection/nav tints.
      --solid = accent (blue fills) in dark; --primary = near-white ink. */
   --accent: #5B8DEF;
+  --emily-mark: #5B8DEF;
   --sel: rgba(91,141,239,.16);
   --info: #5B8DEF; /* in dark, "running" shares the blue hue */
   --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
@@ -400,10 +402,8 @@ html.dark ::selection {
 
 *::-webkit-scrollbar-thumb {
   min-height: 44px;
-  border: 2px solid transparent;
-  border-radius: 9999px;
+  border-radius: var(--radius-button);
   background-color: transparent;
-  background-clip: padding-box;
 }
 
 *:hover::-webkit-scrollbar-thumb,
@@ -419,7 +419,7 @@ html.dark ::selection {
 
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply [border:var(--bd-card)] outline-ring/50;
   }
 
   html {
@@ -600,18 +600,6 @@ html.dark .grain {
     color: var(--ink);
   }
 
-  .border-line {
-    border-color: var(--line);
-  }
-
-  .border-\[\#eaeaea\] {
-    border-color: var(--line);
-  }
-
-  .border-\[\#e4e4e7\] {
-    border-color: var(--line-strong);
-  }
-
   .text-\[\#111\],
   .text-\[\#333\] {
     color: var(--ink);
@@ -658,6 +646,10 @@ html.dark .grain {
     box-shadow: var(--shadow-btn);
   }
 
+  .rounded {
+    border-radius: var(--radius-button);
+  }
+
   .rounded-xs {
     border-radius: var(--r-xs);
   }
@@ -698,8 +690,8 @@ html.dark .grain {
   min-height: 32px;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--line);
-  border-radius: var(--r-pill);
+  border: var(--bd-btn);
+  border-radius: var(--radius-button);
   background: var(--glass-bg);
   color: var(--ink-soft);
   padding: 0;
@@ -708,13 +700,11 @@ html.dark .grain {
   transition:
     color var(--t-fast),
     background var(--t-fast),
-    border-color var(--t-fast),
     box-shadow var(--t-fast);
 }
 
 .theme-mode-button:hover {
   background: var(--bg-2);
-  border-color: var(--line-strong);
   color: var(--ink);
 }
 
@@ -768,7 +758,7 @@ html.dark .grain {
 
 /* count strip — inline on the right of the title row (SPEC §11) */
 .c-counts { display:flex; align-items:center; color:var(--muted-foreground); font-size:12.5px; flex-wrap:wrap; }
-.c-counts .ct { display:flex; align-items:baseline; gap:5px; padding:0 14px; border-right:1px solid var(--line); }
+.c-counts .ct { display:flex; align-items:baseline; gap:5px; padding:0 14px; border-right:var(--bd-div); }
 .c-counts .ct:first-child { padding-left:0; }
 .c-counts .ct:last-child { border-right:0; }
 .c-counts .ct b { color:var(--ink); font-weight:600; font-size:14px; }
@@ -798,7 +788,7 @@ html.dark .grain {
 .c-tagbar { display:flex; flex-wrap:nowrap; gap:10px; align-items:center; overflow-x:auto; scrollbar-width:none; }
 .c-tagbar::-webkit-scrollbar { height:0; display:none; }
 .c-tgroup { display:flex; gap:5px; align-items:center; flex:0 0 auto; }
-.c-tgroup + .c-tgroup { padding-left:10px; border-left:1px solid var(--line); }
+.c-tgroup + .c-tgroup { padding-left:10px; border-left:var(--bd-div); }
 .c-tag { display:inline-flex; align-items:center; gap:5px; border:var(--bd-pill); border-radius:var(--radius-pill); padding:3px 9px; font-size:11.5px; color:var(--ink-soft); background:var(--bg-2); white-space:nowrap; }
 .c-tag:hover { background:var(--bg-3); }
 .c-tag.on { background:var(--primary); color:var(--primary-text); border-color:var(--primary); }
@@ -813,8 +803,8 @@ html.dark .grain {
 .c-lrow:hover { background:var(--bg-2); }
 .c-lrow.sel { background:var(--accent-soft); box-shadow:inset 3px 0 0 var(--accent); }
 .c-lprimary { display:flex; align-items:center; gap:13px; min-width:0; }
-.c-logo { width:30px; height:30px; border-radius:8px; background:#fff; border:1px solid var(--line-soft); display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
-.c-av { width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--primary-text); font-size:12px; font-weight:600; flex:0 0 auto; }
+.c-logo { width:30px; height:30px; border-radius:var(--radius-button); background:var(--bg-2); border:var(--bd-card); display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+.c-av { width:30px; height:30px; border-radius:var(--radius-button); display:flex; align-items:center; justify-content:center; color:var(--primary-text); font-size:12px; font-weight:600; flex:0 0 auto; }
 .c-lp-tx { min-width:0; }
 .c-lp-tx .nm { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
 .c-lp-tx .sub { color:var(--muted-foreground); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -824,12 +814,12 @@ html.dark .grain {
 .c-daygrp .dh { display:flex; align-items:center; padding:16px 4px 8px; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted-foreground); font-weight:600; }
 
 /* status pill — outlined/tinted + leading dot (SPEC §2a) */
-.c-pill { display:inline-flex; align-items:center; gap:6px; border-radius:var(--radius-pill); font-size:11.5px; padding:3px 10px; font-weight:500; border:1px solid transparent; }
+.c-pill { display:inline-flex; align-items:center; gap:6px; border-radius:var(--radius-pill); font-size:11.5px; padding:3px 10px; font-weight:500; border:var(--bd-pill); }
 .c-pill .dot { width:6px; height:6px; border-radius:var(--radius-pill); background:currentColor; }
-.c-pill.ok   { background:color-mix(in srgb, var(--success) 12%, transparent); color:var(--success); border-color:color-mix(in srgb, var(--success) 28%, transparent); }
-.c-pill.err  { background:color-mix(in srgb, var(--warning) 14%, transparent); color:var(--warning); border-color:color-mix(in srgb, var(--warning) 30%, transparent); }
-.c-pill.warn,.c-pill.pending { background:color-mix(in srgb, var(--pending) 16%, transparent); color:var(--pending); border-color:color-mix(in srgb, var(--pending) 34%, transparent); }
-.c-pill.run  { background:color-mix(in srgb, var(--info) 14%, transparent); color:var(--info); border-color:color-mix(in srgb, var(--info) 30%, transparent); }
+.c-pill.ok   { background:color-mix(in srgb, var(--success) 12%, transparent); color:var(--success); }
+.c-pill.err  { background:color-mix(in srgb, var(--warning) 14%, transparent); color:var(--warning); }
+.c-pill.warn,.c-pill.pending { background:color-mix(in srgb, var(--pending) 16%, transparent); color:var(--pending); }
+.c-pill.run  { background:color-mix(in srgb, var(--info) 14%, transparent); color:var(--info); }
 .c-pill.idle { background:var(--bg-2); color:var(--muted-foreground); }
 
 /* grid cards (SPEC §2b — calm: avatar+name, desc, one status line) */
@@ -837,7 +827,7 @@ html.dark .grain {
 /* §3 + rule #10: flat by token, uniform 148px, hover = bg lift (no border/shadow). */
 .c-gcard { border:var(--bd-card); background:var(--grid-card-bg,var(--bg-card)); border-radius:var(--radius-card); padding:15px; display:flex; flex-direction:column; min-height:148px; cursor:pointer; position:relative; box-shadow:none; text-align:left; transition:background .12s; }
 .c-gcard:hover { background:var(--bg-2); }
-.c-gcard.sel { box-shadow:0 0 0 1px var(--accent); }
+.c-gcard.sel { background:var(--accent-soft); box-shadow:none; }
 .c-gcard .star { position:absolute; top:13px; right:13px; color:var(--muted-foreground); opacity:0; transition:opacity .12s; }
 .c-gcard:hover .star { opacity:1; }
 .c-gcard .star.on { opacity:1; color:var(--pending); }
@@ -849,6 +839,7 @@ html.dark .grain {
 
 /* split detail (SPEC §3, §8c) */
 .c-body { flex:1; min-height:0; display:flex; overflow:hidden; }
+.c-body.c-split { min-height:0; }
 .c-listcol { flex:1; min-width:0; overflow:auto; }
 .c-split .c-listcol { flex:0 0 30%; min-width:240px; border-right:var(--bd-div); padding:0; display:flex; flex-direction:column; overflow:hidden; }
 .c-split.lc .c-listcol { flex:0 0 46px; min-width:46px; }
@@ -898,11 +889,12 @@ html.dark .grain {
 
 /* responsive (SPEC §8c): persistent ≥1100; drawer 768–1100; stack <768 */
 @media (max-width:1100px) {
-  .c-split .c-detailcol { position:absolute; top:0; right:0; bottom:0; width:min(560px,100%); background:var(--bg-card); border-left:1px solid var(--line); box-shadow:var(--shadow-pop); z-index:20; }
+  .c-split .c-detailcol { position:absolute; top:0; right:0; bottom:0; width:min(560px,100%); background:var(--bg-card); border-left:var(--bd-div); box-shadow:var(--shadow-pop); z-index:20; }
   .c-split { position:relative; }
   .c-split .c-listcol { flex:1 1 auto; }
 }
 @media (max-width:768px) {
-  .c-split .c-detailcol { width:100%; border-left:0; }
+  .c-body.c-split { min-height:calc(100dvh - 176px); }
+  .c-split .c-detailcol { position:relative; inset:auto; width:100%; min-height:0; border-left:0; box-shadow:none; }
   .c-split .c-listcol { display:none; }
 }

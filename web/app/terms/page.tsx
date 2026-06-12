@@ -1,6 +1,6 @@
 export const metadata = {
-  title: "Terms — WorkerOS",
-  description: "Terms for using this WorkerOS instance.",
+  title: "Terms — Floom",
+  description: "Terms for using this Floom instance.",
 };
 
 export default function TermsPage() {
@@ -15,7 +15,7 @@ export default function TermsPage() {
 
       <div className="space-y-4 text-sm leading-relaxed">
         <p>
-          WorkerOS is open-source software provided as-is, without warranty of
+          Floom is open-source software provided as-is, without warranty of
           any kind. This instance is operated by its deployer for their own use.
         </p>
 

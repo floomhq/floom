@@ -801,7 +801,7 @@ export const api = {
         body: JSON.stringify({ return_to }),
       }),
     // Consume a Slack claim token (from ?slack_claim=) and bind the Slack
-    // sender identity to the authenticated Workeros user.
+    // sender identity to the authenticated Floom user.
     claim: (token: string) =>
       fetchJson<{ ok: boolean; slack_team_id: string; slack_user_id: string; user_id: string }>(
         "/slack/bindings/claim",
@@ -897,6 +897,20 @@ export const api = {
     // workspace as an importable template .zip (no secret values).
     shareLink: () =>
       fetchJson<import("./types").WorkspaceShareLink>("/workspace/share-link"),
+    // Workspace tokens (prefix wst_): API access to workspace-shared workers
+    // only — no private workers. Admin-only; value is returned once on create.
+    tokens: {
+      list: () => fetchJson<import("./types").WorkspaceToken[]>("/workspace/tokens"),
+      create: (name: string, expiresAt?: string) =>
+        fetchJson<import("./types").WorkspaceTokenCreate>("/workspace/tokens", {
+          method: "POST",
+          body: JSON.stringify({ name, expires_at: expiresAt }),
+        }),
+      revoke: (tokenId: string) =>
+        fetchJson<null>(`/workspace/tokens/${encodeURIComponent(tokenId)}`, {
+          method: "DELETE",
+        }),
+    },
   },
   // Workspace members (STEP 2). Engine-owned membership: the OSS engine is the
   // single-owner degenerate case (you = Owner); Cloud serves the same shape with

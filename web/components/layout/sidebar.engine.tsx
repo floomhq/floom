@@ -31,7 +31,7 @@ export function FloomMark({ size = 28 }: { size?: number }) {
       viewBox="0 0 100 100"
       xmlns="http://www.w3.org/2000/svg"
       role="img"
-      aria-label="WorkerOS"
+      aria-label="Floom"
       style={{ borderRadius: "22%" }}
     >
       <rect width="100" height="100" rx="22" fill="var(--primary)" />
@@ -122,7 +122,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
       <Link
         href="/chat?mode=create"
         onClick={() => onNavigate?.()}
-        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-transparent px-2.5 text-sm font-medium text-ink hover:bg-[var(--active-nav-bg)] transition-colors duration-150"
+        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] [border:var(--bd-btn)] bg-[var(--bg-2)] px-2.5 text-sm font-medium text-ink hover:bg-[var(--bg-3)] transition-colors duration-150"
       >
         <Plus className="w-4 h-4" />
         <span>New worker</span>
@@ -130,14 +130,14 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
       <button
         type="button"
         onClick={onSearch}
-        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[var(--active-nav-bg)] hover:text-ink transition-colors duration-150"
+        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] [border:var(--bd-input)] bg-[var(--bg-2)] px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[var(--bg-3)] hover:text-ink transition-colors duration-150"
         aria-label="Open command palette"
       >
         <Search className="w-4 h-4 opacity-70" />
         <span>Search...</span>
         <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] tracking-widest text-[var(--ink-faint)]">
-          <kbd className="rounded border border-[var(--border-soft)] bg-[var(--bg-2)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</kbd>
-          <kbd className="rounded border border-[var(--border-soft)] bg-[var(--bg-2)] px-1 py-0.5 font-mono">K</kbd>
+          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-3)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</kbd>
+          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-3)] px-1 py-0.5 font-mono">K</kbd>
         </span>
       </button>
     </div>
@@ -189,10 +189,10 @@ export function Sidebar() {
   return (
     <>
       {/* ── Mobile top bar ─────────────────────────────────────────────────── */}
-      <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--border-soft)] bg-[var(--bg-app)] px-4 md:hidden">
+      <header className="sticky top-0 z-30 flex h-14 items-center justify-between [border-bottom:var(--bd-div)] bg-[var(--bg-app)] px-4 md:hidden">
         <Link href="/overview" className="flex items-center gap-2">
           <FloomMark size={22} />
-          <span className="font-semibold text-base tracking-tight">WorkerOS</span>
+          <span className="font-semibold text-base tracking-tight">Floom</span>
         </Link>
         <div className="flex items-center gap-2">
           <button
@@ -218,7 +218,7 @@ export function Sidebar() {
       {/* ── Desktop sidebar ─────────────────────────────────────────────────── */}
       <aside
         className={cn(
-          "sticky top-0 z-20 hidden h-screen flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] transition-[width] duration-200 md:flex overflow-hidden",
+          "sticky top-0 z-20 hidden h-screen flex-col [border-right:var(--bd-div)] bg-[var(--bg-app)] transition-[width] duration-200 md:flex overflow-hidden",
           collapsed ? "w-[62px]" : "w-[228px]"
         )}
         aria-label="Main navigation"
@@ -226,7 +226,7 @@ export function Sidebar() {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
 
         {/* ── Nav header: workspace identity + collapse chevron ─────────────── */}
-        <div className={cn("flex items-center border-b border-[var(--border-soft)]", collapsed ? "justify-center h-14 px-0" : "h-14 px-2 gap-1")}>
+        <div className={cn("flex items-center [border-bottom:var(--bd-div)]", collapsed ? "justify-center h-14 px-0" : "h-14 px-2 gap-1")}>
           {collapsed ? (
             /* Icon-rail: just the mark, clicking expands */
             <button
@@ -287,7 +287,7 @@ export function Sidebar() {
                 >
                   <item.icon className="w-4 h-4" />
                   {showBadge && (
-                    <span className="absolute -top-0.5 -right-0.5 size-3.5 rounded-full bg-[var(--primary)] flex items-center justify-center text-[8px] font-bold text-[var(--primary-text)]">
+                    <span className="absolute -top-0.5 -right-0.5 size-3.5 rounded-[var(--radius-pill)] bg-[var(--primary)] flex items-center justify-center text-[8px] font-bold text-[var(--primary-text)]">
                       {pendingCount > 9 ? "9+" : pendingCount}
                     </span>
                   )}
@@ -330,9 +330,9 @@ export function Sidebar() {
             onClick={() => setOpen(false)}
             aria-hidden="true"
           />
-          <aside className="relative z-50 flex h-full w-64 max-w-[80vw] flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] shadow-pop">
+          <aside className="relative z-50 flex h-full w-64 max-w-[80vw] flex-col [border-right:var(--bd-div)] bg-[var(--bg-app)] shadow-pop">
             <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
-            <div className="flex items-center justify-between border-b border-[var(--border-soft)] px-3 py-2">
+            <div className="flex items-center justify-between [border-bottom:var(--bd-div)] px-3 py-2">
               <div className="flex-1 min-w-0">
                 <WorkspaceSwitcher />
               </div>
@@ -400,7 +400,7 @@ export function UserProfileFooter({
   const primary = (user as (typeof user & { username?: string | null }) | null)?.username
     || user?.email || user?.display_name || "Local user";
   const userRole = (user as (typeof user & { role?: string }) | null)?.role;
-  const secondary = userRole === "admin" ? "Admin" : userRole === "member" ? "Member" : (user?.email ? "Signed in" : "WorkerOS");
+  const secondary = userRole === "admin" ? "Admin" : userRole === "member" ? "Member" : (user?.email ? "Signed in" : "Floom");
   const initials = profileInitials(primary);
 
   async function logout() {
@@ -415,13 +415,13 @@ export function UserProfileFooter({
   }
 
   return (
-    <div className="flex items-center gap-2 border-t border-[var(--border-soft)] px-3 py-3">
+    <div className="flex items-center gap-2 [border-top:var(--bd-div)] px-3 py-3">
       {/* Profile chip — clicking opens a dropdown with Settings + Sign out (M37). */}
       <DropdownMenu>
         <DropdownMenuTrigger
           className={cn(
             "flex items-center gap-2 min-w-0 flex-1 rounded-[var(--radius-button)] px-1 py-0.5 -mx-1 transition-[background,color] duration-150 ease-[var(--ease)]",
-            "hover:bg-[var(--active-nav-bg)] focus:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+            "hover:bg-[var(--active-nav-bg)] focus:outline-none"
           )}
           aria-label="Profile menu"
         >
@@ -430,11 +430,11 @@ export function UserProfileFooter({
             <img
               src={avatarUrl}
               alt="Profile avatar"
-              className="size-7 shrink-0 rounded-full border border-[var(--border-soft)] object-cover"
+              className="size-7 shrink-0 rounded-[var(--radius-button)] object-cover"
               referrerPolicy="no-referrer"
             />
           ) : (
-            <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-[var(--border-soft)] grid place-items-center text-[11px] font-medium">
+            <div className="size-7 shrink-0 rounded-[var(--radius-button)] bg-muted text-foreground grid place-items-center text-[11px] font-medium">
               {initials}
             </div>
           )}

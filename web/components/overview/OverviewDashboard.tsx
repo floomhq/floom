@@ -257,7 +257,7 @@ function WorkerRowIcon({ workerId, workerName }: { workerId: string; workerName?
   const resolved = workerIcon({ id: workerId, name: workerName || undefined });
   return (
     <span
-      className="inline-flex shrink-0 items-center justify-center size-5 bg-[var(--accent-soft)] text-[var(--accent)] ring-1 ring-[var(--accent-line)]"
+      className="inline-flex shrink-0 items-center justify-center size-5 bg-[var(--accent-soft)] text-[var(--accent)] [border:var(--bd-card)]"
       style={{ borderRadius: "var(--radius-squircle)" }}
       aria-hidden="true"
     >
@@ -297,7 +297,7 @@ function WorkerActivity({
       ) : runs.length === 0 ? (
         <p className="flex flex-1 items-center justify-center py-8 text-center text-sm text-[var(--text-muted)]">No runs yet.</p>
       ) : (
-        <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-[var(--border-soft)]">
+        <div className="flex-1 min-h-0 overflow-y-auto [&>*+*]:[border-top:var(--bd-div)]">
           {visibleRuns.map((run) => {
             const meta = statusMeta(run.status);
             return (
@@ -401,7 +401,7 @@ function ComingUp({
                     {item.worker_name || humanizeSlug(item.worker_id, "Worker")}
                   </span>
                   {item.paused && (
-                    <span className="shrink-0 rounded-[var(--radius-pill)] border border-[var(--line)] px-1.5 py-px text-[10px] font-medium leading-none text-[var(--text-muted)]">
+                    <span className="shrink-0 rounded-[var(--radius-pill)] [border:var(--bd-card)] px-1.5 py-px text-[10px] font-medium leading-none text-[var(--text-muted)]">
                       Paused
                     </span>
                   )}

@@ -95,7 +95,7 @@ function LetterFallback({ slug, className }: { slug: string; className?: string 
   return (
     <span
       className={cn(
-        "inline-flex items-center justify-center rounded-[3px] bg-[var(--ink)]/[0.06] font-medium leading-none text-[var(--ink-mute)]",
+        "inline-flex items-center justify-center rounded-[var(--radius-squircle)] bg-[var(--ink)]/[0.06] font-medium leading-none text-[var(--ink-mute)]",
         className,
       )}
       style={{ fontSize: "0.62em" }}

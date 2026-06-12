@@ -10,7 +10,7 @@ export default function NotFound() {
       <section className="w-full max-w-md">
         <div className="flex items-center gap-2">
           <FloomMark size={24} />
-          <span className="text-base font-semibold tracking-tight">WorkerOS</span>
+          <span className="text-base font-semibold tracking-tight">Floom</span>
         </div>
 
         <div className="mt-10 space-y-3">

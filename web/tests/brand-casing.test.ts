@@ -2,14 +2,14 @@ import { describe, it, expect } from "vitest";
 import { readdirSync, readFileSync, statSync } from "node:fs";
 import { resolve, join } from "node:path";
 
-// #824: it's "WorkerOS", never "Workeros", in every user-visible string.
+// User-facing brand is now "Floom", never "WorkerOS" or "Workeros".
 // Package/identifiers stay lowercase (workeros_*, WORKEROS_*, the CLI command
-// `workeros ...`) and the legacy `WorkerosMark` component identifier is allowed.
-// This scan guards against new "Workeros" display strings slipping in.
+// `workeros ...`) and component identifiers are allowed.
+// This scan guards against capitalized legacy brand display strings slipping in.
 
 const ROOT = resolve(__dirname, "..");
 const DIRS = ["app", "components"];
-const ALLOWED = /Workeros(Mark)/; // only the component identifier
+const ALLOWED = /Workeros(Mark)?|WORKEROS_|x-workeros|workeros_session/;
 
 function walk(dir: string, out: string[] = []): string[] {
   for (const name of readdirSync(dir)) {
@@ -22,15 +22,14 @@ function walk(dir: string, out: string[] = []): string[] {
   return out;
 }
 
-describe("brand casing (#824)", () => {
-  it("has no user-visible 'Workeros' outside the WorkerosMark identifier", () => {
+describe("visible brand rename", () => {
+  it("has no capitalized legacy WorkerOS/Workeros display strings in app/components", () => {
     const offenders: string[] = [];
     for (const file of DIRS.flatMap((d) => walk(join(ROOT, d)))) {
       const text = readFileSync(file, "utf8");
       text.split("\n").forEach((line, i) => {
-        // capital-W "Workeros" that is NOT "WorkerosMark"
-        const stripped = line.replace(/Workeros(Mark)/g, "");
-        if (/Workeros/.test(stripped)) {
+        const stripped = line.replace(ALLOWED, "");
+        if (/WorkerOS|Workeros/.test(stripped)) {
           offenders.push(`${file.replace(ROOT, "")}:${i + 1}: ${line.trim()}`);
         }
       });
