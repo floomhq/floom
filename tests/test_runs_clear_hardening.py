@@ -163,7 +163,10 @@ def test_clear_aborts_when_backup_fails(monkeypatch, tmp_path):
     def _boom() -> str:
         raise RuntimeError("simulated backup failure")
 
-    monkeypatch.setattr(main, "_backup_db_before_clear", _boom)
+    # clear_runs lives in routers.runs and calls _backup_db_before_clear by bare
+    # name out of that module — patch there, not main's re-export.
+    import routers.runs as _runs
+    monkeypatch.setattr(_runs, "_backup_db_before_clear", _boom)
 
     resp = client.post(
         "/runs/clear?confirm=yes-wipe-all-runs", headers=_headers("user-a")
