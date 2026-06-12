@@ -302,6 +302,7 @@ init_db()
 # backward compatibility with the many modules and tests that import them from
 # `main` (e.g. `from main import PROTECTED_STOCK_WORKER_IDS`).
 from core.config import (
+    API_VERSION,
     _PROCESS_START_TIME,
     _PROCESS_STARTED_AT,
     PUBLIC_SHARE_TEXT_PREVIEW_LIMIT,
@@ -641,7 +642,7 @@ async def lifespan(app: FastAPI):
 
 app = FastAPI(
     title="Floom API",
-    version="0.2.0",
+    version=API_VERSION,
     description="Open-source self-hosted runtime for AI workers",
     lifespan=lifespan,
 )

@@ -184,5 +184,8 @@ SYSTEM_CONTEXT_DESCRIPTIONS: dict[str, str] = {
 
 
 # Process start time for /system/metrics uptime reporting.
+# Public API version string (FastAPI app metadata + GET /system/info).
+API_VERSION = "0.2.0"
+
 _PROCESS_START_TIME = time.time()
 _PROCESS_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_PROCESS_START_TIME))
