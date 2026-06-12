@@ -245,9 +245,13 @@ def test_non_allowlisted_hidden_worker_run_stays_inaccessible_by_id(monkeypatch,
     run_id = _insert_run_for_worker(main, worker_id=worker_id)
 
     # Force this worker hidden (NOT worker-author, NOT on the allowlist).
-    real_hidden = main._worker_hidden_from_api
+    # _run_visible_to_api (the run-by-id visibility filter) lives in
+    # services.run_access and resolves _worker_hidden_from_api in that module's
+    # globals, so patch there — not on main's re-export.
+    import services.run_access as _run_access
+    real_hidden = _run_access._worker_hidden_from_api
     monkeypatch.setattr(
-        main,
+        _run_access,
         "_worker_hidden_from_api",
         lambda wid: True if wid == worker_id else real_hidden(wid),
     )
