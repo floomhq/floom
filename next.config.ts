@@ -1,6 +1,8 @@
 import type { NextConfig } from "next";
 
-const APP_BASE_URL = (process.env.NEXT_PUBLIC_APP_URL || "https://workers.floom.dev").replace(/\/+$/, "");
+const CLOUD_DASHBOARD_URL = (
+  process.env.CLOUD_DASHBOARD_URL || "https://web-iota-five-12.vercel.app"
+).replace(/\/+$/, "");
 
 const APP_ROUTES = [
   "overview",
@@ -17,25 +19,13 @@ const APP_ROUTES = [
   "cli-auth",
 ] as const;
 
-function appDestination(path: string): string {
-  return `${APP_BASE_URL}${path}`;
+function cloudAppDestination(path: string): string {
+  return `${CLOUD_DASHBOARD_URL}/app${path === "/" ? "" : path}`;
 }
 
 const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
-  },
-  async redirects() {
-    return [
-      { source: "/app", destination: appDestination("/"), permanent: false },
-      { source: "/app/:path*", destination: appDestination("/:path*"), permanent: false },
-      ...APP_ROUTES.flatMap((route) => [
-        { source: `/${route}`, destination: appDestination(`/${route}`), permanent: false },
-        { source: `/${route}/:path*`, destination: appDestination(`/${route}/:path*`), permanent: false },
-        { source: `/app/${route}`, destination: appDestination(`/${route}`), permanent: false },
-        { source: `/app/${route}/:path*`, destination: appDestination(`/${route}/:path*`), permanent: false },
-      ]),
-    ];
   },
   async rewrites() {
     return [
@@ -44,7 +34,13 @@ const nextConfig: NextConfig = {
       { source: "/docs", destination: "/v3/docs" },
       { source: "/about", destination: "/v3/about" },
       // NOTE: /templates is NOT rewritten — app/(marketing)/templates already owns that route
-      { source: "/s/:path*", destination: appDestination("/s/:path*") },
+      { source: "/app", destination: cloudAppDestination("/") },
+      { source: "/app/:path*", destination: cloudAppDestination("/:path*") },
+      ...APP_ROUTES.flatMap((route) => [
+        { source: `/${route}`, destination: cloudAppDestination(`/${route}`) },
+        { source: `/${route}/:path*`, destination: cloudAppDestination(`/${route}/:path*`) },
+      ]),
+      { source: "/s/:path*", destination: cloudAppDestination("/s/:path*") },
     ];
   },
 };

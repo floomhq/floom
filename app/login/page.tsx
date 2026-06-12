@@ -14,7 +14,7 @@ export default async function LoginPage({
   searchParams?: Promise<{ next?: string }>;
 }) {
   const sp = (await searchParams) ?? {};
-  const next = sp.next ?? "/";
+  const next = sp.next ?? "/app";
 
   return (
     <V3Shell active="login">

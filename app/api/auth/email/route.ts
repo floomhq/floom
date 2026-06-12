@@ -8,7 +8,7 @@ const API_BASE =
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const email = typeof body.email === "string" ? body.email.trim() : "";
-  const next = typeof body.next === "string" ? body.next : "/";
+  const next = typeof body.next === "string" ? body.next : "/app";
   if (!email) {
     return NextResponse.json({ detail: "email is required" }, { status: 400 });
   }
