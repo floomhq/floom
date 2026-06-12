@@ -86,9 +86,14 @@ def test_agent_path_skips_git_pack_and_stages_local(tmp_path, monkeypatch):
     local_pack.mkdir(parents=True)
     (local_pack / "facts.md").write_text("local fact\n", encoding="utf-8")
 
-    import contexts as contexts_module
-
-    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+    # Patch the contexts module INSTANCE that agent_capabilities actually
+    # bound at import time. Other suites pop+reimport `contexts`, so both
+    # `import contexts` and sys.modules-based lookups (inspect.getmodule)
+    # can resolve to a different instance under full-suite ordering; the
+    # function's __globals__ is always the right one.
+    monkeypatch.setitem(
+        agent_capabilities.context_dir.__globals__, "CONTEXTS_DIR", contexts_root
+    )
 
     warnings: list[str] = []
 
