@@ -187,16 +187,24 @@ export async function middleware(req: NextRequest) {
     // Multi-member: a wos_session backend cookie is also valid — the backend validates it
     Boolean(req.cookies.get("wos_session")?.value);
 
+  // #974: terminal /api/proxy responses generated HERE (CSRF 403, auth 401)
+  // short-circuit before the proxy route handler that sets private/no-store,
+  // so they would otherwise inherit Next's default `public, max-age=0,
+  // must-revalidate`. No /api/proxy response — data OR rejection — may be
+  // shared-cacheable.
+  const proxyReject = (body: Record<string, unknown>, status: number) => {
+    const res = NextResponse.json(body, { status });
+    res.headers.set("Cache-Control", "private, no-store, max-age=0");
+    return res;
+  };
+
   // ----- /api/proxy/* : the dangerous surface -----
   if (pathname.startsWith("/api/proxy")) {
     // #947: reject cross-site mutations before anything else. Applies even to
     // the public token-gated endpoints — they're called from same-origin pages,
     // so a legitimate request always passes; a cross-site forgery never does.
     if (!isCsrfSafe(req)) {
-      return NextResponse.json(
-        { detail: "Cross-origin request blocked." },
-        { status: 403 },
-      );
+      return proxyReject({ detail: "Cross-origin request blocked." }, 403);
     }
     if (isPublicProxy(pathname)) {
       // Public, token-gated upstream endpoint (signed-link approvals). Allow.
@@ -205,10 +213,7 @@ export async function middleware(req: NextRequest) {
     if (authed) {
       return pageResponse();
     }
-    return NextResponse.json(
-      { detail: "Authentication required." },
-      { status: 401 },
-    );
+    return proxyReject({ detail: "Authentication required." }, 401);
   }
 
   // ----- App pages -----
