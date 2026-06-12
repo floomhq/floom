@@ -344,6 +344,13 @@ from services.worker_access import (
     _worker_permissions,
     _list_db_workers,
     _worker_access_user_id,
+    _normalize_run_status,
+    _available_connection_slugs_for_user,
+    _normalize_trigger_type,
+    _trigger_label,
+    _list_operator_workers,
+    _worker_required_secret_names,
+    _worker_connection_slugs,
     _worker_repo_role,
     _build_owned_tracked_ids,
     _worker_source_visible_to_api,
@@ -1656,15 +1663,6 @@ async def generic_error_handler(_request, exc: Exception):
 # Helpers
 # ---------------------------------------------------------------------------
 
-def _normalize_run_status(status_value: str) -> str:
-    value = (status_value or "").lower()
-    if value in {"completed", "approved", "success"}:
-        return "success"
-    if value == "pending_approval":
-        return "pending_approval"
-    if value in {"running", "queued"}:
-        return "running"
-    return "error"
 
 
 def _resolve_run_status_filters(raw_status: Optional[str]) -> List[str]:
@@ -1934,18 +1932,6 @@ def _platform_openai_api_key() -> Optional[str]:
     return os.environ.get("PLATFORM_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY") or None
 
 
-def _available_connection_slugs_for_user(user_id: str, repos: Repositories) -> set[str]:
-    """Return lower-cased app_name slugs for all active connections owned by user_id."""
-    _live = {"active", "valid", "connected"}
-    try:
-        rows = repos.connections.list(user_id=user_id)
-        return {
-            row_to_dict(r).get("app_name", "").lower()
-            for r in rows
-            if str((row_to_dict(r).get("status") or "")).lower() in _live
-        }
-    except Exception:
-        return set()
 
 
 def _get_stats_batch(
@@ -2911,42 +2897,8 @@ def rollback_context(
     return _context_detail(safe_name, _metadata, repos=repos, user_id=auth.user_id)
 
 
-def _normalize_trigger_type(value: Any) -> str:
-    normalized = str(value or "manual").strip().lower()
-    if normalized in {"cron", "scheduled"}:
-        return "schedule"
-    return normalized or "manual"
 
 
-def _trigger_label(trigger: Dict[str, Any]) -> str:
-    """Return a human-readable label for one trigger dict."""
-    t_type = _normalize_trigger_type(trigger.get("type"))
-    if t_type == "manual":
-        return "Manual"
-    if t_type in ("schedule", "scheduled"):
-        cron_expr = trigger.get("cron")
-        if cron_expr:
-            return f"Cron · {cron_expr}"
-        every = trigger.get("every")
-        at_time = trigger.get("at")
-        if every and at_time:
-            return f"Every {every} at {at_time}"
-        if every:
-            return f"Every {every}"
-        return "Scheduled"
-    if t_type == "webhook":
-        return "Webhook"
-    if t_type == "composio":
-        composio = trigger.get("composio")
-        if composio and isinstance(composio, dict):
-            event = composio.get("event") or ""
-            conn_id = composio.get("connection_id") or ""
-            app_hint = conn_id.split("_")[0].split("-")[0] if conn_id else "integration"
-            if event:
-                return f"On {app_hint} · {event}"
-            return f"On {app_hint}"
-        return "On integration"
-    return t_type.title()
 
 
 def _build_triggers_spec(worker: Dict[str, Any]) -> List[TriggerSpec]:
@@ -3639,25 +3591,6 @@ def _persist_discovered_workers(
             raise
 
 
-def _list_operator_workers(
-    *,
-    user_id: str,
-    repos: Repositories,
-    use_cache: bool = True,
-) -> List[Dict[str, Any]]:
-    """Workers shown in the operator's default view.
-
-    Same filter as the default GET /workers view: visible (non-hidden) workers,
-    minus system_worker:true and archived. Shared by /workers and the overview
-    'Workers active' count so the two numbers cannot drift (1.5.4).
-    """
-    workers = _list_visible_workers(user_id=user_id, repos=repos, use_cache=use_cache)
-    workers = [
-        w for w in workers
-        if not (w.get("manifest") or {}).get("system_worker", False)
-    ]
-    workers = [w for w in workers if not w.get("archived", False)]
-    return workers
 
 
 def _run_visible_to_api(row: Any, *, user_id: str, repos: Repositories) -> bool:
@@ -9262,56 +9195,8 @@ def _is_exportable_operator_worker(w: Dict[str, Any]) -> bool:
     return True
 
 
-def _worker_required_secret_names(w: Dict[str, Any]) -> List[str]:
-    """Required secret NAMES declared by a worker manifest (never values).
-
-    The normalized ``WorkerConfig`` surfaces secrets at the top level
-    (``config["secrets"]``); raw manifests may also nest them under
-    ``capabilities.secrets`` / ``exec.secrets``. Read all three so the name list
-    is complete regardless of which shape we got.
-    """
-    names: List[str] = []
-    config = w.get("config") or {}
-    for s in config.get("secrets") or []:
-        if isinstance(s, str) and s.strip():
-            names.append(s.strip())
-    cap = config.get("capabilities") or {}
-    for s in cap.get("secrets") or []:
-        if isinstance(s, str) and s.strip():
-            names.append(s.strip())
-    exec_block = config.get("exec") or {}
-    for s in exec_block.get("secrets") or []:
-        if isinstance(s, str) and s.strip():
-            names.append(s.strip())
-    # de-dup, preserve order
-    seen: set[str] = set()
-    ordered: List[str] = []
-    for n in names:
-        if n not in seen:
-            seen.add(n)
-            ordered.append(n)
-    return ordered
 
 
-def _worker_connection_slugs(w: Dict[str, Any]) -> List[str]:
-    """Required connection slugs declared by a worker manifest (never tokens)."""
-    config = w.get("config") or {}
-    raw = config.get("connections") or []
-    slugs: List[str] = []
-    for c in raw:
-        if isinstance(c, str) and c.strip():
-            slugs.append(c.strip())
-        elif isinstance(c, dict):
-            label = (c.get("mcp", {}) or {}).get("label") or c.get("app") or c.get("slug")
-            if isinstance(label, str) and label.strip():
-                slugs.append(label.strip())
-    seen: set[str] = set()
-    ordered: List[str] = []
-    for s in slugs:
-        if s not in seen:
-            seen.add(s)
-            ordered.append(s)
-    return ordered
 
 
 # Filenames / patterns that may hold secret VALUES and must NEVER be exported in
