@@ -1982,6 +1982,14 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_workspace_api_tokens_workspace
         ON workspace_api_tokens(workspace_id);
     """,
+    # -- migration 76: persisted per-run cost accounting (#793 spend cap, #795
+    # approval cost-so-far). Populated at terminal status from the transcript
+    # usage row; NULL = not yet computed / pure-script run with no LLM tokens.
+    """
+    ALTER TABLE runs ADD COLUMN total_tokens INTEGER;
+    ALTER TABLE runs ADD COLUMN total_cost_usd REAL;
+    CREATE INDEX IF NOT EXISTS idx_runs_worker_created ON runs(worker_id, created_at);
+    """,
 ]
 
 
