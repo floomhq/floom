@@ -384,6 +384,14 @@ from services.run_serialize import (
     _make_run_summary,
     _extract_primary_output_file,
 )
+from services.share_links import (
+    _standalone_share_url,
+    _mint_standalone_share_token,
+    _ensure_standalone_share_links_table,
+    _load_standalone_share_row,
+    _create_or_get_standalone_share_link,
+    _revoke_standalone_share_link,
+)
 
 # Context (knowledge-pack) access-control + serialization cluster lives in
 # services.context_access; re-exported here for this module's call sites.
@@ -4695,8 +4703,6 @@ def _worker_public_link(worker: Dict[str, Any]) -> Optional[str]:
     return f"{_frontend_base_url()}/w/{worker_id}?token={token}"
 
 
-def _standalone_share_url(token: str) -> str:
-    return f"{_frontend_base_url()}/s/{urllib.parse.quote(token, safe='')}"
 
 
 def _public_noindex_headers() -> Dict[str, str]:
@@ -4710,86 +4716,10 @@ def _mint_worker_short_id() -> str:
     return f"fls_{pysecrets.token_urlsafe(8).replace('-', '').replace('_', '')[:10]}"
 
 
-def _mint_standalone_share_token() -> str:
-    return f"fls_{pysecrets.token_urlsafe(18).replace('-', '').replace('_', '')[:24]}"
 
 
-def _ensure_standalone_share_links_table() -> None:
-    with get_db() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS standalone_share_links (
-                token TEXT PRIMARY KEY,
-                entity_type TEXT NOT NULL,
-                entity_id TEXT NOT NULL,
-                file_path TEXT NOT NULL DEFAULT '',
-                owner_id TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                UNIQUE(entity_type, entity_id, file_path, owner_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_standalone_share_links_entity
-                ON standalone_share_links(entity_type, entity_id, file_path, owner_id);
-            """
-        )
 
 
-def _create_or_get_standalone_share_link(
-    *,
-    entity_type: Literal["worker", "brain_file", "brain_pack", "run"],
-    entity_id: str,
-    owner_id: str,
-    file_path: str = "",
-) -> Dict[str, str]:
-    safe_file_path = file_path or ""
-    if not entity_id or not owner_id:
-        raise HTTPException(status_code=409, detail="Item cannot be shared")
-    _ensure_standalone_share_links_table()
-    with get_db() as conn:
-        existing = conn.execute(
-            """
-            SELECT token FROM standalone_share_links
-            WHERE entity_type = ? AND entity_id = ? AND file_path = ? AND owner_id = ?
-            LIMIT 1
-            """,
-            (entity_type, entity_id, safe_file_path, owner_id),
-        ).fetchone()
-        if existing:
-            token = str(existing["token"])
-        else:
-            token = ""
-            ts = now_iso()
-            for _ in range(8):
-                candidate = _mint_standalone_share_token()
-                try:
-                    conn.execute(
-                        """
-                        INSERT INTO standalone_share_links
-                            (token, entity_type, entity_id, file_path, owner_id, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (candidate, entity_type, entity_id, safe_file_path, owner_id, ts),
-                    )
-                    token = candidate
-                    break
-                except sqlite3.IntegrityError:
-                    dup = conn.execute(
-                        """
-                        SELECT token FROM standalone_share_links
-                        WHERE entity_type = ? AND entity_id = ? AND file_path = ? AND owner_id = ?
-                        LIMIT 1
-                        """,
-                        (entity_type, entity_id, safe_file_path, owner_id),
-                    ).fetchone()
-                    if dup:
-                        token = str(dup["token"])
-                        break
-            if not token:
-                raise HTTPException(status_code=500, detail="Could not create share link")
-    return {
-        "token": token,
-        "url": _standalone_share_url(token),
-        "entity_type": entity_type,
-    }
 
 
 def _ensure_worker_short_links_table() -> None:
@@ -5338,21 +5268,6 @@ def _public_worker_share_from_worker(worker: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def _load_standalone_share_row(token: str) -> Optional[Dict[str, Any]]:
-    if not re.fullmatch(r"fls_[A-Za-z0-9]{6,80}", token or ""):
-        raise HTTPException(status_code=404, detail="Share link not found")
-    _ensure_standalone_share_links_table()
-    with get_db() as conn:
-        row = conn.execute(
-            """
-            SELECT token, entity_type, entity_id, file_path, owner_id, created_at
-            FROM standalone_share_links
-            WHERE token = ?
-            LIMIT 1
-            """,
-            (token,),
-        ).fetchone()
-    return dict(row) if row else None
 
 
 def _standalone_share_payload(token: str, repos: Repositories) -> Dict[str, Any]:
@@ -5584,25 +5499,6 @@ def create_brain_file_share_link(
     )
 
 
-def _revoke_standalone_share_link(
-    *,
-    entity_type: str,
-    entity_id: str,
-    owner_id: str,
-    file_path: str = "",
-) -> Dict[str, bool]:
-    # #766: delete the token row so the public link stops resolving. A later
-    # POST /share-link mints a fresh token (the frontend toggle off->on flow).
-    _ensure_standalone_share_links_table()
-    with get_db() as conn:
-        cursor = conn.execute(
-            """
-            DELETE FROM standalone_share_links
-            WHERE entity_type = ? AND entity_id = ? AND file_path = ? AND owner_id = ?
-            """,
-            (entity_type, entity_id, file_path or "", owner_id),
-        )
-    return {"revoked": cursor.rowcount > 0}
 
 
 @app.delete("/workers/{worker_id}/share-link")
