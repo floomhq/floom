@@ -32,17 +32,18 @@ frontend** — exactly the "super simple, no custom wiring" you wanted. The `<Co
 | Agent-install (MCP package / CLI) | npm `workeros-mcp` broken; CLI cred mismatch | **BROKEN — #596, #598** |
 | PAT auth | `POST /auth/tokens` 500 | **BROKEN — #597** |
 | **Member Feedback on a worker** | `GET /workers/{id}/feedback` → **404** | **MISSING — file** |
-| **Nested Brain folders (folder-in-folder)** | contexts are FLAT (named folder + files; files can have sub-paths, folders don't nest) | **MISSING/decision — file** |
+| **Nested Brain folders (folder-in-folder)** | contexts are FLAT (named folder + files; files can have sub-paths, folders don't nest) | **DECIDED — #732: nesting = file sub-paths inside one context (option 1). Backed by `path_prefix` filter (#783) + file move (#770). No nested contexts.** |
 | **Channels (Slack / WhatsApp)** | not in MCP tool list; `integrations.catalog` exists; channel functionality unverified | **VERIFY — file** |
 
 ## Net
 - ~85% of the planned UI is **already backed** — including the things I worried about (versions, archive, shared/private, fork, chat-history, read-only brain). Build freely.
 - The `permissions` field makes the roles/sharing UI trivial (no frontend role logic).
 - **3 genuine backend gaps to file for Vivek:** Feedback (missing), nested Brain folders (flat today — either model "nesting" via file sub-paths inside one folder, or add nested contexts), Channels Slack/WhatsApp (verify works + easy setup).
+- **Nested Brain folders update (2026-06-12, #732):** decided as option 1 — folders stay flat; the UI renders "nesting" from file sub-paths within a context. `GET /contexts/{name}?path_prefix=<dir>` (#783) narrows the file list per subfolder and `POST .../files/{path}/move` (#770) supports re-foldering. Contract pinned by `apps/api/tests/test_brain_flat_contract_732.py`. Real nested contexts are out of scope unless a future product need justifies the backend change.
 - 6 already-filed backend blockers (#594–#601) stand.
 
 ## Implication for the wireframe
 - Run-detail tabs → **Output/Inputs/Steps/Files/Logs/Raw/Metadata** (match reality).
 - Worker detail → add **Versions ▾** + **Share** + **Shared/Private** (all backed).
-- Brain → folders are **flat**; show file sub-paths for "nesting" (don't promise nested folders until backend).
+- Brain → folders are **flat**; show file sub-paths for "nesting" (decided #732 — render the path tree from sub-paths; backend will not add nested contexts).
 - Feedback → show the UI but mark it depends on the new backend issue.
