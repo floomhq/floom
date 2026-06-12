@@ -258,16 +258,50 @@ _SECRET_QUERY_VALUE_DELIMITERS = frozenset('& \t\r\n"\'<>)]}')
 
 
 def _effective_worker_visibility_user_id(user_id: str) -> str:
-    """Resolve legacy local default ownership for Emily's worker visibility checks."""
+    """Resolve the owner id Emily should use for worker visibility checks."""
     raw = str(user_id or "").strip()
     if not raw:
         return raw
+    candidates: list[str] = [raw]
+    try:
+        from db import get_db
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id FROM users WHERE username = ? LIMIT 1",
+                (raw,),
+            ).fetchone()
+        if row and row["id"]:
+            candidates.append(str(row["id"]))
+    except Exception:
+        pass
     try:
         from contexts import effective_context_user_id
         effective = effective_context_user_id(raw)
     except Exception:
-        return raw
-    return str(effective or raw)
+        effective = None
+    if effective:
+        candidates.append(str(effective))
+    seen: set[str] = set()
+    unique_candidates: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            unique_candidates.append(candidate)
+    try:
+        from db import get_db
+
+        with get_db() as conn:
+            for candidate in unique_candidates:
+                row = conn.execute(
+                    "SELECT 1 FROM workers WHERE owner_id = ? LIMIT 1",
+                    (candidate,),
+                ).fetchone()
+                if row is not None:
+                    return candidate
+    except Exception:
+        pass
+    return unique_candidates[-1] if unique_candidates else raw
 
 
 _current_chat_conversation_id: ContextVar[Optional[str]] = ContextVar(
