@@ -135,9 +135,21 @@ def test_run_token_rejects_non_wrt_prefix(monkeypatch):
 # 6. auth/multi_member: wrt_ token handled by verify()
 # ---------------------------------------------------------------------------
 
-def test_multi_member_verifies_wrt_token(monkeypatch):
+def test_multi_member_verifies_wrt_token(monkeypatch, tmp_path):
     import asyncio
     monkeypatch.setenv("FLOOM_SECRET", "test-secret-abc")
+    # #916: run-token verification now checks the owning user's lifecycle
+    # against the active DB. Pin a fresh DB (empty users table = legacy
+    # single-user mode, where any user_id is honored) so this test doesn't
+    # depend on whatever user rows sibling tests left behind.
+    monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
+    for name in list(sys.modules):
+        if name == "db" or name.startswith("db."):
+            sys.modules.pop(name, None)
+    import db
+
+    db.init_db()
+    db.get_repositories.cache_clear()
     from run_token import issue_worker_call_token
     from auth.multi_member import MultiMemberAuthProvider
 
