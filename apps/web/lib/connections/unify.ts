@@ -40,9 +40,20 @@ export function connStatusKey(s: ConnectionStatus): ConnStatusKey {
   return "error"; // failed | unknown | not_found
 }
 
+const APP_NAME_OVERRIDES: Record<string, string> = {
+  github: "GitHub",
+  gmail: "Gmail",
+  googlecalendar: "Google Calendar",
+  googledrive: "Google Drive",
+  googlesheets: "Google Sheets",
+  slack: "Slack",
+};
+
 /** Capitalise the first letter and replace underscores/hyphens with spaces. */
 function humaniseAppName(s: string): string {
   if (!s) return s;
+  const key = s.toLowerCase().replace(/[_\-\s]+/g, "");
+  if (APP_NAME_OVERRIDES[key]) return APP_NAME_OVERRIDES[key];
   return s
     .replace(/[_-]+/g, " ")
     .replace(/^[a-z]/, (c) => c.toUpperCase());
@@ -60,7 +71,7 @@ export function toUnified(connections: ConnectionItem[], secrets: SecretItem[]):
       name: isMcp ? appName : appName,
       account: isMcp
         ? c.mcp_url || c.mcp_command || "MCP server"
-        : c.display_name || c.account_label || c.app_name,
+        : c.account_label || c.display_name || c.app_name,
       statusKey: connStatusKey(c.status),
       detail: isMcp
         ? `${c.mcp_allowed_tools?.length ?? 0} tools`
