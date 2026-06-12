@@ -266,3 +266,77 @@ class TestRunTokenMiddleware:
 
         r = client.get("/workers", headers={"X-Workeros-Run-Token": token})
         assert r.status_code == 401
+
+
+class TestWorkerCallSecretRequired:
+    """#972: worker-call tokens must never sign/validate with a hardcoded
+    fallback key. No real FLOOM_SECRET → fail closed."""
+
+    def test_issue_refuses_without_secret(self, monkeypatch):
+        from run_token import issue_worker_call_token, WorkerCallSecretMissing
+
+        monkeypatch.delenv("FLOOM_SECRET", raising=False)
+        with pytest.raises(WorkerCallSecretMissing):
+            issue_worker_call_token(
+                user_id="u1", parent_run_id="r1", callable_workers=["w1"]
+            )
+        # explicit empty secret also refused
+        with pytest.raises(WorkerCallSecretMissing):
+            issue_worker_call_token(
+                user_id="u1", parent_run_id="r1", callable_workers=["w1"], secret=""
+            )
+
+    def test_validate_refuses_without_secret(self, monkeypatch):
+        from run_token import (
+            issue_worker_call_token,
+            validate_worker_call_token,
+            WorkerCallSecretMissing,
+        )
+
+        # a token validly signed under a real secret...
+        token = issue_worker_call_token(
+            user_id="u1", parent_run_id="r1", callable_workers=["w1"], secret="real-secret"
+        )
+        # ...must NOT validate when the server has no secret (no guessable key).
+        monkeypatch.delenv("FLOOM_SECRET", raising=False)
+        with pytest.raises(WorkerCallSecretMissing):
+            validate_worker_call_token(token)
+        with pytest.raises(WorkerCallSecretMissing):
+            validate_worker_call_token(token, secret="")
+
+    def test_missing_secret_error_is_valueerror(self):
+        # the validate middleware catches ValueError → 401; WorkerCallSecretMissing
+        # must subclass it so a misconfigured server rejects the token, not 500.
+        from run_token import WorkerCallSecretMissing
+
+        assert issubclass(WorkerCallSecretMissing, ValueError)
+
+    def test_forged_dev_secret_token_is_rejected(self, monkeypatch):
+        # the old public fallback must no longer validate anything.
+        import hashlib
+        import hmac
+        import json
+        import base64
+
+        from run_token import validate_worker_call_token, WORKER_CALL_TOKEN_PREFIX
+
+        payload = {
+            "user_id": "attacker",
+            "parent_run_id": "r1",
+            "callable_workers": ["victim-worker"],
+            "depth": 0,
+            "nonce": "x",
+            "exp": 9999999999,
+        }
+        encoded = base64.urlsafe_b64encode(
+            json.dumps(payload, separators=(",", ":"), sort_keys=True).encode()
+        ).rstrip(b"=").decode()
+        forged_sig = hmac.new(
+            b"dev-secret-not-set", encoded.encode(), hashlib.sha256
+        ).hexdigest()
+        forged = f"{WORKER_CALL_TOKEN_PREFIX}{encoded}.{forged_sig}"
+
+        # even with a real secret configured, the forged dev-secret signature fails
+        monkeypatch.setenv("FLOOM_SECRET", "real-secret")
+        with pytest.raises(ValueError):
+            validate_worker_call_token(forged)

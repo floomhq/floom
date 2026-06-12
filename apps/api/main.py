@@ -3480,17 +3480,11 @@ def list_worker_versions(
         asset_type="worker",
         asset_id=worker_id,
     )
-    if not rows:
-        # First time viewing versions for a pre-existing worker — commit its
-        # current files as the initial baseline so history isn't empty.
-        _git_commit_worker(worker_id, message=f"baseline: snapshot existing {worker_id}")
-        rows = _git_ops.get_log(
-            workspace,
-            rel_path=f"{prefix}/{worker_id}",
-            limit=min(limit, 100),
-            asset_type="worker",
-            asset_id=worker_id,
-        )
+    # #979: a GET must be side-effect free. The old path committed a baseline
+    # when history was empty, so a read (incl. a browser prefetch or crawler)
+    # mutated server-side git state and could snapshot a wrongly-visible
+    # private worker. Baseline creation now happens on worker
+    # create/update/import; an empty history just returns [].
     return [VersionSummary(**r) for r in rows]
 
 
@@ -7953,16 +7947,23 @@ def _build_worker_detail(
         except Exception:
             worker_files = _worker_files_from_manifest(worker)
 
-    # Build webhook URL if this worker has a webhook trigger
+    # Build webhook URL if this worker has a webhook trigger.
+    # #978: the webhook URL carries a bearer token that triggers a run with no
+    # session auth (POST /webhooks/{id}?token=...). A view-only grantee
+    # (specific-people grant = VIEW only) must NOT receive a durable execution
+    # capability, so only surface it to callers who can actually run the
+    # worker (owner / workspace admin / run rights). Treat it as a secret.
     from webhook_service import build_webhook_url as _build_webhook_url
     webhook_url: Optional[str] = None
     if _worker_has_webhook_trigger(worker, config):
-        try:
-            # Token derives from the worker's current rotatable secret (backfilled
-            # lazily if absent), so this always surfaces the working current URL.
-            webhook_url = _build_webhook_url(worker["id"], repos=repos)
-        except Exception:
-            logger.warning("Could not build webhook URL for %s", worker["id"], exc_info=True)
+        _perms = _worker_permissions(worker, user_id=user_id, repos=repos, owner_aliases=owner_aliases)
+        if _perms.can_run:
+            try:
+                # Token derives from the worker's current rotatable secret (backfilled
+                # lazily if absent), so this always surfaces the working current URL.
+                webhook_url = _build_webhook_url(worker["id"], repos=repos)
+            except Exception:
+                logger.warning("Could not build webhook URL for %s", worker["id"], exc_info=True)
 
     triggers_spec = _build_triggers_spec(worker)
 
@@ -22655,7 +22656,11 @@ class _UserCreateRequest(BaseModel):
     username: str
     password: str
     display_name: Optional[str] = None
-    role: str = "member"
+    # #975: role is intentionally NOT accepted here. New users are always
+    # created as 'member'; promotion to admin is a separate explicit PATCH
+    # /users/{id} action (admin-gated, auditable). Accepting role at create
+    # let an admin (or a CSRF #947 forced request) mint a backdoor admin in
+    # one call with no audit trail.
 
 
 class _UserUpdateRequest(BaseModel):
@@ -23030,19 +23035,18 @@ def create_user(
     username = payload.username.strip()
     if not username:
         raise HTTPException(status_code=422, detail="username required")
-    if payload.role not in ("admin", "member"):
-        raise HTTPException(status_code=422, detail="role must be admin or member")
     _validate_new_password(payload.password, username=username)
     if user_repo.get_by_username(username=username) is not None:
         raise HTTPException(status_code=409, detail="username already taken")
     user_id = str(_uuid_mod.uuid4())
     pw_hash = _bcrypt_hash(payload.password)
+    # #975: always 'member' regardless of any role in the request body.
     row = user_repo.create(
         user_id=user_id,
         username=username,
         display_name=payload.display_name,
         password_hash=pw_hash,
-        role=payload.role,
+        role="member",
     )
     return _UserOut(id=row["id"], username=row["username"], display_name=row.get("display_name"),
                     role=row["role"], disabled=bool(row["disabled"]), created_at=row["created_at"])
@@ -23073,6 +23077,29 @@ def update_user(
             username=(existing_user or {}).get("username"),
         )
         updates["password_hash"] = _bcrypt_hash(payload.password)
+    # #976: never let the LAST active admin be disabled or demoted — that
+    # permanently locks the workspace out with no self-service recovery.
+    # Guard fires for self-disable AND for demoting another admin when no
+    # other active admin would remain.
+    _would_disable = updates.get("disabled") == 1
+    _would_demote = updates.get("role") == "member"
+    if _would_disable or _would_demote:
+        target = user_repo.get(user_id=uid)
+        if target is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        if str(target.get("role")) == "admin" and not bool(target.get("disabled")):
+            other_active_admins = [
+                u for u in user_repo.list()
+                if str(u.get("role")) == "admin"
+                and not bool(u.get("disabled"))
+                and u.get("id") != uid
+            ]
+            if not other_active_admins:
+                raise HTTPException(
+                    status_code=409,
+                    detail="At least one active admin is required; "
+                           "promote another admin before disabling or demoting this one.",
+                )
     row = user_repo.update(user_id=uid, **updates)
     if row is None:
         raise HTTPException(status_code=404, detail="user not found")

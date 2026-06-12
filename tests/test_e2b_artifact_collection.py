@@ -69,7 +69,7 @@ class FakeCommandRunner:
 
     def run(self, command, **kwargs):
         self.run_calls.append((command, kwargs))
-        if command == "python run.py":
+        if "python run.py" in command:  # #977: command may be env-scrub wrapped
             kwargs["on_stdout"]("live stdout\n")
             kwargs["on_stderr"]("live stderr\n")
             self.files.write(
@@ -330,7 +330,8 @@ def test_e2b_driver_streams_command_output_callbacks(tmp_path, monkeypatch):
     sandbox = FakeFullSandbox.instances[-1]
     assert FakeFullSandbox.last_create_kwargs["envs"]["WORKEROS_API_URL"] == "https://origin-api.internal"
     command, kwargs = sandbox.commands.run_calls[-1]
-    assert command == "python run.py"
+    assert "python run.py" in command  # #977: env-scrub wrapped
+    assert command.startswith("env -u ")
     assert kwargs["envs"]["WORKEROS_API_URL"] == "https://origin-api.internal"
     assert callable(kwargs["on_stdout"])
     assert callable(kwargs["on_stderr"])
