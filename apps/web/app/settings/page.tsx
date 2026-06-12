@@ -38,7 +38,7 @@ import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { CollectionView } from "@/components/collection/CollectionView";
 import { emptyState } from "@/lib/collection/url-state";
-import type { CollectionConfig, CollectionState, PillTone } from "@/lib/collection/types";
+import type { CollectionConfig, CollectionState } from "@/lib/collection/types";
 import { SETTINGS_NAV, settingsGroup, settingsCounts, groupLabel } from "@/lib/settings/nav-groups";
 import { CliCommandPanel } from "@/components/CliCommandPanel";
 import { GitWorkspacePanel } from "@/components/GitWorkspacePanel";
@@ -52,6 +52,7 @@ import { cn } from "@/lib/utils";
 import {
   AlertTriangle,
   Bot,
+  ChevronRight,
   CheckCircle2,
   Code2,
   Copy,
@@ -427,12 +428,12 @@ function SettingsContent() {
         item.scope === "workspace"
           ? groupLabel("workspace", workspaceName)
           : groupLabel("account", accountName),
-      columns: { template: "1fr 24px", headers: ["Section", ""] },
+      columns: { template: "1fr 24px", headers: ["Section", ""], statusColumn: false, menuColumn: false },
       row: (item) => ({
         leading: <SettingsIcon icon={item.icon} />,
         primary: item.label,
         secondary: item.description,
-        cols: [],
+        cols: [<ChevronRight key="chevron" className="size-4 text-[var(--muted-foreground)]" />],
       }),
       detail: (item) => ({
         header: {
@@ -616,18 +617,6 @@ function SettingsIcon({ icon: Icon }: { icon: SettingsIconType }) {
       <Icon className="size-4" />
     </span>
   );
-}
-
-function statusForSection(
-  item: SettingsNavItemWithIcon,
-  isAdmin: boolean,
-): { tone: PillTone; label: string } | null {
-  if (item.scope === "account") return { tone: "idle", label: "Personal" };
-  if (item.key === "danger") return { tone: isAdmin ? "warn" : "idle", label: isAdmin ? "Admin" : "View only" };
-  if (item.key === "assistant" || item.key === "members") {
-    return { tone: isAdmin ? "ok" : "idle", label: isAdmin ? "Editable" : "View only" };
-  }
-  return { tone: isAdmin ? "ok" : "idle", label: isAdmin ? "Workspace" : "View only" };
 }
 
 function SystemSection({

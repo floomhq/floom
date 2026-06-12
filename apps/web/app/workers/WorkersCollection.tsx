@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type {
@@ -472,6 +473,7 @@ export default function WorkersCollection({
 }: {
   initialWorkers: WorkerSummary[];
 }) {
+  const router = useRouter();
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
 
@@ -613,9 +615,8 @@ export default function WorkersCollection({
         }),
       };
     },
-    // No "New worker" button in the toolbar — the sidebar already has a persistent
-    // "+ New worker" primary action. One CTA per v4 card anatomy rule (item 18).
-    add: undefined,
+    // Contextual toolbar action only; the global sidebar CTA was removed for v4.
+    add: { label: "Add", onSelect: () => router.push("/workers/new") },
     states: {
       empty: { title: "No workers yet", help: "Create your first worker to get started." },
     },
