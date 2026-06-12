@@ -1990,6 +1990,13 @@ MIGRATIONS: list[Migration] = [
     ALTER TABLE runs ADD COLUMN total_cost_usd REAL;
     CREATE INDEX IF NOT EXISTS idx_runs_worker_created ON runs(worker_id, created_at);
     """,
+    # -- migration 77: approval cost-so-far snapshot (#795). Captured at
+    # approval creation from the live transcript; estimate, surfaced on the
+    # approval Run tab so the page needs no separate run fetch.
+    """
+    ALTER TABLE approvals ADD COLUMN tokens_so_far INTEGER;
+    ALTER TABLE approvals ADD COLUMN cost_usd_so_far REAL;
+    """,
 ]
 
 
