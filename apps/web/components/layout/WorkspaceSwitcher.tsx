@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-logo";
+import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import type { LocalWorkspace } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -37,15 +38,6 @@ type WorkspaceState = {
   workspaces: LocalWorkspace[];
   activeId: string;
 };
-
-/** UUID-shaped pattern: 8-4-4-4-12 hex */
-const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
-
-function resolveWorkspaceName(name: string): string {
-  if (!name.trim()) return "My workspace";
-  if (UUID_RE.test(name.trim())) return "My workspace";
-  return name;
-}
 
 function shortInitial(name: string): string {
   const display = resolveWorkspaceName(name);
