@@ -99,7 +99,8 @@ describe("page components render with data (no client crash)", () => {
     const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
     render(<RunsCollection initialRuns={[run as never]} />);
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
-    expect(screen.getByText("Export CSV")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /export/i })).toBeInTheDocument();
+    expect(screen.queryByText("Export CSV")).not.toBeInTheDocument();
   });
 
   it("ConnectionsCollection renders the connection", async () => {

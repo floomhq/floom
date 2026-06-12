@@ -33,10 +33,10 @@ import { BrandLogo } from "@/components/connections/BrandLogo";
 export type { SystemOverviewAttentionItem };
 
 // Spec rule 2: flat-by-token — all borders from CSS variables, never hardcoded.
-// --bd-card is `none` per design tokens; use `border border-[var(--bd-card)]`
-// so a token-level change propagates everywhere automatically.
+// --bd-card is `none` per design tokens; use the full border shorthand so the
+// computed border width is 0px when the token is none.
 const cardClass =
-  "rounded-[var(--radius-card)] border border-[var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
+  "rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
 
 const providerNameAliases: Record<string, string> = {
   github: "GitHub",
