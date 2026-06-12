@@ -78,7 +78,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Sidebar />
       {/* Main content between sidebar and Emily dock — scrolls in its own container */}
       <main className="relative z-10 flex-1 min-w-0 h-full overflow-y-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex flex-col min-h-full">{children}</div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex h-full min-h-0 flex-col">{children}</div>
       </main>
       {/* Emily dock: fixed-height right rail — scrolls internally, never bleeds to body */}
       {isDesktop ? <EmilyDock /> : <EmilyMobileSheet />}

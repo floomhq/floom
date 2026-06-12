@@ -32,7 +32,7 @@ export function PromptText({
         return (
           <span
             key={i}
-            className="inline-flex items-baseline gap-[3px] rounded-[4px] bg-muted/50 px-[5px] py-[1px] mx-[1px] align-baseline whitespace-nowrap"
+            className="inline-flex items-baseline gap-[3px] rounded-[var(--radius-squircle)] bg-muted/50 px-[5px] py-[1px] mx-[1px] align-baseline whitespace-nowrap"
           >
             {seg.brand && (
               <BrandLogo

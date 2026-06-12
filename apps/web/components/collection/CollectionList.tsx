@@ -66,7 +66,7 @@ function RowMenu({ items }: { items: RowMenuItem[] }) {
                 width: "100%",
                 textAlign: "left",
                 padding: "8px 10px",
-                borderRadius: 8,
+                borderRadius: "var(--radius-button)",
                 fontSize: 13,
                 color: it.danger ? "var(--warning)" : "var(--ink-soft)",
               }}

@@ -388,8 +388,8 @@ function SettingsContent() {
   const initialSection = (() => {
     const fromHash =
       typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : null;
-    const fromQuery = searchParams.get("tab");
-    return sectionFromCandidate(fromHash || fromQuery);
+    const fromQuery = searchParams.get("sel") || searchParams.get("tab");
+    return sectionFromCandidate(fromQuery || fromHash);
   })();
   const [collectionState, setCollectionState] = useState<CollectionState>(() => ({
     ...emptyState("list"),
@@ -514,23 +514,34 @@ function SettingsContent() {
     if (dest) setCollectionState((prev) => ({ ...prev, sel: dest, tab: null }));
     const params = new URLSearchParams(searchParams.toString());
     params.delete("from_install");
+    params.delete("tab");
+    if (dest) params.set("sel", dest);
     const qs = params.size ? `?${params.toString()}` : "";
-    window.history.replaceState(null, "", `${window.location.pathname}${qs}#${dest ?? "channels"}`);
+    window.history.replaceState(null, "", `${window.location.pathname}${qs}`);
     setSearch(window.location.search);
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Keep state in sync with the URL hash for deep-links and back/forward.
+  // Keep state in sync with ?sel= for deep-links/back-forward. Hash is accepted
+  // only as a compatibility input for older links.
   useEffect(() => {
-    function syncFromHash() {
+    function syncFromLocation() {
+      const params = new URLSearchParams(window.location.search);
+      const fromQuery = sectionFromCandidate(params.get("sel") || params.get("tab"));
       const raw = window.location.hash.replace(/^#/, "");
       const fromHash = sectionFromCandidate(raw);
-      if (fromHash) {
-        setCollectionState((prev) => (prev.sel === fromHash ? prev : { ...prev, sel: fromHash, tab: null }));
+      const nextSel = fromQuery || fromHash;
+      if (nextSel) {
+        setCollectionState((prev) => (prev.sel === nextSel ? prev : { ...prev, sel: nextSel, tab: null }));
       }
+      setSearch(window.location.search);
     }
-    window.addEventListener("hashchange", syncFromHash);
-    return () => window.removeEventListener("hashchange", syncFromHash);
+    window.addEventListener("hashchange", syncFromLocation);
+    window.addEventListener("popstate", syncFromLocation);
+    return () => {
+      window.removeEventListener("hashchange", syncFromLocation);
+      window.removeEventListener("popstate", syncFromLocation);
+    };
   }, []);
 
   async function handleClearRuns() {
@@ -642,9 +653,10 @@ function SettingsContent() {
     setCollectionState(next);
     const params = new URLSearchParams(searchParams.toString());
     params.delete("tab");
+    if (next.sel && isValidSection(next.sel)) params.set("sel", next.sel);
+    else params.delete("sel");
     const qs = params.size ? `?${params.toString()}` : "";
-    const hash = next.sel && isValidSection(next.sel) ? `#${next.sel}` : "";
-    window.history.replaceState(null, "", `${window.location.pathname}${qs}${hash}`);
+    window.history.replaceState(null, "", `${window.location.pathname}${qs}`);
     setSearch(window.location.search);
   }
 
@@ -806,13 +818,13 @@ function SystemSection({
       {!canEdit ? <ReadOnlyNotice /> : null}
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-muted-foreground">System info</h2>
-        <div className="c-ltable text-sm">
+        <div className="space-y-2 text-sm">
           {info ? (
             <>
-              <Row label="Version" value={info.version} mono />
-              <Row label="Started at" value={info.started_at} mono />
-              <Row label="Python" value={info.python_version} mono />
-              <Row label="Runner" value={info.runner} />
+              <SystemInfoRow label="Version" value={info.version} mono />
+              <SystemInfoRow label="Started at" value={info.started_at} mono />
+              <SystemInfoRow label="Python" value={info.python_version} mono />
+              <SystemInfoRow label="Runner" value={info.runner} />
             </>
           ) : (
             <div className="space-y-3">
@@ -888,6 +900,23 @@ function SystemSection({
           )}
         </div>
       </section>
+    </div>
+  );
+}
+
+function SystemInfoRow({
+  label,
+  value,
+  mono,
+}: {
+  label: string;
+  value: string;
+  mono?: boolean;
+}) {
+  return (
+    <div className="flex min-w-0 items-start justify-between gap-4 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-3">
+      <span className="text-muted-foreground">{label}</span>
+      <span className={`min-w-0 break-words text-right font-medium ${mono ? "font-mono" : ""}`}>{value}</span>
     </div>
   );
 }
@@ -1030,23 +1059,6 @@ function ReadOnlyNotice({ message = "Workspace controls are view only for this a
       <AlertTitle>View only</AlertTitle>
       <AlertDescription>{message}</AlertDescription>
     </Alert>
-  );
-}
-
-function Row({
-  label,
-  value,
-  mono,
-}: {
-  label: string;
-  value: string;
-  mono?: boolean;
-}) {
-  return (
-    <div className="c-lrow" style={{ gridTemplateColumns: "minmax(120px,.35fr) 1fr", cursor: "default" }}>
-      <span className="text-muted-foreground">{label}</span>
-      <span className={`truncate font-medium ${mono ? "font-mono" : ""}`}>{value}</span>
-    </div>
   );
 }
 
