@@ -1162,13 +1162,14 @@ class AgentDriver(SandboxDriver):
         return agent_capabilities.mcp_connections(config)
 
     def _sdk_tools(self, config: WorkerConfig, state: _AgentRunState) -> list[Any]:
-        from agents import FunctionTool, WebSearchTool
+        from agents import FunctionTool
+        from web_search import web_search_tool
 
         sdk_tools: list[Any] = []
         for tool in self._tool_schemas(config):
             tool_type = tool.get("type")
             if tool_type == "web_search":
-                sdk_tools.append(WebSearchTool())
+                sdk_tools.append(web_search_tool())
                 continue
             if tool_type != "function":
                 continue
