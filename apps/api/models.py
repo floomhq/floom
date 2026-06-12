@@ -2230,3 +2230,14 @@ class WorkspaceStats(BaseModel):
     avg_duration_ms: Optional[float] = None
     most_active_worker_id: Optional[str] = None
     most_active_worker_name: Optional[str] = None
+
+
+class VersionSummary(BaseModel):
+    id: str           # 7-char git SHA
+    sha: str          # same 7-char git SHA
+    message: str      # commit message
+    author: str       # git author name
+    timestamp: str    # ISO 8601 commit date
+    asset_type: str   # kept for API compat
+    asset_id: str     # kept for API compat
+    change_source: Optional[str] = None
