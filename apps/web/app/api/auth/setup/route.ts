@@ -16,7 +16,10 @@ export async function GET(_req: NextRequest) {
     headers: { "x-floom-secret": process.env.FLOOM_API_SECRET || "" },
   });
   const body = await upstream.json();
-  return NextResponse.json(body, { status: upstream.status });
+  return NextResponse.json(body, {
+    status: upstream.status,
+    headers: { "cache-control": "private, no-store, max-age=0" }, // #941
+  });
 }
 
 export async function POST(req: NextRequest) {
@@ -32,7 +35,10 @@ export async function POST(req: NextRequest) {
   const responseBody = await upstream.text();
   const res = new NextResponse(responseBody, {
     status: upstream.status,
-    headers: { "content-type": upstream.headers.get("content-type") || "application/json" },
+    headers: {
+      "content-type": upstream.headers.get("content-type") || "application/json",
+      "cache-control": "private, no-store, max-age=0", // #941
+    },
   });
 
   // Forward the wos_session cookie from the backend to the browser
