@@ -496,6 +496,23 @@ def _dispatch_terminal_run_alerts(
         )
         if status != RunStatus.FAILED.value:
             return
+        # #794: workspace 'failure_email_enabled' toggle — email the workspace's
+        # configured address on ANY run failure (distinct from the per-worker
+        # email_to alert above). Best-effort; skipped when no recipient/RESEND.
+        try:
+            if _workspace_toggle("failure_email_enabled", env_var="WORKEROS_FAILURE_EMAIL", default=False):
+                recipients = _workspace_failure_email_recipients()
+                if recipients:
+                    _send_email_notification(
+                        to_addrs=recipients,
+                        worker_name=worker_id,
+                        run_id=run_id,
+                        worker_id=worker_id,
+                        status=status,
+                        error=error,
+                    )
+        except Exception:
+            logger.debug("workspace failure-email dispatch failed for run %s", run_id, exc_info=True)
         try:
             from alerting import alert_worker_failure_if_needed
 
@@ -2770,6 +2787,13 @@ def _workspace_toggle(key: str, *, env_var: str, default: bool) -> bool:
     if raw is not None:
         return raw.strip().lower() not in _FALSEY
     return default
+
+
+def _workspace_failure_email_recipients() -> list[str]:
+    """#794: where workspace failure emails go — the `failure_email_to`
+    workspace setting (comma-separated), else NOTIFY_EMAIL / WORKEROS_ALERT_EMAIL."""
+    raw = _workspace_setting("failure_email_to") or os.environ.get("NOTIFY_EMAIL") or os.environ.get("WORKEROS_ALERT_EMAIL") or ""
+    return [addr.strip() for addr in raw.split(",") if addr.strip()]
 
 
 def _auto_pause_on_consecutive_failures_enabled() -> bool:
