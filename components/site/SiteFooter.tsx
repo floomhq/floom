@@ -28,6 +28,7 @@ const FOOTER_COLS: Array<{
     title: "Product",
     links: [
       { label: "Templates", href: "/templates" },
+      { label: "Integrations", href: "/integrations" },
       { label: "Sign in", href: "/login" },
       { label: "Marketing", href: "/marketing" },
       { label: "Sales", href: "/sales" },

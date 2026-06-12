@@ -42,8 +42,10 @@ function Mark({ size = 22 }: { size?: number }) {
 }
 
 const NAV = [
-  ["Product", "/v3/product"],
-  ["Docs", "/v3/docs"],
+  ["Product", "/product"],
+  ["Templates", "/templates"],
+  ["Integrations", "/integrations"],
+  ["Docs", "/docs"],
 ] as const;
 
 export function V3Shell({
@@ -86,7 +88,7 @@ export function V3Shell({
     >
       <div className="mx-auto w-full max-w-[1000px] flex-1 px-7 pb-24">
         <nav className="flex h-[64px] items-center justify-between">
-          <Link href="/v3" className="flex items-center gap-2.5 text-[14px] font-semibold">
+          <Link href="/" className="flex items-center gap-2.5 text-[14px] font-semibold">
             <Mark />
             WorkerOS
           </Link>
@@ -132,8 +134,10 @@ export function V3Shell({
             <span>Built in San Francisco · © 2026 Floom</span>
           </div>
           <span className="flex flex-wrap gap-4">
-            <Link href="/v3/product" className="transition-colors hover:text-foreground">Product</Link>
-            <Link href="/v3/docs" className="transition-colors hover:text-foreground">Docs</Link>
+            <Link href="/product" className="transition-colors hover:text-foreground">Product</Link>
+            <Link href="/templates" className="transition-colors hover:text-foreground">Templates</Link>
+            <Link href="/integrations" className="transition-colors hover:text-foreground">Integrations</Link>
+            <Link href="/docs" className="transition-colors hover:text-foreground">Docs</Link>
             <a href="https://github.com/floomhq/workeros" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">GitHub</a>
             <Link href="/privacy" className="transition-colors hover:text-foreground">Privacy</Link>
             <Link href="/terms" className="transition-colors hover:text-foreground">Terms</Link>

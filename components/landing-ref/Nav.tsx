@@ -4,7 +4,7 @@ import { MobileNav } from "./MobileNav";
 const LINKS: Array<{ label: string; href: string }> = [
   { label: "Templates", href: "/templates" },
   { label: "How it works", href: "/#see-how-it-works" },
-  { label: "Integrations", href: "/#connections" },
+  { label: "Integrations", href: "/integrations" },
 ];
 
 function FloomMark({ size = 24 }: { size?: number }) {
@@ -86,6 +86,7 @@ const FOOTER_COLS: Array<{
     title: "Product",
     links: [
       { label: "Templates", href: "/templates" },
+      { label: "Integrations", href: "/integrations" },
       { label: "Sign in", href: "/login" },
       { label: "Marketing", href: "/marketing" },
       { label: "Sales", href: "/sales" },

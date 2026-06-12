@@ -42,7 +42,7 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
 
   return (
     <V3Shell active="templates">
-      <Link href="/v3/templates" className="mt-2 inline-flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground">
+      <Link href="/templates" className="mt-2 inline-flex items-center gap-1.5 text-[13px] text-muted-foreground transition-colors hover:text-foreground">
         <ArrowLeft className="h-3.5 w-3.5" /> All templates
       </Link>
 

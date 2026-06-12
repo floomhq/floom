@@ -3,7 +3,7 @@ import Link from "next/link";
 const LINKS: Array<{ label: string; href: string }> = [
   { label: "Templates", href: "/templates" },
   { label: "How it works", href: "/#see-how-it-works" },
-  { label: "Integrations", href: "/#connections" },
+  { label: "Integrations", href: "/integrations" },
 ];
 
 function FloomMark({ size = 24 }: { size?: number }) {

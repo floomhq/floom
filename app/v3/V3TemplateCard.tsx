@@ -52,7 +52,7 @@ export function V3TemplateCard({
   return (
     <motion.div {...anim} transition={{ duration: 0.4, delay: Math.min(i * 0.05, 0.3), ease: EASE }}>
       <Link
-        href={href ?? `/v3/templates/${t.slug}`}
+        href={href ?? `/templates/${t.slug}`}
         className="group flex h-full flex-col rounded-[16px] bg-card p-6 transition-colors hover:bg-secondary/70"
       >
         <div className="flex items-center justify-between gap-3">

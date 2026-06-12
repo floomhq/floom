@@ -292,7 +292,7 @@ function Templates() {
         transition={{ duration: 0.5, delay: 0.2 }}
         className="mt-5 text-[13px]"
       >
-        <Link href="/v3/templates" className="text-muted-foreground transition-colors hover:text-foreground">
+        <Link href="/templates" className="text-muted-foreground transition-colors hover:text-foreground">
           All templates →
         </Link>
       </motion.div>

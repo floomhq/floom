@@ -56,7 +56,7 @@ const CHANNELS: Record<
       ["Point your agent at it", "Add workeros-mcp to your agent's MCP config. The docs have copy-paste blocks for Claude Code, Cursor, and Codex."],
       ["Drive workers from your editor", "“Run client-follow-up for the Acme call.” The run lands in your workspace like any other."],
     ],
-    cta: { label: "Read the MCP setup", href: "/v3/docs#mcp" },
+    cta: { label: "Read the MCP setup", href: "/docs#mcp" },
     ctaNote: "The server needs a workspace token; you sign in once to mint it and never need the dashboard again.",
   },
 };
