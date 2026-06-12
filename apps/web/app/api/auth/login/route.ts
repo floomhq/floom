@@ -4,6 +4,7 @@ import {
   deriveSessionToken,
   isCorrectSecret,
 } from "@/lib/web-session";
+import { forwardSecureSetCookies } from "@/lib/secure-set-cookie";
 
 const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
@@ -79,13 +80,14 @@ export async function POST(req: NextRequest) {
     const upstreamBody = await upstream.text();
     const res = new NextResponse(upstreamBody, {
       status: upstream.status,
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        // #941: auth responses are identity-bearing — never shared-cacheable
+        "cache-control": "private, no-store, max-age=0",
+      },
     });
-    // Forward the wos_session cookie from the backend
-    const setCookie = upstream.headers.get("set-cookie");
-    if (setCookie) {
-      res.headers.set("set-cookie", setCookie);
-    }
+    // Forward the wos_session cookie from the backend (#927: force Secure)
+    forwardSecureSetCookies(upstream, res.headers);
     return res;
   }
 
@@ -107,6 +109,7 @@ export async function POST(req: NextRequest) {
 
   const token = await deriveSessionToken();
   const res = NextResponse.json({ ok: true });
+  res.headers.set("cache-control", "private, no-store, max-age=0"); // #941
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: true,

@@ -16,6 +16,7 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { Table, TableBody, TableCell, TableHead, TableHeader, TableRow } from "@/components/ui/table";
 import { stripCitationTokens } from "@/lib/strip-citations";
+import { sanitizeHref } from "@/lib/safe-url";
 
 export type GenericOutputType = "markdown" | "json" | "csv" | "text" | "file" | string;
 
@@ -56,7 +57,7 @@ const markdownComponents = {
   strong: ({ children }: MarkdownChildProps) => <strong className="font-semibold">{children}</strong>,
   a: ({ href, children }: MarkdownAnchorProps) => (
     <a
-      href={href}
+      href={sanitizeHref(href)}
       className="text-foreground underline decoration-muted-foreground/40 underline-offset-4 hover:decoration-foreground"
       target="_blank"
       rel="noopener noreferrer"
