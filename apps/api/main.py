@@ -118,6 +118,7 @@ from db import DB_PATH, Repositories, WorkspaceMemberRepository, assistant_row_i
 from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
 from secret_scan import scan_bytes
 from models import (
+    VersionSummary,
     AssetPermissions,
     RunCreate,
     WorkerVisibilityUpdate,
@@ -1866,15 +1867,6 @@ def _git_commit_workspace_base_md(
     except Exception as exc:
         logger.warning("git commit failed for workspace.base.md: %s", exc)
 
-class VersionSummary(BaseModel):
-    id: str           # 7-char git SHA
-    sha: str          # same 7-char git SHA
-    message: str      # commit message
-    author: str       # git author name
-    timestamp: str    # ISO 8601 commit date
-    asset_type: str   # kept for API compat
-    asset_id: str     # kept for API compat
-    change_source: Optional[str] = None
 
 
 class ContextWorkerRef(BaseModel):
@@ -1992,110 +1984,8 @@ class ContextSecretScanResponse(BaseModel):
     flagged_files: List[ContextSecretScanFile] = Field(default_factory=list)
 
 
-@app.get("/workers/{worker_id}/versions", response_model=List[VersionSummary])
-def list_worker_versions(
-    worker_id: str,
-    limit: int = 50,
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> List[VersionSummary]:
-    """List git commit history for a worker (newest first)."""
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
-    if not worker:
-        raise HTTPException(status_code=404, detail="Worker not found")
-    prefix = _workers_git_prefix()
-    workspace = _git_workspace()
-    rows = _git_ops.get_log(
-        workspace,
-        rel_path=f"{prefix}/{worker_id}",
-        limit=min(limit, 100),
-        asset_type="worker",
-        asset_id=worker_id,
-    )
-    if not rows:
-        # First time viewing versions for a pre-existing worker — commit its
-        # current files as the initial baseline so history isn't empty.
-        _git_commit_worker(worker_id, message=f"baseline: snapshot existing {worker_id}")
-        rows = _git_ops.get_log(
-            workspace,
-            rel_path=f"{prefix}/{worker_id}",
-            limit=min(limit, 100),
-            asset_type="worker",
-            asset_id=worker_id,
-        )
-    return [VersionSummary(**r) for r in rows]
+# Worker version/rollback routes -> routers/worker_versions.py
 
-
-@app.get("/workers/{worker_id}/versions/{sha}")
-def get_worker_version(
-    worker_id: str,
-    sha: str,
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> Dict[str, Any]:
-    """Return the file tree for a worker at a specific git commit."""
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
-    if not worker:
-        raise HTTPException(status_code=404, detail="Worker not found")
-    workspace = _git_workspace()
-    prefix = _workers_git_prefix()
-    file_paths = _git_ops.list_files_at_sha(workspace, sha, f"{prefix}/{worker_id}")
-    if not file_paths:
-        raise HTTPException(status_code=404, detail="Version not found or worker had no files at this commit")
-    files = []
-    for fp in file_paths:
-        content = _git_ops.get_file_at_sha(workspace, sha, fp)
-        if content is not None:
-            rel = fp[len(f"{prefix}/{worker_id}/"):]
-            files.append({"path": rel, "content": content})
-    return {"files": files}
-
-
-@app.post("/workers/{worker_id}/rollback/{sha}", response_model=WorkerDetail)
-def rollback_worker(
-    worker_id: str,
-    sha: str,
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> WorkerDetail:
-    """Restore a worker to the state at a given git commit SHA."""
-    _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
-    if not worker:
-        raise HTTPException(status_code=404, detail="Worker not found")
-
-    workspace = _git_workspace()
-    prefix = _workers_git_prefix()
-    worker_git_path = f"{prefix}/{worker_id}"
-
-    try:
-        _git_ops.checkout_path(workspace, sha, worker_git_path)
-    except _git_ops.GitOpsError as exc:
-        raise HTTPException(status_code=404, detail=f"Commit {sha!r} not found: {exc}") from exc
-
-    author_name, author_email = _git_author(auth)
-    _git_commit_worker(
-        worker_id,
-        message=f"rollback: restore {worker_id} to {sha}",
-        author_name=author_name,
-        author_email=author_email,
-    )
-
-    invalidate_worker_cache()
-    workers = discover_workers()
-    this_worker_list = [w for w in workers if w["id"] == worker_id]
-    if not this_worker_list:
-        raise HTTPException(status_code=500, detail=f"Worker {worker_id!r} not found after rollback")
-    with get_db() as conn:
-        _persist_discovered_workers(conn, this_worker_list, user_id=auth.user_id)
-
-    try:
-        from worker_registry import WORKERS_DIR as _WD
-        _embed_files_in_skill_version(worker_id, _WD / worker_id)
-    except Exception:
-        logger.warning("Failed to embed files in DB after rollback for worker %s", worker_id, exc_info=True)
-
-    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
 
 @app.get("/contexts/{name}/versions", response_model=List[VersionSummary])
@@ -8554,6 +8444,14 @@ from routers.worker_telemetry import (
     delete_worker_feedback,
 )
 app.include_router(worker_telemetry_router)
+
+from routers.worker_versions import (
+    worker_versions_router,
+    list_worker_versions,
+    get_worker_version,
+    rollback_worker,
+)
+app.include_router(worker_versions_router)
 
 from routers.uploads import (
     uploads_router,
