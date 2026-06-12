@@ -1045,15 +1045,39 @@ def test_system_metrics_and_overview_are_user_scoped(monkeypatch, tmp_path):
 def test_shipped_worker_directories_match_protected_set(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     shipped_worker_ids = _tracked_worker_ids()
+    protected = set(main.PROTECTED_STOCK_WORKER_IDS)
 
-    assert shipped_worker_ids == set(main.PROTECTED_STOCK_WORKER_IDS)
+    # #940 deliberately broke shipped == protected: tenant-specific bundles
+    # (real Gmail/PostHog/GSC/CRM data) still ship as directories but are no
+    # longer protected, which makes them owner-scoped and owner-deletable.
+    # The invariants that remain:
+    #   1. every protected stock worker must actually ship, and
+    #   2. the #940-curated-out tenant workers must NEVER regain protected
+    #      status (protected grants every user view/run via _worker_can_view).
+    assert protected <= shipped_worker_ids, (
+        f"protected stock workers missing from workers/: {sorted(protected - shipped_worker_ids)}"
+    )
+    for tenant_worker in (
+        "gmail-summarize-latest",
+        "openpaper-posthog-daily",
+        "seo-opportunity-digest",
+        "linkedin-post-engagements",
+        "cv_writeup",
+        "weekly_update",
+    ):
+        assert tenant_worker not in protected, (
+            f"{tenant_worker} is tenant-specific and was curated out by #940; "
+            "it must not regain PROTECTED_STOCK_WORKER_IDS status"
+        )
 
 
 def test_protected_stock_worker_direct_mutations_are_blocked(monkeypatch, tmp_path):
-    main = _load_api(monkeypatch, tmp_path, stock_workers=("linkedin-post-engagements",))
+    # csv_enricher: still in PROTECTED_STOCK_WORKER_IDS after the #940
+    # curation (linkedin-post-engagements no longer is, so it stopped 403ing).
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("csv_enricher",))
     client = TestClient(main.app)
 
-    payload = _worker_payload("linkedin-post-engagements", title="Probe Replacement")
+    payload = _worker_payload("csv_enricher", title="Probe Replacement")
     files_payload = {
         "files": [
             {"path": "worker.yml", "content": payload["worker_yml"]},
@@ -1062,19 +1086,19 @@ def test_protected_stock_worker_direct_mutations_are_blocked(monkeypatch, tmp_pa
     }
 
     blocked_checks = {
-        "delete": client.delete("/workers/linkedin-post-engagements", headers=_headers("user-a")),
+        "delete": client.delete("/workers/csv_enricher", headers=_headers("user-a")),
         "patch": client.patch(
-            "/workers/linkedin-post-engagements",
+            "/workers/csv_enricher",
             headers=_headers("user-a"),
             json={"trigger_type": "manual"},
         ),
         "put": client.put(
-            "/workers/linkedin-post-engagements",
+            "/workers/csv_enricher",
             headers=_headers("user-a"),
             json=payload,
         ),
         "files": client.put(
-            "/workers/linkedin-post-engagements/files",
+            "/workers/csv_enricher/files",
             headers=_headers("user-a"),
             json=files_payload,
         ),
