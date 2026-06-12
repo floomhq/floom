@@ -1470,14 +1470,20 @@ async def _handle_slack_direct_message(
             system_suffix=_slack_system_suffix,
         )
         _post_slack_thread_reply(channel=channel, thread_ts=thread_ts, text=reply, bot_token=bot_token)
-    except Exception:
+    except Exception as exc:
         logger.exception("Slack direct message processing failed")
         if os.environ.get("SLACK_POST_ERRORS_TO_THREAD", "1").strip().lower() not in {"0", "false", "no", "off"}:
             try:
+                from llm import is_llm_provider_outage, safe_llm_error_message
+
+                if is_llm_provider_outage(exc):
+                    error_text = safe_llm_error_message(exc, action="Chat")
+                else:
+                    error_text = "Something went wrong on my end. Try again in a moment."
                 _post_slack_thread_reply(
                     channel=channel,
                     thread_ts=thread_ts,
-                    text="Something went wrong on my end. Try again in a moment.",
+                    text=error_text,
                     bot_token=bot_token,
                 )
             except Exception:
