@@ -560,3 +560,23 @@ def _build_worker_detail(
         visibility=str(worker.get("visibility") or "private"),
         permissions=_worker_permissions(worker, user_id=user_id, repos=repos),
     )
+
+
+def _get_timeseries_batch(
+    worker_ids: List[str],
+    *,
+    user_id: str,
+    repos: Repositories,
+    days: int = 14,
+) -> Dict[str, List[TimeseriesDay]]:
+    """Batch-query per-day run counts for sparkline charts (last N days).
+
+    Returns a dict mapping worker_id -> list of N TimeseriesDay objects,
+    oldest first, zero-filled for days with no runs.
+    """
+    if not worker_ids:
+        return {}
+    try:
+        return repos.workers.timeseries_batch(user_id=user_id, worker_ids=worker_ids, days=days)
+    except sqlite3.OperationalError:
+        return {}
