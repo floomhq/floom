@@ -119,6 +119,27 @@ def compute_next_run_at(cron_expr: str, after: datetime, cron_timezone: str | No
         return None
 
 
+def _owner_is_active(repos, user_id: str | None) -> bool:
+    """#918: disabling or deleting a user must halt their scheduled automation.
+
+    Returns False when the install has real user accounts and the worker's
+    owner is missing or disabled. Installs with an empty users table (legacy
+    single-user ids like "federico") keep firing. Fails open on repo errors so
+    a transient DB hiccup can't silence every schedule.
+    """
+    users = getattr(repos, "users", None)
+    if users is None or not user_id:
+        return True
+    try:
+        row = users.get(user_id=user_id)
+        if row is not None:
+            return not row.get("disabled")
+        return users.count() == 0
+    except Exception:
+        logger.exception("owner lifecycle check failed for user %s; failing open", user_id)
+        return True
+
+
 def _is_worker_running(worker_id: str) -> bool:
     """Return True if there is a run in 'running' state for this worker."""
     repos = get_repositories()
@@ -232,6 +253,12 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
         cron_timezone = _cron_timezone_from_trigger_config(row.get("config_json")) or row.get("cron_timezone") or "UTC"
         if _worker_is_archived(worker_id):
             logger.info("Skipping schedule trigger %s — worker %s is archived", trigger_id, worker_id)
+            continue
+        if not _owner_is_active(repos, user_id):
+            logger.info(
+                "Skipping schedule trigger %s — owner %s of worker %s is disabled or deleted",
+                trigger_id, user_id, worker_id,
+            )
             continue
 
         # Initialize next_run_at on first sight.
@@ -401,6 +428,12 @@ def _tick() -> None:
                 continue
         except Exception:
             pass
+        if not _owner_is_active(repos, user_id):
+            logger.info(
+                "Skipping scheduled run for %s — owner %s is disabled or deleted",
+                worker_id, user_id,
+            )
+            continue
 
         next_at_str = _get_or_init_next_run_at(worker_id, cron_expr, cron_timezone)
         if not next_at_str:

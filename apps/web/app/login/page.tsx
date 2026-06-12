@@ -112,7 +112,7 @@ function LoginContent() {
         });
         if (!res.ok) {
           const body = (await res.json().catch(() => ({}))) as { detail?: string };
-          setError(body.detail || "Invalid access secret.");
+          setError(body.detail || "Invalid credentials.");
           return;
         }
       }
