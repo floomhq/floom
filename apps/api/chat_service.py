@@ -4602,10 +4602,20 @@ def build_system_prompt_for_source(user_id: str, source: str = "web", message: s
         include_authoring_rules=_is_worker_authoring_intent(message),
     )
     snapshot = _build_capabilities_snapshot(user_id)
-    return (
+    prompt = (
         f"{base}\n\n{GLOBAL_COMMUNICATION_RULES}\n\n{_environment_note(source)}"
         f"\n\n{snapshot}"
     )
+    # #844: durable cross-conversation memory (owner's private `memory` pack)
+    try:
+        from conversation_memory import memory_prompt_section
+
+        memory_section = memory_prompt_section(user_id)
+    except Exception:
+        memory_section = ""
+    if memory_section:
+        prompt = f"{prompt}\n\n{memory_section}"
+    return prompt
 
 
 def workspace_agent_tool_metadata(user_id: str) -> List[Dict[str, str]]:
@@ -4670,7 +4680,9 @@ def workspace_agent_info(user_id: str) -> Dict[str, Any]:
         "model": os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL,
         "base_persona": get_workspace_base_persona(),
         "worker_authoring_rules": WORKER_AUTHORING_RULES,
-        "system_prompt": _build_system_prompt(user_id, include_authoring_rules=False),
+        # build_system_prompt_for_source is what /chat actually runs (#844:
+        # includes the User memory section), so the operator view stays honest.
+        "system_prompt": build_system_prompt_for_source(user_id, "web", message=""),
         "tools": workspace_agent_tool_metadata(user_id),
         "settings": settings,
         "channels": {
@@ -5174,6 +5186,16 @@ async def stream_chat(
             "assistant_message_id": assistant_message_id,
             "cards": list(card_summaries.values()),
         })
+
+        # #844: distill durable facts into the owner's memory brain pack.
+        # Best-effort background task; rate-limited per conversation inside.
+        try:
+            from conversation_memory import memory_enabled, persist_conversation_memory
+
+            if memory_enabled():
+                asyncio.create_task(persist_conversation_memory(conversation_id, user_id))
+        except Exception:
+            logger.debug("memory task scheduling failed (non-fatal)", exc_info=True)
 
     except Exception as exc:
         logger.exception("stream_chat failed for conversation %s", conversation_id)
