@@ -74,6 +74,52 @@ export function buildCsp(nonce: string): string {
   ].join("; ");
 }
 
+// #947 — CSRF defence-in-depth, mirrored from the engine middleware. The cloud
+// /api/proxy forwards the victim's Supabase Bearer token to the backend, so a
+// cross-site mutation with their cookie is exactly as dangerous here. Validate
+// Origin (falling back to Referer) against the app's own host on every mutating
+// method. The proxy is browser-only, so a legit mutation always carries Origin.
+const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
+
+function allowedHosts(req: NextRequest): Set<string> {
+  const hosts = new Set<string>();
+  const add = (h: string | null | undefined) => {
+    if (h) hosts.add(h.split(",")[0].trim().toLowerCase());
+  };
+  add(req.nextUrl.host);
+  add(req.headers.get("host"));
+  add(req.headers.get("x-forwarded-host"));
+  for (const entry of (process.env.CSRF_TRUSTED_ORIGINS || "").split(",")) {
+    const v = entry.trim();
+    if (!v) continue;
+    try {
+      hosts.add(new URL(v.includes("://") ? v : `https://${v}`).host.toLowerCase());
+    } catch {
+      /* ignore malformed entry */
+    }
+  }
+  return hosts;
+}
+
+function hostOf(value: string | null): string | null {
+  if (!value) return null;
+  try {
+    return new URL(value).host.toLowerCase();
+  } catch {
+    return null;
+  }
+}
+
+function isCsrfSafe(req: NextRequest): boolean {
+  if (!MUTATING_METHODS.has(req.method.toUpperCase())) return true;
+  const allowed = allowedHosts(req);
+  const originHost = hostOf(req.headers.get("origin"));
+  if (originHost) return allowed.has(originHost);
+  const refererHost = hostOf(req.headers.get("referer"));
+  if (refererHost) return allowed.has(refererHost);
+  return false;
+}
+
 export async function middleware(req: NextRequest): Promise<NextResponse> {
   const nonce = btoa(crypto.randomUUID());
   const csp = buildCsp(nonce);
@@ -89,6 +135,19 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     }
     return response;
   };
+
+  // #947: block cross-site mutations on the proxy before the public-path early
+  // return (the cloud treats /api/proxy/* as public — backend verifies the
+  // Bearer token — so CSRF is the relevant control here).
+  if (
+    stripAppBase(req.nextUrl.pathname).startsWith("/api/proxy/") &&
+    !isCsrfSafe(req)
+  ) {
+    return NextResponse.json(
+      { detail: "Cross-origin request blocked." },
+      { status: 403 },
+    );
+  }
 
   if (isPublicPath(req.nextUrl.pathname)) {
     return respond();
