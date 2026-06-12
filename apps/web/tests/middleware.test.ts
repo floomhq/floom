@@ -150,3 +150,31 @@ describe("middleware auth gate", () => {
     expect(location).toContain("next=%2Fthis-does-not-exist-xyz");
   });
 });
+
+describe("middleware: #974 proxy rejections are never shared-cacheable", () => {
+  beforeEach(() => {
+    process.env.FLOOM_API_SECRET = SECRET;
+  });
+  afterEach(() => {
+    delete process.env.FLOOM_API_SECRET;
+  });
+
+  it("401 (anonymous) /api/proxy carries private no-store, not the Next public default", async () => {
+    const { middleware } = await import("@/middleware");
+    const res = await middleware(req("/api/proxy/secrets"));
+    expect(res.status).toBe(401);
+    expect(res.headers.get("cache-control")).toBe("private, no-store, max-age=0");
+    expect(res.headers.get("cache-control")).not.toMatch(/public/i);
+  });
+
+  it("403 (CSRF) /api/proxy carries private no-store", async () => {
+    const { middleware } = await import("@/middleware");
+    const evil = new NextRequest("https://workers.floom.dev/api/proxy/auth/tokens", {
+      method: "POST",
+      headers: { origin: "https://evil.com" },
+    });
+    const res = await middleware(evil);
+    expect(res.status).toBe(403);
+    expect(res.headers.get("cache-control")).toBe("private, no-store, max-age=0");
+  });
+});
