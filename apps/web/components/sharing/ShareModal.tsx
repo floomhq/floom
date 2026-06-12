@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { Copy, ExternalLink, Lock, X } from "lucide-react";
+import { AlertTriangle, Copy, ExternalLink, Lock, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { AssetVisibility } from "@/lib/types";
+import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
   Dialog,
   DialogContent,
@@ -203,6 +204,20 @@ export function ShareModal({
           </div>
           <p className="text-xs text-muted-foreground">{shareSummary(visibility)}</p>
         </div>
+
+        {/* Workspace sharing TRANSFERS ownership (workers only; shown
+            unconditionally when the asset type is unknown). */}
+        {visibility === "workspace" && (!grantAsset || grantAsset.type === "worker") && (
+          <Alert variant="destructive">
+            <AlertTriangle className="size-4" />
+            <AlertTitle>Ownership transfer</AlertTitle>
+            <AlertDescription>
+              Sharing transfers this worker to the workspace. You will lose edit
+              access, and an admin must configure its connections and secrets
+              before it can run.
+            </AlertDescription>
+          </Alert>
+        )}
 
         {/* Public link toggle (#766) — view & duplicate. Backend pending. */}
         <label
