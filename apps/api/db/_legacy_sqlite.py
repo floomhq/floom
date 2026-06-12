@@ -1997,6 +1997,22 @@ MIGRATIONS: list[Migration] = [
     ALTER TABLE approvals ADD COLUMN tokens_so_far INTEGER;
     ALTER TABLE approvals ADD COLUMN cost_usd_so_far REAL;
     """,
+    # -- migration 78: edit-access requests (#807). A member viewing a locked
+    # (workspace-shared, not owned) worker can ask the owner/admin for edit
+    # rights; the request is recorded (and the owner notified best-effort).
+    """
+    CREATE TABLE IF NOT EXISTS edit_access_requests (
+        id           TEXT PRIMARY KEY,
+        worker_id    TEXT NOT NULL,
+        requester_id TEXT NOT NULL,
+        message      TEXT,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        created_at   TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_req_pending
+        ON edit_access_requests(worker_id, requester_id)
+        WHERE status = 'pending';
+    """,
 ]
 
 
