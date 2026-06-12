@@ -110,6 +110,7 @@ export const OVERLAY_FILES = [
   "lib/verify-session.ts",
   "tests/verify-session-935.test.ts",
   "tests/me-cache-941.test.ts",
+  "tests/csrf-origin-947.test.ts",
 ];
 
 const CLOUD_TAILWIND_SOURCE_MARKER = "/* workeros-cloud generated Tailwind sources */";
