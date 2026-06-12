@@ -12167,12 +12167,39 @@ def export_workspace(
     # #925: a full-workspace download is an admin capability — a compromised
     # member session must not be able to exfiltrate the whole workspace.
     _require_admin(auth)
-    # #925/#948: every export is audit-logged with the actor.
+    # #925/#948: every export is audit-logged with the actor — the structured
+    # log (journalctl) AND a persistent, queryable audit row so a compromised-
+    # admin exfiltration is reviewable after the fact.
     logger.info("workspace export by user=%s role=%s", auth.user_id, auth.role)
+    try:
+        with get_db() as _conn:
+            _conn.execute(
+                "INSERT INTO workspace_export_audit (id, user_id, role, exported_at) "
+                "VALUES (?, ?, ?, ?)",
+                (f"export_{_uuid_mod.uuid4().hex[:12]}", auth.user_id, auth.role, now_iso()),
+            )
+    except Exception:
+        logger.warning("workspace export audit row insert failed", exc_info=True)
     payload = _build_workspace_template_zip(
         user_id=auth.user_id, repos=repos, exported_at=exported_at
     )
     return _workspace_template_response(payload)
+
+
+@app.get("/workspace/export/audit")
+def list_workspace_export_audit(
+    limit: int = Query(50, ge=1, le=500),
+    auth: AuthContext = Depends(get_auth_context),
+) -> List[Dict[str, Any]]:
+    """#925: admin-only review of the workspace-export audit trail."""
+    _require_admin(auth)
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, user_id, role, exported_at FROM workspace_export_audit "
+            "ORDER BY exported_at DESC LIMIT ?",
+            (limit,),
+        ).fetchall()
+    return [dict(r) for r in rows]
 
 
 # ---------------------------------------------------------------------------
