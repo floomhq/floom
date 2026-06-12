@@ -4834,12 +4834,12 @@ async def stream_chat(
         strict_json_schema=False,
     )
 
-    from agents import WebSearchTool
+    from web_search import web_search_tool
     all_tools = (
         workspace_tools
         + brain_tools
         + composio_tools
-        + [WebSearchTool(), finish_tool]
+        + [web_search_tool(), finish_tool]
     )
 
     # Per-run, loop-local OpenAI client. Worker runs execute in their own fresh

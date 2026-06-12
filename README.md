@@ -82,6 +82,11 @@ in the Bedrock console (per region). Prompt caching of the static system prompt 
 applied automatically on Anthropic/Bedrock for both codegen and agent (worker +
 Emily) calls; OpenAI caches prefixes server-side.
 
+**Web search:** Emily and web-search workers use a provider-agnostic `web_search`
+function tool that works on every model (including Bedrock/Claude), not OpenAI's
+hosted tool. It defaults to free DuckDuckGo (no key); set `SERPER_API_KEY` for
+Google-quality results (serper.dev).
+
 **Recommended for production:**
 - `FLOOM_SECRET` — operator secret that gates all API requests. Omit entirely for unauthenticated local dev.
 
