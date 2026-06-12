@@ -39,6 +39,8 @@ def _load_app(monkeypatch, tmp_path):
         "run_service", "main",
     ]:
         sys.modules.pop(name, None)
+    for _n in [n for n in list(sys.modules) if n.startswith("routers")]:
+        sys.modules.pop(_n, None)
 
     db = importlib.import_module("db")
     db.init_db()
