@@ -2924,7 +2924,7 @@ html.dark .ln-nw-art-cta { background: var(--solid); color: var(--solid-fg); }
   background: #2EB67D;
   color: #fff;
 }
-/* Workeros app avatar — our near-black/blue brand mark on a tile. */
+/* WorkerOS app avatar — our near-black/blue brand mark on a tile. */
 .ln-slack-av.bot {
   background: var(--ink);
   color: var(--bg-card);

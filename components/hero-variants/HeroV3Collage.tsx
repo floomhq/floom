@@ -442,7 +442,7 @@ export function HeroV3Collage() {
           transition={{ duration: 0.55, delay: 0.18, ease: EASE_OUT }}
           className="text-balance mx-auto mt-6 max-w-xl text-[17px] leading-relaxed text-muted-foreground"
         >
-          Describe the job. Workeros hires the worker and runs it for your team,
+          Describe the job. WorkerOS hires the worker and runs it for your team,
           with your approval before anything ships.
         </motion.p>
 

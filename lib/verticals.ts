@@ -98,10 +98,10 @@ export interface Vertical {
 export const VERTICALS: Record<string, Vertical> = {
   marketing: {
     slug: "marketing",
-    metaTitle: "Workeros for Marketing: Campaign reporting that writes itself",
+    metaTitle: "WorkerOS for Marketing: Campaign reporting that writes itself",
     metaDescription:
       "Hire an AI worker for your marketing team. It pulls performance from Google Analytics, drafts social from new posts, scores inbound leads in HubSpot, and watches competitors, on a schedule, a webhook, or with your approval.",
-    eyebrow: "Workeros for Marketing",
+    eyebrow: "WorkerOS for Marketing",
     h1: "Campaign reporting that writes itself",
     h1Accent: "writes itself",
     sub: "Ask in Slack, connect Analytics, HubSpot, and Slack, and your worker pulls the numbers, drafts the posts, and scores the leads, using your brand voice and ICP, on a schedule, a webhook, or with your approval.",
@@ -171,10 +171,10 @@ export const VERTICALS: Record<string, Vertical> = {
 
   recruiting: {
     slug: "recruiting",
-    metaTitle: "Workeros for Recruiting: Screen every applicant before standup",
+    metaTitle: "WorkerOS for Recruiting: Screen every applicant before standup",
     metaDescription:
       "Hire an AI worker for your recruiting team. It screens new applicants against the role brief, drafts personalized outreach, sends a daily pipeline digest, and schedules interviews via Calendar, with your approval.",
-    eyebrow: "Workeros for Recruiting",
+    eyebrow: "WorkerOS for Recruiting",
     h1: "Screen every applicant before standup",
     h1Accent: "before standup",
     sub: "Ask in Slack, connect your ATS, Gmail, and Calendar, and your worker scores each new applicant against the brief, drafts the outreach, and books the interviews, on a schedule, a webhook, or with your approval.",
@@ -244,10 +244,10 @@ export const VERTICALS: Record<string, Vertical> = {
 
   support: {
     slug: "support",
-    metaTitle: "Workeros for Support: Every ticket triaged the moment it lands",
+    metaTitle: "WorkerOS for Support: Every ticket triaged the moment it lands",
     metaDescription:
       "Hire an AI worker for your support team. It triages and tags incoming tickets, drafts first-response replies, escalates urgent issues to Slack, and writes a weekly support-trends report, with your approval.",
-    eyebrow: "Workeros for Support",
+    eyebrow: "WorkerOS for Support",
     h1: "Every ticket triaged the moment it lands",
     h1Accent: "the moment it lands",
     sub: "Ask in Slack, connect your helpdesk, Slack, and Notion, and your worker tags and prioritizes each ticket, drafts the first reply, and escalates what's urgent, on a schedule, a webhook, or with your approval.",
@@ -316,10 +316,10 @@ export const VERTICALS: Record<string, Vertical> = {
 
   sales: {
     slug: "sales",
-    metaTitle: "Workeros for Sales: Every lead researched before you call",
+    metaTitle: "WorkerOS for Sales: Every lead researched before you call",
     metaDescription:
       "Hire an AI worker for your sales team. It enriches and scores every new inbound lead in your CRM, drafts personalized first-touch outreach, sends a daily pipeline digest, and researches accounts before your calls, on a schedule, a webhook, or with your approval.",
-    eyebrow: "Workeros for Sales",
+    eyebrow: "WorkerOS for Sales",
     h1: "Every lead researched before you call",
     h1Accent: "before you call",
     sub: "Ask in Slack, connect your CRM, LinkedIn, and Gmail, and your worker enriches and scores each new lead, drafts the first touch, and briefs you on the account, on a schedule, a webhook, or with your approval.",

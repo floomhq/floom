@@ -36,14 +36,14 @@ const CHANNELS: Channel[] = [
   {
     key: "slack",
     name: "Slack",
-    href: "/login?install=slack",
+    href: "/start/slack",
     logo: <SlackLogo />,
     hint: "Workspace install",
   },
   {
     key: "whatsapp",
     name: "WhatsApp",
-    href: "/login?install=whatsapp",
+    href: "/start/whatsapp",
     logo: <WhatsAppLogo />,
     hint: "Personal or shared number",
   },
@@ -91,7 +91,7 @@ export function ChannelInstall() {
     <Wrapper
       {...wrapperProps}
       className="mx-auto mt-7 w-full max-w-2xl"
-      aria-label="Install Workeros directly in a channel"
+      aria-label="Install WorkerOS directly in a channel"
     >
       {reduce ? (
         <div className="mb-2.5 text-center text-[12px] text-muted-foreground">

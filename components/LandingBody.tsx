@@ -37,10 +37,10 @@ import {
 // of triggering one provider directly.
 const SIGN_IN_HREF = "/login";
 
-/* Workeros mark used as the agent avatar inside the Slack mock. Same glyph
+/* WorkerOS mark used as the agent avatar inside the Slack mock. Same glyph
    as the nav brand mark, on a near-black tile so it reads as the
    "@workeros" app icon in a channel. */
-const WorkerosMarkSVG = () => (
+const WorkerOSMarkSVG = () => (
   <svg viewBox="0 0 100 100" width="18" height="18" fill="currentColor" aria-hidden="true">
     <path d="M32 26h20l22 22a3 3 0 0 1 0 4l-22 22H32a6 6 0 0 1-6-6V32a6 6 0 0 1 6-6z" />
   </svg>
@@ -85,7 +85,7 @@ const RailDMIcon = () => (
 
 function SlackThreadMock() {
   return (
-    <div className="ln-slack" id="see-how-it-works" aria-label="How Workeros works in Slack">
+    <div className="ln-slack" id="see-how-it-works" aria-label="How WorkerOS works in Slack">
       {/* Slack workspace rail (aubergine) */}
       <div className="ln-slack-rail" aria-hidden="true">
         <span className="ln-slack-rail-ws">A</span>
@@ -120,10 +120,10 @@ function SlackThreadMock() {
 
         {/* The delivery */}
         <div className="ln-slack-msg">
-          <span className="ln-slack-av bot"><WorkerosMarkSVG /></span>
+          <span className="ln-slack-av bot"><WorkerOSMarkSVG /></span>
           <div className="ln-slack-bd">
             <div className="ln-slack-meta">
-              <b>Workeros</b>
+              <b>WorkerOS</b>
               <span className="ln-slack-app">APP</span>
               <span className="ln-slack-time">1:47 PM</span>
             </div>
@@ -228,7 +228,7 @@ const COMPARE_ROWS = [
   { who: "ChatGPT", verb: "answers." },
   { who: "Zapier", verb: "connects." },
   { who: "Dashboards", verb: "show." },
-  { who: "Workeros", verb: "does the workflow.", us: true },
+  { who: "WorkerOS", verb: "does the workflow.", us: true },
 ];
 
 /* ── Section 4 data: how it works (5 steps) ─────────────────────────── */
@@ -240,7 +240,7 @@ const HOW_STEPS = [
   },
   {
     icon: <PlugIcon />,
-    title: "Workeros uses your tools",
+    title: "WorkerOS uses your tools",
     body: "Gmail, HubSpot, Sheets, Notion, Linear, Salesforce, and more.",
   },
   {
@@ -392,7 +392,7 @@ export function LandingBody() {
             <h1 className="ln-h1">Hire AI workers<br />that finish business work.</h1>
 
             <p className="ln-sub">
-              Workeros lives in Slack, connects to your tools, uses your company
+              WorkerOS lives in Slack, connects to your tools, uses your company
               context, and returns finished artifacts: lead briefs, reports,
               drafts, sheets, tickets, and more.
             </p>
@@ -412,9 +412,9 @@ export function LandingBody() {
         </section>
 
         {/* SECTION 2 — OUTCOME GRID (departments) */}
-        <section className="ln-outcome-sec lp1" aria-label="What Workeros ships">
+        <section className="ln-outcome-sec lp1" aria-label="What WorkerOS ships">
           <div className="ln-sec-head">
-            <h2>Workeros ships the work your team keeps delaying.</h2>
+            <h2>WorkerOS ships the work your team keeps delaying.</h2>
           </div>
           <div className="ln-outcome-grid">
             {OUTCOME_DEPTS.map((d) => {
@@ -445,7 +445,7 @@ export function LandingBody() {
         </section>
 
         {/* SECTION 3 — COMPARISON */}
-        <section className="ln-compare-sec lp1" aria-label="Why Workeros exists">
+        <section className="ln-compare-sec lp1" aria-label="Why WorkerOS exists">
           <div className="ln-sec-head">
             <h2>Not AI chat. Not automation glue.</h2>
           </div>
@@ -550,7 +550,7 @@ export function LandingBody() {
               <div className="ln-ft-eye">Company context</div>
               <h2>Your company brain, used on every run.</h2>
               <p>
-                Workeros does not start from zero. Every worker can use your
+                WorkerOS does not start from zero. Every worker can use your
                 company context: ICP, CRM playbook, voice guide, pricing rules,
                 OKRs, customer notes, and internal docs.
               </p>
@@ -595,7 +595,7 @@ export function LandingBody() {
             <div className="ln-ft-eye">Connections</div>
             <h2>Connect the tools you already use.</h2>
             <p>
-              Workeros works across Slack, Gmail, HubSpot, Salesforce, Notion,
+              WorkerOS works across Slack, Gmail, HubSpot, Salesforce, Notion,
               Sheets, Linear, and your internal tools.
             </p>
           </div>
@@ -618,7 +618,7 @@ export function LandingBody() {
             <div className="ln-ft-eye">For developers</div>
             <h2>Built for teams that already use agents.</h2>
             <p>
-              Run Workeros from Claude, Cursor, Codex, or your own agents via MCP.
+              Run WorkerOS from Claude, Cursor, Codex, or your own agents via MCP.
               Give agents access to approved workers, tools, and company context
               without exposing everything.
             </p>
@@ -675,7 +675,7 @@ export function LandingBody() {
 
       <footer className="ln-footer">
         <div className="ln-footer-in">
-          <div className="ln-footer-brand">Workeros<span className="cp">© 2026 · Built with care in San Francisco</span></div>
+          <div className="ln-footer-brand">WorkerOS<span className="cp">© 2026 · Built with care in San Francisco</span></div>
           <div className="ln-footer-col">
             <h3>Product</h3>
             <a href={SIGN_IN_HREF}>Sign in</a>

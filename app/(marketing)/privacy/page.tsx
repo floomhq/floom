@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Privacy — Workeros",
+  title: "Privacy — WorkerOS",
   description:
-    "How Workeros handles your data, your worker runs, and the tools you connect.",
+    "How WorkerOS handles your data, your worker runs, and the tools you connect.",
 };
 
 export default function PrivacyPage() {
@@ -15,7 +15,7 @@ export default function PrivacyPage() {
           Privacy
         </p>
         <h1 className="mt-2 text-[34px] font-semibold leading-tight tracking-[-0.025em] text-foreground sm:text-[42px]">
-          How Workeros handles your data.
+          How WorkerOS handles your data.
         </h1>
         <p className="mt-3 text-[15px] text-muted-foreground">
           Last updated 2026-06-06. This is the short version; reach out at{" "}
@@ -46,7 +46,7 @@ export default function PrivacyPage() {
           </h2>
           <p className="text-[15px] leading-relaxed text-muted-foreground">
             When you connect Gmail, Slack, HubSpot, Notion, or any of the
-            1,000+ tools we support via Composio, Workeros holds the
+            1,000+ tools we support via Composio, WorkerOS holds the
             OAuth token and uses it only to run the workers you build.
             Revoking access in the source tool stops every worker that
             depends on it.
@@ -58,7 +58,7 @@ export default function PrivacyPage() {
             Who can see your data
           </h2>
           <p className="text-[15px] leading-relaxed text-muted-foreground">
-            Your workspace and its members. Workeros support reviews data
+            Your workspace and its members. WorkerOS support reviews data
             only when you ask us to debug a run. We do not sell data, we do
             not train shared models on your worker outputs, and we do not
             share your data with third parties beyond the tools you connect.

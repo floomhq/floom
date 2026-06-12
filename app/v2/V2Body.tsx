@@ -33,7 +33,7 @@ const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 function Mark({ size = 22 }: { size?: number }) {
   return (
-    <svg width={size} height={size} viewBox="0 0 100 100" aria-label="Workeros" style={{ borderRadius: "27%" }}>
+    <svg width={size} height={size} viewBox="0 0 100 100" aria-label="WorkerOS" style={{ borderRadius: "27%" }}>
       <rect width="100" height="100" rx="24" fill="var(--primary)" />
       <path d="M30 22 h20 l22 22 a3 3 0 0 1 0 4 l-22 22 h-20 a6 6 0 0 1 -6 -6 v-36 a6 6 0 0 1 6 -6 z" fill="var(--primary-text)" />
     </svg>
@@ -67,7 +67,7 @@ export function V2Body() {
         <nav className="flex h-[60px] items-center justify-between">
           <Link href="/" className="flex items-center gap-2.5 text-[14px] font-semibold">
             <Mark />
-            Workeros
+            WorkerOS
             <span className="text-[9.5px] font-medium uppercase tracking-[0.15em] text-muted-foreground">by Floom</span>
           </Link>
           <div className="hidden gap-0.5 text-[13px] text-muted-foreground md:flex">
@@ -104,7 +104,7 @@ export function V2Body() {
             transition={{ duration: 0.55, delay: 0.08, ease: EASE }}
             className="mx-auto mt-5 max-w-[440px] text-[16px] text-muted-foreground"
           >
-            Describe the job. Workeros runs it and asks before anything ships.
+            Describe the job. WorkerOS runs it and asks before anything ships.
           </motion.p>
           <motion.div
             initial={{ opacity: 0, y: 12 }}

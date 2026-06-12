@@ -3,9 +3,9 @@ import { TemplatesBrowser } from "@/components/landing-ref/TemplatesBrowser";
 import { HeroPromptComposer } from "@/components/landing-ref/HeroPromptComposer";
 
 export const metadata: Metadata = {
-  title: "Templates — Workeros",
+  title: "Templates — WorkerOS",
   description:
-    "Browse ready-to-run AI workers by team. Pick one or describe a new one. Workeros hires the worker and runs the work.",
+    "Browse ready-to-run AI workers by team. Pick one or describe a new one. WorkerOS hires the worker and runs the work.",
 };
 
 export default function TemplatesPage() {
@@ -45,7 +45,7 @@ export default function TemplatesPage() {
             <span aria-hidden="true" className="h-px w-6 bg-[#3a6ea5]/30" />
           </div>
           <h2 className="text-balance text-[28px] font-semibold leading-[1.05] tracking-[-0.025em] text-foreground sm:text-[36px]">
-            Describe a worker. Workeros builds it.
+            Describe a worker. WorkerOS builds it.
           </h2>
           <p className="mx-auto mt-4 max-w-md text-[15px] text-muted-foreground">
             If none of these fit, write the job the way you&apos;d brief a teammate.
