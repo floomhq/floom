@@ -81,6 +81,10 @@ export interface ListColumns {
   headers: string[];
   /** When true the header row is transparent (no grey bar), hairline only. */
   headerTransparent?: boolean;
+  /** Render the canonical status slot after `cols`; defaults to true. */
+  statusColumn?: boolean;
+  /** Render the trailing row-actions slot; defaults to true. */
+  menuColumn?: boolean;
 }
 
 /** One detail tab (SPEC §3). */

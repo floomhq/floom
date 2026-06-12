@@ -11,6 +11,7 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
+import { StatusPill } from "@/components/collection/StatusPill";
 import { api } from "@/lib/api";
 import { formatRelative } from "@/lib/formatters";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
@@ -235,16 +236,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     }
   };
 
-  const cancel = async (r: RunSummary) => {
-    try {
-      await api.runs.cancel(r.id);
-      toast.success("Run cancelled");
-      await refresh();
-    } catch {
-      toast.error("Could not cancel the run.");
-    }
-  };
-
   const replay = async (r: RunSummary) => {
     try {
       const res = await api.runs.replay(r.worker_id, r.id);
@@ -313,8 +304,10 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     ),
     group: (r) => dayLabel(r.created_at ?? r.started_at, now),
     columns: {
-      template: "1.6fr 1fr .8fr 1fr 130px 40px",
-      headers: ["Worker", "Trigger", "Duration", "Started", "Status", ""],
+      template: "1.6fr 1fr .8fr 130px 1fr",
+      headers: ["Worker", "Trigger", "Duration", "Status", "Started"],
+      statusColumn: false,
+      menuColumn: false,
     },
     row: (r) => ({
       // V4 SPEC rule 3: no avatar for runs — non-person entity.
@@ -322,13 +315,9 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       cols: [
         formatTrigger(r.trigger_source),
         formatDuration(r.duration_ms),
+        <StatusPill key="status" spec={runStatusPill(r.status)} />,
         formatRelative(r.created_at ?? r.started_at ?? ""),
       ],
-      status: runStatusPill(r.status),
-      menu:
-        r.status === "running" || r.status === "queued"
-          ? [{ label: "Cancel run", onSelect: () => void cancel(r), danger: true }]
-          : [{ label: "Open full run", onSelect: () => (window.location.href = `/runs/${r.id}`) }],
     }),
     card: (r) => ({
       // V4 SPEC rule 3: no avatar monogram for runs.

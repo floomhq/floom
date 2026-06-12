@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Folder } from "lucide-react";
+import { Folder, Lock, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatRelative } from "@/lib/formatters";
 import type { ContextSummary, ContextDetail } from "@/lib/types";
@@ -164,7 +164,6 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
 
   useEffect(() => {
     void refresh(true);
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const remove = async (c: ContextSummary) => {
@@ -176,6 +175,17 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       toast.error(`Could not delete ${c.name}`);
     }
   };
+
+  const folderTitle = (c: ContextSummary) => (
+    <span className="inline-flex min-w-0 items-baseline gap-1.5">
+      <span className="truncate">{c.name}</span>
+      {c.visibility === "workspace" ? (
+        <Users className="size-3 text-[var(--muted-foreground)] translate-y-px" aria-label="Shared" />
+      ) : (
+        <Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" aria-label="Private" />
+      )}
+    </span>
+  );
 
   const config: CollectionConfig<ContextSummary> = {
     title: "Brain",
@@ -205,8 +215,9 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     ],
     view: { default: "list", grid: true },
     columns: {
-      template: "1.8fr 1fr 1fr 120px 40px",
-      headers: ["Folder", "Files", "Updated", "Access", ""],
+      template: "1.8fr 1fr 1fr 40px",
+      headers: ["Folder", "Files", "Updated", ""],
+      statusColumn: false,
     },
     row: (c) => ({
       leading: (
@@ -214,10 +225,9 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
           <Folder size={16} />
         </span>
       ),
-      primary: c.name,
+      primary: folderTitle(c),
       secondary: c.description ?? undefined,
       cols: [`${c.file_count ?? 0} files`, formatRelative(c.updated_at ?? "")],
-      status: c.read_only ? { tone: "idle", label: "Read only" } : { tone: "ok", label: "Writeable" },
       menu: c.read_only ? undefined : [{ label: "Delete", onSelect: () => void remove(c), danger: true }],
     }),
     card: (c) => ({
@@ -242,9 +252,8 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
           <>
             <span className="c-vpill">{visibilityLabel(c.visibility)}</span>
             {c.read_only && <span className="c-vpill">Read only</span>}
-            <span className="c-dh-sub" style={{ margin: 0 }}>
-              {c.description ?? `${c.file_count ?? 0} files · ${formatBytes(c.total_size_bytes)}`}
-            </span>
+            <span className="c-vpill">{c.file_count ?? 0} files</span>
+            <span className="c-vpill">{formatBytes(c.total_size_bytes)}</span>
           </>
         ),
         actions: (
