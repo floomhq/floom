@@ -80,7 +80,7 @@ function RecentChats({
         <div
           role="menu"
           onMouseLeave={() => setOpen(false)}
-          className="absolute right-0 top-full z-30 mt-1 max-h-72 w-64 overflow-auto rounded-[12px] [border:var(--bd-card)] bg-[var(--bg-card)] p-1 shadow-[var(--shadow-pop)]"
+          className="absolute right-0 top-full z-30 mt-1 max-h-72 w-64 overflow-auto rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-1 shadow-[var(--shadow-pop)]"
         >
           {items === null && <div className="px-2 py-3 text-xs text-muted-foreground">Loading…</div>}
           {items?.length === 0 && (
@@ -96,7 +96,7 @@ function RecentChats({
                 onLoadConversation(c.id);
               }}
               className={cn(
-                "flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-xs hover:bg-[var(--bg-2)]",
+                "flex w-full items-center gap-2 rounded-[var(--radius-button)] px-2 py-1.5 text-left text-xs hover:bg-[var(--bg-2)]",
                 c.id === activeConversationId && "bg-[var(--bg-2)]"
               )}
             >
@@ -225,7 +225,7 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
       <Message from="user">
         <div className="flex max-w-[85%] flex-col items-end gap-1.5">
           {msg.text && (
-            <MessageContent className="rounded-2xl rounded-tr-sm bg-muted/60 px-3.5 py-2.5 text-foreground">
+            <MessageContent className="rounded-[var(--radius-card)] bg-muted/60 px-3.5 py-2.5 text-foreground">
               <MessageResponse className="whitespace-pre-wrap">
                 <p>{msg.text}</p>
               </MessageResponse>

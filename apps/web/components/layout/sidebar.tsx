@@ -430,11 +430,11 @@ export function UserProfileFooter({
             <img
               src={avatarUrl}
               alt="Profile avatar"
-              className="size-7 shrink-0 rounded-[var(--radius-button)] [border:var(--bd-card)] object-cover"
+              className="size-7 shrink-0 rounded-[var(--radius-button)] object-cover"
               referrerPolicy="no-referrer"
             />
           ) : (
-            <div className="size-7 shrink-0 rounded-[var(--radius-button)] bg-muted text-foreground [border:var(--bd-card)] grid place-items-center text-[11px] font-medium">
+            <div className="size-7 shrink-0 rounded-[var(--radius-button)] bg-muted text-foreground grid place-items-center text-[11px] font-medium">
               {initials}
             </div>
           )}

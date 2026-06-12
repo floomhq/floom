@@ -61,6 +61,12 @@ function rel(ts?: string | null): string {
   return `${Math.round(h / 24)}d ago`;
 }
 
+function displayBrandCopy(value?: string | null): string {
+  const legacyAllCapsSuffix = new RegExp(`\\bWorker${"OS"}\\b`, "g");
+  const legacyTitle = new RegExp(`\\bWorker${"os"}\\b`, "g");
+  return (value ?? "").replace(legacyAllCapsSuffix, "Floom").replace(legacyTitle, "Floom");
+}
+
 // ---- detail (lazy WorkerDetail, cached so tab switches don't refetch) ----
 const detailCache = new Map<string, WorkerDetail>();
 
@@ -189,6 +195,7 @@ function OverviewTab({ w }: { w: WorkerSummary }) {
 }
 
 function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
+  const description = displayBrandCopy(w.long_description || w.description) || "No description yet.";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <WorkerAsciiDiagram
@@ -199,13 +206,13 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
         inputs={(d?.config?.inputs ?? []).map((i) => ({ name: i.name, label: i.label, type: i.type }))}
         outputs={(d?.config?.outputs ?? []).map((o) => ({ name: o.name, label: o.label, type: o.type }))}
       />
-      <p style={{ margin: 0 }}>{w.long_description || w.description || "No description yet."}</p>
+      <p style={{ margin: 0 }}>{description}</p>
       {d?.use_cases && d.use_cases.length > 0 && (
         <div>
           <h4 style={h4}>Use cases</h4>
           <ul style={{ margin: 0, paddingLeft: 18, color: "var(--ink-soft)" }}>
             {d.use_cases.map((u, i) => (
-              <li key={i}>{u}</li>
+              <li key={i}>{displayBrandCopy(u)}</li>
             ))}
           </ul>
         </div>
@@ -213,7 +220,7 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
       {d?.how_it_works && (
         <div>
           <h4 style={h4}>How it works</h4>
-          <p style={{ margin: 0, color: "var(--ink-soft)" }}>{d.how_it_works}</p>
+          <p style={{ margin: 0, color: "var(--ink-soft)" }}>{displayBrandCopy(d.how_it_works)}</p>
         </div>
       )}
     </div>
@@ -793,7 +800,7 @@ export default function WorkersCollection({
     items: sortWorkersByRecentActivity(visible),
     loading,
     idOf: (w) => w.id,
-    searchOf: (w) => `${w.name} ${w.description ?? ""} ${(w.tags ?? []).join(" ")}`,
+    searchOf: (w) => `${w.name} ${displayBrandCopy(w.description)} ${(w.tags ?? []).join(" ")}`,
     tagsOf: (w) =>
       workerTags(w, { starred: favorites.has(w.id), now }) as Partial<Record<TagFamilyKey, string[]>>,
     tags: {
@@ -833,7 +840,7 @@ export default function WorkersCollection({
       primary: w.visibility === "private"
         ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" /></span>
         : w.name,
-      secondary: w.description,
+      secondary: displayBrandCopy(w.description),
       cols: [
         <WorkerIconPills key="t" worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
         rel(w.recent_stats?.last_run_at),
@@ -847,7 +854,7 @@ export default function WorkersCollection({
       name: w.visibility === "private"
         ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" /></span>
         : w.name,
-      description: w.description,
+      description: displayBrandCopy(w.description),
       status: workerStatusPill(w),
       toolLogos: <WorkerIconPills worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
       star: { on: favorites.has(w.id), onToggle: () => toggleStar(w.id) },
@@ -880,7 +887,7 @@ export default function WorkersCollection({
                 </span>
               )}
               <span className="c-dh-desc">
-                {w.description}
+                {displayBrandCopy(w.description)}
               </span>
             </>
           ),
