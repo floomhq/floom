@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ChevronRight, ChevronLeft, ChevronDown, Maximize2, Minimize2, PenSquare, Download, History, MoreHorizontal } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, PenSquare, Download, History, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -19,6 +19,13 @@ import { MarkdownText } from "./MarkdownText";
 import { PromptInput } from "./PromptInput";
 import { FileChip } from "./FileChip";
 import { ToolCardRenderer } from "./cards/ToolCardRenderer";
+import {
+  Message,
+  MessageAction,
+  MessageActions,
+  MessageContent,
+  MessageResponse,
+} from "@/components/ai-elements/message";
 import {
   getAutoOpenRunDetailsHref,
   shouldAutoOpenRunDetails,
@@ -182,15 +189,47 @@ function TypingIndicator() {
 
 // ── Message renderer ──────────────────────────────────────────────────────────
 
+function assistantMessageText(msg: ChatMessage): string {
+  return (msg.parts ?? [])
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n\n")
+    .trim();
+}
+
+function MessageCopyAction({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = useCallback(() => {
+    if (!text) return;
+    const write = navigator.clipboard?.writeText?.(text);
+    if (!write) return;
+    write
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1200);
+      })
+      .catch(() => {});
+  }, [text]);
+
+  if (!text) return null;
+  return (
+    <MessageAction label={copied ? "Copied" : "Copy"} tooltip={copied ? "Copied" : "Copy"} onClick={copy}>
+      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+    </MessageAction>
+  );
+}
+
 function MessageRow({ msg }: { msg: ChatMessage }) {
   if (msg.role === "user") {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] space-y-1.5">
+      <Message from="user">
+        <div className="flex max-w-[85%] flex-col items-end gap-1.5">
           {msg.text && (
-            <div className="rounded-2xl rounded-tr-sm bg-muted/60 px-3.5 py-2.5 text-sm text-foreground">
-              <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
-            </div>
+            <MessageContent className="rounded-2xl rounded-tr-sm bg-muted/60 px-3.5 py-2.5 text-foreground">
+              <MessageResponse className="whitespace-pre-wrap">
+                <p>{msg.text}</p>
+              </MessageResponse>
+            </MessageContent>
           )}
           {msg.files && msg.files.length > 0 && (
             <div className="flex flex-wrap gap-1.5 justify-end">
@@ -199,28 +238,41 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
               ))}
             </div>
           )}
+          <MessageActions className="justify-end pr-1">
+            <MessageCopyAction text={msg.text ?? ""} />
+          </MessageActions>
         </div>
-      </div>
+      </Message>
     );
   }
 
   // assistant
+  const text = assistantMessageText(msg);
   return (
-    <div className="flex items-start gap-2.5">
+    <Message from="assistant" className="flex-row items-start gap-2.5">
       <EmilyAvatar size="sm" />
       {/* min-w-0 + overflow-hidden prevent long URLs and code from blowing out the rail */}
       <div className="flex-1 min-w-0 overflow-hidden space-y-2.5">
         {msg.parts?.map((part, i) => {
           if (part.type === "text") {
-            return <MarkdownText key={i} text={part.text} />;
+            return (
+              <MessageContent key={i}>
+                <MessageResponse>
+                  <MarkdownText text={part.text} />
+                </MessageResponse>
+              </MessageContent>
+            );
           }
           if (part.type === "tool-card") {
             return <ToolCardRenderer key={i} card={part.card} />;
           }
           return null;
         })}
+        <MessageActions>
+          <MessageCopyAction text={text} />
+        </MessageActions>
       </div>
-    </div>
+    </Message>
   );
 }
 

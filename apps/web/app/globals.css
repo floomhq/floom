@@ -238,6 +238,8 @@
   --sidebar-accent-foreground: var(--ink);
   --sidebar-border: var(--card-border);
   --sidebar-ring: var(--accent-line);
+  --scrollbar-thumb: color-mix(in srgb, var(--text-muted) 28%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--text-muted) 42%, transparent);
 }
 
 html.dark {
@@ -333,6 +335,8 @@ html.dark {
   --sidebar-accent-foreground: var(--ink);
   --sidebar-border: var(--card-border);
   --sidebar-ring: var(--accent-line);
+  --scrollbar-thumb: rgba(255,255,255,.18);
+  --scrollbar-thumb-hover: rgba(255,255,255,.28);
 }
 
 /* PR S18: shimmer skeleton — replaces the default tailwind animate-pulse
@@ -365,6 +369,47 @@ html.dark {
 html.dark ::selection {
   background-color: color-mix(in srgb, var(--accent) 40%, transparent);
   color: var(--ink);
+}
+
+/* Global chrome: quiet, thin scrollbars across chat rails, detail panes, source
+   lists, popovers, and code blocks. Tracks stay transparent; thumbs reveal on
+   hover/active where the platform allows it. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover,
+*:focus-within {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  min-height: 44px;
+  border: 2px solid transparent;
+  border-radius: 9999px;
+  background-color: transparent;
+  background-clip: padding-box;
+}
+
+*:hover::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-thumb:active {
+  background-color: var(--scrollbar-thumb);
+}
+
+*::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:active {
+  background-color: var(--scrollbar-thumb-hover);
 }
 
 @layer base {
