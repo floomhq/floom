@@ -116,11 +116,13 @@ def test_reconnect_same_account_no_duplicate(monkeypatch, tmp_path):
     )
 
     # Composio resolves the new account to the SAME email -> dedupe must merge.
+    import routers.connections as _conn
     monkeypatch.setattr(
-        main, "_fetch_composio_account_info",
+        _conn, "_fetch_composio_account_info",
         lambda cid, *, user_id: {"email": "alice@example.com", "scopes": ["a", "b"]},
     )
-    monkeypatch.setattr(main, "_normalize_composio_connection_status", lambda s: "active")
+    import routers.connections as _conn
+    monkeypatch.setattr(_conn, "_normalize_composio_connection_status", lambda s: "active")
     import composio_client
     monkeypatch.setattr(composio_client, "check_status", lambda cid: "active")
 
@@ -168,11 +170,13 @@ def test_connect_new_account_adds_row(monkeypatch, tmp_path):
         updated_at="2026-06-03T00:00:00Z",
     )
 
+    import routers.connections as _conn
     monkeypatch.setattr(
-        main, "_fetch_composio_account_info",
+        _conn, "_fetch_composio_account_info",
         lambda cid, *, user_id: {"email": "bob@example.com", "scopes": []},
     )
-    monkeypatch.setattr(main, "_normalize_composio_connection_status", lambda s: "active")
+    import routers.connections as _conn
+    monkeypatch.setattr(_conn, "_normalize_composio_connection_status", lambda s: "active")
     import composio_client
     monkeypatch.setattr(composio_client, "check_status", lambda cid: "active")
 
