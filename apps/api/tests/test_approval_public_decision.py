@@ -140,9 +140,13 @@ def _client_and_calls(monkeypatch):
         )
         return {"status": "approved", "executed": "data/old.csv"}
 
-    monkeypatch.setattr(main, "approve_run", _fake_approve_run)
-    monkeypatch.setattr(main, "reject_run", _fake_reject_run)
-    monkeypatch.setattr(main, "approve_destructive_action", _fake_approve_destructive)
+    # The public-approval route handlers live in routers.approvals and call
+    # approve_run / reject_run / approve_destructive_action by bare name (resolved
+    # in that module), so patch there — not on main's re-export.
+    import routers.approvals as _appr
+    monkeypatch.setattr(_appr, "approve_run", _fake_approve_run)
+    monkeypatch.setattr(_appr, "reject_run", _fake_reject_run)
+    monkeypatch.setattr(_appr, "approve_destructive_action", _fake_approve_destructive)
     main.app.dependency_overrides[main.get_repos] = lambda: _Repos()
     return TestClient(main.app), calls
 

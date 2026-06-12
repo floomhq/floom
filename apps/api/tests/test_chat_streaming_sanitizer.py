@@ -124,6 +124,8 @@ def test_stream_chat_emits_and_persists_only_sanitized_text(monkeypatch, tmp_pat
         "chat_service",
     ]:
         sys.modules.pop(name, None)
+        for _rn in [n for n in list(sys.modules) if n.startswith("routers")]:
+            sys.modules.pop(_rn, None)
 
     db = importlib.import_module("db")
     db.init_db()
