@@ -211,6 +211,9 @@ class MultiMemberAuthProvider:
 
     async def _verify_pat(self, raw_token: str) -> AuthContext:
         from db import get_repositories, now_iso
+
+        if raw_token.startswith("wst_"):
+            return await self._verify_workspace_token(raw_token)
         repos = get_repositories()
         if repos.tokens is None:
             raise HTTPException(status_code=401, detail="unauthorized")
@@ -236,6 +239,49 @@ class MultiMemberAuthProvider:
             auth_method="pat",
             username=row.get("username"),
             scopes=("admin",) if row.get("role") == "admin" else (),
+        )
+
+    async def _verify_workspace_token(self, raw_token: str) -> AuthContext:
+        """Workspace API token (wst_): authenticates as the synthetic workspace
+        actor with MEMBER role — read+run on workspace-shared assets only.
+
+        The actor is never is_owner of anything a human can claim, so private
+        workers (including the minter's own) are structurally invisible, and
+        edit/delete/share are denied by the canonical permission rule. A
+        main.py middleware additionally restricts these tokens to GET/HEAD +
+        POST /workers/{id}/runs and blocks credential/config surfaces.
+        """
+        from db import get_db, now_iso
+        from db.sqlite import workspace_actor_id
+
+        token_hash = _hash_token(raw_token)
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT id, workspace_id, name, expires_at
+                FROM workspace_api_tokens
+                WHERE token_hash = ? AND revoked_at IS NULL
+                LIMIT 1
+                """,
+                (token_hash,),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=401, detail="invalid token")
+        if _is_expired(row["expires_at"]):
+            raise HTTPException(status_code=401, detail="token expired")
+        try:
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE workspace_api_tokens SET last_used_at = ? WHERE id = ?",
+                    (now_iso(), row["id"]),
+                )
+        except Exception:
+            pass
+        return AuthContext(
+            user_id=workspace_actor_id(str(row["workspace_id"])),
+            role="member",
+            auth_method="workspace_token",
+            username=row["name"],
         )
 
     async def _verify_cli_api_token(self, raw_token: str) -> AuthContext:

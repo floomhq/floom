@@ -1362,6 +1362,40 @@ def _is_context_upload_request(request: Request) -> bool:
     )
 
 
+_WST_ALLOWED_POST_RE = re.compile(r"^/workers/[^/]+/runs$")
+_WST_DENIED_PREFIXES = (
+    "/secrets", "/connections", "/auth", "/workspace/tokens", "/workspace/secrets",
+    "/workspace/settings", "/system", "/settings", "/contexts", "/chat",
+)
+
+
+@app.middleware("http")
+async def workspace_token_scope_middleware(request: Request, call_next):
+    """Workspace API tokens (wst_) are read+run only.
+
+    Reads stay permission-scoped by the synthetic member actor (shared workers
+    only); this gate removes every write surface except firing a run, and
+    blocks credential/config surfaces outright — including reads — so a leaked
+    token can never enumerate secrets, connections, or settings.
+    """
+    bearer = (request.headers.get("authorization") or "").strip()
+    if bearer.lower().startswith("bearer wst_"):
+        path = request.url.path
+        if any(path == pfx or path.startswith(pfx + "/") for pfx in _WST_DENIED_PREFIXES):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "workspace tokens cannot access this resource"},
+            )
+        if request.method.upper() not in {"GET", "HEAD"} and not (
+            request.method.upper() == "POST" and _WST_ALLOWED_POST_RE.match(path)
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "workspace tokens are read-and-run only"},
+            )
+    return await call_next(request)
+
+
 @app.middleware("http")
 async def request_body_size_middleware(request: Request, call_next):
     if request.method.upper() in BODYLESS_METHODS:
@@ -4820,6 +4854,29 @@ def _get_db_worker(
         return repos.workers.get(user_id=user_id, worker_id=worker_id)
     except sqlite3.OperationalError:
         return None
+
+
+def _worker_for_mutation(
+    worker_id: str,
+    auth: AuthContext,
+    repos: Repositories,
+) -> Optional[Dict[str, Any]]:
+    """Resolve a worker the caller may MUTATE (donation model).
+
+    - Owner fetch (unchanged): a member mutates their own private workers.
+    - Admins additionally mutate workspace-shared workers, which are owned by
+      the synthetic workspace actor after share-transfer — no human is ever
+      is_owner of those, so this is the ONLY mutation path for shared workers.
+    Returns None when the caller has no mutation rights (callers 404).
+    """
+    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if worker is not None:
+        return worker
+    if auth.is_admin:
+        any_row = repos.workers.get_any(worker_id=worker_id)
+        if any_row and str(any_row.get("visibility") or "private") == "workspace":
+            return any_row
+    return None
 
 
 def _archived_tracked_worker(worker_id: str) -> Optional[Dict[str, Any]]:
@@ -8727,7 +8784,14 @@ def set_worker_visibility(
     """
     _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    worker = _get_visible_worker(
+        worker_id,
+        user_id=auth.user_id,
+        repos=repos,
+        # donation model: workspace-shared workers are owned by the synthetic
+        # workspace actor, so the admin doing the unshare is not their owner.
+        role="admin" if auth.is_admin else None,
+    )
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -8750,6 +8814,7 @@ def set_worker_visibility(
             asset_type="worker",
             asset_id=worker_id,
             visibility=payload.visibility,
+            actor_role="admin" if auth.is_admin else None,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -8768,7 +8833,15 @@ def set_worker_visibility(
         author_email=author_email,
     )
 
-    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+    # Donation model: after share-transfer the caller is no longer the owner,
+    # but they can still VIEW the now-workspace-shared worker — fetch the
+    # response with the member/admin role path, not the owner-scoped default.
+    return _build_worker_detail(
+        worker_id,
+        user_id=auth.user_id,
+        repos=repos,
+        role="admin" if auth.is_admin else "member",
+    )
 
 
 def _patch_worker_yml_field(worker_id: str, field: str, value: Any) -> None:
@@ -9660,13 +9733,18 @@ def delete_worker(
     # to _delete_worker_impl when the worker has no DB row at all; only deny when
     # a DB row exists but isn't visible to the caller (owned by someone else).
     canonical_id = _canonical_worker_id(worker_id)
-    if _get_visible_worker(canonical_id, user_id=auth.user_id, repos=repos) is None:
-        # Check whether any DB row exists for this worker_id regardless of ownership.
-        # _db_worker_owners() reads the raw workers table and maps id → owner_id.
-        # If the id appears there, a real DB-backed worker exists that the caller
-        # cannot see — that is the ownership-protection case; raise 404.
-        # If the id does not appear, it is a true orphan (directory without DB row);
-        # let _delete_worker_impl handle it (it will rmtree the dir and return 204).
+    if canonical_id in _db_worker_owners():
+        # DB-backed worker: mutation rights are required — the caller must be
+        # its owner, or an admin when it is workspace-shared (donation model:
+        # the sharer is NOT the owner anymore and must get 404 here even
+        # though the bundle dir still exists on disk; the filesystem-visibility
+        # fallback below must never bypass DB ownership).
+        if _worker_for_mutation(canonical_id, auth, repos) is None:
+            raise HTTPException(status_code=404, detail="Worker not found")
+    elif _get_visible_worker(canonical_id, user_id=auth.user_id, repos=repos) is None:
+        # No DB row anywhere: a true orphan (directory without DB row) falls
+        # through so _delete_worker_impl can reap it (issue #810); anything
+        # else invisible stays a 404.
         if canonical_id in _db_worker_owners():
             raise HTTPException(status_code=404, detail="Worker not found")
     _delete_worker_impl(worker_id, auth.user_id, repos)
@@ -12292,7 +12370,7 @@ def update_worker(
             status_code=400,
             detail=f"worker_yml name {parsed_worker_id!r} does not match path worker_id {worker_id!r}",
         )
-    if _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) is None:
+    if _worker_for_mutation(worker_id, auth, repos) is None:
         raise HTTPException(status_code=404, detail="Worker not found")
 
     target_dir = WORKERS_DIR / worker_id
@@ -12343,6 +12421,9 @@ def update_worker(
         worker_id,
         user_id=auth.user_id,
         repos=repos,
+        # donation model: an admin editing a workspace-owned worker is not its
+        # owner, so the detail fetch needs the admin-role path.
+        role="admin" if auth.is_admin else None,
     )
 
 
@@ -12477,6 +12558,10 @@ def update_worker_files(
         _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=get_repositories())
+    if not worker:
+        # Donation model: admins edit workspace-shared workers (workspace-actor
+        # owned; the owner-scoped fetch above can no longer see them).
+        worker = _worker_for_mutation(worker_id, auth, get_repositories())
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -23073,6 +23158,159 @@ def delete_token(
     _, _, token_repo = _require_multi_member_repos(repos)
     if not token_repo.delete(token_id=token_id, user_id=auth.user_id):
         raise HTTPException(status_code=404, detail="token not found")
+
+
+# ---------------------------------------------------------------------------
+# Workspace API tokens — admin-minted; authenticate as the synthetic workspace
+# actor (member role): read+run on workspace-shared workers ONLY, no private
+# workers (including the minter's own), no mutations (middleware-gated).
+# ---------------------------------------------------------------------------
+
+class _WorkspaceTokenOut(BaseModel):
+    id: str
+    name: str
+    created_by: str
+    created_at: str
+    last_used_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    revoked_at: Optional[str] = None
+
+
+class _WorkspaceTokenCreateRequest(BaseModel):
+    name: str
+    expires_at: Optional[str] = None
+
+
+class _WorkspaceTokenCreateResponse(BaseModel):
+    id: str
+    name: str
+    token: str  # shown ONCE; only the hash is stored
+    expires_at: Optional[str] = None
+
+
+def _require_workspace_admin(auth: AuthContext) -> None:
+    if not auth.is_admin:
+        raise HTTPException(status_code=403, detail="workspace tokens are admin-only")
+
+
+@app.get("/workspace/tokens", response_model=List[_WorkspaceTokenOut])
+def list_workspace_tokens(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> List[_WorkspaceTokenOut]:
+    _require_workspace_admin(auth)
+    workspace_id = _active_workspace_id(request)
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, name, created_by, created_at, last_used_at, expires_at, revoked_at "
+            "FROM workspace_api_tokens WHERE workspace_id = ? ORDER BY created_at DESC",
+            (workspace_id,),
+        ).fetchall()
+    return [_WorkspaceTokenOut(**dict(r)) for r in rows]
+
+
+@app.post("/workspace/tokens", response_model=_WorkspaceTokenCreateResponse, status_code=201)
+def create_workspace_token(
+    payload: _WorkspaceTokenCreateRequest,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> _WorkspaceTokenCreateResponse:
+    _require_workspace_admin(auth)
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="token name required")
+    expires_at = _enforce_token_ttl_cap(payload.expires_at)
+    workspace_id = _active_workspace_id(request)
+    raw = "wst_" + _secrets_mod.token_urlsafe(32)
+    token_id = str(_uuid_mod.uuid4())
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO workspace_api_tokens "
+            "(id, workspace_id, name, token_hash, created_by, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (token_id, workspace_id, name, _hash_pat(raw), auth.user_id, now_iso(), expires_at),
+        )
+    logger.info(
+        "workspace token created: workspace=%s name=%r by=%s expires_at=%s",
+        workspace_id, name, auth.user_id, expires_at,
+    )
+    return _WorkspaceTokenCreateResponse(id=token_id, name=name, token=raw, expires_at=expires_at)
+
+
+@app.delete("/workspace/tokens/{token_id}", status_code=204)
+def revoke_workspace_token(
+    token_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> None:
+    _require_workspace_admin(auth)
+    workspace_id = _active_workspace_id(request)
+    with get_db() as conn:
+        updated = conn.execute(
+            "UPDATE workspace_api_tokens SET revoked_at = ? "
+            "WHERE id = ? AND workspace_id = ? AND revoked_at IS NULL",
+            (now_iso(), token_id, workspace_id),
+        ).rowcount
+    if not updated:
+        raise HTTPException(status_code=404, detail="token not found")
+
+
+# ---------------------------------------------------------------------------
+# Workspace secrets — admin-set credential rows stored under the synthetic
+# workspace actor; workspace-shared (donated) workers resolve against these.
+# ---------------------------------------------------------------------------
+
+@app.get("/workspace/secrets")
+def list_workspace_secrets(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[Dict[str, Any]]:
+    _require_workspace_admin(auth)
+    from db.sqlite import workspace_actor_id
+
+    actor = workspace_actor_id(_active_workspace_id(request))
+    rows = repos.secrets.list(user_id=actor)
+    # names + status only, never values
+    return [{"name": r.get("name"), "status": r.get("status"), "updated_at": r.get("updated_at")} for r in rows]
+
+
+class _WorkspaceSecretWrite(BaseModel):
+    value: str
+
+
+@app.post("/workspace/secrets/{name}", status_code=200)
+def set_workspace_secret(
+    name: str,
+    payload: _WorkspaceSecretWrite,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    _require_workspace_admin(auth)
+    from db.sqlite import workspace_actor_id
+
+    actor = workspace_actor_id(_active_workspace_id(request))
+    repos.secrets.set(user_id=actor, name=name, value=payload.value)
+    logger.info("workspace secret %r set by %s (value not logged)", name, auth.user_id)
+    return {"ok": True, "name": name}
+
+
+@app.delete("/workspace/secrets/{name}", status_code=204)
+def delete_workspace_secret(
+    name: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    _require_workspace_admin(auth)
+    from db.sqlite import workspace_actor_id
+
+    actor = workspace_actor_id(_active_workspace_id(request))
+    delete = getattr(repos.secrets, "delete", None)
+    if delete is None:
+        raise HTTPException(status_code=501, detail="secret delete not available")
+    delete(user_id=actor, name=name)
 
 
 class _WorkspaceSettingValue(BaseModel):

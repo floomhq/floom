@@ -1953,6 +1953,35 @@ MIGRATIONS: list[Migration] = [
     SET workspace_id = 'local-default'
     WHERE status = 'active' AND workspace_id IS NULL;
     """,
+    # -- migration 74: donation model — workspace-shared workers are owned by --
+    # the synthetic workspace actor (workspace:<id>). Migrate-and-break by
+    # decision (2026-06-12): existing shared workers stop resolving their
+    # sharer's personal secrets/connections; an admin re-binds workspace creds.
+    """
+    UPDATE workers
+    SET owner_id = 'workspace:' || COALESCE(NULLIF(workspace_id, ''), 'local-default')
+    WHERE visibility = 'workspace'
+      AND owner_id IS NOT NULL
+      AND owner_id NOT LIKE 'workspace:%';
+    """,
+    # -- migration 75: workspace API tokens (read+run access to shared workers)
+    """
+    CREATE TABLE IF NOT EXISTS workspace_api_tokens (
+        id           TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        name         TEXT NOT NULL,
+        token_hash   TEXT NOT NULL,
+        created_by   TEXT NOT NULL,
+        created_at   TEXT NOT NULL,
+        last_used_at TEXT,
+        expires_at   TEXT,
+        revoked_at   TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_api_tokens_hash
+        ON workspace_api_tokens(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_workspace_api_tokens_workspace
+        ON workspace_api_tokens(workspace_id);
+    """,
 ]
 
 
