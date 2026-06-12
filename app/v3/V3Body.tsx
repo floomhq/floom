@@ -19,6 +19,7 @@ import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
 import { Check } from "lucide-react";
+import { appUrl } from "@/lib/app-url";
 import {
   GCalLogo,
   GmailLogo,
@@ -391,7 +392,7 @@ export function V3Body() {
             className="mt-8"
           >
             <Link
-              href="/app/workers/new"
+              href={appUrl("/workers/new")}
               className="inline-flex items-center gap-2 rounded-[12px] px-6 py-3 text-[14.5px] font-medium text-white"
               style={{ background: "var(--v3-accent)" }}
             >

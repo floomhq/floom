@@ -13,7 +13,7 @@ export default async function LoginPage({
 }) {
   // Next 16: searchParams is always a Promise in server components.
   const sp = (await searchParams) ?? {};
-  const next = sp.next ?? "/app";
+  const next = sp.next ?? "/";
 
   return (
     <main className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--ink)] font-sans antialiased">

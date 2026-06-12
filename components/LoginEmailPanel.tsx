@@ -1,6 +1,7 @@
 "use client";
 
 import { FormEvent, useState } from "react";
+import { appUrl, stripLegacyAppPrefix } from "@/lib/app-url";
 
 async function postAuth(endpoint: string, payload: unknown): Promise<Response> {
   let lastError: unknown = null;
@@ -20,21 +21,21 @@ async function postAuth(endpoint: string, payload: unknown): Promise<Response> {
 }
 
 function normalizeNextPath(value: string): string {
-  let next = value || "/app";
+  let next = value || "/";
   for (let depth = 0; depth < 3; depth += 1) {
     try {
       const url = new URL(next, "https://workeros.floom.dev");
       if (url.pathname !== "/login" && url.pathname !== "/app/login") {
-        return `${url.pathname}${url.search}${url.hash}`;
+        return `${stripLegacyAppPrefix(url.pathname)}${url.search}${url.hash}`;
       }
       const nested = url.searchParams.get("next");
-      if (!nested) return "/app";
+      if (!nested) return "/";
       next = nested;
     } catch {
-      return "/app";
+      return "/";
     }
   }
-  return "/app";
+  return "/";
 }
 
 export function LoginEmailPanel({ next }: { next: string }) {
@@ -52,14 +53,14 @@ export function LoginEmailPanel({ next }: { next: string }) {
     setError(null);
     try {
       const normalizedNext = normalizeNextPath(next);
-      const endpoint = mode === "magic" ? "/app/api/auth/email" : "/app/api/auth/password";
+      const endpoint = mode === "magic" ? "/api/auth/email" : "/api/auth/password";
       const response = await postAuth(endpoint, { email, password, next: normalizedNext });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
         throw new Error(typeof body.detail === "string" ? body.detail : "Sign-in failed");
       }
       if (mode === "password") {
-        window.location.replace(normalizeNextPath(body.next || normalizedNext || "/app"));
+        window.location.replace(appUrl(normalizeNextPath(body.next || normalizedNext || "/")));
         return;
       }
       setStatus("Check your email for the magic link.");

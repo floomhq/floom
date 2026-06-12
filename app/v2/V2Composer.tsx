@@ -9,9 +9,9 @@
  */
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { ArrowUp } from "lucide-react";
+import { appUrl } from "@/lib/app-url";
 import { SlackLogo, WhatsAppLogo } from "@/components/landing-icons";
 
 const KNOWN_TOOLS: Array<{ keys: string[]; canonical: string }> = [
@@ -95,13 +95,12 @@ export function V2Composer({
 }) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
-  const router = useRouter();
   const matches = useMemo(() => detectMatches(value), [value]);
 
   function submit() {
     const v = value.trim();
     if (!v) return;
-    router.push(`/app/workers/new?prompt=${encodeURIComponent(v)}`);
+    window.location.assign(appUrl("/workers/new", { prompt: v }));
   }
 
   return (

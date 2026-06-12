@@ -1,9 +1,9 @@
 "use client";
 
 import { useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { ArrowUp } from "lucide-react";
+import { appUrl } from "@/lib/app-url";
 import { ToolLogo, hasLogo } from "./logos";
 
 const ACCENT = "#3a6ea5";
@@ -147,7 +147,6 @@ export function HeroPromptComposer({
 }) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
-  const router = useRouter();
 
   const matches = useMemo(() => detectMatches(value), [value]);
   const detected = useMemo(() => uniqueTools(matches), [matches]);
@@ -160,9 +159,7 @@ export function HeroPromptComposer({
   function submit() {
     const v = value.trim();
     if (!v) return;
-    // Goes to the new-worker flow in the dashboard (basePath /app, see vercel.json),
-    // which reads ?prompt= and seeds the worker-author with it. NOT the assistant.
-    router.push(`/app/workers/new?prompt=${encodeURIComponent(v)}`);
+    window.location.assign(appUrl("/workers/new", { prompt: v }));
   }
 
   return (

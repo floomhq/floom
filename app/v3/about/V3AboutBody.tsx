@@ -9,6 +9,7 @@
 import Image from "next/image";
 import Link from "next/link";
 import { motion } from "motion/react";
+import { appUrl } from "@/lib/app-url";
 import { V3Shell } from "../V3Shell";
 import "../theme.css";
 
@@ -98,7 +99,7 @@ export function V3AboutBody() {
         <Reveal delay={0.1}>
           <div className="mt-16 flex items-center gap-5">
             <Link
-              href="/app/workers/new"
+              href={appUrl("/workers/new")}
               className="inline-flex items-center gap-2 rounded-[12px] px-6 py-3 text-[14px] font-medium text-white"
               style={{ background: "var(--v3-accent)" }}
             >

@@ -8,9 +8,9 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { useRouter } from "next/navigation";
 import { motion } from "motion/react";
 import { ArrowUp } from "lucide-react";
+import { appUrl } from "@/lib/app-url";
 import {
   GCalLogo,
   GmailLogo,
@@ -117,7 +117,6 @@ export function V3Composer({
 }) {
   const [value, setValue] = useState("");
   const [focused, setFocused] = useState(false);
-  const router = useRouter();
   const matches = useMemo(() => detectMatches(value), [value]);
 
   useEffect(() => {
@@ -127,7 +126,7 @@ export function V3Composer({
   function submit() {
     const v = value.trim();
     if (!v) return;
-    router.push(`/app/workers/new?prompt=${encodeURIComponent(v)}`);
+    window.location.assign(appUrl("/workers/new", { prompt: v }));
   }
 
   return (

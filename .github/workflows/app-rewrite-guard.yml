@@ -1,23 +1,22 @@
-name: /app rewrite guard
+name: Landing app-route guard
 
-# Durable guard against re-introducing ade0ec7-style regressions.
+# Durable guard against re-introducing landing /app fall-through regressions.
 #
-# The root vercel.json MUST rewrite /app and /app/:path* to the isolated
-# dashboard project (workeros-cloud-dashboard.vercel.app). Pointing /app at any
-# other host (e.g. the shared web/marketing project that also serves
-# flyfast.app + sky.buildingopen.org) couples the dashboard to a stale build and
-# breaks the documented 2-project rewrite. This check fails the PR/push if the
-# /app rewrite destination drifts away from workeros-cloud-dashboard.vercel.app.
+# The landing project must not catch-all rewrite /app/* to another deployment.
+# Known app entrypoints are redirected from next.config.ts to NEXT_PUBLIC_APP_URL,
+# while unknown /app/* paths fall through to app/not-found.tsx.
 
 on:
   pull_request:
     paths:
       - "vercel.json"
+      - "next.config.ts"
       - ".github/workflows/app-rewrite-guard.yml"
   push:
     branches: [main]
     paths:
       - "vercel.json"
+      - "next.config.ts"
       - ".github/workflows/app-rewrite-guard.yml"
 
 permissions:
@@ -25,46 +24,47 @@ permissions:
 
 jobs:
   guard:
-    name: Verify /app rewrite target
+    name: Verify landing app routes
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
 
-      - name: Assert /app rewrites point at workeros-cloud-dashboard
+      - name: Assert landing does not proxy /app catch-all
         run: |
           set -euo pipefail
           python3 - <<'PY'
-          import json, sys
-
-          EXPECTED_HOST = "workeros-cloud-dashboard.vercel.app"
+          import json, pathlib, sys
 
           with open("vercel.json") as f:
               cfg = json.load(f)
 
-          rewrites = cfg.get("rewrites", [])
-          targets = {}
-          for r in rewrites:
-              src = r.get("source", "")
-              if src == "/app" or src == "/app/:path*":
-                  targets[src] = r.get("destination", "")
-
           errors = []
-          for src in ("/app", "/app/:path*"):
-              dest = targets.get(src)
-              if dest is None:
-                  errors.append(f"missing rewrite for source {src!r}")
-                  continue
-              if EXPECTED_HOST not in dest:
-                  errors.append(
-                      f"rewrite for {src!r} points at {dest!r}; "
-                      f"it MUST target {EXPECTED_HOST} (see ade0ec7 regression)"
-                  )
+          for r in cfg.get("rewrites", []):
+              src = r.get("source", "")
+              dest = r.get("destination", "")
+              if src in {"/app", "/app/:path*"} or src.startswith("/app/"):
+                  errors.append(f"vercel.json still rewrites {src!r} to {dest!r}")
+              if "workeros-cloud-dashboard.vercel.app/app" in dest:
+                  errors.append(f"vercel.json still proxies to stale dashboard path {dest!r}")
+
+          next_config = pathlib.Path("next.config.ts").read_text()
+          required_fragments = [
+              "NEXT_PUBLIC_APP_URL",
+              "https://workers.floom.dev",
+              "source: `/app/${route}`",
+              "source: `/app/${route}/:path*`",
+              "destination: appDestination(`/${route}`)",
+              "destination: appDestination(`/${route}/:path*`)",
+          ]
+          for fragment in required_fragments:
+              if fragment not in next_config:
+                  errors.append(f"next.config.ts missing routing fragment {fragment!r}")
 
           if errors:
-              print("::error::vercel.json /app rewrite guard failed:")
+              print("::error::landing app-route guard failed:")
               for e in errors:
                   print(f"::error::  - {e}")
               sys.exit(1)
 
-          print(f"OK: /app and /app/:path* both rewrite to {EXPECTED_HOST}")
+          print("OK: landing app routes redirect known app entrypoints and do not catch-all proxy /app/*")
           PY

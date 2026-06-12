@@ -1,4 +1,5 @@
 import { redirect } from "next/navigation";
+import { appUrl } from "@/lib/app-url";
 
 export default async function AssistantRedirectPage({
   searchParams,
@@ -12,5 +13,5 @@ export default async function AssistantRedirectPage({
     else if (Array.isArray(v)) v.forEach((vv) => qs.append(k, vv));
   }
   const tail = qs.toString();
-  redirect(tail ? `/app/assistant?${tail}` : "/app/assistant");
+  redirect(tail ? appUrl(`/assistant?${tail}`) : appUrl("/assistant"));
 }
