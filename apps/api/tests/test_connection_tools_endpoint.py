@@ -50,7 +50,8 @@ def test_returns_live_tools(main_mod, monkeypatch):
             tools=["search_web", "fetch_url", "summarize"],
         )
 
-    monkeypatch.setattr(main, "test_connection", _fake_test)
+    import routers.connections as _conn
+    monkeypatch.setattr(_conn, "test_connection", _fake_test)
     with _client(main) as c:
         resp = c.get("/connections/conn-1/tools")
     assert resp.status_code == 200, resp.text
@@ -65,7 +66,8 @@ def test_unreachable_server_503(main_mod, monkeypatch):
             status="failed", reason="Could not reach MCP server", tested_at="2026-06-11T00:00:00Z",
         )
 
-    monkeypatch.setattr(main, "test_connection", _fake_test)
+    import routers.connections as _conn
+    monkeypatch.setattr(_conn, "test_connection", _fake_test)
     with _client(main) as c:
         resp = c.get("/connections/conn-1/tools")
     assert resp.status_code == 503
