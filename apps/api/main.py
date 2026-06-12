@@ -14315,12 +14315,12 @@ from routers.share import (
 )
 app.include_router(share_router)
 
+from services.composio import _raise_composio_unavailable
 from routers.integrations import (
     integrations_router,
     IntegrationCatalogItem,
     IntegrationCatalogResponse,
     CatalogToolItem,
-    _raise_composio_unavailable,
     _trigger_catalog_cache,
     _trigger_catalog_lock,
     _trigger_item_app_slug,
