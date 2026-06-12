@@ -52,7 +52,7 @@ export function V3Shell({
   active,
   children,
 }: {
-  active?: "product" | "templates" | "docs" | "about";
+  active?: "product" | "templates" | "integrations" | "docs" | "about";
   children: React.ReactNode;
 }) {
   const [mode, setMode] = useState<ThemeMode>("system");
