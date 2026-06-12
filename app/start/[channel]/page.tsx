@@ -6,8 +6,8 @@
 // signed onboarding token) is #817 and depends on backend work (#762/#733).
 
 import type { Metadata } from "next";
-import Link from "next/link";
 import { notFound } from "next/navigation";
+import { ChannelActions } from "@/app/v3/ChannelActions";
 import { V3Shell } from "../../v3/V3Shell";
 
 type ChannelKey = "slack" | "whatsapp" | "mcp";
@@ -19,44 +19,40 @@ const CHANNELS: Record<
     title: string;
     lead: string;
     steps: [string, string][];
-    cta: { label: string; href: string };
     ctaNote: string;
   }
 > = {
   slack: {
     name: "Slack",
-    title: "WorkerOS in Slack",
+    title: "Floom in Slack",
     lead: "Hire and run AI workers from the workspace you already live in. The dashboard stays optional.",
     steps: [
-      ["Add WorkerOS to Slack", "One workspace install. Your team DMs Emily, the WorkerOS assistant, like any coworker."],
+      ["Add Floom to Slack", "One workspace install. Your team DMs Emily, the Floom assistant, like any coworker."],
       ["Describe the job", "“Every Monday, pull last week’s signups and draft the investor update.” Emily sets the worker up from the conversation."],
       ["Approve in-channel", "Anything that writes to your tools pauses for an approval card in Slack. Nothing ships without you."],
     ],
-    cta: { label: "Add to Slack", href: "/login?install=slack" },
     ctaNote: "Connecting Slack creates your workspace at the last step — that's the only moment sign-in appears.",
   },
   whatsapp: {
     name: "WhatsApp",
-    title: "WorkerOS on WhatsApp",
+    title: "Floom on WhatsApp",
     lead: "Message your workers like you message anyone else. No app to learn, no dashboard required.",
     steps: [
-      ["Connect your number", "Scan a QR code and WorkerOS recognises your WhatsApp number."],
+      ["Connect your number", "Scan a QR code and Floom recognises your WhatsApp number."],
       ["Describe the job", "Send the job as a message. Emily sets the worker up and confirms what it will do."],
       ["Approve by reply", "Runs that need a decision message you first. Reply to approve or reject."],
     ],
-    cta: { label: "Connect WhatsApp", href: "/login?install=whatsapp" },
-    ctaNote: "The QR + number bind happens right after the one-time sign-in — everything else lives in WhatsApp.",
+    ctaNote: "The QR opens the pairing flow. Sign-in appears only when the number is ready to bind to your workspace.",
   },
   mcp: {
     name: "MCP",
-    title: "WorkerOS from any MCP agent",
+    title: "Floom from any MCP agent",
     lead: "Claude Code, Cursor, Codex — if it speaks MCP, it can hire and run your workers.",
     steps: [
       ["Install the server", "npm i -g @floomhq/workeros — ships the workeros-mcp stdio server."],
-      ["Point your agent at it", "Add workeros-mcp to your agent's MCP config. The docs have copy-paste blocks for Claude Code, Cursor, and Codex."],
+      ["Point your agent at it", "Copy the config below into Claude Code, Cursor, Codex, or any MCP client."],
       ["Drive workers from your editor", "“Run client-follow-up for the Acme call.” The run lands in your workspace like any other."],
     ],
-    cta: { label: "Read the MCP setup", href: "/docs#mcp" },
     ctaNote: "The server needs a workspace token; you sign in once to mint it and never need the dashboard again.",
   },
 };
@@ -72,9 +68,9 @@ export async function generateMetadata({
 }): Promise<Metadata> {
   const { channel } = await params;
   const c = CHANNELS[channel as ChannelKey];
-  if (!c) return { title: "WorkerOS" };
+  if (!c) return { title: "Floom" };
   return {
-    title: `${c.title} · WorkerOS`,
+    title: `${c.title} · Floom`,
     description: c.lead,
   };
 }
@@ -102,7 +98,7 @@ export default async function StartChannelPage({
         <ol className="mt-9 space-y-6">
           {c.steps.map(([heading, body], i) => (
             <li key={heading} className="flex gap-4">
-              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full border border-border text-[12px] font-medium text-muted-foreground">
+              <span className="mt-0.5 flex h-6 w-6 shrink-0 items-center justify-center rounded-full bg-secondary text-[12px] font-medium text-muted-foreground">
                 {i + 1}
               </span>
               <div>
@@ -114,12 +110,7 @@ export default async function StartChannelPage({
         </ol>
 
         <div className="mt-10">
-          <Link
-            href={c.cta.href}
-            className="inline-flex h-9 items-center rounded-[10px] bg-primary px-4 text-[13px] font-medium text-primary-foreground transition-opacity hover:opacity-90"
-          >
-            {c.cta.label}
-          </Link>
+          <ChannelActions compact only={channel as ChannelKey} />
           <p className="mt-3 text-[12px] leading-relaxed text-muted-foreground">{c.ctaNote}</p>
         </div>
       </main>

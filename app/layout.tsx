@@ -1,5 +1,6 @@
 import type { Metadata } from "next";
 import { Geist, Geist_Mono, Source_Serif_4 } from "next/font/google";
+import Script from "next/script";
 import "./globals.css";
 import { Ambient } from "@/components/Ambient";
 
@@ -24,9 +25,16 @@ const sourceSerif = Source_Serif_4({
 });
 
 export const metadata: Metadata = {
-  title: "WorkerOS: Hire AI workers for your company",
+  title: "Floom: Hire AI workers for your company",
   description:
-    "Hire AI workers for your company. Describe the job, connect your tools, and WorkerOS runs it on a schedule, a webhook, or with your approval. Drive everything from Claude, Codex, Cursor, or any agent that speaks MCP.",
+    "Hire AI workers for your company. Describe the job, connect your tools, and Floom runs it on a schedule, a webhook, or with your approval. Drive everything from Claude, Codex, Cursor, or any agent that speaks MCP.",
+  icons: {
+    icon: [
+      { url: "/floom-mark.svg", type: "image/svg+xml", media: "(prefers-color-scheme: light)" },
+      { url: "/floom-icon.svg", type: "image/svg+xml", media: "(prefers-color-scheme: dark)" },
+    ],
+    apple: [{ url: "/floom-icon.svg", type: "image/svg+xml" }],
+  },
 };
 
 export default function RootLayout({
@@ -41,6 +49,9 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="min-h-full bg-transparent text-foreground">
+        <Script id="floom-theme-init" strategy="beforeInteractive">
+          {`try{var m=localStorage.getItem("floom-theme");document.documentElement.classList.toggle("floom-night",m==="night");document.documentElement.classList.toggle("floom-day",m==="day")}catch(e){}`}
+        </Script>
         <Ambient />
         {children}
       </body>

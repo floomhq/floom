@@ -166,7 +166,7 @@ export function V3Composer({
           }}
           placeholder={placeholder}
           rows={2}
-          className="relative w-full resize-none bg-transparent px-1 pb-6 pt-1 text-left text-[15.5px] leading-relaxed placeholder:text-muted-foreground focus:outline-none"
+          className="relative w-full resize-none bg-transparent px-1 pb-6 pt-1 text-left text-[15.5px] leading-relaxed placeholder:text-muted-foreground"
           style={{ color: "transparent", caretColor: "var(--text-primary)", WebkitTextFillColor: "transparent" }}
           aria-label="Describe the job"
         />
@@ -229,7 +229,7 @@ export function V3StickyPrompt() {
           animate={{ opacity: 1, y: 0, scale: 1 }}
           exit={{ opacity: 0, y: 16, scale: 0.98 }}
           transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
-          className="fixed inset-x-4 bottom-2 z-50 mx-auto flex max-w-[520px] items-center gap-1.5 rounded-[16px] border border-border/80 bg-card/95 p-1.5 shadow-[0_14px_44px_rgba(16,17,20,0.13)] backdrop-blur md:bottom-3"
+          className="fixed inset-x-4 bottom-2 z-50 mx-auto flex max-w-[520px] items-center gap-1.5 rounded-[16px] bg-card/95 p-1.5 backdrop-blur md:bottom-3"
         >
           <button
             type="button"
@@ -249,7 +249,7 @@ export function V3StickyPrompt() {
               value={value}
               onChange={(e) => setValue(e.target.value)}
               placeholder="Tell Emily what to automate..."
-              className="relative h-8 w-full bg-transparent text-[13.5px] leading-5 placeholder:text-muted-foreground focus:outline-none"
+              className="relative h-8 w-full bg-transparent text-[13.5px] leading-5 placeholder:text-muted-foreground"
               style={value ? { color: "transparent", caretColor: "var(--text-primary)", WebkitTextFillColor: "transparent" } : undefined}
               aria-label="Describe the worker"
             />

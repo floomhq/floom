@@ -30,6 +30,7 @@ import {
   SlackLogo,
 } from "@/components/landing-icons";
 import { V3Composer, V3StickyPrompt } from "./V3Composer";
+import { ChannelActions } from "./ChannelActions";
 import { V3TemplateCard } from "./V3TemplateCard";
 import { getTemplate } from "@/components/landing-ref/data";
 import { Hl, V3Shell } from "./V3Shell";
@@ -60,7 +61,7 @@ function ToolHl({
 const BEATS = [
   {
     t: "Describe the job",
-    p: "One sentence, plain English. WorkerOS recognises your tools as you type and drafts the worker.",
+    p: "One sentence, plain English. Floom recognises your tools as you type and drafts the worker.",
   },
   {
     t: "Approve the draft",
@@ -76,7 +77,7 @@ const BEATS = [
 
 function BeatDescribe() {
   return (
-    <div className="w-full max-w-[460px] rounded-[18px] bg-card p-6 ring-1 ring-border">
+    <div className="w-full max-w-[460px] rounded-[18px] bg-card p-6">
       <div className="text-[16px] leading-relaxed">
         Summarise my{" "}
         <ToolHl logo={<GranolaLogo />}>Granola</ToolHl>
@@ -92,7 +93,7 @@ function BeatDescribe() {
         initial={{ opacity: 0, y: 6 }}
         animate={{ opacity: 1, y: 0 }}
         transition={{ delay: 0.5, duration: 0.4 }}
-        className="mt-5 flex items-center justify-between border-t border-border-soft pt-4"
+        className="mt-5 flex items-center justify-between bg-secondary/60 px-4 py-3"
       >
         <span className="text-[12px] text-muted-foreground">Recognised: Granola, HubSpot</span>
         <span className="whitespace-nowrap rounded-[10px] px-4 py-2 text-[13px] font-medium text-white" style={{ background: "var(--v3-accent)" }}>Hire</span>
@@ -103,8 +104,8 @@ function BeatDescribe() {
 
 function BeatApprove() {
   return (
-    <div className="w-full max-w-[460px] overflow-hidden rounded-[18px] bg-card ring-1 ring-border">
-      <div className="border-b border-border-soft px-5 py-3.5">
+    <div className="w-full max-w-[460px] overflow-hidden rounded-[18px] bg-card">
+      <div className="bg-secondary/60 px-5 py-3.5">
         <div className="flex items-center justify-between gap-3">
           <div className="text-[10.5px] font-semibold uppercase tracking-[0.11em] text-muted-foreground">
             Email draft
@@ -131,7 +132,7 @@ function BeatApprove() {
           Built from your tone guide and pricing sheet
         </motion.div>
       </div>
-      <div className="flex gap-2 border-t border-border-soft px-5 py-4">
+      <div className="flex gap-2 px-5 py-4">
         <motion.span
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
@@ -145,7 +146,7 @@ function BeatApprove() {
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.55, duration: 0.35 }}
-          className="rounded-[10px] border border-border bg-card px-4 py-2 text-[13px] text-foreground/80"
+          className="rounded-[10px] bg-secondary px-4 py-2 text-[13px] text-foreground/80"
         >
           Edit
         </motion.span>
@@ -156,8 +157,8 @@ function BeatApprove() {
 
 function BeatRecord() {
   return (
-    <div className="w-full max-w-[460px] overflow-hidden rounded-[18px] bg-card ring-1 ring-border">
-      <div className="flex items-center justify-between border-b border-border-soft px-5 py-4">
+    <div className="w-full max-w-[460px] overflow-hidden rounded-[18px] bg-card">
+      <div className="flex items-center justify-between bg-secondary/60 px-5 py-4">
         <span className="text-[15px] font-semibold tracking-[-0.012em]">This week</span>
         <span className="rounded-full bg-secondary px-2.5 py-1 font-mono text-[10.5px] text-muted-foreground">5 runs</span>
       </div>
@@ -174,7 +175,7 @@ function BeatRecord() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.12 + i * 0.08, duration: 0.35 }}
-            className="flex items-center gap-3 border-b border-border-soft py-3 text-[13px] last:border-0"
+            className="flex items-center gap-3 py-3 text-[13px]"
           >
             <span className={`w-12 shrink-0 font-mono text-[10.5px] ${done ? "text-muted-foreground" : "font-semibold"}`} style={!done ? { color: "var(--v3-accent)" } : undefined}>
               {d as string}
@@ -357,17 +358,15 @@ export function V3Body() {
               </button>
             ))}
           </motion.div>
-          <motion.p
+          <motion.div
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.5, delay: 0.46 }}
-            className="mx-auto mt-8 text-[12px] text-muted-foreground/90"
+            className="mx-auto mt-8 flex flex-col items-center text-[12px] text-muted-foreground/90"
           >
-            Works without the dashboard too:{" "}
-            <Link href="/start/slack" className="text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline">Slack</Link>,{" "}
-            <Link href="/start/whatsapp" className="text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline">WhatsApp</Link>, or any{" "}
-            <Link href="/start/mcp" className="text-foreground/70 underline-offset-4 transition-colors hover:text-foreground hover:underline">MCP agent</Link>.
-          </motion.p>
+            <span>Works without the dashboard too.</span>
+            <ChannelActions />
+          </motion.div>
         </section>
 
         {/* six marks, still */}
@@ -377,12 +376,12 @@ export function V3Body() {
           transition={{ duration: 0.7, delay: 0.5 }}
           className="flex flex-col items-center gap-4 pb-36 pt-10"
         >
-          <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground/80">Connects to your tools</span>
-          <span className="flex items-center justify-center gap-5 opacity-80">
+          <Link href="/integrations" className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground/80 transition-colors hover:text-foreground">Connects to your tools</Link>
+          <Link href="/integrations" aria-label="Browse Floom integrations" className="flex items-center justify-center gap-5 opacity-80 transition-opacity hover:opacity-100">
           {[<GmailLogo key="g" />, <SlackLogo key="s" />, <HubSpotLogo key="h" />, <NotionLogo key="n" />, <GCalLogo key="c" />, <SheetsLogo key="sh" />].map((logo, i) => (
             <span key={i} className="flex h-5 w-5 items-center justify-center grayscale-[0.2] [&_svg]:h-5 [&_svg]:w-5">{logo}</span>
           ))}
-          </span>
+          </Link>
         </motion.section>
 
         <Story />

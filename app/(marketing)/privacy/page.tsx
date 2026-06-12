@@ -1,21 +1,22 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { V3Shell } from "@/app/v3/V3Shell";
 
 export const metadata: Metadata = {
-  title: "Privacy — WorkerOS",
+  title: "Privacy — Floom",
   description:
-    "How WorkerOS handles your data, your worker runs, and the tools you connect.",
+    "How Floom handles your data, your worker runs, and the tools you connect.",
 };
 
 export default function PrivacyPage() {
   return (
-    <main className="px-6 py-14 sm:py-20">
-      <article className="prose-workeros mx-auto max-w-2xl">
+    <V3Shell>
+      <article className="mx-auto max-w-2xl pb-20 pt-16 sm:pt-24">
         <p className="text-[11.5px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
           Privacy
         </p>
         <h1 className="mt-2 text-[34px] font-semibold leading-tight tracking-[-0.025em] text-foreground sm:text-[42px]">
-          How WorkerOS handles your data.
+          How Floom handles your data.
         </h1>
         <p className="mt-3 text-[15px] text-muted-foreground">
           Last updated 2026-06-06. This is the short version; reach out at{" "}
@@ -46,7 +47,7 @@ export default function PrivacyPage() {
           </h2>
           <p className="text-[15px] leading-relaxed text-muted-foreground">
             When you connect Gmail, Slack, HubSpot, Notion, or any of the
-            1,000+ tools we support via Composio, WorkerOS holds the
+            1,000+ tools we support via Composio, Floom holds the
             OAuth token and uses it only to run the workers you build.
             Revoking access in the source tool stops every worker that
             depends on it.
@@ -58,7 +59,7 @@ export default function PrivacyPage() {
             Who can see your data
           </h2>
           <p className="text-[15px] leading-relaxed text-muted-foreground">
-            Your workspace and its members. WorkerOS support reviews data
+            Your workspace and its members. Floom support reviews data
             only when you ask us to debug a run. We do not sell data, we do
             not train shared models on your worker outputs, and we do not
             share your data with third parties beyond the tools you connect.
@@ -112,6 +113,6 @@ export default function PrivacyPage() {
           </Link>
         </div>
       </article>
-    </main>
+    </V3Shell>
   );
 }

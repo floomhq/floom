@@ -1,6 +1,8 @@
 import Link from "next/link";
+import Image from "next/image";
 import { OAUTH_LOGIN_URL, OAUTH_LOGIN_URL_GITHUB } from "@/lib/api";
 import { LoginEmailPanel } from "@/components/LoginEmailPanel";
+import { V3Shell } from "@/app/v3/V3Shell";
 
 export const metadata = {
   title: "Sign in · Floom",
@@ -11,182 +13,59 @@ export default async function LoginPage({
 }: {
   searchParams?: Promise<{ next?: string }>;
 }) {
-  // Next 16: searchParams is always a Promise in server components.
   const sp = (await searchParams) ?? {};
   const next = sp.next ?? "/";
 
   return (
-    <main className="login-cool min-h-screen bg-[var(--bg-app)] text-[var(--ink)] font-sans antialiased">
-      <header className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-6">
-        <Link
-          href="/"
-          className="inline-flex items-center gap-2 text-[15px] font-[660] tracking-[-0.025em] text-[var(--ink)] hover:opacity-80 transition-opacity"
-        >
-          <FloomMark />
-          WorkerOS
-          <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--ink-mute)]">by Floom</span>
-        </Link>
-        <Link href="/" className="hidden rounded-[10px] px-3 py-1.5 text-[13px] text-[var(--ink-soft)] transition hover:bg-[var(--bg-2)] hover:text-[var(--ink)] sm:block">
-          Back to landing
-        </Link>
-      </header>
-
-      <section className="mx-auto grid min-h-[calc(100vh-64px)] w-full max-w-6xl items-center gap-10 px-6 pb-20 pt-8 md:grid-cols-[1fr_420px]">
-        <div className="hidden max-w-[520px] md:block">
-          <div className="inline-flex rounded-full bg-[var(--sel)] px-3 py-1 text-[12px] font-medium text-[var(--accent)]">
-            Cloud sign-in
-          </div>
-          <h1 className="mt-5 text-[46px] font-semibold leading-[1.02] tracking-[-0.036em] text-[var(--ink)]">
-            Your workers, approvals, and runs in one calm place.
+    <V3Shell active="login">
+      <main className="mx-auto grid w-full max-w-[820px] items-center gap-10 pb-20 pt-16 md:grid-cols-[1fr_360px] md:pt-24">
+        <section className="max-w-[430px]">
+          <Image src="/floom-mark.svg" alt="" width={34} height={34} />
+          <h1 className="mt-6 text-[36px] font-semibold leading-[1.04] tracking-[-0.032em] sm:text-[46px]">
+            Sign in to Floom.
           </h1>
-          <p className="mt-4 max-w-[420px] text-[15px] leading-relaxed text-[var(--ink-soft)]">
-            Sign in to review drafts, connect tools, and keep every worker on the record.
+          <p className="mt-4 text-[15px] leading-relaxed text-muted-foreground">
+            Review drafts, connect tools, and keep every worker run on the record.
           </p>
-          <div className="mt-8 rounded-[18px] bg-[var(--bg-card)] p-4 ring-1 ring-[var(--line)]">
-            <div className="flex items-center justify-between border-b border-[var(--line-soft)] pb-3">
-              <span className="text-[13px] font-medium">Client Follow-up Worker</span>
-              <span className="rounded-full bg-[var(--sel)] px-2.5 py-1 text-[10.5px] font-medium text-[var(--accent)]">Needs approval</span>
-            </div>
-            <div className="space-y-3 pt-3">
-              {["Read calendar notes", "Drafted Sarah follow-up", "Holding send for approval"].map((item, index) => (
-                <div key={item} className="flex items-center gap-3 text-[12.5px] text-[var(--ink-soft)]">
-                  <span className={`h-1.5 w-1.5 rounded-full ${index === 2 ? "bg-[var(--accent)]" : "bg-[var(--ink-mute)]"}`} />
-                  {item}
-                </div>
-              ))}
-            </div>
-          </div>
-        </div>
+        </section>
 
-        <div className="w-full max-w-[420px] justify-self-center">
-          <div className="rounded-[18px] border border-[var(--line)] bg-[var(--bg-card)] p-7 shadow-[0_18px_56px_rgba(16,17,20,0.08)]">
-            <div className="mb-7 space-y-1.5 text-center">
-              <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-[12px] bg-[var(--ink)] text-[var(--bg-card)]">
-                <FloomMark size={20} inverted />
-              </div>
-              <h1 className="text-[23px] font-semibold leading-tight tracking-[-0.024em]">Sign in to WorkerOS</h1>
-              <p className="text-[13px] leading-relaxed text-[var(--ink-soft)]">Magic link or password. Same workspace, same worker record.</p>
-            </div>
-            <div className="space-y-2.5">
-              <a href={OAUTH_LOGIN_URL(next)} className="auth-btn auth-btn-primary">
-                <GoogleIcon />
-                <span>Continue with Google</span>
-              </a>
-              <a href={OAUTH_LOGIN_URL_GITHUB(next)} className="auth-btn auth-btn-secondary">
-                <GitHubIcon />
-                <span>Continue with GitHub</span>
-              </a>
-            </div>
-
-            <div className="my-5 flex items-center gap-3">
-              <span className="h-px flex-1 bg-[var(--line)]" />
-              <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--ink-mute)]">or</span>
-              <span className="h-px flex-1 bg-[var(--line)]" />
-            </div>
-
-            <LoginEmailPanel next={next} />
-
-            <p className="mt-6 text-center text-[11.5px] leading-[1.6] text-[var(--ink-mute)]">
-              By signing in you agree to the{" "}
-              <Link href="/terms" className="underline underline-offset-2 hover:text-[var(--ink)] transition-colors">
-                Terms
-              </Link>{" "}
-              and{" "}
-              <Link href="/privacy" className="underline underline-offset-2 hover:text-[var(--ink)] transition-colors">
-                Privacy Policy
-              </Link>
-              . We&apos;ll create your workspace automatically on first sign-in.
-            </p>
+        <section className="rounded-[18px] bg-card p-6">
+          <div className="mb-6 text-center">
+            <h2 className="text-[21px] font-semibold tracking-[-0.02em]">Welcome back</h2>
+            <p className="mt-1 text-[12.5px] text-muted-foreground">Magic link, password, or OAuth.</p>
           </div>
 
-          <p className="mt-5 text-center text-[12px] text-[var(--ink-mute)]">
-            New here?{" "}
-            <Link href="/" className="text-[var(--ink-soft)] hover:text-[var(--ink)] underline underline-offset-2 transition-colors">
-              See what Floom does
+          <div className="space-y-2.5">
+            <a href={OAUTH_LOGIN_URL(next)} className="flex h-11 items-center justify-center gap-2 rounded-[12px] bg-foreground px-4 text-[14px] font-medium text-background">
+              <GoogleIcon />
+              <span>Continue with Google</span>
+            </a>
+            <a href={OAUTH_LOGIN_URL_GITHUB(next)} className="flex h-11 items-center justify-center gap-2 rounded-[12px] bg-secondary px-4 text-[14px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]">
+              <GitHubIcon />
+              <span>Continue with GitHub</span>
+            </a>
+          </div>
+
+          <div className="my-5 text-center">
+            <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">or</span>
+          </div>
+
+          <LoginEmailPanel next={next} />
+
+          <p className="mt-6 text-center text-[11.5px] leading-[1.6] text-muted-foreground">
+            By signing in you agree to the{" "}
+            <Link href="/terms" className="underline-offset-4 hover:text-foreground hover:underline">
+              Terms
+            </Link>{" "}
+            and{" "}
+            <Link href="/privacy" className="underline-offset-4 hover:text-foreground hover:underline">
+              Privacy Policy
             </Link>
+            .
           </p>
-        </div>
-      </section>
-
-      <style>{`
-        .login-cool {
-          --bg-app: #FBFBFC;
-          --bg-card: #FFFFFF;
-          --bg-2: #F3F4F6;
-          --bg-3: #ECEDF0;
-          --ink: #16171A;
-          --ink-soft: #6B7280;
-          --ink-mute: rgba(107, 114, 128, 0.78);
-          --line: rgba(16, 17, 20, 0.09);
-          --line-soft: rgba(16, 17, 20, 0.055);
-          --accent: #3E6FE0;
-          --sel: #EEF3FE;
-          --solid: #16171A;
-          --solid-2: #2A2C31;
-          --solid-fg: #FFFFFF;
-          --success: #2F8F5B;
-          --warning: #E5533D;
-        }
-        .auth-btn {
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          gap: 10px;
-          height: 44px;
-          border-radius: var(--radius-button);
-          font-size: 14px;
-          font-weight: 500;
-          letter-spacing: -0.005em;
-          text-decoration: none;
-          transition: transform 120ms cubic-bezier(0.2, 0.7, 0.2, 1), background 120ms, border-color 120ms;
-        }
-        .auth-btn:active { transform: translateY(1px); }
-        .auth-btn-primary {
-          background: var(--solid);
-          color: var(--solid-fg);
-          border: 1px solid var(--solid);
-          box-shadow: 0 1px 0 rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.06);
-        }
-        .auth-btn-primary:hover { background: var(--solid-2); }
-        .auth-btn-secondary {
-          background: var(--bg-card);
-          color: var(--ink);
-          border: 1px solid var(--line);
-        }
-        .auth-btn-secondary:hover {
-          border-color: rgba(20,20,20,0.18);
-          background: var(--bg-2);
-        }
-        .auth-btn-accent {
-          background: var(--accent);
-          color: #fff;
-          border: 1px solid var(--accent);
-        }
-        .auth-btn-accent:hover {
-          background: #315EC6;
-        }
-      `}</style>
-    </main>
-  );
-}
-
-// Same play-arrow mark + lockup the landing nav uses (.ln-mark / "Floom /
-// workeros"). /login only imports globals.css, not landing.css, so the mark
-// is inlined here from the same SVG path rather than reusing the class.
-function FloomMark({ size = 20, inverted = false }: { size?: number; inverted?: boolean }) {
-  return (
-    <svg
-      width={size}
-      height={size}
-      viewBox="0 0 100 100"
-      aria-hidden="true"
-      style={{ color: inverted ? "var(--bg-card)" : "var(--ink)" }}
-    >
-      <path
-        d="M32 26h20l22 22a3 3 0 0 1 0 4l-22 22H32a6 6 0 0 1-6-6V32a6 6 0 0 1 6-6z"
-        fill="currentColor"
-      />
-    </svg>
+        </section>
+      </main>
+    </V3Shell>
   );
 }
 

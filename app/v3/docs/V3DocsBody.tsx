@@ -10,6 +10,7 @@ import { useState } from "react";
 import { motion } from "motion/react";
 import { SlackLogo, WhatsAppLogo } from "@/components/landing-icons";
 import { Hl, V3Shell } from "../V3Shell";
+import { ChannelActions } from "../ChannelActions";
 import "../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -25,12 +26,12 @@ const TOC = [
 
 function CopyLine({ text }: { text: string }) {
   return (
-    <span className="flex items-center justify-between gap-3">
-      <span>$ {text}</span>
+    <span className="flex min-w-0 items-center justify-between gap-3">
+      <span className="min-w-0 break-all">$ {text}</span>
       <button
         type="button"
         onClick={() => navigator.clipboard?.writeText(text)}
-        className="shrink-0 rounded-[7px] border border-border bg-card px-2 py-0.5 font-sans text-[10.5px] font-medium text-muted-foreground hover:text-foreground"
+        className="shrink-0 rounded-[7px] bg-card px-2 py-0.5 font-sans text-[10.5px] font-medium text-muted-foreground hover:text-foreground"
       >
         Copy
       </button>
@@ -58,7 +59,7 @@ function McpInstall() {
   const [target, setTarget] = useState<(typeof MCP_TARGETS)[number][0]>("claude");
   return (
     <div>
-      <div className="mb-2 flex gap-1.5">
+      <div className="mb-2 flex flex-wrap gap-1.5">
         {MCP_TARGETS.map(([id, label]) => (
           <button
             key={id}
@@ -100,7 +101,7 @@ function DocsSection({
   children: React.ReactNode;
 }) {
   return (
-    <section className="rounded-[18px] bg-card p-5 ring-1 ring-border">
+    <section className="rounded-[18px] bg-card p-5">
       <H2 id={id}>{title}</H2>
       <div className="mt-4">{children}</div>
     </section>
@@ -119,7 +120,7 @@ export function V3DocsBody() {
           className="pb-9 pt-16"
         >
           <div className="inline-flex rounded-full bg-[var(--v3-sel)] px-3 py-1 text-[12px] font-medium" style={{ color: "var(--v3-accent)" }}>
-            WorkerOS docs
+            Floom docs
           </div>
           <h1 className="mt-5 text-[40px] font-semibold leading-[1.03] tracking-[-0.034em] sm:text-[52px]">Hire your first <Hl>worker</Hl>.</h1>
           <p className="mt-4 max-w-[520px] text-[15px] leading-relaxed text-muted-foreground">
@@ -130,7 +131,7 @@ export function V3DocsBody() {
         <div className="grid gap-10 md:grid-cols-[190px_1fr]">
           {/* mini TOC */}
           <div className="hidden md:block">
-            <div className="sticky top-20 rounded-[16px] bg-card p-2 ring-1 ring-border">
+            <div className="sticky top-20 rounded-[16px] bg-card p-2">
               {TOC.map(([id, label]) => (
                 <a key={id} href={`#${id}`} className="block rounded-[10px] px-3 py-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
                   {label}
@@ -143,7 +144,7 @@ export function V3DocsBody() {
           <div className="flex min-w-0 max-w-[700px] flex-col gap-4">
             <DocsSection id="quickstart" title="Quickstart">
             <ol className="flex flex-col gap-2.5 text-[13.5px] leading-relaxed text-foreground/85">
-              <li><b className="font-semibold">1. Describe the job.</b> One sentence, plain English. WorkerOS recognises your tools as you type.</li>
+              <li><b className="font-semibold">1. Describe the job.</b> One sentence, plain English. Floom recognises your tools as you type.</li>
               <li><b className="font-semibold">2. Review the draft.</b> Tools, schedule, approval rules and company brain, assembled for review. Edit anything, then hire.</li>
               <li><b className="font-semibold">3. Approve the first run.</b> The worker drafts, you approve. After that it runs in the background and asks before anything ships.</li>
             </ol>
@@ -154,39 +155,42 @@ export function V3DocsBody() {
 
             <DocsSection id="channels" title="Install in your channel">
             <p className="text-[13.5px] leading-relaxed text-muted-foreground">
-              You never have to open the dashboard. Install WorkerOS where your team already talks and hire, approve, and redirect from there.
+              You never have to open the dashboard. Install Floom where your team already talks and hire, approve, and redirect from there.
             </p>
-            <div className="mt-2 flex flex-col">
-              <div className="flex items-center gap-3 border-b border-border-soft py-3.5 last:border-0">
+            <div className="mt-4">
+              <ChannelActions compact />
+            </div>
+            <div className="mt-4 flex flex-col">
+              <div className="flex items-center gap-3 py-3.5">
                 <span className="[&_svg]:h-4 [&_svg]:w-4"><SlackLogo /></span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium">Slack</div>
                   <div className="text-[12px] text-muted-foreground">Workspace install. Workers post drafts and approval buttons in your channels.</div>
                 </div>
-                <Link href="/start/slack" className="rounded-[8px] border border-border bg-card px-2.5 py-1 text-[12px] font-medium hover:bg-secondary">Install</Link>
+                <Link href="/login?install=slack" className="rounded-[8px] bg-secondary px-2.5 py-1 text-[12px] font-medium hover:bg-[var(--bg-3)]">Install</Link>
               </div>
-              <div className="flex items-center gap-3 border-b border-border-soft py-3.5 last:border-0">
+              <div className="flex items-center gap-3 py-3.5">
                 <span className="[&_svg]:h-4 [&_svg]:w-4"><WhatsAppLogo /></span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium">WhatsApp</div>
                   <div className="text-[12px] text-muted-foreground">Personal or shared number. Summaries and approvals as messages.</div>
                 </div>
-                <Link href="/start/whatsapp" className="rounded-[8px] border border-border bg-card px-2.5 py-1 text-[12px] font-medium hover:bg-secondary">Install</Link>
+                <Link href="/login?install=whatsapp" className="rounded-[8px] bg-secondary px-2.5 py-1 text-[12px] font-medium hover:bg-[var(--bg-3)]">Install</Link>
               </div>
-              <div className="flex items-center gap-3 border-b border-border-soft py-3.5 last:border-0">
+              <div className="flex items-center gap-3 py-3.5">
                 <span className="flex h-4 w-4 items-center justify-center rounded-[4px] bg-primary font-mono text-[7.5px] font-bold text-primary-foreground">&gt;_</span>
                 <div className="min-w-0 flex-1">
                   <div className="text-[13px] font-medium">CLI</div>
                   <div className="text-[12px] text-muted-foreground">Pair from your terminal with a one-time code.</div>
                 </div>
-                <Link href="/login?install=cli" className="rounded-[8px] border border-border bg-card px-2.5 py-1 text-[12px] font-medium hover:bg-secondary">Pair</Link>
+                <Link href="/login?install=cli" className="rounded-[8px] bg-secondary px-2.5 py-1 text-[12px] font-medium hover:bg-[var(--bg-3)]">Pair</Link>
               </div>
             </div>
             </DocsSection>
 
             <DocsSection id="mcp" title="Use from any agent (MCP)">
             <p className="mb-3 text-[13.5px] leading-relaxed text-muted-foreground">
-              WorkerOS speaks MCP. Add it to Claude Code, Cursor, Codex, or any client and drive workers from where you already work.
+              Floom speaks MCP. Add it to Claude Code, Cursor, Codex, or any client and drive workers from where you already work.
             </p>
             <McpInstall />
             <p className="mt-2 text-[12px] text-muted-foreground">Ships the `workeros-mcp` stdio server from the `@floomhq/workeros` package.</p>
@@ -213,7 +217,7 @@ export function V3DocsBody() {
                 ["Which models does it use?", "Any. Bring your own keys or use the defaults. Model choice is per worker."],
                 ["Where do my tokens live?", "Encrypted at rest, used only for the workers you build. Revoke at the source any time."],
                 ["Can my team share workers?", "Yes. Workspaces share workers, brain, and the run record."],
-                ["What does it cost?", "WorkerOS Cloud is in early access. Pricing is being finalised with the first teams."],
+                ["What does it cost?", "Floom Cloud is in early access. Pricing is being finalised with the first teams."],
               ].map(([q, a]) => (
                 <div key={q}>
                   <div className="text-[13.5px] font-semibold">{q}</div>

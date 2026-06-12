@@ -78,7 +78,7 @@ export function LoginEmailPanel({ next }: { next: string }) {
           type="button"
           onClick={() => setMode("magic")}
           className={`h-8 rounded-[9px] text-[13px] font-medium transition-colors ${
-            mode === "magic" ? "bg-[var(--bg-card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink-soft)]"
+            mode === "magic" ? "bg-card text-foreground" : "text-muted-foreground"
           }`}
         >
           Magic link
@@ -87,7 +87,7 @@ export function LoginEmailPanel({ next }: { next: string }) {
           type="button"
           onClick={() => setMode("password")}
           className={`h-8 rounded-[9px] text-[13px] font-medium transition-colors ${
-            mode === "password" ? "bg-[var(--bg-card)] text-[var(--ink)] shadow-sm" : "text-[var(--ink-soft)]"
+            mode === "password" ? "bg-card text-foreground" : "text-muted-foreground"
           }`}
         >
           Password
@@ -103,7 +103,7 @@ export function LoginEmailPanel({ next }: { next: string }) {
           autoComplete="email"
           required
           placeholder="you@company.com"
-          className="h-11 w-full rounded-[12px] border border-[var(--line)] bg-[var(--bg-card)] px-3 text-sm outline-none transition-colors placeholder:text-[var(--ink-mute)] focus:border-[var(--accent)]"
+          className="h-11 w-full rounded-[12px] bg-secondary px-3 text-sm transition-colors placeholder:text-muted-foreground focus:bg-card"
         />
       </label>
 
@@ -117,7 +117,7 @@ export function LoginEmailPanel({ next }: { next: string }) {
             autoComplete="current-password"
             required
             placeholder="Password"
-            className="h-11 w-full rounded-[12px] border border-[var(--line)] bg-[var(--bg-card)] px-3 text-sm outline-none transition-colors placeholder:text-[var(--ink-mute)] focus:border-[var(--accent)]"
+            className="h-11 w-full rounded-[12px] bg-secondary px-3 text-sm transition-colors placeholder:text-muted-foreground focus:bg-card"
           />
         </label>
       ) : null}
@@ -125,12 +125,13 @@ export function LoginEmailPanel({ next }: { next: string }) {
       <button
         type="submit"
         disabled={loading}
-        className="auth-btn auth-btn-accent w-full disabled:cursor-not-allowed disabled:opacity-60"
+        className="flex h-11 w-full items-center justify-center rounded-[12px] px-4 text-[14px] font-medium text-white transition hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
+        style={{ background: "var(--v3-accent)" }}
       >
         {loading ? "Sending..." : mode === "magic" ? "Email me a magic link" : "Sign in with password"}
       </button>
 
-      {status ? <p className="text-center text-[12px] text-[var(--success)]">{status}</p> : null}
+      {status ? <p className="text-center text-[12px]" style={{ color: "var(--v3-accent)" }}>{status}</p> : null}
       {error ? <p className="text-center text-[12px] text-[var(--warning)]">{error}</p> : null}
     </form>
   );

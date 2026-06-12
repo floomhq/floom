@@ -1,16 +1,17 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { V3Shell } from "@/app/v3/V3Shell";
 
 export const metadata: Metadata = {
-  title: "Terms — WorkerOS",
+  title: "Terms — Floom",
   description:
-    "The rules that govern how you use WorkerOS and what you can expect from us.",
+    "The rules that govern how you use Floom and what you can expect from us.",
 };
 
 export default function TermsPage() {
   return (
-    <main className="px-6 py-14 sm:py-20">
-      <article className="mx-auto max-w-2xl">
+    <V3Shell>
+      <article className="mx-auto max-w-2xl pb-20 pt-16 sm:pt-24">
         <p className="text-[11.5px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
           Terms of service
         </p>
@@ -18,7 +19,7 @@ export default function TermsPage() {
           The rules of the road.
         </h1>
         <p className="mt-3 text-[15px] text-muted-foreground">
-          Last updated 2026-06-06. By using WorkerOS you agree to the terms
+          Last updated 2026-06-06. By using Floom you agree to the terms
           below. Reach out at{" "}
           <a
             href="mailto:hello@floom.dev"
@@ -31,10 +32,10 @@ export default function TermsPage() {
 
         <section className="mt-10 space-y-2.5">
           <h2 className="text-[20px] font-semibold text-foreground">
-            What WorkerOS is
+            What Floom is
           </h2>
           <p className="text-[15px] leading-relaxed text-muted-foreground">
-            WorkerOS lets you describe a job and runs an AI worker that does
+            Floom lets you describe a job and runs an AI worker that does
             it on a schedule, a webhook, or with your approval. You stay in
             control of every run and every connected tool.
           </p>
@@ -56,7 +57,7 @@ export default function TermsPage() {
             Acceptable use
           </h2>
           <p className="text-[15px] leading-relaxed text-muted-foreground">
-            WorkerOS is for legitimate work. No spam, no harassment, no
+            Floom is for legitimate work. No spam, no harassment, no
             fraud, no abuse of the tools you connect, no attempts to
             reverse-engineer or disrupt the service.
           </p>
@@ -79,7 +80,7 @@ export default function TermsPage() {
             Service availability
           </h2>
           <p className="text-[15px] leading-relaxed text-muted-foreground">
-            We work hard to keep WorkerOS up and running. The service is
+            We work hard to keep Floom up and running. The service is
             provided as-is; we do not guarantee uninterrupted availability
             and we are not liable for losses that result from downtime,
             third-party tool outages, or worker behavior beyond a refund of
@@ -115,6 +116,6 @@ export default function TermsPage() {
           </Link>
         </div>
       </article>
-    </main>
+    </V3Shell>
   );
 }

@@ -91,7 +91,7 @@ export function V3AboutBody() {
         <Reveal>
           <div className="mt-5 text-[13px] leading-[1.7] text-muted-foreground">
             <p>Floom builds the bridge between the work that must be done and the life that must be lived.</p>
-            <p className="mt-1">WorkerOS finishes the work on this side. You walk across.</p>
+            <p className="mt-1">Floom finishes the work on this side. You walk across.</p>
           </div>
         </Reveal>
 

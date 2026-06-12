@@ -8,9 +8,9 @@
  */
 
 import Link from "next/link";
+import Image from "next/image";
 import { motion } from "motion/react";
-import { Brain, Check } from "lucide-react";
-import { AppFrame } from "../../v2/V2Sections";
+import { Brain, Check, CheckCircle2, Layers, LayoutGrid, MessageCircleMore, Play, Plug2 } from "lucide-react";
 import {
   GCalLogo,
   GmailLogo,
@@ -23,6 +23,23 @@ import { Hl, V3Shell } from "../V3Shell";
 import "../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+
+const NAV_ITEMS = [
+  { icon: LayoutGrid, label: "Overview" },
+  { icon: MessageCircleMore, label: "Assistant" },
+  { icon: Layers, label: "Workers", on: true },
+  { icon: Brain, label: "Brain" },
+  { icon: Play, label: "Runs" },
+  { icon: CheckCircle2, label: "Approvals", badge: 2 },
+  { icon: Plug2, label: "Connections" },
+];
+
+const APP_WORKERS = [
+  { av: "WU", nm: "Weekly Update", d: "Turns raw notes into a polished weekly company update.", st: "active" as const, meta: "5d ago", tools: [<NotionLogo key="n" />, <GmailLogo key="g" />] },
+  { av: "CF", nm: "Client Follow-up", d: "Drafts follow-up emails after calls, adds CRM notes.", st: "review" as const, meta: "needs you", tools: [<GmailLogo key="g" />, <HubSpotLogo key="h" />] },
+  { av: "GD", nm: "GitHub Digest", d: "Every morning at 9am, a digest of unread PRs and issues.", st: "active" as const, meta: "running", tools: [<SlackLogo key="s" />] },
+  { av: "PB", nm: "Pipeline Brief", d: "Weekly pipeline summary posted in #sales.", st: "active" as const, meta: "3d ago", tools: [<SheetsLogo key="sh" />, <SlackLogo key="s" />] },
+];
 
 function Reveal({ children, delay = 0, className }: { children: React.ReactNode; delay?: number; className?: string }) {
   return (
@@ -68,7 +85,7 @@ function ApprovalArtifact() {
               whileInView={{ opacity: 1, y: 0 }}
               viewport={{ once: true }}
               transition={{ delay: 0.45, duration: 0.35 }}
-              className="rounded-[10px] border border-border bg-card px-4 py-2 text-[12.5px]"
+              className="rounded-[10px] bg-secondary px-4 py-2 text-[12.5px]"
             >
               Edit
             </motion.span>
@@ -100,7 +117,7 @@ function RecordArtifact() {
             whileInView={{ opacity: 1 }}
             viewport={{ once: true }}
             transition={{ delay: 0.15 + i * 0.1, duration: 0.35 }}
-            className="flex items-center gap-3 border-b border-border-soft py-2.5 text-[13px] last:border-0"
+            className="flex items-center gap-3 py-2.5 text-[13px]"
           >
             <span className="font-mono text-[10px] text-muted-foreground">{t}</span>
             <span className="flex-1 text-muted-foreground">{n}</span>
@@ -127,7 +144,7 @@ function BrainArtifact() {
     <div className="relative h-[280px] w-full max-w-[440px]">
       <svg className="absolute inset-0 h-full w-full" aria-hidden>
         {[["18%", "20%"], ["74%", "14%"], ["22%", "82%"], ["74%", "82%"]].map(([x, y], i) => (
-          <line key={i} x1="50%" y1="50%" x2={x} y2={y} stroke="var(--border-default)" strokeWidth="1" />
+          <line key={i} x1="50%" y1="50%" x2={x} y2={y} stroke="var(--bg-3)" strokeWidth="1" />
         ))}
       </svg>
       <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
@@ -147,6 +164,80 @@ function BrainArtifact() {
         </div>
       ))}
     </div>
+  );
+}
+
+function ProductMockup() {
+  return (
+    <section id="product" className="pb-0">
+      <Reveal delay={0.1}>
+        <div className="overflow-hidden rounded-[24px] bg-secondary p-3">
+          <div className="overflow-hidden rounded-[18px] bg-[var(--bg-app)]">
+            <div className="flex min-h-[430px]">
+              <aside className="hidden w-[190px] shrink-0 flex-col bg-card py-3 sm:flex">
+                <div className="flex items-center gap-2 px-4 pb-3">
+                  <Image src="/floom-mark.svg" alt="" width={20} height={20} />
+                  <span className="text-[12.5px] font-semibold">Floom</span>
+                </div>
+                <div className="flex flex-col gap-px px-2.5">
+                  {NAV_ITEMS.map((n) => (
+                    <div key={n.label} className={`flex items-center gap-2.5 rounded-[8px] px-2.5 py-[7px] text-[12px] ${n.on ? "bg-secondary font-medium text-foreground" : "text-muted-foreground"}`}>
+                      <n.icon className="h-[14px] w-[14px] opacity-70" />
+                      {n.label}
+                      {n.badge ? (
+                        <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-secondary px-1 text-[9.5px] font-semibold text-muted-foreground">{n.badge}</span>
+                      ) : null}
+                    </div>
+                  ))}
+                </div>
+              </aside>
+              <div className="min-w-0 flex-1 bg-[var(--bg-app)] p-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-[17px] font-semibold tracking-[-0.01em]">Workers</div>
+                    <div className="text-[11.5px] text-muted-foreground">8 active · 1 waiting for review</div>
+                  </div>
+                  <span className="rounded-[10px] px-3 py-1.5 text-[12px] font-medium text-white" style={{ background: "var(--v3-accent)" }}>+ New worker</span>
+                </div>
+                <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
+                  {APP_WORKERS.map((w, i) => (
+                    <motion.div
+                      key={w.nm}
+                      initial={{ opacity: 0, y: 8 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ delay: i * 0.06, duration: 0.4, ease: EASE }}
+                      className="rounded-[12px] bg-card p-3.5 transition-colors hover:bg-secondary"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="flex h-7 w-7 shrink-0 items-center justify-center rounded-[8px] bg-secondary font-mono text-[10px] font-semibold text-muted-foreground">{w.av}</span>
+                        <span className="truncate text-[13px] font-medium">{w.nm}</span>
+                        <span className="ml-auto">
+                          <span
+                            className="inline-flex items-center gap-1.5 rounded-full bg-secondary px-2 py-0.5 text-[10.5px] font-semibold uppercase text-muted-foreground"
+                            style={w.st === "review" ? { background: "var(--v3-sel)", color: "var(--v3-accent)" } : undefined}
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full" style={{ background: w.st === "review" ? "var(--v3-accent)" : "currentColor" }} />
+                            {w.st === "review" ? "Review" : "Active"}
+                          </span>
+                        </span>
+                      </div>
+                      <p className="mt-2 line-clamp-2 text-[12px] leading-relaxed text-muted-foreground">{w.d}</p>
+                      <div className="mt-2.5 flex items-center gap-1.5">
+                        {w.tools.map((t, j) => (
+                          <span key={j} className="flex h-[20px] w-[20px] items-center justify-center rounded-[6px] bg-secondary [&_svg]:h-[11px] [&_svg]:w-[11px]">{t}</span>
+                        ))}
+                        <span className="ml-auto font-mono text-[10px] text-muted-foreground">{w.meta}</span>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </Reveal>
+    </section>
   );
 }
 
@@ -194,7 +285,7 @@ export function V3ProductBody() {
             transition={{ duration: 0.55, ease: EASE }}
             className="text-[34px] font-semibold leading-[1.03] tracking-[-0.032em] sm:text-[48px]"
           >
-            The <Hl>cockpit</Hl> behind every worker.
+            The <Hl>record</Hl> behind every worker.
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 10 }}
@@ -207,7 +298,7 @@ export function V3ProductBody() {
         </div>
 
         <div className="pb-16">
-          <AppFrame standalone />
+          <ProductMockup />
         </div>
 
         <Beat
@@ -234,11 +325,11 @@ export function V3ProductBody() {
 
         {/* connections, one quiet line */}
         <Reveal className="flex flex-col items-center gap-4 pb-20 text-center">
-          <span className="flex items-center justify-center gap-5 opacity-80">
+          <Link href="/integrations" className="flex items-center justify-center gap-5 opacity-80 transition-opacity hover:opacity-100" aria-label="Browse Floom integrations">
             {[<GmailLogo key="g" />, <SlackLogo key="s" />, <HubSpotLogo key="h" />, <NotionLogo key="n" />, <GCalLogo key="c" />, <SheetsLogo key="sh" />].map((logo, i) => (
               <span key={i} className="flex h-5 w-5 items-center justify-center [&_svg]:h-5 [&_svg]:w-5">{logo}</span>
             ))}
-          </span>
+          </Link>
           <p className="max-w-[420px] text-[13px] text-muted-foreground">
             Your tools connect with your tokens, and your tokens stay yours. Revoke at the source any time.
           </p>

@@ -26,7 +26,7 @@
   --line-strong: rgba(16, 17, 20, 0.16);
   --shadow-sm: none;
   --shadow-md: none;
-  --shadow-pop: 0 12px 32px rgba(16, 17, 20, 0.10), 0 0 0 1px var(--border-default);
+  --shadow-pop: none;
   --shadow-btn: none;
 
   /* spec accent (blue) for selection + highlights */
@@ -37,7 +37,8 @@
   color: var(--text-primary);
 }
 
-.theme-v3.theme-v3.dark {
+.theme-v3.theme-v3.dark,
+html.floom-night .theme-v3.theme-v3 {
   --bg-app: #191A1D;
   --bg-card: #212327;
   --text-primary: #ECEDEF;
@@ -52,7 +53,7 @@
   --bg-3: #33363C;
   --paper-2: #232529;
   --line-strong: rgba(255, 255, 255, 0.18);
-  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--border-default);
+  --shadow-pop: none;
 
   --v3-accent: #5B8DEF;
   --v3-sel: rgba(91, 141, 239, 0.16);
@@ -93,7 +94,7 @@
 
 
 /* flat spec: the composer carries inline JS shadows the token override can't
-   reach — force flat. Focus ring handled by the border color below. */
+   reach — force flat. */
 .theme-v3 form[data-v3-composer="hero"] {
   box-shadow: none !important;
   border-color: transparent !important;
@@ -105,7 +106,10 @@
 /* dark mode: monochrome brand marks (Notion/GitHub) get a light fill */
 .theme-v3.dark svg path[fill="#000"],
 .theme-v3.dark svg path[fill="#000000"],
-.theme-v3.dark svg path[fill="#181717"] {
+.theme-v3.dark svg path[fill="#181717"],
+html.floom-night .theme-v3 svg path[fill="#000"],
+html.floom-night .theme-v3 svg path[fill="#000000"],
+html.floom-night .theme-v3 svg path[fill="#181717"] {
   fill: #ECEDEF;
 }
 
@@ -127,9 +131,7 @@
 }
 
 
-/* v3 border system (wireframe update): flat surfaces, fills over rings.
-   Cards/tiles/inputs/lists: no borders. Dividers + secondary buttons keep
-   hairlines. Selection/focus = accent ring. */
+/* v3 surface system: flat fills instead of outlines. */
 
 
 /* v3: follow the system, no toggle (configuration stays out of the poster) */
@@ -150,7 +152,7 @@
   --bg-3: #33363C;
   --paper-2: #232529;
   --line-strong: rgba(255, 255, 255, 0.18);
-  --shadow-pop: 0 12px 32px rgba(0, 0, 0, 0.45), 0 0 0 1px var(--border-default);
+  --shadow-pop: none;
 
   --v3-accent: #5B8DEF;
   --v3-sel: rgba(91, 141, 239, 0.16);
@@ -160,7 +162,8 @@
 
 
 /* explicit user override: .light beats the system media query */
-.theme-v3.theme-v3.light {
+.theme-v3.theme-v3.light,
+html.floom-day .theme-v3.theme-v3 {
 
   /* source tokens */
   --bg-app: #FBFBFC;
@@ -185,7 +188,7 @@
   --line-strong: rgba(16, 17, 20, 0.16);
   --shadow-sm: none;
   --shadow-md: none;
-  --shadow-pop: 0 12px 32px rgba(16, 17, 20, 0.10), 0 0 0 1px var(--border-default);
+  --shadow-pop: none;
   --shadow-btn: none;
 
   /* spec accent (blue) for selection + highlights */
@@ -196,7 +199,8 @@
   color: var(--text-primary);
 }
 .theme-v3.theme-v3.light,
-.theme-v3.theme-v3.light.light {
+.theme-v3.theme-v3.light.light,
+html.floom-day .theme-v3.theme-v3 {
   --bg: var(--bg-app);
   --background: var(--bg-app);
   --foreground: var(--text-primary);
@@ -231,4 +235,32 @@
 .v3-float { animation: v3-float 3.6s ease-in-out infinite; }
 @media (prefers-reduced-motion: reduce) {
   .v3-caret, .v3-breathe, .v3-float { animation: none; }
+}
+
+.theme-v3 .floom-mark-dark {
+  display: none;
+}
+.theme-v3.dark .floom-mark-light,
+html.floom-night .theme-v3 .floom-mark-light {
+  display: none;
+}
+.theme-v3.dark .floom-mark-dark,
+html.floom-night .theme-v3 .floom-mark-dark {
+  display: block;
+}
+@media (prefers-color-scheme: dark) {
+  .theme-v3:not(.light) .floom-mark-light {
+    display: none;
+  }
+  .theme-v3:not(.light) .floom-mark-dark {
+    display: block;
+  }
+}
+html.floom-day .theme-v3 .floom-mark-light,
+.theme-v3.light .floom-mark-light {
+  display: block;
+}
+html.floom-day .theme-v3 .floom-mark-dark,
+.theme-v3.light .floom-mark-dark {
+  display: none;
 }

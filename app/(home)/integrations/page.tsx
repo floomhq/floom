@@ -1,6 +1,7 @@
 import type { Metadata } from "next";
 import Link from "next/link";
 import type { ReactNode } from "react";
+import { V3Shell } from "@/app/v3/V3Shell";
 import {
   GCalLogo,
   GitHubSVG,
@@ -13,12 +14,11 @@ import {
   SheetsLogo,
   SlackLogo,
 } from "@/components/landing-icons";
-import { V3Shell } from "../../v3/V3Shell";
 
 export const metadata: Metadata = {
-  title: "Integrations · WorkerOS",
+  title: "Integrations — Floom",
   description:
-    "Connect WorkerOS to Slack, Gmail, Google Calendar, Drive, Sheets, Notion, Linear, GitHub, HubSpot, Salesforce, LinkedIn, Apollo, and more.",
+    "Connect Floom to Slack, Gmail, Google Calendar, Drive, Sheets, Notion, Linear, GitHub, HubSpot, Salesforce, LinkedIn, Apollo, and more.",
 };
 
 type Logo = () => ReactNode;
@@ -99,7 +99,6 @@ const ALL_INTEGRATIONS = [...CONNECTION_CATALOG, ...WORKSPACE_TOOLS];
 export default function IntegrationsPage() {
   return (
     <V3Shell active="integrations">
-      <main>
       <section className="pb-12 pt-16 sm:pt-20">
         <div>
           <div className="max-w-2xl">
@@ -110,7 +109,7 @@ export default function IntegrationsPage() {
               Workers plug into the stack your team already uses.
             </h1>
             <p className="mt-5 max-w-xl text-[16px] leading-relaxed text-[var(--text-muted)]">
-              WorkerOS connects to communication, CRM, knowledge, and product systems so a worker can read the right context, produce the output, and ask for approval where your team already works.
+              Floom connects to communication, CRM, knowledge, and product systems so a worker can read the right context, produce the output, and ask for approval where your team already works.
             </p>
           </div>
         </div>
@@ -121,7 +120,7 @@ export default function IntegrationsPage() {
           {ALL_INTEGRATIONS.map(({ name, category, detail, Logo }) => (
             <article
               key={name}
-              className="flex min-h-[172px] flex-col rounded-[8px] bg-card p-5 ring-1 ring-border transition-colors hover:bg-secondary/60"
+              className="flex min-h-[172px] flex-col rounded-[8px] bg-card p-5 transition-colors hover:bg-secondary/60"
             >
               <div className="flex items-center justify-between gap-4">
                 <span className="flex h-10 w-10 items-center justify-center rounded-[8px] bg-background [&_svg]:h-6 [&_svg]:w-6">
@@ -138,8 +137,8 @@ export default function IntegrationsPage() {
         </div>
       </section>
 
-      <section className="border-t border-border bg-card/60 px-6 py-14">
-        <div className="mx-auto flex max-w-[920px] flex-col gap-5 md:flex-row md:items-center md:justify-between">
+      <section className="bg-card/60 py-14">
+        <div className="flex flex-col gap-5 md:flex-row md:items-center md:justify-between">
           <div>
             <h2 className="text-[24px] font-semibold tracking-[-0.02em]">Bring one job. Connect only what it needs.</h2>
             <p className="mt-2 max-w-xl text-[14px] leading-relaxed text-muted-foreground">
@@ -155,7 +154,6 @@ export default function IntegrationsPage() {
           </Link>
         </div>
       </section>
-      </main>
     </V3Shell>
   );
 }

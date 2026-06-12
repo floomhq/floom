@@ -2,8 +2,9 @@ import type { Metadata } from "next";
 import { V3DocsBody } from "./V3DocsBody";
 
 export const metadata: Metadata = {
-  title: "Docs · WorkerOS",
-  robots: { index: false, follow: false },
+  title: "Docs — Floom",
+  description:
+    "Hire your first Floom worker, connect channels, add MCP, load company brain, and keep approvals on the record.",
 };
 
 export default function V3DocsPage() {

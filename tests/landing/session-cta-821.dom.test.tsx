@@ -1,4 +1,4 @@
-// #821 — landing nav CTA is session-aware: "Sign in" by default, "Dashboard"
+// #821 — landing nav CTA is session-aware: "Sign in" by default, "Open app →"
 // when /api/session reports an authenticated visitor.
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
@@ -25,13 +25,13 @@ describe("session-aware CTA (#821)", () => {
     await waitFor(() => expect(globalThis.fetch).toHaveBeenCalled());
     const cta = screen.getByText("Sign in").closest("a")!;
     expect(cta.getAttribute("href")).toBe("/login");
-    expect(screen.queryByText("Dashboard")).toBeNull();
+    expect(screen.queryByText("Open app →")).toBeNull();
   });
 
-  it("swaps to Dashboard → /app/overview when a session exists", async () => {
+  it("swaps to Open app → /app/overview when a session exists", async () => {
     mockSession(true);
     render(<V3Shell>x</V3Shell>);
-    const cta = await screen.findByText("Dashboard");
+    const cta = await screen.findByText("Open app →");
     expect(cta.closest("a")!.getAttribute("href")).toBe("/app/overview");
     expect(screen.queryByText("Sign in")).toBeNull();
   });
