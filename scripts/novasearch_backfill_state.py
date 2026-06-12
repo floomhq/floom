@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Backfill NovaSearch SQLite state into Workeros Cloud Supabase tables."""
+"""Backfill NovaSearch SQLite state into WorkerOS Cloud Supabase tables."""
 
 from __future__ import annotations
 
@@ -290,7 +290,7 @@ def build_rows(data_pack: Path, workspace_id: str, user_id: str) -> dict[str, li
 
 
 def main() -> int:
-    parser = argparse.ArgumentParser(description="Backfill NovaSearch state into Workeros Supabase")
+    parser = argparse.ArgumentParser(description="Backfill NovaSearch state into WorkerOS Supabase")
     parser.add_argument("--apply", action="store_true", help="write rows; default only prints counts")
     parser.add_argument("--env-file", default=str(DEFAULT_ENV))
     parser.add_argument("--data-pack", default=str(DEFAULT_DATA_PACK))

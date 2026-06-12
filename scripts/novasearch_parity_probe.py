@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-"""NovaSearch old-vs-Workeros parity probe.
+"""NovaSearch old-vs-WorkerOS parity probe.
 
 Default mode is old-backend baseline only. It calls guarded CRM-only fixtures
 from docs/novasearch-migration/gold-fixtures.json and prints normalized
 evidence. If --new-match-url is supplied later, the script compares the old
-backend response with the Workeros response using the fixture thresholds.
+backend response with the WorkerOS response using the fixture thresholds.
 """
 
 from __future__ import annotations

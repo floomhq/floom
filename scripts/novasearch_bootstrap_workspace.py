@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Bootstrap the NovaSearch Workeros workspace and Brain pack.
+"""Bootstrap the NovaSearch WorkerOS workspace and Brain pack.
 
 Dry-run is the default. Production writes only happen with --apply and an
 explicit --email. This script intentionally does not touch nova-api.floom.dev.
@@ -256,7 +256,7 @@ def main() -> int:
     }
 
     if not args.apply:
-        report["next"] = "Run with --apply --email <target> to create/update Workeros Cloud rows and Brain pack."
+        report["next"] = "Run with --apply --email <target> to create/update WorkerOS Cloud rows and Brain pack."
         print(json.dumps(report, indent=2, sort_keys=True))
         return 0
 
