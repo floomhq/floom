@@ -90,6 +90,7 @@ from contexts import (
     context_updated_at,
     current_contexts_root,
     delete_context_metadata,
+    effective_context_user_id,
     ensure_contexts_dir,
     guess_mime_type,
     is_active_markup,
@@ -687,6 +688,10 @@ def _active_context_scope() -> str | None:
 
 
 set_context_scope_resolver(_active_context_scope)
+
+
+def _context_actor_user_id(user_id: str) -> str:
+    return effective_context_user_id(user_id)
 
 
 def _validate_startup_configuration() -> None:
@@ -5978,13 +5983,14 @@ def _context_visible_to_user(
     repos: Optional[Repositories] = None,
 ) -> bool:
     safe_name = validate_context_name(name)
+    actor_user_id = _context_actor_user_id(user_id)
     meta = metadata if metadata is not None else load_context_metadata()
     # Engine/system packs are internal config, never operator-facing.
     if _is_system_context_pack(safe_name, meta):
         return False
     owner_id = context_owner_id(safe_name, meta)
     if owner_id:
-        if owner_id == user_id:
+        if owner_id == actor_user_id:
             return True
         # Members STEP 4: a pack shared with the workspace is visible to members.
         # Only consult the access mirror when repos is available (the OSS list /
@@ -6129,6 +6135,7 @@ def _brain_pack_access(
     repo is available, so the OSS single-owner UX is unchanged. Never raises.
     """
     meta = metadata if metadata is not None else load_context_metadata()
+    actor_user_id = _context_actor_user_id(user_id)
     owner_id = context_owner_id(name, meta)
     asset_access = getattr(repos, "asset_access", None) if repos is not None else None
     if asset_access is not None and owner_id:
@@ -6136,7 +6143,7 @@ def _brain_pack_access(
         try:
             perms = asset_access.get_permissions(
                 workspace_id=derive_workspace_id(owner_id),
-                user_id=user_id,
+                user_id=actor_user_id,
                 asset_type="brain_pack",
                 asset_id=name,
             )
@@ -6155,7 +6162,7 @@ def _brain_pack_access(
         except Exception:
             logger.debug("brain_pack permission probe failed for %s", name, exc_info=True)
     # Fallback: no DB row (unowned pack) — the viewer who can see it is owner.
-    is_owner = (not owner_id) or owner_id == user_id
+    is_owner = (not owner_id) or owner_id == actor_user_id
     return (
         owner_id,
         "private",
@@ -6502,12 +6509,13 @@ def list_contexts(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[ContextSummary]:
+    context_user_id = _context_actor_user_id(auth.user_id)
     ensure_contexts_dir()
     metadata = load_context_metadata()
     root = current_contexts_root()
     # Compute worker_count for every pack from a single workers.list() call so
     # the LIST row matches the DETAIL view (used_by) without N+1 queries.
-    worker_counts = _context_worker_counts(repos, auth.user_id)
+    worker_counts = _context_worker_counts(repos, context_user_id)
     operator_items: List[ContextSummary] = []
     system_items: List[ContextSummary] = []
     for folder in sorted(root.iterdir(), key=lambda p: p.name):
@@ -6521,14 +6529,14 @@ def list_contexts(
             ))
             continue
         if _context_visible_to_user(
-            folder.name, user_id=auth.user_id, metadata=metadata, repos=repos
+            folder.name, user_id=context_user_id, metadata=metadata, repos=repos
         ):
             operator_items.append(_context_summary(
                 folder.name,
                 metadata,
                 worker_count=worker_counts.get(folder.name, 0),
                 repos=repos,
-                user_id=auth.user_id,
+                user_id=context_user_id,
             ))
     # Operator packs first, then read-only system packs.
     return operator_items + system_items
@@ -6541,12 +6549,13 @@ def create_context(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextDetail:
+    context_user_id = _context_actor_user_id(auth.user_id)
     safe_name = _context_name_or_400(name)
     root = context_dir(safe_name)
     metadata = load_context_metadata()
     if root.exists():
         if not _context_visible_to_user(
-            safe_name, user_id=auth.user_id, metadata=metadata, repos=repos
+            safe_name, user_id=context_user_id, metadata=metadata, repos=repos
         ):
             raise HTTPException(status_code=404, detail="Context not found")
         raise HTTPException(status_code=409, detail="Context already exists")
@@ -6555,13 +6564,13 @@ def create_context(
         safe_name,
         writeable=bool(payload.writeable) if payload else False,
         sensitive=bool(payload.sensitive) if payload else True,
-        owner_id=auth.user_id,
+        owner_id=context_user_id,
         category=(payload.category if payload else None),  # #780
     )
     # Materialize the access-control mirror row (default private) so the Share
     # control + permission checks work immediately. Members STEP 4.
-    _ensure_brain_pack_row(safe_name, owner_id=auth.user_id, repos=repos)
-    return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
+    _ensure_brain_pack_row(safe_name, owner_id=context_user_id, repos=repos)
+    return _context_detail(safe_name, repos=repos, user_id=context_user_id)
 
 
 @app.put("/contexts/{name}/category", response_model=ContextDetail)
@@ -6573,9 +6582,10 @@ def set_context_category(
 ) -> ContextDetail:
     """#780: set/clear a brain pack's content-category tag (marketing,
     accounting, research, data, ...). Empty/null clears it."""
-    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    context_user_id = _context_actor_user_id(auth.user_id)
+    safe_name, _metadata = _require_context_for_user(name, user_id=context_user_id)
     set_context_metadata(safe_name, category=(payload.category or ""))
-    return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
+    return _context_detail(safe_name, repos=repos, user_id=context_user_id)
 
 
 @app.get("/contexts/{name}", response_model=ContextDetail)
@@ -6585,12 +6595,13 @@ def get_context(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextDetail:
+    context_user_id = _context_actor_user_id(auth.user_id)
     safe_name, metadata = _require_readable_context_for_user(
-        name, user_id=auth.user_id, repos=repos
+        name, user_id=context_user_id, repos=repos
     )
     # #783: ?path_prefix=reports filters the file list to that subfolder.
     return _context_detail(
-        safe_name, metadata, repos=repos, user_id=auth.user_id, path_prefix=path_prefix
+        safe_name, metadata, repos=repos, user_id=context_user_id, path_prefix=path_prefix
     )
 
 
@@ -6608,8 +6619,9 @@ def set_context_visibility(
     local user owns their packs, so this always succeeds for them. System/engine
     packs are read-only (404 from the require helper). 404 for an invisible pack.
     """
+    context_user_id = _context_actor_user_id(auth.user_id)
     safe_name, metadata = _require_context_for_user(
-        name, user_id=auth.user_id, repos=repos
+        name, user_id=context_user_id, repos=repos
     )
     asset_access = getattr(repos, "asset_access", None)
     if asset_access is None or not hasattr(asset_access, "set_visibility"):
@@ -6626,7 +6638,7 @@ def set_context_visibility(
     try:
         result = asset_access.set_visibility(
             workspace_id=derive_workspace_id(owner_id),
-            actor_id=auth.user_id,
+            actor_id=context_user_id,
             asset_type="brain_pack",
             asset_id=safe_name,
             visibility=payload.visibility,
@@ -6637,7 +6649,7 @@ def set_context_visibility(
         raise HTTPException(status_code=400, detail=str(exc)) from exc
     if result is None:
         raise HTTPException(status_code=404, detail="Context not found")
-    return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
+    return _context_detail(safe_name, repos=repos, user_id=context_user_id)
 
 
 class ContextSensitiveRequest(BaseModel):
@@ -6656,7 +6668,8 @@ def set_context_sensitive(
     committed to git, never appear in git history, and never pushed to any
     connected GitHub repo. Toggle off to resume git tracking from the next write.
     """
-    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    context_user_id = _context_actor_user_id(auth.user_id)
+    safe_name, _metadata = _require_context_for_user(name, user_id=context_user_id)
     set_context_metadata(safe_name, sensitive=body.sensitive)
     return {"name": safe_name, "sensitive": body.sensitive}
 
@@ -6668,9 +6681,10 @@ def delete_context(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextDeleteResponse:
-    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    context_user_id = _context_actor_user_id(auth.user_id)
+    safe_name, _metadata = _require_context_for_user(name, user_id=context_user_id)
     root = context_dir(safe_name)
-    referenced_by = _workers_referencing_context(safe_name, user_id=auth.user_id, repos=repos)
+    referenced_by = _workers_referencing_context(safe_name, user_id=context_user_id, repos=repos)
     if referenced_by and not force:
         raise HTTPException(
             status_code=409,
@@ -6689,7 +6703,8 @@ def get_context_file(
     file_path: str,
     auth: AuthContext = Depends(get_auth_context),
 ):
-    safe_name, _metadata = _require_readable_context_for_user(name, user_id=auth.user_id)
+    context_user_id = _context_actor_user_id(auth.user_id)
+    safe_name, _metadata = _require_readable_context_for_user(name, user_id=context_user_id)
     rel = _context_file_path_or_400(file_path)
     target = _safe_context_file_or_400(safe_name, rel)
     if not target.is_file():
@@ -6725,7 +6740,8 @@ async def put_context_file(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextFileItem:
-    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    context_user_id = _context_actor_user_id(auth.user_id)
+    safe_name, _metadata = _require_context_for_user(name, user_id=context_user_id)
     rel = _context_file_path_or_400(file_path)
     content_type = (request.headers.get("content-type") or "").split(";", 1)[0].strip().lower()
     if content_type == "application/json":
@@ -6744,7 +6760,7 @@ async def put_context_file(
         safe_name,
         rel,
         data,
-        user_id=auth.user_id,
+        user_id=context_user_id,
         tags=tags,
         file_metadata=file_metadata,
     )
@@ -6760,7 +6776,8 @@ def delete_context_file(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextDetail:
-    safe_name, metadata = _require_context_for_user(name, user_id=auth.user_id)
+    context_user_id = _context_actor_user_id(auth.user_id)
+    safe_name, metadata = _require_context_for_user(name, user_id=context_user_id)
     rel = _context_file_path_or_400(file_path)
     target = _safe_context_file_or_400(safe_name, rel)
     if not target.is_file():
@@ -6773,10 +6790,10 @@ def delete_context_file(
             parent.rmdir()
         except OSError:
             break
-    set_context_file_metadata(safe_name, rel, tags=[], file_metadata={}, owner_id=auth.user_id)
+    set_context_file_metadata(safe_name, rel, tags=[], file_metadata={}, owner_id=context_user_id)
     author_name, author_email = _git_author(auth)
     _git_commit_context(safe_name, rel, message=f"context {safe_name}: delete {rel}", author_name=author_name, author_email=author_email)
-    return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
+    return _context_detail(safe_name, repos=repos, user_id=context_user_id)
 
 
 class _SqliteView(BaseModel):
@@ -6800,7 +6817,8 @@ def view_context_sqlite(
     """#777: inspect a brain .db file — list tables, or read a table's rows.
     Opens the file READ-ONLY; table name is validated against the real table
     list before use (no injection); rows are capped and BLOBs are summarised."""
-    safe_name, _meta = _require_context_for_user(name, user_id=auth.user_id)
+    context_user_id = _context_actor_user_id(auth.user_id)
+    safe_name, _meta = _require_context_for_user(name, user_id=context_user_id)
     rel = _context_file_path_or_400(file_path)
     target = _safe_context_file_or_400(safe_name, rel)
     if not target.is_file():
@@ -6852,7 +6870,8 @@ def move_context_file(
     DELETE old + PUT new loses version history; this renames on disk and
     commits both paths so git records it as a rename.
     """
-    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
+    context_user_id = _context_actor_user_id(auth.user_id)
+    safe_name, _metadata = _require_context_for_user(name, user_id=context_user_id)
     old_rel = _context_file_path_or_400(file_path)
     new_rel = _context_file_path_or_400(payload.new_path)
     if old_rel == new_rel:
@@ -6871,9 +6890,9 @@ def move_context_file(
         safe_name, new_rel,
         tags=old_meta.get("tags", []) or [],
         file_metadata=old_meta.get("metadata", {}) or {},
-        owner_id=auth.user_id,
+        owner_id=context_user_id,
     )
-    set_context_file_metadata(safe_name, old_rel, tags=[], file_metadata={}, owner_id=auth.user_id)
+    set_context_file_metadata(safe_name, old_rel, tags=[], file_metadata={}, owner_id=context_user_id)
     # prune now-empty source dirs
     for parent in src.parents:
         if parent == context_dir(safe_name):
@@ -6903,20 +6922,21 @@ async def upload_context_files(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextUploadResponse:
+    context_user_id = _context_actor_user_id(auth.user_id)
     safe_name = _context_name_or_400(name)
     root = context_dir(safe_name)
     if root.is_dir():
         safe_name, _metadata = _require_context_for_user(
             safe_name,
-            user_id=auth.user_id,
+            user_id=context_user_id,
             repos=repos,
         )
     elif create_if_missing:
         if _user_scoped_local_mode() or _is_cloud_deploy():
             raise HTTPException(status_code=404, detail="Context not found")
         root.mkdir(parents=True, exist_ok=True)
-        set_context_metadata(safe_name, writeable=True, owner_id=auth.user_id)
-        _ensure_brain_pack_row(safe_name, owner_id=auth.user_id, repos=repos)
+        set_context_metadata(safe_name, writeable=True, owner_id=context_user_id)
+        _ensure_brain_pack_row(safe_name, owner_id=context_user_id, repos=repos)
     else:
         raise HTTPException(status_code=404, detail="Context not found")
     raw_prefix = path_prefix.strip().strip("/")
@@ -6953,7 +6973,7 @@ async def upload_context_files(
                 safe_name,
                 rel,
                 data,
-                user_id=auth.user_id,
+                user_id=context_user_id,
                 tags=upload_tags,
                 file_metadata=upload_metadata,
             )
@@ -6980,7 +7000,8 @@ def scan_context_for_secrets(
     findings — never the raw value — and refreshes the persisted
     has_secret_warning flag so the UI badge stays accurate.
     """
-    safe_name, _metadata = _require_readable_context_for_user(name, user_id=auth.user_id)
+    context_user_id = _context_actor_user_id(auth.user_id)
+    safe_name, _metadata = _require_readable_context_for_user(name, user_id=context_user_id)
     root = context_dir(safe_name)
     scanned = 0
     flagged: List[ContextSecretScanFile] = []
