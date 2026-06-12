@@ -1982,6 +1982,37 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_workspace_api_tokens_workspace
         ON workspace_api_tokens(workspace_id);
     """,
+    # -- migration 76: persisted per-run cost accounting (#793 spend cap, #795
+    # approval cost-so-far). Populated at terminal status from the transcript
+    # usage row; NULL = not yet computed / pure-script run with no LLM tokens.
+    """
+    ALTER TABLE runs ADD COLUMN total_tokens INTEGER;
+    ALTER TABLE runs ADD COLUMN total_cost_usd REAL;
+    CREATE INDEX IF NOT EXISTS idx_runs_worker_created ON runs(worker_id, created_at);
+    """,
+    # -- migration 77: approval cost-so-far snapshot (#795). Captured at
+    # approval creation from the live transcript; estimate, surfaced on the
+    # approval Run tab so the page needs no separate run fetch.
+    """
+    ALTER TABLE approvals ADD COLUMN tokens_so_far INTEGER;
+    ALTER TABLE approvals ADD COLUMN cost_usd_so_far REAL;
+    """,
+    # -- migration 78: edit-access requests (#807). A member viewing a locked
+    # (workspace-shared, not owned) worker can ask the owner/admin for edit
+    # rights; the request is recorded (and the owner notified best-effort).
+    """
+    CREATE TABLE IF NOT EXISTS edit_access_requests (
+        id           TEXT PRIMARY KEY,
+        worker_id    TEXT NOT NULL,
+        requester_id TEXT NOT NULL,
+        message      TEXT,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        created_at   TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_req_pending
+        ON edit_access_requests(worker_id, requester_id)
+        WHERE status = 'pending';
+    """,
 ]
 
 
