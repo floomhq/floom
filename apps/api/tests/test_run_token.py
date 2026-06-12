@@ -340,3 +340,58 @@ class TestWorkerCallSecretRequired:
         monkeypatch.setenv("FLOOM_SECRET", "real-secret")
         with pytest.raises(ValueError):
             validate_worker_call_token(forged)
+
+
+class TestWorkerCallSecretDecoupled:
+    """#992: signing secret decoupled from FLOOM_SECRET (env var + resolver hook)
+    so multi-tenant cloud can sign without re-enabling the x-floom-secret gate,
+    while OSS still fails closed (#972)."""
+
+    def teardown_method(self):
+        from run_token import set_worker_call_secret_resolver
+        set_worker_call_secret_resolver(None)
+
+    def test_dedicated_env_var_used_before_floom_secret(self, monkeypatch):
+        from run_token import _worker_call_signing_key
+
+        monkeypatch.delenv("FLOOM_SECRET", raising=False)
+        monkeypatch.setenv("WORKEROS_WORKER_CALL_SECRET", "wcs-real")
+        assert _worker_call_signing_key() == "wcs-real"
+
+    def test_resolver_wins_over_env(self, monkeypatch):
+        from run_token import _worker_call_signing_key, set_worker_call_secret_resolver
+
+        monkeypatch.setenv("WORKEROS_WORKER_CALL_SECRET", "env-secret")
+        set_worker_call_secret_resolver(lambda: "resolver-secret")
+        assert _worker_call_signing_key() == "resolver-secret"
+
+    def test_cloud_path_signs_and_validates_without_floom_secret(self, monkeypatch):
+        from run_token import (
+            issue_worker_call_token,
+            validate_worker_call_token,
+            set_worker_call_secret_resolver,
+        )
+
+        monkeypatch.delenv("FLOOM_SECRET", raising=False)
+        monkeypatch.delenv("WORKEROS_WORKER_CALL_SECRET", raising=False)
+        # cloud registers a Supabase-derived secret at startup
+        set_worker_call_secret_resolver(lambda: "supabase-derived-secret")
+        token = issue_worker_call_token(user_id="u1", parent_run_id="r1", callable_workers=["w1"])
+        payload = validate_worker_call_token(token)
+        assert payload["user_id"] == "u1"
+
+    def test_oss_still_fails_closed_with_no_secret_and_no_resolver(self, monkeypatch):
+        from run_token import issue_worker_call_token, WorkerCallSecretMissing
+
+        monkeypatch.delenv("FLOOM_SECRET", raising=False)
+        monkeypatch.delenv("WORKEROS_WORKER_CALL_SECRET", raising=False)
+        with pytest.raises(WorkerCallSecretMissing):
+            issue_worker_call_token(user_id="u1", parent_run_id="r1", callable_workers=["w1"])
+
+    def test_resolver_returning_none_falls_through_to_env(self, monkeypatch):
+        from run_token import _worker_call_signing_key, set_worker_call_secret_resolver
+
+        monkeypatch.delenv("FLOOM_SECRET", raising=False)
+        monkeypatch.setenv("WORKEROS_WORKER_CALL_SECRET", "env-fallback")
+        set_worker_call_secret_resolver(lambda: None)
+        assert _worker_call_signing_key() == "env-fallback"
