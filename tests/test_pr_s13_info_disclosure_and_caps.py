@@ -694,7 +694,8 @@ def test_sweep_connections_is_scoped_per_user(monkeypatch, tmp_path):
     async def fake_sweep(*, user_id=None):
         seen_user_ids.append(user_id)
 
-    monkeypatch.setattr(main, "_run_connection_sweep", fake_sweep)
+    import routers.connections as _conn
+    monkeypatch.setattr(_conn, "_run_connection_sweep", fake_sweep)
 
     user_a = {**_AUTH_HEADER, "x-floom-user": "user-a"}
     user_b = {**_AUTH_HEADER, "x-floom-user": "user-b"}

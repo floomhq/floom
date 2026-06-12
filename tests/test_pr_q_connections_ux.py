@@ -242,7 +242,7 @@ class TestScopesUX:
         conn = _seed_connection(client, app_name="gmail")
         local_id = conn["id"]
 
-        with patch("main._fetch_composio_account_info") as mock_fetch:
+        with patch("routers.connections._fetch_composio_account_info") as mock_fetch:
             mock_fetch.return_value = {
                 "email": "user@example.com",
                 "scopes": [
@@ -278,7 +278,7 @@ class TestScopesUX:
         conn = _seed_connection(client, app_name="slack")
         local_id = conn["id"]
 
-        with patch("main._fetch_composio_account_info") as mock_fetch:
+        with patch("routers.connections._fetch_composio_account_info") as mock_fetch:
             mock_fetch.return_value = {
                 "email": "team@example.com",
                 "scopes": ["channels:read", "chat:write"],
