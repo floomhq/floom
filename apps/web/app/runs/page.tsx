@@ -47,9 +47,9 @@ function RunsLoadingSkeleton() {
           ))}
         </div>
       </div>
-      <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
+      <div className="rounded-xl [border:var(--bd-card)] bg-[var(--bg-card)] overflow-hidden">
         {Array.from({ length: 8 }).map((_, i) => (
-          <Skeleton key={i} className="h-11 w-full rounded-none border-b border-[var(--border-default)] last:border-b-0" />
+          <Skeleton key={i} className="h-11 w-full rounded-none [border-bottom:var(--bd-div)] last:[border-bottom:0]" />
         ))}
       </div>
     </div>

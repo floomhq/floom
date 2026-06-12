@@ -126,7 +126,7 @@ export function TextHighlightAnnotator({
         ref={containerRef}
         onMouseUp={captureSelection}
         onKeyUp={captureSelection}
-        className="relative max-h-[42vh] select-text overflow-auto whitespace-pre-wrap rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] p-4 text-sm leading-6 text-[var(--ink)]"
+        className="relative max-h-[42vh] select-text overflow-auto whitespace-pre-wrap rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] p-4 text-sm leading-6 text-[var(--ink)]"
       >
         {segments.map((seg, i) =>
           seg.highlighted ? (
@@ -143,7 +143,7 @@ export function TextHighlightAnnotator({
       </div>
 
       <div className="flex flex-col gap-3">
-        <div className="rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--paper)] p-3">
+        <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] p-3">
           <p className="text-xs font-medium text-[var(--ink)]">
             {selection ? "Comment on selection" : "Select text to comment"}
           </p>
@@ -157,7 +157,7 @@ export function TextHighlightAnnotator({
             onChange={(e) => setDraft(e.target.value)}
             disabled={!selection}
             placeholder="What should change here?"
-            className="mt-2 min-h-16 w-full rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] px-2 py-1.5 text-xs text-[var(--ink)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)] disabled:opacity-50"
+            className="mt-2 min-h-16 w-full rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] px-2 py-1.5 text-xs text-[var(--ink)] focus:outline-none focus:[border:var(--bd-card)] disabled:opacity-50"
           />
           <button
             type="button"
@@ -175,7 +175,7 @@ export function TextHighlightAnnotator({
             {items.map((item) => (
               <li
                 key={item._id}
-                className="rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--paper)] p-2.5 text-xs"
+                className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] p-2.5 text-xs"
               >
                 {item.quote && (
                   <p className="line-clamp-2 italic text-[var(--ink-soft)]">“{item.quote}”</p>
@@ -310,7 +310,7 @@ export function ScreenshotAnnotator({
         type="button"
         onClick={() => fileRef.current?.click()}
         disabled={uploading}
-        className="inline-flex h-9 w-fit items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] px-3 text-sm font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] disabled:opacity-50"
+        className="inline-flex h-9 w-fit items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 text-sm font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] disabled:opacity-50"
       >
         <Upload className="h-4 w-4" />
         {uploading ? "Uploading…" : "Attach screenshot"}
@@ -319,9 +319,9 @@ export function ScreenshotAnnotator({
       {images.map((img) => (
         <div
           key={img._id}
-          className="overflow-hidden rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--paper)]"
+          className="overflow-hidden rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)]"
         >
-          <div className="flex items-center justify-between gap-2 border-b border-[var(--border-soft)] px-3 py-2">
+          <div className="flex items-center justify-between gap-2 [border-bottom:var(--bd-div)] px-3 py-2">
             <input
               value={img.caption}
               onChange={(e) => updateImage(img._id, { caption: e.target.value.slice(0, 8000) })}
@@ -344,13 +344,13 @@ export function ScreenshotAnnotator({
                 src={img._previewUrl}
                 alt={img.caption || "Review screenshot"}
                 onClick={(e) => addPin(img._id, e)}
-                className="max-h-[40vh] max-w-full cursor-crosshair rounded-[var(--radius-button)] border border-[var(--border-soft)] object-contain"
+                className="max-h-[40vh] max-w-full cursor-crosshair rounded-[var(--radius-button)] [border:var(--bd-card)] object-contain"
               />
               {img.pins.map((pin, i) => (
                 <span
                   key={i}
                   style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%` }}
-                  className="absolute -ml-3 -mt-3 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--primary)] text-[11px] font-semibold text-[var(--primary-text)] shadow"
+                  className="absolute -ml-3 -mt-3 flex h-6 w-6 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] text-[11px] font-semibold text-[var(--primary-text)] shadow"
                 >
                   {i + 1}
                 </span>
@@ -364,14 +364,14 @@ export function ScreenshotAnnotator({
               <ul className="mt-2 flex flex-col gap-1.5">
                 {img.pins.map((pin, i) => (
                   <li key={i} className="flex items-center gap-2">
-                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-[10px] font-semibold text-[var(--primary-text)]">
+                    <span className="flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] text-[10px] font-semibold text-[var(--primary-text)]">
                       {i + 1}
                     </span>
                     <input
                       value={pin.comment}
                       onChange={(e) => updatePin(img._id, i, e.target.value.slice(0, 8000))}
                       placeholder="Comment for this pin"
-                      className="min-w-0 flex-1 rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] px-2 py-1 text-xs text-[var(--ink)] focus:outline-none focus:ring-1 focus:ring-[var(--primary)]"
+                      className="min-w-0 flex-1 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] px-2 py-1 text-xs text-[var(--ink)] focus:outline-none focus:[border:var(--bd-card)]"
                     />
                     <button
                       type="button"
@@ -417,7 +417,7 @@ export function AnnotationsViewer({
             {text.map((item, i) => (
               <li
                 key={i}
-                className="rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] p-3 text-xs"
+                className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] p-3 text-xs"
               >
                 {item.quote && <p className="italic text-[var(--ink-soft)]">“{item.quote}”</p>}
                 {item.comment && <p className="mt-1 text-[var(--ink)]">{item.comment}</p>}
@@ -428,10 +428,10 @@ export function AnnotationsViewer({
         {images.map((img, i) => (
           <div
             key={i}
-            className="overflow-hidden rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)]"
+            className="overflow-hidden rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)]"
           >
             {img.caption && (
-              <p className="border-b border-[var(--border-soft)] px-3 py-2 text-xs text-[var(--ink)]">
+              <p className="[border-bottom:var(--bd-div)] px-3 py-2 text-xs text-[var(--ink)]">
                 {img.caption}
               </p>
             )}
@@ -441,13 +441,13 @@ export function AnnotationsViewer({
                 <img
                   src={resolveImageUrl ? resolveImageUrl(img.url) : img.url}
                   alt={img.caption || "Reviewer screenshot"}
-                  className="max-h-[40vh] max-w-full rounded-[var(--radius-button)] border border-[var(--border-soft)] object-contain"
+                  className="max-h-[40vh] max-w-full rounded-[var(--radius-button)] [border:var(--bd-card)] object-contain"
                 />
                 {(img.pins ?? []).map((pin, p) => (
                   <span
                     key={p}
                     style={{ left: `${pin.x * 100}%`, top: `${pin.y * 100}%` }}
-                    className="absolute -ml-3 -mt-3 flex h-6 w-6 items-center justify-center rounded-full bg-[var(--primary)] text-[11px] font-semibold text-[var(--primary-text)] shadow"
+                    className="absolute -ml-3 -mt-3 flex h-6 w-6 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] text-[11px] font-semibold text-[var(--primary-text)] shadow"
                   >
                     {p + 1}
                   </span>
@@ -457,7 +457,7 @@ export function AnnotationsViewer({
                 <ul className="mt-2 flex flex-col gap-1 text-xs">
                   {img.pins.map((pin, p) => (
                     <li key={p} className="flex items-start gap-2">
-                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-full bg-[var(--primary)] text-[10px] font-semibold text-[var(--primary-text)]">
+                      <span className="mt-0.5 flex h-5 w-5 shrink-0 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] text-[10px] font-semibold text-[var(--primary-text)]">
                         {p + 1}
                       </span>
                       <span className="text-[var(--ink)]">{pin.comment || <span className="text-[var(--ink-faint)]">(no comment)</span>}</span>

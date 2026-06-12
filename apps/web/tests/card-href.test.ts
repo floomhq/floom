@@ -17,8 +17,8 @@ describe("getCardHref", () => {
     expect(getCardHref(card({ kind: "worker-create", workerName: "W", step: "drafting" }))).toBeNull();
   });
 
-  it("run → /runs/{id} (null without id)", () => {
-    expect(getCardHref(card({ kind: "run", workerName: "W", runId: "run_9" }))).toBe("/runs/run_9");
+  it("run → split-pane run detail (null without id)", () => {
+    expect(getCardHref(card({ kind: "run", workerName: "W", runId: "run_9" }))).toBe("/runs?sel=run_9");
     expect(getCardHref(card({ kind: "run", workerName: "W" }))).toBeNull();
   });
 
@@ -27,7 +27,7 @@ describe("getCardHref", () => {
       getCardHref(
         card({ kind: "artifact", runId: "run_5", artifactId: "a1", name: "x.png", downloadUrl: "/d" })
       )
-    ).toBe("/runs/run_5?tab=Output");
+    ).toBe("/runs?sel=run_5&tab=Output");
   });
 
   it("approval → /approvals?sel={id} or /approvals", () => {

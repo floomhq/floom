@@ -25,7 +25,7 @@ const geistMono = Geist_Mono({
 export const dynamic = "force-dynamic";
 
 export const metadata: Metadata = {
-  title: "WorkerOS",
+  title: "Floom",
   description: "Workers that use your tools. Run them on schedule, webhook, or approval.",
   icons: {
     // Single SVG favicon that adapts via prefers-color-scheme inside the SVG.

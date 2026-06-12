@@ -128,9 +128,9 @@ function Cell({
     <span
       title={title}
       className={cn(
-        "relative inline-flex shrink-0 items-center justify-center ring-1",
+        "relative inline-flex shrink-0 items-center justify-center [border:var(--bd-card)]",
         first ? "z-20" : "-ml-px z-10",
-        "bg-[var(--bg-2)] text-[var(--ink-soft)] ring-[var(--line-soft)]",
+        "bg-[var(--bg-2)] text-[var(--ink-soft)] [border:var(--bd-card)]",
         SIZE[size].box,
       )}
       style={{ borderRadius: "5px" }}
@@ -279,7 +279,7 @@ export function WorkerIconPills({
           <span
             title={`+${overflow} more`}
             className={cn(
-              "relative -ml-px z-0 inline-flex shrink-0 items-center justify-center px-1 text-[9px] font-medium leading-none ring-1 ring-[var(--line-soft)] bg-[var(--bg-2)] text-[var(--ink-mute)]",
+              "relative -ml-px z-0 inline-flex shrink-0 items-center justify-center px-1 text-[9px] font-medium leading-none [border:var(--bd-card)] [border:var(--bd-card)] bg-[var(--bg-2)] text-[var(--ink-mute)]",
               SIZE[size].overflow,
             )}
             style={{ borderRadius: "5px" }}

@@ -31,7 +31,7 @@ export function GenericToolCard({ card }: { card: GenericToolCardType }) {
               <a
                 key={action.id}
                 href={action.href}
-                className="inline-flex items-center gap-1 rounded-md border border-border bg-background px-2 py-1 text-[11px] font-medium text-foreground hover:bg-accent transition-colors"
+                className="inline-flex items-center gap-1 rounded-md [border:var(--bd-card)] bg-background px-2 py-1 text-[11px] font-medium text-foreground hover:bg-accent transition-colors"
               >
                 {action.label ?? action.id}
                 <ExternalLink className="size-3" />
@@ -39,7 +39,7 @@ export function GenericToolCard({ card }: { card: GenericToolCardType }) {
             ) : (
               <span
                 key={action.id}
-                className="inline-flex items-center rounded-md border border-border bg-background px-2 py-1 text-[11px] text-muted-foreground"
+                className="inline-flex items-center rounded-md [border:var(--bd-card)] bg-background px-2 py-1 text-[11px] text-muted-foreground"
               >
                 {action.label ?? action.id}
                 {action.method ? ` ${action.method}` : ""}

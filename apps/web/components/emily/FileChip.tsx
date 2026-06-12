@@ -24,7 +24,7 @@ export function FileChip({
   onRemove?: () => void;
 }) {
   return (
-    <div className="inline-flex items-center gap-1.5 rounded-full border border-border bg-muted/60 pl-2.5 pr-1.5 py-1 text-xs max-w-[200px]">
+    <div className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/60 pl-2.5 pr-1.5 py-1 text-xs max-w-[200px]">
       <FileIcon type={file.type} />
       <span className="truncate flex-1 min-w-0 text-foreground/80">{file.name}</span>
       <span className="text-muted-foreground shrink-0">{formatBytes(file.size)}</span>
@@ -32,7 +32,7 @@ export function FileChip({
         <button
           type="button"
           onClick={onRemove}
-          className="shrink-0 rounded-full p-0.5 hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
+          className="shrink-0 rounded-[var(--radius-pill)] p-0.5 hover:bg-muted transition-colors text-muted-foreground hover:text-foreground"
           aria-label={`Remove ${file.name}`}
         >
           <X className="size-3" />

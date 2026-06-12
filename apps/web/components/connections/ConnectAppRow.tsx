@@ -16,9 +16,9 @@ export function ConnectAppRow({
   onConnect: (slug: string) => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-lg border border-[var(--line)] bg-[var(--glass-bg)] p-3 transition-colors hover:bg-[var(--paper-2)]">
+    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--glass-bg)] p-3 transition-colors hover:bg-[var(--paper-2)]">
       <div className="flex min-w-0 items-center gap-3">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--paper)]">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)]">
           <BrandLogo icon={app.icon} className="size-4" />
         </div>
         <span className="truncate text-sm font-medium text-[var(--ink)]">
@@ -27,7 +27,7 @@ export function ConnectAppRow({
         {connected && (
           <Badge
             variant="outline"
-            className="border-[color-mix(in_srgb,var(--positive)_24%,var(--line))] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] text-[var(--positive)]"
+            className="[border:var(--bd-pill)] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] text-[var(--positive)]"
           >
             Connected
           </Badge>

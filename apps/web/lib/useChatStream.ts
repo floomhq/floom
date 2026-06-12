@@ -87,7 +87,7 @@ export function useChatStream(): ChatStreamState {
   }, []);
 
   // Cross-tab / cross-instance sync: if another mounted instance (e.g. the dock
-  // while the full page is open, or a second tab) starts a new session or
+  // while another chat surface is open, or a second tab) starts a new session or
   // switches conversation, mirror it here.
   useEffect(() => {
     function onStorage(e: StorageEvent) {
@@ -778,7 +778,7 @@ function runCardFromResult(
                 id: "open_run",
                 label: "View run",
                 method: "GET" as const,
-                href: `/runs/${runId}?tab=logs`,
+                href: `/runs?sel=${encodeURIComponent(runId)}&tab=Trace`,
               },
             ]
           : event.actions;
@@ -1024,7 +1024,9 @@ export function shouldAutoOpenRunDetails(card: ToolCard): card is RunCard {
 }
 
 export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
-  return shouldAutoOpenRunDetails(card) ? `/runs/${card.runId}?tab=logs` : null;
+  return shouldAutoOpenRunDetails(card) && card.runId
+    ? `/runs?sel=${encodeURIComponent(card.runId)}&tab=Trace`
+    : null;
 }
 
 // #825: Emily's answers link to app pages as REAL router hrefs (no DOM access /
@@ -1035,9 +1037,9 @@ export function getCardHref(card: ToolCard): string | null {
     case "worker-create":
       return card.workerId ? `/workers?sel=${encodeURIComponent(card.workerId)}` : null;
     case "run":
-      return card.runId ? `/runs/${card.runId}` : null;
+      return card.runId ? `/runs?sel=${encodeURIComponent(card.runId)}` : null;
     case "artifact":
-      return card.runId ? `/runs/${card.runId}?tab=Output` : null;
+      return card.runId ? `/runs?sel=${encodeURIComponent(card.runId)}&tab=Output` : null;
     case "approval":
       return card.approvalId ? `/approvals?sel=${card.approvalId}` : "/approvals";
     case "connect-service":

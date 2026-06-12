@@ -27,8 +27,7 @@ describe("ModelDefaults (#797)", () => {
     const { ModelDefaults } = await import("@/app/settings/page");
     render(<ModelDefaults />);
 
-    const modelInput = (await screen.findByLabelText("Default model")) as HTMLInputElement;
-    expect(modelInput.value).toBe("claude-opus-4-8");
+    expect(await screen.findByText("Claude Opus 4.8")).toBeInTheDocument();
 
     const capInput = screen.getByLabelText("Monthly spend cap (USD)") as HTMLInputElement;
     fireEvent.change(capInput, { target: { value: "100" } });

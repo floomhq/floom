@@ -801,7 +801,7 @@ export const api = {
         body: JSON.stringify({ return_to }),
       }),
     // Consume a Slack claim token (from ?slack_claim=) and bind the Slack
-    // sender identity to the authenticated Workeros user.
+    // sender identity to the authenticated Floom user.
     claim: (token: string) =>
       fetchJson<{ ok: boolean; slack_team_id: string; slack_user_id: string; user_id: string }>(
         "/slack/bindings/claim",

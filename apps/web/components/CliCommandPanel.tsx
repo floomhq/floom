@@ -78,7 +78,7 @@ const CLI_COMMANDS: { name: string; description: string }[] = [
   { name: "workeros secrets delete <key>", description: "Delete a secret." },
   { name: "workeros connections list", description: "List saved app and MCP connections." },
   { name: "workeros connections import-mcp-config <path>", description: "Import MCP servers from a client config JSON." },
-  { name: "workeros mcp install --target <client>", description: "Install the WorkerOS MCP server into a client config (claude, cursor, vscode, windsurf, generic)." },
+  { name: "workeros mcp install --target <client>", description: "Install the Floom MCP server into a client config (claude, cursor, vscode, windsurf, generic)." },
   { name: "workeros doctor", description: "Check CLI setup: API, auth, MCP, runs endpoint." },
 ];
 
@@ -308,7 +308,7 @@ export function CliCommandPanel() {
           </p>
         </div>
         {storedSecret ? (
-          <div className="flex items-center gap-2 rounded-[var(--radius-card)] border border-line bg-[var(--bg-2)] px-3 py-2">
+          <div className="flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2">
             <code className="flex-1 truncate font-mono text-xs">
               {revealed ? storedSecret : maskSecret(storedSecret)}
             </code>
@@ -429,10 +429,10 @@ export function CliCommandPanel() {
                     type="button"
                     onClick={() => setMcpTarget(t.value)}
                     className={
-                      `inline-flex h-8 items-center rounded-[var(--radius-button)] border px-3 text-xs font-medium transition-colors ` +
+                      `inline-flex h-8 items-center rounded-[var(--radius-button)] [border:var(--bd-pill)] px-3 text-xs font-medium transition-colors ` +
                       (mcpTarget === t.value
-                        ? "border-[var(--foreground)] bg-[var(--foreground)] text-[var(--background)]"
-                        : "border-line bg-[var(--bg-2)] text-muted-foreground hover:text-foreground hover:bg-muted")
+                        ? "bg-[var(--foreground)] text-[var(--background)]"
+                        : "bg-[var(--bg-2)] text-muted-foreground hover:text-foreground hover:bg-muted")
                     }
                   >
                     {t.label}
@@ -457,7 +457,7 @@ export function CliCommandPanel() {
               Call the HTTP API directly with your token. It is a full read+write API —
               create workers, start runs, approve, rotate secrets, and more.
             </p>
-            <div className="rounded-[var(--radius-card)] border border-line bg-[var(--bg-2)] px-3 py-2.5 space-y-1.5 text-sm">
+            <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2.5 space-y-1.5 text-sm">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="w-20 shrink-0 text-muted-foreground">Base URL</span>
                 <code className="font-mono text-xs text-foreground">{API_BASE}</code>
@@ -515,13 +515,13 @@ function RefList({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={filterPlaceholder}
-          className="h-8 w-44 rounded-[var(--radius-input)] border border-line bg-[var(--bg-2)] px-2.5 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring"
+          className="h-8 w-44 rounded-[var(--radius-input)] [border:var(--bd-input)] bg-[var(--bg-2)] px-2.5 text-xs outline-none placeholder:text-muted-foreground"
         />
       </div>
       {filtered.length === 0 ? (
         <p className="px-1 py-3 text-xs text-muted-foreground">No matches.</p>
       ) : (
-        <div className="divide-y divide-line rounded-[var(--radius-card)] border border-line overflow-hidden">
+        <div className="[&>*+*]:[border-top:var(--bd-div)] rounded-[var(--radius-card)] [border:var(--bd-card)] overflow-hidden">
           {filtered.map((item) => (
             <div key={item.name} className="px-3 py-2.5">
               <code className="text-xs font-medium text-foreground">{item.name}</code>
@@ -569,7 +569,7 @@ function ApiEndpointList() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Filter endpoints..."
-          className="h-8 w-44 rounded-[var(--radius-input)] border border-line bg-[var(--bg-2)] px-2.5 text-xs outline-none placeholder:text-muted-foreground focus-visible:border-ring"
+          className="h-8 w-44 rounded-[var(--radius-input)] [border:var(--bd-input)] bg-[var(--bg-2)] px-2.5 text-xs outline-none placeholder:text-muted-foreground"
         />
       </div>
       {groups.length === 0 ? (
@@ -579,7 +579,7 @@ function ApiEndpointList() {
           {groups.map((group) => (
             <div key={group.group} className="space-y-1.5">
               <p className="text-xs font-medium text-muted-foreground">{group.group}</p>
-              <div className="divide-y divide-line rounded-[var(--radius-card)] border border-line overflow-hidden">
+              <div className="[&>*+*]:[border-top:var(--bd-div)] rounded-[var(--radius-card)] [border:var(--bd-card)] overflow-hidden">
                 {group.endpoints.map((endpoint) => (
                   <div
                     key={`${endpoint.method} ${endpoint.path}`}
@@ -622,11 +622,11 @@ function SnippetBox({
   onCopy: () => void;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-[var(--radius-card)] border border-line bg-[var(--bg-2)] dark:bg-[#1a1a1a]">
+    <div className="relative overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] dark:bg-[#1a1a1a]">
       <button
         type="button"
         onClick={onCopy}
-        className="absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-[var(--radius-button)] border border-line bg-card px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        className="absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         aria-label={copied ? "Copied" : "Copy snippet"}
       >
         {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}

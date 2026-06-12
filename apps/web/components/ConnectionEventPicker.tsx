@@ -172,9 +172,9 @@ export function ConnectionEventPicker({
 
   if (connectedApps.length === 0) {
     return (
-      <div className="rounded-[var(--radius-button)] border border-border bg-muted/30 p-3 space-y-2">
+      <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 p-3 space-y-2">
         <p className="text-sm text-muted-foreground">No connected integrations yet.</p>
-        <Link href="/connections/browse" className="inline-flex items-center gap-1 rounded-[var(--radius-button)] border border-border bg-card px-2 py-1 text-xs hover:bg-muted">
+        <Link href="/connections/browse" className="inline-flex items-center gap-1 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card px-2 py-1 text-xs hover:bg-muted">
           <Plus className="w-3 h-3" />
           Connect an integration
         </Link>
@@ -188,7 +188,7 @@ export function ConnectionEventPicker({
       <div className="space-y-1.5">
         <Label className="text-xs text-muted-foreground ">Integration</Label>
         <Select value={selectedApp} onValueChange={handleAppChange}>
-          <SelectTrigger className="w-full border-border">
+          <SelectTrigger className="w-full [border:var(--bd-card)]">
             <SelectValue placeholder="Pick a connected integration">
               {selectedApp ? (
                 <span className="flex items-center gap-2">
@@ -226,7 +226,7 @@ export function ConnectionEventPicker({
           <Label className="text-xs text-muted-foreground ">Event</Label>
           {loadingTriggers ? (
             <div className="space-y-1.5 py-1" aria-label={`Loading ${appDisplayName(selectedApp)} events`}>
-              <div className="h-8 rounded-[var(--radius-button)] border border-border bg-muted/50" />
+              <div className="h-8 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/50" />
               <p className="text-xs text-muted-foreground">
                 Loading {appDisplayName(selectedApp)} events...
               </p>
@@ -235,7 +235,7 @@ export function ConnectionEventPicker({
             <p className="text-xs text-muted-foreground">No events found for this integration.</p>
           ) : (
             <Select value={composioEvent} onValueChange={handleEventChange}>
-              <SelectTrigger className="w-full border-border">
+              <SelectTrigger className="w-full [border:var(--bd-card)]">
                 <SelectValue placeholder="Select an event">
                   {composioEvent
                     ? (triggers.find((t) => triggerEventId(t) === composioEvent)
@@ -264,7 +264,7 @@ export function ConnectionEventPicker({
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground ">Account</Label>
           <Select value={composioConnectionId} onValueChange={(v) => onConnectionIdChange(v ?? "")}>
-            <SelectTrigger className="w-full border-border">
+            <SelectTrigger className="w-full [border:var(--bd-card)]">
               <SelectValue placeholder="Select account">
                 {composioConnectionId
                   ? connectionAccountLabel(appConnections.find((conn) => conn.id === composioConnectionId) || appConnections[0])

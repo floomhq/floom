@@ -3,6 +3,7 @@
 import { useEffect } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import { Suspense } from "react";
+import { Loader2 } from "lucide-react";
 
 function CallbackInner() {
   const router = useRouter();
@@ -104,7 +105,7 @@ function CallbackInner() {
   return (
     <div className="flex items-center justify-center min-h-[60vh]">
       <div className="text-center space-y-2">
-        <div className="w-8 h-8 rounded-full border-2 border-foreground border-t-transparent animate-spin mx-auto" />
+        <Loader2 className="mx-auto size-8 animate-spin text-foreground" />
         <p className="text-sm text-muted-foreground">Finalizing connection...</p>
       </div>
     </div>

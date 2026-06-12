@@ -35,7 +35,7 @@ export function Tool({
   const showState = Boolean(status) || state !== "done";
   return (
     <Collapsible defaultOpen={state !== "done"}>
-      <div className={cn("rounded-[var(--radius-button)] border border-border bg-card", className)}>
+      <div className={cn("rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card", className)}>
         <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
           <div className="flex min-w-0 items-center gap-2">
             {isError ? (
@@ -57,12 +57,12 @@ export function Tool({
             {showState && (
               <span
                 className={cn(
-                  "rounded border px-1.5 py-0.5 text-[11px] font-medium",
+                  "rounded-[var(--radius-button)] [border:var(--bd-pill)] px-1.5 py-0.5 text-[11px] font-medium",
                   state === "error"
-                    ? "border-error/30 bg-error/10 text-error"
+                    ? "bg-error/10 text-error"
                     : state === "done"
-                      ? "border-border bg-muted/50 text-muted-foreground"
-                      : "border-pending/30 bg-pending/10 text-pending",
+                      ? "bg-muted/50 text-muted-foreground"
+                      : "bg-pending/10 text-pending",
                 )}
               >
                 {displayState}
@@ -72,7 +72,7 @@ export function Tool({
           </div>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="space-y-3 border-t border-border p-3">
+          <div className="space-y-3 [border-top:var(--bd-div)] p-3">
             {args !== undefined && <ToolBlock label="Args" value={args} />}
             {result !== undefined && <ToolBlock label={isError ? "Error" : "Result"} value={result} />}
             {children}

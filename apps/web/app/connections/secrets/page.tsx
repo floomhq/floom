@@ -150,7 +150,7 @@ function SecretsContent() {
           </p>
         </header>
         <ConnectionsTabs />
-        <Card className="border-border shadow-none bg-card">
+        <Card className="[border:var(--bd-card)] shadow-none bg-card">
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
             <KeyRound className="mx-auto mb-3 h-5 w-5 opacity-60" />
             Secret names and worker mappings are restricted to workspace owners
@@ -186,7 +186,7 @@ function SecretsContent() {
       <ConnectionsTabs />
 
       {addingOpen && (
-        <Card className="border-border shadow-none bg-card">
+        <Card className="[border:var(--bd-card)] shadow-none bg-card">
           <CardHeader>
             <CardTitle className="text-sm font-medium">Add new secret</CardTitle>
           </CardHeader>
@@ -197,14 +197,14 @@ function SecretsContent() {
                 placeholder="SECRET_NAME"
                 value={addingName}
                 onChange={(e) => setAddingName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_"))}
-                className="h-11 font-mono text-sm sm:h-9 sm:w-[220px] border-border"
+                className="h-11 font-mono text-sm sm:h-9 sm:w-[220px] [border:var(--bd-card)]"
               />
               <Input
                 type="password"
                 placeholder="Value (write-only)"
                 value={addingValue}
                 onChange={(e) => setAddingValue(e.target.value)}
-                className="h-11 text-sm sm:h-9 sm:flex-1 border-border"
+                className="h-11 text-sm sm:h-9 sm:flex-1 [border:var(--bd-card)]"
                 onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
               />
               <div className="flex gap-2">
@@ -234,7 +234,7 @@ function SecretsContent() {
             Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)
           ) : secrets.length === 0 ? (
             <div className="py-12 flex flex-col items-center gap-3 text-center">
-              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+              <div className="w-10 h-10 rounded-[var(--radius-pill)] bg-muted flex items-center justify-center">
                 <KeyRound className="w-5 h-5 text-muted-foreground" />
               </div>
               <div>
@@ -330,8 +330,8 @@ function SecretsContent() {
                           variant="outline"
                           className={
                             testResults[s.name].status === "valid"
-                              ? "text-emerald-600 border-emerald-200 bg-emerald-50 text-xs hidden sm:inline-flex"
-                              : "text-red-600 border-red-200 bg-red-50 text-xs hidden sm:inline-flex"
+                              ? "text-emerald-600 [border:var(--bd-card)] bg-emerald-50 text-xs hidden sm:inline-flex"
+                              : "text-red-600 [border:var(--bd-card)] bg-red-50 text-xs hidden sm:inline-flex"
                           }
                           title={testResults[s.name].reason}
                         >
@@ -342,7 +342,7 @@ function SecretsContent() {
                       {s.status !== "set" && (
                         <Badge
                           variant="outline"
-                          className="text-red-600 border-red-200 bg-red-50 text-xs"
+                          className="text-red-600 [border:var(--bd-card)] bg-red-50 text-xs"
                         >
                           Missing
                         </Badge>
@@ -390,7 +390,7 @@ function SecretsContent() {
                         placeholder="New value (write-only)"
                         value={updatingValue}
                         onChange={(e) => setUpdatingValue(e.target.value)}
-                        className="h-11 text-sm border-border sm:h-8 sm:flex-1"
+                        className="h-11 text-sm [border:var(--bd-card)] sm:h-8 sm:flex-1"
                         onKeyDown={(e) => { if (e.key === "Enter") handleUpdate(s.name); if (e.key === "Escape") setUpdatingName(null); }}
                         autoFocus
                       />

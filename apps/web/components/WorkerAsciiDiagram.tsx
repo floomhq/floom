@@ -553,7 +553,7 @@ export function WorkerAsciiDiagram({
             Real BrandLogo SVGs (same vocabulary as WorkerIconPills). Hidden
             when the worker declares no connections. */}
         {conns.length > 0 && (
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--line-soft)] pt-3">
+          <div className="mt-4 flex flex-wrap items-center gap-2 [border-top:var(--bd-div)] pt-3">
             <span
               className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-faint)]"
               style={{ fontFamily: "var(--font-mono)" }}
