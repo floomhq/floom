@@ -8749,6 +8749,94 @@ def get_worker_detail(
     )
 
 
+class _RequestEditAccessBody(BaseModel):
+    message: Optional[str] = Field(default=None, max_length=2000)
+
+
+@app.post("/workers/{worker_id}/request-edit", status_code=201)
+def request_worker_edit_access(
+    worker_id: str,
+    body: _RequestEditAccessBody,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """#807: a member viewing a locked (workspace-shared, not owned) worker
+    asks the owner/admin for edit access. 404 if the worker isn't visible,
+    403 if the caller already has edit rights. Records a pending request
+    (idempotent) and notifies the owner best-effort.
+    """
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(
+        worker_id, user_id=auth.user_id, repos=repos,
+        role=_worker_repo_role(auth), include_grants=True,
+    )
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    perms = _worker_permissions(
+        worker, user_id=auth.user_id, repos=repos,
+        owner_aliases={auth.user_id, auth.username or ""},
+    )
+    if perms.can_edit:
+        raise HTTPException(status_code=403, detail="You already have edit access to this worker.")
+
+    req_id = f"editreq_{_uuid_mod.uuid4().hex[:12]}"
+    created = False
+    with get_db() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO edit_access_requests (id, worker_id, requester_id, message, status, created_at) "
+                "VALUES (?, ?, ?, ?, 'pending', ?)",
+                (req_id, worker_id, auth.user_id, (body.message or None), now_iso()),
+            )
+            created = True
+        except sqlite3.IntegrityError:
+            # idempotent: a pending request from this member already exists
+            created = False
+    if created:
+        try:
+            from alerting import _send_email  # noqa: PLC0415
+
+            _send_email(
+                f"Edit-access request for worker {worker.get('name') or worker_id}",
+                f"{auth.username or auth.user_id} requested edit access to "
+                f"'{worker.get('name') or worker_id}'."
+                + (f"\n\nMessage: {body.message}" if body.message else ""),
+            )
+        except Exception:
+            logger.debug("edit-access request email failed (non-fatal)", exc_info=True)
+    return {"ok": True, "pending": True}
+
+
+@app.get("/workers/{worker_id}/edit-requests")
+def list_worker_edit_requests(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[Dict[str, Any]]:
+    """#807: the owner/admin lists pending edit-access requests for a worker."""
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(
+        worker_id, user_id=auth.user_id, repos=repos,
+        role="admin" if auth.is_admin else _worker_repo_role(auth),
+    )
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    perms = _worker_permissions(
+        worker, user_id=auth.user_id, repos=repos,
+        owner_aliases={auth.user_id, auth.username or ""},
+    )
+    if not (perms.can_edit or auth.is_admin):
+        raise HTTPException(status_code=403, detail="Only the owner or an admin can view edit requests.")
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, worker_id, requester_id, message, status, created_at "
+            "FROM edit_access_requests WHERE worker_id = ? AND status = 'pending' "
+            "ORDER BY created_at DESC",
+            (worker_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 @app.get("/workers/{worker_id}/bundle.zip")
 def download_worker_bundle(
     worker_id: str,
@@ -12848,15 +12936,25 @@ def create_worker_run(
     _enforce_run_create_quota(auth, worker_id)
 
     # Create the run record first so we have a run_id for per-run file staging.
-    run_id = create_run(
-        worker_id,
-        payload.inputs,
-        trigger_source,
-        status=RunStatus.RUNNING.value,
-        user_id=auth.user_id,
-        trigger_ref=trigger_ref,
-        repos=repos,
-    )
+    from run_service import SpendCapExceeded
+
+    try:
+        run_id = create_run(
+            worker_id,
+            payload.inputs,
+            trigger_source,
+            status=RunStatus.RUNNING.value,
+            user_id=auth.user_id,
+            trigger_ref=trigger_ref,
+            repos=repos,
+        )
+    except SpendCapExceeded as exc:
+        # #793: refuse cleanly (not a 500) with a machine-readable code the UI
+        # surfaces on the Limits tab.
+        raise HTTPException(
+            status_code=402,
+            detail={"error_code": "spend_cap_exceeded", "message": str(exc)},
+        ) from exc
     bound_by = auth.user_id or "anonymous"
     try:
         resolved_inputs = _resolve_file_input_references(
