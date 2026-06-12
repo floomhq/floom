@@ -96,6 +96,9 @@ function Row<T>({
   compact?: boolean;
 }) {
   void item;
+  const showStatus = template.includes("__status__");
+  const showMenu = template.includes("__menu__");
+  const gridTemplate = template.replace("__status__", "").replace("__menu__", "").trim();
   return (
     <div
       role="button"
@@ -103,7 +106,7 @@ function Row<T>({
       data-collrow
       aria-current={selected ? "true" : undefined}
       className={`c-lrow ${selected ? "sel" : ""}`}
-      style={compact ? undefined : { gridTemplateColumns: template }}
+      style={compact ? undefined : { gridTemplateColumns: gridTemplate }}
       onClick={onSelect}
       onKeyDown={(e) => {
         if (e.key === "Enter" || e.key === " ") {
@@ -124,8 +127,8 @@ function Row<T>({
           {c}
         </div>
       ))}
-      <div>{spec.status ? <StatusPill spec={spec.status} /> : null}</div>
-      <div className="c-menu">{spec.menu?.length ? <RowMenu items={spec.menu} /> : null}</div>
+      {showStatus && <div>{spec.status ? <StatusPill spec={spec.status} /> : null}</div>}
+      {showMenu && <div className="c-menu">{spec.menu?.length ? <RowMenu items={spec.menu} /> : null}</div>}
     </div>
   );
 }
@@ -140,6 +143,7 @@ export function CollectionList<T>({
   group,
   compact,
 }: CollectionListProps<T>) {
+  const template = `${columns.template} ${columns.statusColumn === false ? "" : "__status__"} ${columns.menuColumn === false ? "" : "__menu__"}`;
   const rows = items.map((item) => {
     const id = idOf(item);
     return (
@@ -147,7 +151,7 @@ export function CollectionList<T>({
         key={id}
         item={item}
         spec={row(item)}
-        template={columns.template}
+        template={template}
         selected={id === selectedId}
         onSelect={() => onSelect(id)}
         compact={compact}
@@ -176,7 +180,13 @@ export function CollectionList<T>({
   return (
     <div className="c-ltable">
       {!compact && columns.headers.length > 0 && (
-        <div className="c-lhead" style={{ gridTemplateColumns: columns.template }}>
+        <div
+          className="c-lhead"
+          style={{
+            gridTemplateColumns: columns.template,
+            ...(columns.headerTransparent ? { background: "transparent" } : {}),
+          }}
+        >
           {columns.headers.map((h, i) => (
             <div key={i}>{h}</div>
           ))}

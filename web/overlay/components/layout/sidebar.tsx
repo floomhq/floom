@@ -29,7 +29,7 @@ function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void }) {
   return (
     <div className="px-3 pb-3 space-y-1.5">
       <Link
-        href="/workers/new"
+        href="/chat?mode=create"
         onClick={onNavigate}
         className="flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--primary)] px-2.5 text-sm font-medium text-[var(--primary-text)] shadow-[var(--shadow-btn)] hover:bg-[var(--solid-2)] transition-colors duration-150"
       >

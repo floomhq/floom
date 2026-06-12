@@ -113,7 +113,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
     try {
       const result = await api.workers.importFromShare(token);
       setImportedId(result.worker_id);
-      router.push(`/workers/${result.worker_id}`);
+      router.push(`/workers?sel=${encodeURIComponent(result.worker_id)}`);
     } catch {
       setImporting(false);
     }

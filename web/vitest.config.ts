@@ -54,6 +54,17 @@ const cloudExclude = [
   "tests/login-split-822.dom.test.tsx",
   // overlay app/contexts/page.tsx is a cloud fork; brain tag editing differs
   "tests/brain-tags-780.dom.test.tsx",
+  // engine middleware/proxy/auth-session tests (FLOOM_API_SECRET + wos_session
+  // model) — the overlay replaces middleware + proxy + /api/me for Supabase.
+  // Cloud equivalents: tests/verify-session-935.test.ts (middleware + CSP +
+  // no-store) and tests/me-cache-941.test.ts (/api/me cache + verified user).
+  "tests/csp-cache-926-945.test.ts",
+  "tests/secure-cookie-cache-927-941.test.ts",
+  "tests/auth-route-cache-headers-941.test.ts",
+  // overlay settings/assistant pages have not ported these engine features —
+  // known drift (settings collection layout, #541 coworker chrome).
+  "tests/settings-collection.dom.test.tsx",
+  "tests/assistant-coworker-chrome-541.dom.test.tsx",
 ];
 
 export default defineConfig({

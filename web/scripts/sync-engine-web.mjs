@@ -109,6 +109,7 @@ export const OVERLAY_FILES = [
   "lib/useRunStream.ts",
   "lib/verify-session.ts",
   "tests/verify-session-935.test.ts",
+  "tests/me-cache-941.test.ts",
 ];
 
 const CLOUD_TAILWIND_SOURCE_MARKER = "/* workeros-cloud generated Tailwind sources */";

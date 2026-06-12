@@ -119,10 +119,12 @@ function testUserMessageAlwaysScrolls() {
 // ---------------------------------------------------------------------------
 
 function testNewSessionResetsScroll() {
+  const handleNewIdx = src.indexOf("const handleNew = useCallback");
   const newSessionBlock = src.slice(
-    src.indexOf("onNew={() => {"),
-    src.indexOf("onNew={() => {") + 200
+    handleNewIdx,
+    handleNewIdx + 300
   );
+  assert(handleNewIdx !== -1, "#593: handleNew callback must exist");
   assert(
     newSessionBlock.includes("isNearBottomRef.current = true") ||
     newSessionBlock.includes("setShowScrollButton(false)"),

@@ -13,35 +13,10 @@ import type { NextConfig } from "next";
 // Verify with: `curl -I https://workers.floom.dev/` and a browser console
 // CSP-violation check after deploy.
 //
-// R17 FIX 2 (LOW) — `script-src 'unsafe-inline'` is a known defense-in-depth
-// weakness. It is DELIBERATELY LEFT for now, not an oversight:
-// Next.js 16 app-router emits inline bootstrap/flight scripts that only get a
-// CSP nonce when the header is produced per-request from `middleware.ts`. This
-// app ships no middleware and relies on static/ISR rendering; adding a nonce
-// middleware forces every route to dynamic rendering and risks hydration
-// regressions — too much risk for a LOW finding on a single-tenant OS.
-// TODO(cloud-ga): before the multi-tenant Cloud serves untrusted-tenant
-// content, replace 'unsafe-inline' on script-src with a per-request nonce
-// (middleware.ts + nonce threaded to next/script + headers), or 'strict-dynamic'
-// with hashes, and verify hydration + streaming still work. style-src keeps
-// 'unsafe-inline' (style injection is far lower risk; Next/Tailwind need it).
-const CSP_DIRECTIVES = [
-  "default-src 'self'",
-  "base-uri 'self'",
-  "frame-ancestors 'none'",
-  "object-src 'none'",
-  "form-action 'self'",
-  "img-src 'self' data: blob: https:",
-  "media-src 'self' blob:",
-  "frame-src 'self' blob:",
-  "font-src 'self' data: https:",
-  "style-src 'self' 'unsafe-inline' https:",
-  "script-src 'self' 'unsafe-inline' https:",
-  "connect-src 'self' https:",
-  "worker-src 'self' blob:",
-  "upgrade-insecure-requests",
-].join("; ");
-
+// #926 — CSP moved to middleware.ts. The policy needs a per-request nonce on
+// script-src (no more 'unsafe-inline'), and a nonce can only be minted at
+// request time. Keeping a second static CSP here would race the middleware
+// header, so this file ships only the nonce-free security headers.
 const PERMISSIONS_POLICY = [
   "accelerometer=()",
   "camera=()",
@@ -54,7 +29,6 @@ const PERMISSIONS_POLICY = [
 ].join(", ");
 
 const SECURITY_HEADERS = [
-  { key: "Content-Security-Policy", value: CSP_DIRECTIVES },
   { key: "X-Frame-Options", value: "DENY" },
   { key: "X-Content-Type-Options", value: "nosniff" },
   { key: "Referrer-Policy", value: "strict-origin-when-cross-origin" },
@@ -108,14 +82,13 @@ const nextConfig: NextConfig = {
   turbopack: {
     root: __dirname,
   },
-  // S42: /workers/<id>/edit is gone; redirect bookmarks to the unified detail
-  // page with edit mode toggled on via ?edit=1.
+  // /workers/<id>/edit is gone; redirect bookmarks to the split-pane detail.
   async redirects() {
     return [
       ...cloudApexRedirects(),
       {
         source: "/workers/:id/edit",
-        destination: "/workers/:id?edit=1",
+        destination: "/workers?sel=:id&tab=Config",
         permanent: true,
       },
     ];

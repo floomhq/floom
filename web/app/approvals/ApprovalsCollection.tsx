@@ -6,7 +6,7 @@ import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ApprovalRow, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
-import { Collection, Avatar } from "@/components/collection";
+import { Collection } from "@/components/collection";
 import { contentTagOptions } from "@/lib/workers/derive";
 import {
   ApprovalActionItems,
@@ -78,6 +78,9 @@ export default function ApprovalsCollection() {
     }
   };
 
+  // Curated status groups only — no raw per-worker tags (avoids one-off noise).
+  const CURATED_CONTENT_TAGS = ["email", "crm", "github", "report", "analytics", "slack"];
+
   const config: CollectionConfig<ApprovalRow> = {
     title: "Approvals",
     subtitle: "Workers waiting for your decision before executing.",
@@ -86,9 +89,14 @@ export default function ApprovalsCollection() {
     error,
     idOf: (a) => a.id,
     searchOf: (a) => `${a.worker_name ?? ""} ${a.label ?? ""}`,
-    tagsOf: (a) =>
-      ({ content: workerTags[a.worker_id] ?? [] }) as Partial<Record<TagFamilyKey, string[]>>,
-    tags: { content: contentTagOptions(workers) },
+    tagsOf: (a) => {
+      const allTags = workerTags[a.worker_id] ?? [];
+      const curated = allTags.filter((t) => CURATED_CONTENT_TAGS.includes(t));
+      return (curated.length > 0 ? { content: curated } : {}) as Partial<Record<TagFamilyKey, string[]>>;
+    },
+    tags: {
+      content: contentTagOptions(workers).filter((t) => CURATED_CONTENT_TAGS.includes(t.value)),
+    },
     counts: [{ value: items.length, label: "pending" }],
     view: { default: "list", grid: true },
     columns: {
@@ -96,7 +104,7 @@ export default function ApprovalsCollection() {
       headers: ["Worker", "Wants to", "Waiting", ""],
     },
     row: (a) => ({
-      leading: <Avatar name={a.worker_name ?? a.worker_id} />,
+      // V4 SPEC rule 3: no avatar for approvals — non-person entity.
       primary: a.worker_name ?? a.worker_id,
       cols: [approvalActionLine(a.label, parseDecisionInput(a.decision_input_json))],
       status: {
@@ -109,7 +117,7 @@ export default function ApprovalsCollection() {
       ],
     }),
     card: (a) => ({
-      leading: <Avatar name={a.worker_name ?? a.worker_id} />,
+      // V4 SPEC rule 3: no avatar monogram for approvals.
       name: a.worker_name ?? a.worker_id,
       description: approvalActionLine(a.label, parseDecisionInput(a.decision_input_json)),
       status: {
@@ -121,7 +129,8 @@ export default function ApprovalsCollection() {
       const di = parseDecisionInput(a.decision_input_json);
       return {
         header: {
-          leading: <Avatar name={a.worker_name ?? a.worker_id} size={42} />,
+          // V4 SPEC rule 3: no avatar in detail header for approvals.
+          leading: undefined,
           title: a.worker_name ?? a.worker_id,
           sub: <span className="c-dh-sub" style={{ margin: 0 }}>{approvalActionLine(a.label, di)}</span>,
           actions: (
@@ -189,7 +198,7 @@ export default function ApprovalsCollection() {
                 </span>
                 <span style={kvK}>Worker</span>
                 <span>
-                  <Link href={`/workers/${a.worker_id}`} style={{ color: "var(--accent)" }}>
+                  <Link href={`/workers?sel=${encodeURIComponent(a.worker_id)}`} style={{ color: "var(--accent)" }}>
                     {a.worker_name ?? a.worker_id}
                   </Link>
                 </span>

@@ -1,11 +1,10 @@
 "use client";
 
-import React from "react";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut } from "lucide-react";
+import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -44,42 +43,26 @@ export function FloomMark({ size = 28 }: { size?: number }) {
   );
 }
 
-// C6: Emily avatar — solid WorkerOS accent blue circle, no glyph.
-// Used as the nav icon for the Assistant item in place of the generic Bot glyph.
-// The accent blue (#59AAF8 / --accent in dark, hardcoded for light) is the
-// WorkerOS brand blue Federico designated for Emily's identity.
-function EmilyDot({ className }: { className?: string }) {
-  return (
-    <span
-      className={cn("shrink-0 rounded-full", className)}
-      style={{ background: "var(--emily-accent, #59AAF8)", width: "16px", height: "16px" }}
-      aria-hidden="true"
-    />
-  );
-}
-
 // S24: Secrets removed from top-level nav; reachable as a third tab on
 // /connections ("Connected" / "Browse" / "Secrets"). Connections + secrets
 // are the same mental model (credentials a worker can read) so they share
 // a surface.
 // `hint` is surfaced as a native title tooltip on hover — the flat single-row
 // nav has no room for a permanent subtitle without a redesign, so the
-// employee-model microcopy ("Assistant = the thing you talk to"; "Workers run
-// on triggers") lives in the tooltip instead (Federico 2026-06-02).
+// employee-model microcopy ("Workers run on triggers") lives in the tooltip
+// instead (Federico 2026-06-02).
 type NavItem = {
   href: string;
   label: string;
-  icon: React.ElementType | null;
+  icon: React.ElementType;
   hint?: string;
   badge?: boolean;
-  emilyDot?: boolean;
 };
 
+// V4 SPEC §2: nav order per wireframe — no Assistant item (config lives in
+// Settings per v4). Overview · Workers · Brain · Runs · Approvals · Connections.
 const nav: NavItem[] = [
   { href: "/overview", label: "Overview", icon: Activity },
-  // FL9: Assistant above Workers — the thing you talk to comes before the
-  // things that run on triggers.
-  { href: "/assistant", label: "Assistant", icon: null, emilyDot: true, hint: "Chat, ask, delegate" },
   { href: "/workers", label: "Workers", icon: Box, hint: "Runs on triggers and schedules" },
   { href: "/brain", label: "Brain", icon: Brain },
   { href: "/runs", label: "Runs", icon: Clock },
@@ -113,11 +96,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
                 : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
             )}
           >
-            {item.emilyDot ? (
-              <EmilyDot />
-            ) : item.icon ? (
-              <item.icon className="w-4 h-4" />
-            ) : null}
+            <item.icon className="w-4 h-4" />
             {item.label}
             {showBadge && (
               <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] px-1 text-[10px] font-semibold leading-none text-[var(--primary-text)]">
@@ -138,13 +117,15 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
   };
   return (
     <div className="px-3 pb-3 space-y-1.5">
+      {/* #902 (wireframe newbtn): creating a worker = a conversation with
+          Emily — full-page chat in create mode, not a form. */}
       <Link
-        href="/workers/new"
-        onClick={onNavigate}
-        className="flex h-9 items-center justify-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--primary)] px-2.5 text-sm font-medium text-[var(--primary-text)] shadow-[var(--shadow-btn)] hover:bg-[var(--solid-2)] transition-colors duration-150"
+        href="/chat?mode=create"
+        onClick={() => onNavigate?.()}
+        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-transparent px-2.5 text-sm font-medium text-ink hover:bg-[var(--active-nav-bg)] transition-colors duration-150"
       >
         <Plus className="w-4 h-4" />
-        New worker
+        <span>New worker</span>
       </Link>
       <button
         type="button"
@@ -163,19 +144,51 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
   );
 }
 
+// V4 SPEC §2: nav collapses to 62px icon rail via chevron in nav header.
+// State is persisted to localStorage under "sidebar-collapsed" so it survives
+// page navigations and refreshes.
+const SIDEBAR_COLLAPSE_KEY = "sidebar-collapsed";
+
 export function Sidebar() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  // collapsed = icon-rail (62px); expanded = full (228px)
+  const [collapsed, setCollapsed] = useState(false);
 
-  // Close mobile nav on route changes; wrap in a callback to avoid
-  // "setState synchronously inside an effect" lint rule
+  // Hydrate from localStorage after mount to avoid SSR mismatch
   useEffect(() => {
-    const close = () => setOpen(false);
-    close();
+    try {
+      const stored = localStorage.getItem(SIDEBAR_COLLAPSE_KEY);
+      if (stored === "1") setCollapsed(true);
+    } catch {
+      // localStorage may be unavailable (private browsing, SSR)
+    }
+  }, []);
+
+  const toggleCollapse = () => {
+    setCollapsed((prev) => {
+      const next = !prev;
+      try {
+        if (next) {
+          localStorage.setItem(SIDEBAR_COLLAPSE_KEY, "1");
+        } else {
+          localStorage.removeItem(SIDEBAR_COLLAPSE_KEY);
+        }
+      } catch {}
+      return next;
+    });
+  };
+
+  // Close mobile nav on route changes
+  useEffect(() => {
+    setOpen(false);
   }, [pathname]);
+
+  const pendingCount = useApprovalsCount();
 
   return (
     <>
+      {/* ── Mobile top bar ─────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between border-b border-[var(--border-soft)] bg-[var(--bg-app)] px-4 md:hidden">
         <Link href="/overview" className="flex items-center gap-2">
           <FloomMark size={22} />
@@ -202,22 +215,114 @@ export function Sidebar() {
         </div>
       </header>
 
-      <aside className="sticky top-0 z-20 hidden h-screen w-[228px] flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] md:flex">
+      {/* ── Desktop sidebar ─────────────────────────────────────────────────── */}
+      <aside
+        className={cn(
+          "sticky top-0 z-20 hidden h-screen flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] transition-[width] duration-200 md:flex overflow-hidden",
+          collapsed ? "w-[62px]" : "w-[228px]"
+        )}
+        aria-label="Main navigation"
+      >
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
-        <div className="px-5 pt-6 pb-8">
-          <Link href="/overview" className="flex items-center gap-2">
-            <FloomMark size={22} />
-            <span className="font-semibold text-base tracking-tight">WorkerOS</span>
-          </Link>
+
+        {/* ── Nav header: workspace identity + collapse chevron ─────────────── */}
+        <div className={cn("flex items-center border-b border-[var(--border-soft)]", collapsed ? "justify-center h-14 px-0" : "h-14 px-2 gap-1")}>
+          {collapsed ? (
+            /* Icon-rail: just the mark, clicking expands */
+            <button
+              type="button"
+              aria-label="Expand navigation"
+              onClick={toggleCollapse}
+              className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
+            >
+              <FloomMark size={22} />
+            </button>
+          ) : (
+            <>
+              <div className="flex-1 min-w-0 py-1">
+                <WorkspaceSwitcher />
+              </div>
+              {/* Collapse chevron — dim at rest, full opacity on hover */}
+              <button
+                type="button"
+                aria-label="Collapse navigation"
+                onClick={toggleCollapse}
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] opacity-40 hover:opacity-100 focus-visible:opacity-100 transition-all hover:bg-[var(--active-nav-bg)] hover:text-ink"
+                title="Collapse sidebar"
+              >
+                <ChevronLeft className="w-4 h-4" />
+              </button>
+            </>
+          )}
         </div>
-        <SidebarPrimaryActions />
-        <NavLinks pathname={pathname} />
-        <div className="mt-auto pt-3 border-t border-[var(--border-soft)]">
-          <WorkspaceSwitcher />
-        </div>
-        <UserProfileFooter />
+
+        {!collapsed && (
+          <>
+            <SidebarPrimaryActions />
+            <NavLinks pathname={pathname} />
+            <UserProfileFooter />
+          </>
+        )}
+
+        {/* ── Icon rail (collapsed) ─────────────────────────────────────────── */}
+        {collapsed && (
+          <nav className="flex flex-1 flex-col items-center gap-0.5 pt-3 pb-3 overflow-y-auto" aria-label="Icon navigation">
+            {nav.map((item) => {
+              const active =
+                item.href === "/overview"
+                  ? pathname === "/" || pathname === "/overview"
+                  : pathname === item.href || pathname.startsWith(item.href + "/");
+              const showBadge = item.badge && pendingCount > 0;
+              return (
+                <Link
+                  key={item.href}
+                  href={item.href}
+                  title={item.label}
+                  className={cn(
+                    "relative inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150",
+                    active
+                      ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)]"
+                      : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
+                  )}
+                >
+                  <item.icon className="w-4 h-4" />
+                  {showBadge && (
+                    <span className="absolute -top-0.5 -right-0.5 size-3.5 rounded-full bg-[var(--primary)] flex items-center justify-center text-[8px] font-bold text-[var(--primary-text)]">
+                      {pendingCount > 9 ? "9+" : pendingCount}
+                    </span>
+                  )}
+                </Link>
+              );
+            })}
+            {/* Settings icon at bottom */}
+            <div className="flex-1" />
+            <Link
+              href="/settings"
+              title="Settings"
+              className={cn(
+                "inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150",
+                pathname === "/settings" || pathname.startsWith("/settings/")
+                  ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)]"
+                  : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
+              )}
+            >
+              <Settings className="w-4 h-4" />
+            </Link>
+            {/* Expand chevron at the very bottom */}
+            <button
+              type="button"
+              aria-label="Expand navigation"
+              onClick={toggleCollapse}
+              title="Expand sidebar"
+              className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink transition-colors mt-1"
+            >
+              <ChevronRight className="w-4 h-4" />
+            </button>
+          </nav>
+        )}
       </aside>
 
+      {/* ── Mobile drawer ───────────────────────────────────────────────────── */}
       {open && (
         <div className="md:hidden fixed inset-0 z-40 flex">
           <div
@@ -227,16 +332,15 @@ export function Sidebar() {
           />
           <aside className="relative z-50 flex h-full w-64 max-w-[80vw] flex-col border-r border-[var(--border-soft)] bg-[var(--bg-app)] shadow-pop">
             <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
-            <div className="flex items-center justify-between border-b border-[var(--border-soft)] px-5 py-4">
-              <Link href="/overview" className="flex items-center gap-2" onClick={() => setOpen(false)}>
-                <FloomMark size={22} />
-                <span className="font-semibold text-base tracking-tight">WorkerOS</span>
-              </Link>
+            <div className="flex items-center justify-between border-b border-[var(--border-soft)] px-3 py-2">
+              <div className="flex-1 min-w-0">
+                <WorkspaceSwitcher />
+              </div>
               <button
                 type="button"
                 aria-label="Close navigation"
                 onClick={() => setOpen(false)}
-                className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
+                className="ml-1 inline-flex h-11 w-11 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -244,9 +348,6 @@ export function Sidebar() {
             <div className="py-3 flex-1 overflow-auto">
               <SidebarPrimaryActions onNavigate={() => setOpen(false)} />
               <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
-            </div>
-            <div className="pt-3 border-t border-[var(--border-soft)]">
-              <WorkspaceSwitcher />
             </div>
             <UserProfileFooter onNavigate={() => setOpen(false)} />
           </aside>

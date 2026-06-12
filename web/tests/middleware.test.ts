@@ -134,4 +134,19 @@ describe("middleware auth gate", () => {
     const res = await middleware(req("/connections", await validCookie()));
     expect(res.headers.get("x-middleware-next")).toBe("1");
   });
+
+  it("lets authenticated unknown app routes reach the branded not-found page", async () => {
+    const { middleware } = await import("@/middleware");
+    const res = await middleware(req("/this-does-not-exist-xyz", await validCookie()));
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+  });
+
+  it("keeps anonymous unknown app routes behind the login gate", async () => {
+    const { middleware } = await import("@/middleware");
+    const res = await middleware(req("/this-does-not-exist-xyz"));
+    expect(res.status).toBe(307);
+    const location = res.headers.get("location")!;
+    expect(location).toContain("/login");
+    expect(location).toContain("next=%2Fthis-does-not-exist-xyz");
+  });
 });

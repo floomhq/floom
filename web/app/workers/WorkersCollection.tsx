@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type {
@@ -17,7 +18,8 @@ import { WORKER_DETAIL_TABS, type WorkerDetailTab } from "@/lib/workers/tabs";
 import { formatDuration } from "@/lib/runs/format";
 import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
-import { Collection, Avatar } from "@/components/collection";
+import { Collection } from "@/components/collection";
+import { FileText, Folder, Lock } from "lucide-react";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import { CodeBlock } from "@/components/file-viewer/code-block";
@@ -320,8 +322,63 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
   );
 }
 
-// SPEC §11: Source is file SUB-TABS (worker.yml/SKILL.md/run.py/requirements.txt),
-// NOT a left-sidebar file list.
+function sourceFolder(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length <= 1) return "Root";
+  return parts.slice(0, -1).join("/");
+}
+
+function sourceFileName(path: string): string {
+  return path.split("/").filter(Boolean).pop() || path;
+}
+
+function SourceFileTree({
+  files,
+  activePath,
+  onSelect,
+}: {
+  files: ReturnType<typeof orderedSourceFiles>;
+  activePath: string;
+  onSelect: (path: string) => void;
+}) {
+  const groups = new Map<string, typeof files>();
+  for (const file of files) {
+    const folder = sourceFolder(file.path);
+    const list = groups.get(folder) ?? [];
+    list.push(file);
+    groups.set(folder, list);
+  }
+
+  return (
+    <div className="max-h-[min(58vh,520px)] overflow-y-auto rounded-[var(--radius-card)] bg-[var(--bg-2)] p-2">
+      {Array.from(groups.entries()).map(([folder, group]) => (
+        <div key={folder} className="mb-2 last:mb-0">
+          <div className="flex min-w-0 items-center gap-1.5 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
+            <Folder className="size-3.5 shrink-0" />
+            <span className="truncate">{folder}</span>
+          </div>
+          <div className="space-y-0.5">
+            {group.map((file) => (
+              <button
+                key={file.path}
+                type="button"
+                className={`flex w-full min-w-0 items-center gap-2 rounded-[var(--radius-button)] px-2 py-1.5 text-left text-xs transition-colors ${
+                  file.path === activePath ? "bg-[var(--bg-card)] text-foreground" : "text-muted-foreground hover:bg-[var(--bg-3)] hover:text-foreground"
+                }`}
+                title={file.path}
+                onClick={() => onSelect(file.path)}
+              >
+                <FileText className="size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate font-mono">{sourceFileName(file.path)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SourceTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
   const [active, setActive] = useState<string | null>(null);
@@ -330,20 +387,19 @@ function SourceTab({ w }: { w: WorkerSummary }) {
   if (ordered.length === 0) return <div style={muted}>No source files.</div>;
   const file = ordered.find((f) => f.path === active) ?? ordered[0];
   return (
-    <div>
-      <div style={{ display: "flex", gap: 2, marginBottom: 12, flexWrap: "wrap" }}>
-        {ordered.map((f) => (
-          <button
-            key={f.path}
-            type="button"
-            className={`c-dtab ${f.path === file.path ? "on" : ""}`}
-            onClick={() => setActive(f.path)}
-          >
-            {f.path}
-          </button>
-        ))}
+    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(180px,240px)_minmax(0,1fr)]">
+      <SourceFileTree files={ordered} activePath={file.path} onSelect={setActive} />
+      <div className="min-w-0">
+        <div className="mb-2 flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0 truncate font-mono text-xs text-muted-foreground" title={file.path}>
+            {file.path}
+          </div>
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            {ordered.length} {ordered.length === 1 ? "file" : "files"}
+          </span>
+        </div>
+        <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} />
       </div>
-      <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} />
     </div>
   );
 }
@@ -471,15 +527,26 @@ export default function WorkersCollection({
 }: {
   initialWorkers: WorkerSummary[];
 }) {
+  const router = useRouter();
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(initialWorkers.length === 0);
 
   useEffect(() => {
+    let alive = true;
     setFavorites(getFavorites());
     api.workers
       .list({ include_archived: true })
-      .then((all) => setWorkers(all.filter((w) => !isSystemWorker(w))))
-      .catch(() => {});
+      .then((all) => {
+        if (alive) setWorkers(all.filter((w) => !isSystemWorker(w)));
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const toggleStar = useCallback((id: string) => {
@@ -500,6 +567,7 @@ export default function WorkersCollection({
     title: "Workers",
     subtitle: "Your AI workers.",
     items: sortWorkersByRecentActivity(visible),
+    loading,
     idOf: (w) => w.id,
     searchOf: (w) => `${w.name} ${w.description ?? ""} ${(w.tags ?? []).join(" ")}`,
     tagsOf: (w) =>
@@ -531,23 +599,30 @@ export default function WorkersCollection({
     ],
     view: { default: "grid", grid: true },
     columns: {
-      template: "1.8fr 1fr 1fr 140px 40px",
+      template: "1.9fr 1fr 1fr 130px 40px", // #895: wireframe pageWorkers grid
       headers: ["Worker", "Tools", "Last run", "Status", ""],
     },
     row: (w) => ({
-      leading: <Avatar name={w.name} />,
-      primary: w.name,
+      // V4 SPEC rule 3: no avatar for workers.
+      // Lock icon: inline after title at baseline (small + muted), never as leading.
+      leading: undefined,
+      primary: w.visibility === "private"
+        ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" /></span>
+        : w.name,
       secondary: w.description,
       cols: [
         <WorkerIconPills key="t" worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
         rel(w.recent_stats?.last_run_at),
       ],
       status: workerStatusPill(w),
-      menu: [{ label: "Open", onSelect: () => (window.location.href = `/workers/${w.id}`) }],
+      menu: [{ label: "Open", onSelect: () => (window.location.href = `/workers?sel=${encodeURIComponent(w.id)}`) }],
     }),
     card: (w) => ({
-      leading: <Avatar name={w.name} size={38} />,
-      name: w.name,
+      // V4 SPEC rule 3: no avatar monogram. Lock is small+muted inline after name.
+      leading: undefined,
+      name: w.visibility === "private"
+        ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" /></span>
+        : w.name,
       description: w.description,
       status: workerStatusPill(w),
       toolLogos: <WorkerIconPills worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
@@ -558,27 +633,25 @@ export default function WorkersCollection({
       const viewOnly = isViewOnly(w);
       const actions = (
         <>
-          {/* SPEC §4: Run opens the inputs flow on the full worker page (the
-              dedicated Run-with-inputs modal is §5). */}
           {can("run", w) && (
-            <Link href={`/workers/${w.id}#run`} className="c-addbtn" style={pillBtn}>
+            <Link href={`/workers?sel=${encodeURIComponent(w.id)}`} className="c-addbtn" style={pillBtn}>
               Run
             </Link>
           )}
           {editable && (
-            <Link href={`/workers/${w.id}?edit=1`} className="c-vpill" style={pillBtn}>
+            <Link href={`/workers?sel=${encodeURIComponent(w.id)}&tab=Config`} className="c-vpill" style={pillBtn}>
               Edit
             </Link>
           )}
-          <Link href={`/workers/${w.id}`} className="c-vpill" style={pillBtn}>
-            Open full page →
-          </Link>
         </>
       );
       return {
         header: {
-          leading: <Avatar name={w.name} size={42} />,
-          title: w.name,
+          // V4 SPEC rule 3: no avatar monogram in detail header. Lock inline after title.
+          leading: undefined,
+          title: w.visibility === "private"
+            ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3.5 text-[var(--muted-foreground)] translate-y-px" /></span>
+            : w.name,
           actions,
           sub: (
             <>
@@ -588,7 +661,7 @@ export default function WorkersCollection({
                   View only
                 </span>
               )}
-              <span className="c-dh-sub" style={{ margin: 0 }}>
+              <span className="c-dh-desc">
                 {w.description}
               </span>
             </>
@@ -602,10 +675,8 @@ export default function WorkersCollection({
         }),
       };
     },
-    add: {
-      label: "New worker",
-      onSelect: () => (window.location.href = "/workers/new"),
-    },
+    // Contextual toolbar action only; the global sidebar CTA was removed for v4.
+    add: { label: "Add", onSelect: () => router.push("/chat?mode=create") }, // #902: create = Emily flow
     states: {
       empty: { title: "No workers yet", help: "Create your first worker to get started." },
     },
