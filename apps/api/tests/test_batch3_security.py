@@ -10,6 +10,7 @@ import os
 import sys
 import tempfile
 from pathlib import Path
+from tests._api_source import api_source
 
 import pytest
 
@@ -69,7 +70,7 @@ _GUARD = "== \"public\" else None"
 
 def test_list_endpoint_guards_public_link():
     """list_workers must gate _worker_public_link on visibility == 'public'."""
-    src = MAIN_PY.read_text()
+    src = api_source()
     # Find the list_workers assignment — must be a conditional, not a bare call.
     # We look for the guard expression occurring on the same line as the list call.
     list_lines = [
@@ -84,7 +85,7 @@ def test_list_endpoint_guards_public_link():
 
 def test_detail_endpoint_guards_public_link():
     """WorkerDetail constructor must gate _worker_public_link on visibility == 'public'."""
-    src = MAIN_PY.read_text()
+    src = api_source()
     guarded = [
         line for line in src.splitlines()
         if "_worker_public_link" in line and "public_link=" in line and _GUARD in line
@@ -98,7 +99,7 @@ def test_detail_endpoint_guards_public_link():
 
 def test_no_unguarded_worker_public_link_assignments():
     """No public_link= line may call _worker_public_link without the visibility guard."""
-    src = MAIN_PY.read_text()
+    src = api_source()
     unguarded = [
         line.strip() for line in src.splitlines()
         if "_worker_public_link" in line and "public_link=" in line and _GUARD not in line
