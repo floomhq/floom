@@ -735,3 +735,106 @@ def _worker_connection_slugs(w: Dict[str, Any]) -> List[str]:
             seen.add(s)
             ordered.append(s)
     return ordered
+
+
+# ---------------------------------------------------------------------------
+# Worker deletion (shared by DELETE /workers/{id} and destructive-action approval)
+# ---------------------------------------------------------------------------
+
+def _delete_worker_impl(worker_id: str, owner_id: str, repos: "Repositories") -> None:
+    """Core delete-worker logic, shared by the DELETE endpoint and approval execution."""
+    import shutil
+
+    from worker_registry import WORKERS_DIR, invalidate_worker_cache
+    from models import RunStatus
+    from run_service import get_worker_config_for_run, update_run_status
+    from services.composio import _composio_trigger_signature, _disable_composio_trigger
+    from services.git_service import (
+        _ensure_git_workspace_ready,
+        _git_ops_lock,
+        _git_workspace,
+        _workers_git_prefix,
+    )
+    import git_ops as _git_ops
+    worker_id = _canonical_worker_id(worker_id)
+    _raise_if_protected_worker_mutation(worker_id)
+    worker = repos.workers.get(user_id=owner_id, worker_id=worker_id)
+    if not worker:
+        bundle_dir = WORKERS_DIR / worker_id
+        if bundle_dir.is_dir():
+            shutil.rmtree(bundle_dir, ignore_errors=True)
+            invalidate_worker_cache()
+            logger.info("Removed orphaned worker bundle dir %s", bundle_dir)
+            return
+        raise HTTPException(status_code=404, detail="Worker not found")
+    skill_version_id = worker.get("skill_version_id")
+    config = get_worker_config_for_run(worker_id)
+    composio_state = {
+        "trigger_id": worker.get("composio_trigger_id"),
+        "event": worker.get("composio_event"),
+        "signature": _composio_trigger_signature(config),
+    }
+
+    if composio_state.get("trigger_id"):
+        try:
+            _disable_composio_trigger(
+                composio_state.get("event") or (composio_state.get("signature") or {}).get("event"),
+                composio_state.get("trigger_id"),
+                worker_id,
+            )
+        except RuntimeError as exc:
+            raise HTTPException(status_code=502, detail=str(exc)) from exc
+
+    # Cancel any in-progress runs gracefully before deletion
+    active_runs = repos.workers.list_active_run_ids(user_id=owner_id, worker_id=worker_id)
+
+    for run_id in active_runs:
+        try:
+            update_run_status(
+                run_id,
+                RunStatus.FAILED.value,
+                error="Worker deleted",
+                user_id=owner_id,
+                repos=repos,
+            )
+            logger.info("Cancelled active run %s before worker deletion", run_id)
+        except Exception as exc:
+            logger.warning("Could not cancel run %s: %s", run_id, exc)
+
+    # Remove webhook secret
+    try:
+        from webhook_service import delete_webhook_secret
+        delete_webhook_secret(worker_id, repos=repos)
+    except Exception as exc:
+        logger.warning("Could not delete webhook secret for %s: %s", worker_id, exc)
+
+    # Delete the worker (FK CASCADE removes runs/artifacts/logs/webhooks)
+    repos.workers.delete(user_id=owner_id, worker_id=worker_id)
+
+    # Check if skill_version is still referenced by other workers; preserve if so.
+    ref_count = repos.workers.get_skill_version_ref_count(skill_version_id=skill_version_id)
+    if ref_count == 0 and skill_version_id:
+        repos.workers.delete_skill_version(skill_version_id=skill_version_id)
+        logger.info("Removed unreferenced skill_version %s", skill_version_id)
+
+    # Remove bundle files from disk only if no other worker references this skill_version
+    bundle_dir = WORKERS_DIR / worker_id
+    if ref_count == 0 and bundle_dir.is_dir():
+        try:
+            shutil.rmtree(bundle_dir)
+            logger.info("Removed bundle dir %s", bundle_dir)
+            # Record the deletion in git history (files gone, history preserved)
+            try:
+                workspace = _git_workspace()
+                prefix = _workers_git_prefix()
+                with _git_ops_lock:
+                    _ensure_git_workspace_ready(workspace)
+                    _git_ops.commit_paths(workspace, [f"{prefix}/{worker_id}"], f"worker: delete {worker_id}")
+            except Exception as _git_exc:
+                logger.warning("git commit for worker deletion failed (non-fatal): %s", _git_exc)
+        except Exception as exc:
+            logger.warning("Could not remove bundle dir %s: %s", bundle_dir, exc)
+    elif ref_count > 0:
+        logger.info("skill_version %s still referenced by %d workers, bundle preserved", skill_version_id, ref_count)
+
+    invalidate_worker_cache()
