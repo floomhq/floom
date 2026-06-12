@@ -113,7 +113,7 @@ class TestAccountInfoEndpoint:
         conn = _seed_connection(client)
         local_id = conn["id"]
 
-        with patch("main._fetch_composio_account_info") as mock_fetch:
+        with patch("routers.connections._fetch_composio_account_info") as mock_fetch:
             mock_fetch.return_value = {
                 "email": "user@example.com",
                 "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
@@ -152,7 +152,7 @@ class TestAccountInfoEndpoint:
         conn = _seed_connection(client, app_name="linkedin")
         local_id = conn["id"]
 
-        with patch("main._fetch_composio_account_info") as mock_fetch:
+        with patch("routers.connections._fetch_composio_account_info") as mock_fetch:
             mock_fetch.return_value = {
                 "email": "fede@example.com",
                 "scopes": ["r_liteprofile"],
@@ -260,7 +260,7 @@ class TestConnectionsListProjection:
         conn = _seed_connection(client, app_name="slack")
         local_id = conn["id"]
 
-        with patch("main._fetch_composio_account_info") as mock_fetch:
+        with patch("routers.connections._fetch_composio_account_info") as mock_fetch:
             mock_fetch.return_value = {
                 "email": "team@example.com",
                 "scopes": ["channels:read", "chat:write"],
@@ -273,7 +273,7 @@ class TestConnectionsListProjection:
                 headers=AUTH_HEADERS,
             )
 
-        with patch("main._fetch_composio_account_info") as mock_no_call:
+        with patch("routers.connections._fetch_composio_account_info") as mock_no_call:
             list_resp = client.get("/connections", headers=AUTH_HEADERS)
             # Cached scopes keep the list endpoint local.
             mock_no_call.assert_not_called()
@@ -875,7 +875,7 @@ class TestConnectionTestEndpoint:
         local_id = conn["id"]
 
         with patch("composio_client.check_status", return_value="enabled"), patch(
-            "main._fetch_composio_account_info"
+            "routers.connections._fetch_composio_account_info"
         ) as mock_info:
             mock_info.return_value = {
                 "email": "user@example.com",
