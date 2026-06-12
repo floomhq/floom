@@ -372,3 +372,77 @@ def _workers_referencing_context(name: str, *, user_id: str, repos: Repositories
         except Exception:
             continue
     return sorted(set(referenced_by))
+
+
+def _ensure_assistant_row(
+    *,
+    user_id: str,
+    repos,
+) -> Optional[dict[str, Any]]:
+    """Lazily upsert + return the workspace assistant's access mirror row.
+
+    The assistant is one shared tool per workspace (default ``workspace``). The
+    owner is the workspace owner; on the OSS single-owner engine that is the local
+    user. Never raises.
+    """
+    from db import assistant_row_id, derive_workspace_id
+
+    if repos is None or not user_id:
+        return None
+    asset_access = getattr(repos, "asset_access", None)
+    ensure = getattr(asset_access, "ensure_assistant", None)
+    if ensure is None:
+        return None
+    workspace_id = derive_workspace_id(user_id)
+    try:
+        return ensure(
+            assistant_id=assistant_row_id(workspace_id),
+            workspace_id=workspace_id,
+            owner_id=user_id,
+        )
+    except Exception:
+        logger.debug("ensure assistant row failed for %s", user_id, exc_info=True)
+        return None
+
+
+def _assistant_access(
+    *,
+    user_id: str,
+    repos,
+) -> "tuple[Optional[str], str, Any]":
+    """Resolve (owner_id, visibility, permissions) for the workspace assistant.
+
+    Delegates to the AssetAccessRepository. Falls back to owner-permissive
+    workspace defaults when no repo/row is available (OSS single-owner: the local
+    user owns + can share the assistant). Never raises.
+    """
+    from db import assistant_row_id, derive_workspace_id
+    from models import AssetPermissions
+
+    asset_access = getattr(repos, "asset_access", None) if repos is not None else None
+    workspace_id = derive_workspace_id(user_id)
+    aid = assistant_row_id(workspace_id)
+    if asset_access is not None:
+        _ensure_assistant_row(user_id=user_id, repos=repos)
+        try:
+            perms = asset_access.get_permissions(
+                workspace_id=workspace_id,
+                user_id=user_id,
+                asset_type="assistant",
+                asset_id=aid,
+            )
+            return (
+                str(perms.get("owner_id") or user_id),
+                str(perms.get("visibility") or "workspace"),
+                AssetPermissions(
+                    is_owner=bool(perms.get("is_owner", True)),
+                    can_view=bool(perms.get("can_view", True)),
+                    can_edit=bool(perms.get("can_edit", True)),
+                    can_run=bool(perms.get("can_run", True)),
+                    can_delete=bool(perms.get("can_delete", True)),
+                    can_share=bool(perms.get("can_share", True)),
+                ),
+            )
+        except Exception:
+            logger.debug("assistant permission probe failed", exc_info=True)
+    return (user_id, "workspace", AssetPermissions())

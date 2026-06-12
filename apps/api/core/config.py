@@ -9,6 +9,7 @@ every name below for backward compatibility with existing imports.
 from __future__ import annotations
 
 import os
+import time
 import re
 
 
@@ -180,3 +181,8 @@ SYSTEM_CONTEXT_DESCRIPTIONS: dict[str, str] = {
         "generating new workers from your prompts (read-only)."
     ),
 }
+
+
+# Process start time for /system/metrics uptime reporting.
+_PROCESS_START_TIME = time.time()
+_PROCESS_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_PROCESS_START_TIME))
