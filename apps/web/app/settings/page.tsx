@@ -853,12 +853,16 @@ const BEHAVIOUR_TOGGLES: { key: string; title: string; description: string }[] =
     description: "New workers pause for review before taking external actions.",
   },
   {
-    key: "auto_pause",
+    // MUST be "auto_pause_enabled" — run_service._auto_pause_on_consecutive_
+    // failures_enabled() reads exactly this key (the UI shipped writing
+    // "auto_pause", which the runner never read — dead toggle).
+    key: "auto_pause_enabled",
     title: "Auto-pause on repeated failures",
     description: "Pause a worker automatically after consecutive failed runs.",
   },
   {
-    key: "failure_emails",
+    // Canonical key per #794's proposal; enforcement is tracked there.
+    key: "failure_email_enabled",
     title: "Email me on run failures",
     description: "Send a notification when a run ends in error.",
   },
