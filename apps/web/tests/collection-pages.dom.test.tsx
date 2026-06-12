@@ -103,10 +103,24 @@ describe("page components render with data (no client crash)", () => {
     expect(screen.queryByText("Export CSV")).not.toBeInTheDocument();
   });
 
+  it("RunsCollection renders runs returned by the client API when server data is empty", async () => {
+    const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
+    render(<RunsCollection initialRuns={[]} />);
+    expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
+    expect(screen.queryByText("No runs yet")).not.toBeInTheDocument();
+  });
+
   it("ConnectionsCollection renders the connection", async () => {
     const { default: ConnectionsCollection } = await import("@/app/connections/ConnectionsCollection");
     render(<ConnectionsCollection initialConnections={[connection as never]} />);
     expect(await screen.findByText("GitHub")).toBeInTheDocument();
+  });
+
+  it("ConnectionsCollection renders connections returned by the client API when server data is empty", async () => {
+    const { default: ConnectionsCollection } = await import("@/app/connections/ConnectionsCollection");
+    render(<ConnectionsCollection initialConnections={[]} />);
+    expect(await screen.findByText("GitHub")).toBeInTheDocument();
+    expect(screen.queryByText("No connections yet")).not.toBeInTheDocument();
   });
 
   it("BrainCollection renders the folder", async () => {

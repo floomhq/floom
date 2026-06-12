@@ -39,7 +39,8 @@ import { Textarea } from "@/components/ui/textarea";
 import { CollectionView } from "@/components/collection/CollectionView";
 import { emptyState } from "@/lib/collection/url-state";
 import type { CollectionConfig, CollectionState } from "@/lib/collection/types";
-import { SETTINGS_NAV, settingsGroup, settingsCounts, groupLabel } from "@/lib/settings/nav-groups";
+import { SETTINGS_NAV, settingsGroup, groupLabel } from "@/lib/settings/nav-groups";
+import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import { CliCommandPanel } from "@/components/CliCommandPanel";
 import { GitWorkspacePanel } from "@/components/GitWorkspacePanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
@@ -401,9 +402,9 @@ function SettingsContent() {
     }
   }
 
-  const workspaceName =
-    workspaceList?.workspaces.find((workspace) => workspace.id === workspaceList.active_id)?.name ??
-    "Floom";
+  const workspaceName = resolveWorkspaceName(
+    workspaceList?.workspaces.find((workspace) => workspace.id === workspaceList.active_id)?.name,
+  );
   const accountName =
     currentUser?.display_name?.trim() ||
     currentUser?.email?.trim() ||
@@ -523,13 +524,6 @@ function SettingsContent() {
           }}
         />
       )}
-
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          System configuration and access. {settingsCounts()}.
-        </p>
-      </div>
 
       {waClaimBanner && (
         <Alert variant={waClaimBanner.ok ? "default" : "destructive"}>

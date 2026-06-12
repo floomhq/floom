@@ -58,4 +58,22 @@ describe("api session expiry handling", () => {
     await expect(api.approvals.publicGet("approval_1", "token_1")).rejects.toThrow("Invalid approval token.");
     expect(assign).not.toHaveBeenCalled();
   });
+
+  it("sends the local-default workspace header when no browser workspace is stored", async () => {
+    stubBrowserLocation("/runs", "");
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(JSON.stringify([]), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      }),
+    );
+
+    const { api, getActiveWorkspaceId } = await import("@/lib/api");
+
+    expect(getActiveWorkspaceId()).toBe("local-default");
+    await api.runs.list({ limit: 50 });
+
+    const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
+    expect(headers.get("x-workeros-workspace")).toBe("local-default");
+  });
 });

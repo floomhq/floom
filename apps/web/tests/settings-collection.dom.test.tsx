@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
 const apiMock = vi.hoisted(() => ({
@@ -130,7 +130,8 @@ describe("Settings Collection (Phase 3)", () => {
 
     render(<SettingsPage />);
 
-    expect(await screen.findByText("Workspace defaults")).toBeInTheDocument();
+    await waitFor(() => expect(screen.getByText("System")).toBeInTheDocument(), { timeout: 3000 });
+    expect(screen.getByText("Workspace defaults")).toBeInTheDocument();
     expect(screen.getByText("Slack, email & agent install")).toBeInTheDocument();
     expect(screen.getByText("Configure Emily")).toBeInTheDocument();
     expect(screen.getByText("People & roles")).toBeInTheDocument();
@@ -146,5 +147,26 @@ describe("Settings Collection (Phase 3)", () => {
 
     expect(await screen.findByText("Assistant editing controls are hidden because this account cannot edit workspace assistant settings.")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: "Edit" })).not.toBeInTheDocument();
+  });
+
+  it("uses the workspace display fallback for UUID names and renders one Settings heading", async () => {
+    apiMock.workspaceList.mockResolvedValue({
+      active_id: "w1",
+      workspaces: [
+        {
+          id: "w1",
+          name: "9b1a5065-3ab9-493a-8220-b6c139d9c1b7",
+          owner_user_id: "u0",
+          created_at: "2026-06-01T00:00:00Z",
+        },
+      ],
+    });
+    const { default: SettingsPage } = await import("@/app/settings/page");
+
+    render(<SettingsPage />);
+
+    expect(await screen.findByText("Workspace · My workspace", {}, { timeout: 3000 })).toBeInTheDocument();
+    expect(screen.queryByText(/9b1a5065-3ab9-493a-8220-b6c139d9c1b7/i)).not.toBeInTheDocument();
+    expect(screen.getAllByText("Settings")).toHaveLength(1);
   });
 });
