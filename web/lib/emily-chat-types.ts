@@ -248,6 +248,9 @@ interface BaseCard {
   status: CardStatus;
   actions?: CardAction[];
   streams?: { events: string; parts: string };
+  args?: unknown;
+  result?: unknown;
+  duration?: string;
 }
 
 export interface WorkerCreateCard extends BaseCard {
@@ -265,7 +268,6 @@ export interface RunCard extends BaseCard {
   workerName: string;
   workerId?: string;
   runId?: string;
-  duration?: string;
   logLines?: number;
   artifact?: { name: string; id: string };
 }
@@ -311,6 +313,7 @@ export interface GenericToolCard extends BaseCard {
   kind: "generic";
   toolName: string;
   title: string;
+  /** @deprecated use args/result. Kept for old persisted/local card shapes. */
   preview?: Record<string, unknown>;
   isError?: boolean;
 }

@@ -1,41 +1,42 @@
 // Settings nav, grouped per APP-UI-V4-SPEC §4: TWO labeled groups —
 //   Workspace · {name}  and  Account · {user}
-// with a counts strip like "4 workspace · 2 account".
-//
-// This models the LIVE /settings tabs (app/settings/page.tsx renders its
-// TabsList from these groups). v4's full target set also moves Assistant,
-// Members and Version history under Workspace — today those live on their own
-// pages (/assistant, members page, per-asset versions) and migrate in the
-// settings regroup pass:
-//   TODO(v4-§4): fold Assistant (guarded by #804), Members, Version history
-//   (#772 merged timeline) into the Workspace group.
+// with a counts strip like "6 workspace · 2 account".
 
 export type SettingsScope = "workspace" | "account";
 
 export interface SettingsNavItem {
-  key: string;
+  key:
+    | "system"
+    | "channels"
+    | "assistant"
+    | "members"
+    | "versions"
+    | "danger"
+    | "developer"
+    | "appearance";
   label: string;
   scope: SettingsScope;
-  /** Hidden for members in the UI; the server still enforces (e.g. #804). */
-  adminOnly?: boolean;
+  description: string;
 }
 
 export const SETTINGS_NAV: SettingsNavItem[] = [
   // Workspace · {name}
-  { key: "system", label: "System", scope: "workspace" },
-  { key: "git", label: "Git", scope: "workspace" },
-  { key: "channels", label: "Channels", scope: "workspace" },
-  { key: "danger", label: "Danger", scope: "workspace", adminOnly: true },
+  { key: "system", label: "System", scope: "workspace", description: "Workspace defaults" },
+  { key: "channels", label: "Channels", scope: "workspace", description: "Slack, email & agent install" },
+  { key: "assistant", label: "Assistant", scope: "workspace", description: "Configure Emily" },
+  { key: "members", label: "Members", scope: "workspace", description: "People & roles" },
+  { key: "versions", label: "Version history", scope: "workspace", description: "Git-tracked workspace changelog" },
+  { key: "danger", label: "Danger", scope: "workspace", description: "Irreversible actions" },
   // Account · {user}
-  { key: "developer", label: "Developer", scope: "account" },
-  { key: "appearance", label: "Appearance", scope: "account" },
+  { key: "developer", label: "Developer", scope: "account", description: "Your API, CLI & MCP access" },
+  { key: "appearance", label: "Appearance", scope: "account", description: "Theme & accent" },
 ];
 
 export function settingsGroup(scope: SettingsScope): SettingsNavItem[] {
   return SETTINGS_NAV.filter((i) => i.scope === scope);
 }
 
-/** Count strip, e.g. "4 workspace · 2 account". */
+/** Count strip, e.g. "6 workspace · 2 account". */
 export function settingsCounts(): string {
   const ws = settingsGroup("workspace").length;
   const acct = settingsGroup("account").length;

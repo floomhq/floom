@@ -23,8 +23,8 @@ function api(rel: string) { return readFileSync(resolve(API_ROOT, rel), "utf8");
 
 function test556ModelsMissingSecretsOnSummary(): void {
   const s = api("models.py");
-  const summaryIdx = s.indexOf("class WorkerSummary");
-  const detailIdx = s.indexOf("class WorkerDetail");
+  const summaryIdx = s.indexOf("class WorkerSummary(BaseModel)");
+  const detailIdx = s.indexOf("class WorkerDetail(BaseModel)");
   const summarySection = s.slice(summaryIdx, detailIdx);
   assert(summarySection.includes("missing_secrets"),
     "WorkerSummary must declare missing_secrets field");
@@ -34,7 +34,7 @@ function test556ModelsMissingSecretsOnSummary(): void {
 
 function test556ModelsMissingSecretsOnDetail(): void {
   const s = api("models.py");
-  const detailIdx = s.indexOf("class WorkerDetail");
+  const detailIdx = s.indexOf("class WorkerDetail(BaseModel)");
   const detailSection = s.slice(detailIdx, detailIdx + 3000);
   assert(detailSection.includes("missing_secrets"),
     "WorkerDetail must declare missing_secrets field");
@@ -97,11 +97,11 @@ function test556TypesUpdated(): void {
 // ---------------------------------------------------------------------------
 
 function test556WorkerDetailShowsSecretNames(): void {
-  const s = src("app/workers/[id]/page.tsx");
-  assert(s.includes("worker.missing_secrets"),
-    "Worker detail must render worker.missing_secrets in the warning block");
-  assert(s.includes("prefill="),
-    "Missing secret links must pre-fill the secret name in the add form");
+  const s = src("components/overview/AlertsBell.tsx");
+  assert(s.includes('type === "setup_incomplete"') || s.includes('type === \\"setup_incomplete\\"'),
+    "Setup alerts must render setup_incomplete items from the overview flow");
+  assert(s.includes("/connections/secrets"),
+    "Missing secret links must route to the secrets manager");
 }
 
 // ---------------------------------------------------------------------------

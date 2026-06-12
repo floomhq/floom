@@ -736,6 +736,8 @@ function workerListCardFromResult(
     status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "completed")),
     actions: event.actions,
     streams: event.streams,
+    args: existing.args ?? ("preview" in existing ? existing.preview : undefined),
+    result: event.result,
     workers,
   };
 }
@@ -759,11 +761,11 @@ function runCardFromResult(
     optionalString(resource?.run_id);
   if (!isRun || !runId) return null;
 
-  const preview = "preview" in existing ? existing.preview : undefined;
+  const args = asRecord(existing.args) ?? ("preview" in existing ? asRecord(existing.preview) : null);
   const workerId =
     optionalString(resource?.worker_id) ??
     optionalString(nestedRun?.worker_id) ??
-    optionalString(asRecord(preview)?.id);
+    optionalString(args?.id);
   const workerName = optionalString(resource?.worker_name) ?? workerId ?? "Worker run";
   const actions =
     event.actions && event.actions.length > 0
@@ -788,6 +790,8 @@ function runCardFromResult(
     status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "running")),
     actions,
     streams: event.streams,
+    args: existing.args ?? ("preview" in existing ? existing.preview : undefined),
+    result: event.result,
     toolName: normalizedTool || event.toolName,
     runId,
     workerId,
@@ -886,6 +890,7 @@ export function reduceSSEEvent(
         card_id: cardId,
         toolName: event.toolName,
         title: event.card?.title ?? getToolCardTitle(event.toolName, status),
+        args: event.args_preview ?? event.args,
         preview: event.args_preview as Record<string, unknown> | undefined,
         status,
         ...(event.resource ? {} : {}),
@@ -929,9 +934,7 @@ export function reduceSSEEvent(
                 ? { title: getToolCardTitle(toolName, newStatus) }
                 : {}),
             ...(event.actions ? { actions: event.actions } : {}),
-            ...(event.type === "tool-resource" && event.streams
-              ? { streams: event.streams }
-              : {}),
+            ...("streams" in event && event.streams ? { streams: event.streams } : {}),
           } as ToolCard;
           return { type: "tool-card" as const, card: updatedCard };
         });
@@ -960,6 +963,8 @@ export function reduceSSEEvent(
               : toolName
                 ? { title: getToolCardTitle(toolName, normalizeCardStatus(status)) }
                 : {}),
+            result: event.result,
+            isError: event.isError,
             ...(event.actions ? { actions: event.actions } : {}),
             ...(event.streams ? { streams: event.streams } : {}),
           } as ToolCard;
@@ -1028,7 +1033,7 @@ export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
 export function getCardHref(card: ToolCard): string | null {
   switch (card.kind) {
     case "worker-create":
-      return card.workerId ? `/workers/${card.workerId}` : null;
+      return card.workerId ? `/workers?sel=${encodeURIComponent(card.workerId)}` : null;
     case "run":
       return card.runId ? `/runs/${card.runId}` : null;
     case "artifact":

@@ -15,12 +15,12 @@ let loginRedirectStarted = false;
 export function getActiveWorkspaceId(): string | null {
   if (typeof window === "undefined") return null;
   const value = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
-  return value && value !== "local-default" ? value : null;
+  return value || "local-default";
 }
 
 export function setActiveWorkspaceId(workspaceId: string | null) {
   if (typeof window === "undefined") return;
-  if (!workspaceId || workspaceId === "local-default") {
+  if (!workspaceId) {
     window.localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
     window.document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=; Path=/; Max-Age=0; SameSite=Lax`;
   } else {
@@ -672,7 +672,6 @@ export const api = {
     info: () => fetchJson<import("./types").SystemInfo>("/system/info"),
     platformConfig: () => fetchJson<import("./types").PlatformConfig>("/system/platform-config"),
     overview: () => fetchJson<import("./types").SystemOverview>("/system/overview"),
-    metrics: () => fetchJson<import("./types").SystemMetrics>("/system/metrics"),
     clearRuns: () => fetchJson<import("./types").ActionResponse>("/runs/clear", { method: "POST" }),
     workspaceAgent: () =>
       fetchJson<import("./types").WorkspaceAgentInfo>("/system/workspace-agent"),

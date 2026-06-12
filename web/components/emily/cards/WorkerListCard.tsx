@@ -37,17 +37,16 @@ export function WorkerListCard({ card }: { card: WorkerListCardType }) {
               )}
             </span>
             <div className="flex gap-1 shrink-0">
-              {/* #843: /workers/{id}/runs has no page (404). The worker
-                  detail page is where a run can be started. */}
+              {/* Worker detail opens in the Workers split pane. */}
               <a
-                href={`/workers/${w.id}`}
+                href={`/workers?sel=${encodeURIComponent(w.id)}`}
                 title="Run"
                 className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
                 <Play className="size-3" />
               </a>
               <a
-                href={`/workers/${w.id}`}
+                href={`/workers?sel=${encodeURIComponent(w.id)}`}
                 title="Open"
                 className="inline-flex h-6 w-6 items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
               >
