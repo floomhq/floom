@@ -26,6 +26,7 @@ from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel
 
 from auth import AuthContext, get_auth_context
+from services.composio import _raise_composio_unavailable
 
 logger = logging.getLogger("floom.api")
 
@@ -52,18 +53,6 @@ class IntegrationCatalogResponse(BaseModel):
     categories: List[str] = []
 
 
-def _raise_composio_unavailable(exc: Exception) -> None:
-    from composio_client import ComposioConfigurationError
-
-    if isinstance(exc, ComposioConfigurationError):
-        raise HTTPException(status_code=503, detail=str(exc)) from exc
-    raise HTTPException(
-        status_code=503,
-        detail=(
-            "Unable to reach the integration provider right now. "
-            "Try again later or use an API-key connection if this app does not support OAuth."
-        ),
-    ) from exc
 
 
 @integrations_router.get("/integrations/catalog", response_model=IntegrationCatalogResponse)
