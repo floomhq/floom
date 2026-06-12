@@ -15,19 +15,21 @@ const ACTIVE_WORKSPACE_COOKIE_KEY = "workeros.activeWorkspaceId";
 
 export async function serverFetch<T>(
   path: string,
-  options?: RequestInit & { next?: { revalidate?: number | false; tags?: string[] } }
+  options?: RequestInit & {
+    next?: { revalidate?: number | false; tags?: string[] };
+    includeWorkspace?: boolean;
+  }
 ): Promise<T> {
-  const { next, ...fetchOptions } = options ?? {};
+  const { next, includeWorkspace = true, ...fetchOptions } = options ?? {};
   const cookieStore = await cookies();
   const workspaceCookie = cookieStore.get(ACTIVE_WORKSPACE_COOKIE_KEY)?.value || "";
-  const activeWorkspace =
-    workspaceCookie && workspaceCookie !== "local-default" ? decodeURIComponent(workspaceCookie) : "";
+  const activeWorkspace = workspaceCookie ? decodeURIComponent(workspaceCookie) : "local-default";
   const res = await fetch(`${API_BASE}${path}`, {
     ...fetchOptions,
     headers: {
       "content-type": "application/json",
       "x-floom-secret": API_SECRET,
-      ...(activeWorkspace ? { "x-workeros-workspace": activeWorkspace } : {}),
+      ...(includeWorkspace && activeWorkspace ? { "x-workeros-workspace": activeWorkspace } : {}),
       ...fetchOptions?.headers,
     },
     // next.js cache config — passed through as NextFetchRequestConfig
@@ -93,7 +95,7 @@ export async function fetchConnections() {
 export async function fetchPublicWorker(id: string, token: string) {
   return serverFetch<import("./types").PublicWorker>(
     `/workers/public/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`,
-    { next: { revalidate: 30 } }
+    { next: { revalidate: 30 }, includeWorkspace: false }
   );
 }
 
@@ -101,6 +103,6 @@ export async function fetchPublicWorker(id: string, token: string) {
 export async function fetchStandaloneShare(token: string) {
   return serverFetch<import("./types").StandaloneShare>(
     `/s/${encodeURIComponent(token)}`,
-    { next: { revalidate: false } }
+    { next: { revalidate: false }, includeWorkspace: false }
   );
 }
