@@ -878,18 +878,6 @@ export interface SystemOverview {
   needs_attention: SystemOverviewAttentionItem[];
 }
 
-export interface SystemMetrics {
-  workers_count: number;
-  runs_total: number;
-  runs_7d: number;
-  runs_failed_7d: number;
-  connections_count: number;
-  secrets_count: number;
-  active_triggers: number;
-  uptime_seconds: number;
-  drafts_last_hour?: number;
-}
-
 // ---------------------------------------------------------------------------
 // Connections (Composio OAuth)
 // ---------------------------------------------------------------------------
