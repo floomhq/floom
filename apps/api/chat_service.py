@@ -256,6 +256,20 @@ _SECRET_QUERY_PREFIX_RE = re.compile(
 )
 _SECRET_QUERY_VALUE_DELIMITERS = frozenset('& \t\r\n"\'<>)]}')
 
+
+def _effective_worker_visibility_user_id(user_id: str) -> str:
+    """Resolve legacy local default ownership for Emily's worker visibility checks."""
+    raw = str(user_id or "").strip()
+    if not raw:
+        return raw
+    try:
+        from contexts import effective_context_user_id
+        effective = effective_context_user_id(raw)
+    except Exception:
+        return raw
+    return str(effective or raw)
+
+
 _current_chat_conversation_id: ContextVar[Optional[str]] = ContextVar(
     "workeros_chat_conversation_id",
     default=None,
@@ -1865,6 +1879,7 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
 
 def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     from db import get_db as _get_db
+    visibility_user_id = _effective_worker_visibility_user_id(user_id)
     result = []
     with _get_db() as conn:
         # Role-aware visibility, mirroring the /workers UI: an admin sees EVERY
@@ -1873,7 +1888,7 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
         # workers (e.g. the seed workers belong to the local-default user) got an
         # empty list from Emily while the UI showed all of them.
         try:
-            role_row = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+            role_row = conn.execute("SELECT role FROM users WHERE id = ?", (visibility_user_id,)).fetchone()
             is_admin = bool(role_row) and str(role_row["role"]).lower() == "admin"
         except Exception:
             # No users table (single-user OSS without multi-member) -> not admin;
@@ -1913,7 +1928,7 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
                     + "OR (COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
                     + "    AND wm.user_id IS NOT NULL) "
                     + "ORDER BY w.name",
-                    (user_id, user_id),
+                    (visibility_user_id, visibility_user_id),
                 ).fetchall()
                 # Also include stock/public workers not already captured above
                 # (e.g. stock worker owned by another user in a workspace the
@@ -1944,7 +1959,7 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
                         + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
                         + f"OR w.id IN ({placeholders}) "
                         + "ORDER BY w.name",
-                        [user_id] + all_stock_ids,
+                        [visibility_user_id] + all_stock_ids,
                     ).fetchall()
                 else:
                     rows = conn.execute(
@@ -1952,7 +1967,7 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
                         + "WHERE w.owner_id = ? "
                         + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
                         + "ORDER BY w.name",
-                        (user_id,),
+                        (visibility_user_id,),
                     ).fetchall()
     # #841 RCA: every row was returned, so "what workers do I have?" dumped
     # system and example workers into the chat card with no distinction. The
@@ -2018,6 +2033,7 @@ def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
         PROTECTED_STOCK_WORKER_IDS,
         _shared_filesystem_fallback_allowed,
     )
+    visibility_user_id = _effective_worker_visibility_user_id(user_id)
     if worker_id in PUBLIC_STOCK_WORKER_IDS or worker_id in PROTECTED_STOCK_WORKER_IDS:
         return True
     try:
@@ -2037,7 +2053,7 @@ def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
             return True
         # Unknown worker ID in a multi-user deployment — block it.
         return False
-    if row["owner_id"] == user_id:
+    if row["owner_id"] == visibility_user_id:
         return True
     # Admins may view every worker, mirroring the role-aware /workers UI and
     # workers__list_all. Without this, an admin who owns no workers could LIST a
@@ -2045,7 +2061,7 @@ def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
     # user OSS) -> not admin.
     try:
         role_row = conn.execute(
-            "SELECT role FROM users WHERE id = ? LIMIT 1", (user_id,)
+            "SELECT role FROM users WHERE id = ? LIMIT 1", (visibility_user_id,)
         ).fetchone()
         if role_row and str(role_row["role"]).lower() == "admin":
             return True
@@ -2061,7 +2077,7 @@ def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
         member_row = conn.execute(
             "SELECT 1 FROM workspace_members "
             "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
-            (workspace_id, user_id),
+            (workspace_id, visibility_user_id),
         ).fetchone()
     except Exception:
         return False
@@ -2111,8 +2127,9 @@ def _list_viewable_workers(conn: Any, user_id: str) -> List[Dict[str, str]]:
     """
     from main import PUBLIC_STOCK_WORKER_IDS, PROTECTED_STOCK_WORKER_IDS
 
+    visibility_user_id = _effective_worker_visibility_user_id(user_id)
     try:
-        role_row = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+        role_row = conn.execute("SELECT role FROM users WHERE id = ?", (visibility_user_id,)).fetchone()
         is_admin = bool(role_row) and str(role_row["role"]).lower() == "admin"
     except Exception:
         is_admin = False
@@ -2128,7 +2145,7 @@ def _list_viewable_workers(conn: Any, user_id: str) -> List[Dict[str, str]]:
                 + "WHERE w.owner_id = ? "
                 + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
                 + "ORDER BY w.name",
-                (user_id,),
+                (visibility_user_id,),
             ).fetchall()
     except Exception:
         rows = []
