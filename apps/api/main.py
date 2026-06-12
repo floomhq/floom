@@ -302,6 +302,8 @@ init_db()
 # backward compatibility with the many modules and tests that import them from
 # `main` (e.g. `from main import PROTECTED_STOCK_WORKER_IDS`).
 from core.config import (
+    _PROCESS_START_TIME,
+    _PROCESS_STARTED_AT,
     PUBLIC_SHARE_TEXT_PREVIEW_LIMIT,
     DEFAULT_JSON_BODY_LIMIT_BYTES,
     FROM_BUNDLE_BODY_LIMIT_BYTES,
@@ -359,6 +361,8 @@ from services.context_access import (
     _is_system_context_pack,
     _context_visible_to_user,
     _require_context_for_user,
+    _ensure_assistant_row,
+    _assistant_access,
     _context_worker_counts,
     _ensure_brain_pack_row,
     _brain_pack_access,
@@ -1418,9 +1422,6 @@ def _worker_call_token_allows_request(
         and str(run_row.get("trigger_ref") or "") == str(token_payload.get("parent_run_id") or "")
     )
 
-# Process start time for /system/metrics uptime reporting.
-_PROCESS_START_TIME = time.time()
-_PROCESS_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_PROCESS_START_TIME))
 
 
 # Architecture banner: visible in journalctl on every API boot so auditors
@@ -4268,75 +4269,6 @@ def _require_readable_context_for_user(
     ):
         raise HTTPException(status_code=404, detail="Context not found")
     return safe_name, meta
-
-
-def _ensure_assistant_row(
-    *,
-    user_id: str,
-    repos: Optional[Repositories],
-) -> Optional[dict[str, Any]]:
-    """Lazily upsert + return the workspace assistant's access mirror row.
-
-    The assistant is one shared tool per workspace (default ``workspace``). The
-    owner is the workspace owner; on the OSS single-owner engine that is the local
-    user. Never raises.
-    """
-    if repos is None or not user_id:
-        return None
-    asset_access = getattr(repos, "asset_access", None)
-    ensure = getattr(asset_access, "ensure_assistant", None)
-    if ensure is None:
-        return None
-    workspace_id = derive_workspace_id(user_id)
-    try:
-        return ensure(
-            assistant_id=assistant_row_id(workspace_id),
-            workspace_id=workspace_id,
-            owner_id=user_id,
-        )
-    except Exception:
-        logger.debug("ensure assistant row failed for %s", user_id, exc_info=True)
-        return None
-
-
-def _assistant_access(
-    *,
-    user_id: str,
-    repos: Optional[Repositories],
-) -> tuple[Optional[str], str, AssetPermissions]:
-    """Resolve (owner_id, visibility, permissions) for the workspace assistant.
-
-    Delegates to the AssetAccessRepository. Falls back to owner-permissive
-    workspace defaults when no repo/row is available (OSS single-owner: the local
-    user owns + can share the assistant). Never raises.
-    """
-    asset_access = getattr(repos, "asset_access", None) if repos is not None else None
-    workspace_id = derive_workspace_id(user_id)
-    aid = assistant_row_id(workspace_id)
-    if asset_access is not None:
-        _ensure_assistant_row(user_id=user_id, repos=repos)
-        try:
-            perms = asset_access.get_permissions(
-                workspace_id=workspace_id,
-                user_id=user_id,
-                asset_type="assistant",
-                asset_id=aid,
-            )
-            return (
-                str(perms.get("owner_id") or user_id),
-                str(perms.get("visibility") or "workspace"),
-                AssetPermissions(
-                    is_owner=bool(perms.get("is_owner", True)),
-                    can_view=bool(perms.get("can_view", True)),
-                    can_edit=bool(perms.get("can_edit", True)),
-                    can_run=bool(perms.get("can_run", True)),
-                    can_delete=bool(perms.get("can_delete", True)),
-                    can_share=bool(perms.get("can_share", True)),
-                ),
-            )
-        except Exception:
-            logger.debug("assistant permission probe failed", exc_info=True)
-    return (user_id, "workspace", AssetPermissions())
 
 
 def _context_detail(
