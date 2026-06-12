@@ -120,4 +120,43 @@ describe("page components render with data (no client crash)", () => {
     render(<ApprovalsCollection />);
     expect(await screen.findByText("Reverse Match CRM")).toBeInTheDocument();
   });
+
+  it("shows loading skeletons, not empty states, while first collection fetches are pending", async () => {
+    const { api } = await import("@/lib/api");
+
+    vi.mocked(api.workers.list).mockReturnValueOnce(new Promise(() => {}) as never);
+    const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
+    const workers = render(<WorkersCollection initialWorkers={[]} />);
+    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText("No workers yet")).not.toBeInTheDocument();
+    workers.unmount();
+
+    vi.mocked(api.runs.list).mockReturnValueOnce(new Promise(() => {}) as never);
+    const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
+    const runs = render(<RunsCollection initialRuns={[]} />);
+    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText("No run history yet")).not.toBeInTheDocument();
+    runs.unmount();
+
+    vi.mocked(api.connections.list).mockReturnValueOnce(new Promise(() => {}) as never);
+    const { default: ConnectionsCollection } = await import("@/app/connections/ConnectionsCollection");
+    const connections = render(<ConnectionsCollection initialConnections={[]} />);
+    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText("No connections yet")).not.toBeInTheDocument();
+    connections.unmount();
+
+    vi.mocked(api.contexts.list).mockReturnValueOnce(new Promise(() => {}) as never);
+    const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
+    const brain = render(<BrainCollection initialFolders={[]} />);
+    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText("No folders yet")).not.toBeInTheDocument();
+    brain.unmount();
+
+    vi.mocked(api.approvals.list).mockReturnValueOnce(new Promise(() => {}) as never);
+    const { default: ApprovalsCollection } = await import("@/app/approvals/ApprovalsCollection");
+    const approvals = render(<ApprovalsCollection />);
+    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText("No pending approvals")).not.toBeInTheDocument();
+    approvals.unmount();
+  });
 });

@@ -161,16 +161,22 @@ const RUN_TAB_COMPONENT: Record<RunDetailTab, (props: { r: RunSummary }) => Reac
 export default function RunsCollection({ initialRuns }: { initialRuns: RunSummary[] }) {
   const [runs, setRuns] = useState<RunSummary[]>(initialRuns);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
+  const [loading, setLoading] = useState(initialRuns.length === 0);
   const [now] = useState(() => Date.now());
 
-  const refresh = () =>
-    api.runs
-      .list({ limit: 200 })
-      .then((rows) => setRuns([...rows].sort((a, b) => runSortTime(b) - runSortTime(a))))
-      .catch(() => {});
+  const refresh = async (initial = false) => {
+    try {
+      const rows = await api.runs.list({ limit: 200 });
+      setRuns([...rows].sort((a, b) => runSortTime(b) - runSortTime(a)));
+    } catch {
+      // leave existing state intact on refresh errors
+    } finally {
+      if (initial) setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    void refresh();
+    void refresh(true);
     // Content tags are inherited from the parent worker (SPEC §11).
     api.workers.list().then(setWorkers).catch(() => {});
   }, []);
@@ -250,6 +256,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     title: "Run history",
     subtitle: "Worker executions grouped by day.",
     items: sorted,
+    loading,
     idOf: (r) => r.id,
     searchOf: (r) => `${r.worker_name ?? r.worker_id} ${r.id} ${r.trigger_source}`,
     tagsOf: (r) =>

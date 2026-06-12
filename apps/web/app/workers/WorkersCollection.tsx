@@ -476,13 +476,23 @@ export default function WorkersCollection({
   const router = useRouter();
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(initialWorkers.length === 0);
 
   useEffect(() => {
+    let alive = true;
     setFavorites(getFavorites());
     api.workers
       .list({ include_archived: true })
-      .then((all) => setWorkers(all.filter((w) => !isSystemWorker(w))))
-      .catch(() => {});
+      .then((all) => {
+        if (alive) setWorkers(all.filter((w) => !isSystemWorker(w)));
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const toggleStar = useCallback((id: string) => {
@@ -503,6 +513,7 @@ export default function WorkersCollection({
     title: "Workers",
     subtitle: "Your AI workers.",
     items: sortWorkersByRecentActivity(visible),
+    loading,
     idOf: (w) => w.id,
     searchOf: (w) => `${w.name} ${w.description ?? ""} ${(w.tags ?? []).join(" ")}`,
     tagsOf: (w) =>
