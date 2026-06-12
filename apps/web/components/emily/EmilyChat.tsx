@@ -461,7 +461,11 @@ function EmilyChatCore({ fullPage = false, onOpenRunDetails, hideControls = fals
           )}
         >
           <ChatControls
-            onNew={handleNew}
+            onNew={() => {
+              handleNew();
+              isNearBottomRef.current = true;
+              setShowScrollButton(false);
+            }}
             onExport={handleExport}
             canExport={hasMessages}
             activeConversationId={conversationId}
