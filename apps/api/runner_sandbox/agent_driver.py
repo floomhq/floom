@@ -601,160 +601,73 @@ class AgentDriver(SandboxDriver):
         return self._usage_tokens(usage)
 
     def _agent_event_to_part(self, event: Any, emitted_text_delta: bool) -> tuple[Optional[Dict[str, Any]], bool]:
-        event_type = getattr(event, "type", None)
-        if event_type == "raw_response_event":
-            part = self._raw_response_event_to_part(getattr(event, "data", None))
-            return part, bool(part and part.get("type") == "text")
+        # Decoding is shared with chat_service.stream_chat (#605); this method
+        # only formats the normalized item into transcript/run parts.
+        from runner_sandbox.stream_adapter import decode_stream_event
 
-        if event_type != "run_item_stream_event":
+        item = decode_stream_event(event)
+        if item is None:
             return None, False
 
-        name = getattr(event, "name", None)
-        item = getattr(event, "item", None)
-        raw_item = getattr(item, "raw_item", None)
+        if item.kind == "text_delta":
+            return {"type": "text", "text": item.text}, True
 
-        if name == "message_output_created":
-            if emitted_text_delta:
+        if item.kind == "reasoning_delta":
+            return {"type": "reasoning", "text": item.text}, False
+
+        if item.kind == "message_output":
+            if emitted_text_delta or not item.text:
                 return None, False
-            text = self._message_item_text(item)
-            if text:
-                return {"type": "text", "text": text}, False
-            return None, False
+            return {"type": "text", "text": item.text}, False
 
-        if name == "reasoning_item_created":
-            text = self._object_get(raw_item, "summary") or self._object_get(raw_item, "content")
-            if isinstance(text, list):
-                text = " ".join(str(part) for part in text)
-            if text:
-                return {"type": "reasoning", "text": str(text)}, False
-            return None, False
+        if item.kind == "reasoning":
+            if not item.text:
+                return None, False
+            return {"type": "reasoning", "text": item.text}, False
 
-        if name == "tool_called":
-            tool_name = self._raw_tool_name(raw_item, item)
+        if item.kind == "tool_call":
             return {
                 "type": "tool-call",
-                "toolName": tool_name,
-                "args": self._raw_tool_args(raw_item),
-                "callId": self._raw_tool_call_id(raw_item),
-                **self._tool_part_metadata(raw_item, item),
+                "toolName": item.tool_name,
+                "args": item.args,
+                "callId": item.call_id,
+                **item.metadata,
             }, False
 
-        if name == "tool_output":
-            output = getattr(item, "output", None)
-            parsed_output = self._maybe_json_loads(output)
+        if item.kind == "tool_output":
             return {
                 "type": "tool-result",
-                "callId": self._raw_tool_call_id(raw_item),
-                "result": parsed_output,
-                "isError": self._tool_output_is_error(parsed_output),
-                **self._tool_part_metadata(raw_item, item),
+                "callId": item.call_id,
+                "result": item.output,
+                "isError": item.is_error,
+                **item.metadata,
             }, False
 
-        if name == "mcp_approval_requested":
+        if item.kind == "mcp_approval":
             return {
                 "type": "tool-call",
-                "toolName": self._raw_tool_name(raw_item, item) or "mcp_approval_requested",
-                "args": self._raw_tool_args(raw_item),
-                "callId": self._raw_tool_call_id(raw_item),
+                "toolName": item.tool_name,
+                "args": item.args,
+                "callId": item.call_id,
                 "kind": "mcp-approval",
-                **self._tool_part_metadata(raw_item, item),
+                **item.metadata,
             }, False
 
-        if name == "mcp_list_tools":
-            server_label = self._object_get(raw_item, "server_label") or self._object_get(raw_item, "serverLabel")
+        if item.kind == "mcp_list_tools":
             return {
                 "type": "tool-result",
-                "callId": self._raw_tool_call_id(raw_item),
+                "callId": item.call_id,
                 "result": {
                     "ok": True,
                     "event": "mcp_list_tools",
-                    "server_label": server_label,
+                    "server_label": item.server_label,
                 },
                 "isError": False,
                 "kind": "mcp-list-tools",
-                "mcpServer": server_label,
+                "mcpServer": item.server_label,
             }, False
 
         return None, False
-
-    def _raw_response_event_to_part(self, data: Any) -> Optional[Dict[str, Any]]:
-        data_type = str(getattr(data, "type", "") or "")
-        delta = getattr(data, "delta", None)
-        if delta and data_type.endswith("output_text.delta"):
-            return {"type": "text", "text": str(delta)}
-        if delta and "reasoning" in data_type:
-            return {"type": "reasoning", "text": str(delta)}
-        return None
-
-    def _message_item_text(self, item: Any) -> str:
-        try:
-            from agents.items import ItemHelpers
-
-            return ItemHelpers.text_message_output(item)
-        except Exception:
-            raw_item = getattr(item, "raw_item", None)
-            content = self._object_get(raw_item, "content") or []
-            parts: list[str] = []
-            for entry in content:
-                text = self._object_get(entry, "text")
-                if text:
-                    parts.append(str(text))
-            return "".join(parts)
-
-    def _raw_tool_name(self, raw_item: Any, item: Any = None) -> str:
-        server_label = self._object_get(raw_item, "server_label") or self._object_get(raw_item, "serverLabel")
-        name = self._object_get(raw_item, "name")
-        raw_type = self._object_get(raw_item, "type")
-        if server_label and name:
-            return f"{server_label}.{name}"
-        if name:
-            return str(name)
-        if raw_type:
-            return str(raw_type)
-        title = getattr(item, "title", None)
-        return str(title or "tool")
-
-    def _raw_tool_args(self, raw_item: Any) -> Any:
-        raw_args = (
-            self._object_get(raw_item, "arguments")
-            or self._object_get(raw_item, "input")
-            or self._object_get(raw_item, "action")
-        )
-        return self._maybe_json_loads(raw_args)
-
-    def _raw_tool_call_id(self, raw_item: Any) -> str:
-        value = (
-            self._object_get(raw_item, "call_id")
-            or self._object_get(raw_item, "callId")
-            or self._object_get(raw_item, "id")
-        )
-        return str(value or f"call_{uuid.uuid4().hex[:12]}")
-
-    def _tool_part_metadata(self, raw_item: Any, item: Any = None) -> Dict[str, Any]:
-        metadata: Dict[str, Any] = {}
-        server_label = self._object_get(raw_item, "server_label") or self._object_get(raw_item, "serverLabel")
-        tool_origin = getattr(item, "tool_origin", None)
-        origin_server = getattr(tool_origin, "mcp_server_name", None)
-        if server_label or origin_server:
-            metadata["kind"] = "mcp"
-            metadata["mcpServer"] = server_label or origin_server
-        raw_type = self._object_get(raw_item, "type")
-        if raw_type == "web_search_call":
-            metadata["kind"] = "web_search"
-        return metadata
-
-    def _tool_output_is_error(self, output: Any) -> bool:
-        if isinstance(output, dict) and "ok" in output:
-            return not bool(output.get("ok"))
-        return False
-
-    def _maybe_json_loads(self, value: Any) -> Any:
-        if not isinstance(value, str):
-            return value if value is not None else {}
-        try:
-            return json.loads(value)
-        except Exception:
-            return value
 
     def _cancel_requested(self, run_id: str) -> bool:
         """Check if the run's cancel_requested flag is set in the DB."""
@@ -1972,7 +1885,3 @@ class AgentDriver(SandboxDriver):
         except Exception:
             logger.debug("Run part emit failed for run %s", run_id, exc_info=True)
 
-    def _object_get(self, obj: Any, key: str) -> Any:
-        if isinstance(obj, dict):
-            return obj.get(key)
-        return getattr(obj, key, None)
