@@ -122,52 +122,88 @@ app = FastAPI(
 )
 
 
-import hashlib as _hashlib
 import re as _re
-_RE_WORKER_ID = _re.compile(r"^/api/workers/([^/]+)$")
+# Worker path across ALL engine mount prefixes (/, /v1, /api, /api/v1) — the
+# engine app is mounted at each (see app.mount calls below), so guarding only
+# /api/workers left bare /workers/{id} as an isolation bypass.
+_RE_WORKER_PATH = _re.compile(r"^(?:/api/v1|/v1|/api)?/workers/([^/]+)(/.*)?$")
+
+
+def _is_owner_only_worker_write(method: str, suffix: str) -> bool:
+    """True for worker mutations that only the owner / workspace admin may do.
+
+    Deliberately EXCLUDES member-permitted actions on shared workers (runs,
+    feedback, request-edit) — those are gated by their own per-action rules.
+    """
+    suffix = suffix or ""
+    if method in ("PATCH", "DELETE") and suffix == "":
+        return True  # edit fields / delete the worker
+    if method == "PUT" and suffix == "/files":
+        return True  # replace the worker's code/manifest
+    if method == "PATCH" and suffix == "/visibility":
+        return True
+    if method == "POST" and suffix in ("/archive", "/restore"):
+        return True
+    if method == "POST" and suffix.startswith("/rollback/"):
+        return True
+    return False
 
 
 @app.middleware("http")
 async def member_write_guard(request: Request, call_next):
-    """Block member tokens from mutating workers they don't own (DELETE/PATCH)."""
-    import asyncio as _asyncio
-    if request.method in ("DELETE", "PATCH"):
-        m = _RE_WORKER_ID.match(request.url.path)
-        if m:
-            raw_token = (request.headers.get("authorization") or "").removeprefix("Bearer ").strip()
-            if raw_token:
-                worker_id = m.group(1)
-                token_hash = _hashlib.sha256(raw_token.encode()).hexdigest()
+    """Block non-owner members from mutating a worker they don't own.
 
-                def _check():
+    Resolves the caller via the same SupabaseAuthProvider the routes use, so it
+    works for every auth method (x-floom-token, Bearer floom_ PAT, Supabase JWT)
+    and every mount prefix — not just PAT-on-/api as before. Workspace owners and
+    promoted admins are allowed; non-owner members get 403. Never blocks when
+    auth can't be resolved (the route's own auth returns the proper 401).
+    """
+    import asyncio as _asyncio
+    if request.method in ("DELETE", "PATCH", "PUT", "POST"):
+        m = _RE_WORKER_PATH.match(request.url.path)
+        if m and _is_owner_only_worker_write(request.method, m.group(2) or ""):
+            worker_id = m.group(1)
+            try:
+                from apps.api.auth.supabase_provider import SupabaseAuthProvider
+                from apps.api.auth.workspace_context import (
+                    get_active_member_role,
+                    get_active_workspace_id,
+                )
+
+                auth = await SupabaseAuthProvider().verify(request)
+                user_id = getattr(auth, "user_id", None)
+                role = get_active_member_role()
+                workspace_id = get_active_workspace_id()
+            except Exception:
+                return await call_next(request)  # let the route's auth handle it
+
+            # Workspace owner / promoted admin may mutate anything in the workspace.
+            if user_id and workspace_id and role != "admin":
+                def _owns() -> bool:
                     from apps.api.config import get_supabase_service_client
-                    from apps.api.db import workspaces as _ws_repo
                     svc = get_supabase_service_client()
-                    tok_row = svc.table("api_tokens").select("user_id,workspace_id").eq("token_hash", token_hash).limit(1).execute()
-                    if not tok_row.data:
-                        return None  # let auth handle it
-                    user_id = tok_row.data[0]["user_id"]
-                    workspace_id = tok_row.data[0].get("workspace_id")
-                    if not workspace_id:
-                        return None
-                    ws = _ws_repo.get(workspace_id=workspace_id)
-                    if not ws or str(ws.get("owner_user_id")) == str(user_id):
-                        return None  # workspace owner — allow
-                    # Member: only allow if they own the worker
-                    w_row = svc.table("workers").select("user_id").eq("id", worker_id).eq("workspace_id", workspace_id).limit(1).execute()
-                    if not w_row.data:
-                        return None
-                    if str(w_row.data[0].get("user_id")) != str(user_id):
-                        return "403"
-                    return None
+                    w = (
+                        svc.table("workers")
+                        .select("user_id")
+                        .eq("id", worker_id)
+                        .eq("workspace_id", workspace_id)
+                        .limit(1)
+                        .execute()
+                    )
+                    if not w.data:
+                        return True  # not in this workspace — let the route 404
+                    return str(w.data[0].get("user_id")) == str(user_id)
 
                 try:
-                    result = await _asyncio.to_thread(_check)
-                    if result == "403":
+                    if not await _asyncio.to_thread(_owns):
                         from fastapi.responses import JSONResponse as _JSONResponse
-                        return _JSONResponse(status_code=403, content={"detail": "admin access required"})
+                        return _JSONResponse(
+                            status_code=403,
+                            content={"detail": "You do not have edit access to this worker."},
+                        )
                 except Exception:
-                    pass  # never block on unexpected errors
+                    pass  # never hard-fail the request on guard error
 
     return await call_next(request)
 
