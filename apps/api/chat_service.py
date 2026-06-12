@@ -1518,6 +1518,10 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
                     "include_system": {
                         "type": "boolean",
                         "description": "Also include system/example workers (hidden by default).",
+                    },
+                    "include_all_users": {
+                        "type": "boolean",
+                        "description": "Admin only: include workers owned by every user.",
                     }
                 },
                 "required": [],
@@ -1880,13 +1884,12 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
 def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     from db import get_db as _get_db
     visibility_user_id = _effective_worker_visibility_user_id(user_id)
+    include_all_users = bool(args.get("include_all_users"))
     result = []
     with _get_db() as conn:
-        # Role-aware visibility, mirroring the /workers UI: an admin sees EVERY
-        # worker; a member sees their own + workspace-shared. This was previously
-        # strictly owner-scoped (WHERE owner_id = ?), so an admin who owns no
-        # workers (e.g. the seed workers belong to the local-default user) got an
-        # empty list from Emily while the UI showed all of them.
+        # Default to "the user's workers" for Emily's "what workers do I have?"
+        # path. Admin-wide listing is explicit so the default never exposes
+        # another user's private workers in a personal inventory answer.
         try:
             role_row = conn.execute("SELECT role FROM users WHERE id = ?", (visibility_user_id,)).fetchone()
             is_admin = bool(role_row) and str(role_row["role"]).lower() == "admin"
@@ -1899,7 +1902,7 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
             "FROM workers w "
             "LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id "
         )
-        if is_admin:
+        if is_admin and include_all_users:
             rows = conn.execute(base_select + "ORDER BY w.name").fetchall()
         else:
             # Mirror _worker_can_view exactly: a member sees their own workers,
