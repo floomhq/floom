@@ -106,6 +106,7 @@
      Source of truth: docs/design/final.html :root. Warm OS palette superseded. */
   --bg-app: #FBFBFC;
   --bg-card: #FFFFFF;
+  --grid-card-bg: #FFFFFF;
   --text-primary: #16171A;
   --text-muted: #6B7280;
   --border-default: rgba(16,17,20,.09);
@@ -291,6 +292,7 @@ html.dark {
   --card-shadow: var(--shadow-sm);
   --bg-app: var(--bg);
   --bg-card: var(--card-glass);
+  --grid-card-bg: color-mix(in srgb, var(--bg-2) 62%, var(--bg));
   --text-primary: var(--ink);
   --text-muted: var(--ink-soft);
   --border-default: var(--line);
@@ -777,7 +779,7 @@ html.dark .grain {
 /* grid cards (SPEC §2b — calm: avatar+name, desc, one status line) */
 .c-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:14px; }
 /* §3 + rule #10: flat by token, uniform 148px, hover = bg lift (no border/shadow). */
-.c-gcard { border:var(--bd-card); background:var(--bg-card); border-radius:var(--radius-card); padding:15px; display:flex; flex-direction:column; min-height:148px; cursor:pointer; position:relative; box-shadow:none; text-align:left; transition:background .12s; }
+.c-gcard { border:var(--bd-card); background:var(--grid-card-bg,var(--bg-card)); border-radius:var(--radius-card); padding:15px; display:flex; flex-direction:column; min-height:148px; cursor:pointer; position:relative; box-shadow:none; text-align:left; transition:background .12s; }
 .c-gcard:hover { background:var(--bg-2); }
 .c-gcard.sel { box-shadow:0 0 0 1px var(--accent); }
 .c-gcard .star { position:absolute; top:13px; right:13px; color:var(--muted-foreground); opacity:0; transition:opacity .12s; }
