@@ -40,14 +40,27 @@ export function connStatusKey(s: ConnectionStatus): ConnStatusKey {
   return "error"; // failed | unknown | not_found
 }
 
+/** Capitalise the first letter and replace underscores/hyphens with spaces. */
+function humaniseAppName(s: string): string {
+  if (!s) return s;
+  return s
+    .replace(/[_-]+/g, " ")
+    .replace(/^[a-z]/, (c) => c.toUpperCase());
+}
+
 export function toUnified(connections: ConnectionItem[], secrets: SecretItem[]): UnifiedConn[] {
   const fromConns: UnifiedConn[] = connections.map((c) => {
     const isMcp = c.kind === "mcp";
+    // Primary = APP NAME (human-readable service, e.g. "Gmail", "Google Sheets")
+    // NOT display_name/account_label which is often just the user's account slug.
+    const appName = c.mcp_label || humaniseAppName(c.app_name || "");
     return {
       id: c.id,
       kind: isMcp ? "mcp" : "connection",
-      name: c.display_name || c.mcp_label || c.app_name,
-      account: isMcp ? c.mcp_url || c.mcp_command || "MCP server" : c.account_label || c.app_name,
+      name: isMcp ? appName : appName,
+      account: isMcp
+        ? c.mcp_url || c.mcp_command || "MCP server"
+        : c.display_name || c.account_label || c.app_name,
       statusKey: connStatusKey(c.status),
       detail: isMcp
         ? `${c.mcp_allowed_tools?.length ?? 0} tools`

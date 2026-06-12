@@ -109,16 +109,18 @@ const SIZE: Record<PillSize, { box: string; glyph: string; overflow: string }> =
 
 // A single cell in the composed strip. `accent` marks the start node; `first`
 // drops the negative margin so the strip butts cleanly against its left edge.
+// v4 addendum: chips are square ~5px-radius neutral bg-2, monochrome-leaning
+// marks. The accent tint was the "colour overload" — status pill is the only
+// tinted element per card. All cells now use the same neutral bg-2 / ink-soft.
 function Cell({
   size,
   title,
-  accent,
   first,
   children,
 }: {
   size: PillSize;
   title: string;
-  accent?: boolean;
+  accent?: boolean;  // kept for API compat; intentionally unused
   first?: boolean;
   children: React.ReactNode;
 }) {
@@ -126,17 +128,12 @@ function Cell({
     <span
       title={title}
       className={cn(
-        // ring-* + a matching --bg-card backing makes the seams read as one
-        // connected unit while keeping each cell crisp. relative + z keeps the
-        // overlap order stable (left cell sits above the one to its right).
         "relative inline-flex shrink-0 items-center justify-center ring-1",
         first ? "z-20" : "-ml-px z-10",
-        accent
-          ? "bg-[var(--accent-soft)] text-[var(--accent)] ring-[var(--accent-line)]"
-          : "bg-[var(--bg-card)] text-[var(--ink-soft)] ring-[var(--line-soft)]",
+        "bg-[var(--bg-2)] text-[var(--ink-soft)] ring-[var(--line-soft)]",
         SIZE[size].box,
       )}
-      style={{ borderRadius: "var(--radius-squircle)" }}
+      style={{ borderRadius: "5px" }}
     >
       {children}
     </span>

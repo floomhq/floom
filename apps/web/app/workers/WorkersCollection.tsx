@@ -536,9 +536,12 @@ export default function WorkersCollection({
       headers: ["Worker", "Tools", "Last run", "Status", ""],
     },
     row: (w) => ({
-      // V4 SPEC rule 3: no avatar for workers; lock icon shown when private only.
-      leading: w.visibility === "private" ? <Lock className="size-4 text-[var(--muted-foreground)]" /> : undefined,
-      primary: w.name,
+      // V4 SPEC rule 3: no avatar for workers.
+      // Lock icon: inline after title at baseline (small + muted), never as leading.
+      leading: undefined,
+      primary: w.visibility === "private"
+        ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" /></span>
+        : w.name,
       secondary: w.description,
       cols: [
         <WorkerIconPills key="t" worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
@@ -548,10 +551,11 @@ export default function WorkersCollection({
       menu: [{ label: "Open", onSelect: () => (window.location.href = `/workers/${w.id}`) }],
     }),
     card: (w) => ({
-      // V4 SPEC rule 3: no avatar monogram; name carries lock icon inline when private.
-      // Lock is surfaced via `leading` only when private; workspace is silent default.
-      leading: w.visibility === "private" ? <Lock className="size-3.5 text-[var(--muted-foreground)]" /> : undefined,
-      name: w.name,
+      // V4 SPEC rule 3: no avatar monogram. Lock is small+muted inline after name.
+      leading: undefined,
+      name: w.visibility === "private"
+        ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" /></span>
+        : w.name,
       description: w.description,
       status: workerStatusPill(w),
       toolLogos: <WorkerIconPills worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
@@ -581,9 +585,11 @@ export default function WorkersCollection({
       );
       return {
         header: {
-          // V4 SPEC rule 3: no avatar monogram in detail header either.
-          leading: w.visibility === "private" ? <Lock className="size-4 text-[var(--muted-foreground)]" /> : undefined,
-          title: w.name,
+          // V4 SPEC rule 3: no avatar monogram in detail header. Lock inline after title.
+          leading: undefined,
+          title: w.visibility === "private"
+            ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3.5 text-[var(--muted-foreground)] translate-y-px" /></span>
+            : w.name,
           actions,
           sub: (
             <>
@@ -607,10 +613,9 @@ export default function WorkersCollection({
         }),
       };
     },
-    add: {
-      label: "New worker",
-      onSelect: () => (window.location.href = "/workers/new"),
-    },
+    // No "New worker" button in the toolbar — the sidebar already has a persistent
+    // "+ New worker" primary action. One CTA per v4 card anatomy rule (item 18).
+    add: undefined,
     states: {
       empty: { title: "No workers yet", help: "Create your first worker to get started." },
     },

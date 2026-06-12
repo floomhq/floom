@@ -147,10 +147,24 @@ function UsedByTab({ folder }: { folder: ContextSummary }) {
 
 export default function BrainCollection({ initialFolders }: { initialFolders: ContextSummary[] }) {
   const [folders, setFolders] = useState<ContextSummary[]>(initialFolders);
+  // Show a loading skeleton until the first fetch completes so we never flash
+  // "No folders yet" before the real data arrives (14a: empty-initial-state bug).
+  const [loading, setLoading] = useState(initialFolders.length === 0);
 
-  const refresh = () => api.contexts.list().then(setFolders).catch(() => {});
+  const refresh = async (initial = false) => {
+    try {
+      const data = await api.contexts.list();
+      setFolders(data);
+    } catch {
+      // leave existing state intact on error
+    } finally {
+      if (initial) setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    void refresh();
+    void refresh(true);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   const remove = async (c: ContextSummary) => {
@@ -167,6 +181,7 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     title: "Brain",
     subtitle: "Reusable folders of files your workers can read before they act.",
     items: folders,
+    loading,
     idOf: (c) => c.name,
     searchOf: (c) => `${c.name} ${c.description ?? ""}`,
     tagsOf: (c) =>

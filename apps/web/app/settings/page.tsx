@@ -427,16 +427,12 @@ function SettingsContent() {
         item.scope === "workspace"
           ? groupLabel("workspace", workspaceName)
           : groupLabel("account", accountName),
-      columns: { template: "1fr 180px 90px 34px", headers: ["Section", "Group", "Access", ""] },
+      columns: { template: "1fr 24px", headers: ["Section", ""] },
       row: (item) => ({
         leading: <SettingsIcon icon={item.icon} />,
         primary: item.label,
         secondary: item.description,
-        cols: [
-          item.scope === "workspace" ? "Workspace" : "Account",
-          item.scope === "workspace" ? (isAdmin ? "Editable" : "View only") : "Personal",
-        ],
-        status: statusForSection(item, isAdmin),
+        cols: [],
       }),
       detail: (item) => ({
         header: {

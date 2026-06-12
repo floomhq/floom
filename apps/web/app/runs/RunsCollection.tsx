@@ -4,7 +4,13 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import Papa from "papaparse";
-import { Download } from "lucide-react";
+import { ChevronDown, Download } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { api } from "@/lib/api";
 import { formatRelative } from "@/lib/formatters";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
@@ -284,20 +290,28 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     ],
     view: { default: "list", grid: true },
     toolbarActions: (
-      <>
-        <button type="button" className="c-vpill" style={{ padding: "9px 12px" }} onClick={() => void exportCSV()}>
-          <Download size={14} /> Export CSV
-        </button>
-        <button
-          type="button"
-          className="c-vpill"
-          style={{ padding: "9px 12px" }}
-          disabled={exportingZip}
-          onClick={() => void exportZip()}
-        >
-          <Download size={14} /> {exportingZip ? "Exporting…" : "Export ZIP"}
-        </button>
-      </>
+      <DropdownMenu>
+        <DropdownMenuTrigger asChild>
+          <button type="button" className="c-vpill" style={{ padding: "9px 12px", gap: 5 }}>
+            <Download size={14} /> Export <ChevronDown size={12} />
+          </button>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40 p-1">
+          <DropdownMenuItem
+            onClick={() => void exportCSV()}
+            className="flex items-center gap-2 text-sm text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <Download size={14} /> Export CSV
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={exportingZip}
+            onClick={() => void exportZip()}
+            className="flex items-center gap-2 text-sm text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <Download size={14} /> {exportingZip ? "Exporting…" : "Export ZIP"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     ),
     group: (r) => dayLabel(r.created_at ?? r.started_at, now),
     columns: {

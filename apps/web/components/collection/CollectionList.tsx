@@ -176,7 +176,13 @@ export function CollectionList<T>({
   return (
     <div className="c-ltable">
       {!compact && columns.headers.length > 0 && (
-        <div className="c-lhead" style={{ gridTemplateColumns: columns.template }}>
+        <div
+          className="c-lhead"
+          style={{
+            gridTemplateColumns: columns.template,
+            ...(columns.headerTransparent ? { background: "transparent" } : {}),
+          }}
+        >
           {columns.headers.map((h, i) => (
             <div key={i}>{h}</div>
           ))}
