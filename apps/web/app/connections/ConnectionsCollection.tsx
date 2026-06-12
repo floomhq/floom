@@ -131,8 +131,9 @@ export default function ConnectionsCollection({
   const [connections, setConnections] = useState<ConnectionItem[]>(initialConnections);
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
+  const [loading, setLoading] = useState(initialConnections.length === 0);
 
-  const refresh = async () => {
+  const refresh = async (initial = false) => {
     const [c, s, w] = await Promise.allSettled([
       api.connections.list(),
       api.secrets.list(),
@@ -141,10 +142,11 @@ export default function ConnectionsCollection({
     if (c.status === "fulfilled") setConnections(c.value);
     if (s.status === "fulfilled") setSecrets(s.value);
     if (w.status === "fulfilled") setWorkers(w.value);
+    if (initial) setLoading(false);
   };
 
   useEffect(() => {
-    void refresh();
+    void refresh(true);
   }, []);
 
   const items = useMemo(() => toUnified(connections, secrets), [connections, secrets]);
@@ -186,6 +188,7 @@ export default function ConnectionsCollection({
     title: "Connections",
     subtitle: "Apps, MCP servers and secrets your workers can use.",
     items,
+    loading,
     idOf: (i) => i.id,
     searchOf: (i) => `${i.name} ${i.account} ${TYPE_LABEL[i.kind]}`,
     tagsOf: (i) =>
