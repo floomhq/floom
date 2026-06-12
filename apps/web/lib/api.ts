@@ -672,7 +672,6 @@ export const api = {
     info: () => fetchJson<import("./types").SystemInfo>("/system/info"),
     platformConfig: () => fetchJson<import("./types").PlatformConfig>("/system/platform-config"),
     overview: () => fetchJson<import("./types").SystemOverview>("/system/overview"),
-    metrics: () => fetchJson<import("./types").SystemMetrics>("/system/metrics"),
     clearRuns: () => fetchJson<import("./types").ActionResponse>("/runs/clear", { method: "POST" }),
     workspaceAgent: () =>
       fetchJson<import("./types").WorkspaceAgentInfo>("/system/workspace-agent"),
