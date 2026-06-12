@@ -24,7 +24,6 @@ from typing import Any, Dict, List, Optional
 from fastapi import HTTPException
 
 from core.utils import row_to_dict
-from models import Artifact, RunStatus, RunSummary, ToolCallEntry
 from services.public_view import _operator_error_message
 
 def _resolve_run_status_filters(raw_status: Optional[str]) -> List[str]:
@@ -140,6 +139,8 @@ def _extract_total_tokens_from_transcript(rows: List[Dict[str, Any]]) -> Optiona
 
 def _parse_tool_calls_from_transcript(rows: List[Dict[str, Any]]) -> List[ToolCallEntry]:
     """Build paired ToolCallEntry list from normalised transcript rows."""
+    from models import ToolCallEntry
+
     # Index tool_call rows by id first, then attach matching tool_result rows.
     calls: Dict[str, ToolCallEntry] = {}
     order: List[str] = []
@@ -173,7 +174,9 @@ def _parse_tool_calls_from_transcript(rows: List[Dict[str, Any]]) -> List[ToolCa
     return [calls[cid] for cid in order if cid in calls]
 
 
-def _make_run_summary(row: Any) -> RunSummary:
+def _make_run_summary(row: Any) -> "RunSummary":
+    from models import RunStatus, RunSummary
+
     d = row_to_dict(row)
     status_value = str(d.get("status") or "").lower()
     status_aliases = {
