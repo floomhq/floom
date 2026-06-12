@@ -22649,7 +22649,11 @@ class _UserCreateRequest(BaseModel):
     username: str
     password: str
     display_name: Optional[str] = None
-    role: str = "member"
+    # #975: role is intentionally NOT accepted here. New users are always
+    # created as 'member'; promotion to admin is a separate explicit PATCH
+    # /users/{id} action (admin-gated, auditable). Accepting role at create
+    # let an admin (or a CSRF #947 forced request) mint a backdoor admin in
+    # one call with no audit trail.
 
 
 class _UserUpdateRequest(BaseModel):
@@ -23024,19 +23028,18 @@ def create_user(
     username = payload.username.strip()
     if not username:
         raise HTTPException(status_code=422, detail="username required")
-    if payload.role not in ("admin", "member"):
-        raise HTTPException(status_code=422, detail="role must be admin or member")
     _validate_new_password(payload.password, username=username)
     if user_repo.get_by_username(username=username) is not None:
         raise HTTPException(status_code=409, detail="username already taken")
     user_id = str(_uuid_mod.uuid4())
     pw_hash = _bcrypt_hash(payload.password)
+    # #975: always 'member' regardless of any role in the request body.
     row = user_repo.create(
         user_id=user_id,
         username=username,
         display_name=payload.display_name,
         password_hash=pw_hash,
-        role=payload.role,
+        role="member",
     )
     return _UserOut(id=row["id"], username=row["username"], display_name=row.get("display_name"),
                     role=row["role"], disabled=bool(row["disabled"]), created_at=row["created_at"])
@@ -23067,6 +23070,29 @@ def update_user(
             username=(existing_user or {}).get("username"),
         )
         updates["password_hash"] = _bcrypt_hash(payload.password)
+    # #976: never let the LAST active admin be disabled or demoted — that
+    # permanently locks the workspace out with no self-service recovery.
+    # Guard fires for self-disable AND for demoting another admin when no
+    # other active admin would remain.
+    _would_disable = updates.get("disabled") == 1
+    _would_demote = updates.get("role") == "member"
+    if _would_disable or _would_demote:
+        target = user_repo.get(user_id=uid)
+        if target is None:
+            raise HTTPException(status_code=404, detail="user not found")
+        if str(target.get("role")) == "admin" and not bool(target.get("disabled")):
+            other_active_admins = [
+                u for u in user_repo.list()
+                if str(u.get("role")) == "admin"
+                and not bool(u.get("disabled"))
+                and u.get("id") != uid
+            ]
+            if not other_active_admins:
+                raise HTTPException(
+                    status_code=409,
+                    detail="At least one active admin is required; "
+                           "promote another admin before disabling or demoting this one.",
+                )
     row = user_repo.update(user_id=uid, **updates)
     if row is None:
         raise HTTPException(status_code=404, detail="user not found")
