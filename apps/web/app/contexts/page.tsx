@@ -1426,7 +1426,7 @@ function PackDetailPane({
               <span className="flex flex-wrap items-center gap-x-1.5 gap-y-0.5 min-w-0">
                 {(detail.used_by ?? []).map((ref, i, arr) => (
                   <span key={ref.worker_id} className="inline-flex items-center min-w-0">
-                    <Link href={`/workers/${encodeURIComponent(ref.worker_id)}`} className="text-xs font-medium hover:underline truncate">
+                    <Link href={`/workers?sel=${encodeURIComponent(ref.worker_id)}`} className="text-xs font-medium hover:underline truncate">
                       {ref.worker_name}
                     </Link>
                     {i < arr.length - 1 && <span className="text-xs text-muted-foreground ml-1.5">·</span>}

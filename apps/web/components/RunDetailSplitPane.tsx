@@ -80,7 +80,7 @@ export function RunDetailSplitPane({
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <Link
-              href={`/workers/${run.worker_id}`}
+              href={`/workers?sel=${encodeURIComponent(run.worker_id)}`}
               className={cn("min-w-0 break-words font-semibold tracking-tight sm:truncate hover:underline", inline ? "text-base" : "text-xl")}
             >
               {run.worker_name || run.worker_id}
@@ -128,7 +128,7 @@ export function RunDetailSplitPane({
           {/* N27: was "Edit" — misleading in run-detail context (users expected to
               edit the run, not the worker source). Relabelled "Edit worker" and
               link lands on the worker Source tab (same destination as before). */}
-          <Link href={`/workers/${run.worker_id}#source`}>
+          <Link href={`/workers?sel=${encodeURIComponent(run.worker_id)}&tab=Source`}>
             <Button variant="outline" size="sm">
               <Pencil className="size-3.5 mr-1.5" />
               Edit worker
