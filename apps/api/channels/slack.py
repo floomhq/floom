@@ -787,6 +787,9 @@ def _frontend_base_url() -> str:
 # ---------------------------------------------------------------------------
 # Slack per-user sender bindings (claim-link DM identity)
 # Mirrors the WhatsApp binding pattern in channels/whatsapp.py.
+
+# #865: workspace segment embedded in a locally-scoped user id ("base__ws_x").
+_re_ws = re.compile(r"__(?P<ws>(?:local-default|ws_[a-f0-9]{14}))$")
 # ---------------------------------------------------------------------------
 
 def _slack_claim_url(token: str) -> str:
@@ -850,7 +853,7 @@ def _slack_binding_user_id(team_id: str, slack_user_id: str) -> Optional[str]:
         with get_db() as conn:
             row = conn.execute(
                 """
-                SELECT user_id
+                SELECT user_id, workspace_id
                 FROM slack_sender_bindings
                 WHERE slack_team_id = ? AND slack_user_id = ?
                   AND status = 'active' AND user_id IS NOT NULL
@@ -858,13 +861,22 @@ def _slack_binding_user_id(team_id: str, slack_user_id: str) -> Optional[str]:
                 (team_id, slack_user_id),
             ).fetchone()
             if row and row["user_id"]:
-                # Validate the bound user still exists in the users table.
-                # bound_user_is_valid() treats the bootstrap/legacy owner id as
-                # always-valid, and also skips the check when the table is empty
-                # (pre-auth / dev mode) — same guard as the original logic but now
-                # shared and correct for non-empty-table legacy installs.
+                # #865: validate the BASE user and the pinned workspace
+                # independently. The stored user_id may be workspace-scoped
+                # ("base__ws_x"); only the base id exists in the users table,
+                # so validating the raw scoped id reset every secondary-
+                # workspace binding as "deleted".
+                from auth.local_workspaces import (
+                    local_workspace_base_user_id,
+                    _valid_workspace_id,
+                )
                 from channels.common import bound_user_is_valid
-                if not bound_user_is_valid(str(row["user_id"])):
+
+                bound = str(row["user_id"])
+                base_id = local_workspace_base_user_id(bound)
+                pinned_ws = str(row["workspace_id"] or "") if "workspace_id" in row.keys() else ""
+                ws_format_ok = not pinned_ws or _valid_workspace_id(pinned_ws) is not None
+                if not bound_user_is_valid(base_id) or not ws_format_ok:
                     logger.warning(
                         "Slack binding for %s/%s points to deleted user %s; resetting to pending",
                         team_id, slack_user_id, row["user_id"],
@@ -1041,15 +1053,41 @@ def claim_slack_sender(
         team_id = str(row["slack_team_id"])
         slack_user_id = str(row["slack_user_id"])
 
+        # #865: pin a VALIDATED workspace at claim time (mirrors WhatsApp).
+        # Local engine: the workspace is embedded in the scoped auth user id
+        # ("base__ws_x"); verify it actually exists for the claiming owner.
+        # Cloud: the cloud repository owns workspace resolution — persist NULL
+        # rather than a fabricated 'local-default'.
+        deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+        bound_user_id = auth.user_id
+        workspace_id: Optional[str] = None
+        if deploy == "local":
+            from auth.local_workspaces import (
+                DEFAULT_WORKSPACE_ID,
+                get_local_workspace,
+                local_workspace_base_user_id,
+                local_workspace_user_id,
+            )
+
+            base_user_id = local_workspace_base_user_id(auth.user_id)
+            ws_match = _re_ws.search(auth.user_id)
+            workspace_id = ws_match.group("ws") if ws_match else DEFAULT_WORKSPACE_ID
+            if get_local_workspace(base_user_id, workspace_id) is None:
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Workspace {workspace_id} does not exist for this account",
+                )
+            bound_user_id = local_workspace_user_id(base_user_id, workspace_id)
+
         # Mark active, bind to this user, and clear the token (single-use).
         conn.execute(
             """
             UPDATE slack_sender_bindings
-            SET user_id = ?, status = 'active', claim_token = NULL,
+            SET user_id = ?, workspace_id = ?, status = 'active', claim_token = NULL,
                 claim_expires_at = NULL, updated_at = ?
             WHERE claim_token = ?
             """,
-            (auth.user_id, now_iso(), token),
+            (bound_user_id, workspace_id, now_iso(), token),
         )
 
     # Notify the previous owner if the binding was already active for a different user.
@@ -1083,7 +1121,8 @@ def claim_slack_sender(
         "ok": True,
         "slack_team_id": team_id,
         "slack_user_id": slack_user_id,
-        "user_id": auth.user_id,
+        "user_id": bound_user_id,
+        "workspace_id": workspace_id,
     }
 
 
