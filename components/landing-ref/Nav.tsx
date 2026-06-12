@@ -35,11 +35,11 @@ function Wordmark() {
     <Link
       href="/"
       className="flex items-center gap-2 text-[15px] font-semibold tracking-tight text-foreground"
-      aria-label="Workeros home"
+      aria-label="WorkerOS home"
     >
       <FloomMark size={24} />
       <span className="flex items-baseline gap-1.5">
-        Workeros
+        WorkerOS
         <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
           by Floom
         </span>
@@ -120,7 +120,7 @@ export function Footer() {
           <div className="flex items-center gap-2">
             <FloomMark size={22} />
             <div className="flex items-baseline gap-1.5 text-[15px] font-semibold text-foreground">
-              Workeros
+              WorkerOS
               <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
                 by Floom
               </span>

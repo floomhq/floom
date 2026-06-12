@@ -4,10 +4,13 @@
 // NEXT_PUBLIC_API_PROXY_BASE="/app/api/proxy". Keeping this an env seam lets the
 // Cloud wrapper consume this file unmodified (no fork).
 export const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
+const WEB_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
+const ACTIVE_WORKSPACE_COOKIE_KEY = "workeros.activeWorkspaceId";
 const APP_API_BASE = API_BASE.endsWith("/api/proxy")
   ? API_BASE.slice(0, -"/api/proxy".length) + "/api"
   : "/api";
+let loginRedirectStarted = false;
 
 export function getActiveWorkspaceId(): string | null {
   if (typeof window === "undefined") return null;
@@ -19,8 +22,10 @@ export function setActiveWorkspaceId(workspaceId: string | null) {
   if (typeof window === "undefined") return;
   if (!workspaceId || workspaceId === "local-default") {
     window.localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+    window.document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=; Path=/; Max-Age=0; SameSite=Lax`;
   } else {
     window.localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, workspaceId);
+    window.document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=${encodeURIComponent(workspaceId)}; Path=/; Max-Age=31536000; SameSite=Lax`;
   }
 }
 
@@ -70,6 +75,50 @@ export function apiProxyPath(path: string, includeWorkspaceQuery = false): strin
   return `${API_BASE}${includeWorkspaceQuery ? withWorkspaceQuery(path) : path}`;
 }
 
+function isSignedApprovalProxyPath(path: string): boolean {
+  return path.startsWith("/approvals/public/");
+}
+
+function currentPathForLoginNext(): string {
+  if (typeof window === "undefined") return "/";
+  const path = `${window.location.pathname}${window.location.search || ""}`;
+  return path || "/";
+}
+
+function redirectToLoginOnce(path: string): void {
+  if (loginRedirectStarted || typeof window === "undefined") return;
+  if (isSignedApprovalProxyPath(path)) return;
+  loginRedirectStarted = true;
+  const loginPath = `${WEB_BASE_PATH}/login`;
+  const next = currentPathForLoginNext();
+  const target =
+    next && next !== "/" && next !== loginPath
+      ? `${loginPath}?next=${encodeURIComponent(next)}`
+      : loginPath;
+  window.location.assign(target);
+}
+
+function handleUnauthorizedResponse(status: number, path: string): void {
+  if (status === 401) redirectToLoginOnce(path);
+}
+
+async function apiErrorFromResponse(res: Response): Promise<string> {
+  let err = "";
+  try {
+    const body = await res.json();
+    err = extractApiErrorMessage(body);
+  } catch {
+    err = "";
+  }
+  if (!err || err === "{}") {
+    err =
+      res.status === 504
+        ? "Request timed out. The server took too long to respond."
+        : res.statusText || `HTTP ${res.status}`;
+  }
+  return err;
+}
+
 async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
   const headers = withWorkspaceHeaders(options?.headers);
   if (!headers.has("Content-Type")) {
@@ -80,22 +129,8 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
     headers,
   });
   if (!res.ok) {
-    // PR S19 (I-6): surface SOMETHING actionable even when the upstream
-    // returns no JSON body (Vercel 504 timeouts hand back empty HTML).
-    let err = "";
-    try {
-      const body = await res.json();
-      err = extractApiErrorMessage(body);
-    } catch {
-      err = "";
-    }
-    if (!err || err === "{}") {
-      err =
-        res.status === 504
-          ? "Request timed out. The server took too long to respond."
-          : res.statusText || `HTTP ${res.status}`;
-    }
-    throw new Error(err);
+    handleUnauthorizedResponse(res.status, path);
+    throw new Error(await apiErrorFromResponse(res));
   }
   // No-content responses (204, or any empty body) carry no JSON. Calling
   // res.json() on them throws ("Unexpected end of JSON input"), which used to
@@ -119,14 +154,8 @@ async function fetchText(path: string, options?: RequestInit): Promise<string> {
     headers,
   });
   if (!res.ok) {
-    let err = "";
-    try {
-      const body = await res.json();
-      err = extractApiErrorMessage(body);
-    } catch {
-      err = "";
-    }
-    throw new Error(err || res.statusText || `HTTP ${res.status}`);
+    handleUnauthorizedResponse(res.status, path);
+    throw new Error(await apiErrorFromResponse(res));
   }
   if (res.status === 204) return "";
   return res.text();
@@ -138,14 +167,8 @@ async function fetchRaw(path: string, options?: RequestInit): Promise<Response> 
     headers: withWorkspaceHeaders(options?.headers),
   });
   if (!res.ok) {
-    let err = "";
-    try {
-      const body = await res.json();
-      err = extractApiErrorMessage(body);
-    } catch {
-      err = res.statusText || `HTTP ${res.status}`;
-    }
-    throw new Error(err);
+    handleUnauthorizedResponse(res.status, path);
+    throw new Error(await apiErrorFromResponse(res));
   }
   return res;
 }
@@ -175,23 +198,38 @@ export const api = {
       headers: withWorkspaceHeaders(),
     });
     if (!res.ok) {
-      let err = "";
-      try {
-        const body = await res.json();
-        err = extractApiErrorMessage(body);
-      } catch {
-        err = res.statusText || `HTTP ${res.status}`;
-      }
-      throw new Error(err);
+      handleUnauthorizedResponse(res.status, "/me");
+      throw new Error(await apiErrorFromResponse(res));
     }
     return res.json() as Promise<import("./types").CurrentUser>;
   },
-  whatsapp: {
-    claim: (token: string) =>
-      fetchJson<{ ok: boolean; wa_id: string; user_id: string }>("/whatsapp/bindings/claim", {
+  // #778: Emily chat attachments — upload to extract text for the next message.
+  chat: {
+    uploadAttachments: async (files: File[]): Promise<import("./types").ChatAttachment[]> => {
+      const fd = new FormData();
+      for (const f of files) fd.append("files", f);
+      const res = await fetch(`${API_BASE}${withWorkspaceQuery("/chat/attachments")}`, {
         method: "POST",
-        body: JSON.stringify({ token }),
+        headers: withWorkspaceHeaders(), // no Content-Type — browser sets the multipart boundary
+        body: fd,
+      });
+      if (!res.ok) throw new Error(await apiErrorFromResponse(res));
+      return res.json();
+    },
+  },
+  // #767/#768: specific-people share grants.
+  share: {
+    listGrants: (assetType: string, assetId: string) =>
+      fetchJson<import("./types").ShareGrant[]>(
+        `/share/grants?asset_type=${encodeURIComponent(assetType)}&asset_id=${encodeURIComponent(assetId)}`
+      ),
+    addGrant: (assetType: string, assetId: string, email: string) =>
+      fetchJson<import("./types").ShareGrant>("/share/grants", {
+        method: "POST",
+        body: JSON.stringify({ asset_type: assetType, asset_id: assetId, email }),
       }),
+    revokeGrant: (grantId: string) =>
+      fetchJson<null>(`/share/grants/${encodeURIComponent(grantId)}`, { method: "DELETE" }),
   },
   workers: {
     // S44 Win 3: use list shape (~15 KB vs 47 KB full) for the web UI.
@@ -289,6 +327,18 @@ export const api = {
       fetchJson<import("./types").VersionDetail>(`/workers/${id}/versions/${versionId}`),
     rollback: (id: string, versionId: string) =>
       fetchJson<import("./types").WorkerDetail>(`/workers/${id}/rollback/${versionId}`, { method: "POST" }),
+    // Worker feedback (SPEC §12) — anyone who can see the worker can comment.
+    feedback: {
+      list: (id: string) =>
+        fetchJson<import("./types").WorkerFeedback[]>(`/workers/${id}/feedback`),
+      create: (id: string, content: string) =>
+        fetchJson<import("./types").WorkerFeedback>(`/workers/${id}/feedback`, {
+          method: "POST",
+          body: JSON.stringify({ content }),
+        }),
+      remove: (id: string, feedbackId: string) =>
+        fetchJson<void>(`/workers/${id}/feedback/${feedbackId}`, { method: "DELETE" }),
+    },
   },
   runs: {
     list: (params?: {
@@ -337,6 +387,16 @@ export const api = {
         `/workers/${encodeURIComponent(workerId)}/runs/${encodeURIComponent(runId)}/replay`,
         { method: "POST" }
       ),
+    // #796: bulk-export the given runs as one ZIP blob.
+    exportBundle: async (runIds: string[]): Promise<Blob> => {
+      const res = await fetch(`${API_BASE}${withWorkspaceQuery("/runs/export")}`, {
+        method: "POST",
+        headers: { ...withWorkspaceHeaders(), "Content-Type": "application/json" },
+        body: JSON.stringify({ run_ids: runIds }),
+      });
+      if (!res.ok) throw new Error(await apiErrorFromResponse(res));
+      return res.blob();
+    },
     downloadUrl: (id: string) =>
       `${API_BASE}${withWorkspaceQuery(`/runs/${encodeURIComponent(id)}/download`)}`,
     artifactUrl: (id: string, artifactId: string) =>
@@ -371,6 +431,22 @@ export const api = {
         {
           method: "POST",
           body: JSON.stringify({ reason, annotations: annotations ?? null }),
+        }
+      ),
+    approveAgentTool: (approvalId: string, editedOutput?: Record<string, unknown>) =>
+      fetchJson<import("./types").ActionResponse>(
+        `/approvals/${approvalId}/approve`,
+        {
+          method: "POST",
+          body: JSON.stringify({ edited_output: editedOutput ?? null }),
+        }
+      ),
+    rejectAgentTool: (approvalId: string, reason?: string) =>
+      fetchJson<import("./types").ActionResponse>(
+        `/approvals/${approvalId}/reject`,
+        {
+          method: "POST",
+          body: JSON.stringify({ reason: reason ?? null }),
         }
       ),
     publicGet: (approvalId: string, token: string) =>
@@ -420,14 +496,8 @@ export const api = {
         { method: "POST", headers: withWorkspaceHeaders(), body: form }
       );
       if (!res.ok) {
-        let err: string;
-        try {
-          const body = await res.json();
-          err = body.detail || JSON.stringify(body);
-        } catch {
-          err = res.statusText;
-        }
-        throw new Error(err);
+        handleUnauthorizedResponse(res.status, `/approvals/${approvalId}/uploads`);
+        throw new Error(await apiErrorFromResponse(res));
       }
       return res.json() as Promise<import("./types").ApprovalUploadResponse>;
     },
@@ -444,14 +514,8 @@ export const api = {
         { method: "POST", body: form }
       );
       if (!res.ok) {
-        let err: string;
-        try {
-          const body = await res.json();
-          err = body.detail || JSON.stringify(body);
-        } catch {
-          err = res.statusText;
-        }
-        throw new Error(err);
+        handleUnauthorizedResponse(res.status, `/approvals/public/${approvalId}/uploads`);
+        throw new Error(await apiErrorFromResponse(res));
       }
       return res.json() as Promise<import("./types").ApprovalUploadResponse>;
     },
@@ -487,6 +551,11 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}/visibility`,
         { method: "PUT", body: JSON.stringify({ visibility }) }
       ),
+    setSensitive: (name: string, sensitive: boolean) =>
+      fetchJson<{ name: string; sensitive: boolean }>(
+        `/contexts/${encodeURIComponent(name)}/sensitive`,
+        { method: "PATCH", body: JSON.stringify({ sensitive }) }
+      ),
     sharePackLink: (name: string) =>
       fetchJson<import("./types").StandaloneShareLink>(
         `/contexts/${encodeURIComponent(name)}/share-link`,
@@ -497,10 +566,10 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
         { method: "DELETE" }
       ),
-    saveTextFile: (name: string, path: string, content: string) =>
+    saveTextFile: (name: string, path: string, content: string, tags?: string[]) =>
       fetchJson<import("./types").ContextFileItem>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
-        { method: "PUT", body: JSON.stringify({ content }) }
+        { method: "PUT", body: JSON.stringify(tags ? { content, tags } : { content }) } // #780
       ),
     deleteFile: (name: string, path: string) =>
       fetchJson<import("./types").ContextDetail>(
@@ -511,6 +580,19 @@ export const api = {
       fetchJson<import("./types").StandaloneShareLink>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/share-link`,
         { method: "POST" }
+      ),
+    // #777: inspect a brain .db file — tables list, or a table's rows.
+    sqlite: (name: string, path: string, table?: string) => {
+      const qs = table ? `?table=${encodeURIComponent(table)}` : "";
+      return fetchJson<import("./types").SqliteView>(
+        `/contexts/${encodeURIComponent(name)}/sqlite/${path.split("/").map(encodeURIComponent).join("/")}${qs}`
+      );
+    },
+    // #770: move/rename a brain file (matches the backend's {new_path} contract).
+    moveFile: (name: string, path: string, newPath: string) =>
+      fetchJson<import("./types").ContextFileItem>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/move`,
+        { method: "POST", body: JSON.stringify({ new_path: newPath }) }
       ),
     readTextFile: async (name: string, path: string) => {
       const res = await fetchRaw(
@@ -580,6 +662,11 @@ export const api = {
       fetchJson<import("./types").VersionFileDetail>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/versions/${versionId}`
       ),
+    restoreFileVersion: (name: string, path: string, sha: string) =>
+      fetchJson<import("./types").ContextFileItem>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/restore/${sha}`,
+        { method: "POST" }
+      ),
   },
   system: {
     info: () => fetchJson<import("./types").SystemInfo>("/system/info"),
@@ -609,6 +696,10 @@ export const api = {
       fetchJson<{ content: string }>(`/workspace/versions/${encodeURIComponent(versionId)}`),
     rollbackWorkspaceInstructions: (versionId: string) =>
       fetchText(`/workspace/rollback/${versionId}`, { method: "POST" }),
+    // Base instructions (the built-in Emily persona). This layer applies to ALL
+    // conversations and is layered BEFORE workspace instructions. Editing it
+    // saves an override; resetting removes the override and restores the
+    // built-in engine default.
     workspaceBasePersona: fetchWorkspaceBasePersona,
     updateWorkspaceBasePersona: (content: string) =>
       fetchText("/workspace/base", {
@@ -705,11 +796,38 @@ export const api = {
       fetchJson<import("./types").SlackSetupStatus>("/slack/setup/status", {
         cache: "no-store",
       }),
-    installUrl: (return_to = "/assistant") =>
+    installUrl: (return_to = "/settings#channels") =>
       fetchJson<import("./types").SlackInstallUrlResponse>("/slack/oauth/install", {
         method: "POST",
         body: JSON.stringify({ return_to }),
       }),
+    // Consume a Slack claim token (from ?slack_claim=) and bind the Slack
+    // sender identity to the authenticated Workeros user.
+    claim: (token: string) =>
+      fetchJson<{ ok: boolean; slack_team_id: string; slack_user_id: string; user_id: string }>(
+        "/slack/bindings/claim",
+        {
+          method: "POST",
+          body: JSON.stringify({ token }),
+        }
+      ),
+    // My binding status (linked as which Slack user) and unlink.
+    bindingMe: () =>
+      fetchJson<import("./types").SlackBindingMe>("/slack/bindings/me"),
+    unlink: () =>
+      fetchJson<{ ok: boolean; unlinked: number }>("/slack/bindings/me", { method: "DELETE" }),
+  },
+  // My WhatsApp binding status and unlink.
+  whatsapp: {
+    claim: (token: string) =>
+      fetchJson<{ ok: boolean; wa_id: string; user_id: string; workspace_id: string }>(
+        "/whatsapp/bindings/claim",
+        { method: "POST", body: JSON.stringify({ token }) }
+      ),
+    bindingMe: () =>
+      fetchJson<import("./types").WhatsAppBindingMe>("/whatsapp/bindings/me"),
+    unlink: () =>
+      fetchJson<{ ok: boolean; unlinked: number }>("/whatsapp/bindings/me", { method: "DELETE" }),
   },
   workspace: {
     // Download the whole workspace as a .zip template. Returns the Blob so the
@@ -754,6 +872,18 @@ export const api = {
     select: (id: string) =>
       fetchJson<import("./types").LocalWorkspace>(`/workspaces/${encodeURIComponent(id)}/select`, {
         method: "POST",
+      }),
+    // #794/#797: workspace behaviour toggles + model defaults (admin-only PUT).
+    getSettings: () => fetchJson<Record<string, string>>("/workspace/settings"),
+    setSetting: (key: string, value: string) =>
+      fetchJson<null>(`/workspace/settings/${encodeURIComponent(key)}`, {
+        method: "PUT",
+        body: JSON.stringify({ value }),
+      }),
+    rename: (id: string, name: string) => // #791
+      fetchJson<import("./types").LocalWorkspace>(`/workspaces/${encodeURIComponent(id)}`, {
+        method: "PATCH",
+        body: JSON.stringify({ name }),
       }),
     // Duplicate a workspace into a new "<name> (copy)" sibling. On the
     // single-tenant OSS instance, workers/knowledge live in a shared pool, so
@@ -802,6 +932,30 @@ export const api = {
     get: (id: string) =>
       fetchJson<import("./types").ConversationDetail>(`/conversations/${encodeURIComponent(id)}`),
   },
+  // Multi-member: user management + personal access tokens
+  users: {
+    list: () => fetchJson<import("./types").OssUser[]>("/users"),
+    create: (data: { username: string; password: string; display_name?: string; role?: string }) =>
+      fetchJson<import("./types").OssUser>("/users", { method: "POST", body: JSON.stringify(data) }),
+    update: (userId: string, data: Partial<{ display_name: string; role: string; disabled: boolean; password: string }>) =>
+      fetchJson<import("./types").OssUser>(`/users/${encodeURIComponent(userId)}`, {
+        method: "PATCH",
+        body: JSON.stringify(data),
+      }),
+    remove: (userId: string) =>
+      fetchJson<null>(`/users/${encodeURIComponent(userId)}`, { method: "DELETE" }),
+  },
+  tokens: {
+    list: () => fetchJson<import("./types").PersonalAccessToken[]>("/auth/tokens"),
+    create: (name: string, expiresAt?: string) =>
+      fetchJson<import("./types").PersonalAccessTokenCreate>("/auth/tokens", {
+        method: "POST",
+        body: JSON.stringify({ name, expires_at: expiresAt }),
+      }),
+    revoke: (tokenId: string) =>
+      fetchJson<null>(`/auth/tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" }),
+  },
+  authMe: () => fetchJson<import("./types").AuthMe>("/auth/me"),
   integrations: {
     triggers: () =>
       fetchJson<{ items: import("./types").ComposioTriggerItem[] }>("/integrations/triggers"),

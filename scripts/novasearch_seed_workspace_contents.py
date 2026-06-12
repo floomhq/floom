@@ -1,9 +1,9 @@
 #!/usr/bin/env python3
-"""Seed the Nova Search Workeros workspace with current safe assets.
+"""Seed the Nova Search WorkerOS workspace with current safe assets.
 
 This is deliberately additive/idempotent:
 - copies NovaSearch data snapshots into the workspace Brain pack
-- registers existing Workeros worker bundles under the Nova Search workspace
+- registers existing WorkerOS worker bundles under the Nova Search workspace
 - writes workspace-agent instructions describing the current operating surface
 
 It does not disable or mutate nova-api.floom.dev.
@@ -50,7 +50,7 @@ WORKER_BUNDLES = [
 
 WORKSPACE_INSTRUCTIONS = """# Nova Search Workspace
 
-This workspace is the Workeros Cloud migration target for NovaSearch.
+This workspace is the WorkerOS Cloud migration target for NovaSearch.
 
 Current verified assets:
 - Brain pack `novasearch-data` contains snapshots from `/opt/novasearch-backend/data`.
@@ -65,8 +65,8 @@ Operating rules:
 - Do not expose secret values. List secret names only.
 
 Known migration gaps:
-- Full `/api/match` parity is not yet implemented as a Workeros worker.
-- Query log, labels, tracked candidates, memory, outreach, judge cache, and telemetry still need workspace-scoped Supabase tables before Workeros can replace the isolated backend.
+- Full `/api/match` parity is not yet implemented as a WorkerOS worker.
+- Query log, labels, tracked candidates, memory, outreach, judge cache, and telemetry still need workspace-scoped Supabase tables before WorkerOS can replace the isolated backend.
 - LangDock/Emily tool parity is pending.
 """
 

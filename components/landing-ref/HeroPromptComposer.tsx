@@ -231,7 +231,7 @@ export function HeroPromptComposer({
                     background: "color-mix(in srgb, #3a6ea5 8%, transparent)",
                     color: "#1f4870",
                   }}
-                  title={`Workeros recognises ${d.canonical}`}
+                  title={`WorkerOS recognises ${d.canonical}`}
                 >
                   {hasLogo(d.tool) && (
                     <span className="inline-flex h-3 w-3 shrink-0 items-center justify-center [&>svg]:h-3 [&>svg]:w-3">

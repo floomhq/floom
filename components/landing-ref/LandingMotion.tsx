@@ -45,7 +45,7 @@ export function TemplatesHeader({ templatesHref }: { templatesHref: string }) {
             Hire a worker in 60 seconds.
           </h2>
           <p className="mt-3 text-base text-background/65">
-            Templates already tuned for the recurring work teams ask Workeros to handle.
+            Templates already tuned for the recurring work teams ask WorkerOS to handle.
           </p>
         </div>
         <Link
@@ -87,7 +87,7 @@ export function TemplatesHeader({ templatesHref }: { templatesHref: string }) {
           Hire a worker in 60 seconds.
         </motion.h2>
         <motion.p variants={item} className="mt-3 text-base text-background/65">
-          Templates already tuned for the recurring work teams ask Workeros to handle.
+          Templates already tuned for the recurring work teams ask WorkerOS to handle.
         </motion.p>
       </div>
       <motion.div variants={item}>
@@ -116,7 +116,7 @@ export function FinalCTAGroup({ templatesHref }: { templatesHref: string }) {
           Hire your first worker.
         </h2>
         <p className="mx-auto mt-5 max-w-md text-[16px] text-muted-foreground">
-          Describe the task once. Workeros runs it for your team, with your approval before anything ships.
+          Describe the task once. WorkerOS runs it for your team, with your approval before anything ships.
         </p>
         <div className="mt-9 flex flex-col items-stretch justify-center gap-3 sm:flex-row sm:flex-wrap sm:items-center">
           <ScrollToHeroButton className="w-full sm:w-auto">Describe your worker</ScrollToHeroButton>
@@ -149,7 +149,7 @@ export function FinalCTAGroup({ templatesHref }: { templatesHref: string }) {
         variants={item}
         className="mx-auto mt-5 max-w-md text-[16px] text-muted-foreground"
       >
-        Describe the task once. Workeros runs it for your team, with your approval before anything ships.
+        Describe the task once. WorkerOS runs it for your team, with your approval before anything ships.
       </motion.p>
       <motion.div
         variants={item}

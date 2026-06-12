@@ -54,9 +54,23 @@ export function V3Shell({
   children: React.ReactNode;
 }) {
   const [mode, setMode] = useState<ThemeMode>("system");
+  // #821 — session-aware CTA. The session cookie is HttpOnly, so presence is
+  // reflected by /api/session (non-blocking: the nav renders "Sign in" first
+  // and swaps to "Dashboard" when the fetch resolves true).
+  const [authed, setAuthed] = useState(false);
 
   useEffect(() => {
     setMode(readMode());
+    let cancelled = false;
+    fetch("/api/session", { cache: "no-store" })
+      .then((r) => (r.ok ? r.json() : { authed: false }))
+      .then((d) => {
+        if (!cancelled && d && typeof d.authed === "boolean") setAuthed(d.authed);
+      })
+      .catch(() => {});
+    return () => {
+      cancelled = true;
+    };
   }, []);
 
   function cycleMode() {
@@ -98,8 +112,12 @@ export function V3Shell({
             <Link href={appUrl("/workers/new")} className="rounded-[10px] px-3 py-1.5 font-medium text-white transition hover:-translate-y-px" style={{ background: "var(--v3-accent)" }}>
               Hire
             </Link>
-            <Link href="/login" className="hidden rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground sm:block">
-              Sign in
+            {/* #821: session-aware — Dashboard when a session exists. */}
+            <Link
+              href={authed ? "/app/overview" : "/login"}
+              className="hidden rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground sm:block"
+            >
+              {authed ? "Dashboard" : "Sign in"}
             </Link>
           </div>
         </nav>

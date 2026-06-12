@@ -1,7 +1,7 @@
 import Link from "next/link";
 
 export const metadata = {
-  title: "Not found — Workeros",
+  title: "Not found — WorkerOS",
 };
 
 function FloomMark({ size = 28 }: { size?: number }) {
@@ -28,7 +28,7 @@ export default function NotFound() {
   return (
     <main className="flex min-h-screen items-center justify-center px-6">
       <div className="mx-auto max-w-md text-center">
-        <Link href="/" aria-label="Workeros home" className="mb-10 inline-flex">
+        <Link href="/" aria-label="WorkerOS home" className="mb-10 inline-flex">
           <FloomMark size={36} />
         </Link>
         <div className="mb-3 text-[11px] font-medium uppercase tracking-[0.22em] text-[#3a6ea5]">

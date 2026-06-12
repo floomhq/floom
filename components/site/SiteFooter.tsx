@@ -62,7 +62,7 @@ export function SiteFooter() {
           <div className="flex items-center gap-2">
             <FloomMark size={22} />
             <div className="flex items-baseline gap-1.5 text-[15px] font-semibold text-foreground">
-              Workeros
+              WorkerOS
               <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-muted-foreground">
                 by Floom
               </span>

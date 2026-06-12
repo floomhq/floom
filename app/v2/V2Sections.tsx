@@ -92,7 +92,7 @@ export function SectionHead({ title, sub }: { title: string; sub?: string }) {
 const STEPS = [
   {
     t: "Describe the job",
-    p: "One sentence, plain English. Workeros recognises your tools as you type.",
+    p: "One sentence, plain English. WorkerOS recognises your tools as you type.",
   },
   {
     t: "Watch it draft the worker",
@@ -658,7 +658,7 @@ export function V2Footer() {
               <span className="flex h-[20px] w-[20px] items-center justify-center rounded-[6px] bg-primary">
                 <svg width="11" height="11" viewBox="0 0 100 100"><path d="M30 22 h20 l22 22 a3 3 0 0 1 0 4 l-22 22 h-20 a6 6 0 0 1 -6 -6 v-36 a6 6 0 0 1 6 -6 z" fill="var(--primary-text)" /></svg>
               </span>
-              Workeros
+              WorkerOS
               <span className="text-[9px] font-medium uppercase tracking-[0.15em] text-muted-foreground">by Floom</span>
             </div>
             <p className="mt-2.5 max-w-[230px] text-[12px] leading-relaxed text-muted-foreground">Hire AI workers for your company. Approval before anything ships.</p>

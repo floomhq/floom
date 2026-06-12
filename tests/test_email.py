@@ -11,7 +11,7 @@ from apps.api import email
 def _message() -> email.TransactionalEmail:
     return email.TransactionalEmail(
         to="user@example.com",
-        subject="Welcome to Workeros",
+        subject="Welcome to WorkerOS",
         html="<p>Hello</p>",
         text="Hello",
         tags={"kind": "welcome"},
@@ -93,7 +93,7 @@ def test_email_enabled_calls_resend_with_server_side_key(monkeypatch):
         {
             "from": "Floom <hello@floom.dev>",
             "to": ["user@example.com"],
-            "subject": "Welcome to Workeros",
+            "subject": "Welcome to WorkerOS",
             "html": "<p>Hello</p>",
             "text": "Hello",
             "tags": [{"name": "kind", "value": "welcome"}],

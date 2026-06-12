@@ -2,9 +2,9 @@ import type { Metadata } from "next";
 import Link from "next/link";
 
 export const metadata: Metadata = {
-  title: "Terms — Workeros",
+  title: "Terms — WorkerOS",
   description:
-    "The rules that govern how you use Workeros and what you can expect from us.",
+    "The rules that govern how you use WorkerOS and what you can expect from us.",
 };
 
 export default function TermsPage() {
@@ -18,7 +18,7 @@ export default function TermsPage() {
           The rules of the road.
         </h1>
         <p className="mt-3 text-[15px] text-muted-foreground">
-          Last updated 2026-06-06. By using Workeros you agree to the terms
+          Last updated 2026-06-06. By using WorkerOS you agree to the terms
           below. Reach out at{" "}
           <a
             href="mailto:hello@floom.dev"
@@ -31,10 +31,10 @@ export default function TermsPage() {
 
         <section className="mt-10 space-y-2.5">
           <h2 className="text-[20px] font-semibold text-foreground">
-            What Workeros is
+            What WorkerOS is
           </h2>
           <p className="text-[15px] leading-relaxed text-muted-foreground">
-            Workeros lets you describe a job and runs an AI worker that does
+            WorkerOS lets you describe a job and runs an AI worker that does
             it on a schedule, a webhook, or with your approval. You stay in
             control of every run and every connected tool.
           </p>
@@ -56,7 +56,7 @@ export default function TermsPage() {
             Acceptable use
           </h2>
           <p className="text-[15px] leading-relaxed text-muted-foreground">
-            Workeros is for legitimate work. No spam, no harassment, no
+            WorkerOS is for legitimate work. No spam, no harassment, no
             fraud, no abuse of the tools you connect, no attempts to
             reverse-engineer or disrupt the service.
           </p>
@@ -79,7 +79,7 @@ export default function TermsPage() {
             Service availability
           </h2>
           <p className="text-[15px] leading-relaxed text-muted-foreground">
-            We work hard to keep Workeros up and running. The service is
+            We work hard to keep WorkerOS up and running. The service is
             provided as-is; we do not guarantee uninterrupted availability
             and we are not liable for losses that result from downtime,
             third-party tool outages, or worker behavior beyond a refund of

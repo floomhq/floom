@@ -26,7 +26,7 @@ const PlayIcon = () => (
     <polygon points="6 4 20 12 6 20 6 4" />
   </svg>
 );
-const WorkerosMarkSVG = () => (
+const WorkerOSMarkSVG = () => (
   <svg viewBox="0 0 100 100" width="18" height="18" fill="currentColor" aria-hidden="true">
     <path d="M32 26h20l22 22a3 3 0 0 1 0 4l-22 22H32a6 6 0 0 1-6-6V32a6 6 0 0 1 6-6z" />
   </svg>
@@ -47,7 +47,7 @@ const RailDMIcon = () => (
 function SlackThreadMock({ v }: { v: Vertical }) {
   const s = v.slack;
   return (
-    <div className="ln-slack" id="see-how-it-works" aria-label={`How Workeros works for ${v.eyebrow}`}>
+    <div className="ln-slack" id="see-how-it-works" aria-label={`How WorkerOS works for ${v.eyebrow}`}>
       <div className="ln-slack-rail" aria-hidden="true">
         <span className="ln-slack-rail-ws">A</span>
         <span className="ln-slack-rail-ico on"><RailHomeIcon /></span>
@@ -74,10 +74,10 @@ function SlackThreadMock({ v }: { v: Vertical }) {
         </div>
 
         <div className="ln-slack-msg">
-          <span className="ln-slack-av bot"><WorkerosMarkSVG /></span>
+          <span className="ln-slack-av bot"><WorkerOSMarkSVG /></span>
           <div className="ln-slack-bd">
             <div className="ln-slack-meta">
-              <b>Workeros</b>
+              <b>WorkerOS</b>
               <span className="ln-slack-app">APP</span>
               <span className="ln-slack-time">9:03 AM</span>
             </div>
@@ -128,7 +128,7 @@ export function VerticalLanding({ slug }: { slug: string }) {
         <section className="lp1 ln-hero-section">
           <div className="ln-hero ln-rise ln-rise-1">
             <div className="ln-badge">
-              <span className="ln-badge-k">Workeros</span>
+              <span className="ln-badge-k">WorkerOS</span>
               <span className="ln-badge-v">{v.eyebrow}</span>
             </div>
 

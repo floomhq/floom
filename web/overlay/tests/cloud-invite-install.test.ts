@@ -1,3 +1,4 @@
+import { describe, it } from "vitest";
 import { existsSync, readFileSync } from "fs";
 import { resolve } from "path";
 
@@ -46,19 +47,12 @@ function testMiddlewarePublicInvite(): void {
   assert(s.includes('path.startsWith("/invites/")'), "invite preview API must be public pre-login");
 }
 
-const tests: [string, () => void][] = [
-  ["invite route alias", testInviteAliasRoute],
-  ["settings members alias", testSettingsMembersAliasRoute],
-  ["install channel route", testInstallRoute],
-  ["login install routing", testLoginInstallRoutes],
-  ["middleware public invite paths", testMiddlewarePublicInvite],
-];
-
-let passed = 0;
-for (const [name, fn] of tests) {
-  fn();
-  console.log(`  ✓ ${name}`);
-  passed += 1;
-}
-
-console.log(`\n${passed}/${tests.length} passed`);
+// Originally a standalone script (pre-vitest); now a proper suite so the
+// cloud runner (vitest.config.ts) can execute it.
+describe("cloud invite/install routes", () => {
+  it("invite route alias", testInviteAliasRoute);
+  it("settings members alias", testSettingsMembersAliasRoute);
+  it("install channel route", testInstallRoute);
+  it("login install routing", testLoginInstallRoutes);
+  it("middleware public invite paths", testMiddlewarePublicInvite);
+});

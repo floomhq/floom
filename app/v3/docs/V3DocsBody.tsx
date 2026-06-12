@@ -163,7 +163,7 @@ export function V3DocsBody() {
                   <div className="text-[13px] font-medium">Slack</div>
                   <div className="text-[12px] text-muted-foreground">Workspace install. Workers post drafts and approval buttons in your channels.</div>
                 </div>
-                <Link href="/login?install=slack" className="rounded-[8px] border border-border bg-card px-2.5 py-1 text-[12px] font-medium hover:bg-secondary">Install</Link>
+                <Link href="/start/slack" className="rounded-[8px] border border-border bg-card px-2.5 py-1 text-[12px] font-medium hover:bg-secondary">Install</Link>
               </div>
               <div className="flex items-center gap-3 border-b border-border-soft py-3.5 last:border-0">
                 <span className="[&_svg]:h-4 [&_svg]:w-4"><WhatsAppLogo /></span>
@@ -171,7 +171,7 @@ export function V3DocsBody() {
                   <div className="text-[13px] font-medium">WhatsApp</div>
                   <div className="text-[12px] text-muted-foreground">Personal or shared number. Summaries and approvals as messages.</div>
                 </div>
-                <Link href="/login?install=whatsapp" className="rounded-[8px] border border-border bg-card px-2.5 py-1 text-[12px] font-medium hover:bg-secondary">Install</Link>
+                <Link href="/start/whatsapp" className="rounded-[8px] border border-border bg-card px-2.5 py-1 text-[12px] font-medium hover:bg-secondary">Install</Link>
               </div>
               <div className="flex items-center gap-3 border-b border-border-soft py-3.5 last:border-0">
                 <span className="flex h-4 w-4 items-center justify-center rounded-[4px] bg-primary font-mono text-[7.5px] font-bold text-primary-foreground">&gt;_</span>
