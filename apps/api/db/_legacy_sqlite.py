@@ -1934,6 +1934,12 @@ MIGRATIONS: list[Migration] = [
     ALTER TABLE approvals ADD COLUMN preview_payload_json TEXT;
     CREATE INDEX IF NOT EXISTS idx_approvals_expires_at ON approvals(expires_at);
     """,
+    # -- migration 72: CLI API token expiry (#915/#924/#949) -------------------
+    # CLI device tokens used to live forever. New tokens get a bounded TTL at
+    # mint time; NULL means a legacy token (still honored until rotated).
+    """
+    ALTER TABLE cli_api_tokens ADD COLUMN expires_at TEXT;
+    """,
 ]
 
 
