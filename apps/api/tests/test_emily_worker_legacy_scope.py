@@ -84,6 +84,41 @@ def _seed_db(db, session_user_id: str) -> None:
         )
 
 
+def _seed_admin_isolation_db(db, admin_user_id: str) -> None:
+    now = db.now_iso()
+    with db.get_db() as conn:
+        conn.execute(
+            """
+            INSERT INTO users
+                (id, username, password_hash, role, disabled, created_at, updated_at)
+            VALUES (?, 'admin', 'test-hash', 'admin', 0, ?, ?)
+            """,
+            (admin_user_id, now, now),
+        )
+        conn.execute(
+            """
+            INSERT INTO workspace_members
+                (workspace_id, user_id, role, status, created_at, updated_at)
+            VALUES ('local-default', ?, 'owner', 'active', ?, ?)
+            """,
+            (admin_user_id, now, now),
+        )
+    repos = db.get_repositories()
+    for worker_id, owner_id in (
+        ("admin-real", admin_user_id),
+        ("other-private", "other-user"),
+    ):
+        repos.workers.create(
+            user_id=owner_id,
+            worker_id=worker_id,
+            name=worker_id,
+            manifest_json=json.dumps(_manifest(worker_id)),
+            bundle_path=f"workers/{worker_id}",
+            workspace_id="local-default",
+            visibility="private",
+        )
+
+
 def _load_chat_service():
     import chat_service
 
@@ -119,3 +154,24 @@ def test_emily_worker_list_resolves_uuid_session_to_legacy_default_owner(tmp_pat
         "legacy-system",
     }
     assert "other-private" not in {worker["id"] for worker in include_system["workers"]}
+
+
+def test_emily_worker_list_does_not_widen_admin_to_all_users_by_default(tmp_path, monkeypatch):
+    admin_user_id = "admin-user"
+    db_path = tmp_path / "workeros.db"
+    contexts_dir = tmp_path / "contexts"
+    _configure_env(monkeypatch, db_path=db_path, contexts_dir=contexts_dir)
+    _reset_modules()
+
+    import db
+
+    db.init_db()
+    db.get_repositories.cache_clear()
+    _seed_admin_isolation_db(db, admin_user_id)
+    chat_service = _load_chat_service()
+
+    result = chat_service._tool_workers_list_all({}, admin_user_id)
+    assert {worker["id"] for worker in result["workers"]} == {"admin-real"}
+
+    all_users = chat_service._tool_workers_list_all({"include_all_users": True}, admin_user_id)
+    assert {worker["id"] for worker in all_users["workers"]} == {"admin-real", "other-private"}
