@@ -921,7 +921,7 @@ class TestApprovalStatusPublisher(unittest.TestCase):
     def test_approve_run_publishes_terminal_status(self):
         run_id = self._insert_pending_approval_run()
 
-        with patch.object(app_module, "_sse_publish") as publish:
+        with patch("routers.approvals._sse_publish") as publish:
             r = client.post(f"/runs/{run_id}/approve")
 
         self.assertEqual(r.status_code, 200)
@@ -934,7 +934,7 @@ class TestApprovalStatusPublisher(unittest.TestCase):
     def test_reject_run_publishes_terminal_status(self):
         run_id = self._insert_pending_approval_run()
 
-        with patch.object(app_module, "_sse_publish") as publish:
+        with patch("routers.approvals._sse_publish") as publish:
             r = client.post(f"/runs/{run_id}/reject", json={"reason": "Not ready"})
 
         self.assertEqual(r.status_code, 200)
