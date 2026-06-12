@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import type { SecretItem } from "@/lib/types";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { formatRelativeTime } from "@/components/connections/connection-data";
+import { useIsAdmin } from "@/lib/use-is-admin";
 
 export default function SecretsPage() {
   return (
@@ -43,7 +44,12 @@ function SecretsContent() {
   // Track which secrets have their "used by" list expanded on mobile
   const [expandedUsedBy, setExpandedUsedBy] = useState<Set<string>>(new Set());
 
+  // #943 — the secret inventory (names + which workers use them) maps the
+  // workspace's vendors and operational gaps. Owner/admin only.
+  const { isAdmin, pending: roleCheckPending } = useIsAdmin();
+
   const refresh = useCallback(async () => {
+    if (!isAdmin) return;
     try {
       const s = await api.secrets.list();
       setSecrets(s);
@@ -52,11 +58,16 @@ function SecretsContent() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
+    if (roleCheckPending) return;
+    if (!isAdmin) {
+      setLoading(false);
+      return;
+    }
     void refresh();
-  }, [refresh]);
+  }, [refresh, roleCheckPending, isAdmin]);
 
   async function handleAdd() {
     if (!addingName.trim() || !addingValue.trim()) {
@@ -126,6 +137,28 @@ function SecretsContent() {
     } finally {
       setTestingName(null);
     }
+  }
+
+  // #943 — members see a restricted notice instead of the inventory.
+  if (!roleCheckPending && !isAdmin) {
+    return (
+      <div className="space-y-6">
+        <header>
+          <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
+          <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
+            Manage environment secrets for your workers. Values are write-only.
+          </p>
+        </header>
+        <ConnectionsTabs />
+        <Card className="border-border shadow-none bg-card">
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            <KeyRound className="mx-auto mb-3 h-5 w-5 opacity-60" />
+            Secret names and worker mappings are restricted to workspace owners
+            and admins. Ask an admin if a worker is missing a credential.
+          </CardContent>
+        </Card>
+      </div>
+    );
   }
 
   return (
