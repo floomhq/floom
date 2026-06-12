@@ -133,7 +133,7 @@ function Cell({
         "bg-[var(--bg-2)] text-[var(--ink-soft)] [border:var(--bd-card)]",
         SIZE[size].box,
       )}
-      style={{ borderRadius: "5px" }}
+      style={{ borderRadius: "var(--radius-squircle)" }}
     >
       {children}
     </span>
@@ -282,7 +282,7 @@ export function WorkerIconPills({
               "relative -ml-px z-0 inline-flex shrink-0 items-center justify-center px-1 text-[9px] font-medium leading-none [border:var(--bd-card)] [border:var(--bd-card)] bg-[var(--bg-2)] text-[var(--ink-mute)]",
               SIZE[size].overflow,
             )}
-            style={{ borderRadius: "5px" }}
+            style={{ borderRadius: "var(--radius-squircle)" }}
             aria-label={`${overflow} more`}
           >
             +{overflow}

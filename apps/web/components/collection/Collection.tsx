@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import type { CollectionConfig, CollectionState } from "@/lib/collection/types";
@@ -16,17 +16,8 @@ import { CollectionView } from "./CollectionView";
  * changes (so Back closes/changes the detail), replace for search/tag/view
  * churn (no RSC refetch per keystroke). Back/forward re-seed from the URL.
  */
-/**
- * `useSearchParams()` forces a Suspense boundary during static prerender. Wrap
- * the hook-using inner component once here so EVERY collection page is safe
- * without each route needing its own boundary or `force-dynamic`.
- */
 export function Collection<T>({ config }: { config: CollectionConfig<T> }) {
-  return (
-    <Suspense fallback={null}>
-      <CollectionInner config={config} />
-    </Suspense>
-  );
+  return <CollectionInner config={config} />;
 }
 
 function CollectionInner<T>({ config }: { config: CollectionConfig<T> }) {
