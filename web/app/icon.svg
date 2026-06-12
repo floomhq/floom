@@ -1,6 +1,6 @@
-<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="WorkerOS">
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Floom">
   <!--
-    WorkerOS favicon: the mark fills black in light mode, white in dark mode.
+    Floom favicon: the mark fills black in light mode, white in dark mode.
     Using CSS prefers-color-scheme inside the SVG for light/dark switching.
   -->
   <style>

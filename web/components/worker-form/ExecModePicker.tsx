@@ -23,7 +23,7 @@ export function ExecModePicker({ detectedEntry }: ExecModePickerProps) {
   const isScript = detectedEntry === "run.py";
 
   return (
-    <Card className="border-border shadow-none bg-card">
+    <Card className="bg-card shadow-none">
       <CardHeader>
         <CardTitle className="text-sm font-medium">Entry point</CardTitle>
       </CardHeader>
@@ -33,8 +33,8 @@ export function ExecModePicker({ detectedEntry }: ExecModePickerProps) {
           Add a SKILL.md to run as an agent; add a run.py to run as a script.
         </p>
         <div
-          className={`flex items-start gap-3 rounded-[var(--radius-button)] border px-3 py-2.5 ${
-            isAgent ? "border-[var(--accent)] bg-muted/50" : "border-line opacity-60"
+          className={`flex items-start gap-3 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 py-2.5 ${
+            isAgent ? "bg-muted/50" : "opacity-60"
           }`}
         >
           <FileText className="w-4 h-4 mt-0.5 text-muted-foreground" />
@@ -48,8 +48,8 @@ export function ExecModePicker({ detectedEntry }: ExecModePickerProps) {
           </div>
         </div>
         <div
-          className={`flex items-start gap-3 rounded-[var(--radius-button)] border px-3 py-2.5 ${
-            isScript ? "border-[var(--accent)] bg-muted/50" : "border-line opacity-60"
+          className={`flex items-start gap-3 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 py-2.5 ${
+            isScript ? "bg-muted/50" : "opacity-60"
           }`}
         >
           <FileCode className="w-4 h-4 mt-0.5 text-muted-foreground" />
@@ -63,7 +63,7 @@ export function ExecModePicker({ detectedEntry }: ExecModePickerProps) {
           </div>
         </div>
         {detectedEntry === "none" && (
-          <p className="rounded-[var(--radius-button)] border border-[color-mix(in_srgb,var(--warning)_28%,var(--line))] bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] px-3 py-2 text-xs text-[var(--warning)]">
+          <p className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] px-3 py-2 text-xs text-[var(--warning)]">
             Add SKILL.md (agent) or run.py (script) to the file list to set the entry point.
           </p>
         )}

@@ -306,8 +306,8 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
           from the top while the document scrolls. self-start lets the sticky
           element detach from the flex stretch.
           Mobile (< lg): full-width rail, no sticky (stacks above the code pane). */}
-      <div className="w-full lg:w-64 shrink-0 lg:self-start lg:sticky lg:top-[4.5rem] border border-line rounded-[var(--radius-card)] overflow-hidden">
-        <div className="px-3 py-2 border-b border-line">
+      <div className="w-full lg:w-64 shrink-0 lg:self-start lg:sticky lg:top-[4.5rem] [border:var(--bd-card)] rounded-[var(--radius-card)] overflow-hidden">
+        <div className="px-3 py-2 [border-bottom:var(--bd-div)]">
           <p className="text-xs font-medium text-muted-foreground flex items-center gap-1.5">
             <FolderOpen className="w-3.5 h-3.5" />
             Files
@@ -335,8 +335,8 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
 
       <div className="flex-1 min-w-0">
         {selected ? (
-          <div className="border border-line rounded-[var(--radius-card)] overflow-hidden">
-            <div className="py-2 px-4 border-b border-line">
+          <div className="[border:var(--bd-card)] rounded-[var(--radius-card)] overflow-hidden">
+            <div className="py-2 px-4 [border-bottom:var(--bd-div)]">
               <p className="text-xs font-mono text-muted-foreground">{selected.path}</p>
             </div>
             <ReadOnlyFileContent file={selected} />
@@ -369,7 +369,7 @@ function ReadOnlyFileContent({ file }: { file: WorkerFile }) {
   if (hasWorkerYamlSummary(file.path, file.binary) || supportsRenderedPreview(file.path, file.binary)) {
     return (
       <Tabs defaultValue="preview" className="bg-muted/20">
-        <div className="flex items-center justify-end gap-3 border-b border-line px-4 py-2">
+        <div className="flex items-center justify-end gap-3 [border-bottom:var(--bd-div)] px-4 py-2">
           <TabsList>
             <TabsTrigger value="preview">Preview</TabsTrigger>
             <TabsTrigger value="raw">Raw</TabsTrigger>
@@ -405,12 +405,12 @@ function SourcePreviewToolbar({
   label: string;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 border-b border-line bg-card px-4 py-2">
+    <div className="flex items-center justify-between gap-3 [border-bottom:var(--bd-div)] bg-card px-4 py-2">
       <p className="text-xs text-muted-foreground">{label}</p>
       <div className="flex items-center gap-1.5">
         <button
           type="button"
-          className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] border border-border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
           onClick={() => openSourceContent(path, content)}
         >
           <ExternalLink className="size-3.5" />
@@ -418,7 +418,7 @@ function SourcePreviewToolbar({
         </button>
         <button
           type="button"
-          className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] border border-border px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
+          className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-2 text-xs text-muted-foreground hover:bg-muted hover:text-foreground"
           onClick={() => downloadSourceContent(path, content)}
         >
           <Download className="size-3.5" />
@@ -440,10 +440,10 @@ function UnsupportedSourcePreview({
 }) {
   return (
     <div className="flex min-h-[280px] items-center justify-center bg-muted/20 p-6">
-      <div className="max-w-lg rounded-[var(--radius-card)] border border-border bg-card p-5 text-sm">
+      <div className="max-w-lg rounded-[var(--radius-card)] [border:var(--bd-card)] bg-card p-5 text-sm">
         <p className="font-medium text-foreground">{title}</p>
         <p className="mt-2 leading-6 text-muted-foreground">{detail}</p>
-        <p className="mt-3 rounded-[var(--radius-button)] border border-line bg-muted/30 px-3 py-2 font-mono text-xs text-muted-foreground">
+        <p className="mt-3 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 px-3 py-2 font-mono text-xs text-muted-foreground">
           {path}
         </p>
       </div>
@@ -485,7 +485,7 @@ function RenderedFilePreview({
         srcDoc={content}
         sandbox=""
         referrerPolicy="no-referrer"
-        className="h-[640px] w-full border-0 bg-white"
+        className="h-[640px] w-full [border:0] bg-white"
       />
     );
   }
@@ -545,7 +545,7 @@ function SourceDelimitedTablePreview({ content, path }: { content: string; path:
           {rows.map((row, rowIndex) => (
             <tr key={rowIndex} className={rowIndex === 0 ? "bg-muted/60 font-medium" : "odd:bg-muted/20"}>
               {row.map((cell, cellIndex) => (
-                <td key={cellIndex} className="max-w-[240px] border border-line px-2.5 py-1.5 align-top">
+                <td key={cellIndex} className="max-w-[240px] [border:var(--bd-card)] px-2.5 py-1.5 align-top">
                   <span className="block truncate" title={cell}>{cell}</span>
                 </td>
               ))}
@@ -582,7 +582,7 @@ function WorkerYamlPreviewContent({ content }: { content: string }) {
           <p className="mt-1 max-w-2xl text-sm leading-relaxed text-muted-foreground">{parsed.description}</p>
         ) : null}
       </div>
-      <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] border border-line bg-line text-sm sm:grid-cols-2">
+      <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-line text-sm sm:grid-cols-2">
         {entries.map(([label, value]) => (
           <div key={label} className="bg-card px-3 py-2">
             <dt className="text-[11px] font-medium uppercase text-muted-foreground">{label}</dt>
@@ -683,7 +683,7 @@ function YamlList({
         {items.map((item, index) => (
           <span
             key={`${title}-${index}`}
-            className="rounded-[var(--radius-button)] border border-line bg-card px-2 py-1 text-xs text-foreground"
+            className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card px-2 py-1 text-xs text-foreground"
             title={getLabel(item)}
           >
             {getLabel(item)}
@@ -760,7 +760,7 @@ function FilesEditorEdit({
 
   return (
     <div className="grid grid-cols-1 lg:grid-cols-[260px_1fr] gap-4 items-start">
-      <Card size="sm" className="border-border shadow-none bg-card self-start lg:sticky lg:top-3">
+      <Card size="sm" className="[border:var(--bd-card)] shadow-none bg-card self-start lg:sticky lg:top-3">
         <CardHeader className="px-3 py-2 flex flex-row items-center justify-between">
           <CardTitle className="flex items-center gap-1.5 text-xs font-medium text-muted-foreground">
             <FolderOpen className="w-3.5 h-3.5" />
@@ -778,9 +778,9 @@ function FilesEditorEdit({
         </CardHeader>
         <CardContent className="p-0 pb-1">
           {addingFile && (
-            <div className="px-3 py-2 flex gap-1.5 border-b border-line">
+            <div className="px-3 py-2 flex gap-1.5 [border-bottom:var(--bd-div)]">
               <Input
-                className="h-6 text-xs font-mono border-border py-0"
+                className="h-6 text-xs font-mono [border:var(--bd-card)] py-0"
                 placeholder="lib/helpers.py"
                 value={newFilePath}
                 onChange={(e) => setNewFilePath(e.target.value)}
@@ -827,14 +827,14 @@ function FilesEditorEdit({
         </CardContent>
       </Card>
 
-      <Card className="border-border shadow-none bg-card">
-        <CardHeader className="py-2 px-4 border-b border-border">
+      <Card className="[border:var(--bd-card)] shadow-none bg-card">
+        <CardHeader className="py-2 px-4 [border-bottom:var(--bd-div)]">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-xs font-medium font-mono text-muted-foreground">
               {selectedFile ? selectedFile.path : "Select a file"}
             </CardTitle>
             {selectedFile && selectedHasPreview && (
-              <div className="flex items-center gap-0 rounded-md border border-border overflow-hidden shrink-0">
+              <div className="flex items-center gap-0 rounded-md [border:var(--bd-card)] overflow-hidden shrink-0">
                 {(["raw", "preview"] as SourceMode[]).map((mode) => (
                   <button
                     key={mode}

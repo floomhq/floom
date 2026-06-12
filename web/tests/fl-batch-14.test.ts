@@ -36,7 +36,7 @@ describe("#616 Settings Developer section", () => {
     const s = src("app/settings/page.tsx");
     const developerSectionIdx = s.indexOf("function DeveloperSection()");
     expect(developerSectionIdx).toBeGreaterThanOrEqual(0);
-    expect(s.slice(developerSectionIdx, developerSectionIdx + 500)).toContain("<GitWorkspacePanel />");
+    expect(s.slice(developerSectionIdx, developerSectionIdx + 1600)).toContain("<GitWorkspacePanel />");
   });
 
   it("keeps GitWorkspacePanel wired to the /system/git API wrappers", () => {

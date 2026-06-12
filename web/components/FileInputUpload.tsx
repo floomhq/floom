@@ -93,8 +93,8 @@ export function FileInputUpload({ name, value, fileName, accepts, maxSizeMb, onU
     <div className="space-y-2">
       <button
         type="button"
-        className={`relative w-full rounded-[var(--radius-button)] border-2 border-dashed p-4 text-left transition-colors ${
-          dragging ? "border-[var(--accent)] bg-muted" : "border-line hover:border-muted-foreground/40"
+        className={`relative w-full rounded-[var(--radius-button)] [border:var(--bd-input)] p-4 text-left transition-colors ${
+          dragging ? "bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]" : "hover:bg-muted/40"
         }`}
         onClick={() => inputRef.current?.click()}
         onDragOver={(event) => {
@@ -136,8 +136,8 @@ export function FileInputUpload({ name, value, fileName, accepts, maxSizeMb, onU
           </div>
         </div>
         {uploading && (
-          <div className="mt-3 h-1.5 overflow-hidden rounded-full bg-[var(--bg-2)]">
-            <div className="h-full rounded-full bg-[var(--accent)] transition-all" style={{ width: `${progress}%` }} />
+          <div className="mt-3 h-1.5 overflow-hidden rounded-[var(--radius-pill)] bg-[var(--bg-2)]">
+            <div className="h-full rounded-[var(--radius-pill)] bg-[var(--accent)] transition-all" style={{ width: `${progress}%` }} />
           </div>
         )}
       </button>

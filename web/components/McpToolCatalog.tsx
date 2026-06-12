@@ -15,7 +15,7 @@ const TOOL_GROUPS: { group: string; tools: { name: string; description: string }
   {
     group: "Workers",
     tools: [
-      { name: "workers.list", description: "List available WorkerOS workers." },
+      { name: "workers.list", description: "List available Floom workers." },
       { name: "workers.get", description: "Read one worker, including config and recent run metadata." },
       { name: "workers.create", description: "Create a script-mode worker from worker_yml and run_py." },
       { name: "workers.update", description: "Patch trigger, cron, default inputs, capabilities, or rotate webhook secret." },
@@ -161,7 +161,7 @@ export function McpToolCatalog() {
         {/* W4: /connections/mcp is a real route (apps/web/app/connections/mcp).
             Link verified, not dead. */}
         <p className="mt-0.5 text-sm text-muted-foreground">
-          Every tool the WorkerOS MCP server exposes to connected agents. Custom MCP
+          Every tool the Floom MCP server exposes to connected agents. Custom MCP
           tools you add live under{" "}
           <Link href="/connections/mcp" className="font-medium text-foreground underline underline-offset-2">
             Connections &rarr; MCP
@@ -175,7 +175,7 @@ export function McpToolCatalog() {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Filter tools..."
-        className="h-9 w-full rounded-[var(--radius-input)] border border-line bg-[var(--bg-2)] px-3 text-sm outline-none placeholder:text-muted-foreground focus-visible:border-ring sm:max-w-xs"
+        className="h-9 w-full rounded-[var(--radius-input)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 text-sm outline-none placeholder:text-muted-foreground sm:max-w-xs"
       />
 
       {filteredGroups.length === 0 ? (
@@ -192,7 +192,7 @@ export function McpToolCatalog() {
             return (
               <div
                 key={group.group}
-                className="overflow-hidden rounded-[var(--radius-card)] border border-line"
+                className="overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)]"
               >
                 <button
                   type="button"
@@ -211,7 +211,7 @@ export function McpToolCatalog() {
                   />
                 </button>
                 {expanded ? (
-                  <div className="divide-y divide-line border-t border-line">
+                  <div className="[&>*+*]:[border-top:var(--bd-div)] [border-top:var(--bd-div)]">
                     {group.tools.map((tool) => (
                       <div key={tool.name} className="px-3 py-2.5">
                         <code className="text-xs font-medium text-foreground">{tool.name}</code>

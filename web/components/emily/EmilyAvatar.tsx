@@ -1,11 +1,11 @@
 import { cn } from "@/lib/utils";
 
 /**
- * EmilyAvatar — the WorkerOS Emily identity mark.
+ * EmilyAvatar — the Floom Emily identity mark.
  *
- * Federico 2026-06-12: no decorative glyph. The shared mark is a quiet, flat
- * accent circle so the rail, empty state, bubbles, and settings all carry the
- * same calm Emily identity.
+ * Federico 2026-06-12: refined blue "E" monogram, no sparkle, no gradient.
+ * The fill is tokenized as --emily-mark so the rail, empty state, bubbles, and
+ * settings all carry the same calm identity in light and dark mode.
  */
 export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
   const isSmall = size === "sm";
@@ -18,7 +18,7 @@ export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
     >
       <span
         className={cn(
-          "relative inline-flex items-center justify-center rounded-full bg-[var(--accent)] font-semibold leading-none text-white",
+          "relative inline-flex items-center justify-center rounded-[var(--radius-button)] bg-[var(--emily-mark)] font-semibold leading-none text-white",
           sz,
           textSize,
         )}
