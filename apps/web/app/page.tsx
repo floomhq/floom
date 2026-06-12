@@ -4,7 +4,9 @@ import { fetchOverview } from "@/lib/server-api";
 import { OverviewDashboard } from "@/components/overview/OverviewDashboard";
 import { OverviewSkeleton } from "@/components/overview/OverviewSkeleton";
 
-export const revalidate = 10;
+// #945: was `revalidate = N` (ISR) — an authenticated, per-user data fetch
+// must not be baked into a statically-cached shell shared across requests.
+export const dynamic = "force-dynamic";
 
 export default async function HomePage() {
   return (

@@ -316,6 +316,11 @@ interface ChatCoreActions {
 
 interface EmilyChatCoreProps {
   fullPage?: boolean;
+  /** #902 create-worker mode: create-primed composer placeholder (wireframe
+   *  newWorker(): Emily full-screen, placeholder "Create me: a worker that…"). */
+  createMode?: boolean;
+  /** #902: pre-fill the composer (legacy /workers/new?prompt= deep links). */
+  primeInput?: string;
   onOpenRunDetails?: () => void;
   /** When provided, the core omits its own controls row (host renders them in the header). */
   hideControls?: boolean;
@@ -329,7 +334,7 @@ interface EmilyChatCoreProps {
 
 const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
 
-function EmilyChatCore({ fullPage = false, onOpenRunDetails, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange }: EmilyChatCoreProps) {
+function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpenRunDetails, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange }: EmilyChatCoreProps) {
   const {
     messages,
     conversationId,
@@ -341,7 +346,7 @@ function EmilyChatCore({ fullPage = false, onOpenRunDetails, hideControls = fals
     loadConversation,
   } = useChatStream();
   const router = useRouter();
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(primeInput ?? "");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -587,7 +592,7 @@ function EmilyChatCore({ fullPage = false, onOpenRunDetails, hideControls = fals
           onFilesChange={setAttachedFiles}
           attachedFiles={attachedFiles}
           disabled={isStreaming}
-          placeholder="Message Emily..."
+          placeholder={createMode ? "Create me: a worker that…" : "Message Emily..."}
         />
         <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
           Emily can make mistakes. Verify important results.
@@ -815,7 +820,13 @@ export function EmilyMobileSheet() {
 
 // ── Full-page chat (used by /chat route) ──────────────────────────────────────
 
-export function EmilyChatPage() {
+export function EmilyChatPage({
+  createMode = false,
+  primeInput,
+}: {
+  createMode?: boolean;
+  primeInput?: string;
+} = {}) {
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
       <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
@@ -826,7 +837,7 @@ export function EmilyChatPage() {
         </div>
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
-        <EmilyChatCore fullPage />
+        <EmilyChatCore fullPage createMode={createMode} primeInput={primeInput} />
       </div>
     </div>
   );

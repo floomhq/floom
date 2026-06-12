@@ -22,6 +22,7 @@ export async function POST(req: NextRequest) {
   }
 
   const res = NextResponse.json({ ok: true });
+  res.headers.set("cache-control", "private, no-store, max-age=0"); // #941
   // Clear the Next.js web session cookie
   res.cookies.set(SESSION_COOKIE, "", {
     httpOnly: true,
@@ -30,9 +31,10 @@ export async function POST(req: NextRequest) {
     path: "/",
     maxAge: 0,
   });
-  // Clear the backend session cookie
+  // Clear the backend session cookie (#927: Secure matches how it is set)
   res.cookies.set("wos_session", "", {
     httpOnly: true,
+    secure: true,
     sameSite: "lax",
     path: "/",
     maxAge: 0,

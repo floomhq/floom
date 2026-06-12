@@ -4,7 +4,8 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, Edit3, RotateCcw, Save, X } from "lucide-react";
+import { AlertTriangle, Edit3, MessageCircle, RotateCcw, Save, X } from "lucide-react";
+import Link from "next/link";
 
 import { api } from "@/lib/api";
 import type { VersionSummary, WorkspaceAgentInfo } from "@/lib/types";
@@ -279,10 +280,22 @@ export default function AssistantPage() {
           <div className="flex items-center gap-2">
             <EmilyAvatar size="md" />
             <div>
-              <h1 className="text-2xl font-semibold tracking-tight">Emily</h1>
+              <div className="flex items-center gap-1.5">
+                <h1 className="text-2xl font-semibold tracking-tight">Emily</h1>
+                {/* #541: same presence treatment as the chat surfaces — Emily
+                    is a coworker who is around, not a config object. */}
+                <span className="size-2 shrink-0 rounded-full bg-green-500" aria-label="Online" />
+              </div>
               <p className="text-xs text-muted-foreground">Chief of Staff</p>
             </div>
           </div>
+          <Link
+            href="/chat"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] px-3 text-sm font-medium text-ink hover:bg-[var(--active-nav-bg)] transition-colors"
+          >
+            <MessageCircle className="w-3.5 h-3.5" />
+            Talk to Emily
+          </Link>
           {agent?.model ? (
             <Badge variant="outline" className="font-mono text-xs">
               {agent.model}
@@ -307,7 +320,9 @@ export default function AssistantPage() {
           ) : null}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Emily&apos;s persona, workspace notes, and compiled prompt live here.
+          How Emily works for this workspace — her persona, what she knows
+          about your company, and the prompt she runs on. To get work done,
+          just talk to her.
         </p>
       </div>
 

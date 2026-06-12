@@ -23,6 +23,8 @@ async function handler(req: NextRequest) {
   const responseHeaders = new Headers();
   const contentType = upstream.headers.get("content-type");
   if (contentType) responseHeaders.set("content-type", contentType);
+  // #941: identity/role/scope JSON must never land in a shared cache.
+  responseHeaders.set("cache-control", "private, no-store, max-age=0");
 
   return new NextResponse(upstream.body, {
     status: upstream.status,
