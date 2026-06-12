@@ -52,6 +52,36 @@ class E2BKeyExhaustedError(RuntimeError):
     """Raised when every configured E2B key is quota/rate-limit exhausted."""
 
 
+_WORKER_AUTHOR_ID = "worker-author"
+
+# #977: internal vars the WORKER process must never see. The worker-author
+# meta-worker legitimately needs the codegen model; everything else here is
+# infrastructure detail (E2B sandbox/template ids, events address) that lets
+# an attacker who can run a worker probe or target our infra. Callback vars
+# (WORKEROS_API_URL, WORKEROS_RUN_TOKEN, FLOOM_RUN_ID/TRACE_ID) are by design
+# and intentionally NOT scrubbed.
+_E2B_INTERNAL_ENV_VARS = (
+    "E2B_TEMPLATE_ID",
+    "E2B_SANDBOX_ID",
+    "E2B_EVENTS_ADDRESS",
+)
+
+
+def _scrub_internal_env_command(command: str, worker_id: str | None) -> str:
+    """Wrap the worker command so internal infra env vars are unset for it.
+
+    Uses `env -u` so the worker's `os.environ` never carries the E2B sandbox/
+    template ids or the codegen model (except for the worker-author worker,
+    which needs the model). Idempotent and shell-safe: the original command is
+    passed through `sh -c` unchanged.
+    """
+    to_unset = list(_E2B_INTERNAL_ENV_VARS)
+    if worker_id != _WORKER_AUTHOR_ID:
+        to_unset.append("WORKEROS_CODEGEN_MODEL")
+    unset_flags = " ".join(f"-u {name}" for name in to_unset)
+    return f"env {unset_flags} sh -c {shlex.quote(command)}"
+
+
 def _split_env_values(raw_value: str | None) -> list[str]:
     if not raw_value:
         return []
@@ -697,8 +727,11 @@ class E2BSandboxDriver(SandboxDriver):
         # Propagate the codegen model override so the worker-author meta-worker
         # (which generates code from inside the sandbox) uses the same model the
         # API-side draft/repair calls do. Falls back to its baked-in default.
+        # #977: only the worker-author meta-worker generates code inside the
+        # sandbox and needs the codegen model; injecting it for every worker
+        # leaked an internal architecture detail to untrusted worker code.
         _codegen_model_override = (os.environ.get("WORKEROS_CODEGEN_MODEL") or "").strip()
-        if _codegen_model_override:
+        if _codegen_model_override and worker_id == _WORKER_AUTHOR_ID:
             _sandbox_envs["WORKEROS_CODEGEN_MODEL"] = _codegen_model_override
         sandbox = _create_sandbox_with_key_fallback(
             Sandbox,
@@ -871,6 +904,9 @@ class E2BSandboxDriver(SandboxDriver):
             command = "python run.py"
             if config and config.runtime and config.runtime.command:
                 command = config.runtime.command
+            # #977: strip E2B sandbox/template ids (and the codegen model for
+            # non-author workers) from the worker process environment.
+            command = _scrub_internal_env_command(command, worker_id)
             log_fn(f"[e2b] Executing worker command: {command}", "info")
             streamed_stdout: list[str] = []
             streamed_stderr: list[str] = []
