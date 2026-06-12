@@ -7,7 +7,7 @@ const buttonVariants = cva(
   // v4 flat system (APP-UI-V4-SPEC §1 rule #2): border comes from --bd-btn token (none).
   // No resting shadow on any button. Hover = bg lift only. Shadow-none is explicit
   // so Tailwind's @layer base `shadow-sm` reset doesn't re-apply.
-  "group/button inline-flex shrink-0 items-center justify-center rounded-[var(--radius-button)] border-[length:0] [border:var(--bd-btn)] bg-clip-padding text-sm font-medium whitespace-nowrap shadow-none transition-all duration-150 ease-[var(--ease)] outline-none select-none focus-visible:ring-3 focus-visible:ring-ring/50 focus-visible:outline-2 focus-visible:outline-ring active:not-aria-[haspopup]:translate-y-px active:not-aria-[haspopup]:scale-[0.985] disabled:pointer-events-none disabled:opacity-50 aria-invalid:ring-3 aria-invalid:ring-destructive/20 dark:aria-invalid:ring-destructive/40 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+  "group/button inline-flex shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-btn)] bg-clip-padding text-sm font-medium whitespace-nowrap shadow-none transition-all duration-150 ease-[var(--ease)] outline-none select-none active:not-aria-[haspopup]:translate-y-px active:not-aria-[haspopup]:scale-[0.985] disabled:pointer-events-none disabled:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
   {
     variants: {
       variant: {
@@ -27,7 +27,7 @@ const buttonVariants = cva(
         ghost:
           "text-[var(--ink-soft)] hover:bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] hover:text-ink aria-expanded:bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] aria-expanded:text-ink",
         destructive:
-          "bg-destructive/10 text-destructive hover:bg-destructive/20 focus-visible:ring-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30 dark:focus-visible:ring-destructive/40",
+          "bg-destructive/10 text-destructive hover:bg-destructive/20 dark:bg-destructive/20 dark:hover:bg-destructive/30",
         link: "text-[var(--accent)] underline-offset-4 hover:underline",
       },
       size: {

@@ -26,6 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
 import { EmilyAvatar } from "@/components/emily/EmilyAvatar";
+import { modelLabel } from "@/lib/model-labels";
 
 type TabKey = "base" | "instructions" | "prompt";
 
@@ -284,21 +285,21 @@ export default function AssistantPage() {
                 <h1 className="text-2xl font-semibold tracking-tight">Emily</h1>
                 {/* #541: same presence treatment as the chat surfaces — Emily
                     is a coworker who is around, not a config object. */}
-                <span className="size-2 shrink-0 rounded-full bg-green-500" aria-label="Online" />
+                <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
               </div>
               <p className="text-xs text-muted-foreground">Chief of Staff</p>
             </div>
           </div>
           <Link
             href="/chat"
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] px-3 text-sm font-medium text-ink hover:bg-[var(--active-nav-bg)] transition-colors"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 text-sm font-medium text-ink hover:bg-[var(--active-nav-bg)] transition-colors"
           >
             <MessageCircle className="w-3.5 h-3.5" />
             Talk to Emily
           </Link>
           {agent?.model ? (
-            <Badge variant="outline" className="font-mono text-xs">
-              {agent.model}
+            <Badge variant="outline" className="text-xs">
+              {modelLabel(agent.model)}
             </Badge>
           ) : null}
           {/* Visibility (Share) control: Private <-> Shared with workspace.
@@ -509,7 +510,7 @@ export default function AssistantPage() {
                 </div>
                 <Badge variant="outline" className="text-xs">Read-only</Badge>
               </div>
-              <pre className="max-h-[42rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-[var(--border-default)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
+              <pre className="max-h-[42rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
                 {agent.system_prompt}
               </pre>
             </>

@@ -60,13 +60,13 @@ export function ApprovalCard({ card }: { card: ApprovalCardType }) {
   return (
     <div
       className={cn(
-        "rounded-lg border overflow-hidden text-sm",
+        "rounded-[var(--radius-card)] [border:var(--bd-card)] overflow-hidden text-sm",
         // Rule #9: pending is quiet grey — color only after a decision.
         isPending
-          ? "border-border bg-muted/30"
+          ? "[border:var(--bd-card)] bg-muted/30"
           : approved
-          ? "border-green-500/20 bg-green-50/30 dark:bg-green-950/20"
-          : "border-red-500/20 bg-red-50/30 dark:bg-red-950/20"
+          ? "[border:var(--bd-card)] bg-green-50/30 dark:bg-green-950/20"
+          : "[border:var(--bd-card)] bg-red-50/30 dark:bg-red-950/20"
       )}
     >
       <div className="flex items-start gap-2.5 px-3.5 py-2.5">
@@ -93,7 +93,7 @@ export function ApprovalCard({ card }: { card: ApprovalCardType }) {
       {isPending ? (
         <div className="space-y-2 px-3.5 pb-3">
           <input
-            className="w-full rounded-md border border-border bg-background px-2 py-1 text-xs"
+            className="w-full rounded-md [border:var(--bd-card)] bg-background px-2 py-1 text-xs"
             placeholder="Add a comment (sent with reject; approve comments land with #769)"
             value={comment}
             onChange={(e) => setComment(e.target.value)}
@@ -127,8 +127,8 @@ export function ApprovalCard({ card }: { card: ApprovalCardType }) {
             className={cn(
               "text-[10px] font-normal",
               approved
-                ? "bg-green-500/10 text-green-700 border-green-500/20"
-                : "bg-red-500/10 text-red-600 border-red-500/20"
+                ? "bg-green-500/10 text-green-700 [border:var(--bd-card)]"
+                : "bg-red-500/10 text-red-600 [border:var(--bd-card)]"
             )}
           >
             {approved ? "Approved" : "Rejected"}

@@ -219,7 +219,7 @@ export function WorkspaceSwitcher() {
     return (
       <div className="px-3 pb-2">
         <div
-          className="flex h-10 items-center gap-2 rounded-md border border-line bg-transparent px-2.5 text-sm text-[var(--ink-mute)]"
+          className="flex h-10 items-center gap-2 rounded-md [border:var(--bd-card)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)]"
           aria-label="Loading workspaces"
         >
           <div className="size-6 shrink-0 rounded-md bg-muted" />
@@ -249,7 +249,7 @@ export function WorkspaceSwitcher() {
         <DropdownMenuTrigger
           className={cn(
             "group flex h-10 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm font-semibold text-ink transition-colors duration-150",
-            "hover:bg-[var(--active-nav-bg)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--primary)]"
+            "hover:bg-[var(--active-nav-bg)] focus-visible:outline-none"
           )}
           aria-label="Switch workspace"
         >
@@ -429,7 +429,7 @@ export function WorkspaceSwitcher() {
             <DialogTitle>New workspace</DialogTitle>
             <DialogDescription>
               Workspaces keep workers, runs, connections, secrets, and brain folders
-              isolated on this local WorkerOS instance.
+              isolated on this local Floom instance.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">

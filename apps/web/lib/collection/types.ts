@@ -1,7 +1,7 @@
 /**
  * The Collection model (SPEC §0, §8a).
  *
- * Almost every page in Workeros is a Collection: a list/grid of items with a
+ * Almost every page in Floom is a Collection: a list/grid of items with a
  * search box, a multi-select tag bar, and a 30/70 split detail. Pages become
  * thin configs of `<Collection>`; this file is the shared type surface.
  */

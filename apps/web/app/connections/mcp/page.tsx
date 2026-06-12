@@ -506,20 +506,20 @@ export default function McpConnectionsPage() {
       {/* ============================================================= */}
       {/* Concept A — Use Floom Workers IN your AI client (secondary)   */}
       {/* ============================================================= */}
-      <section className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)]">
+      <section className="rounded-xl [border:var(--bd-card)] bg-[var(--bg-card)]">
         <button
           type="button"
           onClick={() => setInstallOpen((v) => !v)}
           aria-expanded={installOpen}
           className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left transition-colors hover:bg-[var(--active-nav-bg)]"
         >
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-app)]">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)]">
             <Terminal className="size-4 text-muted-foreground" />
           </div>
           <div className="min-w-0 flex-1">
-            <h2 className="text-base font-medium">Use WorkerOS in your AI client</h2>
+            <h2 className="text-base font-medium">Use Floom in your AI client</h2>
             <p className="mt-0.5 text-sm text-muted-foreground">
-              Install WorkerOS as an MCP server in Claude, Cursor, VS Code, or another client.
+              Install Floom as an MCP server in Claude, Cursor, VS Code, or another client.
             </p>
           </div>
           <ChevronDown
@@ -528,17 +528,17 @@ export default function McpConnectionsPage() {
         </button>
 
         {installOpen && (
-          <div className="space-y-3 border-t border-[var(--border-default)] px-4 py-4">
+          <div className="space-y-3 [border-top:var(--bd-div)] px-4 py-4">
             <div className="flex flex-wrap gap-1.5">
               {MCP_INSTALL_TARGETS.map((target) => (
                 <button
                   key={target.target}
                   type="button"
                   onClick={() => setInstallTarget(target.target)}
-                  className={`rounded-md border px-2.5 py-1 text-xs font-medium transition-colors ${
+                  className={`rounded-[var(--radius-button)] [border:var(--bd-pill)] px-2.5 py-1 text-xs font-medium transition-colors ${
                     installTarget === target.target
-                      ? "border-[var(--ink)] bg-[var(--ink)] text-[var(--bg-app)]"
-                      : "border-[var(--border-default)] bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
+                      ? "bg-[var(--ink)] text-[var(--bg-app)]"
+                      : "bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
                   }`}
                 >
                   {target.label}
@@ -552,8 +552,8 @@ export default function McpConnectionsPage() {
               onCopy={() => copyCommand(currentInstallCommand)}
             />
             <p className="text-xs text-muted-foreground">
-              Installs WorkerOS&apos; tools into your AI client. To connect a third-party MCP
-              server <em>into</em> WorkerOS instead, use the section below.
+              Installs Floom&apos; tools into your AI client. To connect a third-party MCP
+              server <em>into</em> Floom instead, use the section below.
             </p>
           </div>
         )}
@@ -579,7 +579,7 @@ export default function McpConnectionsPage() {
 
       {/* Single add flow: JSON config first, with form and bulk import as secondary paths. */}
       {formOpen && (
-        <div className="rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4">
+        <div className="rounded-xl [border:var(--bd-card)] bg-[var(--bg-card)] p-4">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="text-sm font-medium text-foreground">Add MCP server</h3>
@@ -587,7 +587,7 @@ export default function McpConnectionsPage() {
                 Paste a JSON config. Use secret names, not secret values.
               </p>
             </div>
-          <div className="inline-flex rounded-lg border border-[var(--border-default)] bg-[var(--bg-app)] p-0.5">
+          <div className="inline-flex rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)] p-0.5">
             <button
               type="button"
               onClick={() => setMode("json")}
@@ -686,7 +686,7 @@ export default function McpConnectionsPage() {
                     id="mcp-transport"
                     value={transport}
                     onChange={(e) => setTransport(e.target.value as McpTransport)}
-                    className="flex h-9 w-full rounded-lg border border-line-strong bg-paper px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
+                    className="flex h-9 w-full rounded-[var(--radius-input)] [border:var(--bd-input)] bg-[var(--bg-2)] px-3 text-sm outline-none"
                   >
                     <option value="streamable_http">HTTP</option>
                     <option value="sse">SSE</option>
@@ -700,7 +700,7 @@ export default function McpConnectionsPage() {
                     id="mcp-auth-secret"
                     value={authSecret}
                     onChange={(e) => setAuthSecret(e.target.value)}
-                    className="flex h-9 w-full rounded-lg border border-line-strong bg-paper px-3 text-sm outline-none focus-visible:border-ring focus-visible:ring-3 focus-visible:ring-ring/30"
+                    className="flex h-9 w-full rounded-[var(--radius-input)] [border:var(--bd-input)] bg-[var(--bg-2)] px-3 text-sm outline-none"
                   >
                     <option value="">No bearer token</option>
                     {secrets.map((s) => (
@@ -828,15 +828,15 @@ export default function McpConnectionsPage() {
                     {importParsed.map((item) => (
                       <div
                         key={item.key}
-                        className={`flex items-center gap-3 rounded-lg border px-3 py-2.5 text-sm transition-colors ${
+                        className={`flex items-center gap-3 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 py-2.5 text-sm transition-colors ${
                           item.transport !== "stdio" && !item.url
-                            ? "cursor-not-allowed border-[var(--border-default)] bg-muted/30 opacity-60"
-                            : "cursor-pointer border-[var(--border-default)] bg-[var(--bg-app)] hover:bg-muted/40"
+                            ? "cursor-not-allowed bg-muted/30 opacity-60"
+                            : "cursor-pointer bg-[var(--bg-app)] hover:bg-muted/40"
                         }`}
                         onClick={() => { if (item.transport === "stdio" || item.url) toggleImportItem(item.key); }}
                       >
-                        <div className={`flex size-4 shrink-0 items-center justify-center rounded border ${
-                          item.selected ? "border-[var(--accent)] bg-[var(--accent)]" : "border-[var(--border-default)]"
+                        <div className={`flex size-4 shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-pill)] ${
+                          item.selected ? "bg-[var(--accent)]" : "bg-[var(--bg-2)]"
                         }`}>
                           {item.selected && <Check className="size-3 text-white" />}
                         </div>
@@ -887,9 +887,9 @@ export default function McpConnectionsPage() {
       )}
 
       {/* Saved servers list */}
-      <div className="overflow-hidden rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)]">
+      <div className="overflow-hidden rounded-xl [border:var(--bd-card)] bg-[var(--bg-card)]">
         {/* Header row */}
-        <div className="hidden grid-cols-[32px_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] gap-4 border-b border-[var(--border-default)] bg-[var(--bg-2)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid">
+        <div className="hidden grid-cols-[32px_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] gap-4 [border-bottom:var(--bd-div)] bg-[var(--bg-2)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid">
           <span />
           <span>Name</span>
           <span>Endpoint</span>
@@ -900,11 +900,11 @@ export default function McpConnectionsPage() {
 
         {loading ? (
           Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-12 animate-pulse border-b border-[var(--border-default)] bg-muted/20 last:border-b-0" />
+            <div key={i} className="h-12 animate-pulse [border-bottom:var(--bd-div)] bg-muted/20 last:[border-bottom:0]" />
           ))
         ) : connections.length === 0 ? (
           <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
-            <div className="flex size-10 items-center justify-center rounded-full border border-[var(--border-default)] bg-[var(--bg-app)]">
+            <div className="flex size-10 items-center justify-center rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--bg-app)]">
               <Server className="size-5 text-muted-foreground/50" />
             </div>
             <div>
@@ -960,13 +960,13 @@ function CommandBlock({
   onCopy: () => void;
 }) {
   return (
-    <div className="rounded-lg border border-[var(--border-default)] bg-[var(--bg-app)] p-3">
+    <div className="rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)] p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</span>
         <button
           type="button"
           onClick={onCopy}
-          className="inline-flex size-7 items-center justify-center rounded-md border border-[var(--border-default)] bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
+          className="inline-flex size-7 items-center justify-center rounded-md [border:var(--bd-card)] bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
           title="Copy command"
         >
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
@@ -1013,7 +1013,7 @@ function McpRow({
   const isActive = conn.status === "active";
 
   return (
-    <div className="border-b border-[var(--border-default)] last:border-b-0 transition-colors">
+    <div className="[border-bottom:var(--bd-div)] last:[border-bottom:0] transition-colors">
       {/* Clickable row */}
       <div
         role={onToggle ? "button" : undefined}
@@ -1023,7 +1023,7 @@ function McpRow({
         className={`group grid grid-cols-[32px_1fr_auto] items-center gap-3 px-3 py-2.5 md:grid-cols-[32px_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] md:gap-4 ${onToggle ? "cursor-pointer select-none hover:bg-[var(--active-nav-bg)]" : "hover:bg-[var(--active-nav-bg)]"} transition-colors`}
       >
         {/* Icon */}
-        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-app)]">
+        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)]">
           <Server className="size-3.5 text-muted-foreground" />
         </div>
 
@@ -1100,9 +1100,9 @@ function McpRow({
 
       {/* Expanded peek */}
       {expanded && (
-        <div className="border-t border-[var(--border-default)] bg-[color-mix(in_srgb,var(--active-nav-bg)_60%,transparent)] px-3 py-3 md:pl-[52px]">
+        <div className="[border-top:var(--bd-div)] bg-[color-mix(in_srgb,var(--active-nav-bg)_60%,transparent)] px-3 py-3 md:pl-[52px]">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-            <span className={`inline-flex items-center rounded-full px-2 py-0.5 text-xs font-medium border ${isActive ? "border-[color-mix(in_srgb,var(--positive)_24%,var(--line))] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] text-[var(--positive)]" : "border-[color-mix(in_srgb,var(--negative)_24%,var(--line))] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] text-[var(--negative)]"}`}>
+            <span className={`inline-flex items-center rounded-[var(--radius-pill)] [border:var(--bd-pill)] px-2 py-0.5 text-xs font-medium ${isActive ? "bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] text-[var(--positive)]" : "bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] text-[var(--negative)]"}`}>
               {statusLabel}
             </span>
             <span className="text-[var(--ink-soft)]">{toolLabel}</span>

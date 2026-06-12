@@ -115,7 +115,7 @@ function FileTagChips({ file, compact = false }: { file: ContextFileItem; compac
       {tags.map((tag) => (
         <span
           key={`tag:${tag}`}
-          className="inline-flex max-w-full items-center rounded-[var(--radius-pill)] border border-[var(--border-default)] bg-[var(--bg-app)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+          className="inline-flex max-w-full items-center rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--bg-app)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
           title={`Tag: ${tag}`}
         >
           <span className="truncate">{tag}</span>
@@ -124,7 +124,7 @@ function FileTagChips({ file, compact = false }: { file: ContextFileItem; compac
       {metadata.map(([key, value]) => (
         <span
           key={`meta:${key}`}
-          className="inline-flex max-w-full items-center gap-1 rounded-[var(--radius-pill)] border border-[var(--border-default)] bg-[var(--bg-app)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+          className="inline-flex max-w-full items-center gap-1 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--bg-app)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
           title={`${key}: ${value}`}
         >
           <span className="truncate">{key}</span>
@@ -793,7 +793,7 @@ function ContextsPage() {
 
       {/* New brain-pack inline form */}
       {showNewContext && (
-        <div className="shrink-0 flex items-center gap-2 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] px-3 py-2">
+        <div className="shrink-0 flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] px-3 py-2">
           <Input
             autoFocus
             value={newContextName}
@@ -815,16 +815,16 @@ function ContextsPage() {
       {/* Progressive miller-column panes inside ONE unified container. Desktop:
           side-by-side panes separated by internal dividers (not floating cards),
           compressing as a file opens. Mobile: a single drill-in column. */}
-      <div className="flex flex-col lg:flex-row flex-1 min-h-0 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
+      <div className="flex flex-col lg:flex-row flex-1 min-h-0 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] overflow-hidden">
         {/* ---- Packs pane (resizable on desktop, drag the divider to its
             right). Full-width on mobile drill-in. ---------------------------- */}
         <section
           style={packsStyle}
-          className={`flex flex-col w-full lg:w-auto shrink-0 border-b lg:border-b-0 border-[var(--border-default)] ${
+          className={`flex flex-col w-full lg:w-auto shrink-0 [border-bottom:var(--bd-div)] lg:[border-bottom:0] lg:[border-right:var(--bd-div)] ${
             mobilePane === "packs" ? "flex" : "hidden lg:flex"
           }`}
         >
-          <div className="flex min-h-[82px] shrink-0 flex-col justify-center border-b border-[var(--border-default)] p-3">
+          <div className="flex min-h-[82px] shrink-0 flex-col justify-center [border-bottom:var(--bd-div)] p-3">
             <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide mb-2">Folders</p>
             {!fileOpen && (
               <div className="relative">
@@ -847,7 +847,7 @@ function ContextsPage() {
             )}
 
             {operatorPacks.length > 0 ? (
-              <div className="divide-y divide-[var(--border-default)]">
+              <div className="[&>*+*]:[border-top:var(--bd-div)]">
                 {operatorPacks.map((ctx) => (
                   <PackRow
                     key={ctx.name}
@@ -865,7 +865,7 @@ function ContextsPage() {
                   <button
                     type="button"
                     onClick={() => setShowNewContext(true)}
-                    className="w-full rounded-[var(--radius-button)] border border-dashed border-[var(--border-default)] px-3 py-4 text-left hover:bg-muted/40 transition-colors"
+                    className="w-full rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 py-4 text-left hover:bg-muted/40 transition-colors"
                   >
                     <span className="flex items-center gap-2 text-sm font-medium">
                       <Plus className="size-4" />
@@ -884,7 +884,7 @@ function ContextsPage() {
                 <p className="px-3 pt-4 pb-1 text-xs font-medium uppercase tracking-wide text-muted-foreground">
                   System
                 </p>
-                <div className="divide-y divide-[var(--border-default)]">
+                <div className="[&>*+*]:[border-top:var(--bd-div)]">
                   {systemPacks.map((ctx) => (
                     <PackRow
                       key={ctx.name}
@@ -932,7 +932,7 @@ function ContextsPage() {
               </Button>
             </div>
             {dragActive && (
-              <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed border-[var(--primary)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
+              <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
                 Drop files to create a folder
               </div>
             )}
@@ -965,7 +965,7 @@ function ContextsPage() {
           <>
             <section
               style={midStyle}
-              className={`flex overflow-hidden w-full lg:w-auto shrink-0 border-b lg:border-b-0 border-[var(--border-default)] ${
+              className={`flex overflow-hidden w-full lg:w-auto shrink-0 [border-bottom:var(--bd-div)] lg:[border-bottom:0] lg:[border-right:var(--bd-div)] ${
                 mobilePane === "files" ? "flex" : "hidden lg:flex"
               }`}
             >
@@ -1026,7 +1026,7 @@ function ContextsPage() {
                 }}
               />
               {dragActive && !readOnly && (
-                <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed border-[var(--primary)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
+                <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
                   Drop files to add them{folderPath.length ? ` to ${folderPath.join("/")}` : ""}
                 </div>
               )}
@@ -1070,17 +1070,17 @@ function BrainSkeleton() {
       </div>
 
       {/* Two-pane container */}
-      <div className="flex flex-col lg:flex-row flex-1 min-h-0 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] overflow-hidden">
+      <div className="flex flex-col lg:flex-row flex-1 min-h-0 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] overflow-hidden">
         {/* Folders rail */}
-        <section className="flex flex-col w-full lg:w-[300px] shrink-0 border-b lg:border-b-0 lg:border-r border-[var(--border-default)]">
-          <div className="flex min-h-[82px] shrink-0 flex-col justify-center gap-2 border-b border-[var(--border-default)] p-3">
+        <section className="flex flex-col w-full lg:w-[300px] shrink-0 [border-bottom:var(--bd-div)] lg:[border-bottom:0] lg:[border-right:var(--bd-div)]">
+          <div className="flex min-h-[82px] shrink-0 flex-col justify-center gap-2 [border-bottom:var(--bd-div)] p-3">
             <Skeleton className="h-3 w-20 rounded-[var(--radius-button)]" />
             <Skeleton className="h-7 w-full rounded-[var(--radius-button)]" />
           </div>
-          <div className="flex-1 divide-y divide-[var(--border-default)]">
+          <div className="flex-1 [&>*+*]:[border-top:var(--bd-div)]">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="flex items-start gap-2.5 px-3 py-3">
-                <Skeleton className="mt-0.5 size-3 shrink-0 rounded-full" />
+                <Skeleton className="mt-0.5 size-3 shrink-0 rounded-[var(--radius-pill)]" />
                 <div className="min-w-0 flex-1 space-y-1.5">
                   <Skeleton className="h-4 w-32 rounded-[var(--radius-button)]" />
                   <Skeleton className="h-3 w-40 rounded-[var(--radius-button)]" />
@@ -1093,7 +1093,7 @@ function BrainSkeleton() {
         {/* Folder detail pane */}
         <section className="flex-1 flex flex-col min-w-0">
           {/* Metadata header */}
-          <div className="min-h-[82px] shrink-0 border-b border-[var(--border-default)] px-5 py-4 space-y-3">
+          <div className="min-h-[82px] shrink-0 [border-bottom:var(--bd-div)] px-5 py-4 space-y-3">
             <Skeleton className="h-5 w-44 rounded-[var(--radius-button)]" />
             <Skeleton className="h-4 w-72 rounded-[var(--radius-button)]" />
             <div className="flex flex-wrap items-center gap-3">
@@ -1103,7 +1103,7 @@ function BrainSkeleton() {
             </div>
           </div>
           {/* Files toolbar */}
-          <div className="flex items-center justify-between px-5 py-2.5 border-b border-[var(--border-default)] shrink-0">
+          <div className="flex items-center justify-between px-5 py-2.5 [border-bottom:var(--bd-div)] shrink-0">
             <Skeleton className="h-3 w-12 rounded-[var(--radius-button)]" />
             <div className="flex items-center gap-2">
               <Skeleton className="h-7 w-28 rounded-[var(--radius-button)]" />
@@ -1145,7 +1145,7 @@ function SecretWarningBanner({
   return (
     <div
       role="alert"
-      className="mx-3 mt-3 flex items-start gap-3 rounded-[var(--radius-card)] border border-amber-500/40 bg-amber-500/10 px-4 py-3 text-sm"
+      className="mx-3 mt-3 flex items-start gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-amber-500/10 px-4 py-3 text-sm"
     >
       <AlertTriangle className="size-4 shrink-0 text-amber-500 mt-0.5" />
       <div className="min-w-0 flex-1 space-y-1.5">
@@ -1218,7 +1218,7 @@ function PackRow({
       onClick={onSelect}
       onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") onSelect(); }}
       className={`group relative flex w-full items-start gap-2.5 px-3 py-3 text-left transition-colors cursor-pointer ${
-        selected ? "bg-[var(--active-nav-bg)] border-l-2 border-l-[var(--border-default)]" : "hover:bg-muted/40"
+        selected ? "bg-[var(--active-nav-bg)]" : "hover:bg-muted/40"
       }`}
       title={compact ? ctx.name : undefined}
     >
@@ -1228,7 +1228,7 @@ function PackRow({
           <span className="truncate text-sm font-medium">{ctx.name}</span>
           {!compact && ctx.read_only && (
             <span
-              className="inline-flex items-center gap-0.5 rounded-[var(--radius-pill)] border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0"
+              className="inline-flex items-center gap-0.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0"
               title="Read-only system folder"
             >
               <Lock className="size-2.5" />
@@ -1334,7 +1334,7 @@ function PackDetailPane({
       } ${mobileVisible ? "flex" : "hidden lg:flex"}`}
     >
       {/* Pack header / metadata (used-by chips live here) */}
-      <div className="min-h-[82px] shrink-0 border-b border-[var(--border-default)] px-5 py-4">
+      <div className="min-h-[82px] shrink-0 [border-bottom:var(--bd-div)] px-5 py-4">
         <div className="flex items-start justify-between gap-2">
           <h2 className="flex items-center gap-2 text-base font-semibold min-w-0">
             <button
@@ -1348,7 +1348,7 @@ function PackDetailPane({
             <span className="truncate">{detail.name}</span>
             {readOnly && (
               <span
-                className="inline-flex items-center gap-0.5 rounded-[var(--radius-pill)] border border-[var(--border-default)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0"
+                className="inline-flex items-center gap-0.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0"
                 title="Read-only system folder"
               >
                 <Lock className="size-2.5" />
@@ -1404,7 +1404,7 @@ function PackDetailPane({
         </div>
         {readOnly && (
           <p className="mt-2 text-xs text-muted-foreground">
-            This is a WorkerOS engine folder. It shapes how workers are generated and is read-only.
+            This is a Floom engine folder. It shapes how workers are generated and is read-only.
           </p>
         )}
         {detail.description ? (
@@ -1414,11 +1414,11 @@ function PackDetailPane({
         )}
 
         <div className="flex flex-wrap items-center gap-3 mt-3">
-          <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-1.5">
+          <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3 py-1.5">
             <span className="text-xs text-muted-foreground">Files</span>
             <span className="text-xs font-medium">{detail.file_count}</span>
           </div>
-          <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-1.5 min-w-0">
+          <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3 py-1.5 min-w-0">
             <span className="text-xs text-muted-foreground shrink-0">Used by</span>
             {(detail.used_by ?? []).length === 0 ? (
               <span className="text-xs text-muted-foreground italic">none yet</span>
@@ -1435,7 +1435,7 @@ function PackDetailPane({
               </span>
             )}
           </div>
-          <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] bg-[var(--bg-app)] px-3 py-1.5">
+          <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3 py-1.5">
             <span className="text-xs text-muted-foreground">Size</span>
             <span className="text-xs font-medium">{formatBytes(detail.total_size_bytes)}</span>
           </div>
@@ -1443,7 +1443,7 @@ function PackDetailPane({
       </div>
 
       {/* Files toolbar */}
-      <div className="flex items-center justify-between px-5 py-2.5 border-b border-[var(--border-default)] shrink-0">
+      <div className="flex items-center justify-between px-5 py-2.5 [border-bottom:var(--bd-div)] shrink-0">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">Files</p>
         {readOnly ? (
           <span className="inline-flex items-center gap-1 text-xs text-muted-foreground">
@@ -1467,7 +1467,7 @@ function PackDetailPane({
       {/* Miller columns: one column per folder level, horizontally scrollable */}
       {detail.files.length === 0 ? (
         <div className="flex-1 flex items-center justify-center p-6">
-          <div className="rounded-[var(--radius-button)] border border-dashed border-[var(--border-default)] p-6 text-center">
+          <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] p-6 text-center">
             {readOnly ? (
               <p className="text-sm text-muted-foreground">This system folder has no files.</p>
             ) : (
@@ -1508,7 +1508,7 @@ function PackDetailPane({
           miller columns) so a drop anywhere over a writable pack uploads.
           pointer-events-none lets the underlying drag events keep firing. */}
       {dragActive && !readOnly && (
-        <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] border-2 border-dashed border-[var(--primary)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
+        <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
           Drop files to add them{folderPath.length ? ` to ${folderPath.join("/")}` : ""}
         </div>
       )}
@@ -1542,7 +1542,7 @@ function FolderColumns({
 }) {
   return (
     <div className="flex flex-col w-full min-w-0">
-      <div className="flex h-[82px] shrink-0 items-center gap-1.5 border-b border-[var(--border-default)] px-3 py-2.5">
+      <div className="flex h-[82px] shrink-0 items-center gap-1.5 [border-bottom:var(--bd-div)] px-3 py-2.5">
         <button
           type="button"
           onClick={onBackMobile}
@@ -1606,7 +1606,7 @@ function FolderColumn({
   return (
     <div
       className={`flex flex-col h-full overflow-y-auto shrink-0 ${
-        isLast ? "flex-1 min-w-[180px]" : "w-[40%] min-w-[160px] border-r border-[var(--border-default)]"
+        isLast ? "flex-1 min-w-[180px]" : "w-[40%] min-w-[160px] [border-right:var(--bd-div)]"
       }`}
     >
       {entries.length === 0 ? (
@@ -1749,7 +1749,7 @@ function FilePane({
   return (
     <>
       {/* Breadcrumb + actions */}
-      <div className="flex h-[82px] shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] px-4 py-2.5">
+      <div className="flex h-[82px] shrink-0 items-center justify-between gap-3 [border-bottom:var(--bd-div)] px-4 py-2.5">
         <div className="min-w-0 flex-1">
           <div className="flex items-center gap-2 min-w-0">
             <button
@@ -1807,14 +1807,14 @@ function FilePane({
           <button
             type="button"
             onClick={copyFileLink}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-button)] border border-[var(--border-default)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             title="Share this file"
           >
             {fileLinkCopied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5" />}
           </button>
           <a
             href={fileUrl}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-button)] border border-[var(--border-default)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             title="Download"
           >
             <Download className="size-3.5" />
@@ -1835,7 +1835,7 @@ function FilePane({
           <Textarea
             value={editText}
             onChange={(e) => onChangeEdit(e.target.value)}
-            className="w-full h-full min-h-[400px] resize-none border-0 rounded-none font-mono text-xs leading-6 outline-none focus-visible:ring-0 focus-visible:ring-offset-0 p-4"
+            className="w-full h-full min-h-[400px] resize-none [border:0] rounded-none font-mono text-xs leading-6 outline-none p-4"
           />
         ) : (
           <FileContent file={file} packName={packName} kind={kind} text={text} fileUrl={fileUrl} />
@@ -1866,7 +1866,7 @@ function FileContent({
     return (
       <div className="p-4 space-y-3 text-sm">
         <p className="text-muted-foreground">File is too large to preview inline ({formatBytes(file.size)}).</p>
-        <a href={fileUrl} className="inline-flex items-center gap-2 rounded-[var(--radius-button)] border border-[var(--border-default)] px-3 py-1.5 text-sm hover:bg-muted">
+        <a href={fileUrl} className="inline-flex items-center gap-2 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 py-1.5 text-sm hover:bg-muted">
           <Download className="size-4" />
           Download
         </a>
@@ -1920,7 +1920,7 @@ function FileContent({
             srcDoc={text}
             sandbox=""
             referrerPolicy="no-referrer"
-            className="h-full min-h-[600px] w-full border-0 bg-white"
+            className="h-full min-h-[600px] w-full [border:0] bg-white"
           />
         }
         raw={<CodeBlock text={text} filePath={file.path} />}
@@ -1963,7 +1963,7 @@ function FileContent({
       <ContextFileObjectUrl packName={packName} file={file}>
         {(src) => (
           <div className="flex h-full min-h-[420px] items-center justify-center bg-muted/20 p-6">
-            <video src={src} controls className="max-h-[650px] max-w-full rounded-[var(--radius-button)] border border-[var(--border-default)] bg-black">
+            <video src={src} controls className="max-h-[650px] max-w-full rounded-[var(--radius-button)] [border:var(--bd-card)] bg-black">
               <a href={fileUrl}>Download video</a>
             </video>
           </div>
@@ -1975,7 +1975,7 @@ function FileContent({
   return (
     <div className="p-4 space-y-3 text-sm">
       <p className="text-muted-foreground">{fileDisplayType(file)} file · {formatBytes(file.size)}</p>
-      <a href={fileUrl} className="inline-flex items-center gap-2 rounded-[var(--radius-button)] border border-[var(--border-default)] px-3 py-1.5 text-sm hover:bg-muted">
+      <a href={fileUrl} className="inline-flex items-center gap-2 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 py-1.5 text-sm hover:bg-muted">
         <Download className="size-4" />
         Download
       </a>
@@ -1997,7 +1997,7 @@ function PreviewRawTabs({
 }) {
   return (
     <Tabs defaultValue="preview" className="flex h-full flex-col">
-      <div className="shrink-0 border-b border-[var(--border-default)] px-4 pt-2">
+      <div className="shrink-0 [border-bottom:var(--bd-div)] px-4 pt-2">
         <TabsList variant="line" className="h-8">
           <TabsTrigger value="preview" className="text-xs">Preview</TabsTrigger>
           <TabsTrigger value="raw" className="text-xs">Raw</TabsTrigger>
@@ -2025,11 +2025,11 @@ function CodeViewToolbar({ text }: { text: string }) {
     });
   }
   return (
-    <div className="flex shrink-0 items-center justify-end border-b border-[var(--border-default)] px-4 py-1.5">
+    <div className="flex shrink-0 items-center justify-end [border-bottom:var(--bd-div)] px-4 py-1.5">
       <button
         type="button"
         onClick={copy}
-        className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         {copied ? <Check className="size-3.5 text-[var(--success)]" /> : <Copy className="size-3.5" />}
         {copied ? "Copied" : "Copy"}
@@ -2219,11 +2219,11 @@ function PdfPreview({
 
   return (
     <div className="flex h-full min-h-[600px] flex-col bg-muted/20">
-      <div className="flex shrink-0 items-center justify-between gap-3 border-b border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-2 text-xs text-muted-foreground">
+      <div className="flex shrink-0 items-center justify-between gap-3 [border-bottom:var(--bd-div)] bg-[var(--bg-card)] px-4 py-2 text-xs text-muted-foreground">
         <span>{pageCount ? `Page 1 of ${pageCount}` : "Rendering PDF preview"}</span>
         <a
           href={fileUrl}
-          className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] px-2.5 text-xs hover:bg-muted"
+          className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-2.5 text-xs hover:bg-muted"
         >
           <Download className="size-3.5" />
           Download
@@ -2321,7 +2321,7 @@ function PreviewUnavailable({
 }) {
   return (
     <div className="flex h-full min-h-[260px] items-center justify-center p-6">
-      <div className="max-w-lg rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] p-5 text-sm shadow-sm">
+      <div className="max-w-lg rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-5 text-sm shadow-sm">
         <p className="font-medium text-foreground">{title}</p>
         <p className="mt-2 leading-6 text-muted-foreground">{detail}</p>
         <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -2331,7 +2331,7 @@ function PreviewUnavailable({
           </Button>
           <a
             href={fileUrl}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-default)] px-3 text-sm hover:bg-muted"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 text-sm hover:bg-muted"
           >
             <Download className="size-3.5" />
             Download
@@ -2476,7 +2476,7 @@ function TablePreview({ rows }: { rows: string[][] }) {
           {visibleRows.map((row, rowIndex) => (
             <tr key={rowIndex} className={rowIndex === 0 ? "bg-muted/60 font-medium" : "odd:bg-muted/20"}>
               {Array.from({ length: colCount }).map((_, colIndex) => (
-                <td key={colIndex} className="max-w-[260px] border border-[var(--border-default)] px-2.5 py-1.5 align-top">
+                <td key={colIndex} className="max-w-[260px] [border:var(--bd-card)] px-2.5 py-1.5 align-top">
                   <span className="block truncate" title={row[colIndex] ?? ""}>
                     {row[colIndex] ?? ""}
                   </span>
@@ -2487,7 +2487,7 @@ function TablePreview({ rows }: { rows: string[][] }) {
         </tbody>
       </table>
       {(rows.length > TABLE_PREVIEW_ROWS || rows.some((row) => row.length > TABLE_PREVIEW_COLS)) && (
-        <p className="border-t border-[var(--border-default)] px-3 py-2 text-xs text-muted-foreground">
+        <p className="[border-top:var(--bd-div)] px-3 py-2 text-xs text-muted-foreground">
           Showing first {Math.min(rows.length, TABLE_PREVIEW_ROWS)} rows and {colCount} columns.
         </p>
       )}
@@ -2538,7 +2538,7 @@ function columnIndexFromCellRef(ref: string): number {
 
 function MarkdownRenderer({ content }: { content: string }) {
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:bg-muted prose-pre:border prose-pre:border-[var(--border-default)] prose-pre:rounded-[var(--radius-button)] prose-pre:text-foreground prose-pre:[&_code]:text-foreground prose-code:bg-muted prose-code:text-foreground prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:font-mono prose-blockquote:border-l prose-blockquote:border-[var(--border-default)] prose-blockquote:not-italic prose-headings:font-semibold prose-headings:tracking-tight">
+    <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:bg-muted prose-pre:[border:var(--bd-card)] prose-pre:rounded-[var(--radius-button)] prose-pre:text-foreground prose-pre:[&_code]:text-foreground prose-code:bg-muted prose-code:text-foreground prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:font-mono prose-blockquote:[border-left:var(--bd-div)] prose-blockquote:not-italic prose-headings:font-semibold prose-headings:tracking-tight">
       <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
     </div>
   );

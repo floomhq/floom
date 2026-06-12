@@ -6,7 +6,7 @@ function FloomMark({ className }: { className?: string }) {
       className={className}
       viewBox="0 0 100 100"
       role="img"
-      aria-label="WorkerOS"
+      aria-label="Floom"
     >
       <rect width="100" height="100" rx="22" fill="#1a1a1a" />
       <path
@@ -46,13 +46,13 @@ export function ProviderLogos({ providerIcon }: { providerIcon: string }) {
   const icon = normalizeIcon(providerIcon);
   return (
     <div className="flex items-center justify-center gap-3">
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl border bg-card shadow-sm">
+      <div className="flex h-14 w-14 items-center justify-center rounded-[var(--radius-card)] [border:var(--bd-card)] bg-card shadow-sm">
         <FloomMark className="size-9" />
       </div>
       <span aria-hidden className="text-2xl text-muted-foreground leading-none">
         ·
       </span>
-      <div className="flex h-14 w-14 items-center justify-center rounded-2xl border bg-card shadow-sm">
+      <div className="flex h-14 w-14 items-center justify-center rounded-[var(--radius-card)] [border:var(--bd-card)] bg-card shadow-sm">
         <BrandLogo icon={icon} className="size-7" />
       </div>
     </div>

@@ -9,13 +9,11 @@ function source(path: string): string {
 }
 
 describe("approval fetch and decision surfacing", () => {
-  it("shows a visible run-detail approval load error instead of swallowing it", () => {
+  it("redirects legacy run detail routes into the Runs split-pane", () => {
     const page = source("app/runs/[id]/page.tsx");
 
-    expect(page).toContain("approvalLoadError");
-    expect(page).toContain("Could not load the approval card.");
-    expect(page).toContain("setApprovalLoadError(message)");
-    expect(page).not.toContain("catch {\n          // ignore");
+    expect(page).toContain("redirect(`/runs?sel=${encodeURIComponent(id)}`)");
+    expect(page).not.toContain("approvalLoadError");
   });
 
   it("keeps standalone approval decisions synchronized with the shared queue", () => {

@@ -78,7 +78,7 @@ const CATEGORY_FILTERS = [
 ];
 
 function shortDescription(item: IntegrationCatalogItem) {
-  return item.description || `${item.name} integration for your WorkerOS workers.`;
+  return item.description || `${item.name} integration for your Floom workers.`;
 }
 
 function CatalogSkeleton() {
@@ -87,7 +87,7 @@ function CatalogSkeleton() {
       {Array.from({ length: PAGE_SIZE }).map((_, index) => (
         <div
           key={index}
-          className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]"
+          className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-xl [border:var(--bd-card)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]"
         >
           <div className="flex items-center gap-3">
             <Skeleton className="h-10 w-10 rounded-[var(--radius-button)]" />
@@ -170,8 +170,8 @@ function ToolsModal({
         showCloseButton={true}
       >
         {/* Header: logo + name */}
-        <DialogHeader className="flex-row items-center gap-3 border-b px-4 py-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-2)]">
+        <DialogHeader className="flex-row items-center gap-3 [border-bottom:var(--bd-div)] px-4 py-3">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg [border:var(--bd-card)] bg-[var(--bg-2)]">
             <img
               src={item.logo_url}
               alt={`${item.name} logo`}
@@ -191,7 +191,7 @@ function ToolsModal({
         </DialogHeader>
 
         {/* Search */}
-        <div className="border-b px-4 py-2.5">
+        <div className="[border-bottom:var(--bd-div)] px-4 py-2.5">
           <div className="relative">
             <Search className="pointer-events-none absolute left-2.5 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground" />
             <input
@@ -199,7 +199,7 @@ function ToolsModal({
               value={toolSearch}
               onChange={(e) => setToolSearch(e.target.value)}
               placeholder="Filter tools..."
-              className="h-8 w-full rounded-md border border-[var(--border-default)] bg-[var(--bg-2)] pl-8 pr-3 text-xs text-ink placeholder:text-muted-foreground focus:border-[var(--accent-line)] focus:outline-none focus:ring-1 focus:ring-[var(--accent-line)]"
+              className="h-8 w-full rounded-[var(--radius-input)] [border:var(--bd-input)] bg-[var(--bg-2)] pl-8 pr-3 text-xs text-ink placeholder:text-muted-foreground focus:outline-none"
             />
             {toolSearch ? (
               <button
@@ -245,7 +245,7 @@ function ToolsModal({
         </div>
 
         {/* Footer: Connect CTA */}
-        <DialogFooter className="border-t px-4 py-3" showCloseButton={false}>
+        <DialogFooter className="[border-top:var(--bd-div)] px-4 py-3" showCloseButton={false}>
           <Button
             type="button"
             size="sm"
@@ -281,9 +281,9 @@ function CatalogCard({
 
   return (
     <>
-      <article className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-xl border border-[var(--border-default)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] transition-[border-color,box-shadow,transform] duration-150 ease-[var(--ease)] hover:-translate-y-px hover:border-[var(--accent-line)] hover:shadow-md">
+      <article className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] transition-[background-color,box-shadow] duration-150 ease-[var(--ease)] hover:bg-[var(--bg-2)]">
         <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-2)]">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)]">
             <img
               src={item.logo_url}
               alt={`${item.name} logo`}
@@ -303,7 +303,7 @@ function CatalogCard({
             <button
               type="button"
               onClick={() => setModalOpen(true)}
-              className="mt-2 inline-flex items-center gap-1 rounded-full border border-[var(--border-default)] px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:border-[var(--accent-line)] hover:text-[var(--accent)]"
+              className="mt-2 inline-flex items-center gap-1 rounded-[var(--radius-pill)] [border:var(--bd-pill)] px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-[var(--accent)]"
               title="View tools in this integration"
             >
               <Wrench className="h-2.5 w-2.5" />
@@ -521,7 +521,7 @@ export default function ConnectionsBrowsePage() {
         {loading ? (
           <CatalogSkeleton />
         ) : loadError ? (
-          <div className="col-span-full rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-card)] px-4 py-12 text-center space-y-3">
+          <div className="col-span-full space-y-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] px-4 py-12 text-center">
             <p className="text-sm font-medium text-ink">Could not load integrations</p>
             <p className="mt-1 text-sm text-[var(--ink-soft)]">{loadError}</p>
             <button
@@ -546,7 +546,7 @@ export default function ConnectionsBrowsePage() {
           // S24: when Composio catalog returns no match for the search,
           // bridge to the manual path: store a raw API key as a Secret.
           // Many apps that lack Composio OAuth still expose a simple key.
-          <div className="col-span-full rounded-xl border border-dashed border-[var(--border-default)] bg-[var(--bg-card)] px-6 py-10 text-center">
+          <div className="col-span-full rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] px-6 py-10 text-center">
             <p className="text-sm font-medium text-ink">No integrations found</p>
             <p className="mt-1 text-sm text-[var(--ink-soft)]">
               Clear filters or try a broader search.
@@ -558,7 +558,7 @@ export default function ConnectionsBrowsePage() {
                 </p>
                 <Link
                   href={`/connections/secrets?prefill=${encodeURIComponent(search.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, "_") + "_API_KEY")}`}
-                  className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--accent)] bg-[var(--accent-soft)] px-3 text-xs font-medium text-[var(--accent)] hover:opacity-90 transition-opacity"
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-btn)] bg-[var(--accent-soft)] px-3 text-xs font-medium text-[var(--accent)] transition-opacity hover:opacity-90"
                 >
                   Add {search.trim()} as a secret
                 </Link>
@@ -568,7 +568,7 @@ export default function ConnectionsBrowsePage() {
         )}
       </section>
 
-      <div className="flex items-center justify-between border-t border-line pt-4">
+      <div className="flex items-center justify-between [border-top:var(--bd-div)] pt-4">
         <Button
           type="button"
           variant="outline"

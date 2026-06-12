@@ -66,13 +66,13 @@ function ItemRow({ item, verb }: { item: unknown; verb: string | null }) {
     const title = titleKey ? asString((item as Json)[titleKey]) : asString(Object.values(item)[0]);
     const rest = entries.filter(([k]) => k !== titleKey);
     return (
-      <div className="overflow-hidden rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-app)]">
-        <div className="flex items-center gap-2 border-b border-[var(--border-soft)] px-3 py-2">
+      <div className="overflow-hidden rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)]">
+        <div className="flex items-center gap-2 [border-bottom:var(--bd-div)] px-3 py-2">
           <span className="flex-1 truncate text-[13px] font-medium">{title || "Item"}</span>
           {verb && <span className="font-mono text-[11px] text-[var(--ink-soft)]">{verb}</span>}
         </div>
         {rest.length > 0 && (
-          <dl className="divide-y divide-[var(--border-soft)]">
+          <dl className="[&>*+*]:[border-top:var(--bd-div)]">
             {rest.map(([k, v]) => (
               <div key={k} className="grid grid-cols-[120px_1fr] gap-3 px-3 py-1.5 text-xs">
                 <dt className="truncate text-[var(--ink-soft)]">{k.replace(/[_-]+/g, " ")}</dt>
@@ -86,8 +86,8 @@ function ItemRow({ item, verb }: { item: unknown; verb: string | null }) {
   }
   // Scalar item -> a single plain row.
   return (
-    <div className="flex items-start gap-2.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-app)] px-3 py-2 text-[13px]">
-      <span className="mt-2 size-1 shrink-0 rounded-full bg-[var(--ink-soft)]" aria-hidden />
+    <div className="flex items-start gap-2.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3 py-2 text-[13px]">
+      <span className="mt-2 size-1 shrink-0 rounded-[var(--radius-pill)] bg-[var(--ink-soft)]" aria-hidden />
       <span className="min-w-0 break-words">{asString(item)}</span>
     </div>
   );

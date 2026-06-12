@@ -16,7 +16,7 @@ function BrandPanel() {
     <section className="order-2 flex min-h-[240px] flex-col justify-between gap-12 bg-[var(--bg-app)] px-6 py-8 text-[var(--ink)] sm:px-12 lg:order-1 lg:min-h-screen lg:px-14 lg:py-12">
       <div className="flex items-center gap-2">
         <FloomMark size={22} />
-        <span className="text-base font-semibold tracking-tight">WorkerOS</span>
+        <span className="text-base font-semibold tracking-tight">Floom</span>
       </div>
 
       <div className="max-w-md space-y-4">
@@ -130,7 +130,7 @@ function LoginContent() {
     effectiveMode === "setup" ? "Create your workspace" : "Sign in";
   const sub =
     effectiveMode === "setup"
-      ? "Set up the first admin account for this WorkerOS instance."
+      ? "Set up the first admin account for this Floom instance."
       : effectiveMode === "username"
       ? "Enter your username and password to continue."
       : "Enter your access secret to continue.";
@@ -143,7 +143,7 @@ function LoginContent() {
         <div className="mx-auto w-full max-w-sm">
           <div className="mb-8 flex items-center gap-2">
             <FloomMark size={22} />
-            <span className="text-base font-semibold tracking-tight">WorkerOS</span>
+            <span className="text-base font-semibold tracking-tight">Floom</span>
           </div>
 
           {mode === "loading" ? (

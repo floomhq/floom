@@ -110,7 +110,7 @@ export default function ConnectAppPage() {
             <ProviderLogos providerIcon={slug} />
 
             <h1 className="mt-6 text-center text-xl font-semibold">
-              WorkerOS wants to connect to {providerName}
+              Floom wants to connect to {providerName}
             </h1>
 
             {meta?.description && (
@@ -120,7 +120,7 @@ export default function ConnectAppPage() {
             )}
 
             {alreadyConnected && (
-              <div className="mt-6 rounded-lg border border-[color-mix(in_srgb,var(--positive)_30%,var(--border))] bg-[color-mix(in_srgb,var(--positive)_8%,transparent)] p-4">
+              <div className="mt-6 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--positive)_8%,transparent)] p-4">
                 <div className="flex items-start gap-2">
                   <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[var(--positive)]" />
                   <div className="text-sm">
@@ -178,7 +178,7 @@ export default function ConnectAppPage() {
             </Link>
 
             <p className="mt-6 text-center text-xs text-muted-foreground leading-relaxed">
-              You will be redirected to {providerName} to authenticate. WorkerOS uses
+              You will be redirected to {providerName} to authenticate. Floom uses
               Composio as its integrations layer, so you may see Composio&apos;s
               name on the next screen. That is expected.
             </p>

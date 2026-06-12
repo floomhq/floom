@@ -52,7 +52,7 @@ const markdownComponents = {
       </pre>
     ),
   blockquote: ({ children }: MarkdownChildProps) => (
-    <blockquote className="border-l-2 border-border pl-3 text-muted-foreground my-3">{children}</blockquote>
+    <blockquote className="[border-left:var(--bd-div)] pl-3 text-muted-foreground my-3">{children}</blockquote>
   ),
   strong: ({ children }: MarkdownChildProps) => <strong className="font-semibold">{children}</strong>,
   a: ({ href, children }: MarkdownAnchorProps) => (
@@ -66,14 +66,14 @@ const markdownComponents = {
     </a>
   ),
   table: ({ children }: MarkdownChildProps) => (
-    <div className="overflow-x-auto rounded-[var(--radius-button)] border border-border my-3">
+    <div className="overflow-x-auto rounded-[var(--radius-button)] [border:var(--bd-card)] my-3">
       <table className="w-full border-collapse text-sm">{children}</table>
     </div>
   ),
   th: ({ children }: MarkdownChildProps) => (
-    <th className="border-b border-border bg-muted px-2.5 py-1.5 text-left text-xs font-medium">{children}</th>
+    <th className="[border-bottom:var(--bd-div)] bg-muted px-2.5 py-1.5 text-left text-xs font-medium">{children}</th>
   ),
-  td: ({ children }: MarkdownChildProps) => <td className="border-b border-[var(--border-soft)] px-2.5 py-1.5">{children}</td>,
+  td: ({ children }: MarkdownChildProps) => <td className="[border-bottom:var(--bd-div)] px-2.5 py-1.5">{children}</td>,
 };
 
 function CsvTable({ value }: { value: string }) {
@@ -81,7 +81,7 @@ function CsvTable({ value }: { value: string }) {
   if (rows.length === 0) return <p className="text-sm text-muted-foreground">Empty CSV</p>;
   const [header, ...body] = rows;
   return (
-    <div className="overflow-auto rounded-[var(--radius-button)] border border-border">
+    <div className="overflow-auto rounded-[var(--radius-button)] [border:var(--bd-card)]">
       <Table>
         <TableHeader>
           <TableRow>

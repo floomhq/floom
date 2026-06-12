@@ -57,14 +57,14 @@ export function SqliteTableView({ load }: { load: (table?: string) => Promise<Sq
         ))}
       </div>
       {view.columns && view.rows ? (
-        <div style={{ overflow: "auto", border: "1px solid var(--line)", borderRadius: 12 }}>
+        <div style={{ overflow: "auto", border: "var(--bd-list)", borderRadius: "var(--radius-card)" }}>
           <table style={{ borderCollapse: "collapse", fontSize: 12, fontFamily: "var(--font-mono)", width: "100%" }}>
             <thead>
               <tr>
                 {view.columns.map((c) => (
                   <th
                     key={c}
-                    style={{ textAlign: "left", padding: "6px 10px", borderBottom: "1px solid var(--line)", color: "var(--ink-soft)" }}
+                    style={{ textAlign: "left", padding: "6px 10px", borderBottom: "var(--bd-div)", color: "var(--ink-soft)" }}
                   >
                     {c}
                   </th>
@@ -75,7 +75,7 @@ export function SqliteTableView({ load }: { load: (table?: string) => Promise<Sq
               {view.rows.map((row, i) => (
                 <tr key={i}>
                   {row.map((cell, j) => (
-                    <td key={j} style={{ padding: "6px 10px", borderBottom: "1px solid var(--line-soft)", color: "var(--ink-soft)" }}>
+                    <td key={j} style={{ padding: "6px 10px", borderBottom: "var(--bd-div)", color: "var(--ink-soft)" }}>
                       {cell === null ? "NULL" : String(cell)}
                     </td>
                   ))}
