@@ -46,7 +46,45 @@ def codegen_model() -> str:
     return value or DEFAULT_CODEGEN_MODEL
 
 
+def _uses_max_completion_tokens(model: str) -> bool:
+    m = model.lower()
+    return m.startswith(("gpt-5", "o3", "o4"))
+
+
+def _chat_completion_codegen_direct(
+    client: Any,
+    *,
+    messages: List[Dict[str, Any]],
+    max_output_tokens: int,
+    temperature: float,
+    response_format: Dict[str, Any] | None,
+    model: str,
+) -> Any:
+    kwargs: Dict[str, Any] = {
+        "model": model,
+        "messages": messages,
+        "temperature": temperature,
+    }
+    token_key = "max_completion_tokens" if _uses_max_completion_tokens(model) else "max_tokens"
+    kwargs[token_key] = max_output_tokens
+    if response_format is not None:
+        kwargs["response_format"] = response_format
+
+    try:
+        return client.chat.completions.create(**kwargs)
+    except Exception as exc:  # noqa: BLE001 - OpenAI SDK errors vary by version
+        message = str(exc).lower()
+        if "max_tokens" in kwargs and "max_completion_tokens" in message:
+            kwargs["max_completion_tokens"] = kwargs.pop("max_tokens")
+            return client.chat.completions.create(**kwargs)
+        if "temperature" in message:
+            retry_kwargs = {k: v for k, v in kwargs.items() if k != "temperature"}
+            return client.chat.completions.create(**retry_kwargs)
+        raise
+
+
 def chat_completion_codegen(
+    client: Any | None = None,
     *,
     messages: List[Dict[str, Any]],
     max_output_tokens: int,
@@ -65,9 +103,19 @@ def chat_completion_codegen(
     Anthropic/Bedrock). Retries once without ``temperature`` for models that only
     accept the default.
     """
+    chosen = model or codegen_model()
+    if client is not None:
+        return _chat_completion_codegen_direct(
+            client,
+            messages=messages,
+            max_output_tokens=max_output_tokens,
+            temperature=temperature,
+            response_format=response_format,
+            model=chosen,
+        )
+
     import llm
 
-    chosen = model or codegen_model()
     kwargs: Dict[str, Any] = {
         "model": chosen,
         "messages": messages,
