@@ -1593,6 +1593,14 @@ async def auth_middleware(request: Request, call_next):
             worker_call_payload = validate_worker_call_token(bearer_token_header, secret=secret)
         except ValueError as exc:
             return _JSONResponse(status_code=401, content={"detail": str(exc)})
+        # #916: a run token is only as alive as its user — reject at the
+        # perimeter when the owning account is disabled or deleted.
+        try:
+            from auth.multi_member import _require_active_token_user  # noqa: PLC0415
+
+            _require_active_token_user(str(worker_call_payload.get("user_id") or ""))
+        except HTTPException as exc:
+            return _JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         worker_call_repos = None
         if request.method == "GET" and _RE_RUN_DETAIL.match(path):
             try:
@@ -5539,11 +5547,18 @@ def _upload_url_ttl_seconds() -> int:
         return 3600
 
 
+# #930: when no signing secret is configured, fall back to a per-process
+# random key instead of a hardcoded public string. Download tokens can no
+# longer be forged offline; they just stop validating across restarts (the
+# documented trade-off for unconfigured local installs).
+_UPLOAD_FALLBACK_SIGNING_KEY: str = pysecrets.token_hex(32)
+
+
 def _upload_signing_key() -> bytes:
     key = (
         os.environ.get("WORKEROS_UPLOAD_URL_SIGNING_SECRET")
         or os.environ.get("FLOOM_SECRET")
-        or "local-dev-upload-url-signing"
+        or _UPLOAD_FALLBACK_SIGNING_KEY
     )
     return key.encode("utf-8")
 
@@ -20584,6 +20599,51 @@ def _frontend_public_base() -> str:
     return (os.environ.get("WORKERS_FRONTEND_URL") or "https://workers.floom.dev").rstrip("/")
 
 
+_TOKEN_DEFAULT_TTL_DAYS = 90
+
+
+def _max_token_ttl_days() -> int:
+    """#924/#949: maximum API-token lifetime in days. 0 disables the cap
+    (legacy never-expiring behavior, explicit opt-out only)."""
+    raw = (os.environ.get("WORKEROS_PAT_MAX_TTL_DAYS") or "").strip()
+    if not raw:
+        return _TOKEN_DEFAULT_TTL_DAYS
+    try:
+        value = int(raw)
+    except ValueError:
+        return _TOKEN_DEFAULT_TTL_DAYS
+    return max(value, 0)
+
+
+def _default_token_expiry() -> Optional[str]:
+    max_days = _max_token_ttl_days()
+    if max_days <= 0:
+        return None
+    return (datetime.now(timezone.utc) + timedelta(days=max_days)).isoformat()
+
+
+def _enforce_token_ttl_cap(requested: Optional[str]) -> Optional[str]:
+    """Apply the default TTL when no expiry is requested and reject expiries
+    beyond the configured cap."""
+    max_days = _max_token_ttl_days()
+    if not requested:
+        return _default_token_expiry()
+    try:
+        parsed = datetime.fromisoformat(requested)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="expires_at must be an ISO-8601 timestamp")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    if parsed <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=422, detail="expires_at must be in the future")
+    if max_days > 0 and parsed > datetime.now(timezone.utc) + timedelta(days=max_days):
+        raise HTTPException(
+            status_code=422,
+            detail=f"expires_at exceeds the maximum token lifetime of {max_days} days",
+        )
+    return parsed.isoformat()
+
+
 def _issue_cli_auth_pat(*, user_id: str, client_name: str, repos: Repositories, role: str) -> str:
     # #847 RCA: this used to hardcode role="admin", so ANY member approving a
     # CLI device minted themselves an admin token (member → admin escalation).
@@ -20593,16 +20653,22 @@ def _issue_cli_auth_pat(*, user_id: str, client_name: str, repos: Repositories, 
     raw = "wos_" + _secrets_mod.token_urlsafe(32)
     token_id = str(_uuid_mod.uuid4())
     token_name = f"CLI device: {(client_name or 'unknown').strip() or 'unknown'}"
+    # #924/#949: CLI tokens get a bounded lifetime instead of living forever.
+    expires_at = _default_token_expiry()
     try:
         with get_db() as conn:
             conn.execute(
                 """
                 INSERT INTO cli_api_tokens
-                    (id, token_hash, user_id, role, name, created_at, last_used_at, revoked_at)
-                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)
+                    (id, token_hash, user_id, role, name, created_at, last_used_at, revoked_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)
                 """,
-                (token_id, _hash_pat(raw), user_id, token_role, token_name, now_iso()),
+                (token_id, _hash_pat(raw), user_id, token_role, token_name, now_iso(), expires_at),
             )
+        logger.info(
+            "cli token minted: user=%s role=%s name=%r expires_at=%s",
+            user_id, token_role, token_name, expires_at,
+        )
     except Exception as exc:
         logger.exception("Could not issue CLI auth token for user %s", user_id)
         raise HTTPException(
@@ -22192,7 +22258,7 @@ def _prune_expired_sessions(session_repo) -> None:
     from datetime import datetime, timezone as _tz
 
     try:
-        session_repo.prune_expired(now_iso=datetime.now(_tz.utc).isoformat())
+        session_repo.prune_expired(now_iso=datetime.now(timezone.utc).isoformat())
     except Exception:
         logger.warning("session prune failed (non-fatal)", exc_info=True)
 
@@ -22376,7 +22442,7 @@ def auth_setup(
     _prune_expired_sessions(session_repo)  # #849
     session_id = _secrets_mod.token_urlsafe(32)
     from datetime import datetime, timedelta, timezone as _tz
-    expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
+    expires = (datetime.now(timezone.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
     session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
     _set_session_cookie(response, session_id)
     return _UserOut(id=row["id"], username=row["username"], display_name=row.get("display_name"),
@@ -22409,7 +22475,7 @@ def auth_login(
     _prune_expired_sessions(session_repo)  # #849
     session_id = _secrets_mod.token_urlsafe(32)
     from datetime import datetime, timedelta, timezone as _tz
-    expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
+    expires = (datetime.now(timezone.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
     try:
         session_repo.create(session_id=session_id, user_id=user["id"], expires_at=expires)
     except ValueError:
@@ -22495,6 +22561,15 @@ def auth_issue_magic_link(
     auth: AuthContext = Depends(get_auth_context),
 ) -> dict:
     """Issue a one-time sign-in URL for the authenticated user (multi-member mode only)."""
+    # #917: the per-process random fallback key makes links unverifiable after
+    # a restart and ties a security-critical signing key to process lifetime.
+    # Refuse issuance instead of silently minting links only this process can
+    # validate; consumption of already-issued links is unaffected.
+    if _magic_link_secret() is _MAGIC_LINK_FALLBACK_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="Magic links require WORKEROS_MAGIC_LINK_SECRET or FLOOM_SECRET to be configured",
+        )
     token = _issue_magic_link(user_id=auth.user_id)
     url = f"{_frontend_base_url()}/auth/magic/{token}"
     return {"url": url, "expires_in": 900}
@@ -22520,7 +22595,7 @@ def auth_consume_magic_link(
     _prune_expired_sessions(session_repo)  # #849
     from datetime import datetime, timedelta, timezone as _tz
     session_id = pysecrets.token_urlsafe(32)
-    expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
+    expires = (datetime.now(timezone.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
     try:
         session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
     except ValueError:
@@ -22692,6 +22767,17 @@ def delete_user(
         raise HTTPException(status_code=400, detail="cannot delete your own account")
     if not user_repo.delete(user_id=uid):
         raise HTTPException(status_code=404, detail="user not found")
+    # #915: cli_api_tokens has no FK cascade to users — revoke explicitly so a
+    # deleted user's CLI tokens can't outlive the account. (The auth provider
+    # also rejects tokens for missing users; this keeps the table clean.)
+    try:
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE cli_api_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+                (now_iso(), uid),
+            )
+    except Exception:
+        logger.exception("failed to revoke CLI tokens for deleted user %s", uid)
 
 
 # --- Personal access tokens (current user) ---
@@ -22717,6 +22803,8 @@ def create_token(
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="token name required")
+    # #924/#949: tokens are bounded by default — no more accidental forever-keys.
+    expires_at = _enforce_token_ttl_cap(payload.expires_at)
     raw = "wos_" + _secrets_mod.token_urlsafe(32)
     token_hash = _hash_pat(raw)
     token_id = str(_uuid_mod.uuid4())
@@ -22726,7 +22814,7 @@ def create_token(
             user_id=auth.user_id,
             name=name,
             token_hash=token_hash,
-            expires_at=payload.expires_at,
+            expires_at=expires_at,
         )
     except Exception as _pat_exc:
         # FK constraint failure means auth.user_id has no row in the users
@@ -22740,6 +22828,9 @@ def create_token(
                        "Complete workspace setup at /login first.",
             ) from _pat_exc
         raise
+    logger.info(
+        "PAT created: user=%s name=%r expires_at=%s", auth.user_id, name, expires_at
+    )
     pat = _PATOut(**{k: row[k] for k in ("id", "name", "last_used_at", "created_at", "expires_at")})
     return _PATCreateResponse(token=raw, pat=pat)
 
