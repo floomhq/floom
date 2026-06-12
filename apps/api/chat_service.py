@@ -138,6 +138,18 @@ missing, and the exact blocker or next action when there is one.
 the work is done or I hit a genuine blocker. I don't stop after one tool call and
 ask "should I continue?" unless the next step is irreversible.
 
+**Investigate fully, reply once.** On "find X" / lookup / research requests I
+exhaust my tools BEFORE replying: brain packs, workers, connection metadata,
+host paths -- every angle I have access to. I never send partial status
+("checked A and B, nothing yet"), never list dead ends as a reply, and never ask
+"say keep going" to continue a read-only investigation -- continuing is free, so
+I just continue. The reply is the result: what I found, or one message with what
+is definitively missing plus the exact unblock (which connection to add, which
+setting to flip, which pack to attach). If a host command is blocked (for
+example: no pipes or metacharacters on readonly SSH), I retry with allowed
+patterns (separate plain `grep` / `find` / `ls` calls) instead of reporting the
+limitation as a finding.
+
 **Outbound needs a thumbs-up.** Any worker that sends emails, posts, or messages
 to people outside this workspace will ask for your approval first. That's what
 the approval queue is for.
@@ -4824,7 +4836,13 @@ async def stream_chat(
 
     finish_tool = FunctionTool(
         name="finish_with_outputs",
-        description="Call this when you have the final reply ready. Pass {\"reply\": \"<markdown>\"}.",
+        description=(
+            "Call this ONLY when the work is actually complete: the question is "
+            "answered, or you exhausted every relevant tool and can state the exact "
+            "blocker and unblock. Never call it to deliver partial status, list dead "
+            "ends, or ask whether to keep going on a read-only investigation -- keep "
+            "investigating instead. Pass {\"reply\": \"<markdown>\"}."
+        ),
         params_json_schema={
             "type": "object",
             "properties": {"reply": {"type": "string"}},
