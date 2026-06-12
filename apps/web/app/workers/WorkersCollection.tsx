@@ -599,7 +599,7 @@ export default function WorkersCollection({
     ],
     view: { default: "grid", grid: true },
     columns: {
-      template: "1.8fr 1fr 1fr 140px 40px",
+      template: "1.9fr 1fr 1fr 130px 40px", // #895: wireframe pageWorkers grid
       headers: ["Worker", "Tools", "Last run", "Status", ""],
     },
     row: (w) => ({
