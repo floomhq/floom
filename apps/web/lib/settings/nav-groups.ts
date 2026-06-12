@@ -22,7 +22,7 @@ export interface SettingsNavItem {
 export const SETTINGS_NAV: SettingsNavItem[] = [
   // Workspace · {name}
   { key: "system", label: "System", scope: "workspace", description: "Workspace defaults" },
-  { key: "channels", label: "Channels", scope: "workspace", description: "Slack, email & agent install" },
+  { key: "channels", label: "Channels", scope: "workspace", description: "Slack, email & WhatsApp" },
   { key: "assistant", label: "Assistant", scope: "workspace", description: "Configure Emily" },
   { key: "members", label: "Members", scope: "workspace", description: "People & roles" },
   { key: "versions", label: "Version history", scope: "workspace", description: "Git-tracked workspace changelog" },

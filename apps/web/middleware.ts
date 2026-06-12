@@ -43,7 +43,7 @@ const PUBLIC_PAGE_PREFIXES = [
 ];
 
 // /api/proxy sub-paths that map to PUBLIC upstream endpoints and must stay
-// reachable without a Workeros session (OAuth callbacks and signed approvals).
+// reachable without a Floom session (OAuth callbacks and signed approvals).
 const PUBLIC_PROXY_PATHS = ["/api/proxy/connections/callback"];
 const PUBLIC_PROXY_PREFIXES = ["/api/proxy/approvals/public/"];
 

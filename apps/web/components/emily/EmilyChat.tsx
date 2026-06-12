@@ -80,7 +80,7 @@ function RecentChats({
         <div
           role="menu"
           onMouseLeave={() => setOpen(false)}
-          className="absolute right-0 top-full z-30 mt-1 max-h-72 w-64 overflow-auto rounded-[12px] border border-border bg-[var(--bg-card)] p-1 shadow-[var(--shadow-pop)]"
+          className="absolute right-0 top-full z-30 mt-1 max-h-72 w-64 overflow-auto rounded-[12px] [border:var(--bd-card)] bg-[var(--bg-card)] p-1 shadow-[var(--shadow-pop)]"
         >
           {items === null && <div className="px-2 py-3 text-xs text-muted-foreground">Loading…</div>}
           {items?.length === 0 && (
@@ -178,7 +178,7 @@ function TypingIndicator() {
         {[0, 1, 2].map((i) => (
           <div
             key={i}
-            className="size-1.5 rounded-full bg-muted-foreground/40 animate-bounce"
+            className="size-1.5 rounded-[var(--radius-pill)] bg-muted-foreground/40 animate-bounce"
             style={{ animationDelay: `${i * 150}ms` }}
           />
         ))}
@@ -294,7 +294,7 @@ function EmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
             key={s}
             type="button"
             onClick={() => onSuggest(s)}
-            className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
             {s}
           </button>
@@ -513,7 +513,7 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
       {!hideControls && (
         <div
           className={cn(
-            "flex shrink-0 items-center justify-end gap-1 border-b border-border/60",
+            "flex shrink-0 items-center justify-end gap-1 [border-bottom:var(--bd-div)]/60",
             fullPage ? "px-6 py-2" : "px-3 py-1.5"
           )}
         >
@@ -573,7 +573,7 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
             type="button"
             onClick={() => scrollToBottom(true)}
             aria-label="Scroll to bottom"
-            className="sticky bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground shadow-md hover:text-foreground hover:shadow-lg transition-all"
+            className="sticky bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-background px-3 py-1.5 text-xs text-muted-foreground shadow-md hover:text-foreground hover:shadow-lg transition-all"
           >
             <ChevronDown className="size-3.5" />
             Scroll to bottom
@@ -635,7 +635,7 @@ export function EmilyDock({ className }: { className?: string }) {
     <div
       className={cn(
         "flex h-full flex-col bg-background shrink-0 overflow-hidden",
-        mode !== "full" && "border-l border-border",
+        mode !== "full" && "[border-left:var(--bd-div)]",
         DOCK_WIDTH[mode],
         className
       )}
@@ -659,13 +659,13 @@ export function EmilyDock({ className }: { className?: string }) {
 
       {/* V4 SPEC §Emily rail: 56px header — avatar + Emily + green dot + fullscreen + ⋯ menu */}
       {open && (
-        <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
+        <div className="flex h-14 shrink-0 items-center gap-2 [border-bottom:var(--bd-div)] px-3">
           <EmilyAvatar size="sm" />
           <div className="flex-1 min-w-0 flex items-center gap-1.5">
             <p className="text-sm font-semibold leading-none truncate">Emily</p>
             {/* Green presence dot */}
             <span
-              className="size-2 shrink-0 rounded-full bg-green-500"
+              className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500"
               aria-label="Online"
             />
           </div>
@@ -776,7 +776,7 @@ export function EmilyMobileSheet() {
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Open Emily"
-          className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-full bg-background shadow-lg border border-border"
+          className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-[var(--radius-pill)] bg-background shadow-lg [border:var(--bd-card)]"
         >
           <EmilyAvatar size="sm" />
         </button>
@@ -789,12 +789,12 @@ export function EmilyMobileSheet() {
             className="absolute inset-0 bg-black/40"
             onClick={() => setOpen(false)}
           />
-          <div className="relative flex h-[85vh] flex-col rounded-t-2xl border-t border-border bg-background">
-            <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-3">
+          <div className="relative flex h-[85vh] flex-col rounded-t-2xl [border-top:var(--bd-div)] bg-background">
+            <div className="flex h-14 shrink-0 items-center gap-2 [border-bottom:var(--bd-div)] px-3">
               <EmilyAvatar size="sm" />
               <div className="flex-1 min-w-0 flex items-center gap-1.5">
                 <p className="text-sm font-semibold leading-none truncate">Emily</p>
-                <span className="size-2 shrink-0 rounded-full bg-green-500" aria-label="Online" />
+                <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
               </div>
               <Button
                 size="sm"
@@ -829,11 +829,11 @@ export function EmilyChatPage({
 } = {}) {
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
-      <div className="flex h-14 shrink-0 items-center gap-2 border-b border-border px-4">
+      <div className="flex h-14 shrink-0 items-center gap-2 [border-bottom:var(--bd-div)] px-4">
         <EmilyAvatar size="sm" />
         <div className="flex-1 min-w-0 flex items-center gap-1.5">
           <p className="text-sm font-semibold leading-none">Emily</p>
-          <span className="size-2 shrink-0 rounded-full bg-green-500" aria-label="Online" />
+          <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
         </div>
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">

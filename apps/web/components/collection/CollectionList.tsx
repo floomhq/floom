@@ -45,8 +45,8 @@ function RowMenu({ items }: { items: RowMenuItem[] }) {
             zIndex: 30,
             minWidth: 168,
             background: "var(--bg-card)",
-            border: "1px solid var(--line)",
-            borderRadius: 12,
+            border: "var(--bd-card)",
+            borderRadius: "var(--radius-card)",
             boxShadow: "var(--shadow-pop)",
             padding: 5,
           }}

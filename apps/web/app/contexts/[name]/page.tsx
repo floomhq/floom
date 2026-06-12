@@ -1,9 +1,7 @@
 "use client";
 
-// Legacy pack-detail route. The brain surface is now a single-page,
-// progressive miller-columns layout at /brain. This route only exists so
-// old deep links (and the old folder ?path= query) keep working: it redirects
-// into /brain with the pack (and folder) pre-selected.
+// Legacy pack-detail route. Brain now uses the shared Collection split pane.
+// Old deep links redirect into /brain with the folder selected.
 import { useEffect } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 
@@ -14,7 +12,7 @@ export default function LegacyPackDetailRedirect() {
 
   useEffect(() => {
     const params = new URLSearchParams();
-    params.set("pack", decodeURIComponent(name));
+    params.set("sel", decodeURIComponent(name));
     const path = searchParams.get("path");
     if (path) params.set("path", path);
     router.replace(`/brain?${params.toString()}`);
