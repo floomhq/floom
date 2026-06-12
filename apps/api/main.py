@@ -184,6 +184,7 @@ from services.git_service import (
     _ensure_git_workspace_ready,
     _WORKSPACE_TOOLS_FILENAME,
     _sync_workspace_tools_yml,
+    _workers_git_prefix,
 )
 
 # Env-file secret IO + platform-secret specs live in services.secrets_env;
@@ -2339,18 +2340,6 @@ def _workspace_base_persona_asset_id(request: Request | None = None) -> str:
     return _workspace_instructions_asset_id(request)
 
 
-def _workers_git_prefix() -> str:
-    """Relative path of the workers dir within the workspace git root.
-
-    OSS: git root is WORKERS_DIR.parent, so workers are at 'workers/'.
-    Cloud: git root IS WORKERS_DIR/workspace_id, so workers sit at root — prefix is ''.
-    """
-    if _git_ops.get_active_workspace_id():
-        return ""  # Cloud: worker_id/ is directly under the git root
-    try:
-        return WORKERS_DIR.relative_to(_git_workspace()).as_posix()
-    except ValueError:
-        return "workers"
 
 
 def _contexts_git_prefix() -> str:
