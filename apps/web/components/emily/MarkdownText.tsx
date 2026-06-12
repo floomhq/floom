@@ -1,6 +1,8 @@
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
+import Link from "next/link";
 import { cn } from "@/lib/utils";
+import { sanitizeHref } from "@/lib/safe-url";
 
 /**
  * MarkdownText -- renders assistant message text as real markdown.
@@ -48,16 +50,28 @@ export function MarkdownText({
             );
           },
           pre: ({ children }) => <>{children}</>,
-          a: ({ href, children }) => (
-            <a
-              href={href}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="underline underline-offset-2 text-foreground hover:text-muted-foreground transition-colors break-all"
-            >
-              {children}
-            </a>
-          ),
+          a: ({ href, children }) => {
+            const safe = sanitizeHref(href);
+            // #825/#903 — Emily references app pages (workers/runs/folders) as
+            // REAL router links: client-side navigation, no new tab. External
+            // links keep target=_blank.
+            const isInternal =
+              !!safe && (safe.startsWith("/") || safe.startsWith("#") || safe.startsWith("?"));
+            const className =
+              "underline underline-offset-2 text-foreground hover:text-muted-foreground transition-colors break-all";
+            if (isInternal) {
+              return (
+                <Link href={safe} className={className}>
+                  {children}
+                </Link>
+              );
+            }
+            return (
+              <a href={safe} target="_blank" rel="noopener noreferrer" className={className}>
+                {children}
+              </a>
+            );
+          },
           blockquote: ({ children }) => (
             <blockquote className="border-l-2 border-border/60 pl-3 text-muted-foreground my-1.5">
               {children}
