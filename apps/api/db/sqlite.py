@@ -2831,6 +2831,26 @@ _ASSET_TABLES: dict[str, str] = {
 }
 
 
+WORKSPACE_ACTOR_PREFIX = "workspace:"
+
+
+def workspace_actor_id(workspace_id: str | None) -> str:
+    """Synthetic principal that owns workspace-shared assets (donation model).
+
+    Never a login: no session, password, or PAT can authenticate as it directly.
+    Workspace-shared workers are owned by it, workspace secrets/connections are
+    stored under it, and the workspace API token authenticates as it (member
+    role). Because no human is ever ``is_owner`` of its assets, edit/delete on
+    shared workers structurally reduces to admin-only.
+    """
+    ws = (workspace_id or "").strip() or "local-default"
+    return f"{WORKSPACE_ACTOR_PREFIX}{ws}"
+
+
+def is_workspace_actor(user_id: str | None) -> bool:
+    return bool(user_id) and str(user_id).startswith(WORKSPACE_ACTOR_PREFIX)
+
+
 def derive_workspace_id(owner_id: str | None) -> str:
     """Workspace id for an engine owner_id (mirrors the migration helper).
 
@@ -3119,6 +3139,12 @@ class SqliteAssetAccessRepository:
         return _row_dict(row) if row else {}
 
     def _role(self, conn: sqlite3.Connection, workspace_id: str, user_id: str) -> str | None:
+        # The synthetic workspace actor is implicitly a MEMBER of its own
+        # workspace (and only its own): it can view/run workspace-shared
+        # assets but is never owner or admin, so it can never edit, delete,
+        # or share. Powers the workspace API token.
+        if user_id == workspace_actor_id(workspace_id):
+            return "member"
         row = conn.execute(
             "SELECT role FROM workspace_members "
             "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
@@ -3164,7 +3190,14 @@ class SqliteAssetAccessRepository:
         )
 
     def set_visibility(
-        self, *, workspace_id: str, actor_id: str, asset_type: str, asset_id: str, visibility: str
+        self,
+        *,
+        workspace_id: str,
+        actor_id: str,
+        asset_type: str,
+        asset_id: str,
+        visibility: str,
+        actor_role: str | None = None,
     ) -> dict[str, Any] | None:
         if visibility not in VISIBILITY_VALUES:
             raise ValueError(f"invalid visibility {visibility!r}")
@@ -3175,7 +3208,10 @@ class SqliteAssetAccessRepository:
             asset = self._asset_row(conn, asset_type, asset_id)
             if asset is None:
                 return None
-            role = self._role(conn, asset["workspace_id"] or workspace_id, actor_id)
+            # actor_role: callers with an authenticated role (e.g. the engine
+            # bootstrap admin, who has no workspace_members row) pass it
+            # explicitly; otherwise resolve from the members table.
+            role = actor_role or self._role(conn, asset["workspace_id"] or workspace_id, actor_id)
             perms = self._compute(
                 owner_id=asset["owner_id"],
                 visibility=asset["visibility"] or "private",
@@ -3188,6 +3224,26 @@ class SqliteAssetAccessRepository:
                 f"UPDATE {table} SET visibility = ? WHERE id = ?",
                 (visibility, asset_id),
             )
+            # Donation model (workers only): sharing TRANSFERS ownership to the
+            # synthetic workspace actor — the sharer loses edit (no human is
+            # is_owner), and run-time secrets/connections resolve against the
+            # workspace actor's rows (admin-populated), never personal creds.
+            # Unshare (workspace -> private) re-assigns to the acting admin;
+            # can_share already restricts that transition to admins because
+            # the workspace actor is the owner and never authenticates.
+            if asset_type == "worker":
+                ws = str(asset["workspace_id"] or workspace_id or "local-default")
+                current_owner = asset["owner_id"]
+                if visibility == "workspace" and not is_workspace_actor(current_owner):
+                    conn.execute(
+                        f"UPDATE {table} SET owner_id = ? WHERE id = ?",
+                        (workspace_actor_id(ws), asset_id),
+                    )
+                elif visibility != "workspace" and is_workspace_actor(current_owner):
+                    conn.execute(
+                        f"UPDATE {table} SET owner_id = ? WHERE id = ?",
+                        (actor_id, asset_id),
+                    )
         return self.get_permissions(
             workspace_id=workspace_id, user_id=actor_id, asset_type=asset_type, asset_id=asset_id
         )
