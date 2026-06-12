@@ -676,7 +676,7 @@ export default function WorkersCollection({
       };
     },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
-    add: { label: "Add", onSelect: () => router.push("/workers/new") },
+    add: { label: "Add", onSelect: () => router.push("/chat?mode=create") }, // #902: create = Emily flow
     states: {
       empty: { title: "No workers yet", help: "Create your first worker to get started." },
     },

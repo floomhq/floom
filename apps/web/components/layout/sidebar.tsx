@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Search, LogOut, ChevronLeft, ChevronRight } from "lucide-react";
+import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -117,6 +117,16 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
   };
   return (
     <div className="px-3 pb-3 space-y-1.5">
+      {/* #902 (wireframe newbtn): creating a worker = a conversation with
+          Emily — full-page chat in create mode, not a form. */}
+      <Link
+        href="/chat?mode=create"
+        onClick={() => onNavigate?.()}
+        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-transparent px-2.5 text-sm font-medium text-ink hover:bg-[var(--active-nav-bg)] transition-colors duration-150"
+      >
+        <Plus className="w-4 h-4" />
+        <span>New worker</span>
+      </Link>
       <button
         type="button"
         onClick={onSearch}
