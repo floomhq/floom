@@ -46,8 +46,7 @@ from pydantic import BaseModel
 from auth import AuthContext, get_auth_context
 from core.urls import _frontend_base_url
 from core.utils import row_to_dict
-from files import is_sha256
-from db import Repositories, get_db, get_repos, now_iso
+from db import Repositories, get_repos
 from models import ActionResponse, RunStatus
 from services.run_access import (
     _artifact_file_response,
@@ -57,7 +56,6 @@ from services.run_access import (
 from services.sse_streaming import _sse_publish
 from services.uploads import _store_uploaded_blob
 from services.worker_access import _delete_worker_impl
-from run_service import create_run, start_run
 
 logger = logging.getLogger("floom.api")
 
@@ -87,6 +85,7 @@ def _safe_annotation_image_url(value: Any) -> Optional[str]:
     refuse arbitrary http(s) URLs so a persisted annotation can never become an
     SSRF vector or an off-site beacon when the owner later views the feedback.
     """
+    from files import is_sha256
     if not isinstance(value, str):
         return None
     ref = value.strip()
@@ -184,6 +183,7 @@ def list_approvals(
     repos: Repositories = Depends(get_repos),
 ):
     """List approval requests for the authenticated user."""
+    from db import get_db
     status_filter = (status or "pending").lower()
     if status_filter == "pending":
         rows = repos.approvals.list_pending(owner_id=auth.user_id)
@@ -589,6 +589,8 @@ def approve_run(
       - decision: "approved"
       - approved_output: the (optionally edited) proposed output
     """
+    from db import now_iso
+    from run_service import create_run, start_run
     run_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
     if run_row is None:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -706,6 +708,7 @@ def reject_run(
     repos: Repositories = Depends(get_repos),
 ) -> ActionResponse:
     """Reject a PENDING_APPROVAL run. No follow-up run is spawned."""
+    from db import now_iso
     run_row = _get_visible_run(run_id, user_id=auth.user_id, repos=repos)
     if run_row is None:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -831,6 +834,7 @@ def approve_destructive_action(
     pass reviewer feedback without a request body; the route body carries them
     for authed callers.
     """
+    from db import now_iso
     approval = _load_typed_approval(approval_id, auth.user_id, "destructive_delete", repos)
     decision_input: Dict[str, Any] = json.loads(approval.get("decision_input_json") or "{}")
     path = decision_input.get("path", "")
@@ -867,6 +871,7 @@ def reject_destructive_action(
     repos: Repositories = Depends(get_repos),
 ):
     """Reject a sandboxed-worker DELETE request without executing it."""
+    from db import now_iso
     approval = _load_typed_approval(approval_id, auth.user_id, "destructive_delete", repos)
     decision_input: Dict[str, Any] = json.loads(approval.get("decision_input_json") or "{}")
     annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
@@ -901,6 +906,7 @@ def approve_agent_tool_approval(
     in-process polling loop in agent_driver can resume the run in-place.
     Any edited_output is stored and returned to the agent by the polling loop.
     """
+    from db import now_iso
     approval = _load_typed_approval(approval_id, auth.user_id, "agent_tool", repos)
     edited_output_json = json.dumps(body.edited_output) if body.edited_output is not None else None
     repos.approvals.approve(
@@ -933,6 +939,7 @@ def reject_agent_tool_approval(
     Does NOT affect run status directly — the polling loop in agent_driver
     picks up the 'rejected' status and resumes with approved=False.
     """
+    from db import now_iso
     approval = _load_typed_approval(approval_id, auth.user_id, "agent_tool", repos)
     annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
     repos.approvals.reject(
