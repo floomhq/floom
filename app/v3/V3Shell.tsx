@@ -12,6 +12,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { Monitor, Moon, Sun } from "lucide-react";
+import { appUrl } from "@/lib/app-url";
 import "./theme.css";
 
 /* theme mode: same contract as the app's ThemeModeButton (key, values, cycle
@@ -42,9 +43,7 @@ function Mark({ size = 22 }: { size?: number }) {
 
 const NAV = [
   ["Product", "/v3/product"],
-  ["Templates", "/v3/templates"],
   ["Docs", "/v3/docs"],
-  ["About", "/v3/about"],
 ] as const;
 
 export function V3Shell({
@@ -96,7 +95,10 @@ export function V3Shell({
             >
               {mode === "night" ? <Moon className="h-3.5 w-3.5" /> : mode === "day" ? <Sun className="h-3.5 w-3.5" /> : <Monitor className="h-3.5 w-3.5" />}
             </button>
-            <Link href="/login" className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground">
+            <Link href={appUrl("/workers/new")} className="rounded-[10px] px-3 py-1.5 font-medium text-white transition hover:-translate-y-px" style={{ background: "var(--v3-accent)" }}>
+              Hire
+            </Link>
+            <Link href="/login" className="hidden rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground sm:block">
               Sign in
             </Link>
           </div>
@@ -106,19 +108,17 @@ export function V3Shell({
       </div>
 
       <footer className="border-t border-border-soft">
-        <div className="mx-auto flex max-w-[1000px] flex-col gap-4 px-7 py-6 text-[12px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <span>WorkerOS by Floom · Backed by Founders Inc</span>
+        <div className="mx-auto flex max-w-[1000px] flex-col gap-3 px-7 py-6 text-[12px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <div className="flex flex-col gap-1">
+            <span>WorkerOS by Floom</span>
+            <span>Built in San Francisco · © 2026 Floom</span>
+          </div>
           <span className="flex flex-wrap gap-4">
             <Link href="/v3/product" className="transition-colors hover:text-foreground">Product</Link>
-            <Link href="/v3/templates" className="transition-colors hover:text-foreground">Templates</Link>
             <Link href="/v3/docs" className="transition-colors hover:text-foreground">Docs</Link>
-            <Link href="/v3/about" className="transition-colors hover:text-foreground">About</Link>
+            <a href="https://github.com/floomhq/workeros" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">GitHub</a>
             <Link href="/privacy" className="transition-colors hover:text-foreground">Privacy</Link>
             <Link href="/terms" className="transition-colors hover:text-foreground">Terms</Link>
-            <a href="https://github.com/floomhq/workeros" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">GitHub</a>
-            <a href="https://www.linkedin.com/company/floomhq/" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">LinkedIn</a>
-            {/* TODO(Federico): confirm official X handle — withheld rather than guessed.
-            <a href="https://x.com/floomhq" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">X</a> */}
           </span>
         </div>
       </footer>

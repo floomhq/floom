@@ -3,8 +3,8 @@ name: Landing app-route guard
 # Durable guard against re-introducing landing /app fall-through regressions.
 #
 # The landing project must not catch-all rewrite /app/* to another deployment.
-# Known app entrypoints are redirected from next.config.ts to NEXT_PUBLIC_APP_URL,
-# while unknown /app/* paths fall through to app/not-found.tsx.
+# Bare /app and every /app/* path redirect from next.config.ts to
+# NEXT_PUBLIC_APP_URL with the path and query preserved.
 
 on:
   pull_request:
@@ -51,6 +51,10 @@ jobs:
           required_fragments = [
               "NEXT_PUBLIC_APP_URL",
               "https://workers.floom.dev",
+              'source: "/app"',
+              'source: "/app/:path*"',
+              'destination: appDestination("/")',
+              'destination: appDestination("/:path*")',
               "source: `/app/${route}`",
               "source: `/app/${route}/:path*`",
               "destination: appDestination(`/${route}`)",

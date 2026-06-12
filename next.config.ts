@@ -28,6 +28,7 @@ const nextConfig: NextConfig = {
   async redirects() {
     return [
       { source: "/app", destination: appDestination("/"), permanent: false },
+      { source: "/app/:path*", destination: appDestination("/:path*"), permanent: false },
       ...APP_ROUTES.flatMap((route) => [
         { source: `/${route}`, destination: appDestination(`/${route}`), permanent: false },
         { source: `/${route}/:path*`, destination: appDestination(`/${route}/:path*`), permanent: false },

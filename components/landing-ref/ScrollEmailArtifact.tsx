@@ -169,12 +169,12 @@ function BodyLines({
   perLine: number;
 }) {
   // Index only the non-empty lines; empty lines render as paragraph spacers.
-  let visibleIndex = -1;
+  const nonEmptyTotal = lines.filter((line) => line.trim().length > 0).length;
   return (
     <>
       {lines.map((line, i) => {
         if (line.trim().length === 0) return <div key={i} className="h-2" />;
-        visibleIndex += 1;
+        const visibleIndex = lines.slice(0, i).filter((l) => l.trim().length > 0).length;
         return (
           <BodyLine
             key={i}
@@ -182,7 +182,7 @@ function BodyLines({
             progress={progress}
             from={revealStart + visibleIndex * perLine}
             to={revealStart + (visibleIndex + 1) * perLine}
-            isLast={visibleIndex === Math.max(0, lines.filter((l) => l.trim().length > 0).length - 1)}
+            isLast={visibleIndex === Math.max(0, nonEmptyTotal - 1)}
           />
         );
       })}

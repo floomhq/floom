@@ -8,8 +8,8 @@
  */
 
 import { useEffect, useMemo, useState } from "react";
-import { motion } from "motion/react";
-import { ArrowUp } from "lucide-react";
+import { AnimatePresence, motion } from "motion/react";
+import { ArrowUp, Plus } from "lucide-react";
 import { appUrl } from "@/lib/app-url";
 import {
   GCalLogo,
@@ -131,6 +131,7 @@ export function V3Composer({
 
   return (
     <motion.form
+      data-v3-composer="hero"
       onSubmit={(e) => {
         e.preventDefault();
         submit();
@@ -183,5 +184,87 @@ export function V3Composer({
         </motion.button>
       </div>
     </motion.form>
+  );
+}
+
+export function V3StickyPrompt() {
+  const [value, setValue] = useState("");
+  const [visible, setVisible] = useState(false);
+  const [nearFooter, setNearFooter] = useState(false);
+  const matches = useMemo(() => detectMatches(value), [value]);
+
+  useEffect(() => {
+    function update() {
+      const doc = document.documentElement;
+      const scrolled = window.scrollY > 260;
+      const distanceToBottom = doc.scrollHeight - (window.scrollY + window.innerHeight);
+      setVisible(scrolled);
+      setNearFooter(distanceToBottom < 360);
+    }
+    update();
+    window.addEventListener("scroll", update, { passive: true });
+    window.addEventListener("resize", update);
+    return () => {
+      window.removeEventListener("scroll", update);
+      window.removeEventListener("resize", update);
+    };
+  }, []);
+
+  function submit() {
+    const v = value.trim();
+    if (!v) return;
+    window.location.assign(appUrl("/workers/new", { prompt: v }));
+  }
+
+  return (
+    <AnimatePresence>
+      {visible && !nearFooter ? (
+        <motion.form
+          aria-label="Tell Emily what to automate"
+          onSubmit={(e) => {
+            e.preventDefault();
+            submit();
+          }}
+          initial={{ opacity: 0, y: 20, scale: 0.98 }}
+          animate={{ opacity: 1, y: 0, scale: 1 }}
+          exit={{ opacity: 0, y: 16, scale: 0.98 }}
+          transition={{ duration: 0.24, ease: [0.22, 1, 0.36, 1] }}
+          className="fixed inset-x-4 bottom-2 z-50 mx-auto flex max-w-[520px] items-center gap-1.5 rounded-[16px] border border-border/80 bg-card/95 p-1.5 shadow-[0_14px_44px_rgba(16,17,20,0.13)] backdrop-blur md:bottom-3"
+        >
+          <button
+            type="button"
+            aria-label="Add context"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-secondary text-muted-foreground transition hover:bg-[var(--bg-3)] hover:text-foreground"
+          >
+            <Plus className="h-4 w-4" />
+          </button>
+          <div className="relative min-w-0 flex-1">
+            <div
+              aria-hidden
+              className="pointer-events-none absolute inset-0 truncate py-1.5 text-[13.5px] leading-5 text-foreground"
+            >
+              <Mirror text={value} matches={matches} />
+            </div>
+            <input
+              value={value}
+              onChange={(e) => setValue(e.target.value)}
+              placeholder="Tell Emily what to automate..."
+              className="relative h-8 w-full bg-transparent text-[13.5px] leading-5 placeholder:text-muted-foreground focus:outline-none"
+              style={value ? { color: "transparent", caretColor: "var(--text-primary)", WebkitTextFillColor: "transparent" } : undefined}
+              aria-label="Describe the worker"
+            />
+          </div>
+          <button
+            type="submit"
+            aria-label="Hire worker"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] text-white transition hover:-translate-y-px disabled:opacity-50"
+            style={{ background: "var(--v3-accent)" }}
+            disabled={!value.trim()}
+          >
+            <ArrowUp className="h-4 w-4" />
+          </button>
+        </motion.form>
+      ) : null}
+    </AnimatePresence>
   );
 }

@@ -16,26 +16,57 @@ export default async function LoginPage({
   const next = sp.next ?? "/";
 
   return (
-    <main className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--ink)] font-sans antialiased">
-      <header className="px-6 py-5">
+    <main className="login-cool min-h-screen bg-[var(--bg-app)] text-[var(--ink)] font-sans antialiased">
+      <header className="mx-auto flex h-16 w-full max-w-6xl items-center justify-between px-6">
         <Link
           href="/"
           className="inline-flex items-center gap-2 text-[15px] font-[660] tracking-[-0.025em] text-[var(--ink)] hover:opacity-80 transition-opacity"
         >
           <FloomMark />
-          Floom{" "}
-          <span style={{ color: "var(--ink-mute)", fontWeight: 450, marginLeft: 2 }}>/ workeros</span>
+          WorkerOS
+          <span className="text-[11px] font-medium uppercase tracking-[0.16em] text-[var(--ink-mute)]">by Floom</span>
+        </Link>
+        <Link href="/" className="hidden rounded-[10px] px-3 py-1.5 text-[13px] text-[var(--ink-soft)] transition hover:bg-[var(--bg-2)] hover:text-[var(--ink)] sm:block">
+          Back to landing
         </Link>
       </header>
 
-      <section className="flex-1 grid place-items-center px-6 pb-24">
-        <div className="w-full max-w-[400px]">
-          <div className="rounded-[var(--radius-card)] border border-[var(--line)] bg-[var(--paper)] shadow-[var(--shadow-pop)] p-8">
-            <div className="text-center space-y-1.5 mb-7">
-              <h1 className="text-[22px] font-semibold tracking-tight leading-tight">Sign in to Floom</h1>
-              <p className="text-[13px] text-[var(--ink-soft)] leading-relaxed">AI workers that actually run</p>
+      <section className="mx-auto grid min-h-[calc(100vh-64px)] w-full max-w-6xl items-center gap-10 px-6 pb-20 pt-8 md:grid-cols-[1fr_420px]">
+        <div className="hidden max-w-[520px] md:block">
+          <div className="inline-flex rounded-full bg-[var(--sel)] px-3 py-1 text-[12px] font-medium text-[var(--accent)]">
+            Cloud sign-in
+          </div>
+          <h1 className="mt-5 text-[46px] font-semibold leading-[1.02] tracking-[-0.036em] text-[var(--ink)]">
+            Your workers, approvals, and runs in one calm place.
+          </h1>
+          <p className="mt-4 max-w-[420px] text-[15px] leading-relaxed text-[var(--ink-soft)]">
+            Sign in to review drafts, connect tools, and keep every worker on the record.
+          </p>
+          <div className="mt-8 rounded-[18px] bg-[var(--bg-card)] p-4 ring-1 ring-[var(--line)]">
+            <div className="flex items-center justify-between border-b border-[var(--line-soft)] pb-3">
+              <span className="text-[13px] font-medium">Client Follow-up Worker</span>
+              <span className="rounded-full bg-[var(--sel)] px-2.5 py-1 text-[10.5px] font-medium text-[var(--accent)]">Needs approval</span>
             </div>
+            <div className="space-y-3 pt-3">
+              {["Read calendar notes", "Drafted Sarah follow-up", "Holding send for approval"].map((item, index) => (
+                <div key={item} className="flex items-center gap-3 text-[12.5px] text-[var(--ink-soft)]">
+                  <span className={`h-1.5 w-1.5 rounded-full ${index === 2 ? "bg-[var(--accent)]" : "bg-[var(--ink-mute)]"}`} />
+                  {item}
+                </div>
+              ))}
+            </div>
+          </div>
+        </div>
 
+        <div className="w-full max-w-[420px] justify-self-center">
+          <div className="rounded-[18px] border border-[var(--line)] bg-[var(--bg-card)] p-7 shadow-[0_18px_56px_rgba(16,17,20,0.08)]">
+            <div className="mb-7 space-y-1.5 text-center">
+              <div className="mx-auto mb-4 flex h-10 w-10 items-center justify-center rounded-[12px] bg-[var(--ink)] text-[var(--bg-card)]">
+                <FloomMark size={20} inverted />
+              </div>
+              <h1 className="text-[23px] font-semibold leading-tight tracking-[-0.024em]">Sign in to WorkerOS</h1>
+              <p className="text-[13px] leading-relaxed text-[var(--ink-soft)]">Magic link or password. Same workspace, same worker record.</p>
+            </div>
             <div className="space-y-2.5">
               <a href={OAUTH_LOGIN_URL(next)} className="auth-btn auth-btn-primary">
                 <GoogleIcon />
@@ -55,7 +86,7 @@ export default async function LoginPage({
 
             <LoginEmailPanel next={next} />
 
-            <p className="mt-6 text-[11.5px] leading-[1.6] text-[var(--ink-mute)] text-center">
+            <p className="mt-6 text-center text-[11.5px] leading-[1.6] text-[var(--ink-mute)]">
               By signing in you agree to the{" "}
               <Link href="/terms" className="underline underline-offset-2 hover:text-[var(--ink)] transition-colors">
                 Terms
@@ -78,6 +109,24 @@ export default async function LoginPage({
       </section>
 
       <style>{`
+        .login-cool {
+          --bg-app: #FBFBFC;
+          --bg-card: #FFFFFF;
+          --bg-2: #F3F4F6;
+          --bg-3: #ECEDF0;
+          --ink: #16171A;
+          --ink-soft: #6B7280;
+          --ink-mute: rgba(107, 114, 128, 0.78);
+          --line: rgba(16, 17, 20, 0.09);
+          --line-soft: rgba(16, 17, 20, 0.055);
+          --accent: #3E6FE0;
+          --sel: #EEF3FE;
+          --solid: #16171A;
+          --solid-2: #2A2C31;
+          --solid-fg: #FFFFFF;
+          --success: #2F8F5B;
+          --warning: #E5533D;
+        }
         .auth-btn {
           display: flex;
           align-items: center;
@@ -100,13 +149,21 @@ export default async function LoginPage({
         }
         .auth-btn-primary:hover { background: var(--solid-2); }
         .auth-btn-secondary {
-          background: var(--paper);
+          background: var(--bg-card);
           color: var(--ink);
           border: 1px solid var(--line);
         }
         .auth-btn-secondary:hover {
           border-color: rgba(20,20,20,0.18);
-          background: var(--paper-2);
+          background: var(--bg-2);
+        }
+        .auth-btn-accent {
+          background: var(--accent);
+          color: #fff;
+          border: 1px solid var(--accent);
+        }
+        .auth-btn-accent:hover {
+          background: #315EC6;
         }
       `}</style>
     </main>
@@ -116,14 +173,14 @@ export default async function LoginPage({
 // Same play-arrow mark + lockup the landing nav uses (.ln-mark / "Floom /
 // workeros"). /login only imports globals.css, not landing.css, so the mark
 // is inlined here from the same SVG path rather than reusing the class.
-function FloomMark({ size = 20 }: { size?: number }) {
+function FloomMark({ size = 20, inverted = false }: { size?: number; inverted?: boolean }) {
   return (
     <svg
       width={size}
       height={size}
       viewBox="0 0 100 100"
       aria-hidden="true"
-      style={{ color: "var(--ink)" }}
+      style={{ color: inverted ? "var(--bg-card)" : "var(--ink)" }}
     >
       <path
         d="M32 26h20l22 22a3 3 0 0 1 0 4l-22 22H32a6 6 0 0 1-6-6V32a6 6 0 0 1 6-6z"

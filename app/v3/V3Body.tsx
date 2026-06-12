@@ -23,14 +23,13 @@ import { appUrl } from "@/lib/app-url";
 import {
   GCalLogo,
   GmailLogo,
-  GitHubSVG,
   GranolaLogo,
   HubSpotLogo,
   NotionLogo,
   SheetsLogo,
   SlackLogo,
 } from "@/components/landing-icons";
-import { V3Composer } from "./V3Composer";
+import { V3Composer, V3StickyPrompt } from "./V3Composer";
 import { V3TemplateCard } from "./V3TemplateCard";
 import { getTemplate } from "@/components/landing-ref/data";
 import { Hl, V3Shell } from "./V3Shell";
@@ -104,21 +103,35 @@ function BeatDescribe() {
 
 function BeatApprove() {
   return (
-    <div className="w-full max-w-[460px] rounded-[18px] bg-card p-6 ring-1 ring-border">
-      <div className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">Email draft · to Sarah at Acme</div>
-      <div className="mt-3 text-[17px] font-medium tracking-[-0.01em]">Next steps from today&apos;s call</div>
-      <p className="mt-2 text-[13.5px] leading-relaxed text-muted-foreground">
-        Hi Sarah, thanks for the call today. Based on what you shared, I&apos;d suggest starting with the onboarding workflow and the CRM cleanup before renewals…
-      </p>
-      <motion.div
-        initial={{ opacity: 0 }}
-        animate={{ opacity: 1 }}
-        transition={{ delay: 0.3, duration: 0.4 }}
-        className="mt-3 text-[11.5px] text-muted-foreground"
-      >
-        Built from your tone guide and pricing sheet
-      </motion.div>
-      <div className="mt-5 flex gap-2">
+    <div className="w-full max-w-[460px] overflow-hidden rounded-[18px] bg-card ring-1 ring-border">
+      <div className="border-b border-border-soft px-5 py-3.5">
+        <div className="flex items-center justify-between gap-3">
+          <div className="text-[10.5px] font-semibold uppercase tracking-[0.11em] text-muted-foreground">
+            Email draft
+          </div>
+          <div className="rounded-full bg-secondary px-2.5 py-1 text-[10.5px] font-medium text-muted-foreground">
+            To Sarah at Acme
+          </div>
+        </div>
+      </div>
+      <div className="px-5 py-5">
+        <div className="text-[18px] font-semibold tracking-[-0.018em]">Next steps from today&apos;s call</div>
+        <div className="mt-3 rounded-[14px] bg-secondary/80 px-4 py-3.5">
+          <p className="text-[13.5px] leading-relaxed text-foreground/80">
+            Hi Sarah, thanks for the call today. Based on what you shared, I&apos;d suggest starting with the onboarding workflow and the CRM cleanup before renewals…
+          </p>
+        </div>
+        <motion.div
+          initial={{ opacity: 0 }}
+          animate={{ opacity: 1 }}
+          transition={{ delay: 0.3, duration: 0.4 }}
+          className="mt-3 flex items-center gap-2 text-[11.5px] text-muted-foreground"
+        >
+          <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--v3-accent)" }} />
+          Built from your tone guide and pricing sheet
+        </motion.div>
+      </div>
+      <div className="flex gap-2 border-t border-border-soft px-5 py-4">
         <motion.span
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
@@ -132,7 +145,7 @@ function BeatApprove() {
           initial={{ opacity: 0, y: 6 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ delay: 0.55, duration: 0.35 }}
-          className="rounded-[10px] border border-border bg-card px-4 py-2 text-[13px]"
+          className="rounded-[10px] border border-border bg-card px-4 py-2 text-[13px] text-foreground/80"
         >
           Edit
         </motion.span>
@@ -143,12 +156,12 @@ function BeatApprove() {
 
 function BeatRecord() {
   return (
-    <div className="w-full max-w-[460px] rounded-[18px] bg-card p-6 ring-1 ring-border">
-      <div className="flex items-center justify-between">
-        <span className="text-[14px] font-medium">This week</span>
-        <span className="font-mono text-[10.5px] text-muted-foreground">5 runs</span>
+    <div className="w-full max-w-[460px] overflow-hidden rounded-[18px] bg-card ring-1 ring-border">
+      <div className="flex items-center justify-between border-b border-border-soft px-5 py-4">
+        <span className="text-[15px] font-semibold tracking-[-0.012em]">This week</span>
+        <span className="rounded-full bg-secondary px-2.5 py-1 font-mono text-[10.5px] text-muted-foreground">5 runs</span>
       </div>
-      <div className="mt-3.5">
+      <div className="px-5 py-2">
         {[
           ["Mon", "Posted to HubSpot", true],
           ["Tue", "Posted to HubSpot", true],
@@ -161,16 +174,19 @@ function BeatRecord() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ delay: 0.12 + i * 0.08, duration: 0.35 }}
-            className="flex items-center border-b border-border-soft py-2.5 text-[13px] last:border-0"
+            className="flex items-center gap-3 border-b border-border-soft py-3 text-[13px] last:border-0"
           >
-            {/* Fixed-width day column so text aligns perfectly */}
-            <span className="w-10 shrink-0 font-mono text-[10.5px] text-muted-foreground">{d as string}</span>
-            <span className="flex-1 text-muted-foreground">{s as string}</span>
-            {/* Checkmark inline at row end, not floating */}
+            <span className={`w-12 shrink-0 font-mono text-[10.5px] ${done ? "text-muted-foreground" : "font-semibold"}`} style={!done ? { color: "var(--v3-accent)" } : undefined}>
+              {d as string}
+            </span>
+            <span className={`flex-1 ${done ? "text-muted-foreground" : "font-medium text-foreground"}`}>{s as string}</span>
             {done ? (
               <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
             ) : (
-              <span className="h-2 w-2 shrink-0 rounded-full" style={{ background: "var(--v3-accent)" }} />
+              <span className="relative flex h-3 w-3 shrink-0 items-center justify-center">
+                <span className="absolute h-3 w-3 rounded-full opacity-15" style={{ background: "var(--v3-accent)" }} />
+                <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--v3-accent)" }} />
+              </span>
             )}
           </motion.div>
         ))}
@@ -400,6 +416,8 @@ export function V3Body() {
             </Link>
           </motion.div>
         </section>
+
+        <V3StickyPrompt />
 
     </V3Shell>
   );

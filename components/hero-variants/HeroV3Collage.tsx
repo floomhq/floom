@@ -26,6 +26,7 @@ import {
   type CSSProperties,
   type ComponentType,
 } from "react";
+import Link from "next/link";
 import {
   BarChart3,
   DollarSign,
@@ -462,12 +463,12 @@ export function HeroV3Collage() {
           className="mt-6 text-center text-[13px] text-muted-foreground"
         >
           Or{" "}
-          <a
+          <Link
             href="/templates"
             className="font-medium text-foreground underline-offset-4 transition-colors hover:text-[#3a6ea5] hover:underline"
           >
             browse ready-made workers
-          </a>
+          </Link>
           .
         </motion.div>
       </div>

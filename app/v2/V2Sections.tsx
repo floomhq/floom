@@ -285,7 +285,7 @@ const APP_WORKERS = [
 
 export function AppFrame({ standalone = false }: { standalone?: boolean }) {
   return (
-    <section id="product" className="pb-32">
+    <section id="product" className={standalone ? "pb-0" : "pb-24"}>
       {!standalone && (
         <SectionHead
           title="The cockpit behind every worker."
@@ -293,62 +293,77 @@ export function AppFrame({ standalone = false }: { standalone?: boolean }) {
         />
       )}
       <RevealUp delay={0.1} className={standalone ? "" : "mt-9"}>
-        <div className="overflow-hidden rounded-[16px] bg-card">
-          <div className="flex">
-            {/* sidebar */}
-            <div className="hidden w-[190px] shrink-0 flex-col border-r border-border-soft bg-[var(--bg-app)] py-3 sm:flex">
-              <div className="flex items-center gap-2 px-4 pb-3">
-                <span className="flex h-5 w-5 items-center justify-center rounded-[6px] bg-primary">
-                  <svg width="11" height="11" viewBox="0 0 100 100"><path d="M30 22 h20 l22 22 a3 3 0 0 1 0 4 l-22 22 h-20 a6 6 0 0 1 -6 -6 v-36 a6 6 0 0 1 6 -6 z" fill="var(--primary-text)" /></svg>
-                </span>
-                <span className="text-[12.5px] font-semibold">WorkerOS</span>
-              </div>
-              <div className="flex flex-col gap-px px-2.5">
-                {NAV_ITEMS.map((n) => (
-                  <div key={n.label} className={`flex items-center gap-2.5 rounded-[8px] px-2.5 py-[7px] text-[12px] ${n.on ? "bg-secondary font-medium text-foreground" : "text-muted-foreground"}`}>
-                    <n.icon className="h-[14px] w-[14px] opacity-70" />
-                    {n.label}
-                    {n.badge && <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full bg-primary px-1 text-[9.5px] font-semibold text-primary-foreground">{n.badge}</span>}
-                  </div>
-                ))}
-              </div>
-            </div>
-            {/* main */}
-            <div className="min-w-0 flex-1 p-5">
-              <div className="flex items-center justify-between">
-                <div>
-                  <div className="text-[17px] font-semibold tracking-[-0.01em]">Workers</div>
-                  <div className="text-[11.5px] text-muted-foreground">8 active · 1 needs your approval</div>
+        <div className="overflow-hidden rounded-[22px] border border-border bg-card p-2">
+          <div className="flex items-center gap-1.5 border-b border-border-soft px-2 pb-2">
+            <span className="h-2.5 w-2.5 rounded-full bg-[var(--bg-3)]" />
+            <span className="h-2.5 w-2.5 rounded-full bg-[var(--bg-3)]" />
+            <span className="h-2.5 w-2.5 rounded-full bg-[var(--bg-3)]" />
+            <span className="ml-3 text-[10.5px] font-medium text-muted-foreground">workers.floom.dev</span>
+          </div>
+          <div className="mt-2 overflow-hidden rounded-[16px] bg-[var(--bg-app)]">
+            <div className="flex">
+              {/* sidebar */}
+              <div className="hidden w-[190px] shrink-0 flex-col border-r border-border-soft bg-[var(--bg-card)] py-3 sm:flex">
+                <div className="flex items-center gap-2 px-4 pb-3">
+                  <span className="flex h-5 w-5 items-center justify-center rounded-[6px] bg-primary">
+                    <svg width="11" height="11" viewBox="0 0 100 100"><path d="M30 22 h20 l22 22 a3 3 0 0 1 0 4 l-22 22 h-20 a6 6 0 0 1 -6 -6 v-36 a6 6 0 0 1 6 -6 z" fill="var(--primary-text)" /></svg>
+                  </span>
+                  <span className="text-[12.5px] font-semibold">WorkerOS</span>
                 </div>
-                <span className="rounded-[10px] bg-primary px-3 py-1.5 text-[12px] font-medium text-primary-foreground">+ New worker</span>
+                <div className="flex flex-col gap-px px-2.5">
+                  {NAV_ITEMS.map((n) => (
+                    <div key={n.label} className={`flex items-center gap-2.5 rounded-[8px] px-2.5 py-[7px] text-[12px] ${n.on ? "bg-secondary font-medium text-foreground" : "text-muted-foreground"}`}>
+                      <n.icon className="h-[14px] w-[14px] opacity-70" />
+                      {n.label}
+                      {n.badge && <span className="ml-auto flex h-4 min-w-4 items-center justify-center rounded-full px-1 text-[9.5px] font-semibold text-white" style={{ background: "var(--v3-accent, var(--primary))" }}>{n.badge}</span>}
+                    </div>
+                  ))}
+                </div>
               </div>
-              <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
-                {APP_WORKERS.map((w, i) => (
-                  <motion.div
-                    key={w.nm}
-                    initial={{ opacity: 0, y: 8 }}
-                    whileInView={{ opacity: 1, y: 0 }}
-                    viewport={{ once: true }}
-                    transition={{ delay: i * 0.06, duration: 0.4, ease: EASE }}
-                    className="rounded-[12px] bg-[var(--bg-app)] p-3.5 transition-colors hover:bg-secondary"
-                  >
-                    <div className="flex items-center gap-2.5">
-                      <span className="truncate text-[13px] font-medium">{w.nm}</span>
-                      <span className="ml-auto">
-                        <StatusPill tone={w.st === "ok" ? "success" : w.st === "warn" ? "warning" : "pending"}>
-                          {w.st === "ok" ? "Live" : w.st === "warn" ? "Needs you" : "Running"}
-                        </StatusPill>
-                      </span>
-                    </div>
-                    <p className="mt-2 line-clamp-2 text-[12px] leading-relaxed text-muted-foreground">{w.d}</p>
-                    <div className="mt-2.5 flex items-center gap-1.5">
-                      {w.tools.map((t, j) => (
-                        <span key={j} className="flex h-[20px] w-[20px] items-center justify-center rounded-[6px] bg-secondary [&_svg]:h-[11px] [&_svg]:w-[11px]">{t}</span>
-                      ))}
-                      <span className="ml-auto font-mono text-[10px] text-muted-foreground">{w.meta}</span>
-                    </div>
-                  </motion.div>
-                ))}
+              {/* main */}
+              <div className="min-w-0 flex-1 bg-[var(--bg-app)] p-5">
+                <div className="flex items-center justify-between">
+                  <div>
+                    <div className="text-[17px] font-semibold tracking-[-0.01em]">Workers</div>
+                    <div className="text-[11.5px] text-muted-foreground">8 active · 1 needs your approval</div>
+                  </div>
+                  <span className="rounded-[10px] px-3 py-1.5 text-[12px] font-medium text-white" style={{ background: "var(--v3-accent, var(--primary))" }}>+ New worker</span>
+                </div>
+                <div className="mt-4 grid gap-2.5 sm:grid-cols-2">
+                  {APP_WORKERS.map((w, i) => (
+                    <motion.div
+                      key={w.nm}
+                      initial={{ opacity: 0, y: 8 }}
+                      whileInView={{ opacity: 1, y: 0 }}
+                      viewport={{ once: true }}
+                      transition={{ delay: i * 0.06, duration: 0.4, ease: EASE }}
+                      className="rounded-[12px] bg-card p-3.5 ring-1 ring-border-soft transition-colors hover:bg-secondary"
+                    >
+                      <div className="flex items-center gap-2.5">
+                        <span className="truncate text-[13px] font-medium">{w.nm}</span>
+                        <span className="ml-auto">
+                          <span
+                            className={`inline-flex items-center gap-1.5 rounded-full border px-2 py-0.5 text-[10.5px] font-semibold uppercase tracking-wider ${
+                              w.st === "warn"
+                                ? "border-transparent bg-[var(--v3-sel,#EEF3FE)] text-[var(--v3-accent,#3E6FE0)]"
+                                : "border-border bg-secondary text-muted-foreground"
+                            }`}
+                          >
+                            <span className="h-1.5 w-1.5 rounded-full" style={{ background: w.st === "warn" ? "var(--v3-accent, #3E6FE0)" : "currentColor" }} />
+                            {w.st === "ok" ? "Live" : w.st === "warn" ? "Needs you" : "Running"}
+                          </span>
+                        </span>
+                      </div>
+                      <p className="mt-2 line-clamp-2 text-[12px] leading-relaxed text-muted-foreground">{w.d}</p>
+                      <div className="mt-2.5 flex items-center gap-1.5">
+                        {w.tools.map((t, j) => (
+                          <span key={j} className="flex h-[20px] w-[20px] items-center justify-center rounded-[6px] bg-secondary [&_svg]:h-[11px] [&_svg]:w-[11px]">{t}</span>
+                        ))}
+                        <span className="ml-auto font-mono text-[10px] text-muted-foreground">{w.meta}</span>
+                      </div>
+                    </motion.div>
+                  ))}
+                </div>
               </div>
             </div>
           </div>

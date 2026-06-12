@@ -1,8 +1,8 @@
 "use client";
 
 /**
- * /v2/docs — docs as their own page on the v2 system. Quickstart-first,
- * sticky mini-TOC on desktop, code blocks in the spec grammar.
+ * /v3/docs — docs on the same cool-light system as the landing pages.
+ * Quickstart-first, restrained cards, shared V3 shell and tokens.
  */
 
 import Link from "next/link";
@@ -40,7 +40,7 @@ function CopyLine({ text }: { text: string }) {
 
 function Code({ children }: { children: React.ReactNode }) {
   return (
-    <pre className="overflow-x-auto rounded-[10px] bg-secondary px-4 py-3 font-mono text-[12px] leading-relaxed text-foreground/85">
+    <pre className="overflow-x-auto rounded-[12px] bg-secondary px-4 py-3 font-mono text-[12px] leading-relaxed text-foreground/85">
       {children}
     </pre>
   );
@@ -84,9 +84,26 @@ function McpInstall() {
 
 function H2({ id, children }: { id: string; children: React.ReactNode }) {
   return (
-    <h2 id={id} className="mb-3 mt-12 scroll-mt-24 text-[22px] font-semibold tracking-[-0.018em] first:mt-0">
+    <h2 id={id} className="scroll-mt-24 text-[21px] font-semibold tracking-[-0.02em]">
       {children}
     </h2>
+  );
+}
+
+function DocsSection({
+  id,
+  title,
+  children,
+}: {
+  id: string;
+  title: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <section className="rounded-[18px] bg-card p-5 ring-1 ring-border">
+      <H2 id={id}>{title}</H2>
+      <div className="mt-4">{children}</div>
+    </section>
   );
 }
 
@@ -99,20 +116,23 @@ export function V3DocsBody() {
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
           transition={{ duration: 0.5, ease: EASE }}
-          className="pb-10 pt-12"
+          className="pb-9 pt-16"
         >
-          <h1 className="text-[36px] font-semibold tracking-[-0.028em]">Docs</h1>
-          <p className="mt-2 max-w-[480px] text-[14px] text-muted-foreground">
-            Everything you need to hire your first <Hl>worker</Hl> and keep it on the record.
+          <div className="inline-flex rounded-full bg-[var(--v3-sel)] px-3 py-1 text-[12px] font-medium" style={{ color: "var(--v3-accent)" }}>
+            WorkerOS docs
+          </div>
+          <h1 className="mt-5 text-[40px] font-semibold leading-[1.03] tracking-[-0.034em] sm:text-[52px]">Hire your first <Hl>worker</Hl>.</h1>
+          <p className="mt-4 max-w-[520px] text-[15px] leading-relaxed text-muted-foreground">
+            Everything you need to hire your first worker and keep it on the record.
           </p>
         </motion.div>
 
-        <div className="grid gap-12 md:grid-cols-[180px_1fr]">
+        <div className="grid gap-10 md:grid-cols-[190px_1fr]">
           {/* mini TOC */}
           <div className="hidden md:block">
-            <div className="sticky top-8 flex flex-col gap-0.5 border-l border-border pl-4">
+            <div className="sticky top-20 rounded-[16px] bg-card p-2 ring-1 ring-border">
               {TOC.map(([id, label]) => (
-                <a key={id} href={`#${id}`} className="py-1 text-[12.5px] text-muted-foreground transition-colors hover:text-foreground">
+                <a key={id} href={`#${id}`} className="block rounded-[10px] px-3 py-2 text-[12.5px] text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground">
                   {label}
                 </a>
               ))}
@@ -120,8 +140,8 @@ export function V3DocsBody() {
           </div>
 
           {/* content */}
-          <div className="min-w-0 max-w-[620px]">
-            <H2 id="quickstart">Quickstart</H2>
+          <div className="flex min-w-0 max-w-[700px] flex-col gap-4">
+            <DocsSection id="quickstart" title="Quickstart">
             <ol className="flex flex-col gap-2.5 text-[13.5px] leading-relaxed text-foreground/85">
               <li><b className="font-semibold">1. Describe the job.</b> One sentence, plain English. WorkerOS recognises your tools as you type.</li>
               <li><b className="font-semibold">2. Review the draft.</b> Tools, schedule, approval rules and company brain, assembled for review. Edit anything, then hire.</li>
@@ -130,8 +150,9 @@ export function V3DocsBody() {
             <div className="mt-4">
               <Link href="/v3" className="text-[13px] font-medium" style={{ color: "var(--v3-accent)" }}>Hire your first worker →</Link>
             </div>
+            </DocsSection>
 
-            <H2 id="channels">Install in your channel</H2>
+            <DocsSection id="channels" title="Install in your channel">
             <p className="text-[13.5px] leading-relaxed text-muted-foreground">
               You never have to open the dashboard. Install WorkerOS where your team already talks and hire, approve, and redirect from there.
             </p>
@@ -161,8 +182,9 @@ export function V3DocsBody() {
                 <Link href="/login?install=cli" className="rounded-[8px] border border-border bg-card px-2.5 py-1 text-[12px] font-medium hover:bg-secondary">Pair</Link>
               </div>
             </div>
+            </DocsSection>
 
-            <H2 id="mcp">Use from any agent (MCP)</H2>
+            <DocsSection id="mcp" title="Use from any agent (MCP)">
             <p className="mb-3 text-[13.5px] leading-relaxed text-muted-foreground">
               WorkerOS speaks MCP. Add it to Claude Code, Cursor, Codex, or any client and drive workers from where you already work.
             </p>
@@ -171,18 +193,21 @@ export function V3DocsBody() {
             <p className="mt-3 text-[12.5px] text-muted-foreground">
               Then: &quot;run client-follow-up for the Acme call&quot; from your agent. The run lands on the record like any other.
             </p>
+            </DocsSection>
 
-            <H2 id="brain">Company brain</H2>
+            <DocsSection id="brain" title="Company brain">
             <p className="text-[13.5px] leading-relaxed text-muted-foreground">
               Drop in SOPs, pricing sheets, tone guides, links. Every worker brief comes pre-loaded with what your team already knows, and each run logs which files it used so you can audit the why behind every output.
             </p>
+            </DocsSection>
 
-            <H2 id="approvals">Approvals</H2>
+            <DocsSection id="approvals" title="Approvals">
             <p className="text-[13.5px] leading-relaxed text-muted-foreground">
               Anything that leaves the building (emails, CRM writes, posts) is held for your yes by default. Approve in Slack, WhatsApp, or the app. You can relax the gate per worker once you trust it.
             </p>
+            </DocsSection>
 
-            <H2 id="faq">FAQ</H2>
+            <DocsSection id="faq" title="FAQ">
             <div className="flex flex-col gap-4">
               {[
                 ["Which models does it use?", "Any. Bring your own keys or use the defaults. Model choice is per worker."],
@@ -196,6 +221,7 @@ export function V3DocsBody() {
                 </div>
               ))}
             </div>
+            </DocsSection>
           </div>
         </div>
     </V3Shell>

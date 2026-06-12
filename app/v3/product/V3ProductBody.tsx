@@ -166,14 +166,14 @@ function Beat({
   flip?: boolean;
 }) {
   return (
-    <section className="grid items-center gap-12 pb-32 md:grid-cols-2 md:gap-16">
+    <section className="grid items-center gap-10 pb-20 md:grid-cols-2 md:gap-14">
       <Reveal className={flip ? "md:order-2" : ""}>
         <h2 className="text-[27px] font-semibold leading-[1.06] tracking-[-0.025em] sm:text-[34px]">{title}</h2>
         <p className="mt-3 max-w-[400px] text-[15px] leading-relaxed text-muted-foreground">{copy}</p>
         <p className="mt-3 max-w-[400px] text-[13px] leading-relaxed text-muted-foreground/80">{detail}</p>
       </Reveal>
       <Reveal delay={0.1} className={flip ? "md:order-1" : ""}>
-        <div className="flex items-center justify-center rounded-[22px] bg-secondary/70 p-8 md:min-h-[380px]">
+        <div className="flex items-center justify-center rounded-[22px] bg-secondary/70 p-7 md:min-h-[340px]">
           {artifact}
         </div>
       </Reveal>
@@ -187,7 +187,7 @@ export function V3ProductBody() {
 
 
         {/* hero */}
-        <div className="pb-14 pt-20 text-center">
+        <div className="pb-10 pt-20 text-center">
           <motion.h1
             initial={{ opacity: 0, y: 12 }}
             animate={{ opacity: 1, y: 0 }}
@@ -206,7 +206,7 @@ export function V3ProductBody() {
           </motion.p>
         </div>
 
-        <div className="pb-28">
+        <div className="pb-16">
           <AppFrame standalone />
         </div>
 
@@ -233,7 +233,7 @@ export function V3ProductBody() {
         />
 
         {/* connections, one quiet line */}
-        <Reveal className="flex flex-col items-center gap-4 pb-28 text-center">
+        <Reveal className="flex flex-col items-center gap-4 pb-20 text-center">
           <span className="flex items-center justify-center gap-5 opacity-80">
             {[<GmailLogo key="g" />, <SlackLogo key="s" />, <HubSpotLogo key="h" />, <NotionLogo key="n" />, <GCalLogo key="c" />, <SheetsLogo key="sh" />].map((logo, i) => (
               <span key={i} className="flex h-5 w-5 items-center justify-center [&_svg]:h-5 [&_svg]:w-5">{logo}</span>
@@ -245,7 +245,7 @@ export function V3ProductBody() {
         </Reveal>
 
         {/* close */}
-        <Reveal className="pb-12 text-center">
+        <Reveal className="pb-10 text-center">
           <Link
             href="/login"
             className="inline-flex items-center rounded-[12px] px-6 py-3 text-[14.5px] font-medium text-white"
