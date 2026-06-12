@@ -1107,3 +1107,47 @@ def test_protected_stock_worker_direct_mutations_are_blocked(monkeypatch, tmp_pa
     for name, response in blocked_checks.items():
         assert response.status_code == 403, f"{name}: {response.status_code} {response.text}"
         assert response.json() == {"detail": "Stock workers cannot be modified through the API"}
+
+
+def test_973_private_cross_owner_not_in_list_or_bundle(monkeypatch, tmp_path):
+    """#973: a member must not read/list/bundle another owner's PRIVATE worker.
+
+    The pentest saw can_view=false yet 200 on read/bundle on the cloud
+    deployment. This pins the engine contract: list excludes it, detail 404s,
+    bundle.zip 404s, and the permission object (when reachable) is can_view
+    false — never a 200 body for the private cross-owner worker.
+    """
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    created = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("private-secret-worker", title="Private Secret"),
+    )
+    assert created.status_code == 200, created.text
+    # ensure it is private (engine default), not workspace-shared
+    assert client.get("/workers/private-secret-worker", headers=_headers("user-a")).status_code == 200
+
+    # user-b: list must not contain it
+    listing = client.get("/workers", headers=_headers("user-b"))
+    assert listing.status_code == 200, listing.text
+    ids = {w["id"] for w in listing.json()}
+    assert "private-secret-worker" not in ids, "private cross-owner worker leaked into list (#973)"
+
+    # user-b: detail and bundle must 404 (never expose source)
+    assert client.get("/workers/private-secret-worker", headers=_headers("user-b")).status_code == 404
+    bundle = client.get("/workers/private-secret-worker/bundle.zip", headers=_headers("user-b"))
+    assert bundle.status_code == 404, f"bundle leaked private worker source (#973): {bundle.status_code}"
+
+    # user-b: global search must not surface it
+    search = client.get("/search?q=Private+Secret&types=workers", headers=_headers("user-b"))
+    assert search.status_code == 200, search.text
+    search_ids = {item["id"] for item in search.json().get("results", []) if item.get("type") == "worker"}
+    assert "private-secret-worker" not in search_ids, "private cross-owner worker leaked via /search (#973)"
+
+    # owner still has full access (detail, bundle, and search find it)
+    assert client.get("/workers/private-secret-worker/bundle.zip", headers=_headers("user-a")).status_code == 200
+    owner_search = client.get("/search?q=Private+Secret&types=workers", headers=_headers("user-a"))
+    owner_ids = {item["id"] for item in owner_search.json().get("results", []) if item.get("type") == "worker"}
+    assert "private-secret-worker" in owner_ids
