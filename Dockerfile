@@ -6,17 +6,26 @@ RUN apt-get update && apt-get install -y --no-install-recommends \
 
 WORKDIR /opt/workeros-cloud
 
-# Copy repo
+# Copy repo (.dockerignore keeps .env files, node_modules, tests, and other
+# non-runtime content out of the image — workeros#936).
 COPY . .
 
 # Initialize the engine/ submodule. Railway clones the repo from GitHub but
-# does not recurse into submodules. GIT_TOKEN must be a GitHub token with
-# read access to floomhq/workeros — set it as a Railway build variable.
+# does not recurse into submodules.
+#
+# workeros#936: prefer a BuildKit secret mount (`--mount=type=secret,id=git_token`)
+# so the token never persists in an image layer. The ARG remains as a fallback
+# for builders that can't pass secret mounts; set the GIT_TOKEN build variable
+# only when secret mounts are unavailable.
 ARG GIT_TOKEN
-RUN if [ -n "$GIT_TOKEN" ]; then \
-      git config --global url."https://${GIT_TOKEN}@github.com/".insteadOf "https://github.com/" && \
-      git submodule update --init --recursive && \
-      git config --global --unset-all url."https://${GIT_TOKEN}@github.com/".insteadOf || true; \
+RUN --mount=type=secret,id=git_token \
+    TOKEN="$( [ -f /run/secrets/git_token ] && cat /run/secrets/git_token || printf '%s' "$GIT_TOKEN" )"; \
+    if [ -n "$TOKEN" ]; then \
+      git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/" && \
+      git submodule update --init --recursive; \
+      status=$?; \
+      git config --global --unset-all url."https://${TOKEN}@github.com/".insteadOf || true; \
+      [ "$status" -eq 0 ] || exit "$status"; \
     fi
 
 RUN pip install --no-cache-dir uv
@@ -26,6 +35,11 @@ RUN uv pip install --system --no-cache -r requirements.txt
 RUN mkdir -p /opt/workeros-cloud/var/workers \
              /opt/workeros-cloud/var/contexts \
              /opt/workeros-cloud/var/artifacts
+
+# workeros#936: run the API as an unprivileged user, not root.
+RUN useradd --create-home --uid 10001 workeros \
+    && chown -R workeros:workeros /opt/workeros-cloud
+USER workeros
 
 EXPOSE 8000
 

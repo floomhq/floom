@@ -1,0 +1,25 @@
+# #171 (workeros#936): keep secrets, dev artifacts, and dead weight out of the
+# image. NOTE: .git is intentionally NOT ignored — the build runs
+# `git submodule update --init` to pull the engine/ submodule.
+.env
+.env.*
+*.env
+**/.env
+**/.env.*
+node_modules
+**/node_modules
+web/.next
+**/.next
+var/
+tests/
+test-results/
+playwright-report/
+docs/
+.github/
+.vscode/
+.idea/
+WORKPLAN-*.md
+*.log
+__pycache__/
+**/__pycache__/
+.pytest_cache/
