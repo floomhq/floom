@@ -3608,6 +3608,16 @@ def execute_run(
             preview_type = decision_required.get("preview_type") or decision_required.get("type")
             preview_payload = decision_required.get("preview_payload")
             preview_payload_json = json.dumps(preview_payload) if isinstance(preview_payload, (dict, list)) else None
+            # #795: snapshot the run's cost-so-far onto the approval so the
+            # Run tab renders "1.2k tok · $0.01" without a separate run fetch.
+            # Best-effort estimate from whatever the transcript has at pause.
+            try:
+                from cost import estimate_cost_usd, total_tokens_from_transcript
+
+                _tokens_so_far = total_tokens_from_transcript(run_id)
+                _cost_so_far = estimate_cost_usd(_tokens_so_far)
+            except Exception:
+                _tokens_so_far, _cost_so_far = None, None
             try:
                 repos_obj.approvals.create(
                     owner_id=owner_id,
@@ -3622,6 +3632,8 @@ def execute_run(
                     preview_type=(str(preview_type) if preview_type else None),
                     preview_payload_json=preview_payload_json,
                     decision_input_json=decision_input_json,
+                    tokens_so_far=_tokens_so_far,
+                    cost_usd_so_far=_cost_so_far,
                 )
             except Exception as exc:
                 logger.error("Failed to create approval row for run %s: %s", run_id, exc)
