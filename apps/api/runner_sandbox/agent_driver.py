@@ -45,6 +45,33 @@ from .base import SandboxDriver
 
 logger = logging.getLogger("floom.runner_sandbox.agent")
 
+def _ws_setting(key: str) -> "Optional[str]":
+    """#797: read a workspace setting (model/limit defaults) — lazy import to
+    avoid a run_service <-> driver import cycle. None when unset."""
+    try:
+        from run_service import _workspace_setting
+        return _workspace_setting(key)
+    except Exception:
+        return None
+
+
+def _ws_default_model() -> "Optional[str]":
+    v = (_ws_setting("default_model") or "").strip()
+    return v or None
+
+
+def _ws_default_int(key: str) -> "Optional[int]":
+    raw = (_ws_setting(key) or "").strip()
+    if not raw:
+        return None
+    try:
+        n = int(float(raw))
+        return n if n > 0 else None
+    except ValueError:
+        return None
+
+
+
 _CWD_LOCK = threading.Lock()
 _CANCEL_FLAG_DB_READ_ERRORS_LOCK = threading.Lock()
 _CANCEL_FLAG_DB_READ_ERRORS_TOTAL = 0
@@ -232,6 +259,11 @@ class AgentDriver(SandboxDriver):
 
         limits = config.runtime.limits
         timeout_seconds = min(timeout_seconds, limits.timeout_seconds)
+        # #797: workspace default_timeout_seconds is a ceiling — the tightest of
+        # the requested, per-worker, and workspace timeouts wins.
+        _ws_timeout = _ws_default_int("default_timeout_seconds")
+        if _ws_timeout:
+            timeout_seconds = min(timeout_seconds, _ws_timeout)
         try:
             return await asyncio.wait_for(
                 self._run_agent_inner(
@@ -407,7 +439,7 @@ class AgentDriver(SandboxDriver):
                     )
 
                 force_finish = corrective_retry_used
-                _agent_model = _llm.agent_model(config.runtime.model or DEFAULT_WORKER_AGENT_MODEL)
+                _agent_model = _llm.agent_model(config.runtime.model or _ws_default_model() or DEFAULT_WORKER_AGENT_MODEL)
                 agent = Agent(
                     name=worker_id,
                     instructions=system_prompt,
