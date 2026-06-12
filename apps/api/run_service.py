@@ -496,6 +496,23 @@ def _dispatch_terminal_run_alerts(
         )
         if status != RunStatus.FAILED.value:
             return
+        # #794: workspace 'failure_email_enabled' toggle — email the workspace's
+        # configured address on ANY run failure (distinct from the per-worker
+        # email_to alert above). Best-effort; skipped when no recipient/RESEND.
+        try:
+            if _workspace_toggle("failure_email_enabled", env_var="WORKEROS_FAILURE_EMAIL", default=False):
+                recipients = _workspace_failure_email_recipients()
+                if recipients:
+                    _send_email_notification(
+                        to_addrs=recipients,
+                        worker_name=worker_id,
+                        run_id=run_id,
+                        worker_id=worker_id,
+                        status=status,
+                        error=error,
+                    )
+        except Exception:
+            logger.debug("workspace failure-email dispatch failed for run %s", run_id, exc_info=True)
         try:
             from alerting import alert_worker_failure_if_needed
 
@@ -1942,6 +1959,34 @@ def _spend_cap_for_config(config: Any) -> Optional[float]:
     return float(cap) if cap is not None else None
 
 
+def _workspace_monthly_spend_cap_usd() -> Optional[float]:
+    """#797: the workspace-level monthly spend cap from settings, or None."""
+    raw = (_workspace_setting("monthly_spend_cap_usd") or "").strip()
+    if not raw:
+        return None
+    try:
+        cap = float(raw)
+        return cap if cap >= 0 else None
+    except ValueError:
+        return None
+
+
+def _workspace_month_to_date_cost_usd() -> float:
+    """#797: sum of total_cost_usd across ALL runs in the current UTC month."""
+    from db import get_db
+
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(total_cost_usd), 0.0) AS spent FROM runs "
+                "WHERE created_at >= strftime('%Y-%m-01T00:00:00+00:00', 'now')"
+            ).fetchone()
+        return float(row["spent"] or 0.0) if row else 0.0
+    except Exception:
+        logger.debug("workspace month-to-date cost lookup failed", exc_info=True)
+        return 0.0
+
+
 def create_run(
     worker_id: str,
     inputs: Dict[str, Any],
@@ -1968,6 +2013,16 @@ def create_run(
             raise SpendCapExceeded(
                 f"Worker {worker_id} has reached its monthly spend cap "
                 f"(${_spent:.2f} of ${_cap:.2f}). Raise the cap or wait for next month."
+            )
+    # #797: workspace-level monthly spend cap — aggregate ALL workers' month-to-
+    # date cost against the workspace budget.
+    _ws_cap = _workspace_monthly_spend_cap_usd()
+    if _ws_cap is not None:
+        _ws_spent = _workspace_month_to_date_cost_usd()
+        if _ws_spent >= _ws_cap:
+            raise SpendCapExceeded(
+                f"Workspace has reached its monthly spend cap "
+                f"(${_ws_spent:.2f} of ${_ws_cap:.2f}). Raise it in Settings or wait for next month."
             )
     instance = loaded[2] if loaded else None
     if instance and not instance.get("enabled", True):
@@ -2770,6 +2825,13 @@ def _workspace_toggle(key: str, *, env_var: str, default: bool) -> bool:
     if raw is not None:
         return raw.strip().lower() not in _FALSEY
     return default
+
+
+def _workspace_failure_email_recipients() -> list[str]:
+    """#794: where workspace failure emails go — the `failure_email_to`
+    workspace setting (comma-separated), else NOTIFY_EMAIL / WORKEROS_ALERT_EMAIL."""
+    raw = _workspace_setting("failure_email_to") or os.environ.get("NOTIFY_EMAIL") or os.environ.get("WORKEROS_ALERT_EMAIL") or ""
+    return [addr.strip() for addr in raw.split(",") if addr.strip()]
 
 
 def _auto_pause_on_consecutive_failures_enabled() -> bool:
