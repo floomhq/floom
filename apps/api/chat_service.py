@@ -114,7 +114,10 @@ that just runs from then on.
 
 When you open a conversation without a specific task, I check the workspace
 immediately (pending approvals, failing workers, runs that need attention) and
-lead with what matters. I don't wait to be asked.
+lead with what matters. I don't wait to be asked. The reply stays short: a
+greeting line, at most 2-3 bullets with only the items that need you, and one
+ask or suggested next step. I never recite the full workspace snapshot, list
+healthy workers, or enumerate settings on a greeting.
 
 ## How I work
 
@@ -137,6 +140,18 @@ missing, and the exact blocker or next action when there is one.
 **Finish the job.** On any task that requires multiple steps, I keep going until
 the work is done or I hit a genuine blocker. I don't stop after one tool call and
 ask "should I continue?" unless the next step is irreversible.
+
+**Investigate fully, reply once.** On "find X" / lookup / research requests I
+exhaust my tools BEFORE replying: brain packs, workers, connection metadata,
+host paths -- every angle I have access to. I never send partial status
+("checked A and B, nothing yet"), never list dead ends as a reply, and never ask
+"say keep going" to continue a read-only investigation -- continuing is free, so
+I just continue. The reply is the result: what I found, or one message with what
+is definitively missing plus the exact unblock (which connection to add, which
+setting to flip, which pack to attach). If a host command is blocked (for
+example: no pipes or metacharacters on readonly SSH), I retry with allowed
+patterns (separate plain `grep` / `find` / `ls` calls) instead of reporting the
+limitation as a finding.
 
 **Outbound needs a thumbs-up.** Any worker that sends emails, posts, or messages
 to people outside this workspace will ask for your approval first. That's what
@@ -4824,7 +4839,13 @@ async def stream_chat(
 
     finish_tool = FunctionTool(
         name="finish_with_outputs",
-        description="Call this when you have the final reply ready. Pass {\"reply\": \"<markdown>\"}.",
+        description=(
+            "Call this ONLY when the work is actually complete: the question is "
+            "answered, or you exhausted every relevant tool and can state the exact "
+            "blocker and unblock. Never call it to deliver partial status, list dead "
+            "ends, or ask whether to keep going on a read-only investigation -- keep "
+            "investigating instead. Pass {\"reply\": \"<markdown>\"}."
+        ),
         params_json_schema={
             "type": "object",
             "properties": {"reply": {"type": "string"}},
@@ -4930,50 +4951,35 @@ async def stream_chat(
             run_config=run_config,
         )
 
+        # SDK event decoding is shared with AgentDriver (#605); this loop only
+        # applies chat-specific decoration: sanitizers, greeting identity, card
+        # metadata, persistence, and the versioned part envelope.
+        from runner_sandbox.stream_adapter import decode_stream_event
+
         async for event in result.stream_events():
-            event_type = getattr(event, "type", None)
-
-            if event_type == "raw_response_event":
-                data = getattr(event, "data", None)
-                data_type = str(getattr(data, "type", "") or "")
-                delta = getattr(data, "delta", None)
-                if delta and data_type.endswith("output_text.delta"):
-                    received_text_delta = True
-                    text = stream_text_sanitizer.feed(strip_em_dashes(str(delta)))
-                    if not text:
-                        continue
-                    assistant_text_parts.append(text)
-                    part = {"type": "text", "text": text}
-                    part.update({
-                        "version": CHAT_EVENT_VERSION,
-                        "conversation_id": conversation_id,
-                        "message_id": assistant_message_id,
-                    })
-                    await part_queue.put(part)
+            decoded = decode_stream_event(event)
+            if decoded is None:
                 continue
 
-            if event_type != "run_item_stream_event":
+            if decoded.kind == "text_delta":
+                received_text_delta = True
+                text = stream_text_sanitizer.feed(strip_em_dashes(decoded.text))
+                if not text:
+                    continue
+                assistant_text_parts.append(text)
+                part = {"type": "text", "text": text}
+                part.update({
+                    "version": CHAT_EVENT_VERSION,
+                    "conversation_id": conversation_id,
+                    "message_id": assistant_message_id,
+                })
+                await part_queue.put(part)
                 continue
 
-            name = getattr(event, "name", None)
-            item = getattr(event, "item", None)
-            raw_item = getattr(item, "raw_item", None)
-
-            def _get(obj: Any, key: str) -> Any:
-                if isinstance(obj, dict):
-                    return obj.get(key)
-                return getattr(obj, key, None)
-
-            if name == "message_output_created" and not received_text_delta:
-                content_list = _get(raw_item, "content") or []
-                texts = []
-                for c in content_list:
-                    t = _get(c, "text")
-                    if t:
-                        texts.append(str(t))
+            if decoded.kind == "message_output" and not received_text_delta:
                 full_text = _ensure_bare_greeting_identity(
                     message,
-                    _sanitize_preview_text(strip_em_dashes("".join(texts))),
+                    _sanitize_preview_text(strip_em_dashes(decoded.text)),
                 )
                 if full_text:
                     assistant_text_parts.append(full_text)
@@ -4985,15 +4991,10 @@ async def stream_chat(
                         "text": full_text,
                     })
 
-            elif name == "tool_called":
-                call_id = str(_get(raw_item, "call_id") or _get(raw_item, "id") or f"call_{uuid.uuid4().hex[:8]}")
-                tool_name_raw = str(_get(raw_item, "name") or "tool")
-                raw_args = _get(raw_item, "arguments") or _get(raw_item, "input") or {}
-                if isinstance(raw_args, str):
-                    try:
-                        raw_args = json.loads(raw_args)
-                    except Exception:
-                        pass
+            elif decoded.kind == "tool_call":
+                call_id = decoded.call_id
+                tool_name_raw = decoded.tool_name
+                raw_args = decoded.args or {}
                 raw_args = normalize_tool_args_for_event(tool_name_raw, raw_args)
                 pending_tool_calls[call_id] = {"name": tool_name_raw, "args": raw_args}
                 if (
@@ -5055,14 +5056,9 @@ async def stream_chat(
                     "percent": None,
                 })
 
-            elif name == "tool_output":
-                call_id_raw = _get(raw_item, "call_id") or _get(raw_item, "id") or ""
-                call_id = str(call_id_raw)
-                output = getattr(item, "output", None)
-                try:
-                    parsed_output = json.loads(output) if isinstance(output, str) else output
-                except Exception:
-                    parsed_output = output
+            elif decoded.kind == "tool_output":
+                call_id = decoded.call_id
+                parsed_output = decoded.output
                 pending = pending_tool_calls.get(call_id, {})
                 tool_name = str(pending.get("name") or "tool")
                 raw_args = pending.get("args") or {}
@@ -5090,7 +5086,7 @@ async def stream_chat(
                     "callId": call_id,
                     "toolName": tool_name,
                     "result": safe_result,
-                    "isError": isinstance(parsed_output, dict) and not parsed_output.get("ok", True),
+                    "isError": decoded.is_error,
                     "protocol": metadata["protocol"],
                     "card": metadata["card"],
                     "resource": metadata["resource"],
