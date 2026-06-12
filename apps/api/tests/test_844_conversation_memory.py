@@ -152,3 +152,17 @@ def test_system_prompt_includes_memory_section(memory_env, monkeypatch):
     prompt = chat_service.build_system_prompt_for_source("federico", "web", message="hi")
     assert "## User memory" in prompt
     assert "prefers tables over prose" in prompt
+
+
+def test_stream_chat_fires_memory_persist_task():
+    """Guards the write-hook wiring: reverting the stream_chat hook must fail
+    this test even though persist_conversation_memory itself still works."""
+    import inspect
+
+    import chat_service
+
+    src = inspect.getsource(chat_service.stream_chat)
+    assert "persist_conversation_memory" in src, (
+        "stream_chat no longer schedules the memory persist task (#844)"
+    )
+    assert "memory_enabled" in src, "memory kill switch check missing from stream_chat"

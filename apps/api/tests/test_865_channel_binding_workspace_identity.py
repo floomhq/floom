@@ -1,7 +1,7 @@
 """#865 — channel bindings persist + validate workspace identity.
 
 Pins:
-  - migration 72: slack_sender_bindings has a workspace_id column
+  - migration 73: slack_sender_bindings has a workspace_id column
   - Slack claim pins a validated workspace (default workspace for unscoped
     auth ids) and stores it on the binding
   - Slack claim rejects a workspace that does not exist for the claimer

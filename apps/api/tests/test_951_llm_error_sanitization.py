@@ -99,3 +99,25 @@ def test_draft_from_prompt_does_not_leak_provider_error(client, monkeypatch):
     for marker in LEAK_MARKERS:
         assert marker not in detail, f"endpoint leaks {marker!r}: {detail}"
     assert "worker generation" in detail
+
+
+class TestChatErrorEmitterWiring:
+    """Guards the two chat error-part emitters: reverting either back to
+    str(exc) must fail these even though the sanitizer itself still works."""
+
+    def test_stream_chat_error_part_is_sanitized(self):
+        import inspect
+
+        import chat_service
+
+        src = inspect.getsource(chat_service.stream_chat)
+        assert "safe_llm_error_message" in src, (
+            "stream_chat error part reverted to raw str(exc) (#951)"
+        )
+
+    def test_background_task_error_part_is_sanitized(self):
+        main_src = Path(__file__).resolve().parents[1].joinpath("main.py").read_text(encoding="utf-8")
+        # the /chat background task emitter must not put a raw exception
+        assert '"error": safe_llm_error_message(exc, action="Chat")' in main_src, (
+            "/chat background-task error part reverted to raw str(exc) (#951)"
+        )
