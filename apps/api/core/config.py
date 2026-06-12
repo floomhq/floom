@@ -189,3 +189,7 @@ API_VERSION = "0.2.0"
 
 _PROCESS_START_TIME = time.time()
 _PROCESS_STARTED_AT = time.strftime("%Y-%m-%dT%H:%M:%SZ", time.gmtime(_PROCESS_START_TIME))
+
+
+# Reserved worker id for the worker-authoring meta-worker (Emily generation).
+_WORKER_AUTHOR_ID = "worker-author"
