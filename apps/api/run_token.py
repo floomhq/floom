@@ -104,10 +104,31 @@ WORKER_CALL_TOKEN_PREFIX = "wrt_"
 MAX_CALL_DEPTH = 3
 
 
+class WorkerCallSecretMissing(ValueError):
+    """Raised when no real signing secret is configured for worker-call tokens.
+
+    #972: the old code fell back to a public constant ("dev-secret-not-set"),
+    so any deployment without FLOOM_SECRET signed worker-call tokens with a
+    key an attacker already knows — allowing forged wrt_ tokens and arbitrary
+    call_worker() invocations. Fail closed instead of signing/validating with
+    a guessable key.
+
+    Subclasses ValueError so existing `except ValueError` validation handlers
+    reject the token (401) rather than 500 on a misconfigured server, while
+    the issue path surfaces it as a clear run failure.
+    """
+
+
 def _worker_call_signing_key(secret: str | None = None) -> str:
     if secret is None:
         secret = os.environ.get("FLOOM_SECRET")
-    return (secret or "dev-secret-not-set").strip()
+    key = (secret or "").strip()
+    if not key:
+        raise WorkerCallSecretMissing(
+            "FLOOM_SECRET is not configured; worker-call tokens cannot be "
+            "issued or validated without a real signing secret."
+        )
+    return key
 
 
 def _wrt_b64url_encode(data: bytes) -> str:
