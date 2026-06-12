@@ -616,3 +616,21 @@ def _public_run_part(part: Dict[str, Any]) -> Dict[str, Any]:
             public_part["error"], public_part.get("error_code")
         )
     return public_part
+
+
+def _sanitize_operator_text(text: Optional[str]) -> Optional[str]:
+    """Strip internal artifacts from a short operator-facing string (archive
+    reasons, status notes). Never alters strings that are already clean."""
+    if text is None:
+        return None
+    value = str(text).strip()
+    if not value:
+        return None
+    if not _has_internal_artifact(value):
+        return value
+    value = _GIT_BRANCH_RE.sub("an internal change", value)
+    value = _SANDBOX_PATH_RE.sub("the worker's files", value)
+    value = _ENV_VAR_NAME_RE.sub("a required credential", value)
+    value = re.sub(r"\bTraceback \(most recent call last\):.*", "", value, flags=re.DOTALL)
+    value = re.sub(r"\s{2,}", " ", value).strip(" .,;:") + "."
+    return value
