@@ -50,9 +50,16 @@ export async function serverFetch<T>(
 
 /** Fetch worker list (trimmed list-shape, 30s cache). */
 export async function fetchWorkerList() {
-  return serverFetch<import("./types").WorkerSummary[]>("/workers?shape=list", {
-    next: { revalidate: 30 },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    return await serverFetch<import("./types").WorkerSummary[]>("/workers?shape=list", {
+      next: { revalidate: 30 },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /** Fetch overview stats (10s cache — user-specific). */
