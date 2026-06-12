@@ -343,9 +343,11 @@ def claim_whatsapp_sender(
         # so downstream consumers that use local_workspace_user_id round-trip correctly.
         scoped_user_id = local_workspace_user_id(base_user_id, workspace_id)
     else:
-        # Cloud: workspace is carried in auth context; no scoping needed here.
+        # Cloud: workspace is carried in the cloud's own auth context and
+        # resolved by the cloud repository. #865: persist NULL instead of a
+        # fabricated 'local-default' that downstream code then ignores.
         scoped_user_id = auth.user_id
-        workspace_id = _DEFAULT_WORKSPACE_ID  # cloud uses its own workspace field
+        workspace_id = None
 
     with get_db() as conn:
         row = conn.execute(
