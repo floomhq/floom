@@ -1940,6 +1940,19 @@ MIGRATIONS: list[Migration] = [
     """
     ALTER TABLE cli_api_tokens ADD COLUMN expires_at TEXT;
     """,
+    # -- migration 73: pin workspace_id on Slack sender bindings (#865) --------
+    # Mirrors migration 65 (WhatsApp). Nullable for backward compat — NULL =
+    # 'local-default' on the engine; cloud rows resolve workspace via the cloud
+    # repository and stay NULL here. Backfills existing active rows so live
+    # bindings keep working without manual intervention.
+    """
+    ALTER TABLE slack_sender_bindings ADD COLUMN workspace_id TEXT;
+    CREATE INDEX IF NOT EXISTS idx_slack_sender_bindings_workspace_id
+        ON slack_sender_bindings(workspace_id);
+    UPDATE slack_sender_bindings
+    SET workspace_id = 'local-default'
+    WHERE status = 'active' AND workspace_id IS NULL;
+    """,
 ]
 
 

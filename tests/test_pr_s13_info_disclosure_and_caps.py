@@ -898,7 +898,7 @@ def test_draft_from_prompt_treats_metadata_urls_as_plain_text(monkeypatch, tmp_p
     original_openai = sys.modules.get("openai")
     draft_payload = _valid_draft_payload(name="s13-plain-text-prompt")
 
-    def fake_call_draft_llm(_client, user_message, _extra=None):
+    def fake_call_draft_llm(user_message, _extra=None):
         captured["user_message"] = user_message
         return draft_payload
 
