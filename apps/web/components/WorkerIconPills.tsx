@@ -103,7 +103,7 @@ type PillSize = "sm" | "md";
 
 const SIZE: Record<PillSize, { box: string; glyph: string; overflow: string }> = {
   // sm — worker cards. md — detail header.
-  sm: { box: "size-7", glyph: "size-3.5", overflow: "h-7 min-w-7" },
+  sm: { box: "size-[18px]", glyph: "size-[11px]", overflow: "h-[18px] min-w-[18px]" },
   md: { box: "size-8", glyph: "size-4", overflow: "h-8 min-w-8" },
 };
 
@@ -279,10 +279,10 @@ export function WorkerIconPills({
           <span
             title={`+${overflow} more`}
             className={cn(
-              "relative -ml-px z-0 inline-flex shrink-0 items-center justify-center px-1.5 text-[11px] font-medium leading-none ring-1 ring-[var(--line-soft)] bg-[var(--bg-2)] text-[var(--ink-mute)]",
+              "relative -ml-px z-0 inline-flex shrink-0 items-center justify-center px-1 text-[9px] font-medium leading-none ring-1 ring-[var(--line-soft)] bg-[var(--bg-2)] text-[var(--ink-mute)]",
               SIZE[size].overflow,
             )}
-            style={{ borderRadius: "var(--radius-squircle)" }}
+            style={{ borderRadius: "5px" }}
             aria-label={`${overflow} more`}
           >
             +{overflow}
