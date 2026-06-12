@@ -79,6 +79,12 @@ export interface ListColumns {
   /** CSS grid-template-columns for the row + header. */
   template: string;
   headers: string[];
+  /** When true the header row is transparent (no grey bar), hairline only. */
+  headerTransparent?: boolean;
+  /** Render the canonical status slot after `cols`; defaults to true. */
+  statusColumn?: boolean;
+  /** Render the trailing row-actions slot; defaults to true. */
+  menuColumn?: boolean;
 }
 
 /** One detail tab (SPEC §3). */
@@ -91,7 +97,7 @@ export interface DetailTab {
 
 export interface DetailHeader {
   leading: ReactNode;
-  title: string;
+  title: ReactNode;
   /** Right-aligned primary/secondary actions + overflow. */
   actions?: ReactNode;
   /** Subtitle row (visibility pill, description, app logos). */

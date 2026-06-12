@@ -461,7 +461,11 @@ function EmilyChatCore({ fullPage = false, onOpenRunDetails, hideControls = fals
           )}
         >
           <ChatControls
-            onNew={handleNew}
+            onNew={() => {
+              handleNew();
+              isNearBottomRef.current = true;
+              setShowScrollButton(false);
+            }}
             onExport={handleExport}
             canExport={hasMessages}
             activeConversationId={conversationId}
@@ -550,7 +554,7 @@ type DockMode = "collapsed" | "rail" | "wide" | "full";
 // Widths per APP-UI-V4-SPEC §2: rail 330px (collapse 46px), widen 560px, full.
 const DOCK_WIDTH: Record<DockMode, string> = {
   collapsed: "w-[46px]",
-  rail: "w-full md:w-[330px] md:max-w-[30vw]",
+  rail: "w-full md:w-[330px]",
   wide: "w-full md:w-[560px] md:max-w-[52vw]",
   full: "fixed inset-0 z-50 w-full", // full-screen overlay
 };

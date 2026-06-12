@@ -38,8 +38,18 @@ type WorkspaceState = {
   activeId: string;
 };
 
+/** UUID-shaped pattern: 8-4-4-4-12 hex */
+const UUID_RE = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+
+function resolveWorkspaceName(name: string): string {
+  if (!name.trim()) return "My workspace";
+  if (UUID_RE.test(name.trim())) return "My workspace";
+  return name;
+}
+
 function shortInitial(name: string): string {
-  const trimmed = name.trim();
+  const display = resolveWorkspaceName(name);
+  const trimmed = display.trim();
   if (!trimmed) return "?";
   return trimmed.slice(0, 2).toUpperCase();
 }
@@ -255,7 +265,7 @@ export function WorkspaceSwitcher() {
           <div className="size-6 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_22%,transparent)] text-[var(--accent)] grid place-items-center text-[10px] font-semibold uppercase tracking-wide">
             {shortInitial(active.name)}
           </div>
-          <span className="flex-1 truncate text-left">{active.name}</span>
+          <span className="flex-1 truncate text-left">{resolveWorkspaceName(active.name)}</span>
           <ChevronsUpDown className="size-4 opacity-0 group-hover:opacity-60 transition-opacity duration-100" />
         </DropdownMenuTrigger>
         {/* V9 (Federico 2026-06-02): "this can also be cleaner." The popover is
@@ -287,7 +297,7 @@ export function WorkspaceSwitcher() {
                   <div className="size-5 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)] grid place-items-center text-[9px] font-semibold uppercase">
                     {shortInitial(w.name)}
                   </div>
-                  <span className="flex-1 truncate">{w.name}</span>
+                  <span className="flex-1 truncate">{resolveWorkspaceName(w.name)}</span>
                   {isActive ? <Check className="size-4 opacity-80" /> : null}
                 </DropdownMenuItem>
               );

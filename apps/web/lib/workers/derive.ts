@@ -12,19 +12,22 @@ export function isSystemWorker(w: Pick<WorkerSummary, "system" | "id">): boolean
   return w.system === true || SYSTEM_WORKER_ID_FALLBACK.has(w.id);
 }
 
-/** Worker status → outlined pill (mirrors the old footerStatus). */
+/** Worker status → outlined pill (mirrors the old footerStatus).
+ *  v4 vocab: lowercase, employee-model labels (ok/running/failed/needs attention). */
 export function workerStatusPill(w: WorkerSummary): { tone: PillTone; label: string } {
+  // Check if the worker is currently running
+  if (w.last_run?.status === "running") return { tone: "run", label: "running" };
   switch (w.status) {
     case "error":
-      return { tone: "err", label: "Error" };
+      return { tone: "err", label: "failed" };
     case "needs_attention":
-      return { tone: "warn", label: "Needs attention" };
+      return { tone: "warn", label: "needs attention" };
     case "missing_secret":
-      return { tone: "warn", label: "Missing secret" };
+      return { tone: "warn", label: "needs attention" };
     case "healthy":
-      return { tone: "ok", label: "Healthy" };
+      return { tone: "ok", label: "ok" };
     default:
-      return { tone: "ok", label: "Ready" };
+      return { tone: "ok", label: "ok" };
   }
 }
 

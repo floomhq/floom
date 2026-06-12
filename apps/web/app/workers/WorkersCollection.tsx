@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type {
@@ -472,6 +473,7 @@ export default function WorkersCollection({
 }: {
   initialWorkers: WorkerSummary[];
 }) {
+  const router = useRouter();
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
 
@@ -536,9 +538,12 @@ export default function WorkersCollection({
       headers: ["Worker", "Tools", "Last run", "Status", ""],
     },
     row: (w) => ({
-      // V4 SPEC rule 3: no avatar for workers; lock icon shown when private only.
-      leading: w.visibility === "private" ? <Lock className="size-4 text-[var(--muted-foreground)]" /> : undefined,
-      primary: w.name,
+      // V4 SPEC rule 3: no avatar for workers.
+      // Lock icon: inline after title at baseline (small + muted), never as leading.
+      leading: undefined,
+      primary: w.visibility === "private"
+        ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" /></span>
+        : w.name,
       secondary: w.description,
       cols: [
         <WorkerIconPills key="t" worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
@@ -548,10 +553,11 @@ export default function WorkersCollection({
       menu: [{ label: "Open", onSelect: () => (window.location.href = `/workers/${w.id}`) }],
     }),
     card: (w) => ({
-      // V4 SPEC rule 3: no avatar monogram; name carries lock icon inline when private.
-      // Lock is surfaced via `leading` only when private; workspace is silent default.
-      leading: w.visibility === "private" ? <Lock className="size-3.5 text-[var(--muted-foreground)]" /> : undefined,
-      name: w.name,
+      // V4 SPEC rule 3: no avatar monogram. Lock is small+muted inline after name.
+      leading: undefined,
+      name: w.visibility === "private"
+        ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" /></span>
+        : w.name,
       description: w.description,
       status: workerStatusPill(w),
       toolLogos: <WorkerIconPills worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
@@ -581,9 +587,11 @@ export default function WorkersCollection({
       );
       return {
         header: {
-          // V4 SPEC rule 3: no avatar monogram in detail header either.
-          leading: w.visibility === "private" ? <Lock className="size-4 text-[var(--muted-foreground)]" /> : undefined,
-          title: w.name,
+          // V4 SPEC rule 3: no avatar monogram in detail header. Lock inline after title.
+          leading: undefined,
+          title: w.visibility === "private"
+            ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3.5 text-[var(--muted-foreground)] translate-y-px" /></span>
+            : w.name,
           actions,
           sub: (
             <>
@@ -607,10 +615,8 @@ export default function WorkersCollection({
         }),
       };
     },
-    add: {
-      label: "New worker",
-      onSelect: () => (window.location.href = "/workers/new"),
-    },
+    // Contextual toolbar action only; the global sidebar CTA was removed for v4.
+    add: { label: "Add", onSelect: () => router.push("/workers/new") },
     states: {
       empty: { title: "No workers yet", help: "Create your first worker to get started." },
     },

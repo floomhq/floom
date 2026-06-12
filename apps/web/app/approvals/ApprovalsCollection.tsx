@@ -78,6 +78,9 @@ export default function ApprovalsCollection() {
     }
   };
 
+  // Curated status groups only — no raw per-worker tags (avoids one-off noise).
+  const CURATED_CONTENT_TAGS = ["email", "crm", "github", "report", "analytics", "slack"];
+
   const config: CollectionConfig<ApprovalRow> = {
     title: "Approvals",
     subtitle: "Workers waiting for your decision before executing.",
@@ -86,9 +89,14 @@ export default function ApprovalsCollection() {
     error,
     idOf: (a) => a.id,
     searchOf: (a) => `${a.worker_name ?? ""} ${a.label ?? ""}`,
-    tagsOf: (a) =>
-      ({ content: workerTags[a.worker_id] ?? [] }) as Partial<Record<TagFamilyKey, string[]>>,
-    tags: { content: contentTagOptions(workers) },
+    tagsOf: (a) => {
+      const allTags = workerTags[a.worker_id] ?? [];
+      const curated = allTags.filter((t) => CURATED_CONTENT_TAGS.includes(t));
+      return (curated.length > 0 ? { content: curated } : {}) as Partial<Record<TagFamilyKey, string[]>>;
+    },
+    tags: {
+      content: contentTagOptions(workers).filter((t) => CURATED_CONTENT_TAGS.includes(t.value)),
+    },
     counts: [{ value: items.length, label: "pending" }],
     view: { default: "list", grid: true },
     columns: {
