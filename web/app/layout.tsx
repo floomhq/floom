@@ -18,6 +18,12 @@ export const metadata: Metadata = {
   description: "Workers that use your tools. Run them on schedule, webhook, or approval.",
 };
 
+// #926/#945: render dynamically everywhere — the middleware CSP nonce must be
+// stamped onto inline scripts during SSR (impossible at build time), and the
+// audit flagged statically pre-rendered protected shells with public cache
+// headers. Matches the engine's apps/web root layout.
+export const dynamic = "force-dynamic";
+
 export default function RootLayout({
   children,
 }: Readonly<{

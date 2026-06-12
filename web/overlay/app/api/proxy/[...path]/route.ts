@@ -131,8 +131,15 @@ async function handler(
   if (cd) responseHeaders.set("content-disposition", cd);
   const cl = upstream.headers.get("content-length");
   if (cl) responseHeaders.set("content-length", cl);
+  // #941: every proxied response is authenticated user data — never let a
+  // shared/intermediary cache store it. Upstream may tighten, never loosen.
   const cacheControl = upstream.headers.get("cache-control");
-  if (cacheControl) responseHeaders.set("cache-control", cacheControl);
+  responseHeaders.set(
+    "cache-control",
+    cacheControl && /no-store|private/i.test(cacheControl)
+      ? cacheControl
+      : "private, no-store, max-age=0",
+  );
   // Forward Location so backend-initiated redirects (e.g. /auth/login →
   // Google OAuth 307) actually reach the browser through the proxy.
   const location = upstream.headers.get("location");
