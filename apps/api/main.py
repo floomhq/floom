@@ -11676,6 +11676,27 @@ def _create_worker_from_parsed_payload(
         create_lock.release()
 
 
+def _apply_workspace_approval_default(worker_yml: str) -> str:
+    """#794: at CREATE time, if the workspace `approval_default` is "always" and
+    the manifest has no explicit `approvals` block, stamp approvals.required so
+    the persisted worker.yml (the source of truth) carries the default. An
+    explicit `approvals:` in the manifest is left untouched."""
+    try:
+        import yaml as _pyyaml
+        from run_service import _workspace_setting
+
+        if (_workspace_setting("approval_default") or "").strip().lower() != "always":
+            return worker_yml
+        raw = _pyyaml.safe_load(worker_yml)
+        if not isinstance(raw, dict) or "approvals" in raw:
+            return worker_yml
+        raw["approvals"] = {"required": True}
+        return _pyyaml.safe_dump(raw, sort_keys=False, default_flow_style=False, allow_unicode=True)
+    except Exception:
+        logger.debug("approval_default yaml injection failed", exc_info=True)
+        return worker_yml
+
+
 @app.post("/workers", response_model=WorkerDetail)
 def create_worker(
     payload: WorkerCreateRequest,
@@ -11699,6 +11720,7 @@ def create_worker(
         if worker_id != raw_worker_id:
             worker_yml = _rewrite_worker_yml_id(worker_yml, worker_id)
     _reject_raw_local_runner_on_create(worker_yml)
+    worker_yml = _apply_workspace_approval_default(worker_yml)  # #794
     worker_id, config = _parse_worker_payload(worker_yml, user_id=auth.user_id)
     return _create_worker_from_parsed_payload(
         worker_id=worker_id,
@@ -23489,13 +23511,24 @@ def get_workspace_settings(
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
 ) -> Dict[str, str]:
-    """#794/#797: workspace behaviour toggles + model defaults (key→value map)."""
+    """#794/#797: workspace behaviour toggles + model defaults (key→value map).
+
+    Also surfaces the read-only `current_month_spend_usd` (#797) so the Settings
+    System tab can render spend-against-cap without a separate fetch.
+    """
     ws = _active_workspace_id(request)
     with get_db() as conn:
         rows = conn.execute(
             "SELECT key, value FROM workspace_settings WHERE workspace_id = ?", (ws,)
         ).fetchall()
-    return {str(r["key"]): str(r["value"]) for r in rows}
+    out = {str(r["key"]): str(r["value"]) for r in rows}
+    try:
+        from run_service import _workspace_month_to_date_cost_usd
+
+        out["current_month_spend_usd"] = f"{_workspace_month_to_date_cost_usd():.4f}"
+    except Exception:
+        pass
+    return out
 
 
 @app.put("/workspace/settings/{key}", status_code=204)
