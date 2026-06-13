@@ -491,6 +491,8 @@ from services.context_access import (
 # services.public_view; re-exported here for this module's call sites and for
 # tests that read the redaction constants/headlines via the `main` module.
 from services.public_view import (
+    _public_noindex_headers,
+    _json_noindex,
     _sanitize_operator_text,
     _INTERNAL_LOG_TOKEN_RE,
     _LOG_METADATA_RE,
@@ -3611,11 +3613,6 @@ def list_workers(
 
 
 
-def _public_noindex_headers() -> Dict[str, str]:
-    return {
-        "X-Robots-Tag": "noindex, nofollow",
-        "Cache-Control": "no-store",
-    }
 
 
 
@@ -3697,8 +3694,6 @@ def resolve_worker_short_link(
     return _public_worker_response(worker, config)
 
 
-def _json_noindex(payload: Dict[str, Any], *, status_code: int = 200) -> JSONResponse:
-    return JSONResponse(payload, status_code=status_code, headers=_public_noindex_headers())
 
 
 
