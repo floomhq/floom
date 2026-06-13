@@ -676,3 +676,47 @@ def _persist_discovered_workers(
                 user_id,
             )
             raise
+
+
+def _ensure_worker_row_for_rotation(
+    *,
+    worker_id: str,
+    worker: Dict[str, Any],
+    config: Optional[WorkerConfig],
+    auth: AuthContext,
+    repos: Repositories,
+) -> None:
+    """Persist a filesystem-registry worker before storing FK-backed webhook state."""
+    from models import WorkerConfig  # noqa: F401
+    from worker_registry import WORKERS_DIR
+    from services.worker_access import _get_db_worker
+    if _get_db_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role):
+        return
+
+    manifest = worker.get("manifest") or worker.get("manifest_json") or {}
+    if not isinstance(manifest, dict):
+        manifest = {}
+    config_dict: Dict[str, Any] = {}
+    if config is not None:
+        config_dict = config.model_dump(mode="json")
+        if not manifest:
+            manifest = config_dict
+    elif isinstance(worker.get("config"), dict):
+        config_dict = worker["config"]
+
+    trigger = (config_dict.get("trigger") if isinstance(config_dict, dict) else None) or {}
+    triggers_json = _extract_triggers_from_manifest(manifest, config_dict)
+    repos.workers.upsert(
+        user_id=auth.user_id,
+        worker_id=worker_id,
+        name=worker.get("name") or manifest.get("name") or worker_id,
+        manifest_json=manifest,
+        bundle_path=worker.get("bundle_path") or str((WORKERS_DIR / worker_id).resolve()),
+        trigger_type=worker.get("trigger_type") or trigger.get("type") or "manual",
+        cron_expr=worker.get("cron_expr") or trigger.get("cron"),
+        cron_timezone=worker.get("cron_timezone") or trigger.get("timezone"),
+        grants_json=worker.get("grants_json") or {},
+        input_values_json=worker.get("input_values_json") or {},
+        triggers_json=triggers_json,
+        visibility=worker.get("visibility") or "private",
+    )
