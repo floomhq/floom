@@ -1,7 +1,7 @@
 # Workeros UI/UX Roast — 2026-05-26
 
 **Audited URL:** https://workers.floom.dev  
-**Browser:** chrome-depontefede identity via self-hosted server broker  
+**Browser:** chrome-broker identity via self-hosted server broker  
 **Viewport tested:** 1280px desktop (broker) + 375x812 mobile (Chrome DevTools emulation)  
 **Auditor:** Claude Code agent, no mercy mode
 
@@ -288,4 +288,4 @@ Several pages have empty states (Secrets, Runs, Connections/Browse broken state)
 ---
 
 *Screenshots saved to: `/root/workeros/docs/audits/screenshots-ui/`*  
-*Audit conducted: 2026-05-26 via self-hosted server browser broker (chrome-depontefede identity)*
+*Audit conducted: 2026-05-26 via self-hosted server browser broker (chrome-broker identity)*

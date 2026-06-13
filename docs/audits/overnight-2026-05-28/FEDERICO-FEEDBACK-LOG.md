@@ -68,7 +68,7 @@ currently exists for folders). The category row IS folder, not tag.
 as folders row) showing all unique tags across workers, click-to-toggle
 multi-select filter. Persists in URL.
 
-### F8.6 — /workers/cv_writeup skeleton outdated
+### F8.6 — /workers/resume_helper skeleton outdated
 **Status:** OPEN
 **Severity:** P2
 **Notes:** The worker detail page (separate from the workers list) has a
@@ -76,7 +76,7 @@ skeleton that doesn't match the new tabs+configuration layout.
 **Fix path:** rebuild WorkerDetailSkeleton to match the actual rendered
 shape (H1 + status pill + tabs row + Configuration card + Worker guide).
 
-### F8.7 — /workers/cv_writeup Overview content "hard to digest" (Image #51)
+### F8.7 — /workers/resume_helper Overview content "hard to digest" (Image #51)
 **Status:** OPEN
 **Severity:** P1
 **Notes:** Configuration block (Trigger/Runtime/Runner/Inputs/Outputs) + Worker

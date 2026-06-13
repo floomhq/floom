@@ -3,7 +3,7 @@
 **Auditor:** Claude Code (sub-agent)
 **Scope:** workers.floom.dev (Vercel) + workers-api.floom.dev (self-hosted server port 8011)
 **Auth:** `x-floom-secret` from `/root/workeros/.deploy-secret`
-**Browser:** self-hosted server broker, identity `chrome-depontefede`, lease `8c559ca2-0352-4a12-9c52-6c8cb8e8b5e7` (released)
+**Browser:** self-hosted server broker, identity `chrome-broker`, lease `8c559ca2-0352-4a12-9c52-6c8cb8e8b5e7` (released)
 **Date:** 2026-05-27
 **Baseline:** [functional-e2e-2026-05-26.md](functional-e2e-2026-05-26.md) — 17/22 (77%)
 **PR batches tested:** S1 (proxy fix), S2 (category chips), S3 (code editor), S4 (multi-trigger); H1–H4 sub-tests added
@@ -289,7 +289,7 @@ Confirmed via broker browser snapshot. See Verified Fixes section.
 
 **Reproduction:** Navigate to `/workers/research_brief` in browser. Page renders "Worker not found / Back to workers".
 
-**Contradiction:** `GET /workers/research_brief` via curl returns `200 OK` with full worker JSON. The edit page `/workers/research_brief/edit` loads correctly. Other workers (e.g., `cv_writeup`, `weekly_update`) load correctly in their detail pages.
+**Contradiction:** `GET /workers/research_brief` via curl returns `200 OK` with full worker JSON. The edit page `/workers/research_brief/edit` loads correctly. Other workers (e.g., `resume_helper`, `weekly_update`) load correctly in their detail pages.
 
 **Likely root cause:** The `research_brief` worker detail response contains something that causes the page-level error handler to trigger `setNotFound(true)`. The error handler at lines 60–63 fires when `msg.toLowerCase().includes("not found") || msg.includes("404")`. The worker's `description` field or `name` may contain the string "not found" in its content, or an API call made inside the detail page (e.g., runs list, secrets check) is returning a 404 for a related resource.
 

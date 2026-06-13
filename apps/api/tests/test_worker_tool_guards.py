@@ -437,12 +437,12 @@ def test_stock_worker_always_listed_and_runnable_for_member(env, monkeypatch):
 # read/run when a worker is in PUBLIC *or* PROTECTED, so both must be clean.
 _REMOVED_PRIVATE_WORKER_IDS = (
     "gmail-summarize-latest",
-    "openpaper-posthog-daily",
+    "analytics-daily-demo",
     "seo-opportunity-digest",
-    "cv_writeup",
+    "resume_helper",
     "gmail_intake_brief",
     "dach_compliance",
-    "reverse_match_crm",
+    "crm_matcher",
     "weekly_update",
 )
 

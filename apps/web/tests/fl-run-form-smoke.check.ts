@@ -94,8 +94,8 @@ function test691FileSamplesRespectInputContracts(): void {
   assert(!csvYml.includes("csv_file: null"), "csv_enricher example_input must not leave csv_file null");
   assert(csvYml.includes("name,company,title,location"), "csv_enricher must include inline CSV sample content");
 
-  const cvYml = read("workers/cv_writeup/worker.yml");
-  assert(cvYml.includes("cv_file: null"), "cv_writeup example_input must leave cv_file null");
+  const cvYml = read("workers/resume_helper/worker.yml");
+  assert(cvYml.includes("cv_file: null"), "resume_helper example_input must leave cv_file null");
 }
 
 const tests: [string, () => void][] = [

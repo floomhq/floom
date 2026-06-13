@@ -2,7 +2,7 @@
 
 **Auditor persona:** Paying B2C user, 30-minute trial window, real task: "Summarise my Granola meetings daily and post action items to my HubSpot CRM." No prior knowledge of Workeros.
 
-**Session conducted:** 2026-05-27 via self-hosted server broker (identity: chrome-depontefede)
+**Session conducted:** 2026-05-27 via self-hosted server broker (identity: chrome-broker)
 **Baseline:** b2c-user-roast-2026-05-26.md — Score: 38/100, "would cancel after 30 min"
 **Fix batches applied:** 4 batches since 2026-05-26
 

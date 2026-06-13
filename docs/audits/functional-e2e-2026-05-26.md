@@ -3,7 +3,7 @@
 **Auditor:** Claude Code (sub-agent)
 **Scope:** workers.floom.dev (Vercel) + workers-api.floom.dev (self-hosted server port 8011)
 **Auth:** `x-floom-secret` from `/root/workeros/.deploy-secret`
-**Browser:** self-hosted server broker, lease `d86ac857-8af8-4594-a094-070cb312e2fd`, identity `chrome-depontefede`
+**Browser:** self-hosted server broker, lease `d86ac857-8af8-4594-a094-070cb312e2fd`, identity `chrome-broker`
 **Date:** 2026-05-26
 
 ---
@@ -63,7 +63,7 @@ Created via `POST /workers/{id}/files` with a zip containing `lib/helpers.py`. F
 #### B1 — File input picker
 **Status: PASS**
 
-`cv_writeup` worker defines `kind: file, media_type: application/octet-stream` input in `worker.yml`. The run dialog in the web UI renders a file picker for that field, not a text input. Upload accepted and passed to the sandbox.
+`resume_helper` worker defines `kind: file, media_type: application/octet-stream` input in `worker.yml`. The run dialog in the web UI renders a file picker for that field, not a text input. Upload accepted and passed to the sandbox.
 
 #### B2 — Text input + run completion
 **Status: PASS**
@@ -318,7 +318,7 @@ No `cron:` field. The UI `buildTriggerBlock` has a fallback (`cronExpr || "0 9 *
 
 4. **No rate-limit UI feedback** — When draft-from-prompt hits the 200 req/min rate limit, the API returns `429 Too Many Requests` with `Retry-After: 60`. The UI shows a spinner indefinitely with no "Please wait" message. Users see no feedback.
 
-5. **Google Drive connection expired** — The `team@openpaper.dev` Google Drive connection in the demo account is expired. This is an operational issue but means any worker that relies on Google Drive will fail silently at the connection test step for new users who inherit this config.
+5. **Google Drive connection expired** — The `team@example.com` Google Drive connection in the demo account is expired. This is an operational issue but means any worker that relies on Google Drive will fail silently at the connection test step for new users who inherit this config.
 
 6. **`trigger:` vs `triggers:` YAML key duality** — The API accepts both `trigger:` (singular, with nested `type:`) and `triggers:` (array). But only one code path is read during serialization. This creates a YAML format split that will cause confusion: LLM-drafted YAMLs use one format, multi-trigger workers use another, and the UI always saves the singular form.
 
