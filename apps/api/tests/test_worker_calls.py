@@ -365,7 +365,8 @@ def test_worker_call_run_metadata_uses_parent_run_id():
 
     trigger_source, trigger_ref = _main._worker_call_run_metadata(auth)
 
-    assert trigger_source == "worker_call"
+    # #994: trigger_source now carries the child's call depth (holder depth 0 → 1)
+    assert trigger_source == "worker_call:depth=1"
     assert trigger_ref == "run-parent"
 
 

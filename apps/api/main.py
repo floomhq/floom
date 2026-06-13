@@ -1825,7 +1825,13 @@ def _worker_call_run_metadata(auth: AuthContext) -> tuple[str | None, str | None
     parent_run_id = str(auth.run_token_payload.get("parent_run_id") or "").strip() or None
     if not parent_run_id:
         return None, None
-    return "worker_call", parent_run_id
+    # #994: encode the child's call depth so the chain is trackable and the
+    # next level enforces the cap (holder depth + 1).
+    try:
+        holder_depth = int(auth.run_token_payload.get("depth") or 0)
+    except (TypeError, ValueError):
+        holder_depth = 0
+    return f"worker_call:depth={holder_depth + 1}", parent_run_id
 
 
 def _worker_call_token_allows_request(
@@ -1837,7 +1843,15 @@ def _worker_call_token_allows_request(
 ) -> bool:
     """Allow worker-call bearer tokens only on child creation and child polling."""
     if method == "POST" and _RE_WORKER_RUN_CREATE.match(path):
-        return True
+        # #994: a run whose token is already at the depth cap may not spawn
+        # another child — bounds worker-to-worker recursion on the script path.
+        from run_token import MAX_CALL_DEPTH
+
+        try:
+            depth = int(token_payload.get("depth") or 0)
+        except (TypeError, ValueError):
+            depth = 0
+        return depth < MAX_CALL_DEPTH
     run_match = _RE_RUN_DETAIL.match(path)
     if method != "GET" or run_match is None or repos is None:
         return False
@@ -1845,7 +1859,7 @@ def _worker_call_token_allows_request(
     if not run_row:
         return False
     return (
-        str(run_row.get("trigger_source") or "") == "worker_call"
+        str(run_row.get("trigger_source") or "").startswith("worker_call")  # #994: depth-suffixed
         and str(run_row.get("trigger_ref") or "") == str(token_payload.get("parent_run_id") or "")
     )
 
