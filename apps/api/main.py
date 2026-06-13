@@ -118,6 +118,7 @@ from db import DB_PATH, Repositories, WorkspaceMemberRepository, assistant_row_i
 from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
 from secret_scan import scan_bytes
 from models import (
+    WorkerListSummary,
     DraftFile,
     DraftFromPromptRequest,
     DraftFromPromptInputField,
@@ -479,6 +480,10 @@ from services.worker_codegen import (
     _repair_generated_worker_manifest,
 )
 from services.worker_serialize import (
+    _build_triggers_list,
+    _connection_slug_for_worker_card,
+    _get_last_run_for_worker,
+    _starred_worker_ids,
     _get_timeseries_batch,
     _language_for_path,
     _should_ignore_worker_file,
@@ -1506,14 +1511,6 @@ async def generic_error_handler(_request, exc: Exception):
 
 
 
-def _get_last_run_for_worker(
-    worker_id: str,
-    *,
-    user_id: str,
-    repos: Repositories,
-) -> Optional[Dict[str, Any]]:
-    row = repos.workers.get_last_run(user_id=user_id, worker_id=worker_id)
-    return dict(row) if row else None
 
 
 
@@ -1624,56 +1621,8 @@ def _workspace_base_persona_asset_id(request: Request | None = None) -> str:
 
 
 
-def _build_triggers_list(worker: Dict[str, Any]) -> List[str]:
-    """Extract all configured trigger labels from a worker dict.
-
-    Prefers triggers_json (multi-trigger) if present; falls back to single trigger.
-    Returns labels like ['Manual', 'Cron · 0 9 * * *', 'Webhook', 'On gmail · new_email'].
-    """
-    # Try multi-trigger first (from DB triggers_json column)
-    triggers_json = worker.get("triggers_json")
-    if triggers_json:
-        try:
-            triggers_list = json.loads(triggers_json)
-            if isinstance(triggers_list, list) and triggers_list:
-                return [_trigger_label(t) for t in triggers_list if isinstance(t, dict)]
-        except Exception:
-            pass
-
-    # Fall back to single-trigger logic from config
-    config: Dict[str, Any] = worker.get("config") or {}
-    trigger: Dict[str, Any] = config.get("trigger") or {}
-    trigger_type = _normalize_trigger_type(worker.get("trigger_type") or trigger.get("type"))
-    trigger_with_type = dict(trigger)
-    trigger_with_type.setdefault("type", trigger_type)
-    label = _trigger_label(trigger_with_type)
-    return [label] if label else [trigger_type.title()]
 
 
-def _connection_slug_for_worker_card(connection: Any) -> Optional[str]:
-    """Return a display slug for list-card connection icons.
-
-    Worker manifests have accepted several connection shapes over time:
-    plain app slugs, typed app dicts, and MCP dicts. A malformed/null entry in
-    one worker must not take down the whole `/workers` list endpoint.
-    """
-    if isinstance(connection, str):
-        return connection
-    if not isinstance(connection, dict):
-        return None
-
-    mcp = connection.get("mcp")
-    if isinstance(mcp, dict):
-        label = mcp.get("label")
-        if isinstance(label, str) and label.strip():
-            return label
-
-    for key in ("app", "slug", "toolkit", "label", "name"):
-        value = connection.get(key)
-        if isinstance(value, str) and value.strip():
-            return value
-
-    return None
 
 
 
@@ -2030,9 +1979,6 @@ def _gc_orphan_blobs(*, limit: int = 500) -> int:
 
 
 
-class WorkerListSummary(WorkerSummary):
-    created_at: Optional[str] = None
-    updated_at: Optional[str] = None
 
 
 class SearchResultItem(BaseModel):
@@ -2129,193 +2075,10 @@ def global_search(
     return SearchResponse(results=results[:limit])
 
 
-def _starred_worker_ids(user_id: str) -> set[str]:
-    """#782: the set of worker ids the user has starred."""
-    try:
-        with get_db() as conn:
-            rows = conn.execute(
-                "SELECT worker_id FROM user_worker_prefs WHERE user_id = ? AND starred = 1",
-                (user_id,),
-            ).fetchall()
-        return {str(r["worker_id"]) for r in rows}
-    except Exception:
-        return set()
 
 
 
 
-@app.get("/workers", response_model=List[WorkerListSummary])
-def list_workers(
-    include_system: bool = False,
-    include_archived: bool = False,
-    shape: str = "full",
-    visibility: Optional[str] = None,
-    q: Optional[str] = None,
-    starred: Optional[bool] = None,
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> List[WorkerListSummary]:
-    """List workers.
-
-    ?shape=list           — trimmed payload (~15 KB for 18 workers) for the web UI list view.
-                            Drops: long_description, use_cases, example_input, example_output,
-                            how_it_works, timeseries. Keeps all fields needed to render the card.
-    ?shape=full           — full payload (default, backwards-compat for CLI + MCP consumers).
-    ?include_archived=true — include archived workers (archived:true in worker.yml).
-                             Default: excluded from All/Starred/Recent; shown only in Archived view.
-    """
-    worker_user_id = _worker_access_user_id(auth)
-    workers = _list_visible_workers(
-        user_id=worker_user_id,
-        repos=repos,
-        use_cache=True,
-        role=_worker_repo_role(auth),
-    )
-    # Filter out system_worker: true workers unless explicitly requested.
-    if not include_system:
-        workers = [
-            w for w in workers
-            if not (w.get("manifest") or {}).get("system_worker", False)
-        ]
-    # Filter out archived workers unless explicitly requested.
-    # NOTE: when include_system and include_archived are both False this matches
-    # _list_operator_workers exactly (shared filter, see 1.5.4).
-    if not include_archived:
-        workers = [w for w in workers if not w.get("archived", False)]
-    # #771: optional visibility-tier filter. Does NOT change access control —
-    # only shapes the already-authorized list. "all" is the default no-op.
-    if visibility and visibility != "all":
-        if visibility not in ("private", "workspace", "public"):
-            raise HTTPException(status_code=422, detail="visibility must be private, workspace, public, or all")
-        workers = [
-            w for w in workers
-            if str(w.get("visibility") or "private") == visibility
-        ]
-    # #779: server-side substring search on name + description (case-insensitive),
-    # so large workspaces don't ship the full list to the client to filter.
-    if q and q.strip():
-        needle = q.strip().lower()
-        workers = [
-            w for w in workers
-            if needle in str(w.get("name") or "").lower()
-            or needle in str(w.get("description") or "").lower()
-        ]
-    # #782: per-user star set; optional ?starred=true filter feeds the
-    # "starred" tag tab.
-    _starred_ids = _starred_worker_ids(auth.user_id)
-    if starred:
-        workers = [w for w in workers if w["id"] in _starred_ids]
-    worker_ids = [w["id"] for w in workers]
-    stats_by_id = _get_stats_batch(worker_ids, user_id=worker_user_id, repos=repos)
-    # S44 Win 3: skip expensive timeseries fetch when list shape requested.
-    list_shape = shape == "list"
-    timeseries_by_id = (
-        {} if list_shape
-        else _get_timeseries_batch(worker_ids, user_id=worker_user_id, repos=repos, days=14)
-    )
-    available_secret_names = _available_secret_names_for_user(worker_user_id, repos)
-    available_conn_slugs = _available_connection_slugs_for_user(worker_user_id, repos)
-    result: List[WorkerListSummary] = []
-    for w in workers:
-        last_run_row = _get_last_run_for_worker(w["id"], user_id=worker_user_id, repos=repos)
-        last_run = _make_run_summary(last_run_row) if last_run_row else None
-
-        # Resolve status via the SHARED resolver so LIST and DETAIL agree
-        # exactly for the same worker (full honesty ladder: missing-secret /
-        # failed-run / disabled / never-run, see _resolve_worker_status).
-        config = get_worker_config_for_run(w["id"])
-        is_archived = w.get("archived", False)
-        status = _resolve_worker_status(
-            w,
-            config=config,
-            available_secret_names=available_secret_names,
-            last_run_status=last_run.status if last_run else None,
-            has_run=last_run is not None,
-        )
-
-        triggers = _build_triggers_list(w)
-        triggers_spec = _build_triggers_spec(w)
-        recent_stats = stats_by_id.get(w["id"])
-        timeseries = timeseries_by_id.get(w["id"])
-
-        # #556: compute which required secrets/connections are not yet configured.
-        _secret_set = set(available_secret_names)
-        _req_secrets = _worker_required_secret_names(w) if config else []
-        _missing_secrets = [s for s in _req_secrets if s not in _secret_set]
-        _req_conn_slugs = _worker_connection_slugs(w)
-        _missing_connections = [c for c in _req_conn_slugs if c.lower() not in available_conn_slugs]
-
-        # Extract connection slugs and runtime from worker config dict.
-        # These are lightweight and needed for the worker card tool-logo strip.
-        _worker_config_dict = w.get("config") or {}
-        _raw_connections = _worker_config_dict.get("connections") or w.get("connections") or []
-        _conn_slugs = [
-            slug
-            for c in _raw_connections
-            if (slug := _connection_slug_for_worker_card(c))
-        ]
-        _raw_runtime = _worker_config_dict.get("runtime") or {}
-        _runtime_type = (
-            _raw_runtime.get("type") if isinstance(_raw_runtime, dict)
-            else (str(_raw_runtime) if _raw_runtime else None)
-        )
-        _inputs = []
-        for _raw_input in _worker_config_dict.get("inputs") or []:
-            if isinstance(_raw_input, dict):
-                try:
-                    if list_shape:
-                        _inputs.append(
-                            WorkerSummaryInput(
-                                name=str(_raw_input["name"]),
-                                type=str(_raw_input["type"]),
-                            )
-                        )
-                    else:
-                        _inputs.append(WorkerInput(**_raw_input))
-                except Exception:
-                    continue
-
-        result.append(
-            WorkerListSummary(
-                id=w["id"],
-                name=w["name"],
-                created_at=w.get("created_at"),
-                updated_at=w.get("updated_at"),
-                description=w.get("description"),
-                # S44 Win 3: omit detail-only fields in list shape.
-                long_description=None if list_shape else w.get("long_description"),
-                use_cases=None if list_shape else w.get("use_cases"),
-                example_input=None if list_shape else w.get("example_input"),
-                example_output=None if list_shape else w.get("example_output"),
-                how_it_works=None if list_shape else w.get("how_it_works"),
-                is_example=w.get("is_example"),
-                system=bool((w.get("manifest") or {}).get("system_worker", False)),
-                archived=is_archived,
-                archive_reason=_sanitize_operator_text(w.get("archive_reason")),
-                tags=w.get("tags") or [],
-                folder=w.get("folder"),
-                status=status,
-                trigger_type=w["trigger_type"],
-                runner=w["runner"],
-                last_run=last_run,
-                triggers=triggers,
-                triggers_spec=triggers_spec,
-                recent_stats=recent_stats,
-                timeseries=None if list_shape else timeseries,
-                # B7: always include connection slugs and runtime for worker card tool strip.
-                connections=_conn_slugs,
-                missing_secrets=_missing_secrets,
-                missing_connections=_missing_connections,
-                inputs=_inputs,
-                runtime=_runtime_type,
-                public_link=_worker_public_link(w) if str(w.get("visibility") or "private") == "public" else None,
-                owner_id=w.get("owner_id"),
-                visibility=str(w.get("visibility") or "private"),
-                starred=w["id"] in _starred_ids,  # #782
-                permissions=_worker_permissions(w, user_id=worker_user_id, repos=repos),
-            )
-        )
-    return result
 
 
 
@@ -4748,6 +4511,10 @@ app.include_router(worker_create_router)
 # System health + metrics routes (/health, /healthz, /metrics, /system/metrics).
 from routers.system_health import system_health_router
 app.include_router(system_health_router)
+
+# Worker listing route (GET /workers).
+from routers.worker_listing import worker_listing_router
+app.include_router(worker_listing_router)
 
 from routers.uploads import (
     uploads_router,
