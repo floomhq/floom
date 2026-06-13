@@ -34,6 +34,7 @@ from fastapi import (
     UploadFile,
 )
 from fastapi.responses import PlainTextResponse
+from pydantic import BaseModel
 
 import logging
 
@@ -817,6 +818,169 @@ async def put_workspace(
     author_name, author_email = _git_author(auth)
     _git_commit_workspace_md(message=f"workspace: update instructions ({source})", author_name=author_name, author_email=author_email)
     return Response(status_code=204)
+
+
+# ---------------------------------------------------------------------------
+# Workspace API tokens — admin-minted; authenticate as the synthetic workspace
+# actor (member role): read+run on workspace-shared workers ONLY, no private
+# workers (including the minter's own), no mutations (middleware-gated).
+# ---------------------------------------------------------------------------
+
+class _WorkspaceTokenOut(BaseModel):
+    id: str
+    name: str
+    created_by: str
+    created_at: str
+    last_used_at: Optional[str] = None
+    expires_at: Optional[str] = None
+    revoked_at: Optional[str] = None
+
+
+class _WorkspaceTokenCreateRequest(BaseModel):
+    name: str
+    expires_at: Optional[str] = None
+
+
+class _WorkspaceTokenCreateResponse(BaseModel):
+    id: str
+    name: str
+    token: str  # shown ONCE; only the hash is stored
+    expires_at: Optional[str] = None
+
+
+def _require_workspace_admin(auth: AuthContext) -> None:
+    if not auth.is_admin:
+        raise HTTPException(status_code=403, detail="workspace tokens are admin-only")
+
+
+@workspace_router.get("/workspace/tokens", response_model=List[_WorkspaceTokenOut])
+def list_workspace_tokens(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> List[_WorkspaceTokenOut]:
+    from db import get_db
+
+    _require_workspace_admin(auth)
+    workspace_id = _active_workspace_id(request)
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, name, created_by, created_at, last_used_at, expires_at, revoked_at "
+            "FROM workspace_api_tokens WHERE workspace_id = ? ORDER BY created_at DESC",
+            (workspace_id,),
+        ).fetchall()
+    return [_WorkspaceTokenOut(**dict(r)) for r in rows]
+
+
+@workspace_router.post("/workspace/tokens", response_model=_WorkspaceTokenCreateResponse, status_code=201)
+def create_workspace_token(
+    payload: _WorkspaceTokenCreateRequest,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> _WorkspaceTokenCreateResponse:
+    import secrets as _secrets_mod
+    import uuid as _uuid_mod
+    from db import get_db, now_iso
+    from auth.multi_member import _hash_token as _hash_pat
+    from services.auth_ops import _enforce_token_ttl_cap
+
+    _require_workspace_admin(auth)
+    name = (payload.name or "").strip()
+    if not name:
+        raise HTTPException(status_code=422, detail="token name required")
+    expires_at = _enforce_token_ttl_cap(payload.expires_at)
+    workspace_id = _active_workspace_id(request)
+    raw = "wst_" + _secrets_mod.token_urlsafe(32)
+    token_id = str(_uuid_mod.uuid4())
+    with get_db() as conn:
+        conn.execute(
+            "INSERT INTO workspace_api_tokens "
+            "(id, workspace_id, name, token_hash, created_by, created_at, expires_at) "
+            "VALUES (?, ?, ?, ?, ?, ?, ?)",
+            (token_id, workspace_id, name, _hash_pat(raw), auth.user_id, now_iso(), expires_at),
+        )
+    logger.info(
+        "workspace token created: workspace=%s name=%r by=%s expires_at=%s",
+        workspace_id, name, auth.user_id, expires_at,
+    )
+    return _WorkspaceTokenCreateResponse(id=token_id, name=name, token=raw, expires_at=expires_at)
+
+
+@workspace_router.delete("/workspace/tokens/{token_id}", status_code=204)
+def revoke_workspace_token(
+    token_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> None:
+    from db import get_db, now_iso
+
+    _require_workspace_admin(auth)
+    workspace_id = _active_workspace_id(request)
+    with get_db() as conn:
+        updated = conn.execute(
+            "UPDATE workspace_api_tokens SET revoked_at = ? "
+            "WHERE id = ? AND workspace_id = ? AND revoked_at IS NULL",
+            (now_iso(), token_id, workspace_id),
+        ).rowcount
+    if not updated:
+        raise HTTPException(status_code=404, detail="token not found")
+
+
+# ---------------------------------------------------------------------------
+# Workspace secrets — admin-set credential rows stored under the synthetic
+# workspace actor; workspace-shared (donated) workers resolve against these.
+# ---------------------------------------------------------------------------
+
+@workspace_router.get("/workspace/secrets")
+def list_workspace_secrets(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[Dict[str, Any]]:
+    from db.sqlite import workspace_actor_id
+
+    _require_workspace_admin(auth)
+    actor = workspace_actor_id(_active_workspace_id(request))
+    rows = repos.secrets.list(user_id=actor)
+    # names + status only, never values
+    return [{"name": r.get("name"), "status": r.get("status"), "updated_at": r.get("updated_at")} for r in rows]
+
+
+class _WorkspaceSecretWrite(BaseModel):
+    value: str
+
+
+@workspace_router.post("/workspace/secrets/{name}", status_code=200)
+def set_workspace_secret(
+    name: str,
+    payload: _WorkspaceSecretWrite,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    from db.sqlite import workspace_actor_id
+
+    _require_workspace_admin(auth)
+    actor = workspace_actor_id(_active_workspace_id(request))
+    repos.secrets.set(user_id=actor, name=name, value=payload.value)
+    logger.info("workspace secret %r set by %s (value not logged)", name, auth.user_id)
+    return {"ok": True, "name": name}
+
+
+@workspace_router.delete("/workspace/secrets/{name}", status_code=204)
+def delete_workspace_secret(
+    name: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> None:
+    from db.sqlite import workspace_actor_id
+
+    _require_workspace_admin(auth)
+    actor = workspace_actor_id(_active_workspace_id(request))
+    delete = getattr(repos.secrets, "delete", None)
+    if delete is None:
+        raise HTTPException(status_code=501, detail="secret delete not available")
+    delete(user_id=actor, name=name)
 
 
 @workspace_router.get("/workspace/settings")
