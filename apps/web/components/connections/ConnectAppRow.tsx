@@ -1,6 +1,6 @@
 import { ExternalLink } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatusPill } from "@/components/collection/StatusPill";
 import { BrandLogo } from "./BrandLogo";
 import type { SupportedConnectionApp } from "./connection-data";
 
@@ -24,14 +24,7 @@ export function ConnectAppRow({
         <span className="truncate text-sm font-medium text-[var(--ink)]">
           {app.displayName}
         </span>
-        {connected && (
-          <Badge
-            variant="outline"
-            className="[border:var(--bd-pill)] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] text-[var(--positive)]"
-          >
-            Connected
-          </Badge>
-        )}
+        {connected && <StatusPill spec={{ tone: "ok", label: "Connected" }} />}
       </div>
       <Button
         type="button"
