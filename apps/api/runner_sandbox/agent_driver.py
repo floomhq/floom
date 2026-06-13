@@ -1500,6 +1500,23 @@ class AgentDriver(SandboxDriver):
                 output_dir=output_dir,
                 secrets=secrets,
             )
+        # #1000: the local-subprocess path (runner != e2b) runs on the API
+        # HOST, so it is a shell-injection surface (unlike E2B, where
+        # python -c inside the sandbox is fine). Refuse it unless explicitly
+        # opted in, and only allow a bare PATH executable — no slashes, no
+        # interpreter -c/-e/-m invocations.
+        if os.environ.get("WORKEROS_DEV") != "1" and os.environ.get("WORKEROS_ALLOW_LOCAL_RUNNER") != "1":
+            return {
+                "ok": False,
+                "error": "local subprocess runner is disabled (E2B only); set runner: e2b",
+            }
+        if "/" in cmd or "\\" in cmd:
+            return {"ok": False, "error": "command must be a bare PATH executable name"}
+        _INTERP = {"sh", "bash", "zsh", "dash", "ksh", "fish", "python", "python3",
+                   "node", "nodejs", "ruby", "perl", "php", "env", "eval", "exec"}
+        _CODE_FLAGS = {"-c", "-e", "--eval", "-m", "--command"}
+        if cmd.lower() in _INTERP and any(a in _CODE_FLAGS for a in cmd_args):
+            return {"ok": False, "error": "interpreter -c/-e/-m invocations are not allowed"}
         try:
             with _CWD_LOCK:
                 proc = subprocess.run(
