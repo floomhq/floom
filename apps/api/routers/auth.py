@@ -14,6 +14,7 @@ with main by the test fixtures.
 
 from __future__ import annotations
 
+import os
 import secrets as _secrets_mod
 import secrets as pysecrets
 import uuid as _uuid_mod
@@ -24,6 +25,7 @@ from fastapi import Path as PathParam
 
 from auth import AuthContext, get_auth_context
 from auth.guards import _require_admin
+from core.config import _bootstrap_user_id
 from auth.multi_member import SESSION_COOKIE, _hash_token as _hash_pat
 from core.urls import _frontend_base_url
 from db import Repositories, get_repos
@@ -79,7 +81,13 @@ def auth_setup(
         raise HTTPException(status_code=422, detail="username required")
     password = payload.password
     _validate_new_password(password, username=username)
-    user_id = str(_uuid_mod.uuid4())
+    if (
+        (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() == "local"
+        and username == _bootstrap_user_id()
+    ):
+        user_id = username
+    else:
+        user_id = str(_uuid_mod.uuid4())
     pw_hash = _bcrypt_hash(password)
     row = user_repo.create(
         user_id=user_id,

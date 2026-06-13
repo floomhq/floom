@@ -347,7 +347,12 @@ if os.environ.get("WORKEROS_DEV") == "1":
     load_dotenv()
     print("[workeros] WORKEROS_DEV=1: loaded .env from cwd (dev only)", file=_sys.stderr)
 try:
-    api_env_path = Path.home() / ".config" / "workeros" / "api.env"
+    api_env_override = os.environ.get("WORKEROS_API_ENV_FILE") or os.environ.get("FLOOM_API_ENV_FILE")
+    api_env_path = (
+        Path(api_env_override).expanduser()
+        if api_env_override
+        else Path.home() / ".config" / "workeros" / "api.env"
+    )
     if api_env_path.is_file():
         load_dotenv(api_env_path, override=False)
 except OSError:
