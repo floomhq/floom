@@ -4512,8 +4512,9 @@ app.include_router(worker_create_router)
 from routers.system_health import system_health_router
 app.include_router(system_health_router)
 
-# Worker listing route (GET /workers).
-from routers.worker_listing import worker_listing_router
+# Worker listing route (GET /workers). list_workers re-exported because the
+# workspace-agent MCP tool layer + /search call it directly.
+from routers.worker_listing import worker_listing_router, list_workers
 app.include_router(worker_listing_router)
 
 from routers.uploads import (
