@@ -1581,6 +1581,11 @@ class AgentDriver(SandboxDriver):
         if not local_root.exists():
             return
         for path in sorted(local_root.rglob("*")):
+            # #995: never follow symlinks into the sandbox — a planted link
+            # could exfiltrate host files (e.g. api.env, /etc/passwd).
+            if path.is_symlink():
+                logger.warning("Skipping symlink during tree upload: %s", path)
+                continue
             rel = path.relative_to(local_root).as_posix()
             remote_path = f"{remote_root}/{rel}"
             if path.is_dir():
