@@ -502,7 +502,13 @@ def _call_draft_llm(
         )
     except Exception as exc:
         logger.exception("OpenAI call failed in draft-from-prompt")
-        raise HTTPException(status_code=502, detail=f"LLM call failed: {exc}") from exc
+        # #951: never echo raw provider errors (quota status, key fragments).
+        from llm import safe_llm_error_message
+
+        raise HTTPException(
+            status_code=502,
+            detail=safe_llm_error_message(exc, action="Worker generation"),
+        ) from exc
 
     raw_content = (response.choices[0].message.content or "").strip()
     if raw_content.startswith("```"):
