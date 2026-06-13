@@ -1,0 +1,65 @@
+# Example inbox rules for gmail-inbox-manager-plus.
+#
+# This is a demo template. Replace the entries below with your own:
+#   - rules:              archive / label / mark-read actions, matched top-to-bottom
+#   - important_keywords: never auto-archive a message that matches these
+#   - own_addresses:      your own email addresses, so the worker never drafts a
+#                         reply to yourself
+#   - action_tags:        keyword -> tag, used to categorize kept messages
+
+rules:
+  - name: "Archive CI / build notifications"
+    match:
+      from_contains: "ci-notifications@example.com"
+    action: archive
+
+  - name: "Archive source-control notifications"
+    match:
+      from_contains: "notifications@source-control.example"
+    action: archive
+
+  - name: "Archive newsletters"
+    match:
+      from_contains: "newsletter@"
+    action: archive
+
+  - name: "Archive no-reply automated mail"
+    match:
+      from_contains: "no-reply@"
+    action: archive
+
+  - name: "Label receipts and invoices"
+    match:
+      subject_contains: "receipt"
+    action: label
+    label: "Receipts"
+
+important_keywords:
+  subjects:
+    - "contract"
+    - "invoice"
+    - "payment"
+    - "deadline"
+    - "action required"
+    - "partnership"
+  domains:
+    - "client.example.com"
+    - "partner.example.com"
+  senders:
+    - "important-contact@example.com"
+
+# Your own addresses (never draft a reply to yourself).
+own_addresses:
+  - "you@example.com"
+
+action_tags:
+  - keyword: "partnership"
+    tag: "Partnership / Sales"
+  - keyword: "invoice"
+    tag: "Invoice / Payment"
+  - keyword: "payment"
+    tag: "Invoice / Payment"
+  - keyword: "deadline"
+    tag: "Deadline"
+  - keyword: "action required"
+    tag: "Action Required"
