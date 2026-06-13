@@ -34,14 +34,6 @@ if TYPE_CHECKING:
 logger = logging.getLogger("floom.api")
 
 
-class SecretWarning(BaseModel):
-    """A masked secret-detection finding. NEVER carries the raw value."""
-
-    pattern: str
-    line: int
-    masked: str
-
-
 def _block_secrets_in_contexts() -> bool:
     """Strict mode (default OFF): reject context writes that contain a live
     credential instead of warning. Env-gated so existing installs see no
@@ -57,6 +49,8 @@ def _scan_context_write(file_path: str, data: bytes) -> List[SecretWarning]:
     raises 400; the detail names the pattern (masked) and points the operator
     at the Secrets vault.
     """
+    from models import SecretWarning
+
     findings = scan_bytes(data)
     if not findings:
         return []
@@ -380,11 +374,7 @@ def _context_summary(
     user_id: Optional[str] = None,
 ) -> "ContextSummary":
     from contexts import context_dir, context_owner_id, context_updated_at, iter_context_files
-    from models import AssetPermissions
-    # ContextSummary is a response model still defined in main (pydantic). Imported
-    # lazily so this module resolves the live (test-reloaded) main, never a stale one.
-    # TODO(open-source): move the /contexts response models into models.py.
-    from main import ContextSummary
+    from models import AssetPermissions, ContextSummary
     root = context_dir(name)
     files = list(iter_context_files(root))
     total_size = sum(path.stat().st_size for path in files)
