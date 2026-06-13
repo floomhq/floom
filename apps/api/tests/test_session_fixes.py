@@ -120,9 +120,12 @@ def test_590_run_visible_checks_db_ownership():
 def _public_stock_ids_block() -> str:
     """Extract the PUBLIC_STOCK_WORKER_IDS frozenset contents from main.py."""
     lines = MAIN_SRC.splitlines()
+    # Modular refactor: the frozenset is DEFINED in core/config.py (not main.py);
+    # api_source() spans the whole backend, so anchor on the definition line
+    # (`PUBLIC_STOCK_WORKER_IDS = frozenset(`) rather than the first usage.
     start = next(
         (i for i, l in enumerate(lines)
-         if "PUBLIC_STOCK_WORKER_IDS" in l and "=" in l and "not in" not in l),
+         if l.lstrip().startswith("PUBLIC_STOCK_WORKER_IDS") and "=" in l and "frozenset" in l),
         None,
     )
     if start is None:
