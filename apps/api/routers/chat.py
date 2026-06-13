@@ -156,7 +156,9 @@ async def post_chat(
         except Exception as exc:
             logger.exception("chat background task failed")
             try:
-                await part_queue.put({"type": "error", "error": str(exc)})
+                from llm import safe_llm_error_message
+
+                await part_queue.put({"type": "error", "error": safe_llm_error_message(exc, action="Chat")})
                 await part_queue.put({"type": "finish", "conversation_id": None, "message_id": None})
             except Exception:
                 pass
