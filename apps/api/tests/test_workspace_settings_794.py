@@ -53,13 +53,16 @@ def _as_role(main, **ctx):
 
 def test_admin_round_trip(app_main, client):
     _as_role(app_main, user_id="alice", role="admin")
-    assert client.get("/workspace/settings").json() == {}
+    assert client.get("/workspace/settings").json() == {
+        "current_month_spend_usd": "0.0000",
+    }
 
     assert client.put("/workspace/settings/approval_default", json={"value": "required"}).status_code == 204
     assert client.put("/workspace/settings/auto_pause", json={"value": "true"}).status_code == 204
     assert client.get("/workspace/settings").json() == {
         "approval_default": "required",
         "auto_pause": "true",
+        "current_month_spend_usd": "0.0000",
     }
     # Upsert overwrites.
     assert client.put("/workspace/settings/auto_pause", json={"value": "false"}).status_code == 204

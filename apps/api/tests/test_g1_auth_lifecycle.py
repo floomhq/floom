@@ -208,7 +208,11 @@ def test_cli_token_for_legacy_install_without_users_still_works(monkeypatch, tmp
 # ---------------------------------------------------------------------------
 
 def test_run_token_rejected_when_user_disabled(monkeypatch, tmp_path):
-    main = _load_main(monkeypatch, tmp_path)
+    main = _load_main(
+        monkeypatch,
+        tmp_path,
+        secret=SECRET,
+    )
     from run_token import issue_worker_call_token
 
     with _client(main) as client:
