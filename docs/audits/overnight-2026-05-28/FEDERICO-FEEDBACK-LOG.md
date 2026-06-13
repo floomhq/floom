@@ -1,11 +1,11 @@
-# Federico feedback log — 2026-05-28 (live review session)
+# the operator feedback log — 2026-05-28 (live review session)
 
-This is the source of truth for outstanding UI/UX issues Federico has surfaced
+This is the source of truth for outstanding UI/UX issues the operator has surfaced
 across the overnight session. Every item is OPEN until I (Claude) ship a fix
-AND Federico confirms on prod. No "looks good" without a screenshot from him.
+AND the operator confirms on prod. No "looks good" without a screenshot from him.
 
 **Owner of S29+ queue:** me (Claude). Backend = Codex (under my orchestration).
-Federico is the reviewer + gate; he does not write code.
+the operator is the reviewer + gate; he does not write code.
 
 ---
 
@@ -15,7 +15,7 @@ Federico is the reviewer + gate; he does not write code.
 **Status:** OPEN
 **Severity:** P1
 **Round:** my S27 attempt judged insufficient
-**Notes:** Even after my "chrome aligned to /workers/<id>" S27 change, Federico
+**Notes:** Even after my "chrome aligned to /workers/<id>" S27 change, the operator
 says it's still off. Need a side-by-side audit: open /workers/research_brief and
 /runs/<run_id> in two windows, screenshot, diff every difference (container
 width, padding, H1 size, status pill placement, subtitle format, action-button
@@ -46,7 +46,7 @@ font so the dots align.
 **Status:** OPEN
 **Severity:** P1
 **Notes:** S26 made sparkline/trigger/extended-stats hover-only, but on hover
-the card GROWS (height changes). Federico wants:
+the card GROWS (height changes). the operator wants:
   - Card size MUST NOT CHANGE on hover.
   - On hover, the sparkline/trigger/stats REPLACE the description+tags (not
     appear in addition).
@@ -60,7 +60,7 @@ trigger+stats). Same h-full bounding box.
 ### F8.5 — Tag filter row missing from top of /workers (Image #50)
 **Status:** OPEN
 **Severity:** P1
-**Notes:** S26 added click-to-filter on individual card tags, but Federico
+**Notes:** S26 added click-to-filter on individual card tags, but the operator
 expected a top-level FILTER ROW showing all available tags as togglable
 pills (like the "Operations / Recruiting / Research" category row that
 currently exists for folders). The category row IS folder, not tag.
@@ -80,7 +80,7 @@ shape (H1 + status pill + tabs row + Configuration card + Worker guide).
 **Status:** OPEN
 **Severity:** P1
 **Notes:** Configuration block (Trigger/Runtime/Runner/Inputs/Outputs) + Worker
-guide block (Description/Use cases) is dense + cramped. Federico: "wtf is this
+guide block (Description/Use cases) is dense + cramped. the operator: "wtf is this
 layout and content? so hard to digest? who is our ICP?"
 
 ICP question is fair: who reads this? A developer wants config first. A
@@ -96,7 +96,7 @@ non-developer wants "what does this do? what inputs?" first.
 ### F8.8 — Triggers tab "ugly asf" (Image #52)
 **Status:** OPEN
 **Severity:** P1
-**Notes:** Even after my S22g radio-cards-with-subtitles refresh. Federico still
+**Notes:** Even after my S22g radio-cards-with-subtitles refresh. the operator still
 hates it. The card border + "TRIGGER" / "TRIGGER TYPE" double labels feel
 redundant. The Save/Discard footer is awkwardly placed.
 **Fix path:** strip down to:
@@ -174,23 +174,23 @@ page and checks against this checklist. Diff and fix.
 
 ---
 
-## ROUND 7 (earlier today) — Federico's items, status updated
+## ROUND 7 (earlier today) — the operator's items, status updated
 
 ### F7.1 — /connections Connected too tall (5+ rows wouldn't fit)
 **Status:** DONE (S27 row table)
-**Verified by Federico:** Yes (Round 8: "this is actually good. simply add a search bar")
+**Verified by the operator:** Yes (Round 8: "this is actually good. simply add a search bar")
 **Follow-up:** Search bar added in S28 (live).
 
 ### F7.2 — /runs didn't change at all
 **Status:** DONE (S27 real columnar table with Worker/Trigger/Duration/Status/Started)
-**Verified by Federico:** Not yet confirmed in Round 8 (he saw it but moved on)
+**Verified by the operator:** Not yet confirmed in Round 8 (he saw it but moved on)
 
 ### F7.3 — /runs/<id> not aligned with other pages
-**Status:** ATTEMPTED (S27) but Federico flagged again in Round 8 → see F8.1
+**Status:** ATTEMPTED (S27) but the operator flagged again in Round 8 → see F8.1
 **Re-open** as F8.1.
 
 ### F7.4 — Connections grid like Browse
-**Status:** REVERTED (Federico said "row is good, add search" in Round 8)
+**Status:** REVERTED (the operator said "row is good, add search" in Round 8)
 **Lesson learned:** I should have asked before assuming "same design as Browse"
 meant grid. He meant "tabs + chrome consistency".
 
@@ -213,7 +213,7 @@ meant grid. He meant "tabs + chrome consistency".
 | NEW-3 P1 | Secret length cap | FIXED | #89 (merged) |
 | NEW-4 P1 | CF-IP for ratelimit | FIXED | #89 (merged) |
 
-## Round 7 (Federico's audit) — status
+## Round 7 (the operator's audit) — status
 
 | ID | Finding | Status | Fix PR |
 |---|---|---|---|
@@ -230,7 +230,7 @@ Until that report lands, treat the merged status as "fixed in code" not
 
 ## Cumulative pattern recognition (honest)
 
-Federico has surfaced 30+ UI issues across S22-S28 in real-time review. Each
+the operator has surfaced 30+ UI issues across S22-S28 in real-time review. Each
 round I shipped surgical fixes; each round he found more. The pattern says:
 
 1. I am too quick to claim "done" without walking the surface like a user.
@@ -239,14 +239,14 @@ round I shipped surgical fixes; each round he found more. The pattern says:
 
 **Course correction for S29:**
 - For every fix, click through 3 adjacent pages to verify alignment.
-- Drop any item from "done" if I can't show a Federico-visible screenshot
+- Drop any item from "done" if I can't show a the operator-visible screenshot
   of the fix.
 - Walk the highest-traffic D rows of the matrix BEFORE shipping S29 — find
   drift first, then fix in one pass.
 
 ---
 
-## S29 plan (sub-PRs) — all shipped, awaiting Federico verification
+## S29 plan (sub-PRs) — all shipped, awaiting the operator verification
 
 Each PR was built in an isolated worktree, built clean, merged, deployed
 to prod (workers.floom.dev), and verified via deployed-bundle grep of
@@ -264,11 +264,11 @@ distinctive markers.
 | S29h | F8.1 /runs/<id> chrome alignment to /workers/<id> | #99 | LIVE |
 | S29i | F8.13 design alignment sweep (cron + file editor + exec mode + callback) | #100 | LIVE |
 
-All F8.x items have a shipped fix. Federico verification gate is now open:
+All F8.x items have a shipped fix. the operator verification gate is now open:
 he reviews on prod, I patch any drift.
 
 **Still pending (not in this S29 wave):**
-- F8.1 may need a second pass after Federico's eye on the new /runs/<id> chrome
+- F8.1 may need a second pass after the operator's eye on the new /runs/<id> chrome
 - Pending Codex async-draft backend (S29 timer is interim for F8.12)
 - RequirementsEditor + badge.tsx hex literals (low-visibility, not done in S29i)
 
@@ -276,7 +276,7 @@ he reviews on prod, I patch any drift.
 
 ## Standing instructions (mine, for the rest of this session)
 
-1. **Document every Federico complaint here BEFORE writing code.** No more
+1. **Document every the operator complaint here BEFORE writing code.** No more
    tactical fixes that lose track.
 2. **Click 3 adjacent pages per fix** before claiming done.
 3. **Save screenshot evidence to `/root/workeros/docs/audits/overnight-2026-05-28/round-N-screenshots/`** per round.

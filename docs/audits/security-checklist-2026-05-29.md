@@ -48,7 +48,7 @@ that may receive data (OpenAI/E2B/Composio), and owner-controlled
 retention/deletion. The 2026-06-09 scope update above supersedes any inference
 from that historical wording that agent workers are E2B-isolated. Not
 over-built.
-**Federico decision needed**: if Workeros Cloud (multi-tenant) reuses this OS
+**the operator decision needed**: if Workeros Cloud (multi-tenant) reuses this OS
 frontend, these pages must be replaced with a real processor-listed GDPR
 privacy policy + ToS. For the single-tenant OS they are sufficient.
 
@@ -187,7 +187,7 @@ value 1-32768, rejects newline/null injection.
 
 ---
 
-## Items needing Federico
+## Items needing the operator
 
 1. **Privacy/Terms for Cloud**: the OS `/privacy` + `/terms` are single-tenant
    statements. If Workeros Cloud (multi-tenant, prospect-facing) reuses this

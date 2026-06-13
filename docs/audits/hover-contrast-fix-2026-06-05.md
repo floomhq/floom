@@ -2,7 +2,7 @@
 
 ## Problem
 
-In light mode, hovering over or focusing interactive elements in dropdown menus, select dropdowns, and similar components produced invisible text: dark text (#141414) on a dark background (#181818). Federico described it as "on day mode I hover on a button it turns black but text also black."
+In light mode, hovering over or focusing interactive elements in dropdown menus, select dropdowns, and similar components produced invisible text: dark text (#141414) on a dark background (#181818). the operator described it as "on day mode I hover on a button it turns black but text also black."
 
 ## Root Cause
 

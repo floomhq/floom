@@ -1,12 +1,12 @@
 # Workeros UI Design Mockups (ASCII)
 
-These ASCII layouts were used to align with Federico on the UI direction during the 2026-05-27 launch-readiness push. Saved here as durable artifacts so they're not lost in chat scrollback. Each section also notes which PR shipped the implementation.
+These ASCII layouts were used to align with the operator on the UI direction during the 2026-05-27 launch-readiness push. Saved here as durable artifacts so they're not lost in chat scrollback. Each section also notes which PR shipped the implementation.
 
 ---
 
-## /workers/[id] — Worker Detail Page — Side-Nav B (chosen by Federico, shipped in PR S8 #58)
+## /workers/[id] — Worker Detail Page — Side-Nav B (chosen by the operator, shipped in PR S8 #58)
 
-Federico's pick from three options (A: narrow icon rail, **B: wide labeled rail**, C: anchored sections). Triggers added as its own menu item per Federico's note "all are missing triggers as menu item".
+the operator's pick from three options (A: narrow icon rail, **B: wide labeled rail**, C: anchored sections). Triggers added as its own menu item per the operator's note "all are missing triggers as menu item".
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -40,11 +40,11 @@ Federico's pick from three options (A: narrow icon rail, **B: wide labeled rail*
 
 ---
 
-## /workers/new — Worker Creation Page — Option A (chosen by Federico, shipping in PR S9 #?)
+## /workers/new — Worker Creation Page — Option A (chosen by the operator, shipping in PR S9 #?)
 
-Three options were proposed (A: single hero card, B: side-by-side composer + "how it works" panel, C: inline conversational). Federico picked **A** plus "skip Step 2 → land on /workers/<id>/edit after Generate" (DRY/SOLID consolidation).
+Three options were proposed (A: single hero card, B: side-by-side composer + "how it works" panel, C: inline conversational). the operator picked **A** plus "skip Step 2 → land on /workers/<id>/edit after Generate" (DRY/SOLID consolidation).
 
-### BEFORE (current, "cards floating around" — Federico's complaint)
+### BEFORE (current, "cards floating around" — the operator's complaint)
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -105,7 +105,7 @@ to /workers/<new-id>/edit (same shared form as editing any worker).
 
 ## /workers — Worker List Page — Google Drive Folders (shipped in PR S8 #58)
 
-Federico's spec: "Recent / Favourites / Folders (Google Drive style)" instead of the previous top-chip folder filter (PR N).
+the operator's spec: "Recent / Favourites / Folders (Google Drive style)" instead of the previous top-chip folder filter (PR N).
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -219,7 +219,7 @@ Landing page when user opens workers.floom.dev. B2C single-user: surface "what r
 
 ## /runs — Runs Page (LOCKED, shipping in PR S12)
 
-Global runs view. Currently lives only inside `/workers/[id]?section=runs` — needs a flat list across all workers. Federico 2026-05-27: rows must look clickable; detail page output-first with download.
+Global runs view. Currently lives only inside `/workers/[id]?section=runs` — needs a flat list across all workers. the operator 2026-05-27: rows must look clickable; detail page output-first with download.
 
 ```
 ┌────────────────────────────────────────────────────────────────────────┐
@@ -246,7 +246,7 @@ Global runs view. Currently lives only inside `/workers/[id]?section=runs` — n
 │          │  [← Newer]                                       [Older →]   │
 └────────────────────────────────────────────────────────────────────────┘
 
-List row (Federico 2026-05-27: "must be clear you can click them"):
+List row (the operator 2026-05-27: "must be clear you can click them"):
 - Entire row is the `<a href="/runs/<id>">` anchor.
 - `cursor: pointer`, hover background, chevron `→` at the end of every row.
 - Failed runs: red `✗` glyph + soft-red row background.
@@ -297,7 +297,7 @@ For failed runs, Output panel is replaced by Error panel (same shape, red):
 
 ## /workers — Drive-clone (LOCKED, shipping in PR S12 — REPLACES live page)
 
-Federico 2026-05-27: "/workers don't agree, too noisy". Current page has 5 sections (Recent / Favourites / Folders / Tags / All) — cut to Drive-clone with one tab row.
+the operator 2026-05-27: "/workers don't agree, too noisy". Current page has 5 sections (Recent / Favourites / Folders / Tags / All) — cut to Drive-clone with one tab row.
 
 Looking at the live page screenshot (2026-05-26): Recent shows 3 cards with NO sparkline + NO stats (Recruiting/Search Assistant x2, Recruiting/Compliance). "Recent" should mean "ran recently" — workers with zero runs do not belong there.
 
@@ -392,7 +392,7 @@ Currently `/settings` just shows the Floom secret. With more config coming (noti
 
 ---
 
-## Navigation pattern decision (Federico 2026-05-27)
+## Navigation pattern decision (the operator 2026-05-27)
 
 **Chosen: flat sidebar + in-page tabs (NOT expanding sidebar submenus).**
 
@@ -404,7 +404,7 @@ Rationale:
 
 ---
 
-## Worker mode simplification (Federico 2026-05-27, shipping in PR S11)
+## Worker mode simplification (the operator 2026-05-27, shipping in PR S11)
 
 Drop the three-mode model (`agent | pure-script | hybrid`). The entry point IS the truth — full stop:
 
@@ -431,15 +431,15 @@ TODO (PR S11.1): `apps/web/app/workers/[id]/edit/page.tsx` `detectEntry()` curre
 
 | Layout | Decision | PR | Status |
 |---|---|---|---|
-| Side-nav B on /workers/[id] | Federico chose B + Triggers | PR S8 #58 | ✅ merged |
+| Side-nav B on /workers/[id] | the operator chose B + Triggers | PR S8 #58 | ✅ merged |
 | Sparklines on worker cards | Approved | PR S8 #58 | ✅ merged |
 | Drive folders on /workers | Approved (superseded by S12 simplification) | PR S8 #58 | ✅ merged |
-| /workers/new Option A | Federico chose A + skip Step 2 | PR S9 #60 | ✅ merged |
-| Worker mode → entry point | Federico 2026-05-27 (3 modes → 1 field) | PR S11 | 🔄 in flight |
-| Tools by default + disable_tools opt-out | Federico 2026-05-27 (web_search default-on) | PR S11 | 🔄 in flight |
-| /overview page (4 stats + recent + scheduled + attention) | Locked Federico 2026-05-27 | PR S12 | 📋 queued |
-| /runs page (clickable rows, sparkline header) | Locked Federico 2026-05-27 | PR S12 | 📋 queued |
-| /runs/[id] detail (output-first, download, collapsibles) | Locked Federico 2026-05-27 | PR S12 | 📋 queued |
-| /workers Drive-clone simplified (kill Recent/Favs/Tags) | Locked Federico 2026-05-27 | PR S12 | 📋 queued |
-| /settings in-page tabs | Locked Federico 2026-05-27 | PR S12 | 📋 queued |
-| Global `<Tabs>` primitive (DRY across all pages) | Locked Federico 2026-05-27 | PR S12 | 📋 queued |
+| /workers/new Option A | the operator chose A + skip Step 2 | PR S9 #60 | ✅ merged |
+| Worker mode → entry point | the operator 2026-05-27 (3 modes → 1 field) | PR S11 | 🔄 in flight |
+| Tools by default + disable_tools opt-out | the operator 2026-05-27 (web_search default-on) | PR S11 | 🔄 in flight |
+| /overview page (4 stats + recent + scheduled + attention) | Locked the operator 2026-05-27 | PR S12 | 📋 queued |
+| /runs page (clickable rows, sparkline header) | Locked the operator 2026-05-27 | PR S12 | 📋 queued |
+| /runs/[id] detail (output-first, download, collapsibles) | Locked the operator 2026-05-27 | PR S12 | 📋 queued |
+| /workers Drive-clone simplified (kill Recent/Favs/Tags) | Locked the operator 2026-05-27 | PR S12 | 📋 queued |
+| /settings in-page tabs | Locked the operator 2026-05-27 | PR S12 | 📋 queued |
+| Global `<Tabs>` primitive (DRY across all pages) | Locked the operator 2026-05-27 | PR S12 | 📋 queued |

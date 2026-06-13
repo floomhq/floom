@@ -1,6 +1,6 @@
-# Workeros UI design spec — 2026-06-06 (Federico live-walk)
+# Workeros UI design spec — 2026-06-06 (the operator live-walk)
 
-Design direction from Federico's walkthrough. Bar: Workeros-native (workers.floom.dev design language), ChatGPT-simplicity, no AI-slop, real brand logos. This is ONE coherent UI pass (run after the convergence deploy clears apps/web). Status: DESIGN — discuss before build.
+Design direction from the operator's walkthrough. Bar: Workeros-native (workers.floom.dev design language), ChatGPT-simplicity, no AI-slop, real brand logos. This is ONE coherent UI pass (run after the convergence deploy clears apps/web). Status: DESIGN — discuss before build.
 
 ## 1. Connections — "Connecting" needs a live progress indicator
 - Problem: connection rows stuck on a static amber "Connecting" pill (e.g. Gmail fede@rocketlist.ai, 12 scopes) — looks frozen, low trust.

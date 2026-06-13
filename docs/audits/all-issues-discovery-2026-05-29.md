@@ -91,7 +91,7 @@ Surface: `/workers?folder=Operations`. "Node Smoke Test" — described as "Tiny 
 Evidence: snapshot of `?folder=Operations` (`02-...` flow).
 
 **P1-11 — "Coming up today" feed renders scheduled worker names with strikethrough.**
-Surface: `/overview` "Coming up today". Kugelaudio Bug Intake, Kugelaudio Meeting Pipeline, and LinkedIn Post Engagements are rendered with **strikethrough** text (GitHub Digest Sender is not). Strikethrough in an "upcoming" list reads as cancelled/done — misleading for items that are about to run (likely keyed off paused/failing state, but the visual says "crossed off").
+Surface: `/overview` "Coming up today". A customer's Bug Intake, A customer's Meeting Pipeline, and LinkedIn Post Engagements are rendered with **strikethrough** text (GitHub Digest Sender is not). Strikethrough in an "upcoming" list reads as cancelled/done — misleading for items that are about to run (likely keyed off paused/failing state, but the visual says "crossed off").
 Evidence: `00-overview-desktop.png` (and `01-...`).
 
 ---

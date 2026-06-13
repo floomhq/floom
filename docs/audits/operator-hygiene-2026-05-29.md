@@ -46,13 +46,13 @@ All evidence below is from FRESH live probes of the running prod backend (`x-flo
 
 **Before (3 leaks):**
 - `linkedin-post-engagements`: *"APIFY_API_KEY free credits exhausted … Worker code is correct; KeyError guard added in lane/reliability-2026-05-29."* → leaks env-var name, code identifier, git branch name.
-- `kugelaudio-bug-intake` / `kugelaudio-meeting-pipeline`: *"Customer secrets unavailable (SLACK_BOT_TOKEN, LINEAR_API_KEY, NOTION_API_KEY)."* → leaks env-var names.
+- `customer-worker-a` / `customer-worker-b`: *"Customer secrets unavailable (SLACK_BOT_TOKEN, LINEAR_API_KEY, NOTION_API_KEY)."* → leaks env-var names.
 
 **Fix:**
 - Rewrote all three to plain operator language (e.g. *"Paused — the LinkedIn data provider's quota is used up for now. Resumes automatically on 2026-06-25, or sooner once the data source is topped up."*).
 - Added `_sanitize_operator_text()` at the WorkerSummary + WorkerDetail serialization boundary so ANY archive_reason (incl. future worker-author-generated ones) has env-var names, git branch names, sandbox paths, and tracebacks stripped before it reaches an operator.
 
-**Files:** `workers/{linkedin-post-engagements,kugelaudio-bug-intake,kugelaudio-meeting-pipeline}/worker.yml` (git-tracked) + `apps/api/main.py`.
+**Files:** `workers/{linkedin-post-engagements,customer-worker-a,customer-worker-b}/worker.yml` (git-tracked) + `apps/api/main.py`.
 
 **Live evidence (post-deploy):** Scanned every archived worker's `archive_reason` via `/workers?include_archived=true` with a leak regex (`[A-Z]+_[A-Z_]+ | lane/ | feat/ | fix/ | /home/ | /root/ | /tmp/ | Traceback | KeyError`): 6 archived reasons, **0 leaks**. Example: linkedin → *"Paused — the LinkedIn data provider's quota is used up for now…"*.
 

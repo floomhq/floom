@@ -423,7 +423,7 @@ export function TriggersEditor({
         </p>
       </div>
 
-      {/* Primary action: + Add trigger — ABOVE the list (Federico 2026-05-29 explicit) */}
+      {/* Primary action: + Add trigger — ABOVE the list (the operator 2026-05-29 explicit) */}
       <button
         type="button"
         onClick={addRow}

@@ -1,6 +1,6 @@
 # Standalone share pages — brief (2026-06-05)
 
-Federico gave this feedback BEFORE and it was not delivered — he is frustrated. Do it properly this time, built against his REFERENCE.
+the operator gave this feedback BEFORE and it was not delivered — he is frustrated. Do it properly this time, built against his REFERENCE.
 
 ## The ask
 He wants TRUE standalone share pages (noindex), like the approvals shareable links (M12), for:

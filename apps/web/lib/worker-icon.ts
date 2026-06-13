@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // workerIcon — resolves a DISTINCT, MEANINGFUL primary icon for a worker.
 //
-// Federico (2026-05-29): the /workers grid showed the SAME generic AI sparkle
+// the operator (2026-05-29): the /workers grid showed the SAME generic AI sparkle
 // (✦) on every worker without a connection — 30+ identical sparkles read as a
 // monotonous wall, and the sparkle is the single most overused AI icon. This
 // helper kills that wall by resolving a varied, purpose-derived glyph per

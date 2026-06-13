@@ -7,7 +7,7 @@
 
 ## TL;DR
 
-The API is solid: auth, security headers, rate limiting, secret isolation, E2E runs for all 3 worker types (agent/pure-script/DACH), and E2B isolation for the pure-script path all pass clean. Agent runs use AgentDriver in the API process and were tested as trusted platform-controlled execution, not as sandbox-isolated bundles. The P1 blocker (`draft-from-prompt` 67% failure rate from unquoted-colon YAML) is **fixed and live** as of PR #33: stricter system prompt + `response_format=json_object` + 3-attempt retry loop. Smoke-tested 5/5 against the live API at 09:33 UTC — all parse cleanly, zero retries needed. The UI walks (prompt-to-worker flow, inline secrets #31, cancel button #32) still need Federico's eyes in browser, Vercel deploy protection blocks automated verification from self-hosted server.
+The API is solid: auth, security headers, rate limiting, secret isolation, E2E runs for all 3 worker types (agent/pure-script/DACH), and E2B isolation for the pure-script path all pass clean. Agent runs use AgentDriver in the API process and were tested as trusted platform-controlled execution, not as sandbox-isolated bundles. The P1 blocker (`draft-from-prompt` 67% failure rate from unquoted-colon YAML) is **fixed and live** as of PR #33: stricter system prompt + `response_format=json_object` + 3-attempt retry loop. Smoke-tested 5/5 against the live API at 09:33 UTC — all parse cleanly, zero retries needed. The UI walks (prompt-to-worker flow, inline secrets #31, cancel button #32) still need the operator's eyes in browser, Vercel deploy protection blocks automated verification from self-hosted server.
 
 **Top 3 things to check first when you wake up:**
 1. **`draft-from-prompt` in browser** — go to workers.floom.dev/workers/new, type a prompt, verify it returns a draft worker without error. The retry fix is live; a red toast should now be rare. If you do see one, journal logs at `journalctl -u workeros-api.service -g "YAML validation failed"` will show which attempt failed.
@@ -63,9 +63,9 @@ The API is solid: auth, security headers, rate limiting, secret isolation, E2E r
 
 ---
 
-## What Was NOT Verified (Federico Must Check in Browser)
+## What Was NOT Verified (the operator Must Check in Browser)
 
-Vercel deploy protection on workers.floom.dev blocks unauthenticated requests from self-hosted server. All UI verification requires Federico's authenticated session:
+Vercel deploy protection on workers.floom.dev blocks unauthenticated requests from self-hosted server. All UI verification requires the operator's authenticated session:
 
 1. **workers.floom.dev general navigation** — does the app load, routes work, no JS errors
 2. **Prompt-to-worker UI (#30)** — `/workers/new`, type a prompt, verify draft populates (also surfaces the draft-from-prompt reliability P1 if it's still broken in the UI)
@@ -84,7 +84,7 @@ To disable deploy protection for a one-time audit pass: Vercel dashboard → wor
 | P1 | `draft-from-prompt` returns 502 ~67% of calls (LLM YAML validation failure) | **Fixed in PR #33** — stricter prompt + `response_format=json_object` + 3-attempt retry. Live smoke 5/5. |
 | Low | `/healthz` blocked from self-hosted server IPv6 by Cloudflare WAF when no secret sent | Open, add self-hosted server IPv6 to CF WAF allowlist for `/healthz` path |
 | Spec note | `error_code` field absent from cancel response (spec says `error_code=cancelled`, API says `error="Run cancelled by user"`) | Won't fix unless spec is the external API contract |
-| Pending | UI walk (5 items above) | Federico to verify in browser |
+| Pending | UI walk (5 items above) | the operator to verify in browser |
 
 ---
 

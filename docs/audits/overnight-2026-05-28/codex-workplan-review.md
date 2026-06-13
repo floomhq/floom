@@ -52,7 +52,7 @@ The P0s that need to move ahead of card polish:
 
 4. **Worker detail false "Worker not found" race.** The design roast calls it the second-worst bug: initial navigation shows "Worker not found" and a red failed fetch toast before resolving (`docs/audits/ui-roast-2026-05-28/design-roast.md:14-21`, `docs/audits/ui-roast-2026-05-28/design-roast.md:82-84`). `ISSUES.md` records I-32 P0 (`ISSUES.md:964-967`). The workplan delays skeleton/loading states until batch 8 (`WORKPLAN-2026-05-28-overnight.md:45-46`), but this P0 is exactly a loading-state bug.
 
-5. **Worker cards and worker detail navigation are still broken for Federico.** I-24 says Federico can only click Run on cards and still does not see tabs/side-nav on detail (`ISSUES.md:913-919`). The workplan's first batch fixes button position, not card-body navigation or detail-side-nav recognizability (`WORKPLAN-2026-05-28-overnight.md:38-40`).
+5. **Worker cards and worker detail navigation are still broken for the operator.** I-24 says the operator can only click Run on cards and still does not see tabs/side-nav on detail (`ISSUES.md:913-919`). The workplan's first batch fixes button position, not card-body navigation or detail-side-nav recognizability (`WORKPLAN-2026-05-28-overnight.md:38-40`).
 
 6. **Theme controls are duplicated and desynced.** `ISSUES.md` records I-43 as P0 (`ISSUES.md:1010-1013`). The design roast also flags duplicate theme controls and stale labels (`docs/audits/ui-roast-2026-05-28/design-roast.md:181-187`, `docs/audits/ui-roast-2026-05-28/design-roast.md:277-281`). The workplan does not schedule it.
 
@@ -75,10 +75,10 @@ The plan omits multiple open items that are clearly broken:
 
 - **I-20 CORS prod credential risk.** `ISSUES.md` records localhost origin plus credentials in prod as HIGH-4 (`ISSUES.md:870-875`). The workplan says first action is merge PR #70 for CORS/uploads (`WORKPLAN-2026-05-28-overnight.md:115-117`), but the plan body does not include a verification gate for prod CORS behavior.
 - **I-21 upload validation.** Arbitrary files, no validation, no size limit, disk exhaustion risk (`ISSUES.md:876-885`). Not in Lane A, Lane B, or Lane D.
-- **I-22 dark-mode sidebar regression.** Federico explicitly wants sidebar darker than content and still blue-accented (`ISSUES.md:897-904`). Not in the plan.
+- **I-22 dark-mode sidebar regression.** the operator explicitly wants sidebar darker than content and still blue-accented (`ISSUES.md:897-904`). Not in the plan.
 - **I-23 broken Generate after example pill.** P0 create-flow failure (`ISSUES.md:905-911`). Not in the plan.
 - **I-24 card body click and worker detail tabs/side-nav.** P0 regression (`ISSUES.md:913-919`). Partially adjacent to I-55, but not actually scheduled.
-- **I-25 slow worker detail navigation.** Federico called out long load time (`ISSUES.md:921-925`). Not in the plan.
+- **I-25 slow worker detail navigation.** the operator called out long load time (`ISSUES.md:921-925`). Not in the plan.
 - **I-30 `/runs` page did not get S12-UI updates.** Runs page still does not match locked spec (`ISSUES.md:949-953`). The workplan only does URL-sync for `/runs` and stat-card behavior; it does not align `/runs` with the locked spec.
 - **I-31 invisible connect CTA.** P0 (`ISSUES.md:960-963`). Missing.
 - **I-34 duplicate provider rows.** Two Google Calendar rows need human account labels (`ISSUES.md:972-975`). The workplan touches connections routing but not duplicate account distinction.

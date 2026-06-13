@@ -74,7 +74,7 @@ If R7 is deployed and the code I inspected is what runs, expected score: **80-85
 | R6 fix | Status NOW | Evidence |
 |---|---|---|
 | **CRIT-3** DELETE /connections/<random-uuid> → 404 (not silent delete) | **PASS** ✓ | Random UUID `fce46506-...` → HTTP 404 `{"detail":"Connection not found"}`. No regression. |
-| **CRIT-4** GET /connections returns only caller's rows | **PASS (single-tenant context)** ✓ | 5 connections returned, all Federico's. No cross-user leak vector in single-tenant deployment. No regression. |
+| **CRIT-4** GET /connections returns only caller's rows | **PASS (single-tenant context)** ✓ | 5 connections returned, all the operator's. No cross-user leak vector in single-tenant deployment. No regression. |
 | **HIGH-6** Malformed-JSON branch no longer amplifies | **PASS** ✓ | 1MB malformed body → 158-byte response (no amp). No regression. (The OTHER branch — validation-error — is what NEW-1 catches.) |
 
 ---

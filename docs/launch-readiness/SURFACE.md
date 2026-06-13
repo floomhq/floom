@@ -95,9 +95,9 @@ Local Python CLI (NOT published to PyPI):
 
 | Persona | How they interact | Auth |
 |---|---|---|
-| **Federico (owner)** | Frontend on workers.floom.dev, CLI from his Mac, MCP from Claude Code | x-floom-secret (his) |
+| **the operator (owner)** | Frontend on workers.floom.dev, CLI from his Mac, MCP from Claude Code | x-floom-secret (his) |
 | **Fresh AI agent** | `npx @floomhq/workeros install` → MCP via Claude/Cursor/Continue | x-floom-secret in config env |
-| **Federico's tools** | Composio-connected SaaS apps (Gmail, Calendar, etc.) | OAuth tokens stored in Composio |
+| **the operator's tools** | Composio-connected SaaS apps (Gmail, Calendar, etc.) | OAuth tokens stored in Composio |
 | **Webhook senders** | External services posting to `/webhooks/{id}` | HMAC per worker |
 | **No anonymous public** | Frontend gated by Vercel deploy protection | n/a |
 

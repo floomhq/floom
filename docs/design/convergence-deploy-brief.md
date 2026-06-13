@@ -1,6 +1,6 @@
 # Convergence deploy — brief (2026-06-06)
 
-Goal: ship the batch of verified-but-undeployed work to live Cloud (workeros.floom.dev) + OS (workers.floom.dev) in ONE smoke-gated pass. You (Codex) own the merge/deploy decisions. Be careful: live multi-tenant Cloud. Use the smoke gate. Federico is NOT the reviewer — decide and execute, flag only genuine blockers.
+Goal: ship the batch of verified-but-undeployed work to live Cloud (workeros.floom.dev) + OS (workers.floom.dev) in ONE smoke-gated pass. You (Codex) own the merge/deploy decisions. Be careful: live multi-tenant Cloud. Use the smoke gate. the operator is NOT the reviewer — decide and execute, flag only genuine blockers.
 
 ## PRs to reconcile + merge (verify each is current + de-duped first)
 - #449 feat(emily-chat): the REAL chat (frontend reskin + wired SSE + label polish). This is the canonical chat. #434 and #435 are older chat prototypes — CLOSE them in favor of #449 (confirm #449 supersedes).

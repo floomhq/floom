@@ -93,11 +93,11 @@ Fired 8 concurrent `POST /workers/weekly_update/runs`:
 - **"Event loop is closed" hits across all 8 run logs + errors = 0.** The #258 fix holds.
 
 ### Scheduled workers — ZERO failing on schedule
-The 3 schedule-triggered workers on disk (kugelaudio-bug-intake, kugelaudio-meeting-pipeline,
+The 3 schedule-triggered workers on disk (customer-worker-a, customer-worker-b,
 linkedin-post-engagements) are all **archived/paused** with documented reasons
 (`missing_secret` — needs the customer's accounts / provider quota exhausted). They are excluded
 from the active operator set and from scheduling. No non-archived worker has an active failing
-schedule. The historical kugelaudio failure counts in /metrics predate their archival.
+schedule. The historical a customer's failure counts in /metrics predate their archival.
 
 ### Backup / restore integrity — GREEN
 Latest hourly backup `/root/backups/workeros-2026-05-29-0904` (created 09:04 UTC, timer active,

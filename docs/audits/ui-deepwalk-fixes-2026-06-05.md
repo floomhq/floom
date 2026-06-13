@@ -14,7 +14,7 @@ Git archaeology (`git log --all --diff-filter=D -- "apps/web/**/chat*"`) returne
 
 The backend `POST /chat` SSE endpoint works (confirmed by git log: multiple backend chat commits). The web frontend has always been config-only. Slack is the designed interactive interface for Emily.
 
-**Scope question for Federico:** Build a chat tab on `/assistant` (would require a new ChatPanel component, SSE client, conversation state, and message thread UI — non-trivial), OR document that Slack is the intentional chat interface and mark this as "by design". No change made here.
+**Scope question for the operator:** Build a chat tab on `/assistant` (would require a new ChatPanel component, SSE client, conversation state, and message thread UI — non-trivial), OR document that Slack is the intentional chat interface and mark this as "by design". No change made here.
 
 ---
 
@@ -141,7 +141,7 @@ Relabelled from "Edit" to "Edit worker". Destination unchanged: `/workers/${run.
 
 | Item | Status | Notes |
 |------|--------|-------|
-| N1 | INVESTIGATED — not regressed, never existed | Scope decision needed from Federico |
+| N1 | INVESTIGATED — not regressed, never existed | Scope decision needed from the operator |
 | N5 | BUILT + VERIFIED-DONE | |
 | N7 | BUILT + VERIFIED-DONE | |
 | N8 | BUILT + VERIFIED-DONE | |

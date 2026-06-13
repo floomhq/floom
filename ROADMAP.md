@@ -1,10 +1,10 @@
 # Workeros Roadmap
 
 Single source of truth. Two sections:
-1. **Launch Readiness** — shipped or actively in flight; required for "Federico uses workeros for his own stuff."
+1. **Launch Readiness** — shipped or actively in flight; required for "the operator uses workeros for his own stuff."
 2. **Post-Launch** — explicitly parked; not in scope until reopened.
 
-Scope decisions are owned by Federico. Implementation decisions are owned by Codex. Claude orchestrates and reviews.
+Scope decisions are owned by the operator. Implementation decisions are owned by Codex. Claude orchestrates and reviews.
 
 Last updated: 2026-05-27 — added Series S launch-readiness push to a target score of 91/100.
 
@@ -56,7 +56,7 @@ All items below are SHIPPED unless flagged otherwise. Anything not on this list 
 - **Folder tree + tag chips** — flat folder grouping on `/workers`, tag filter chips, no nested route changes.
 - **Transcript tab** — agent-mode runs render the LLM transcript on `/runs/{id}`. Code-mode runs hide the tab.
 
-### Consumer creation flow (B2C-ready) — Federico 2026-05-26
+### Consumer creation flow (B2C-ready) — the operator 2026-05-26
 
 - **Prompt-to-worker on `/workers/new`** — user pastes a natural-language description ("summarise all my meetings from Granola and update my CRM HubSpot accordingly"). System uses an LLM to (1) draft `SKILL.md` for the worker, (2) identify required Composio connections from the prompt, (3) identify required OpenAI/API secrets, (4) generate the I/O schema (inputs from the prompt nouns, output as markdown). User reviews + edits.
 - **Inline OAuth + secret entry** — at create-time the form walks the user through connecting any required SaaS (Composio OAuth popup) and entering any required secrets, in-flow. No separate `/secrets` or `/connections` detour. After connect/enter, the form re-renders with green checkmarks.
@@ -165,31 +165,31 @@ Explicitly NOT in scope. Will reopen only with a specific trigger.
 | Multi-user / team workspaces | First paying customer with multi-seat need |
 | Calendar view of scheduled runs | More than 10 active cron workers in one account |
 | Daily health checks + alerts on connections / secrets | First production outage from a stale connection |
-| Notifications (browser + email + Slack) | Federico reports missing a run failure |
+| Notifications (browser + email + Slack) | the operator reports missing a run failure |
 | ⌘K palette + global search | More than 50 workers in one account |
 | In-app docs / changelog | First external user |
-| Worker composition (`context.workers.invoke`) | Federico explicitly wants chained workers |
+| Worker composition (`context.workers.invoke`) | the operator explicitly wants chained workers |
 | Library mode SDK (`@floom.worker` decorator + observability) | First framework user asks for it |
-| Pause-resume approvals (real mid-run) | Federico needs an action-taking worker that requires human approval |
+| Pause-resume approvals (real mid-run) | the operator needs an action-taking worker that requires human approval |
 | Multi-agent PR review loop | Concept-stage, not a product wedge |
-| Post-run actions (copy / use-as-input / schedule / retry) | First time Federico clicks "what now?" on a finished run |
+| Post-run actions (copy / use-as-input / schedule / retry) | First time the operator clicks "what now?" on a finished run |
 | Per-error-type CTAs (Stripe-style) | First user-visible error class that needs guided recovery |
 | Outgoing HMAC notify URLs | First worker needing webhook-out fan-out |
-| Skeleton visual fix (radius mismatch, dark-mode contrast) | Federico flags as P0 design |
+| Skeleton visual fix (radius mismatch, dark-mode contrast) | the operator flags as P0 design |
 | Capability grants enforcement (fail-closed) | Marketplace install path OR multi-user |
 | Multi-action skills (`entrypoints[]` exposed as separate API actions + MCP tool param) | First worker that genuinely needs >1 invokable action — workaround today is one worker per action |
 | Richer input/output types (`kind: json` with nested-schema validation, arrays-of-objects) | First user trying to pass nested JSON and asking for first-class type |
-| In-UI preview for file outputs (PDF, Excel, images, video) | Federico wants to glance at a run's output without downloading |
+| In-UI preview for file outputs (PDF, Excel, images, video) | the operator wants to glance at a run's output without downloading |
 | Skills marketplace (install from skills.floom.dev) | After workeros has real usage |
 | Library worker (`@floom.worker` decorator for Python apps) | Library use case validated |
 
-Adding to post-launch requires Federico approval. Items move from post-launch to launch readiness ONLY when their reopen trigger fires.
+Adding to post-launch requires the operator approval. Items move from post-launch to launch readiness ONLY when their reopen trigger fires.
 
 ---
 
 ## How to add to this roadmap
 
-- **Launch readiness additions**: blocking decisions go to Federico. Implementation goes to Codex.
+- **Launch readiness additions**: blocking decisions go to the operator. Implementation goes to Codex.
 - **Post-launch additions**: append to the table with a clear reopen trigger. Never use vague reopens like "later" or "future."
 - **Removed items**: move to the `## History` section with date + reason, do not delete entirely.
 - **Tier numbering** (T0, T1, etc.): retired. The two-section split above is the only structure. Numbered tier drift was the source of repeated scope confusion; do not reintroduce.

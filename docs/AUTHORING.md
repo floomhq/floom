@@ -360,7 +360,7 @@ python3 scripts/smoke_git_context_worker.py --secret "$FLOOM_SECRET"
 - **webhook** — fires when POST hits `https://workers-api.floom.dev/webhooks/<worker-id>?token=<derived>`. The token is a per-worker HMAC of the worker_id under the host's webhook signing key. The URL is shown in the Triggers tab after the worker is created.
 - **composio** — fires when the named Composio event arrives, scoped to the named connection.
 
-A worker can have multiple triggers (use the `triggers:` plural form). Federico tip: keep it to one when possible; two becomes confusing fast.
+A worker can have multiple triggers (use the `triggers:` plural form). the operator tip: keep it to one when possible; two becomes confusing fast.
 
 Use `type: schedule` for cron workers. Legacy manifests with `type: cron` are accepted and normalized to `schedule`, but new templates must emit `schedule`.
 
@@ -557,7 +557,7 @@ When an agent (Claude Code / Cursor / a draft-and-create endpoint) writes a work
 Rules the agent should follow (these are the failure modes observed in real drafts):
 
 - **Default to agent mode** unless the task is deterministic / ETL-shaped. Script mode is faster to debug but loses the "describe in plain English" wedge.
-- **Include `long_description`, `use_cases`, `how_it_works`** — these power the Overview tab. Skipping them lands a worker that reads as "developer-config-first" and Federico has flagged that pattern multiple times.
+- **Include `long_description`, `use_cases`, `how_it_works`** — these power the Overview tab. Skipping them lands a worker that reads as "developer-config-first" and the operator has flagged that pattern multiple times.
 - **Pin every secret** the worker will read. Missing-secret failure = silent empty output.
 - **Set `capabilities.network.egress: true`** if any external API is called. Default-deny.
 - **Set realistic `limits.timeout_seconds`** — 300 is the safe default; longer needs justification.

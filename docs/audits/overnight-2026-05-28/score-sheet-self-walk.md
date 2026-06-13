@@ -1,6 +1,6 @@
 # Self-walk score sheet — 2026-05-28
 
-Walked every page myself via the self-hosted server broker. Reference bar is /runs/<id> at 88 (Federico's gold standard). Average ~71. Honest scores below; S29q has shipped the top fixes from this list.
+Walked every page myself via the self-hosted server broker. Reference bar is /runs/<id> at 88 (the operator's gold standard). Average ~71. Honest scores below; S29q has shipped the top fixes from this list.
 
 ## Top-level surfaces
 

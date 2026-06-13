@@ -55,4 +55,4 @@ conn.close()
 PY
 ```
 
-Expected production baseline for S35: 18 Federico-owned workers and recent runs present.
+Expected production baseline for S35: 18 the operator-owned workers and recent runs present.

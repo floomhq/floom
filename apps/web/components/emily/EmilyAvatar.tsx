@@ -3,7 +3,7 @@ import { cn } from "@/lib/utils";
 /**
  * EmilyAvatar — the Floom Emily identity mark.
  *
- * Federico 2026-06-12: refined blue "E" monogram, no sparkle, no gradient.
+ * the operator 2026-06-12: refined blue "E" monogram, no sparkle, no gradient.
  * The fill is tokenized as --emily-mark so the rail, empty state, bubbles, and
  * settings all carry the same calm identity in light and dark mode.
  */

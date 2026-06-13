@@ -1,6 +1,6 @@
-# Federico's feedback ledger — Workeros session 2026-05-28/29
+# the operator's feedback ledger — Workeros session 2026-05-28/29
 
-Single source of truth for every concrete UI / product / runtime callout Federico made this session, with true status as of **2026-05-29 reconcile**.
+Single source of truth for every concrete UI / product / runtime callout the operator made this session, with true status as of **2026-05-29 reconcile**.
 
 > **Authoritative tracker for current open work: `WORKPLAN-20260529-road-to-100.md`**
 > This ledger records the historical feedback items and whether they shipped. For what is actively in flight or genuinely open today, read the WORKPLAN.
@@ -10,10 +10,10 @@ Single source of truth for every concrete UI / product / runtime callout Federic
 **72 items total — 65 shipped, 7 genuinely open (see WORKPLAN)**
 
 Genuinely open items (all tracked in WORKPLAN-20260529-road-to-100.md):
-1. **E5** — Import Federico's 17 existing stdio MCPs from cursor/.claude configs (verdict done, import not shipped)
+1. **E5** — Import the operator's 17 existing stdio MCPs from cursor/.claude configs (verdict done, import not shipped)
 2. **E7** — Stdio transport support in E2B sandbox (verdict published, implementation open)
 3. **M5** — Cloud agent vendoring + Supabase JWT + RLS + Stripe (separate Cloud lane, not OS)
-4. **O2** — GITHUB_PAT secret missing on prod (github-digest worker needs it; needs Federico to set)
+4. **O2** — GITHUB_PAT secret missing on prod (github-digest worker needs it; needs the operator to set)
 5. **O7** — Full S41 stdio integration (MCP tab ✅; stdio import flow genuinely open)
 6. **WORKPLAN 1.5.1** — Approve/reject endpoint must transition original run status off pending_approval
 7. **WORKPLAN 1.5.2-1.5.5** — Correctness/data-hygiene items (zombie overview links, audit runs, worker count mismatch, robots.txt/favicon)
@@ -30,7 +30,7 @@ Genuinely open items (all tracked in WORKPLAN-20260529-road-to-100.md):
 
 ## A. Runtime + backend quality
 
-| # | Federico's callout | Status | Where |
+| # | the operator's callout | Status | Where |
 |---|---|---|---|
 | A1 | SQLite WAL + concurrency hardening (DB locks from S34) | ✅ | PR #163 |
 | A2 | Graceful shutdown — runs land `error_code=interrupted_by_restart`, E2B sandbox killed | ✅ | PR #164 |
@@ -166,9 +166,9 @@ Genuinely open items (all tracked in WORKPLAN-20260529-road-to-100.md):
 |---|---|---|---|
 | N1 | "Test everything yourself, every click, before declaring done" | ✅ | Standing instruction; live walks performed at each milestone |
 | N2 | Probe set against workers-api hourly | ✅ | Auto-probe at 21:30 + 22:55 + ongoing; 11/11 pass |
-| N3 | "Code/implementation decisions to Codex, not Federico" | ✅ | Standing instruction observed |
+| N3 | "Code/implementation decisions to Codex, not the operator" | ✅ | Standing instruction observed |
 | N4 | "Use more Claude than Codex (temp override)" | ✅ | Memory saved 2026-05-29; Codex reserved for verdicts since |
-| N5 | Document everything Federico calls out | ✅ | THIS FILE (created 2026-05-29) |
+| N5 | Document everything the operator calls out | ✅ | THIS FILE (created 2026-05-29) |
 
 ---
 
@@ -177,8 +177,8 @@ Genuinely open items (all tracked in WORKPLAN-20260529-road-to-100.md):
 | # | Callout | Status | Action |
 |---|---|---|---|
 | O1 | "Granola Hubspot sync: you can remove. I don't have the API key" (USR 288) | ✅ | DELETE /workers/granola-hubspot-sync HTTP 204 — gone from prod |
-| O2 | "GITHUB_PAT: you should have it somewhere here" (USR 288) | ❌ | Secret `GITHUB_PAT` NOT present on prod. github-digest worker needs it. Federico must set it. |
-| O3 | Kugelaudio Meeting Pipeline + Bug Intake workers — sample customer code provided (USR 295) | ✅ | Both workers archived in S38 PR #204 with archive_reason. Restore when customer provides secrets. |
+| O2 | "GITHUB_PAT: you should have it somewhere here" (USR 288) | ❌ | Secret `GITHUB_PAT` NOT present on prod. github-digest worker needs it. the operator must set it. |
+| O3 | A customer's Meeting Pipeline + Bug Intake workers — sample customer code provided (USR 295) | ✅ | Both workers archived in S38 PR #204 with archive_reason. Restore when customer provides secrets. |
 | O4 | "how managed agents compare to what we do? from claude. and same question for trigger dev" (USR 300) | ✅ | `docs/architecture/competitive-comparison-2026-05-29.md` — verdict written, on main |
 | O5 | FRONTEND-AGENT-BRIEFING-R13 (5 missing security headers on frontend) (USR 291) | ✅ | Verified live on prod: CSP + X-Frame-Options + X-Content-Type-Options + Referrer-Policy + Permissions-Policy all present. Shipped before this session. |
 | O6 | "Smoke past, I don't think, is enough" — deeper worker testing (USR 287) | ✅ | S38 PR #204 — prod smoke runs recorded with run_ids, status, duration, output heads. |
@@ -213,7 +213,7 @@ Items added since the ledger was first written, confirmed shipped to main:
 | R7 | /contexts crash (TypeError duplicate kwargs) | ✅ | PR #221 |
 | R8 | Worker reliability batch (file outputs, Composio proxy, KeyError guard) | ✅ | PRs #220-#225 |
 
-## S. 2026-06-01 Reconcile — Federico Follow-Ups Still Open
+## S. 2026-06-01 Reconcile — the operator Follow-Ups Still Open
 
 Current audit document: `docs/audits/security-product-audit-2026-06-01.md`.
 
@@ -223,8 +223,8 @@ Current audit document: `docs/audits/security-product-audit-2026-06-01.md`.
 | S2 | Security checklist: privacy, data storage, headers, OWASP, SQLi/XSS/auth, env leakage, sensitive API responses, logs, frontend keys, server-side keys, rate limits. | 🚧 | Audit completed; S-1..S-4 fixed, P0/P1 items remain listed in the audit doc. |
 | S3 | Workers need Brain connections/brain tab/icon and connected brain packs on worker detail. | ❌ | Still open; worker source can parse contexts but UI is not a first-class guided Brain surface everywhere. |
 | S4 | Source tab: every file needs raw and rendered view; YAML rendered UX is questionable; HTML/CSV/XLSX/PDF/video previews missing. | ❌ | Still open. |
-| S5 | Worker card top bar has extra whitespace and does not show the same connection icons as detail pages. | ❌ | Still open; Federico screenshots captured. |
-| S6 | Brain page three-column layout alignment: top section borders must line up. | ❌ | Still open; Federico screenshot captured. |
+| S5 | Worker card top bar has extra whitespace and does not show the same connection icons as detail pages. | ❌ | Still open; the operator screenshots captured. |
+| S6 | Brain page three-column layout alignment: top section borders must line up. | ❌ | Still open; the operator screenshot captured. |
 | S7 | Connections rows must show app + account name, not cryptic account fragments; loading state needs more than a long spinner. | ❌ | Still open. |
 | S8 | Supabase connection flow/card status looked fake/confusing after auth. | ❌ | Still open; needs Composio callback and status verification. |
 | S9 | CLI/MCP setup must include easy token auth, Codex target, and chips matching the UI system. | 🚧 | Cloud token copy updated separately; broader UI polish remains open. |
@@ -237,13 +237,13 @@ Current audit document: `docs/audits/security-product-audit-2026-06-01.md`.
 | S16 | Worker/agent model declaration visible in UI. | ❌ | Still open unless confirmed in a later UI pass. |
 | S17 | Naming pass: apps -> connections, contexts -> brain. | 🚧 | Partially shipped; remaining old labels still need UI sweep. |
 
-## P. Long-standing Federico standing instructions (verified observed)
+## P. Long-standing the operator standing instructions (verified observed)
 
 | # | Standing rule | Status |
 |---|---|---|
 | P1 | "Dont stop before everything is tested and perfect" (USR 304+) | ✅ Observed — keep grinding |
 | P2 | "Test everything yourself, every click" (USR 23+) | ✅ Browser walks at each milestone |
-| P3 | "Code/implementation decisions to Codex, not Federico" (multiple) | ✅ Followed |
+| P3 | "Code/implementation decisions to Codex, not the operator" (multiple) | ✅ Followed |
 | P4 | "Use more Claude than Codex (temp override 2026-05-29)" (USR 313) | ✅ Memory saved + observed |
 | P5 | "Discuss with Codex before defaulting" (multiple) | ✅ MCP verdict via Codex before S41 |
 | P6 | "Parallelise when possible" (USR 306) | ✅ 4 sub-agents + 2 Codex verdicts running concurrently |

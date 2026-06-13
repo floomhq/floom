@@ -1,12 +1,12 @@
 # S22 — Reference-based Workeros redesign plan
 
 **Created:** 2026-05-28
-**Status:** DRAFT — awaiting Federico sign-off before any code lands
+**Status:** DRAFT — awaiting the operator sign-off before any code lands
 **Replaces:** the brute-force piecemeal fixes shipped in S15-S20
 
 ## Why this exists
 
-Federico verdict on the current Workeros UI: "still looking really bad" and "manual / brute force." Earlier polish batches (S15-S20) shipped one fix at a time without a coherent design source. Result: pages look adjacent, not unified. The fix is wholesale ports from polished references, not more piecemeal patches.
+the operator verdict on the current Workeros UI: "still looking really bad" and "manual / brute force." Earlier polish batches (S15-S20) shipped one fix at a time without a coherent design source. Result: pages look adjacent, not unified. The fix is wholesale ports from polished references, not more piecemeal patches.
 
 This doc maps every Workeros surface to its lift source, with concrete file paths. Six parallel reference surveys (referenced below) fed into it.
 
@@ -120,7 +120,7 @@ After all six: Lane C verification (multi-agent), Lane D worker smoke, release-g
 
 ## Discussion checkpoints before code
 
-Federico decides:
+the operator decides:
 1. D1-D5 above (font, blue, surface, Tremor, Cmd-K)
 2. Mega-PR vs sequenced (D6)
 3. Whether the AI SDK part-type protocol change is in S22d scope (high impact, real backend work) or a separate Codex PR

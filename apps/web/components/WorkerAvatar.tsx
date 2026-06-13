@@ -1,4 +1,4 @@
-// S29r: deterministic-hue gradient dropped. Federico (2026-05-28): "the
+// S29r: deterministic-hue gradient dropped. the operator (2026-05-28): "the
 // placeholder should not have different colours. I don't like too many
 // colours overall, as a rule." Single mono treatment across all workers,
 // matching the floomhq/relay + skills-neo membership-mark pattern.

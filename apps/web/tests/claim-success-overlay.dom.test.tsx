@@ -2,7 +2,7 @@ import { describe, it, expect, vi } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { ClaimSuccessOverlay } from "@/components/channels/ClaimSuccessOverlay";
 
-// Federico 2026-06-11: successful channel claim shows a full-screen
+// the operator 2026-06-11: successful channel claim shows a full-screen
 // confirmation, channel-aware, with a continue action.
 
 describe("ClaimSuccessOverlay", () => {

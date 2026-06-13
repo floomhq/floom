@@ -5,7 +5,7 @@
 // agent produced by its declared type — markdown→markdown, json→formatted
 // JSON, csv→table, file→file ref, anything else→plain text — with NO
 // use-case-specific chrome, badges, or "MARKDOWN REPORT"/"Completed" labels.
-// Federico's HARD rule: the output area is a neutral viewer.
+// the operator's HARD rule: the output area is a neutral viewer.
 //
 // `OutputRenderer` (the per-field variant with a label header + download
 // buttons) delegates its type switch here so there is a single source of truth

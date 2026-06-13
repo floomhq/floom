@@ -6,7 +6,7 @@ Tooling: `pip-audit 2.10.0`, Python 3.12.3 venv at `apps/api/venv`
 
 ## Summary
 
-Federico's external audit reported 64 vulnerabilities across 18 packages. The
+the operator's external audit reported 64 vulnerabilities across 18 packages. The
 branch manifest scan performed for this change resolved 9 vulnerabilities across
 3 packages before the upgrade. After the pinned upgrades, `pip-audit` reported
 0 known vulnerabilities for `apps/api/requirements.txt`.

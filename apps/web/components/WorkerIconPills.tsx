@@ -21,7 +21,7 @@ import { cn } from "@/lib/utils";
 // ---------------------------------------------------------------------------
 // WorkerIconPills — a COMPOSED, Langdock-style icon strip for a worker.
 //
-// Federico (2026-05-29): "should be composed like for langdock — understand
+// the operator (2026-05-29): "should be composed like for langdock — understand
 // the logic?" Langdock's template-card icon row is a SINGLE composed unit:
 // connected/overlapping rounded squares butted together so they read as ONE
 // glyph for the workflow, with the FIRST node accented (their orange
@@ -34,7 +34,7 @@ import { cn } from "@/lib/utils";
 //                       stable-hash neutral fallback. ALWAYS present, ALWAYS
 //                       first, ALWAYS accented (--accent tint) so it anchors
 //                       the composition. This is the fix for the "identical
-//                       sparkle wall" (Federico 2026-05-29): manual workers no
+//                       sparkle wall" (the operator 2026-05-29): manual workers no
 //                       longer all show the same ✦ — each gets a distinct,
 //                       meaningful glyph here.
 //   2. TRIGGER glyph  — schedule→Clock / webhook→Webhook / event→Play, shown
@@ -244,7 +244,7 @@ export function WorkerIconPills({
     entries.push({ kind: "brand", key: `conn-${key}`, title: slug, slug });
   }
 
-  // A worker card must NEVER read as visually empty (Federico 2026-05-29). The
+  // A worker card must NEVER read as visually empty (the operator 2026-05-29). The
   // accented PRIMARY node is the always-present anchor (workerIcon always
   // resolves something), so the strip renders even with no trigger/inputs/
   // connections. The lone primary glyph still carries the worker's identity.

@@ -564,7 +564,7 @@ Per route (top 5 trafficked):
 
 ### K5 — Connection deletion (DESTRUCTIVE — only on test connections)
 ```
-DO NOT RUN against live Federico connections. Create a test connection first.
+DO NOT RUN against live the operator connections. Create a test connection first.
 1. /connections/browse → search "test-app"
 2. Click Connect → OAuth flow → returns to /connections
 3. Note new connection appears
@@ -607,7 +607,7 @@ DO NOT RUN against live Federico connections. Create a test connection first.
 ## Notes (honest gaps)
 
 - This matrix was generated AFTER S22-S27 shipped (not before). Some rows assume S22-S27 features as the "expected" state. If those PRs are reverted, the matrix's "expected" column needs revision.
-- I haven't ticked any rows myself. The grade of "tests passed" is 0/412. Federico or a fresh agent walking through is the next step.
+- I haven't ticked any rows myself. The grade of "tests passed" is 0/412. the operator or a fresh agent walking through is the next step.
 - Mobile rows (375×812) are mostly unchecked even on landed S22 PRs — the broker viewport doesn't easily emulate mobile. Run a Chrome-devtools emulate pass for the mobile rows specifically.
 - Sections B (auth) + C (onboarding) + E (email) are marked N/A because they don't exist in single-user v0. When multi-tenant ships, these become populated.
 - The /cli-auth security row (A2.6 — chrome stripped) is intentionally listed even though it's currently a known gap, per the I-42 issue.
