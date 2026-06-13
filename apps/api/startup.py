@@ -890,33 +890,6 @@ def _install_worker_call_signing_key() -> None:
     run_token.set_worker_call_secret_resolver(lambda: derived)
 
 
-def _register_secrets_key_resolver() -> None:
-    """Tell the engine to fetch the .secrets.enc key from Supabase Vault (pgsodium).
-
-    In OSS mode the key lives in a GitHub repo Variable (readable via API).
-    In cloud, it is a random 32-byte key stored per-workspace in Supabase Vault
-    with pgsodium DARE — it never appears in any readable API response.
-
-    Placeholder: the actual Supabase Vault fetch is wired here once the Vault
-    schema and per-workspace key provisioning are set up. Until then the
-    resolver is not registered and the engine falls back to GitHub Variables
-    (still safe for private repos but less secure than Vault).
-    """
-    try:
-        import main as engine_main  # noqa: PLC0415
-    except ImportError:
-        return
-    if not hasattr(engine_main, "set_secrets_key_resolver"):
-        return  # engine predates the hook — skip silently
-
-    # TODO: implement get_workspace_secrets_key(workspace_id) that reads from
-    # Supabase Vault via pgsodium, then register it here:
-    #   engine_main.set_secrets_key_resolver(
-    #       lambda: get_workspace_secrets_key(get_active_workspace_id())
-    #   )
-    # Until that is wired up, leave the resolver unset — OSS fallback (GitHub Variable).
-
-
 def _bootstrap_git_bundles_storage() -> None:
     """Create the workeros-git-bundles Supabase Storage bucket (idempotent)."""
     from apps.api.cloud_git_local import ensure_bucket
@@ -941,7 +914,6 @@ def register_cloud_components() -> None:
     apply_cloud_whatsapp_overrides()
     _register_contexts_scope_resolver()
     _register_git_workspace_resolver()
-    _register_secrets_key_resolver()
     _override_git_cfg_for_cloud()
     _override_git_ops_for_cloud()
     _override_git_rollback_for_cloud()

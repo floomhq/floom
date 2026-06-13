@@ -87,31 +87,6 @@ def update_last_seen(wa_id: str) -> None:
         logger.warning("WhatsApp last_seen update failed for %s", wa_id, exc_info=True)
 
 
-def consume_claim_token(token: str, user_id: str, workspace_id: str) -> dict[str, Any] | None:
-    """Atomically claim a token: set user_id, workspace_id, status=active, clear token.
-
-    Returns the updated row on success, None if the token is not found / already consumed.
-    """
-    now = _now_iso()
-    resp = (
-        _sb()
-        .table("whatsapp_sender_bindings")
-        .update({
-            "user_id": user_id,
-            "workspace_id": workspace_id,
-            "status": "active",
-            "claim_token": None,
-            "claim_expires_at": None,
-            "updated_at": now,
-        })
-        .eq("claim_token", token)
-        .eq("status", "pending")
-        .execute()
-    )
-    rows = _rows(resp)
-    return rows[0] if rows else None
-
-
 def reset_binding_to_pending(wa_id: str, new_token: str, expires_at: str) -> None:
     """Reset an active binding to pending with a fresh claim token."""
     now = _now_iso()
@@ -235,35 +210,6 @@ def _cloud_reset_binding_to_pending(wa_id: str) -> Optional[str]:
                 "Supabase WhatsApp binding reset dual-write failed for %s", normalized, exc_info=True
             )
     return claim_url
-
-
-def _cloud_claim_binding(
-    wa_id: str, token: str, user_id: str, workspace_id: str
-) -> bool:
-    """Called from the cloud claim endpoint after SQLite claim succeeds.
-
-    Dual-writes the successful claim to Supabase.
-    Returns True if Supabase row was updated, False (non-fatal) if not found.
-    """
-    try:
-        row = consume_claim_token(token, user_id, workspace_id)
-        if row is None:
-            # Pending row may not be in Supabase yet (race or first-claim before dual-write).
-            # Upsert with active state directly.
-            upsert_binding(
-                wa_id,
-                user_id=user_id,
-                workspace_id=workspace_id,
-                status="active",
-                claim_token=None,
-                claim_expires_at=None,
-            )
-        return True
-    except Exception:
-        logger.warning(
-            "Supabase WhatsApp claim dual-write failed for token %s (non-fatal)", token, exc_info=True
-        )
-        return False
 
 
 # ---------------------------------------------------------------------------

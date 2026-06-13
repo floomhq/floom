@@ -14,7 +14,6 @@ from apps.api.db import workspaces as workspace_repo
 logger = logging.getLogger("workeros.cloud.workspace_agent")
 
 chat_service = import_engine_module("chat_service")
-worker_registry = import_engine_module("worker_registry")
 
 _DEFAULT_WORKSPACE_MD = "# Workspace\n\nNo workspace.md configured yet. PUT /workspace to set one."
 _WORKSPACE_AGENT_ID = "workspace-agent"
@@ -203,42 +202,16 @@ def resolve_slack_event_binding(*, team_id: str, channel_id: str) -> dict[str, A
     }
 
 
-def _engine_workspace_agent_skill_path() -> Path:
-    engine_root = Path(chat_service.__file__).resolve().parents[2]
-    return engine_root / "workers" / _WORKSPACE_AGENT_ID / "SKILL.md"
-
-
-def _workspace_agent_skill_md() -> str:
-    candidates = [
-        Path(worker_registry.WORKERS_DIR) / _WORKSPACE_AGENT_ID / "SKILL.md",
-        _engine_workspace_agent_skill_path(),
-    ]
-    for path in candidates:
-        if path.is_file():
-            return path.read_text(encoding="utf-8")
-    logger.warning("workspace-agent SKILL.md not found in %s", candidates)
-    return ""
-
-
-def build_system_prompt(user_id: str) -> str:
-    workspace_content = get_workspace_md()
-    preamble_fn = getattr(chat_service, "_build_workspace_preamble", None)
-    preamble = preamble_fn(user_id) if callable(preamble_fn) else ""
-    skill_md = _workspace_agent_skill_md().replace("{{WORKSPACE_PREAMBLE}}", preamble)
-    return "\n\n".join(part for part in [workspace_content, skill_md] if part)
-
-
 def workspace_agent_info(user_id: str) -> dict[str, Any]:
-    if callable(_original_workspace_agent_info):
-        info = dict(_original_workspace_agent_info(user_id))
-    else:
-        info = {
-            "agent_id": _WORKSPACE_AGENT_ID,
-            "model": os.environ.get("WORKEROS_CHAT_MODEL") or "gpt-4.1-mini",
-            "system_prompt": build_system_prompt(user_id),
-            "tools": [],
-            "channels": {},
-        }
+    # The engine owns workspace_agent_info + the system-prompt build; cloud only
+    # layers the Supabase Slack-binding state on top. get_workspace_md is
+    # overridden (above) so the engine's own _build_system_prompt already
+    # reflects the Supabase-backed workspace.md — no cloud prompt reimplementation.
+    if not callable(_original_workspace_agent_info):
+        raise RuntimeError(
+            "engine chat_service.workspace_agent_info is missing — cloud requires it"
+        )
+    info = dict(_original_workspace_agent_info(user_id))
 
     channels = dict(info.get("channels") or {})
     slack = dict(channels.get("slack") or {})
@@ -255,5 +228,4 @@ def workspace_agent_info(user_id: str) -> dict[str, Any]:
 def apply_cloud_workspace_agent_overrides() -> None:
     chat_service.get_workspace_md = get_workspace_md
     chat_service.set_workspace_md = set_workspace_md
-    chat_service._build_system_prompt = build_system_prompt
     chat_service.workspace_agent_info = workspace_agent_info

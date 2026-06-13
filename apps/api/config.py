@@ -148,24 +148,9 @@ def new_supabase_service_client() -> Client:
 # created after 4 min of silence, accepting one ~50ms TLS handshake then.
 _CLIENT_TTL = 240  # seconds — refresh before Supabase's ~5 min idle timeout
 
-_anon_client: "Client | None" = None
-_anon_client_ts: float = 0.0
-_anon_lock = threading.Lock()
-
 _svc_client: "Client | None" = None
 _svc_client_ts: float = 0.0
 _svc_lock = threading.Lock()
-
-
-def get_supabase_anon_client() -> Client:
-    global _anon_client, _anon_client_ts
-    now = time.monotonic()
-    if _anon_client is None or (now - _anon_client_ts) > _CLIENT_TTL:
-        with _anon_lock:
-            if _anon_client is None or (now - _anon_client_ts) > _CLIENT_TTL:
-                _anon_client = new_supabase_anon_client()
-                _anon_client_ts = now
-    return _anon_client
 
 
 def get_supabase_service_client() -> Client:
@@ -180,11 +165,8 @@ def get_supabase_service_client() -> Client:
 
 
 def reset_cloud_caches() -> None:
-    global _anon_client, _anon_client_ts, _svc_client, _svc_client_ts
+    global _svc_client, _svc_client_ts
     get_cloud_settings.cache_clear()
-    with _anon_lock:
-        _anon_client = None
-        _anon_client_ts = 0.0
     with _svc_lock:
         _svc_client = None
         _svc_client_ts = 0.0

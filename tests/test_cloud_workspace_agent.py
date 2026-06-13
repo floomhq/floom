@@ -162,48 +162,17 @@ def test_workspace_agent_requires_active_workspace_for_save():
 def test_apply_overrides_replaces_engine_functions(monkeypatch):
     monkeypatch.setattr(cloud_agent.chat_service, "get_workspace_md", Mock())
     monkeypatch.setattr(cloud_agent.chat_service, "set_workspace_md", Mock())
-    monkeypatch.setattr(cloud_agent.chat_service, "_build_system_prompt", Mock())
+    monkeypatch.setattr(cloud_agent.chat_service, "workspace_agent_info", Mock())
+    engine_build = cloud_agent.chat_service._build_system_prompt
 
     cloud_agent.apply_cloud_workspace_agent_overrides()
 
     assert cloud_agent.chat_service.get_workspace_md is cloud_agent.get_workspace_md
     assert cloud_agent.chat_service.set_workspace_md is cloud_agent.set_workspace_md
-    assert cloud_agent.chat_service._build_system_prompt is cloud_agent.build_system_prompt
-
-
-def test_build_system_prompt_uses_engine_skill_fallback(monkeypatch, tmp_path):
-    missing_workers = tmp_path / "missing-workers"
-    fallback_skill = tmp_path / "engine" / "workers" / "workspace-agent" / "SKILL.md"
-    fallback_skill.parent.mkdir(parents=True)
-    fallback_skill.write_text(
-        "Agent contract\n\n{{WORKSPACE_PREAMBLE}}\n\nDo the work.",
-        encoding="utf-8",
-    )
-    monkeypatch.setattr(cloud_agent.worker_registry, "WORKERS_DIR", missing_workers)
-    monkeypatch.setattr(cloud_agent, "_engine_workspace_agent_skill_path", lambda: fallback_skill)
-    monkeypatch.setattr(cloud_agent, "get_workspace_md", lambda: "# Workspace\n\nCloud")
-    monkeypatch.setattr(
-        cloud_agent.chat_service,
-        "_build_workspace_preamble",
-        lambda user_id: f"## Workspace snapshot\nUser: {user_id}",
-    )
-
-    prompt = cloud_agent.build_system_prompt("user-1")
-
-    assert "# Workspace\n\nCloud" in prompt
-    assert "Agent contract" in prompt
-    assert "## Workspace snapshot\nUser: user-1" in prompt
-    assert "{{WORKSPACE_PREAMBLE}}" not in prompt
-
-
-def test_workspace_agent_skill_prefers_workers_dir(monkeypatch, tmp_path):
-    workers_skill = tmp_path / "workers" / "workspace-agent" / "SKILL.md"
-    fallback_skill = tmp_path / "engine" / "workers" / "workspace-agent" / "SKILL.md"
-    workers_skill.parent.mkdir(parents=True)
-    fallback_skill.parent.mkdir(parents=True)
-    workers_skill.write_text("from workers dir", encoding="utf-8")
-    fallback_skill.write_text("from engine fallback", encoding="utf-8")
-    monkeypatch.setattr(cloud_agent.worker_registry, "WORKERS_DIR", tmp_path / "workers")
-    monkeypatch.setattr(cloud_agent, "_engine_workspace_agent_skill_path", lambda: fallback_skill)
-
-    assert cloud_agent._workspace_agent_skill_md() == "from workers dir"
+    assert cloud_agent.chat_service.workspace_agent_info is cloud_agent.workspace_agent_info
+    # Cloud must NOT override _build_system_prompt. The engine's own builder
+    # (signature: user_id, *, include_authoring_rules=False) stays — the prior
+    # cloud override took only (user_id) and raised TypeError when the engine
+    # called it with include_authoring_rules. Cloud only swaps get_workspace_md
+    # so the engine builder reads the Supabase-backed workspace.md.
+    assert cloud_agent.chat_service._build_system_prompt is engine_build
