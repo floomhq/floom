@@ -55,6 +55,8 @@ def _build_client(monkeypatch, tmp_path, *, block=False):
         "auth.interface", "auth.local", "contexts", "secret_scan",
     ]:
         sys.modules.pop(name, None)
+    for _rn in [x for x in list(sys.modules) if x.startswith("routers")]:
+        sys.modules.pop(_rn, None)
 
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
