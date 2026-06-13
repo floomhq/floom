@@ -12,6 +12,7 @@ import { useApprovalsCount } from "@/lib/useApprovalsSync";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
 import { api } from "@/lib/api";
 import type { CurrentUser } from "@/lib/types";
+import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -122,7 +123,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
       <Link
         href="/chat?mode=create"
         onClick={() => onNavigate?.()}
-        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm font-medium text-[var(--ink-soft)] hover:bg-[var(--bg-3)] hover:text-ink transition-colors duration-150"
+        className="flex h-9 w-full items-center justify-center gap-2 rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-sm font-medium text-white transition-colors duration-150 hover:opacity-90"
       >
         <Plus className="w-4 h-4" />
         <span>New worker</span>
@@ -381,6 +382,7 @@ export function UserProfileFooter({
   const router = useRouter();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
   const [user, setUser] = useState<CurrentUser | null>(null);
+  const [workspaceName, setWorkspaceName] = useState("Floom workspace");
 
   useEffect(() => {
     let active = true;
@@ -396,11 +398,26 @@ export function UserProfileFooter({
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    api.workspace
+      .list()
+      .then((data) => {
+        const current = data.workspaces.find((workspace) => workspace.id === data.active_id) ?? data.workspaces[0];
+        if (active && current) setWorkspaceName(resolveWorkspaceName(current.name));
+      })
+      .catch(() => {
+        if (active) setWorkspaceName("Floom workspace");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Multi-member: prefer username, then email, then display_name
   const primary = (user as (typeof user & { username?: string | null }) | null)?.username
     || user?.email || user?.display_name || "Local user";
-  const userRole = (user as (typeof user & { role?: string }) | null)?.role;
-  const secondary = userRole === "admin" ? "Admin" : userRole === "member" ? "Member" : (user?.email ? "Signed in" : "Floom");
+  const secondary = workspaceName;
   const initials = profileInitials(primary);
 
   async function logout() {
