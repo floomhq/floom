@@ -227,7 +227,7 @@ export function Sidebar() {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
 
         {/* ── Nav header: workspace identity + collapse chevron ─────────────── */}
-        <div className={cn("flex items-center [border-bottom:var(--bd-div)]", collapsed ? "justify-center h-14 px-0" : "h-14 px-2 gap-1 mt-2")}>
+        <div className={cn("flex items-center [border-bottom:var(--bd-div)]", collapsed ? "justify-center h-14 px-0" : "h-14 gap-1 px-3")}>
           {collapsed ? (
             /* Icon-rail: just the mark, clicking expands */
             <button
@@ -240,7 +240,7 @@ export function Sidebar() {
             </button>
           ) : (
             <>
-              <div className="flex-1 min-w-0 py-1">
+              <div className="min-w-0 flex-1">
                 <WorkspaceSwitcher />
               </div>
               {/* Collapse chevron — dim at rest, full opacity on hover */}
