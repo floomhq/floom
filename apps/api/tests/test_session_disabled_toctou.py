@@ -95,7 +95,10 @@ def test_login_race_disabled_after_password_check_returns_403(monkeypatch, tmp_p
         repos.users.update(user_id="u-1", disabled=1)
         return True
 
-    monkeypatch.setattr(main, "_bcrypt_verify", _verify_and_disable)
+    # auth_login moved to routers.auth and resolves _bcrypt_verify via its own
+    # module global, so patch it there (not on main).
+    import routers.auth as auth_router_mod
+    monkeypatch.setattr(auth_router_mod, "_bcrypt_verify", _verify_and_disable)
 
     with TestClient(main.app, raise_server_exceptions=False) as client:
         resp = client.post("/auth/login", json={"username": "alice", "password": "whatever"})

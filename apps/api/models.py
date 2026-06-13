@@ -2461,3 +2461,55 @@ class ChangelogEntry(BaseModel):
 
 class _WorkspaceSettingValue(BaseModel):
     value: str = Field(..., max_length=4000)
+
+
+class _AuthSetupRequest(BaseModel):
+    username: str
+    password: str
+    display_name: Optional[str] = None
+
+
+class _LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class _UserOut(BaseModel):
+    id: str
+    username: str
+    display_name: Optional[str] = None
+    role: str
+    disabled: bool
+    created_at: str
+
+
+class _UserCreateRequest(BaseModel):
+    username: str
+    password: str
+    display_name: Optional[str] = None
+    role: str = "member"
+
+
+class _UserUpdateRequest(BaseModel):
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+    disabled: Optional[bool] = None
+    password: Optional[str] = None
+
+
+class _PATOut(BaseModel):
+    id: str
+    name: str
+    last_used_at: Optional[str] = None
+    created_at: str
+    expires_at: Optional[str] = None
+
+
+class _PATCreateRequest(BaseModel):
+    name: str
+    expires_at: Optional[str] = None
+
+
+class _PATCreateResponse(BaseModel):
+    token: str  # raw value — shown once, never stored
+    pat: _PATOut
