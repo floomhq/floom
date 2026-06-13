@@ -277,6 +277,9 @@ def _approval_response(
             parsed_preview_payload = None
     response["preview_payload"] = parsed_preview_payload
     # expires_at (#798) + preview_type (#792) pass through from the row as-is.
+    # `type` mirrors preview_type for the v4 frontend's preview dispatcher.
+    if response.get("preview_type") is not None:
+        response["type"] = response.get("preview_type")
     # Standalone share/review link for the authenticated owner. The token is the
     # same deterministic HMAC the /approvals/public/* routes verify, so the owner
     # can copy this URL to open the approval full-page (no app chrome) or share it
