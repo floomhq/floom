@@ -89,6 +89,8 @@ def booted(monkeypatch, tmp_path):
         "run_service", "scheduler", "main",
     ]:
         sys.modules.pop(name, None)
+    for _rn in [x for x in list(sys.modules) if x.startswith('routers')]:
+        sys.modules.pop(_rn, None)
 
     db = importlib.import_module("db")
     db.init_db()
