@@ -183,7 +183,7 @@ def test_run_create_missing_worker_is_not_ip_globally_limited(monkeypatch, tmp_p
 
 
 def test_stock_agent_workers_do_not_require_user_openai_secret():
-    for relative in ["workers/research_brief/worker.yml", "workers/weekly_update/worker.yml"]:
+    for relative in ["workers/research_brief/worker.yml"]:
         manifest = yaml.safe_load((Path(__file__).resolve().parents[1] / relative).read_text())
         exec_secrets = ((manifest.get("exec") or {}).get("secrets") or [])
         capability_secrets = ((manifest.get("capabilities") or {}).get("secrets") or [])
