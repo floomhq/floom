@@ -29,7 +29,7 @@ def app_main(monkeypatch, tmp_path):
                  "db.interface", "models", "worker_registry", "run_service", "scheduler",
                  "auth", "auth.context", "auth.dependency", "main"]:
         sys.modules.pop(name, None)
-        for _rn in [n for n in list(sys.modules) if n.startswith("routers")]:
+        for _rn in [n for n in list(sys.modules) if n.startswith(("routers", "services", "core"))]:
             sys.modules.pop(_rn, None)
     sys.modules["scheduler"] = types.SimpleNamespace(start_scheduler=lambda: None, stop_scheduler=lambda: None)
     db = importlib.import_module("db")

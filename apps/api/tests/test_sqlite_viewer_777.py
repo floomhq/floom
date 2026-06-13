@@ -53,9 +53,11 @@ def client(monkeypatch, tmp_path):
             sys.modules.pop(name)
         for _rn in [x for x in list(sys.modules) if x.startswith('routers')]:
             sys.modules.pop(_rn, None)
-    for stub in ["e2b", "e2b.sandbox", "openai", "anthropic", "composio_openai",
-                 "composio_core", "slowapi", "slowapi.util", "slowapi.errors",
-                 "resend", "supabase", "gotrue"]:
+    _stub_names = ["e2b", "e2b.sandbox", "openai", "anthropic", "composio_openai",
+                   "composio_core", "slowapi", "slowapi.util", "slowapi.errors",
+                   "resend", "supabase", "gotrue"]
+    _newly_stubbed = [s for s in _stub_names if s not in sys.modules]
+    for stub in _stub_names:
         sys.modules.setdefault(stub, types.ModuleType(stub))
     git_ops_stub = types.ModuleType("git_ops")
     for fn in ["commit_paths", "push_background", "get_log", "get_file_at_sha",
@@ -69,6 +71,11 @@ def client(monkeypatch, tmp_path):
     with TestClient(main_mod.app) as c:
         yield c
     sys.modules.pop("git_ops", None)
+    # Remove only the stub modules WE installed so a later test (e.g. web_search,
+    # llm) reimports the real `openai`/`anthropic` instead of our empty stub.
+    for stub in _newly_stubbed:
+        if isinstance(sys.modules.get(stub), types.ModuleType) and not getattr(sys.modules.get(stub), "__file__", None):
+            sys.modules.pop(stub, None)
 
 
 _H = {"x-floom-secret": "test-secret"}
