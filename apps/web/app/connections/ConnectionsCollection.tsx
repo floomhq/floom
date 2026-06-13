@@ -124,6 +124,15 @@ function KV({ rows }: { rows: [string, React.ReactNode][] }) {
   );
 }
 
+function formatLastUsed(connection: ConnectionItem) {
+  if (!connection.last_used_at) return "—";
+  const date = new Date(connection.last_used_at);
+  const when = Number.isNaN(date.getTime())
+    ? connection.last_used_at
+    : date.toLocaleDateString();
+  return connection.last_used_by ? `${when} · ${connection.last_used_by}` : when;
+}
+
 function EmailPeekPanel({ connectionId }: { connectionId: string }) {
   const [emailPeek, setEmailPeek] = useState<
     Array<{ subject: string; from_name: string; from_email: string; date: string }>
@@ -399,6 +408,8 @@ export default function ConnectionsCollection({
                     ["Status", STATUS_PILL[i.statusKey].label],
                     ["Scopes", String(c.scopes?.length ?? 0)],
                     ["Connected", new Date(c.created_at).toLocaleDateString()],
+                    ["Last used", formatLastUsed(c)],
+                    ["Owner", c.owner_id || "—"],
                   ]}
                 />
               ),
