@@ -42,7 +42,7 @@ def _setting(name: str, *sources: dict[str, str]) -> str:
 
 
 def _body(text: str) -> str:
-    return f"""<p class="workeros-ink" style="font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:17px;line-height:1.55;margin:0 0 20px;color:#181716;font-weight:400;">{text}</p>"""
+    return f"""<p class="workeros-ink" style="font-family:'Inter', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, Helvetica, Arial, sans-serif;font-size:17px;line-height:1.55;margin:0 0 20px;color:#16171A;font-weight:400;">{text}</p>"""
 
 
 def _template(
