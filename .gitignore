@@ -5,6 +5,9 @@ __pycache__/
 venv/
 .venv/
 .env
+.env.*
+!.env.example
+!apps/api/.env.example
 
 # Workspace configuration (user-editable, not committed)
 workspace.md
