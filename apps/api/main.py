@@ -1358,7 +1358,12 @@ async def auth_middleware(request: Request, call_next):
         bearer_token_header = authorization_header[7:].strip()
     if bearer_token_header.startswith("wrt_"):
         try:
-            worker_call_payload = validate_worker_call_token(bearer_token_header, secret=secret)
+            # #992: validate with the SAME resolution chain used to mint
+            # (resolver -> WORKEROS_WORKER_CALL_SECRET -> FLOOM_SECRET), not the
+            # raw FLOOM_SECRET. Passing secret="" here (when FLOOM_SECRET is
+            # stripped but a worker-call secret/resolver is configured) bypassed
+            # the fallback and rejected every otherwise-valid worker-call token.
+            worker_call_payload = validate_worker_call_token(bearer_token_header)
         except ValueError as exc:
             return _JSONResponse(status_code=401, content={"detail": str(exc)})
         # #916: a run token is only as alive as its user — reject at the
