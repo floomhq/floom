@@ -2590,3 +2590,8 @@ class DraftAndCreateResponse(BaseModel):
     # the caller does not present it as a clean, ready worker.
     smoke_status: Optional[str] = None
     smoke_reason: Optional[str] = None
+
+
+class WorkerListSummary(WorkerSummary):
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
