@@ -158,6 +158,16 @@ def _is_system_context_pack(
     return bool((meta.get(safe_name) or {}).get("system"))
 
 
+def _context_actor_user_id(user_id: str) -> str:
+    """#957: map a request identity to the user id that actually owns the
+    operator's context packs. On a legacy/default workspace the materialized
+    pack dirs may be owned by a bootstrap id, so visibility/ownership checks must
+    resolve against that effective id rather than the raw request id."""
+    from contexts import effective_context_user_id
+
+    return effective_context_user_id(user_id)
+
+
 def _context_visible_to_user(
     name: str,
     *,
@@ -167,13 +177,14 @@ def _context_visible_to_user(
 ) -> bool:
     from contexts import context_owner_id, load_context_metadata, validate_context_name
     safe_name = validate_context_name(name)
+    actor_user_id = _context_actor_user_id(user_id)
     meta = metadata if metadata is not None else load_context_metadata()
     # Engine/system packs are internal config, never operator-facing.
     if _is_system_context_pack(safe_name, meta):
         return False
     owner_id = context_owner_id(safe_name, meta)
     if owner_id:
-        if owner_id == user_id:
+        if owner_id == actor_user_id:
             return True
         # Members STEP 4: a pack shared with the workspace is visible to members.
         # Only consult the access mirror when repos is available (the OSS list /
@@ -299,6 +310,7 @@ def _brain_pack_access(
     from db import derive_workspace_id
     from models import AssetPermissions
     meta = metadata if metadata is not None else load_context_metadata()
+    actor_user_id = _context_actor_user_id(user_id)
     owner_id = context_owner_id(name, meta)
     asset_access = getattr(repos, "asset_access", None) if repos is not None else None
     if asset_access is not None and owner_id:
@@ -306,7 +318,7 @@ def _brain_pack_access(
         try:
             perms = asset_access.get_permissions(
                 workspace_id=derive_workspace_id(owner_id),
-                user_id=user_id,
+                user_id=actor_user_id,
                 asset_type="brain_pack",
                 asset_id=name,
             )
@@ -325,7 +337,7 @@ def _brain_pack_access(
         except Exception:
             logger.debug("brain_pack permission probe failed for %s", name, exc_info=True)
     # Fallback: no DB row (unowned pack) — the viewer who can see it is owner.
-    is_owner = (not owner_id) or owner_id == user_id
+    is_owner = (not owner_id) or owner_id == actor_user_id
     return (
         owner_id,
         "private",
