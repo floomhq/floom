@@ -119,7 +119,7 @@ ACCOUNTS = {
     "ca_gmail": {
         "id": "ca_gmail",
         "auth_config_id": "ac_gmail",
-        "email": "federico@floom.dev",
+        "email": "owner@example.com",
         "user_id": "federico",
     },
     "ca_slack": {
@@ -258,7 +258,7 @@ def main():
         page.wait_for_load_state("networkidle")
         page.add_style_tag(content=NO_MOTION_CSS)
         expect(page.get_by_role("heading", name="Connections")).to_be_visible()
-        expect(page.get_by_text("Connected as federico@floom.dev")).to_be_visible()
+        expect(page.get_by_text("Connected as owner@example.com")).to_be_visible()
         expect(page.get_by_text("gmail.readonly").first).to_be_visible()
         expect(page.get_by_text("+1 more")).to_be_visible()
         expect(page.locator('use[href="#brand-gmail"]')).to_have_count(1)
@@ -278,7 +278,7 @@ def main():
         mobile.goto(f"{BASE}/connections")
         mobile.wait_for_load_state("networkidle")
         mobile.add_style_tag(content=NO_MOTION_CSS)
-        expect(mobile.get_by_text("Connected as federico@floom.dev")).to_be_visible()
+        expect(mobile.get_by_text("Connected as owner@example.com")).to_be_visible()
         # No horizontal scroll
         scroll_width = mobile.evaluate("document.body.scrollWidth")
         assert scroll_width <= 375, f"Horizontal overflow at 375px: scrollWidth={scroll_width}"
@@ -328,7 +328,7 @@ def main():
         single.goto(f"{BASE}/connections")
         single.wait_for_load_state("networkidle")
         single.add_style_tag(content=NO_MOTION_CSS)
-        expect(single.get_by_text("Connected as federico@floom.dev")).to_be_visible()
+        expect(single.get_by_text("Connected as owner@example.com")).to_be_visible()
         capture(single, "workeros-t2a-connections-single.png")
         print("  single connection view ✓")
 
@@ -350,7 +350,7 @@ def main():
         workers_fail.add_style_tag(content=NO_MOTION_CSS)
         # Connections must still render (page not blanked)
         expect(workers_fail.get_by_role("heading", name="Connections")).to_be_visible()
-        expect(workers_fail.get_by_text("Connected as federico@floom.dev")).to_be_visible()
+        expect(workers_fail.get_by_text("Connected as owner@example.com")).to_be_visible()
         capture(workers_fail, "workeros-t2a-connections-workers-fail.png")
         print("  workers API failure: connections render normally ✓")
 

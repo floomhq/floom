@@ -72,7 +72,7 @@ ACCOUNTS = {
     "ca_gmail": {
         "id": "ca_gmail",
         "auth_config": {"id": "ac_gmail"},
-        "email": "federico@floom.dev",
+        "email": "owner@example.com",
         "user_id": "federico",
     },
     "ca_slack": {

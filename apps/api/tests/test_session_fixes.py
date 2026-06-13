@@ -144,7 +144,7 @@ def _public_stock_ids_block() -> str:
 def test_590_demo_workers_are_public():
     """Genuine demo workers remain in PUBLIC_STOCK_WORKER_IDS.
 
-    #872 later removed tenant/private workers such as kugelaudio from the public
+    #872 later removed tenant/private account-reading workers from the public
     stock bypass, so this legacy regression now locks the current safe demo set.
     """
     block = _public_stock_ids_block()
