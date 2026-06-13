@@ -757,7 +757,10 @@ class TestMCPConnections:
                 FOREIGN KEY(skill_version_id) REFERENCES skill_versions(id)
             );
             CREATE TABLE runs (
-                id TEXT PRIMARY KEY
+                id TEXT PRIMARY KEY,
+                worker_id TEXT,
+                status TEXT,
+                created_at TEXT
             );
             CREATE TABLE files (
                 id TEXT PRIMARY KEY,
