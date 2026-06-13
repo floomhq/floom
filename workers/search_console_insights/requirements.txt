@@ -1,2 +1,0 @@
-# Pure Python standard library — no external deps required
-# Optional: pyyaml for config parsing if extended later
