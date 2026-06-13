@@ -1,12 +1,12 @@
 # Feedback Completeness Audit — Workeros (2026-05-29)
 
-**Trigger:** Federico, 2026-05-28 23:xx (session ab820815):
+**Trigger:** the operator, 2026-05-28 23:xx (session ab820815):
 > "As I made all these points before today, maybe have one more agent checking the session logs for open items that were not addressed. Also, looking at the feedback ledger, for example. Maybe it's not complete."
 
-**Method.** Mined Federico's verbatim USER messages from the Workeros-related Claude Code session transcripts:
+**Method.** Mined the operator's verbatim USER messages from the Workeros-related Claude Code session transcripts:
 `ab820815` (current, 26,557 workeros mentions, 419 user msgs), `06ae6ad8` (cloud wiring), `ac2b2e4d` (landing), `877bed75` + `ac2b2e4d` (skills-neo Live Skills precursor), `ab90e586` (launch video). Deduped repeated asks. For each item, verified **reality** (curl prod API, grep `origin/main` code, `gh` PRs, prod SHA) — NOT the ledger's self-report. Cross-referenced against `docs/FEEDBACK-LEDGER.md`, `ISSUES.md`, `WORKPLAN-20260529-road-to-100.md`.
 
-**Scope note.** This audit covers the **Workeros OS** product (workers.floom.dev / workers-api.floom.dev). It does NOT re-litigate the skills-neo Live Skills history (separate repo) except where Federico explicitly tied it to Workeros primitives.
+**Scope note.** This audit covers the **Workeros OS** product (workers.floom.dev / workers-api.floom.dev). It does NOT re-litigate the skills-neo Live Skills history (separate repo) except where the operator explicitly tied it to Workeros primitives.
 
 ---
 
@@ -14,7 +14,7 @@
 
 | Bucket | Count |
 |---|---|
-| Distinct Federico asks extracted (deduped) | **58** |
+| Distinct the operator asks extracted (deduped) | **58** |
 | ✅ SHIPPED + VERIFIED on prod now | 33 |
 | 🔁 PARTIAL (some done, gap remains) | 9 |
 | ⚠️ DONE-BUT-NOT-LIVE / REGRESSED (merged to main, NOT on prod, or broke again) | 6 |
@@ -22,42 +22,42 @@
 | **Genuinely-open (⚠️+❌+🔁 gaps)** | **25** |
 | Items in transcripts but MISSING from ledger AND workplan AND ISSUES | **7** |
 
-> The ledger claims **65/72 shipped, 7 open**. Reality is closer to **33 truly-live, 25 with a real gap**. The single biggest distortion: the ledger marks items ✅ on "merged to main" while **prod was last deployed 2026-05-29 05:26 UTC and several `main` merges (incl. PR #233 connections fix at 07:48) are NOT live.** "Merged" ≠ "Federico can see it."
+> The ledger claims **65/72 shipped, 7 open**. Reality is closer to **33 truly-live, 25 with a real gap**. The single biggest distortion: the ledger marks items ✅ on "merged to main" while **prod was last deployed 2026-05-29 05:26 UTC and several `main` merges (incl. PR #233 connections fix at 07:48) are NOT live.** "Merged" ≠ "the operator can see it."
 
 ---
 
 ## The ranked actionable gap (the key deliverable)
 
-Ordered by (a) how many times Federico raised it, (b) whether the ledger falsely calls it done.
+Ordered by (a) how many times the operator raised it, (b) whether the ledger falsely calls it done.
 
 ### TIER 1 — Repeated 3+ times AND ledger says ✅ but reality disagrees
 
 1. **Connections show placeholder identity + empty scopes + wrong Reconnect — STILL LIVE ON PROD.**
-   Raised **5×** (USR 216, 359, 388, 416, + 2026-05-28 22:37). Ledger E1/E2/E3 = ✅ (PR #194/#233). **Reality:** `GET /connections` on prod right now returns `"account_label":"Connected account"`, `"display_name":null`, `"scopes":[]` for every connection. PR #233 (the real fix) merged 07:48 but **prod SHA started 05:26 — not deployed.** This is a ⚠️ DONE-BUT-NOT-LIVE. Federico literally said on 2026-05-28: *"All these points I made before. Also, default scopes, I think, is not correct."* — and it's still wrong. **ACTION: deploy main to prod + verify the account-info sweep repopulates real email/scopes.**
+   Raised **5×** (USR 216, 359, 388, 416, + 2026-05-28 22:37). Ledger E1/E2/E3 = ✅ (PR #194/#233). **Reality:** `GET /connections` on prod right now returns `"account_label":"Connected account"`, `"display_name":null`, `"scopes":[]` for every connection. PR #233 (the real fix) merged 07:48 but **prod SHA started 05:26 — not deployed.** This is a ⚠️ DONE-BUT-NOT-LIVE. the operator literally said on 2026-05-28: *"All these points I made before. Also, default scopes, I think, is not correct."* — and it's still wrong. **ACTION: deploy main to prod + verify the account-info sweep repopulates real email/scopes.**
 
 2. **`robots.txt` + `favicon.ico` return 404 (app HTML).**
    Raised 2× (USR 185 "no proper favicon"; workplan 1.5.5). **Reality:** `curl /robots.txt` → `text/html; 404`; `/favicon.ico` → `text/html; 404`. ❌ NEVER ADDRESSED. Workplan has it as `[ ]` 1.5.5 but ledger summary doesn't list it in the "7 open". **ACTION: ship static robots.txt + favicon + og/twitter tags.**
 
 3. **Overview page design / "looks like a default admin dashboard."**
-   Raised 4× (USR 363, 372, 378, 307 "overview is horrible? wtf is this?"). Ledger B1-B8 all ✅. **Reality:** Federico's LAST words on it (USR 372, 2026-05-28): *"this overview tab now completely left the design system... these red cards look like ai slop"* and (USR 307) *"overview is horrible."* Workplan still has overview polish implied. Status 🔁 PARTIAL — tiles/sparklines shipped, but Federico's design-quality bar was not signed off; needs a fresh visual gate. **ACTION: visual re-walk of /overview at the ChatGPT-simplicity bar; get explicit sign-off.**
+   Raised 4× (USR 363, 372, 378, 307 "overview is horrible? wtf is this?"). Ledger B1-B8 all ✅. **Reality:** the operator's LAST words on it (USR 372, 2026-05-28): *"this overview tab now completely left the design system... these red cards look like ai slop"* and (USR 307) *"overview is horrible."* Workplan still has overview polish implied. Status 🔁 PARTIAL — tiles/sparklines shipped, but the operator's design-quality bar was not signed off; needs a fresh visual gate. **ACTION: visual re-walk of /overview at the ChatGPT-simplicity bar; get explicit sign-off.**
 
 ### TIER 2 — Repeated, genuinely open, correctly-or-partly tracked
 
-4. **MCP servers — connect Federico's existing 17 stdio MCPs.** Raised 4× (USR 204, 281, 289, 369). Ledger E5/E7/O7 = ❌. MCP *tab* + HTTP MCP shipped (#206); **stdio import flow never shipped.** `GET /connections/mcp` → 405 on prod (no list endpoint wired the way Federico expects). ❌ for the stdio part. Correctly open in ledger.
+4. **MCP servers — connect the operator's existing 17 stdio MCPs.** Raised 4× (USR 204, 281, 289, 369). Ledger E5/E7/O7 = ❌. MCP *tab* + HTTP MCP shipped (#206); **stdio import flow never shipped.** `GET /connections/mcp` → 405 on prod (no list endpoint wired the way the operator expects). ❌ for the stdio part. Correctly open in ledger.
 
 5. **Mobile optimisation pass (375px) across all surfaces.** Raised 2× (USR 250 "also mobile, once done"; USR 413 implied). Workplan 4.2 `[ ]`. ❌ NEVER ADDRESSED — no evidence of a mobile sweep. NOT in ledger's "7 open" list. **Gap in ledger.**
 
 6. **Worker detail vs `/edit` layout divergence.** Raised 4× (USR 209, 269, 273, 370 "still has a fundamentally different layout... wasnt the plan"). Ledger D4 = ✅ (`?edit=1` toggle). **Reality:** USR 370 (2026-05-28, AFTER the ledger's PR) still reports `/workers/weekly_update/edit` "still has a fundamentally different layout." 🔁 PARTIAL / possibly ⚠️ regressed — needs a live diff of `/workers/<id>` vs `?edit=1`.
 
-7. **CLI published to npm (`npx @floomhq/workeros install`).** Raised 3× (USR 138-142, 151). Workplan: "npm publish needed (flag: bump to 4.1.0)". ❌ NOT published — gated on E2E smoke. Federico explicitly asked "Tell me whenever the CLI package is published." Not in ledger's open list. **Gap.**
+7. **CLI published to npm (`npx @floomhq/workeros install`).** Raised 3× (USR 138-142, 151). Workplan: "npm publish needed (flag: bump to 4.1.0)". ❌ NOT published — gated on E2E smoke. the operator explicitly asked "Tell me whenever the CLI package is published." Not in ledger's open list. **Gap.**
 
-8. **Approvals as a standalone page reachable from the workspace agent.** Raised 2× (USR 400, 403 "I want to see the approvals standalone page once it exists"). Ledger Q1e/R2 = ✅. 🔁 likely shipped (PR #207/#210) but Federico never confirmed seeing it live — needs verification + show-Federico.
+8. **Approvals as a standalone page reachable from the workspace agent.** Raised 2× (USR 400, 403 "I want to see the approvals standalone page once it exists"). Ledger Q1e/R2 = ✅. 🔁 likely shipped (PR #207/#210) but the operator never confirmed seeing it live — needs verification + show-the operator.
 
 9. **Worker cards still too tall / activity bar on hover changing card size.** Raised 5× (USR 279, 285, 362, 375, 418 "jumping in size on hover (not good)"). Ledger C2 = ✅. **Reality:** USR 418 is the LATEST (2026-05-28 22:39) and still complains "jumping in size on hover." ⚠️ likely regressed or incompletely fixed.
 
 ### TIER 3 — Open, lower frequency
 
-10. **Workers should not open in a new tab anymore.** USR 365, 418 ("As said before, workers should not open as a new tab anymore when I click on them"). Earlier ledger L2 = ✅ same-tab. Federico re-reports it 2026-05-28 → ⚠️ REGRESSED.
+10. **Workers should not open in a new tab anymore.** USR 365, 418 ("As said before, workers should not open as a new tab anymore when I click on them"). Earlier ledger L2 = ✅ same-tab. the operator re-reports it 2026-05-28 → ⚠️ REGRESSED.
 
 11. **Run detail left panel "scroll into infinity."** USR 418 ("/runs/run_192471d3a456 -> left panel scroll into infinity"). ❌ NEW, not in ledger. **Gap.**
 
@@ -69,7 +69,7 @@ Ordered by (a) how many times Federico raised it, (b) whether the ledger falsely
 
 15. **Granola-HubSpot example produces only .md, not md+py.** USR 212 ("the granola + hubspot example should have md + py but rn only produces md"). Worker since deleted (O1), so moot — but the underlying "worker should support multi-file md+py" generation was a recurring ask (USR 191, 198, 235). 🔁 — multi-file supported in contract; generation default unverified.
 
-16. **OpenDraft/OpenBlog real-engine limits ("there should be no limits", 300s timeout "is a lie").** USR 313, 314, 316. Workplan Phase 2: opendraft "IN PROGRESS (long-running ~44min)". 🔁 — runs complete but the "no limits / honest timeout" concern and runtime-quality assessment Federico demanded is not closed.
+16. **OpenDraft/OpenBlog real-engine limits ("there should be no limits", 300s timeout "is a lie").** USR 313, 314, 316. Workplan Phase 2: opendraft "IN PROGRESS (long-running ~44min)". 🔁 — runs complete but the "no limits / honest timeout" concern and runtime-quality assessment the operator demanded is not closed.
 
 17. **`env-vars-worker` / `node-smoke-test` internal test workers visible in operator list.** Workplan DoD #3 ("no internal/test workers leaking"). **Reality:** both appear in `GET /workers`; `env-vars-worker` has `is_example=None` (not even labeled). ❌ — leaking. Not in ledger.
 
@@ -79,7 +79,7 @@ Ordered by (a) how many times Federico raised it, (b) whether the ledger falsely
 
 ## Items in transcripts but MISSING from ledger + workplan + ISSUES (the ledger's blind spots)
 
-These are the items Federico's "maybe it's not complete" instinct was pointing at:
+These are the items the operator's "maybe it's not complete" instinct was pointing at:
 
 | # | Verbatim (abbrev) | USR | Status |
 |---|---|---|---|
@@ -107,14 +107,14 @@ Legend: ✅ shipped+live · ⚠️ done-but-not-live/regressed · ❌ never addr
 | Create workers from UI | "i can not create new workers?" | ab820815 | 2 | ✅ | /workers/new + draft endpoint | H1 | — |
 | Observability on runs | "runs has 0 observability?" | ab820815 | 2 | ✅ | run timeline/logs/output | F1-F3 | — |
 | Approvals: don't show fake | "i dont need approvals" → A-now-C-later | ab820815 | 2 | ✅→ | HITL respawn shipped (#207) | Q1 | — |
-| Workspace switching / workspaces | "switch between workspaces" | 06ae6ad8/ab820815 | 3 | ❌→deferred | owner_id only; Federico later said "no multi-user for now" | M5 | DoD |
+| Workspace switching / workspaces | "switch between workspaces" | 06ae6ad8/ab820815 | 3 | ❌→deferred | owner_id only; the operator later said "no multi-user for now" | M5 | DoD |
 | Workers = skills (any md/py/multi-file) | "workers are based on skills" | ab820815 | 6 | ✅ | agent/script modes; WorkerContract | H-series | — |
 | Sandbox: e2b or local | "sandbox logic? either local or e2b" | ab820815 | 4 | ✅ | runner=e2b on prod | A-series | — |
 | Cron + webhook triggers | "obv we need cron and webhook" | 877bed75/ab820815 | 3 | ✅ | trigger_type on workers | — | — |
 | Composio triggers (app events) | "Composio triggers like cron/webhook" | ab820815 | 2 | 🔁 | t15a lane; not confirmed live | — | — |
 | 1000 Composio integrations on browse page | "all of the 1,000 integrations?" | ab820815 | 2 | ✅ | /connections/browse catalog | E-series | — |
 | Real logos + scopes on connections | "real logos and all... scope we connected for" | ab820815 | 3 | ⚠️ | logos yes; scopes `[]` live | E3 | — |
-| White-label Composio → Floom screen | "say floom + secured by composio" | ab820815 | 4 | 🔁 | interstitial added; Federico re-flagged USR 338 | — | — |
+| White-label Composio → Floom screen | "say floom + secured by composio" | ab820815 | 4 | 🔁 | interstitial added; the operator re-flagged USR 338 | — | — |
 | Account name shows real email | "Connected as federico cannot be it" | ab820815 | 5 | ⚠️ | live = "Connected account" | E2 | — |
 | Reconnect only when broken | "why reconnect if already connected" | ab820815 | 3 | ⚠️ | fix #233 not deployed | E1 | — |
 | MCP connections tab | "next to connections i should add MCPs" | ab820815 | 4 | 🔁 | tab+HTTP shipped; stdio import ❌ | E4/E5/E7 | yes |
@@ -168,11 +168,11 @@ Legend: ✅ shipped+live · ⚠️ done-but-not-live/regressed · ❌ never addr
 
 ## Systemic patterns (what keeps slipping)
 
-1. **"Merged" treated as "done." The #1 leak.** The ledger marks ✅ on PR-merge; prod was last deployed 05:26 UTC while fixes kept merging after (PR #233 at 07:48). Federico sees the *live* site, so a merged-but-undeployed fix reads to him as "ignored again." **Fix: ledger status ✅ requires a prod-SHA + live-curl/screenshot timestamp, not a PR number.**
+1. **"Merged" treated as "done." The #1 leak.** The ledger marks ✅ on PR-merge; prod was last deployed 05:26 UTC while fixes kept merging after (PR #233 at 07:48). the operator sees the *live* site, so a merged-but-undeployed fix reads to him as "ignored again." **Fix: ledger status ✅ requires a prod-SHA + live-curl/screenshot timestamp, not a PR number.**
 
-2. **Visual/design items closed on "code shipped," never on Federico's eyes.** Overview, worker cards hover-jump, edit-vs-detail, run-page alignment were all marked ✅ then re-flagged by Federico in a later session. Greppable evidence ≠ visual parity (this is the exact CLAUDE.md anti-pattern).
+2. **Visual/design items closed on "code shipped," never on the operator's eyes.** Overview, worker cards hover-jump, edit-vs-detail, run-page alignment were all marked ✅ then re-flagged by the operator in a later session. Greppable evidence ≠ visual parity (this is the exact CLAUDE.md anti-pattern).
 
-3. **Latest-message-wins not enforced.** Several items have an early ✅ PR and a *later* Federico complaint about the same thing (cards hover USR 418, new-tab USR 418, edit-layout USR 370, overview USR 372). The ledger captured the early PR, not the later re-flag.
+3. **Latest-message-wins not enforced.** Several items have an early ✅ PR and a *later* the operator complaint about the same thing (cards hover USR 418, new-tab USR 418, edit-layout USR 370, overview USR 372). The ledger captured the early PR, not the later re-flag.
 
 4. **Brand-new one-off complaints in image-heavy messages get dropped.** USR 418's three sub-bugs (infinite scroll, folder row-jump, empty #code) landed in NO doc. Dense multi-point messages with screenshots are where items vanish.
 
@@ -186,4 +186,4 @@ Legend: ✅ shipped+live · ⚠️ done-but-not-live/regressed · ❌ never addr
 2. **Ship robots.txt + favicon** (trivial, 404 today, raised twice).
 3. **Live visual re-walk** of /overview, /workers cards (hover), /workers/<id> vs ?edit, /runs/<id> — fix the re-flagged regressions, get explicit sign-off (don't self-close).
 4. **Add the 7 missing items** (G-1..G-7) to ISSUES.md + workplan so nothing lives only in this audit.
-5. **Change the ledger's ✅ definition** to require prod-SHA + live evidence + "latest Federico message on this topic" check.
+5. **Change the ledger's ✅ definition** to require prod-SHA + live evidence + "latest the operator message on this topic" check.

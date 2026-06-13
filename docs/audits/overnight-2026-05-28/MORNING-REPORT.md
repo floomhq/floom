@@ -1,4 +1,4 @@
-# Overnight 2026-05-28 — Morning report for Federico
+# Overnight 2026-05-28 — Morning report for the operator
 
 **Status snapshot at hand-off:** S22 UI redesign sequence shipped + verified live on prod. R6 backend security PR is open with adversarial-probe findings noted. S22d (Codex backend SSE + run detail UI) still in flight.
 

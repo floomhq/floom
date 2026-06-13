@@ -1,11 +1,11 @@
-# Federico historical complaint verification (2026-05-28)
+# the operator historical complaint verification (2026-05-28)
 
-Per Federico 2026-05-27 09:14: "this still has many issues in the UI that I already addressed before. Part of the workplan should definitely be checking all the issues that I have raised. You can even read the session logs, find all issues that I raised before, and see if you really have fixed them."
+Per the operator 2026-05-27 09:14: "this still has many issues in the UI that I already addressed before. Part of the workplan should definitely be checking all the issues that I have raised. You can even read the session logs, find all issues that I raised before, and see if you really have fixed them."
 
 47 typed complaints mined from session logs at `/root/.claude/projects/-root/*.jsonl`. Each gets a status:
 
 - **FIXED** = deployed + verified on `https://workers.floom.dev` after Lane B/A landed
-- **PARTIAL** = code shipped, but Federico's specific symptom still present
+- **PARTIAL** = code shipped, but the operator's specific symptom still present
 - **OPEN** = no code shipped yet
 - **WONTFIX** = decided against, with rationale
 
@@ -26,7 +26,7 @@ Cross-ref: per-complaint ID `F-NN` links to ISSUES.md `I-N` IDs where applicable
 | F-7 | 05-26 16:12 | "sidebar broken on scroll" | NEEDS VERIFY | — | Sidebar uses sticky positioning. Need live screenshot at long scroll. |
 | F-7b | 05-26 16:12 | "card based logic is not good, should be tabs on a worker page" | FIXED (PR #71) | I-24 | Switched from side-rail to shadcn Tabs at top. |
 | F-7c | 05-26 16:12 | "created a new worker but where is the worker code?" | NEEDS VERIFY | — | /workers/<id>?section=code shows files. Verify after create flow lands a worker into that surface. |
-| F-8 | 05-26 16:17 | "/settings why does it have secrets?" | WONTFIX | — | Settings tabs separate from /secrets page. Federico might be confused; we removed secrets from Settings. |
+| F-8 | 05-26 16:17 | "/settings why does it have secrets?" | WONTFIX | — | Settings tabs separate from /secrets page. the operator might be confused; we removed secrets from Settings. |
 | F-8b | 05-26 16:17 | "platform config some value seems missing but i cannot edit" | FIXED | — | S13 redacted platform-config response; UI shows missing-only list with copy-name. |
 | F-9 | 05-26 16:30 | "sidebar on /workers is still broken" | NEEDS VERIFY | — | Pending live check. |
 | F-9b | 05-26 16:30 | "no proper favicon" | OPEN | — | `apps/web/app/icon.svg` exists (black squircle). Verify on mobile + browser tabs. Maybe add apple-touch-icon variant. |
@@ -53,8 +53,8 @@ Cross-ref: per-complaint ID `F-NN` links to ISSUES.md `I-N` IDs where applicable
 | F-17c | 05-27 05:42 | "worker detail pages don't have tabs" | FIXED | I-24 | Top tabs PR #71. |
 | F-17d | 05-27 05:42 | "settings appearance lies about theme" | FIXED | I-3 | ThemeModeButton wired into Appearance tab. |
 | F-17e | 05-27 05:42 | "API access design is weird, no token" | FIXED | I-4 | Token block at top with reveal/copy. |
-| F-17f | 05-27 05:42 | "connections still show Federico" | NEEDS VERIFY | I-12 | account_label refresh in sweep. Live verify. |
-| F-17g | 05-27 05:42 | "skeletons too basic" | PARTIAL | I-13 | S18 added shimmer, S19 tuned. Federico still flagged. May need geometry-matching skeletons per page. |
+| F-17f | 05-27 05:42 | "connections still show the operator" | NEEDS VERIFY | I-12 | account_label refresh in sweep. Live verify. |
+| F-17g | 05-27 05:42 | "skeletons too basic" | PARTIAL | I-13 | S18 added shimmer, S19 tuned. the operator still flagged. May need geometry-matching skeletons per page. |
 | F-17h | 05-27 05:42 | "overview errors should show which connection + logo" | FIXED | I-7 | provider_slug + provider_display_name added; UI names them. |
 | F-17i | 05-27 05:42 | "/runs/run_... not properly designed" | FIXED (PR #71) | I-30 | Rewrote to output-first + collapsibles per ASCII spec. |
 | F-17j | 05-27 05:42 | "workers/new needs more design" | PARTIAL | I-17 | S19 fixed Generate after pill, but visual polish pending. |
@@ -98,7 +98,7 @@ Cross-ref: per-complaint ID `F-NN` links to ISSUES.md `I-N` IDs where applicable
 
 ## Methodology note for future-me
 
-Every time Federico raises something:
+Every time the operator raises something:
 - Add to `ISSUES.md` immediately with a unique ID.
 - After landing a fix, manually verify on `workers.floom.dev` (NOT just code-deployed-grep).
 - If verification fails, status stays PARTIAL/OPEN.

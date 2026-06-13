@@ -89,7 +89,7 @@ The closest design target. Built on shadcn/ui + Tailwind CSS. Key components:
 | Textarea | Transparent, no border, no ring, auto-height | Exact prompt-kit PromptInputTextarea |
 | Send button | 32px round, `bg-primary`, disabled = `bg-muted` | prompt-kit PromptInputAction pattern |
 | Loader | 3 dots `scale+opacity` stagger + "Thinking…" text | Exact `/root/openchat-v2/components/prompt-kit/loader.tsx` |
-| Tool cards | shadcn `border border-radius-lg bg-card` — no colored borders, no gradients | Federico's design rules |
+| Tool cards | shadcn `border border-radius-lg bg-card` — no colored borders, no gradients | the operator's design rules |
 | Palette | shadcn defaults: `--secondary` for bubbles, `--muted` for cards, `--border` for dividers | No gradients, max 1 accent (Emily blue #59AAF8) |
 | Emily avatar | 28px blue (#59AAF8) pill with "E" | Consistent across rail header, message rows, collapsed strip |
 | Mobile | Full-screen chat, iOS-style input bar, approval cards full-width | No split layout on mobile |

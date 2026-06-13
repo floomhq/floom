@@ -364,7 +364,7 @@ body {
   overflow: hidden;
   font-size: 13px;
   box-shadow: var(--shadow-sm);
-  /* NO colored left border per Federico's rules */
+  /* NO colored left border per the operator's rules */
 }
 
 .tool-card-header {

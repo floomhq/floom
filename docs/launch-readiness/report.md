@@ -40,7 +40,7 @@ Normalized to 100 (ignoring N/A): **~72/100**.
 - **Effort**: 5 minutes.
 
 ### P0-2 — Composio events endpoint returns 503 instead of 401 (signing key missing)
-- **Evidence**: `codex-security-2026-05-26.md` line 15. `POST /composio-events` with no signature returns 503 `COMPOSIO_WEBHOOK_SIGNING_KEY is not configured`. Federico needs to add the Composio signing key to env, OR the route should refuse to even register Composio triggers until the key is present.
+- **Evidence**: `codex-security-2026-05-26.md` line 15. `POST /composio-events` with no signature returns 503 `COMPOSIO_WEBHOOK_SIGNING_KEY is not configured`. the operator needs to add the Composio signing key to env, OR the route should refuse to even register Composio triggers until the key is present.
 - **Fix**: Add `COMPOSIO_WEBHOOK_SIGNING_KEY=<from Composio dashboard>` to `/root/.config/workeros/api.env`. OR document the precondition + add a startup check.
 - **Effort**: 10 minutes (get key from Composio dashboard + env update).
 
@@ -93,7 +93,7 @@ Disagreement: none — the two scoring agents converged on independent issue set
 
 | Category | Reason |
 |---|---|
-| Frontend UX walk | Vercel deploy protection returns 401 to anonymous. Federico must authenticate, or disable protection for the audit window. |
+| Frontend UX walk | Vercel deploy protection returns 401 to anonymous. the operator must authenticate, or disable protection for the audit window. |
 | Lighthouse performance | Same Vercel block. |
 | SEO | No anonymous-public surface; project is single-tenant. |
 | Email deliverability | Workeros sends no email. |
@@ -106,7 +106,7 @@ Disagreement: none — the two scoring agents converged on independent issue set
 ## Iteration log
 
 - Phase 1 surface discovery: 30 API routes, 12 frontend routes, 9 MCP tools, 4 CLI commands, 5 auth flows.
-- Phase 2 test plans: 2 personas (Federico owner + fresh AI agent), 14 lifecycle steps, 8 agent-install checks.
+- Phase 2 test plans: 2 personas (the operator owner + fresh AI agent), 14 lifecycle steps, 8 agent-install checks.
 - Phase 3 multi-agent dispatch: 3 agents (codex-roast, codex-security, nvidia-deep). 2 returned with real findings, 1 failed upstream.
 - Phase 4 aggregation: this report.
 - Phase 5 closed-loop: deferred — first iteration surfaced enough P0/P1 to act on.

@@ -10,7 +10,7 @@ Goal: ship the REAL Emily chat (not a prototype). This is the flagship. Two part
 ## Backend deliverable
 1. Assess PR #437 vs the design doc: what of the enriched SSE protocol is implemented vs missing on the /chat endpoint. Report a gap list.
 2. Finish the backend so the FULL documented SSE contract is served by the live /chat endpoint: the token stream PLUS the async tool-card events (chat.meta on start, tool-progress as tools run, tool-resource for produced artifacts, tool-action-required for approvals). Tools must run async without blocking the token stream (the async tool-card model — same lesson as the M73 create-timeout fix: never block the HTTP request on long work).
-3. Conversations persist fully (Federico wants all conversations stored for Emily — no eviction; the _maybe_evict_conversation 50-cap was flagged for no-evict). Verify storage is durable.
+3. Conversations persist fully (the operator wants all conversations stored for Emily — no eviction; the _maybe_evict_conversation 50-cap was flagged for no-evict). Verify storage is durable.
 4. Tests for the protocol (event ordering, tool-card lifecycle, approval round-trip).
 5. Verify LIVE: curl the /chat SSE endpoint with a real prompt that triggers a tool call, capture the event stream, and CONFIRM each documented event type appears in the right order.
 

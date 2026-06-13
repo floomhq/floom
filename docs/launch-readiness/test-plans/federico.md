@@ -1,6 +1,6 @@
-# Test Plan — Federico (owner persona)
+# Test Plan — the operator (owner persona)
 
-Federico installs workeros and uses it for his own work. Single-tenant. Knows the secret. Has Mac + Claude Code installed.
+the operator installs workeros and uses it for his own work. Single-tenant. Knows the secret. Has Mac + Claude Code installed.
 
 ## Dogfooding flows (must work end-to-end)
 
@@ -25,7 +25,7 @@ Federico installs workeros and uses it for his own work. Single-tenant. Knows th
 ### F4 — Composio-trigger a worker on a real Gmail event
 1. Connect Gmail via /connections/browse.
 2. Create a worker with `trigger.composio: { event: GMAIL_NEW_EMAIL, connection_id, filters }`.
-3. Send an email to Federico's Gmail.
+3. Send an email to the operator's Gmail.
 4. Expected: workeros receives Composio webhook → creates run → worker executes.
 5. Fail mode: trigger not registered with Composio, signing-key mismatch, payload mapping wrong.
 

@@ -317,7 +317,7 @@ _current_chat_conversation_id: ContextVar[Optional[str]] = ContextVar(
 def strip_em_dashes(text: str) -> str:
     """Replace em dashes (U+2014) and en dashes (U+2013) with ASCII equivalents.
 
-    Federico requires zero em dashes in Emily's output. A system-prompt
+    the operator requires zero em dashes in Emily's output. A system-prompt
     instruction alone is unreliable because the model occasionally emits them
     anyway. This filter is applied to every text chunk at emission time so the
     guarantee is unconditional.

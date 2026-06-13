@@ -102,7 +102,7 @@ TWO groups with labels: **Workspace · {name}** (System, Channels, Assistant, Me
 - Appearance: theme seg (per-user persistence #773 — client-side until then).
 
 ### Emily rail
-**DO NOT hand-build the chat UI.** Federico's call: Emily will be prompt-kit-native React. The wireframe defines only: placement (right rail), collapse/widen/full behavior, 56px header (avatar + green dot + fullscreen + ⋯ menu with New chat/Export/Recent chats), composer (paperclip + input + send), suggestion chips, create-worker mode ("Describe the job in one sentence…", banner: "Your previous chat is still running — find it in Recent chats"). Backend: SSE `POST /chat`, conversations list/reopen, `POST /workers/new/from-prompt` ALL BUILT; recent-chats wiring #775, export #776, attachments #778.
+**DO NOT hand-build the chat UI.** the operator's call: Emily will be prompt-kit-native React. The wireframe defines only: placement (right rail), collapse/widen/full behavior, 56px header (avatar + green dot + fullscreen + ⋯ menu with New chat/Export/Recent chats), composer (paperclip + input + send), suggestion chips, create-worker mode ("Describe the job in one sentence…", banner: "Your previous chat is still running — find it in Recent chats"). Backend: SSE `POST /chat`, conversations list/reopen, `POST /workers/new/from-prompt` ALL BUILT; recent-chats wiring #775, export #776, attachments #778.
 **Chat internals (#825):** tool calls render with the EXISTING collapsible `ai-elements/tool.tsx` (click → inputs/outputs/status — same component as run details; EmilyChat's flat `tool-card` parts get replaced); approvals appear INLINE in the thread (card + comment + Approve/Reject via existing API); Emily's answers link to app pages as real router hrefs (generalize `getAutoOpenRunDetailsHref`). NO DOM access / page driving — links only.
 
 ## 5. Modals & standalone pages (all in Design index)
@@ -115,13 +115,13 @@ TWO groups with labels: **Workspace · {name}** (System, Channels, Assistant, Me
 - Approval page: calm "Waiting for your review" + tool logo + preview + comment + Approve/Reject (public routes BUILT).
 - **Channel-first onboarding** (#817): landing → "Start in Slack / Start in WhatsApp", dashboard optional. New flow, design in wireframe, backend issue filed (depends #762/#733/#800).
 
-## 5a2. Sign-in + workspace creation (Federico 2026-06-10)
+## 5a2. Sign-in + workspace creation (the operator 2026-06-10)
 
 - **Sign-in page is split** (Design index → "Sign-in page"): LEFT = dark product-proof panel (mark, "Hire AI workers.", a real-looking "This week" artifact card — show what they get, never a bare form); RIGHT = form (email magic-link primary, GitHub/Google secondary, "your first sign-in creates one"). Industry pattern; no boring centered card.
 - **New workspace modal**: ONE company field — typing it fetches the company logo automatically (favicon/logo service) and prefills the workspace name; name stays overridable (one company can run several workspaces). Smooth, not bulky: two fields + live logo preview, nothing else. Backend: workspace create BUILT; storing company domain + logo needs a field (extend #791).
 - **Casing: it's "WorkerOS"**, never "Workeros", in every user-visible string (#824). Package/identifiers stay lowercase.
 
-## 5b. Landing ↔ App continuity (Federico 2026-06-10)
+## 5b. Landing ↔ App continuity (the operator 2026-06-10)
 
 - **One design system.** Landing and app share the tokens in §1 (palette, radii, flat border system). Theme: day/night/system exists on the landing exactly like in the app, same storage key, carried across the transition (#820 — theme toggle half SHIPPED in PR #160, `floom-theme` key is canonical).
 - **Sign-in as late as possible.** The landing's "Works without the dashboard too: Slack, WhatsApp, or any MCP agent" row routes to the INSTALL FLOWS directly (Slack install / WhatsApp QR / MCP config) — never to sign-in (#819). Full anonymous provisioning is #817; #552 (install-after-sign-in) is the interim inverse.

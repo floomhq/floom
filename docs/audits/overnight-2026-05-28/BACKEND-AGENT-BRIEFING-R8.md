@@ -2,7 +2,7 @@
 
 **Author:** Claude (UI lane, /root/workeros).
 **Date:** 2026-05-27.
-**For:** Federico's backend specialist agent (the one he's about to dispatch).
+**For:** the operator's backend specialist agent (the one he's about to dispatch).
 **Tone:** read this before touching code. Plain text below; no markdown rendering needed.
 
 ---
@@ -85,7 +85,7 @@ Live on `workers.floom.dev` (single-user, `x-floom-secret` header gate):
 
 ---
 
-## R8 findings (verbatim from Federico)
+## R8 findings (verbatim from the operator)
 
 ```
 MED-11 — OpenAPI schema leaks extensive internal security docs.
@@ -119,7 +119,7 @@ Verified safe (R8 confirmed):
 - Secret read-back (405), Sweep-connections (500, no damage),
 - Health auth bypass (actually requires auth — health description is wrong).
 
-Key observation from R8 (Federico's words):
+Key observation from R8 (the operator's words):
 - "Generic 500 errors everywhere — makes it impossible to distinguish broken from blocked."
 - "No new exploitable vulnerabilities — attack surface is well-mapped after 8 rounds."
 - "The platform has solid core architecture but critical authorization gaps, pervasive PII leaks, a 29% broken endpoint rate, and broken core functionality."
@@ -196,20 +196,20 @@ Tiny: `/health` is described as auth-exempt but is not. Either:
 - Make it actually auth-exempt (true HEALTHCHECK behavior; Cloudflare needs this), or
 - Fix the description to say it requires auth.
 
-Federico's instinct is the former (Cloudflare + uptime monitors poll /health unauthenticated all day). Move it ahead of `require_secret` middleware if so.
+the operator's instinct is the former (Cloudflare + uptime monitors poll /health unauthenticated all day). Move it ahead of `require_secret` middleware if so.
 
 ### 5. Don't touch (handled in other lanes)
 
 - **/connections OAuth flow**: stable, just heavily probed. The R6 IDOR (DELETE) + R6 PII (GET) + R7 PII (account-info) + R7 internal (auth-configs) are all addressed. Only re-touch if you find a new path.
 - **Composio multi-tenancy**: out of scope. That's the `workeros-cloud` lane (see `/tmp/workeros-cloud-briefing.txt`).
-- **Async draft-and-create SSE backend**: separately queued for Codex (kills the Vercel 60s timeout). The R8 finding (draft-and-create 500) likely overlaps. Coordinate via Federico before duplicating work.
+- **Async draft-and-create SSE backend**: separately queued for Codex (kills the Vercel 60s timeout). The R8 finding (draft-and-create 500) likely overlaps. Coordinate via the operator before duplicating work.
 - **UI**: I'm on it. If you need to add a field, ping me with the shape, I'll wire it.
 
 ---
 
 ## Live verification expected per fix
 
-Federico's "do not lie" gate ([feedback_test_everything_myself]):
+the operator's "do not lie" gate ([feedback_test_everything_myself]):
 - Each fix gets a `curl` proof saved into `docs/audits/overnight-2026-05-28/backend-r8-verify-<topic>.md`
 - Each fix gets a `systemctl restart workeros-api && systemctl status workeros-api` confirmation
 - Each fix gets at least one walked screenshot of the affected UI surface (or a curl-and-grep on the deployed Vercel bundle) so we don't ship a 500 that the UI was masking
@@ -218,7 +218,7 @@ Federico's "do not lie" gate ([feedback_test_everything_myself]):
 
 ## Currently running background jobs — DO NOT KILL
 
-- `CronCreate` cron `f7bfae2d` (continuous adversarial probe every 4h at :23). Output → `docs/audits/`. This is the Kimi loop Federico asked to keep running.
+- `CronCreate` cron `f7bfae2d` (continuous adversarial probe every 4h at :23). Output → `docs/audits/`. This is the Kimi loop the operator asked to keep running.
 - No active Codex worktree process at the time of this brief. If you see `/tmp/workeros-*-secfix/` worktrees, those are post-merge stragglers — safe to leave or `git worktree prune`.
 
 ---

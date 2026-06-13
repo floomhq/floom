@@ -1,6 +1,6 @@
-# Assessment iteration loops — full spec (Federico 2026-05-28)
+# Assessment iteration loops — full spec (the operator 2026-05-28)
 
-Cross-agent rule (Federico mandate): no agent audits what it built.
+Cross-agent rule (the operator mandate): no agent audits what it built.
 
 ## UI loop — runs after every UI PR merges
 
@@ -28,10 +28,10 @@ artifacts dir: docs/audits/overnight-2026-05-28/ui-cycle-N/
      contrast, mobile, empty states, microcopy, affordances, delight."
    - 60 min budget, releases broker lease
 
-4. **/design-review** skill (Gemini-3.1 vision judge — IF Federico re-authorises Gemini)
+4. **/design-review** skill (Gemini-3.1 vision judge — IF the operator re-authorises Gemini)
    - Sends screenshots to Gemini, scores 7 design dimensions per page
    - Score: 0-100 with per-dimension breakdown
-   - GATED on Federico's earlier ban of paid Gemini calls — defer unless he explicitly lifts.
+   - GATED on the operator's earlier ban of paid Gemini calls — defer unless he explicitly lifts.
 
 5. **Aggregate** → `docs/audits/overnight-2026-05-28/ui-cycle-N/findings.md`
    - Findings get new I-N IDs, merged into `ISSUES.md`
@@ -62,7 +62,7 @@ artifacts dir: docs/audits/overnight-2026-05-28/be-cycle-N/
      (CORS, /uploads)
    - Output: verified safe + new findings
 
-3. **kimi-agent** (Kimi CLI, hard-mode probe — Federico's request)
+3. **kimi-agent** (Kimi CLI, hard-mode probe — the operator's request)
    - Stateless: hit every endpoint with adversarial inputs
    - Sql-injection shapes, oversized payloads, race conditions, auth bypass
    - Output: P0/P1 with reproducer commands
@@ -86,7 +86,7 @@ artifacts dir: docs/audits/overnight-2026-05-28/be-cycle-N/
 ## Cross-cutting agents — run at most once per night
 
 - **claude-virgin** real-user 22-step walk: signup-style flow (create worker
-  → run it → see error → edit → re-run → green). Federico's "full flow" gate.
+  → run it → see error → edit → re-run → green). the operator's "full flow" gate.
 - **/launch-readiness** skill: composite 0-100 score with 12 categories,
   weighted total, P0/P1 ranked. Final-gate sign-off.
 
@@ -95,5 +95,5 @@ artifacts dir: docs/audits/overnight-2026-05-28/be-cycle-N/
 The overnight session ends when ANY of:
 1. **Score ≥ 95** + zero open P0/P1 + every stock worker green = SHIP
 2. **5 consecutive batches with no new findings** = ship at current score
-3. **Codex token budget exhausted** (separate from Federico's account)
-4. **Federico wakes up** and gives new direction
+3. **Codex token budget exhausted** (separate from the operator's account)
+4. **the operator wakes up** and gives new direction
