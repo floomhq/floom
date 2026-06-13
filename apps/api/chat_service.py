@@ -31,7 +31,7 @@ from db import get_db, now_iso
 logger = logging.getLogger("floom.chat")
 
 WORKSPACE_AGENT_ID = "workspace-agent"
-DEFAULT_WORKSPACE_AGENT_MODEL = "gpt-5.5"
+DEFAULT_WORKSPACE_AGENT_MODEL = "gpt-5.4-mini"
 TOOL_RESULT_MAX_BYTES = 2048
 CONVERSATION_WINDOW = 50       # LLM context window; stored rows are permanent
 CONVERSATION_KEEP_VERBATIM = 20  # retained for legacy summary compatibility
@@ -114,7 +114,10 @@ that just runs from then on.
 
 When you open a conversation without a specific task, I check the workspace
 immediately (pending approvals, failing workers, runs that need attention) and
-lead with what matters. I don't wait to be asked.
+lead with what matters. I don't wait to be asked. The reply stays short: a
+greeting line, at most 2-3 bullets with only the items that need you, and one
+ask or suggested next step. I never recite the full workspace snapshot, list
+healthy workers, or enumerate settings on a greeting.
 
 ## How I work
 
@@ -137,6 +140,18 @@ missing, and the exact blocker or next action when there is one.
 **Finish the job.** On any task that requires multiple steps, I keep going until
 the work is done or I hit a genuine blocker. I don't stop after one tool call and
 ask "should I continue?" unless the next step is irreversible.
+
+**Investigate fully, reply once.** On "find X" / lookup / research requests I
+exhaust my tools BEFORE replying: brain packs, workers, connection metadata,
+host paths -- every angle I have access to. I never send partial status
+("checked A and B, nothing yet"), never list dead ends as a reply, and never ask
+"say keep going" to continue a read-only investigation -- continuing is free, so
+I just continue. The reply is the result: what I found, or one message with what
+is definitively missing plus the exact unblock (which connection to add, which
+setting to flip, which pack to attach). If a host command is blocked (for
+example: no pipes or metacharacters on readonly SSH), I retry with allowed
+patterns (separate plain `grep` / `find` / `ls` calls) instead of reporting the
+limitation as a finding.
 
 **Outbound needs a thumbs-up.** Any worker that sends emails, posts, or messages
 to people outside this workspace will ask for your approval first. That's what
@@ -240,6 +255,54 @@ _SECRET_QUERY_PREFIX_RE = re.compile(
     re.IGNORECASE,
 )
 _SECRET_QUERY_VALUE_DELIMITERS = frozenset('& \t\r\n"\'<>)]}')
+
+
+def _effective_worker_visibility_user_id(user_id: str) -> str:
+    """Resolve the owner id Emily should use for worker visibility checks."""
+    raw = str(user_id or "").strip()
+    if not raw:
+        return raw
+    candidates: list[str] = [raw]
+    try:
+        from db import get_db
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT id FROM users WHERE username = ? LIMIT 1",
+                (raw,),
+            ).fetchone()
+        if row and row["id"]:
+            candidates.append(str(row["id"]))
+    except Exception:
+        pass
+    try:
+        from contexts import effective_context_user_id
+        effective = effective_context_user_id(raw)
+    except Exception:
+        effective = None
+    if effective:
+        candidates.append(str(effective))
+    seen: set[str] = set()
+    unique_candidates: list[str] = []
+    for candidate in candidates:
+        if candidate and candidate not in seen:
+            seen.add(candidate)
+            unique_candidates.append(candidate)
+    try:
+        from db import get_db
+
+        with get_db() as conn:
+            for candidate in unique_candidates:
+                row = conn.execute(
+                    "SELECT 1 FROM workers WHERE owner_id = ? LIMIT 1",
+                    (candidate,),
+                ).fetchone()
+                if row is not None:
+                    return candidate
+    except Exception:
+        pass
+    return unique_candidates[-1] if unique_candidates else raw
+
 
 _current_chat_conversation_id: ContextVar[Optional[str]] = ContextVar(
     "workeros_chat_conversation_id",
@@ -1489,6 +1552,10 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
                     "include_system": {
                         "type": "boolean",
                         "description": "Also include system/example workers (hidden by default).",
+                    },
+                    "include_all_users": {
+                        "type": "boolean",
+                        "description": "Admin only: include workers owned by every user.",
                     }
                 },
                 "required": [],
@@ -1850,15 +1917,15 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
 
 def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     from db import get_db as _get_db
+    visibility_user_id = _effective_worker_visibility_user_id(user_id)
+    include_all_users = bool(args.get("include_all_users"))
     result = []
     with _get_db() as conn:
-        # Role-aware visibility, mirroring the /workers UI: an admin sees EVERY
-        # worker; a member sees their own + workspace-shared. This was previously
-        # strictly owner-scoped (WHERE owner_id = ?), so an admin who owns no
-        # workers (e.g. the seed workers belong to the local-default user) got an
-        # empty list from Emily while the UI showed all of them.
+        # Default to "the user's workers" for Emily's "what workers do I have?"
+        # path. Admin-wide listing is explicit so the default never exposes
+        # another user's private workers in a personal inventory answer.
         try:
-            role_row = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+            role_row = conn.execute("SELECT role FROM users WHERE id = ?", (visibility_user_id,)).fetchone()
             is_admin = bool(role_row) and str(role_row["role"]).lower() == "admin"
         except Exception:
             # No users table (single-user OSS without multi-member) -> not admin;
@@ -1869,7 +1936,7 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
             "FROM workers w "
             "LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id "
         )
-        if is_admin:
+        if is_admin and include_all_users:
             rows = conn.execute(base_select + "ORDER BY w.name").fetchall()
         else:
             # Mirror _worker_can_view exactly: a member sees their own workers,
@@ -1898,7 +1965,7 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
                     + "OR (COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
                     + "    AND wm.user_id IS NOT NULL) "
                     + "ORDER BY w.name",
-                    (user_id, user_id),
+                    (visibility_user_id, visibility_user_id),
                 ).fetchall()
                 # Also include stock/public workers not already captured above
                 # (e.g. stock worker owned by another user in a workspace the
@@ -1929,7 +1996,7 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
                         + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
                         + f"OR w.id IN ({placeholders}) "
                         + "ORDER BY w.name",
-                        [user_id] + all_stock_ids,
+                        [visibility_user_id] + all_stock_ids,
                     ).fetchall()
                 else:
                     rows = conn.execute(
@@ -1937,7 +2004,7 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
                         + "WHERE w.owner_id = ? "
                         + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
                         + "ORDER BY w.name",
-                        (user_id,),
+                        (visibility_user_id,),
                     ).fetchall()
     # #841 RCA: every row was returned, so "what workers do I have?" dumped
     # system and example workers into the chat card with no distinction. The
@@ -2003,6 +2070,7 @@ def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
         PROTECTED_STOCK_WORKER_IDS,
         _shared_filesystem_fallback_allowed,
     )
+    visibility_user_id = _effective_worker_visibility_user_id(user_id)
     if worker_id in PUBLIC_STOCK_WORKER_IDS or worker_id in PROTECTED_STOCK_WORKER_IDS:
         return True
     try:
@@ -2022,7 +2090,7 @@ def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
             return True
         # Unknown worker ID in a multi-user deployment — block it.
         return False
-    if row["owner_id"] == user_id:
+    if row["owner_id"] == visibility_user_id:
         return True
     # Admins may view every worker, mirroring the role-aware /workers UI and
     # workers__list_all. Without this, an admin who owns no workers could LIST a
@@ -2030,7 +2098,7 @@ def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
     # user OSS) -> not admin.
     try:
         role_row = conn.execute(
-            "SELECT role FROM users WHERE id = ? LIMIT 1", (user_id,)
+            "SELECT role FROM users WHERE id = ? LIMIT 1", (visibility_user_id,)
         ).fetchone()
         if role_row and str(role_row["role"]).lower() == "admin":
             return True
@@ -2046,7 +2114,7 @@ def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
         member_row = conn.execute(
             "SELECT 1 FROM workspace_members "
             "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
-            (workspace_id, user_id),
+            (workspace_id, visibility_user_id),
         ).fetchone()
     except Exception:
         return False
@@ -2096,8 +2164,9 @@ def _list_viewable_workers(conn: Any, user_id: str) -> List[Dict[str, str]]:
     """
     from main import PUBLIC_STOCK_WORKER_IDS, PROTECTED_STOCK_WORKER_IDS
 
+    visibility_user_id = _effective_worker_visibility_user_id(user_id)
     try:
-        role_row = conn.execute("SELECT role FROM users WHERE id = ?", (user_id,)).fetchone()
+        role_row = conn.execute("SELECT role FROM users WHERE id = ?", (visibility_user_id,)).fetchone()
         is_admin = bool(role_row) and str(role_row["role"]).lower() == "admin"
     except Exception:
         is_admin = False
@@ -2113,7 +2182,7 @@ def _list_viewable_workers(conn: Any, user_id: str) -> List[Dict[str, str]]:
                 + "WHERE w.owner_id = ? "
                 + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
                 + "ORDER BY w.name",
-                (user_id,),
+                (visibility_user_id,),
             ).fetchall()
     except Exception:
         rows = []
@@ -3763,7 +3832,11 @@ _APPROVALS_BASE_URL = (
 
 
 def _approval_public_token(row: Any) -> str:
-    secret = os.environ.get("FLOOM_SECRET") or "dev-secret-not-set"
+    # #998: fail closed — no signing with a public constant.
+    secret = (os.environ.get("FLOOM_SECRET") or "").strip()
+    if not secret:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="Server signing secret not configured")
     payload = ".".join(str(row[key] or "") for key in ("id", "run_id", "owner_id"))
     return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 
@@ -4571,10 +4644,20 @@ def build_system_prompt_for_source(user_id: str, source: str = "web", message: s
         include_authoring_rules=_is_worker_authoring_intent(message),
     )
     snapshot = _build_capabilities_snapshot(user_id)
-    return (
+    prompt = (
         f"{base}\n\n{GLOBAL_COMMUNICATION_RULES}\n\n{_environment_note(source)}"
         f"\n\n{snapshot}"
     )
+    # #844: durable cross-conversation memory (owner's private `memory` pack)
+    try:
+        from conversation_memory import memory_prompt_section
+
+        memory_section = memory_prompt_section(user_id)
+    except Exception:
+        memory_section = ""
+    if memory_section:
+        prompt = f"{prompt}\n\n{memory_section}"
+    return prompt
 
 
 def workspace_agent_tool_metadata(user_id: str) -> List[Dict[str, str]]:
@@ -4639,7 +4722,9 @@ def workspace_agent_info(user_id: str) -> Dict[str, Any]:
         "model": os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL,
         "base_persona": get_workspace_base_persona(),
         "worker_authoring_rules": WORKER_AUTHORING_RULES,
-        "system_prompt": _build_system_prompt(user_id, include_authoring_rules=False),
+        # build_system_prompt_for_source is what /chat actually runs (#844:
+        # includes the User memory section), so the operator view stays honest.
+        "system_prompt": build_system_prompt_for_source(user_id, "web", message=""),
         "tools": workspace_agent_tool_metadata(user_id),
         "settings": settings,
         "channels": {
@@ -4825,7 +4910,13 @@ async def stream_chat(
 
     finish_tool = FunctionTool(
         name="finish_with_outputs",
-        description="Call this when you have the final reply ready. Pass {\"reply\": \"<markdown>\"}.",
+        description=(
+            "Call this ONLY when the work is actually complete: the question is "
+            "answered, or you exhausted every relevant tool and can state the exact "
+            "blocker and unblock. Never call it to deliver partial status, list dead "
+            "ends, or ask whether to keep going on a read-only investigation -- keep "
+            "investigating instead. Pass {\"reply\": \"<markdown>\"}."
+        ),
         params_json_schema={
             "type": "object",
             "properties": {"reply": {"type": "string"}},
@@ -4835,12 +4926,12 @@ async def stream_chat(
         strict_json_schema=False,
     )
 
-    from agents import WebSearchTool
+    from web_search import web_search_tool
     all_tools = (
         workspace_tools
         + brain_tools
         + composio_tools
-        + [WebSearchTool(), finish_tool]
+        + [web_search_tool(), finish_tool]
     )
 
     # Per-run, loop-local OpenAI client. Worker runs execute in their own fresh
@@ -4907,15 +4998,19 @@ async def stream_chat(
             _cap_log(f"MCP unavailable, continuing without it: {exc}", "warning")
             mcp_servers = []
 
+        import llm as _llm
+
+        _emily_model = _llm.agent_model(os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL)
         agent = Agent(
             name=WORKSPACE_AGENT_ID,
             instructions=system_prompt,
             tools=all_tools,
             mcp_servers=mcp_servers,
-            model=os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL,
+            model=_emily_model,
             model_settings=ModelSettings(
                 max_tokens=4096,
                 include_usage=True,
+                extra_args=_llm.cache_control_extra_args(_emily_model),
             ),
             tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs"]},
         )
@@ -4927,50 +5022,35 @@ async def stream_chat(
             run_config=run_config,
         )
 
+        # SDK event decoding is shared with AgentDriver (#605); this loop only
+        # applies chat-specific decoration: sanitizers, greeting identity, card
+        # metadata, persistence, and the versioned part envelope.
+        from runner_sandbox.stream_adapter import decode_stream_event
+
         async for event in result.stream_events():
-            event_type = getattr(event, "type", None)
-
-            if event_type == "raw_response_event":
-                data = getattr(event, "data", None)
-                data_type = str(getattr(data, "type", "") or "")
-                delta = getattr(data, "delta", None)
-                if delta and data_type.endswith("output_text.delta"):
-                    received_text_delta = True
-                    text = stream_text_sanitizer.feed(strip_em_dashes(str(delta)))
-                    if not text:
-                        continue
-                    assistant_text_parts.append(text)
-                    part = {"type": "text", "text": text}
-                    part.update({
-                        "version": CHAT_EVENT_VERSION,
-                        "conversation_id": conversation_id,
-                        "message_id": assistant_message_id,
-                    })
-                    await part_queue.put(part)
+            decoded = decode_stream_event(event)
+            if decoded is None:
                 continue
 
-            if event_type != "run_item_stream_event":
+            if decoded.kind == "text_delta":
+                received_text_delta = True
+                text = stream_text_sanitizer.feed(strip_em_dashes(decoded.text))
+                if not text:
+                    continue
+                assistant_text_parts.append(text)
+                part = {"type": "text", "text": text}
+                part.update({
+                    "version": CHAT_EVENT_VERSION,
+                    "conversation_id": conversation_id,
+                    "message_id": assistant_message_id,
+                })
+                await part_queue.put(part)
                 continue
 
-            name = getattr(event, "name", None)
-            item = getattr(event, "item", None)
-            raw_item = getattr(item, "raw_item", None)
-
-            def _get(obj: Any, key: str) -> Any:
-                if isinstance(obj, dict):
-                    return obj.get(key)
-                return getattr(obj, key, None)
-
-            if name == "message_output_created" and not received_text_delta:
-                content_list = _get(raw_item, "content") or []
-                texts = []
-                for c in content_list:
-                    t = _get(c, "text")
-                    if t:
-                        texts.append(str(t))
+            if decoded.kind == "message_output" and not received_text_delta:
                 full_text = _ensure_bare_greeting_identity(
                     message,
-                    _sanitize_preview_text(strip_em_dashes("".join(texts))),
+                    _sanitize_preview_text(strip_em_dashes(decoded.text)),
                 )
                 if full_text:
                     assistant_text_parts.append(full_text)
@@ -4982,15 +5062,10 @@ async def stream_chat(
                         "text": full_text,
                     })
 
-            elif name == "tool_called":
-                call_id = str(_get(raw_item, "call_id") or _get(raw_item, "id") or f"call_{uuid.uuid4().hex[:8]}")
-                tool_name_raw = str(_get(raw_item, "name") or "tool")
-                raw_args = _get(raw_item, "arguments") or _get(raw_item, "input") or {}
-                if isinstance(raw_args, str):
-                    try:
-                        raw_args = json.loads(raw_args)
-                    except Exception:
-                        pass
+            elif decoded.kind == "tool_call":
+                call_id = decoded.call_id
+                tool_name_raw = decoded.tool_name
+                raw_args = decoded.args or {}
                 raw_args = normalize_tool_args_for_event(tool_name_raw, raw_args)
                 pending_tool_calls[call_id] = {"name": tool_name_raw, "args": raw_args}
                 if (
@@ -5052,14 +5127,9 @@ async def stream_chat(
                     "percent": None,
                 })
 
-            elif name == "tool_output":
-                call_id_raw = _get(raw_item, "call_id") or _get(raw_item, "id") or ""
-                call_id = str(call_id_raw)
-                output = getattr(item, "output", None)
-                try:
-                    parsed_output = json.loads(output) if isinstance(output, str) else output
-                except Exception:
-                    parsed_output = output
+            elif decoded.kind == "tool_output":
+                call_id = decoded.call_id
+                parsed_output = decoded.output
                 pending = pending_tool_calls.get(call_id, {})
                 tool_name = str(pending.get("name") or "tool")
                 raw_args = pending.get("args") or {}
@@ -5087,7 +5157,7 @@ async def stream_chat(
                     "callId": call_id,
                     "toolName": tool_name,
                     "result": safe_result,
-                    "isError": isinstance(parsed_output, dict) and not parsed_output.get("ok", True),
+                    "isError": decoded.is_error,
                     "protocol": metadata["protocol"],
                     "card": metadata["card"],
                     "resource": metadata["resource"],
@@ -5159,12 +5229,26 @@ async def stream_chat(
             "cards": list(card_summaries.values()),
         })
 
+        # #844: distill durable facts into the owner's memory brain pack.
+        # Best-effort background task; rate-limited per conversation inside.
+        try:
+            from conversation_memory import memory_enabled, persist_conversation_memory
+
+            if memory_enabled():
+                asyncio.create_task(persist_conversation_memory(conversation_id, user_id))
+        except Exception:
+            logger.debug("memory task scheduling failed (non-fatal)", exc_info=True)
+
     except Exception as exc:
         logger.exception("stream_chat failed for conversation %s", conversation_id)
+        # #951/#870: full detail is in the log above; the client gets a safe
+        # message (degraded-mode wording + ops alert on provider quota/auth).
+        from llm import safe_llm_error_message
+
         await part_queue.put({
             "type": "error",
             "version": CHAT_EVENT_VERSION,
-            "error": str(exc),
+            "error": safe_llm_error_message(exc, action="Chat"),
             "conversation_id": conversation_id,
             "message_id": assistant_message_id,
         })

@@ -11,7 +11,7 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from enum import Enum
 
 
-DEFAULT_WORKER_AGENT_MODEL = "gpt-5.1"
+DEFAULT_WORKER_AGENT_MODEL = os.environ.get("WORKEROS_WORKER_AGENT_MODEL") or "gpt-5.5"
 
 
 def _model_data(value: Any) -> Any:
@@ -959,6 +959,10 @@ class WorkerLimits(BaseModel):
     max_output_tokens: int = Field(default=1000000, ge=1)
     max_total_tokens: int = Field(default=1000000, ge=1)
     timeout_seconds: int = Field(default=300, ge=1)
+    # #793: per-worker monthly spend cap in USD. None = unlimited. Enforced at
+    # dispatch: a run is refused (failed, error_code=spend_cap_exceeded) when
+    # the worker's month-to-date cost has already reached the cap.
+    max_monthly_cost_usd: Optional[float] = Field(default=None, ge=0)
 
 
 _SCRIPT_ENTRY_SUFFIXES: tuple[str, ...] = (".py", ".sh", ".js")
@@ -1669,6 +1673,17 @@ class RunSummary(BaseModel):
     error_code: Optional[str] = None
 
 
+class DetailArtifactPreview(BaseModel):
+    name: str
+    size: Optional[int] = None
+
+
+class DetailLastRun(RunSummary):
+    finished_at: Optional[str] = None
+    output_preview: Optional[str] = None
+    artifacts: List[DetailArtifactPreview] = Field(default_factory=list)
+
+
 class LogEntry(BaseModel):
     level: LogLevel
     message: str
@@ -1866,6 +1881,7 @@ class WorkerDetail(BaseModel):
     trigger_type: str
     runner: str
     config: WorkerConfig
+    last_run: Optional[DetailLastRun] = None
     recent_stats: Optional[RecentStats] = None
     recent_runs: List[RunSummary] = Field(default_factory=list)
     # #815: output-first overview — the most recent completed run's output +

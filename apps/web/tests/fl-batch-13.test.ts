@@ -23,34 +23,34 @@ function api(rel: string) { return readFileSync(resolve(API_ROOT, rel), "utf8");
 // ---------------------------------------------------------------------------
 
 function test562MissingConnectionsDirectLink(): void {
-  const s = src("app/workers/[id]/page.tsx");
+  const s = src("app/connections/ConnectionsCollection.tsx");
   assert(
-    s.includes("/connections/connect/") && s.includes("return_to=/workers/"),
-    "Missing connections banner must link to /connections/connect/{slug}?return_to=/workers/{id}",
+    s.includes("/connections/connect/") && s.includes("return_to"),
+    "Missing connections callout must link directly to /connections/connect/{slug} with return_to",
   );
   assert(
-    s.includes("encodeURIComponent(s)") || s.includes("encodeURIComponent(worker.id)"),
-    "Connect link slugs and worker id must be URI-encoded",
+    s.includes("encodeURIComponent(slug)") || s.includes("encodeURIComponent(slugs[0])"),
+    "Connect link slugs must be URI-encoded",
   );
 }
 
 function test562MissingSecretsDirectLink(): void {
-  const s = src("app/workers/[id]/page.tsx");
+  const s = src("components/overview/AlertsBell.tsx");
   assert(
-    s.includes("return_to=/workers/") && s.includes("connections/secrets"),
-    "Missing secrets banner must include return_to=/workers/{id} on secrets links",
+    s.includes("setup_incomplete") && s.includes("connections/secrets"),
+    "Missing secrets alert must link to /connections/secrets",
   );
 }
 
 function test562TopLevelSecretLinkUpdated(): void {
-  const s = src("app/workers/[id]/page.tsx");
+  const s = src("components/overview/AlertsBell.tsx");
   assert(
     !s.includes('href="/secrets"'),
     "Top-level 'Add secret →' link must not point to bare /secrets (stale path)",
   );
   assert(
-    s.includes("connections/secrets") && s.includes("return_to"),
-    "Top-level 'Add secret →' link must point to /connections/secrets with return_to",
+    s.includes("connections/secrets"),
+    "Top-level secret link must point to /connections/secrets",
   );
 }
 

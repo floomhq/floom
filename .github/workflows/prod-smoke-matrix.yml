@@ -5,12 +5,20 @@ on:
     - cron: "17 6 * * 1"
   workflow_dispatch:
 
+# #938: least-privilege token — the smoke run only reads the repo.
+permissions:
+  contents: read
+
 jobs:
   smoke:
     runs-on: [self-hosted, linux, x64, workeros-ci]
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # #938: don't leave the GITHUB_TOKEN in .git/config on the
+          # self-hosted runner after the job finishes.
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:

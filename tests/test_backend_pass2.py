@@ -170,17 +170,17 @@ def test_secret_values_reject_newlines_and_control_characters(monkeypatch, tmp_p
 
     newline = client.post(
         "/secrets/P2TEST_SECRET",
-        headers=AUTH,
+        headers=_headers("user-a"),
         json={"value": "good\nBAD=injected"},
     )
     tab = client.post(
         "/secrets/P2TEST_SECRET",
-        headers=AUTH,
+        headers=_headers("user-a"),
         json={"value": "good\tbad"},
     )
     clean = client.post(
         "/secrets/P2TEST_SECRET",
-        headers=AUTH,
+        headers=_headers("user-a"),
         json={"value": "good_value"},
     )
 

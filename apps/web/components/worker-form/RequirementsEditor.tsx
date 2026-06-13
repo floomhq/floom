@@ -51,7 +51,7 @@ function InlineSecretRow({ name, initialStatus, onSaved }: InlineSecretRowProps)
 
   if (status === "set") {
     return (
-      <div className="flex items-center justify-between py-2 px-3 rounded-[var(--radius-button)] border border-[color-mix(in_srgb,var(--positive)_24%,var(--line))] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)]">
+      <div className="flex items-center justify-between rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] px-3 py-2">
         <div className="flex items-center gap-2">
           <CheckCircle2 className="w-4 h-4 text-[var(--positive)] flex-shrink-0" />
           <span className="text-sm font-mono font-medium text-[var(--positive)]">{name}</span>
@@ -65,10 +65,10 @@ function InlineSecretRow({ name, initialStatus, onSaved }: InlineSecretRowProps)
   }
 
   return (
-    <div className="rounded-[var(--radius-button)] border border-border bg-card p-3 space-y-2">
+    <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card p-3 space-y-2">
       <div className="flex items-center gap-2">
         <span className="text-sm font-mono font-medium text-foreground">{name}</span>
-        <span className="rounded border border-[color-mix(in_srgb,var(--warning)_28%,var(--line))] bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] px-1.5 py-0.5 text-xs text-[var(--warning)]">required</span>
+        <span className="rounded-[var(--radius-pill)] [border:var(--bd-pill)] bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] px-1.5 py-0.5 text-xs text-[var(--warning)]">required</span>
       </div>
       {showInput && (
         <div className="flex gap-2">
@@ -78,7 +78,7 @@ function InlineSecretRow({ name, initialStatus, onSaved }: InlineSecretRowProps)
             placeholder={`Enter ${name}`}
             value={value}
             onChange={(e) => setValue(e.target.value)}
-            className="border-border font-mono text-sm flex-1"
+            className="flex-1 font-mono text-sm"
             disabled={status === "saving"}
             onKeyDown={(e) => { if (e.key === "Enter") handleSave(); }}
           />
@@ -212,7 +212,7 @@ function InlineRequirementRow({
   }
 
   const methodToggle = canToggle ? (
-    <div className="flex items-center rounded border border-border overflow-hidden text-xs font-mono">
+    <div className="flex items-center rounded [border:var(--bd-card)] overflow-hidden text-xs font-mono">
       {(["oauth", "api_key"] as const).map((m) => (
         <button
           key={m}
@@ -229,10 +229,10 @@ function InlineRequirementRow({
       ))}
     </div>
   ) : (
-    <span className={`text-xs px-1.5 py-0.5 rounded border font-mono ${
+    <span className={`rounded-[var(--radius-pill)] [border:var(--bd-pill)] px-1.5 py-0.5 font-mono text-xs ${
       isOAuth
-        ? "text-[var(--primary)] bg-[color-mix(in_srgb,var(--primary)_9%,transparent)] border-[color-mix(in_srgb,var(--primary)_22%,var(--line))]"
-        : "text-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_9%,transparent)] border-[color-mix(in_srgb,var(--accent)_22%,var(--line))]"
+        ? "bg-[color-mix(in_srgb,var(--primary)_9%,transparent)] text-[var(--primary)]"
+        : "bg-[color-mix(in_srgb,var(--accent)_9%,transparent)] text-[var(--accent)]"
     }`}>
       {isOAuth ? "OAuth" : "API key"}
     </span>
@@ -240,7 +240,7 @@ function InlineRequirementRow({
 
   if (isReady) {
     return (
-      <div className="rounded-[var(--radius-button)] border border-[color-mix(in_srgb,var(--positive)_24%,var(--line))] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] p-3 space-y-2">
+      <div className="space-y-2 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] p-3">
         <div className="flex items-center justify-between">
           <div className="flex items-center gap-2">
             <CheckCircle2 className="w-4 h-4 text-[var(--positive)] flex-shrink-0" />
@@ -266,7 +266,7 @@ function InlineRequirementRow({
   }
 
   return (
-    <div className="rounded-[var(--radius-button)] border border-border bg-card p-3 space-y-2">
+    <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card p-3 space-y-2">
       <div className="flex items-center justify-between">
         <div className="flex items-center gap-2">
           <span className="text-sm font-medium text-foreground">{app.displayName}</span>
@@ -287,7 +287,7 @@ function InlineRequirementRow({
         <>
           <div className="flex items-center gap-2">
             <span className="text-xs font-mono text-muted-foreground">{effectiveSecretName}</span>
-            <span className="text-xs text-[#e67e22] bg-[#fef3c7] px-1.5 py-0.5 rounded border border-[#fde68a]">required</span>
+            <span className="rounded-[var(--radius-pill)] [border:var(--bd-pill)] bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] px-1.5 py-0.5 text-xs text-[var(--warning)]">required</span>
           </div>
           {showSecretInput && (
             <div className="flex gap-2">
@@ -297,7 +297,7 @@ function InlineRequirementRow({
                 placeholder={`Enter ${effectiveSecretName}`}
                 value={secretValue}
                 onChange={(e) => setSecretValue(e.target.value)}
-                className="border-border font-mono text-sm flex-1"
+                className="flex-1 font-mono text-sm"
                 disabled={secretStatus === "saving"}
                 onKeyDown={(e) => { if (e.key === "Enter") handleSaveSecret(); }}
               />
@@ -453,7 +453,7 @@ export function RequirementsEditor({
   if (!hasRequirements) return null;
 
   return (
-    <Card className="border-border shadow-none bg-card">
+    <Card className="[border:var(--bd-card)] shadow-none bg-card">
       <CardHeader>
         <div className="flex items-center justify-between">
           <CardTitle className="text-sm font-medium">
@@ -519,7 +519,7 @@ export function RequirementsEditor({
                     {connectionStates.map((c) => {
                       const appData = getSupportedApp(c.slug);
                       return (
-                        <div key={c.slug} className="flex items-center justify-between py-2 px-3 rounded-[var(--radius-button)] border border-border bg-card">
+                        <div key={c.slug} className="flex items-center justify-between py-2 px-3 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card">
                           <span className="text-sm font-medium text-foreground">{appData.displayName}</span>
                           {c.connected ? (
                             <div className="flex items-center gap-2">

@@ -19,7 +19,7 @@ export function ConnectionsTabs() {
   ];
 
   return (
-    <nav className="-mx-4 flex items-center overflow-x-auto border-b border-line px-4 sm:mx-0 sm:gap-1 sm:px-0" aria-label="Connections sections">
+    <nav className="-mx-4 flex items-center overflow-x-auto [border-bottom:var(--bd-div)] px-4 sm:mx-0 sm:gap-1 sm:px-0" aria-label="Connections sections">
       {tabs.map((tab) => {
         const active = tab.match(pathname);
         return (
@@ -28,8 +28,8 @@ export function ConnectionsTabs() {
             href={tab.href}
             className={
               active
-                ? "relative -mb-px inline-flex h-9 shrink-0 items-center px-2 text-sm font-medium text-[var(--accent)] border-b-2 border-[var(--accent)] sm:px-3"
-                : "relative -mb-px inline-flex h-9 shrink-0 items-center px-2 text-sm font-medium text-muted-foreground hover:text-foreground border-b-2 border-transparent sm:px-3"
+                ? "relative inline-flex h-9 shrink-0 items-center rounded-[var(--radius-button)] bg-[var(--active-nav-bg)] px-2 text-sm font-medium text-[var(--accent)] sm:px-3"
+                : "relative inline-flex h-9 shrink-0 items-center rounded-[var(--radius-button)] px-2 text-sm font-medium text-muted-foreground hover:bg-[var(--active-nav-bg)] hover:text-foreground sm:px-3"
             }
             aria-current={active ? "page" : undefined}
           >

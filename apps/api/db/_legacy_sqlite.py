@@ -1934,6 +1934,99 @@ MIGRATIONS: list[Migration] = [
     ALTER TABLE approvals ADD COLUMN preview_payload_json TEXT;
     CREATE INDEX IF NOT EXISTS idx_approvals_expires_at ON approvals(expires_at);
     """,
+    # -- migration 72: CLI API token expiry (#915/#924/#949) -------------------
+    # CLI device tokens used to live forever. New tokens get a bounded TTL at
+    # mint time; NULL means a legacy token (still honored until rotated).
+    """
+    ALTER TABLE cli_api_tokens ADD COLUMN expires_at TEXT;
+    """,
+    # -- migration 73: pin workspace_id on Slack sender bindings (#865) --------
+    # Mirrors migration 65 (WhatsApp). Nullable for backward compat — NULL =
+    # 'local-default' on the engine; cloud rows resolve workspace via the cloud
+    # repository and stay NULL here. Backfills existing active rows so live
+    # bindings keep working without manual intervention.
+    """
+    ALTER TABLE slack_sender_bindings ADD COLUMN workspace_id TEXT;
+    CREATE INDEX IF NOT EXISTS idx_slack_sender_bindings_workspace_id
+        ON slack_sender_bindings(workspace_id);
+    UPDATE slack_sender_bindings
+    SET workspace_id = 'local-default'
+    WHERE status = 'active' AND workspace_id IS NULL;
+    """,
+    # -- migration 74: donation model — workspace-shared workers are owned by --
+    # the synthetic workspace actor (workspace:<id>). Migrate-and-break by
+    # decision (2026-06-12): existing shared workers stop resolving their
+    # sharer's personal secrets/connections; an admin re-binds workspace creds.
+    """
+    UPDATE workers
+    SET owner_id = 'workspace:' || COALESCE(NULLIF(workspace_id, ''), 'local-default')
+    WHERE visibility = 'workspace'
+      AND owner_id IS NOT NULL
+      AND owner_id NOT LIKE 'workspace:%';
+    """,
+    # -- migration 75: workspace API tokens (read+run access to shared workers)
+    """
+    CREATE TABLE IF NOT EXISTS workspace_api_tokens (
+        id           TEXT PRIMARY KEY,
+        workspace_id TEXT NOT NULL,
+        name         TEXT NOT NULL,
+        token_hash   TEXT NOT NULL,
+        created_by   TEXT NOT NULL,
+        created_at   TEXT NOT NULL,
+        last_used_at TEXT,
+        expires_at   TEXT,
+        revoked_at   TEXT
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_workspace_api_tokens_hash
+        ON workspace_api_tokens(token_hash);
+    CREATE INDEX IF NOT EXISTS idx_workspace_api_tokens_workspace
+        ON workspace_api_tokens(workspace_id);
+    """,
+    # -- migration 76: persisted per-run cost accounting (#793 spend cap, #795
+    # approval cost-so-far). Populated at terminal status from the transcript
+    # usage row; NULL = not yet computed / pure-script run with no LLM tokens.
+    """
+    ALTER TABLE runs ADD COLUMN total_tokens INTEGER;
+    ALTER TABLE runs ADD COLUMN total_cost_usd REAL;
+    CREATE INDEX IF NOT EXISTS idx_runs_worker_created ON runs(worker_id, created_at);
+    """,
+    # -- migration 77: approval cost-so-far snapshot (#795). Captured at
+    # approval creation from the live transcript; estimate, surfaced on the
+    # approval Run tab so the page needs no separate run fetch.
+    """
+    ALTER TABLE approvals ADD COLUMN tokens_so_far INTEGER;
+    ALTER TABLE approvals ADD COLUMN cost_usd_so_far REAL;
+    """,
+    # -- migration 78: edit-access requests (#807). A member viewing a locked
+    # (workspace-shared, not owned) worker can ask the owner/admin for edit
+    # rights; the request is recorded (and the owner notified best-effort).
+    """
+    CREATE TABLE IF NOT EXISTS edit_access_requests (
+        id           TEXT PRIMARY KEY,
+        worker_id    TEXT NOT NULL,
+        requester_id TEXT NOT NULL,
+        message      TEXT,
+        status       TEXT NOT NULL DEFAULT 'pending',
+        created_at   TEXT NOT NULL
+    );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_edit_req_pending
+        ON edit_access_requests(worker_id, requester_id)
+        WHERE status = 'pending';
+    """,
+    # -- migration 79: persistent workspace-export audit trail (#925). Every
+    # full-workspace download is recorded (who/when/role) as a queryable row,
+    # not just a log line, so exfiltration via a compromised admin session is
+    # reviewable after the fact.
+    """
+    CREATE TABLE IF NOT EXISTS workspace_export_audit (
+        id          TEXT PRIMARY KEY,
+        user_id     TEXT NOT NULL,
+        role        TEXT,
+        exported_at TEXT NOT NULL
+    );
+    CREATE INDEX IF NOT EXISTS idx_export_audit_time
+        ON workspace_export_audit(exported_at);
+    """,
 ]
 
 

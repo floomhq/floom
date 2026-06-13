@@ -113,7 +113,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
     try {
       const result = await api.workers.importFromShare(token);
       setImportedId(result.worker_id);
-      router.push(`/workers/${result.worker_id}`);
+      router.push(`/workers?sel=${encodeURIComponent(result.worker_id)}`);
     } catch {
       setImporting(false);
     }
@@ -135,7 +135,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
         >
           {/* FRONT */}
           <div
-            className="absolute inset-0 flex flex-col overflow-hidden rounded-[var(--radius-card)] border border-[var(--card-border)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]"
+            className="absolute inset-0 flex flex-col overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]"
             style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
           >
             <div className="min-h-0 flex-1 overflow-y-auto">
@@ -146,7 +146,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
                   <div className="mb-1 flex flex-wrap items-center gap-2">
                     <h1 className="text-lg font-semibold tracking-tight">{worker.name}</h1>
                     {worker.is_example && (
-                      <span className="inline-flex items-center rounded-[var(--radius-button)] border border-border bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      <span className="inline-flex items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">
                         Example
                       </span>
                     )}
@@ -163,14 +163,14 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
 
               {/* What it does */}
               {worker.use_cases && worker.use_cases.length > 0 && (
-                <div className="border-t border-[var(--border-soft)] px-5 py-4">
+                <div className="[border-top:var(--bd-div)] px-5 py-4">
                   <p className="mb-2.5 text-[11px] font-medium uppercase tracking-wide text-[var(--ink-soft)]">
                     What it does
                   </p>
                   <ul className="flex flex-col gap-1.5">
                     {worker.use_cases.map((uc) => (
                       <li key={uc} className="flex gap-2.5 text-sm leading-relaxed">
-                        <span className="mt-2 size-1 shrink-0 rounded-full bg-[var(--ink-soft)]" aria-hidden />
+                        <span className="mt-2 size-1 shrink-0 rounded-[var(--radius-pill)] bg-[var(--ink-soft)]" aria-hidden />
                         <span>{uc}</span>
                       </li>
                     ))}
@@ -180,13 +180,13 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
 
               {/* Tools */}
               {tools.length > 0 && (
-                <div className="border-t border-[var(--border-soft)] px-5 py-4">
+                <div className="[border-top:var(--bd-div)] px-5 py-4">
                   <p className="mb-2.5 text-[11px] font-medium uppercase tracking-wide text-[var(--ink-soft)]">Tools</p>
                   <div className="flex flex-wrap gap-2">
                     {tools.map((slug) => (
                       <span
                         key={slug}
-                        className="inline-flex items-center gap-1.5 rounded-full border border-[var(--line)] bg-[var(--card-glass)] px-2.5 py-1 text-xs"
+                        className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--card-glass)] px-2.5 py-1 text-xs"
                       >
                         <BrandLogo icon={slug} className="size-3.5" />
                         <span className="capitalize">{slug.replace(/-/g, " ")}</span>
@@ -198,21 +198,21 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
 
               {/* Example / last result — GENERIC renderer */}
               {hasExample && (
-                <div className="border-t border-[var(--border-soft)] px-5 py-4">
+                <div className="[border-top:var(--bd-div)] px-5 py-4">
                   <p className="mb-2.5 text-[11px] font-medium uppercase tracking-wide text-[var(--ink-soft)]">
                     Example result
                   </p>
                   <GenericOutput
                     type={exampleType(worker)}
                     value={worker.example_output}
-                    className="rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-app)] p-3"
+                    className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] p-3"
                   />
                 </div>
               )}
             </div>
 
             {/* Pinned CTA */}
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-[var(--border-soft)] bg-[var(--bg-2)] px-5 py-3">
+            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 [border-top:var(--bd-div)] bg-[var(--bg-2)] px-5 py-3">
               <p className="text-xs leading-relaxed text-[var(--ink-soft)]">
                 {authed
                   ? "Import this worker into your workspace and connect its tools."
@@ -222,7 +222,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
                 <button
                   type="button"
                   onClick={() => setFlipped(true)}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--line)] bg-[var(--card-glass)] px-3.5 text-[13px] font-medium hover:bg-[var(--bg-2)]"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--card-glass)] px-3.5 text-[13px] font-medium hover:bg-[var(--bg-2)]"
                 >
                   <FileText className="size-3.5" />
                   See files
@@ -250,17 +250,17 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
 
           {/* BACK */}
           <div
-            className="absolute inset-0 flex flex-col overflow-hidden rounded-[var(--radius-card)] border border-[var(--card-border)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]"
+            className="absolute inset-0 flex flex-col overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]"
             style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
           >
             {/* Back header */}
-            <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-soft)] px-4 py-3">
+            <div className="flex shrink-0 items-center justify-between [border-bottom:var(--bd-div)] px-4 py-3">
               <div className="flex items-center gap-2.5">
                 <button
                   type="button"
                   onClick={() => setFlipped(false)}
                   aria-label="Back to overview"
-                  className="inline-flex size-7 items-center justify-center rounded-[var(--radius-button)] border border-[var(--line)] hover:bg-[var(--bg-2)]"
+                  className="inline-flex size-7 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] hover:bg-[var(--bg-2)]"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <polyline points="15 18 9 12 15 6" />
@@ -288,7 +288,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
             </div>
 
             {/* TOP TAB BAR */}
-            <div className="flex shrink-0 border-b border-[var(--line)] bg-[var(--bg-2)]">
+            <div className="flex shrink-0 [border-bottom:var(--bd-div)] bg-[var(--bg-2)]">
               {([
                 ["skill", "SKILL.md"],
                 ["yaml", "worker.yml"],
@@ -298,10 +298,10 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
                   key={key}
                   type="button"
                   onClick={() => setTab(key)}
-                  className={`-mb-px border-b-2 px-4 py-2 font-mono text-xs transition-colors ${
+                  className={`px-4 py-2 font-mono text-xs transition-colors ${
                     tab === key
-                      ? "border-[var(--ink)] bg-[var(--bg-card)] font-medium text-[var(--ink)]"
-                      : "border-transparent text-[var(--ink-soft)] hover:text-[var(--ink)]"
+                      ? "bg-[var(--bg-card)] font-medium text-[var(--ink)]"
+                      : "text-[var(--ink-soft)] hover:bg-[var(--bg-card)] hover:text-[var(--ink)]"
                   }`}
                 >
                   {labelText}
@@ -339,7 +339,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
 function FilePane({ meta, children }: { meta: string; children: React.ReactNode }) {
   return (
     <div>
-      <div className="flex items-center gap-2 border-b border-[var(--border-soft)] bg-[var(--bg-2)] px-4 py-2">
+      <div className="flex items-center gap-2 [border-bottom:var(--bd-div)] bg-[var(--bg-2)] px-4 py-2">
         <FileText className="size-3.5 text-[var(--ink-soft)]" />
         <span className="font-mono text-[11px] text-[var(--ink-soft)]">{meta}</span>
       </div>

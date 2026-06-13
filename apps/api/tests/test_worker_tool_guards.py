@@ -420,3 +420,113 @@ def test_stock_worker_always_listed_and_runnable_for_member(env, monkeypatch):
         assert cs._worker_can_view(conn, stock_id, "emily-test") is True, (
             f"Stock worker {stock_id} must always be viewable/runnable"
         )
+
+
+# ---------------------------------------------------------------------------
+# G) #872 — curated PUBLIC_STOCK_WORKER_IDS no longer leaks the tenant's real
+#    private workers. A worker REMOVED from the stock set (gmail-summarize-latest,
+#    which reads the operator's real Gmail) must 404 for a non-owner member, even
+#    though it is a git-tracked worker with a DB row owned by someone else.
+#    A worker RETAINED in the stock set (node-smoke-test) stays accessible.
+# ---------------------------------------------------------------------------
+
+# Workers that were previously in PUBLIC_STOCK_WORKER_IDS and/or
+# PROTECTED_STOCK_WORKER_IDS but are actually the tenant's real private workers
+# (they read Federico's real Gmail / PostHog / GSC / Notion / CRM data). They
+# must NOT be world-accessible via EITHER set (#872). _worker_can_view grants
+# read/run when a worker is in PUBLIC *or* PROTECTED, so both must be clean.
+_REMOVED_PRIVATE_WORKER_IDS = (
+    "gmail-summarize-latest",
+    "openpaper-posthog-daily",
+    "seo-opportunity-digest",
+    "cv_writeup",
+    "gmail_intake_brief",
+    "dach_compliance",
+    "reverse_match_crm",
+    "weekly_update",
+)
+
+
+def test_removed_private_workers_not_in_any_stock_set():
+    """Regression: none of the tenant's real private workers may appear in
+    PUBLIC_STOCK_WORKER_IDS or PROTECTED_STOCK_WORKER_IDS. _worker_can_view
+    bypasses ownership/visibility for members of EITHER set, so a re-add to
+    either one re-opens the #872 leak."""
+    from main import PUBLIC_STOCK_WORKER_IDS, PROTECTED_STOCK_WORKER_IDS
+    removed = set(_REMOVED_PRIVATE_WORKER_IDS)
+    leaked_public = sorted(removed & PUBLIC_STOCK_WORKER_IDS)
+    leaked_protected = sorted(removed & PROTECTED_STOCK_WORKER_IDS)
+    assert not leaked_public, (
+        f"Tenant-private workers leaking via PUBLIC_STOCK_WORKER_IDS: {leaked_public}"
+    )
+    assert not leaked_protected, (
+        f"Tenant-private workers leaking via PROTECTED_STOCK_WORKER_IDS: {leaked_protected}"
+    )
+
+
+def test_removed_private_worker_get_blocked_for_non_owner_member(env):
+    """#872: gmail-summarize-latest was removed from the stock set, so a
+    non-owner member who is NOT in its workspace must get 'not found' — the
+    stock-worker bypass no longer applies."""
+    db = env["db"]
+    cs = env["chat_service"]
+
+    from main import PUBLIC_STOCK_WORKER_IDS
+    assert "gmail-summarize-latest" not in PUBLIC_STOCK_WORKER_IDS, (
+        "gmail-summarize-latest must be removed from PUBLIC_STOCK_WORKER_IDS (#872)"
+    )
+
+    # alice owns the (formerly-leaked) worker as a PRIVATE worker.
+    _create_worker_direct(db, "gmail-summarize-latest", owner_id="alice",
+                          workspace_id="ws-private-872", visibility="private")
+    # bob is a member of a DIFFERENT workspace, not ws-private-872.
+    _add_workspace_member(db, workspace_id="ws-other", user_id="bob", role="member")
+
+    result = cs._tool_workers_get({"id": "gmail-summarize-latest"}, user_id="bob")
+    assert result["ok"] is False, (
+        "bob must not be able to read alice's private gmail-summarize-latest worker"
+    )
+    assert "not found" in result["error"].lower()
+
+
+def test_removed_private_worker_run_blocked_for_non_owner_member(env, monkeypatch):
+    """#872: bob cannot RUN alice's private gmail-summarize-latest worker."""
+    db = env["db"]
+    cs = env["chat_service"]
+
+    _create_worker_direct(db, "gmail-summarize-latest", owner_id="alice",
+                          workspace_id="ws-private-872b", visibility="private")
+    _add_workspace_member(db, workspace_id="ws-other-b", user_id="bob", role="member")
+
+    monkeypatch.setattr("run_service.create_run", lambda *a, **kw: "run-x", raising=False)
+    monkeypatch.setattr("run_service.start_run", lambda *a, **kw: None, raising=False)
+
+    result = cs._tool_workers_run({"id": "gmail-summarize-latest"}, user_id="bob")
+    assert result["ok"] is False
+    assert "not found" in result["error"].lower()
+
+
+def test_retained_stock_worker_still_accessible_to_non_owner(env):
+    """#872: node-smoke-test stays in the curated stock set, so any user can
+    view/run it even with a different DB owner and no shared workspace."""
+    db = env["db"]
+    cs = env["chat_service"]
+
+    from main import PUBLIC_STOCK_WORKER_IDS
+    assert "node-smoke-test" in PUBLIC_STOCK_WORKER_IDS, (
+        "node-smoke-test must remain a public stock worker (E2E + benign smoke)"
+    )
+
+    # Seed it owned by alice in a workspace bob is NOT a member of.
+    _create_worker_direct(db, "node-smoke-test", owner_id="alice",
+                          workspace_id="ws-stock-872", visibility="workspace")
+
+    result = cs._tool_workers_get({"id": "node-smoke-test"}, user_id="bob")
+    assert result["ok"] is True, (
+        f"node-smoke-test must stay accessible to any user: {result.get('error')}"
+    )
+    assert result["worker"]["id"] == "node-smoke-test"
+
+    from db import get_db as _get_db
+    with _get_db() as conn:
+        assert cs._worker_can_view(conn, "node-smoke-test", "bob") is True

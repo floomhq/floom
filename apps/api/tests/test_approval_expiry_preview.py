@@ -104,5 +104,6 @@ def test_response_surfaces_expiry_and_typed_preview(main_mod):
     resp = main._approval_response(row, repos)
     assert resp["expires_at"] == future
     assert resp["preview_type"] == "email"
+    assert resp["type"] == "email"
     assert resp["preview_payload"] == {"to": "a@b.com", "subject": "Hi", "body": "hello"}
     assert "preview_payload_json" not in resp

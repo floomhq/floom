@@ -103,22 +103,24 @@ type PillSize = "sm" | "md";
 
 const SIZE: Record<PillSize, { box: string; glyph: string; overflow: string }> = {
   // sm — worker cards. md — detail header.
-  sm: { box: "size-7", glyph: "size-3.5", overflow: "h-7 min-w-7" },
+  sm: { box: "size-[18px]", glyph: "size-[11px]", overflow: "h-[18px] min-w-[18px]" },
   md: { box: "size-8", glyph: "size-4", overflow: "h-8 min-w-8" },
 };
 
 // A single cell in the composed strip. `accent` marks the start node; `first`
 // drops the negative margin so the strip butts cleanly against its left edge.
+// v4 addendum: chips are square ~5px-radius neutral bg-2, monochrome-leaning
+// marks. The accent tint was the "colour overload" — status pill is the only
+// tinted element per card. All cells now use the same neutral bg-2 / ink-soft.
 function Cell({
   size,
   title,
-  accent,
   first,
   children,
 }: {
   size: PillSize;
   title: string;
-  accent?: boolean;
+  accent?: boolean;  // kept for API compat; intentionally unused
   first?: boolean;
   children: React.ReactNode;
 }) {
@@ -126,14 +128,9 @@ function Cell({
     <span
       title={title}
       className={cn(
-        // ring-* + a matching --bg-card backing makes the seams read as one
-        // connected unit while keeping each cell crisp. relative + z keeps the
-        // overlap order stable (left cell sits above the one to its right).
-        "relative inline-flex shrink-0 items-center justify-center ring-1",
+        "relative inline-flex shrink-0 items-center justify-center [border:var(--bd-card)]",
         first ? "z-20" : "-ml-px z-10",
-        accent
-          ? "bg-[var(--accent-soft)] text-[var(--accent)] ring-[var(--accent-line)]"
-          : "bg-[var(--bg-card)] text-[var(--ink-soft)] ring-[var(--line-soft)]",
+        "bg-[var(--bg-2)] text-[var(--ink-soft)] [border:var(--bd-card)]",
         SIZE[size].box,
       )}
       style={{ borderRadius: "var(--radius-squircle)" }}
@@ -282,7 +279,7 @@ export function WorkerIconPills({
           <span
             title={`+${overflow} more`}
             className={cn(
-              "relative -ml-px z-0 inline-flex shrink-0 items-center justify-center px-1.5 text-[11px] font-medium leading-none ring-1 ring-[var(--line-soft)] bg-[var(--bg-2)] text-[var(--ink-mute)]",
+              "relative -ml-px z-0 inline-flex shrink-0 items-center justify-center px-1 text-[9px] font-medium leading-none [border:var(--bd-card)] [border:var(--bd-card)] bg-[var(--bg-2)] text-[var(--ink-mute)]",
               SIZE[size].overflow,
             )}
             style={{ borderRadius: "var(--radius-squircle)" }}

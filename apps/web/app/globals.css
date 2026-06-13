@@ -102,45 +102,55 @@
 }
 
 :root {
-  /* Warm OS palette */
-  --bg-app: #FAFAF7;
+  /* v4 Cool palette (APP-UI-V4-SPEC §1, design.floom.dev/app — Phase 1 token swap).
+     Source of truth: docs/design/final.html :root. Warm OS palette superseded. */
+  --bg-app: #FBFBFC;
   --bg-card: #FFFFFF;
-  --text-primary: #141414;
-  --text-muted: #6B6861;
-  --border-default: #E7E0D6;
-  --border-soft: #E8E3DA;
-  --primary: #181818;
+  --grid-card-bg: #FFFFFF;
+  --text-primary: #16171A;
+  --text-muted: #6B7280;
+  --border-default: rgba(16,17,20,.09);
+  --border-soft: rgba(16,17,20,.055);
+  --primary: #16171A;
   --primary-text: #FFFFFF;
-  --warning: #F9735B;
+  --warning: #E5533D;
   --success: #2F8F5B;
-  --pending: #E0B349;
+  --pending: #C98A1A;
   --info: #3E6FE0; /* "running"/in-progress accent (SPEC §4) */
-  --radius-card: 18px;
-  --radius-button: 12px;
+  /* v4 cool radii (final.html: --r-card:16px, --r-btn:10px) */
+  --radius-card: 16px;
+  --radius-button: 10px;
   --radius-pill: 9999px;
-  --radius-input: 12px;
+  --radius-input: 10px;
   /* Squircle for small icon pills (WorkerIconPills) — softer than a button,
      not a full pill. Langdock-style rounded-square tool chips. */
   --radius-squircle: 9px;
-  --shadow-card: 0 1px 4px rgba(0,0,0,0.06), 0 0 0 1px rgba(0,0,0,0.03);
-  /* S45: light mode uses same color-mix pattern for active nav */
-  --active-nav-bg: #F1EEE8;
-  --active-nav-text: #111111;
+  --shadow-card: none;
+  /* v4: active nav bg uses --sel (blue tint) */
+  --active-nav-bg: #EEF3FE;
+  --active-nav-text: #3E6FE0;
 
   --bg: var(--bg-app);
-  --bg-2: #F1EEE8;
-  --bg-3: #EDE8DF;
+  --bg-2: #F3F4F6;
+  --bg-3: #ECEDF0;
   --paper: var(--bg-app);
-  --paper-2: #F4F1EA;
+  --paper-2: #F3F4F6;
   --ink: var(--text-primary);
-  --ink-soft: var(--text-muted);
+  --ink-soft: #3a3b40;
   --ink-mute: color-mix(in srgb, var(--text-muted) 80%, transparent);
   --ink-faint: color-mix(in srgb, var(--text-muted) 58%, transparent);
+  /* v4 muted text color (final.html --muted), distinct from shadcn --muted bg below */
+  --muted-text: #6B7280;
   --emerald: var(--success);
   --emerald-dark: color-mix(in srgb, var(--success) 80%, black);
-  --accent: var(--primary);
-  --accent-soft: var(--active-nav-bg);
-  --accent-line: var(--border-default);
+  /* v4: --accent is blue (#3E6FE0); --primary is near-black (#16171A).
+     CRITICAL (Codex trap): primary Buttons use --primary, NOT --accent —
+     so a cool --accent swap does NOT turn buttons blue. See button.tsx fix. */
+  --accent: #3E6FE0;
+  --emily-mark: #3E6FE0;
+  --sel: #EEF3FE;
+  --accent-soft: var(--sel);
+  --accent-line: rgba(62,111,224,.3);
   --accent-hover-bg: var(--active-nav-bg);
   --solid: var(--primary);
   --solid-2: #2A2A2A;
@@ -148,7 +158,7 @@
   --sage: var(--success);
   --sage-tint: color-mix(in srgb, var(--success) 10%, var(--bg-card));
   --line: var(--border-default);
-  --line-strong: #D8CFC2;
+  --line-strong: rgba(16,17,20,.18);
   --line-soft: var(--border-soft);
   --glass-bg: var(--bg-card);
   --glass-bg-strong: var(--bg-card);
@@ -164,23 +174,23 @@
   --bd-list: none;
   --bd-div: 1px solid var(--line-soft);
   --bd-btn: none;
-  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.04), 0 0 0 1px var(--border-soft);
-  --shadow-md: var(--shadow-card);
+  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.04);
+  --shadow-md: none;
   --shadow-pop: 0 16px 36px hsl(0 0% 0% / 0.10), 0 0 0 1px var(--border-default);
   --shadow-btn: 0 1px 0 hsl(0 0% 0% / 0.06);
   --focus: 0 0 0 2px var(--paper), 0 0 0 4px var(--ink);
   --sidebar-glass: var(--bg-app);
   --sidebar-glass-shadow: none;
   --card-glass: var(--bg-card);
-  --card-border: var(--border-default);
-  --card-shadow: var(--shadow-card);
+  --card-border: none;
+  --card-shadow: none;
   --r-xs: 4px;
   --r-sm: 6px;
-  --r-md: 8px;
-  --r-lg: 12px;
-  --r-xl: 18px;
-  --r-2xl: 18px;
-  --r-pill: 999px;
+  --r-md: var(--radius-button);
+  --r-lg: 10px;
+  --r-xl: 16px;
+  --r-2xl: 16px;
+  --r-pill: 9999px;
   --spring: cubic-bezier(0.32, 1.06, 0.5, 1);
   --ease: cubic-bezier(0.22, 1, 0.36, 1);
   --t-fast: 110ms;
@@ -200,15 +210,16 @@
   --card-foreground: var(--ink);
   --popover: var(--paper);
   --popover-foreground: var(--ink);
+  /* shadcn vars — light mode */
+  --primary: var(--text-primary);     /* near-black #16171A — shadcn primary button bg */
   --primary-foreground: var(--solid-fg);
   --secondary: var(--bg-2);
   --secondary-foreground: var(--ink);
-  --muted: var(--bg-2);
+  --muted: var(--bg-2);               /* shadcn muted background */
   --muted-foreground: var(--ink-soft);
-  /* fix(light-mode-hover): --accent is #181818 (near-black) in light mode, so
-     accent-foreground MUST be white (--solid-fg) for legible hover text on
-     focus:bg-accent in dropdown-menu, select, and similar interactive items.
-     Dark mode keeps --ink because --accent is the blue hue there. */
+  /* fix: --accent is now #3E6FE0 (blue) in light mode, so accent-foreground
+     MUST be white (--solid-fg) for legible hover text on focus:bg-accent in
+     dropdown-menu, select, and similar interactive items. */
   --accent-foreground: var(--solid-fg);
   --destructive: var(--warning);
   --border: var(--line);
@@ -228,13 +239,16 @@
   --sidebar-accent-foreground: var(--ink);
   --sidebar-border: var(--card-border);
   --sidebar-ring: var(--accent-line);
+  --scrollbar-thumb: color-mix(in srgb, var(--text-muted) 28%, transparent);
+  --scrollbar-thumb-hover: color-mix(in srgb, var(--text-muted) 42%, transparent);
 }
 
 html.dark {
   color-scheme: dark;
-  /* PR S20 matte dark — openchat-v2 palette.
-     Sidebar is the DARKEST surface (Federico's explicit preference).
-     Pure white borders at 8-12% alpha — the matte signature. */
+  /* PR S20 matte dark — openchat-v2 palette (Federico's explicit preference).
+     Sidebar is the DARKEST surface. Pure white borders at low alpha — matte.
+     v4 Phase 1: accent updated to #5B8DEF (final.html body.dark --accent).
+     --primary in dark = near-white (ECEDEF per final.html), not the blue. */
   --bg: oklch(0.213 0 0);
   --bg-2: oklch(0.27 0 0);
   --bg-3: oklch(0.32 0 0);
@@ -244,13 +258,17 @@ html.dark {
   --ink-soft: oklch(0.75 0.015 286.067);
   --ink-mute: oklch(0.62 0.012 286.067);
   --ink-faint: oklch(0.42 0.01 286.067);
+  /* shadcn muted bg (bg-2 equivalent in dark) */
+  --muted: var(--bg-2);
   --emerald: oklch(0.7 0.16 152);
   --emerald-dark: oklch(0.8 0.13 152);
-  /* S45: ONE blue hue in dark mode. --accent is canonical Floom blue.
-     --accent-soft is replaced by color-mix usage at call sites (18% alpha).
-     Keeping --accent-soft as alias for backwards compat (selection, etc.) */
-  --accent: oklch(0.72 0.14 250);
-  --info: oklch(0.72 0.14 250); /* in dark, "running" shares the blue hue */
+  /* v4 dark accent = #5B8DEF (final.html body.dark). Matte blue.
+     --accent-soft stays as color-mix for selection/nav tints.
+     --solid = accent (blue fills) in dark; --primary = near-white ink. */
+  --accent: #5B8DEF;
+  --emily-mark: #5B8DEF;
+  --sel: rgba(91,141,239,.16);
+  --info: #5B8DEF; /* in dark, "running" shares the blue hue */
   --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);
   --accent-line: oklch(0.45 0.1 250);
   --accent-hover-bg: hsl(0 0% 100% / 0.06);
@@ -260,12 +278,12 @@ html.dark {
   --sage: oklch(0.65 0.06 152);
   --sage-tint: oklch(0.3 0.04 152);
   /* Pure white borders in dark mode at low alpha — the matte hallmark. */
-  --line: hsl(0 0% 100% / 0.1);
-  --line-strong: hsl(0 0% 100% / 0.18);
-  --line-soft: hsl(0 0% 100% / 0.06);
+  --line: rgba(255,255,255,.10);
+  --line-strong: rgba(255,255,255,.18);
+  --line-soft: rgba(255,255,255,.055);
   --glass-bg: oklch(0.213 0 0);
   --glass-bg-strong: oklch(0.213 0 0);
-  --glass-edge: hsl(0 0% 100% / 0.1);
+  --glass-edge: rgba(255,255,255,.10);
   --edge: none;
   --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.3), 0 0 0 1px var(--line);
   --shadow-md: 0 4px 12px hsl(0 0% 0% / 0.4), 0 0 0 1px var(--line);
@@ -274,22 +292,23 @@ html.dark {
   --sidebar-glass: oklch(0.19 0 0);
   --sidebar-glass-shadow: 0 1px 0 hsl(0 0% 0% / 0.3);
   --card-glass: var(--paper);
-  --card-border: var(--line);
-  --card-shadow: var(--shadow-sm);
+  --card-border: none;
+  --card-shadow: none;
   --bg-app: var(--bg);
   --bg-card: var(--card-glass);
+  --grid-card-bg: color-mix(in srgb, var(--bg-2) 62%, var(--bg));
   --text-primary: var(--ink);
   --text-muted: var(--ink-soft);
   --border-default: var(--line);
   --border-soft: var(--line-soft);
   --primary-text: var(--solid-fg);
   --radius-card: var(--r-2xl);
-  --radius-button: 12px;
+  --radius-button: 10px;
   --radius-pill: 9999px;
-  --radius-input: 12px;
+  --radius-input: 10px;
   --radius-squircle: 9px;
-  --shadow-card: var(--shadow-sm);
-  /* S45: active nav bg uses single-blue alpha blend — same hue as accent */
+  --shadow-card: none;
+  /* v4: active nav bg uses single-blue alpha blend — same hue as accent */
   --active-nav-bg: color-mix(in srgb, var(--accent) 18%, transparent);
   --active-nav-text: var(--accent);
 
@@ -299,11 +318,11 @@ html.dark {
   --card-foreground: var(--ink);
   --popover: var(--paper);
   --popover-foreground: var(--ink);
-  --primary: var(--accent);
+  /* dark: primary = near-white (ink), not blue — primary buttons keep reading ink fill */
+  --primary: var(--ink);
   --primary-foreground: var(--solid-fg);
   --secondary: var(--bg-2);
   --secondary-foreground: var(--ink);
-  --muted: var(--bg-2);
   --muted-foreground: var(--ink-soft);
   --accent-foreground: var(--ink);
   --destructive: oklch(0.704 0.191 22.216);
@@ -318,6 +337,8 @@ html.dark {
   --sidebar-accent-foreground: var(--ink);
   --sidebar-border: var(--card-border);
   --sidebar-ring: var(--accent-line);
+  --scrollbar-thumb: rgba(255,255,255,.18);
+  --scrollbar-thumb-hover: rgba(255,255,255,.28);
 }
 
 /* PR S18: shimmer skeleton — replaces the default tailwind animate-pulse
@@ -352,9 +373,48 @@ html.dark ::selection {
   color: var(--ink);
 }
 
+/* Global chrome: quiet, thin scrollbars across chat rails, detail panes, source
+   lists, popovers, and code blocks. Tracks stay transparent; thumbs reveal on
+   hover/active where the platform allows it. */
+* {
+  scrollbar-width: thin;
+  scrollbar-color: transparent transparent;
+}
+
+*:hover,
+*:focus-within {
+  scrollbar-color: var(--scrollbar-thumb) transparent;
+}
+
+*::-webkit-scrollbar {
+  width: 8px;
+  height: 8px;
+}
+
+*::-webkit-scrollbar-track {
+  background: transparent;
+}
+
+*::-webkit-scrollbar-thumb {
+  min-height: 44px;
+  border-radius: var(--radius-button);
+  background-color: transparent;
+}
+
+*:hover::-webkit-scrollbar-thumb,
+*:focus-within::-webkit-scrollbar-thumb,
+*::-webkit-scrollbar-thumb:active {
+  background-color: var(--scrollbar-thumb);
+}
+
+*::-webkit-scrollbar-thumb:hover,
+*::-webkit-scrollbar-thumb:active {
+  background-color: var(--scrollbar-thumb-hover);
+}
+
 @layer base {
   * {
-    @apply border-border outline-ring/50;
+    @apply [border:var(--bd-card)] outline-ring/50;
   }
 
   html {
@@ -535,18 +595,6 @@ html.dark .grain {
     color: var(--ink);
   }
 
-  .border-line {
-    border-color: var(--line);
-  }
-
-  .border-\[\#eaeaea\] {
-    border-color: var(--line);
-  }
-
-  .border-\[\#e4e4e7\] {
-    border-color: var(--line-strong);
-  }
-
   .text-\[\#111\],
   .text-\[\#333\] {
     color: var(--ink);
@@ -593,6 +641,10 @@ html.dark .grain {
     box-shadow: var(--shadow-btn);
   }
 
+  .rounded {
+    border-radius: var(--radius-button);
+  }
+
   .rounded-xs {
     border-radius: var(--r-xs);
   }
@@ -633,8 +685,8 @@ html.dark .grain {
   min-height: 32px;
   align-items: center;
   justify-content: center;
-  border: 1px solid var(--line);
-  border-radius: var(--r-pill);
+  border: var(--bd-btn);
+  border-radius: var(--radius-button);
   background: var(--glass-bg);
   color: var(--ink-soft);
   padding: 0;
@@ -643,13 +695,11 @@ html.dark .grain {
   transition:
     color var(--t-fast),
     background var(--t-fast),
-    border-color var(--t-fast),
     box-shadow var(--t-fast);
 }
 
 .theme-mode-button:hover {
   background: var(--bg-2);
-  border-color: var(--line-strong);
   color: var(--ink);
 }
 
@@ -703,28 +753,39 @@ html.dark .grain {
 
 /* count strip — inline on the right of the title row (SPEC §11) */
 .c-counts { display:flex; align-items:center; color:var(--muted-foreground); font-size:12.5px; flex-wrap:wrap; }
-.c-counts .ct { display:flex; align-items:baseline; gap:5px; padding:0 14px; border-right:1px solid var(--line); }
+.c-counts .ct { display:flex; align-items:baseline; gap:5px; padding:0 14px; border-right:var(--bd-div); }
 .c-counts .ct:first-child { padding-left:0; }
 .c-counts .ct:last-child { border-right:0; }
 .c-counts .ct b { color:var(--ink); font-weight:600; font-size:14px; }
 
 /* control bar */
 .c-toolbar { display:flex; align-items:center; gap:10px; }
-.c-srch { flex:1; display:flex; align-items:center; gap:9px; border:1px solid var(--line); border-radius:var(--radius-button); padding:9px 12px; color:var(--muted-foreground); background:var(--bg-card); max-width:480px; }
+.c-srch { flex:1; min-width:0; display:flex; align-items:center; gap:9px; border:var(--bd-input); border-radius:var(--radius-button); padding:9px 12px; color:var(--muted-foreground); background:var(--bg-2); max-width:480px; }
 .c-srch input { flex:1; border:0; background:none; outline:none; color:var(--ink); font:inherit; min-width:0; }
 .c-srch input::placeholder { color:var(--muted-foreground); }
-.c-vtog { display:flex; gap:2px; border:1px solid var(--line); border-radius:var(--radius-button); padding:2px; background:var(--bg-card); }
-.c-vtog button { width:32px; height:28px; border-radius:9px; color:var(--muted-foreground); display:flex; align-items:center; justify-content:center; }
-.c-vtog button.on { background:var(--bg-2); color:var(--ink); }
+/* Joined segmented control on bg-2 track — ONE visual unit, no gap between segments */
+.c-vtog { display:inline-flex; border:var(--bd-input); border-radius:var(--radius-button); padding:2px; background:var(--bg-2); }
+.c-vtog button { width:30px; height:26px; border-radius:8px; color:var(--muted-foreground); display:flex; align-items:center; justify-content:center; transition:background .1s,color .1s; }
+.c-vtog button.on { background:var(--bg-card,#fff); color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.07); }
+@media (max-width:640px) {
+  .c-toolbar { flex-wrap:wrap; }
+  .c-toolbar .c-srch { flex:1 0 100%; max-width:none; }
+  .c-toolbar .c-vtog { order:2; }
+  .c-toolbar > div:last-child { order:3; margin-left:auto !important; }
+}
 .c-addbtn { display:flex; align-items:center; gap:6px; background:var(--primary); color:var(--primary-text); border-radius:var(--radius-button); padding:9px 14px; font-weight:500; font-size:13px; white-space:nowrap; }
 
 /* tag bar — small chips, single scrollable row, families divided */
+/* Wrapper provides the right-edge fade mask (spec §3: "fades out at right edge, no hard cut"). */
+.c-tagbar-wrap { position:relative; overflow:hidden; }
+.c-tagbar-wrap::after { content:''; position:absolute; top:0; right:0; bottom:0; width:40px; pointer-events:none; background:linear-gradient(to right, transparent, var(--bg-app)); }
+.dark .c-tagbar-wrap::after { background:linear-gradient(to right, transparent, var(--bg-app)); }
 .c-tagbar { display:flex; flex-wrap:nowrap; gap:10px; align-items:center; overflow-x:auto; scrollbar-width:none; }
 .c-tagbar::-webkit-scrollbar { height:0; display:none; }
 .c-tgroup { display:flex; gap:5px; align-items:center; flex:0 0 auto; }
-.c-tgroup + .c-tgroup { padding-left:10px; border-left:1px solid var(--line); }
-.c-tag { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--line); border-radius:var(--radius-pill); padding:3px 9px; font-size:11.5px; color:var(--ink-soft); background:var(--bg-card); white-space:nowrap; }
-.c-tag:hover { border-color:var(--border-default); }
+.c-tgroup + .c-tgroup { padding-left:10px; border-left:var(--bd-div); }
+.c-tag { display:inline-flex; align-items:center; gap:5px; border:var(--bd-pill); border-radius:var(--radius-pill); padding:3px 9px; font-size:11.5px; color:var(--ink-soft); background:var(--bg-2); white-space:nowrap; }
+.c-tag:hover { background:var(--bg-3); }
 .c-tag.on { background:var(--primary); color:var(--primary-text); border-color:var(--primary); }
 .c-tag .ct { opacity:.55; font-size:11px; }
 
@@ -737,8 +798,8 @@ html.dark .grain {
 .c-lrow:hover { background:var(--bg-2); }
 .c-lrow.sel { background:var(--accent-soft); box-shadow:inset 3px 0 0 var(--accent); }
 .c-lprimary { display:flex; align-items:center; gap:13px; min-width:0; }
-.c-logo { width:30px; height:30px; border-radius:8px; background:#fff; border:1px solid var(--line-soft); display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
-.c-av { width:30px; height:30px; border-radius:8px; display:flex; align-items:center; justify-content:center; color:var(--primary-text); font-size:12px; font-weight:600; flex:0 0 auto; }
+.c-logo { width:30px; height:30px; border-radius:var(--radius-button); background:var(--bg-2); border:var(--bd-card); display:flex; align-items:center; justify-content:center; flex:0 0 auto; }
+.c-av { width:30px; height:30px; border-radius:var(--radius-button); display:flex; align-items:center; justify-content:center; color:var(--primary-text); font-size:12px; font-weight:600; flex:0 0 auto; }
 .c-lp-tx { min-width:0; }
 .c-lp-tx .nm { font-weight:500; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
 .c-lp-tx .sub { color:var(--muted-foreground); font-size:12px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
@@ -748,20 +809,20 @@ html.dark .grain {
 .c-daygrp .dh { display:flex; align-items:center; padding:16px 4px 8px; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted-foreground); font-weight:600; }
 
 /* status pill — outlined/tinted + leading dot (SPEC §2a) */
-.c-pill { display:inline-flex; align-items:center; gap:6px; border-radius:var(--radius-pill); font-size:11.5px; padding:3px 10px; font-weight:500; border:1px solid transparent; }
+.c-pill { display:inline-flex; align-items:center; gap:6px; border-radius:var(--radius-pill); font-size:11.5px; padding:3px 10px; font-weight:500; border:var(--bd-pill); }
 .c-pill .dot { width:6px; height:6px; border-radius:var(--radius-pill); background:currentColor; }
-.c-pill.ok   { background:color-mix(in srgb, var(--success) 12%, transparent); color:var(--success); border-color:color-mix(in srgb, var(--success) 28%, transparent); }
-.c-pill.err  { background:color-mix(in srgb, var(--warning) 14%, transparent); color:var(--warning); border-color:color-mix(in srgb, var(--warning) 30%, transparent); }
-.c-pill.warn,.c-pill.pending { background:color-mix(in srgb, var(--pending) 16%, transparent); color:var(--pending); border-color:color-mix(in srgb, var(--pending) 34%, transparent); }
-.c-pill.run  { background:color-mix(in srgb, var(--info) 14%, transparent); color:var(--info); border-color:color-mix(in srgb, var(--info) 30%, transparent); }
+.c-pill.ok   { background:color-mix(in srgb, var(--success) 8%, transparent); color:color-mix(in srgb, var(--success) 78%, var(--ink)); }
+.c-pill.err  { background:color-mix(in srgb, var(--warning) 9%, transparent); color:color-mix(in srgb, var(--warning) 78%, var(--ink)); }
+.c-pill.warn,.c-pill.pending { background:color-mix(in srgb, var(--pending) 9%, transparent); color:color-mix(in srgb, var(--pending) 76%, var(--ink)); }
+.c-pill.run  { background:color-mix(in srgb, var(--info) 8%, transparent); color:color-mix(in srgb, var(--info) 78%, var(--ink)); }
 .c-pill.idle { background:var(--bg-2); color:var(--muted-foreground); }
 
 /* grid cards (SPEC §2b — calm: avatar+name, desc, one status line) */
 .c-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:14px; }
 /* §3 + rule #10: flat by token, uniform 148px, hover = bg lift (no border/shadow). */
-.c-gcard { border:var(--bd-card); background:var(--bg-card); border-radius:var(--radius-card); padding:15px; display:flex; flex-direction:column; min-height:148px; cursor:pointer; position:relative; box-shadow:none; text-align:left; transition:background .12s; }
+.c-gcard { border:var(--bd-card); background:var(--grid-card-bg,var(--bg-card)); border-radius:var(--radius-card); padding:15px; display:flex; flex-direction:column; min-height:148px; cursor:pointer; position:relative; box-shadow:none; text-align:left; transition:background .12s; }
 .c-gcard:hover { background:var(--bg-2); }
-.c-gcard.sel { box-shadow:0 0 0 1px var(--accent); }
+.c-gcard.sel { background:var(--accent-soft); box-shadow:none; }
 .c-gcard .star { position:absolute; top:13px; right:13px; color:var(--muted-foreground); opacity:0; transition:opacity .12s; }
 .c-gcard:hover .star { opacity:1; }
 .c-gcard .star.on { opacity:1; color:var(--pending); }
@@ -773,15 +834,16 @@ html.dark .grain {
 
 /* split detail (SPEC §3, §8c) */
 .c-body { flex:1; min-height:0; display:flex; overflow:hidden; }
+.c-body.c-split { min-height:0; }
 .c-listcol { flex:1; min-width:0; overflow:auto; }
-.c-split .c-listcol { flex:0 0 30%; min-width:240px; border-right:1px solid var(--line); padding:0; display:flex; flex-direction:column; overflow:hidden; }
+.c-split .c-listcol { flex:0 0 30%; min-width:240px; border-right:var(--bd-div); padding:0; display:flex; flex-direction:column; overflow:hidden; }
 .c-split.lc .c-listcol { flex:0 0 46px; min-width:46px; }
 .c-split.lc .c-listcol > .lcin, .c-split.lc .c-listcol > .c-splitbar { display:none; }
 .c-sliver { display:none; }
 .c-split.lc .c-listcol .c-sliver { display:flex; flex-direction:column; align-items:center; gap:8px; padding-top:14px; color:var(--muted-foreground); }
 .c-split .c-listcol .lcin { flex:1; overflow:auto; padding:14px 16px; }
 .c-splitbar { display:none; }
-.c-split .c-splitbar { display:flex; align-items:center; min-height:56px; padding:8px 14px; border-bottom:1px solid var(--line); flex:0 0 auto; }
+.c-split .c-splitbar { display:flex; align-items:center; min-height:56px; padding:8px 14px; border-bottom:var(--bd-div); flex:0 0 auto; }
 .c-detailcol { display:none; }
 .c-split .c-detailcol { display:flex; flex:1; min-width:0; flex-direction:column; overflow:hidden; }
 /* split-left list = the SAME connected list, just single-column + no cols/pills */
@@ -791,22 +853,29 @@ html.dark .grain {
 .c-split .c-listcol .c-lrow.sel { background:var(--bg-2); box-shadow:none; }
 .c-split .c-listcol .c-daygrp .dh { display:none; }
 
-/* detail header + tabs (SPEC §3) */
-.c-dhead { display:flex; align-items:center; gap:11px; padding:10px 20px; border-bottom:1px solid var(--line); min-height:64px; }
+/* detail header + tabs (SPEC §3)
+   SPEC §10: detail header = exactly 56px to align with nav-top (h-14) and Emily header.
+   The collapse chevron (lcbtn) and the list-expand chevron (c-splitbar) must be
+   on the same 56px baseline so they visually align horizontally. */
+.c-dhead { display:flex; align-items:center; gap:11px; padding:7px 20px; border-bottom:var(--bd-div); min-height:56px; height:56px; flex:0 0 56px; overflow:hidden; }
 .c-dhead .lcbtn, .c-dhead .x { color:var(--muted-foreground); padding:5px; border-radius:7px; flex:0 0 auto; }
 .c-dhead .lcbtn:hover, .c-dhead .x:hover { background:var(--bg-2); }
-.c-dh-main { flex:1; min-width:0; }
+.c-dh-main { flex:1 1 auto; min-width:0; overflow:hidden; }
 .c-dh-title { display:flex; align-items:center; gap:8px; min-width:0; }
-.c-dh-title .nm { font-size:17px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
-.c-dh-sub { color:var(--muted-foreground); font-size:12.5px; margin-top:3px; display:flex; align-items:center; gap:8px; min-width:0; }
-.c-dh-act { display:flex; gap:7px; align-items:center; }
-.c-vpill { display:inline-flex; align-items:center; gap:5px; border:1px solid var(--line); border-radius:var(--radius-pill); font-size:10.5px; padding:2px 8px; color:var(--muted-foreground); background:var(--bg-card); white-space:nowrap; flex:0 0 auto; }
-.c-dtabs { display:flex; gap:2px; padding:7px 16px; border-bottom:1px solid var(--line); overflow:auto; }
+/* Title: 15px for 56px header so title+sub both fit at 56px height */
+.c-dh-title .nm { display:block; min-width:0; max-width:100%; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
+/* Sub: badge row sits under title — 2px gap is tighter than 3px to fit 56px header */
+.c-dh-sub { color:var(--muted-foreground); font-size:12px; margin-top:2px; display:flex; align-items:center; gap:6px; min-width:0; max-width:100%; overflow:hidden; flex-wrap:nowrap; }
+.c-dh-sub .c-dh-desc { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+.c-dh-act { display:flex; gap:7px; align-items:center; flex:0 0 auto; min-width:0; }
+.c-vpill { display:inline-flex; align-items:center; gap:5px; border:var(--bd-pill); border-radius:var(--radius-pill); font-size:10.5px; padding:2px 8px; color:var(--muted-foreground); background:var(--bg-2); white-space:nowrap; flex:0 0 auto; }
+.c-dtabs { display:flex; gap:2px; padding:7px 16px; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; }
+.c-dtabs::-webkit-scrollbar { height:0; display:none; }
 .c-dtab { display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border-radius:9px; color:var(--muted-foreground); font-size:13px; white-space:nowrap; }
 .c-dtab:hover { background:var(--bg-2); }
 .c-dtab.on { background:var(--bg-2); color:var(--ink); font-weight:500; }
 .c-dtab .cb { background:var(--bg-3); color:var(--ink-soft); font-size:10.5px; border-radius:var(--radius-pill); padding:0 6px; }
-.c-dbody { flex:1; overflow:auto; padding:18px 20px; }
+.c-dbody { flex:1; min-width:0; overflow:auto; overflow-x:hidden; padding:18px 20px; }
 
 /* states (SPEC §7) */
 .c-statebox { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; color:var(--muted-foreground); padding:50px; }
@@ -815,11 +884,12 @@ html.dark .grain {
 
 /* responsive (SPEC §8c): persistent ≥1100; drawer 768–1100; stack <768 */
 @media (max-width:1100px) {
-  .c-split .c-detailcol { position:absolute; top:0; right:0; bottom:0; width:min(560px,100%); background:var(--bg-card); border-left:1px solid var(--line); box-shadow:var(--shadow-pop); z-index:20; }
+  .c-split .c-detailcol { position:absolute; top:0; right:0; bottom:0; width:min(560px,100%); background:var(--bg-card); border-left:var(--bd-div); box-shadow:var(--shadow-pop); z-index:20; }
   .c-split { position:relative; }
   .c-split .c-listcol { flex:1 1 auto; }
 }
 @media (max-width:768px) {
-  .c-split .c-detailcol { width:100%; border-left:0; }
+  .c-body.c-split { min-height:calc(100dvh - 176px); }
+  .c-split .c-detailcol { position:relative; inset:auto; width:100%; min-height:0; border-left:0; box-shadow:none; }
   .c-split .c-listcol { display:none; }
 }

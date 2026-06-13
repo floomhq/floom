@@ -35,6 +35,7 @@ from models import (
     WorkerConfig,
     WorkerResult,
 )
+import llm as _llm
 from runner_utils import ARTIFACTS_DIR
 from worker_registry import WORKERS_DIR
 
@@ -43,6 +44,33 @@ from .agent_capabilities import WORKER_POLICY, MCPConnectionError
 from .base import SandboxDriver
 
 logger = logging.getLogger("floom.runner_sandbox.agent")
+
+def _ws_setting(key: str) -> "Optional[str]":
+    """#797: read a workspace setting (model/limit defaults) — lazy import to
+    avoid a run_service <-> driver import cycle. None when unset."""
+    try:
+        from run_service import _workspace_setting
+        return _workspace_setting(key)
+    except Exception:
+        return None
+
+
+def _ws_default_model() -> "Optional[str]":
+    v = (_ws_setting("default_model") or "").strip()
+    return v or None
+
+
+def _ws_default_int(key: str) -> "Optional[int]":
+    raw = (_ws_setting(key) or "").strip()
+    if not raw:
+        return None
+    try:
+        n = int(float(raw))
+        return n if n > 0 else None
+    except ValueError:
+        return None
+
+
 
 _CWD_LOCK = threading.Lock()
 _CANCEL_FLAG_DB_READ_ERRORS_LOCK = threading.Lock()
@@ -231,6 +259,11 @@ class AgentDriver(SandboxDriver):
 
         limits = config.runtime.limits
         timeout_seconds = min(timeout_seconds, limits.timeout_seconds)
+        # #797: workspace default_timeout_seconds is a ceiling — the tightest of
+        # the requested, per-worker, and workspace timeouts wins.
+        _ws_timeout = _ws_default_int("default_timeout_seconds")
+        if _ws_timeout:
+            timeout_seconds = min(timeout_seconds, _ws_timeout)
         try:
             return await asyncio.wait_for(
                 self._run_agent_inner(
@@ -406,16 +439,18 @@ class AgentDriver(SandboxDriver):
                     )
 
                 force_finish = corrective_retry_used
+                _agent_model = _llm.agent_model(config.runtime.model or _ws_default_model() or DEFAULT_WORKER_AGENT_MODEL)
                 agent = Agent(
                     name=worker_id,
                     instructions=system_prompt,
                     tools=self._sdk_tools(config, state),
                     mcp_servers=mcp_servers,
-                    model=config.runtime.model or DEFAULT_WORKER_AGENT_MODEL,
+                    model=_agent_model,
                     model_settings=ModelSettings(
                         max_tokens=limits.max_output_tokens,
                         include_usage=True,
                         tool_choice="finish_with_outputs" if force_finish else None,
+                        extra_args=_llm.cache_control_extra_args(_agent_model),
                     ),
                     tool_use_behavior={"stop_at_tool_names": ["finish_with_outputs"]},
                 )
@@ -598,160 +633,73 @@ class AgentDriver(SandboxDriver):
         return self._usage_tokens(usage)
 
     def _agent_event_to_part(self, event: Any, emitted_text_delta: bool) -> tuple[Optional[Dict[str, Any]], bool]:
-        event_type = getattr(event, "type", None)
-        if event_type == "raw_response_event":
-            part = self._raw_response_event_to_part(getattr(event, "data", None))
-            return part, bool(part and part.get("type") == "text")
+        # Decoding is shared with chat_service.stream_chat (#605); this method
+        # only formats the normalized item into transcript/run parts.
+        from runner_sandbox.stream_adapter import decode_stream_event
 
-        if event_type != "run_item_stream_event":
+        item = decode_stream_event(event)
+        if item is None:
             return None, False
 
-        name = getattr(event, "name", None)
-        item = getattr(event, "item", None)
-        raw_item = getattr(item, "raw_item", None)
+        if item.kind == "text_delta":
+            return {"type": "text", "text": item.text}, True
 
-        if name == "message_output_created":
-            if emitted_text_delta:
+        if item.kind == "reasoning_delta":
+            return {"type": "reasoning", "text": item.text}, False
+
+        if item.kind == "message_output":
+            if emitted_text_delta or not item.text:
                 return None, False
-            text = self._message_item_text(item)
-            if text:
-                return {"type": "text", "text": text}, False
-            return None, False
+            return {"type": "text", "text": item.text}, False
 
-        if name == "reasoning_item_created":
-            text = self._object_get(raw_item, "summary") or self._object_get(raw_item, "content")
-            if isinstance(text, list):
-                text = " ".join(str(part) for part in text)
-            if text:
-                return {"type": "reasoning", "text": str(text)}, False
-            return None, False
+        if item.kind == "reasoning":
+            if not item.text:
+                return None, False
+            return {"type": "reasoning", "text": item.text}, False
 
-        if name == "tool_called":
-            tool_name = self._raw_tool_name(raw_item, item)
+        if item.kind == "tool_call":
             return {
                 "type": "tool-call",
-                "toolName": tool_name,
-                "args": self._raw_tool_args(raw_item),
-                "callId": self._raw_tool_call_id(raw_item),
-                **self._tool_part_metadata(raw_item, item),
+                "toolName": item.tool_name,
+                "args": item.args,
+                "callId": item.call_id,
+                **item.metadata,
             }, False
 
-        if name == "tool_output":
-            output = getattr(item, "output", None)
-            parsed_output = self._maybe_json_loads(output)
+        if item.kind == "tool_output":
             return {
                 "type": "tool-result",
-                "callId": self._raw_tool_call_id(raw_item),
-                "result": parsed_output,
-                "isError": self._tool_output_is_error(parsed_output),
-                **self._tool_part_metadata(raw_item, item),
+                "callId": item.call_id,
+                "result": item.output,
+                "isError": item.is_error,
+                **item.metadata,
             }, False
 
-        if name == "mcp_approval_requested":
+        if item.kind == "mcp_approval":
             return {
                 "type": "tool-call",
-                "toolName": self._raw_tool_name(raw_item, item) or "mcp_approval_requested",
-                "args": self._raw_tool_args(raw_item),
-                "callId": self._raw_tool_call_id(raw_item),
+                "toolName": item.tool_name,
+                "args": item.args,
+                "callId": item.call_id,
                 "kind": "mcp-approval",
-                **self._tool_part_metadata(raw_item, item),
+                **item.metadata,
             }, False
 
-        if name == "mcp_list_tools":
-            server_label = self._object_get(raw_item, "server_label") or self._object_get(raw_item, "serverLabel")
+        if item.kind == "mcp_list_tools":
             return {
                 "type": "tool-result",
-                "callId": self._raw_tool_call_id(raw_item),
+                "callId": item.call_id,
                 "result": {
                     "ok": True,
                     "event": "mcp_list_tools",
-                    "server_label": server_label,
+                    "server_label": item.server_label,
                 },
                 "isError": False,
                 "kind": "mcp-list-tools",
-                "mcpServer": server_label,
+                "mcpServer": item.server_label,
             }, False
 
         return None, False
-
-    def _raw_response_event_to_part(self, data: Any) -> Optional[Dict[str, Any]]:
-        data_type = str(getattr(data, "type", "") or "")
-        delta = getattr(data, "delta", None)
-        if delta and data_type.endswith("output_text.delta"):
-            return {"type": "text", "text": str(delta)}
-        if delta and "reasoning" in data_type:
-            return {"type": "reasoning", "text": str(delta)}
-        return None
-
-    def _message_item_text(self, item: Any) -> str:
-        try:
-            from agents.items import ItemHelpers
-
-            return ItemHelpers.text_message_output(item)
-        except Exception:
-            raw_item = getattr(item, "raw_item", None)
-            content = self._object_get(raw_item, "content") or []
-            parts: list[str] = []
-            for entry in content:
-                text = self._object_get(entry, "text")
-                if text:
-                    parts.append(str(text))
-            return "".join(parts)
-
-    def _raw_tool_name(self, raw_item: Any, item: Any = None) -> str:
-        server_label = self._object_get(raw_item, "server_label") or self._object_get(raw_item, "serverLabel")
-        name = self._object_get(raw_item, "name")
-        raw_type = self._object_get(raw_item, "type")
-        if server_label and name:
-            return f"{server_label}.{name}"
-        if name:
-            return str(name)
-        if raw_type:
-            return str(raw_type)
-        title = getattr(item, "title", None)
-        return str(title or "tool")
-
-    def _raw_tool_args(self, raw_item: Any) -> Any:
-        raw_args = (
-            self._object_get(raw_item, "arguments")
-            or self._object_get(raw_item, "input")
-            or self._object_get(raw_item, "action")
-        )
-        return self._maybe_json_loads(raw_args)
-
-    def _raw_tool_call_id(self, raw_item: Any) -> str:
-        value = (
-            self._object_get(raw_item, "call_id")
-            or self._object_get(raw_item, "callId")
-            or self._object_get(raw_item, "id")
-        )
-        return str(value or f"call_{uuid.uuid4().hex[:12]}")
-
-    def _tool_part_metadata(self, raw_item: Any, item: Any = None) -> Dict[str, Any]:
-        metadata: Dict[str, Any] = {}
-        server_label = self._object_get(raw_item, "server_label") or self._object_get(raw_item, "serverLabel")
-        tool_origin = getattr(item, "tool_origin", None)
-        origin_server = getattr(tool_origin, "mcp_server_name", None)
-        if server_label or origin_server:
-            metadata["kind"] = "mcp"
-            metadata["mcpServer"] = server_label or origin_server
-        raw_type = self._object_get(raw_item, "type")
-        if raw_type == "web_search_call":
-            metadata["kind"] = "web_search"
-        return metadata
-
-    def _tool_output_is_error(self, output: Any) -> bool:
-        if isinstance(output, dict) and "ok" in output:
-            return not bool(output.get("ok"))
-        return False
-
-    def _maybe_json_loads(self, value: Any) -> Any:
-        if not isinstance(value, str):
-            return value if value is not None else {}
-        try:
-            return json.loads(value)
-        except Exception:
-            return value
 
     def _cancel_requested(self, run_id: str) -> bool:
         """Check if the run's cancel_requested flag is set in the DB."""
@@ -1159,13 +1107,14 @@ class AgentDriver(SandboxDriver):
         return agent_capabilities.mcp_connections(config)
 
     def _sdk_tools(self, config: WorkerConfig, state: _AgentRunState) -> list[Any]:
-        from agents import FunctionTool, WebSearchTool
+        from agents import FunctionTool
+        from web_search import web_search_tool
 
         sdk_tools: list[Any] = []
         for tool in self._tool_schemas(config):
             tool_type = tool.get("type")
             if tool_type == "web_search":
-                sdk_tools.append(WebSearchTool())
+                sdk_tools.append(web_search_tool())
                 continue
             if tool_type != "function":
                 continue
@@ -1504,19 +1453,29 @@ class AgentDriver(SandboxDriver):
         # Inject worker-to-worker call capability when the manifest declares calls:
         _workeros_helper_dir: str | None = None
         if config.calls and user_id and run_id:
-            from run_token import issue_worker_call_token, MAX_CALL_DEPTH
+            from run_token import issue_worker_call_token, parse_call_depth
             _api_url = os.environ.get("WORKEROS_API_URL") or (
                 f"http://127.0.0.1:{os.environ.get('PORT', '8000')}"
             )
+            # #994: the token carries THIS run's call depth (from its
+            # trigger_source), so children created with it land one level
+            # deeper and the cap actually accumulates across the chain.
+            _self_depth = 0
+            try:
+                from db import get_repositories
+                _row = get_repositories().runs.get_any(run_id=run_id)
+                _self_depth = parse_call_depth((_row or {}).get("trigger_source"))
+            except Exception:
+                _self_depth = 0
             _wrt = issue_worker_call_token(
                 user_id=user_id,
                 parent_run_id=run_id,
                 callable_workers=list(config.calls),
-                depth=0,
+                depth=_self_depth,
             )
             env["WORKEROS_API_URL"] = _api_url
             env["WORKEROS_RUN_TOKEN"] = _wrt
-            env["WORKEROS_CALL_DEPTH"] = "0"
+            env["WORKEROS_CALL_DEPTH"] = str(_self_depth)
             # Write workeros.py into a temp dir and add to PYTHONPATH so that
             # run.py workers can do: from workeros import call_worker
             import tempfile
@@ -1541,6 +1500,23 @@ class AgentDriver(SandboxDriver):
                 output_dir=output_dir,
                 secrets=secrets,
             )
+        # #1000: the local-subprocess path (runner != e2b) runs on the API
+        # HOST, so it is a shell-injection surface (unlike E2B, where
+        # python -c inside the sandbox is fine). Refuse it unless explicitly
+        # opted in, and only allow a bare PATH executable — no slashes, no
+        # interpreter -c/-e/-m invocations.
+        if os.environ.get("WORKEROS_DEV") != "1" and os.environ.get("WORKEROS_ALLOW_LOCAL_RUNNER") != "1":
+            return {
+                "ok": False,
+                "error": "local subprocess runner is disabled (E2B only); set runner: e2b",
+            }
+        if "/" in cmd or "\\" in cmd:
+            return {"ok": False, "error": "command must be a bare PATH executable name"}
+        _INTERP = {"sh", "bash", "zsh", "dash", "ksh", "fish", "python", "python3",
+                   "node", "nodejs", "ruby", "perl", "php", "env", "eval", "exec"}
+        _CODE_FLAGS = {"-c", "-e", "--eval", "-m", "--command"}
+        if cmd.lower() in _INTERP and any(a in _CODE_FLAGS for a in cmd_args):
+            return {"ok": False, "error": "interpreter -c/-e/-m invocations are not allowed"}
         try:
             with _CWD_LOCK:
                 proc = subprocess.run(
@@ -1622,6 +1598,11 @@ class AgentDriver(SandboxDriver):
         if not local_root.exists():
             return
         for path in sorted(local_root.rglob("*")):
+            # #995: never follow symlinks into the sandbox — a planted link
+            # could exfiltrate host files (e.g. api.env, /etc/passwd).
+            if path.is_symlink():
+                logger.warning("Skipping symlink during tree upload: %s", path)
+                continue
             rel = path.relative_to(local_root).as_posix()
             remote_path = f"{remote_root}/{rel}"
             if path.is_dir():
@@ -1968,7 +1949,3 @@ class AgentDriver(SandboxDriver):
         except Exception:
             logger.debug("Run part emit failed for run %s", run_id, exc_info=True)
 
-    def _object_get(self, obj: Any, key: str) -> Any:
-        if isinstance(obj, dict):
-            return obj.get(key)
-        return getattr(obj, key, None)

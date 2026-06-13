@@ -30,7 +30,13 @@ The report includes:
 - the active stock-worker smoke matrix,
 - the system metrics snapshot used for the run-failure-rate audit,
 - open alert incidents,
-- the top 7-day failure streams.
+- the top 7-day failure streams,
+- a "Regressions" section (#614): workers that passed in the most recent
+  prior `SMOKE-RESULTS-*.md` and fail now.
+
+Exit codes: `0` all pass, `1` failures (no regressions), `2` regressions —
+a worker that passed last report fails now. Alert on `2` first; it means
+something that worked yesterday broke.
 
 The `opendraft` row uses a start-and-cancel smoke instead of waiting for the full authoring run.
 

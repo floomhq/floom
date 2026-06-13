@@ -6,6 +6,7 @@ Run from repo root:
 
 import importlib
 import sys
+import json
 import types
 import uuid
 from datetime import datetime, timedelta, timezone
@@ -19,7 +20,9 @@ AUTH_HEADERS = {"x-floom-secret": "test-secret-connections"}
 
 
 def _httpx_response(status_code: int, body: dict) -> types.SimpleNamespace:
-    response = types.SimpleNamespace(status_code=status_code)
+    # .headers and .text are required since the streamable-HTTP probe reads
+    # the mcp-session-id response header and may parse SSE-framed bodies.
+    response = types.SimpleNamespace(status_code=status_code, headers={}, text=json.dumps(body))
     response.json = lambda: body
     return response
 

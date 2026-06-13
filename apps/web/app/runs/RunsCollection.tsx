@@ -4,12 +4,19 @@ import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import Papa from "papaparse";
-import { Download } from "lucide-react";
+import { ChevronDown, Download } from "lucide-react";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { StatusPill } from "@/components/collection/StatusPill";
 import { api } from "@/lib/api";
 import { formatRelative } from "@/lib/formatters";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
-import { Collection, Avatar } from "@/components/collection";
+import { Collection } from "@/components/collection";
 import { InlineFileOpen } from "@/components/file-viewer/InlineFileOpen";
 import { traceSteps } from "@/lib/runs/trace";
 import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
@@ -154,16 +161,22 @@ const RUN_TAB_COMPONENT: Record<RunDetailTab, (props: { r: RunSummary }) => Reac
 export default function RunsCollection({ initialRuns }: { initialRuns: RunSummary[] }) {
   const [runs, setRuns] = useState<RunSummary[]>(initialRuns);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
+  const [loading, setLoading] = useState(initialRuns.length === 0);
   const [now] = useState(() => Date.now());
 
-  const refresh = () =>
-    api.runs
-      .list({ limit: 200 })
-      .then((rows) => setRuns([...rows].sort((a, b) => runSortTime(b) - runSortTime(a))))
-      .catch(() => {});
+  const refresh = async (initial = false) => {
+    try {
+      const rows = await api.runs.list({ limit: 200 });
+      setRuns([...rows].sort((a, b) => runSortTime(b) - runSortTime(a)));
+    } catch {
+      // leave existing state intact on refresh errors
+    } finally {
+      if (initial) setLoading(false);
+    }
+  };
 
   useEffect(() => {
-    void refresh();
+    void refresh(true);
     // Content tags are inherited from the parent worker (SPEC §11).
     api.workers.list().then(setWorkers).catch(() => {});
   }, []);
@@ -229,16 +242,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     }
   };
 
-  const cancel = async (r: RunSummary) => {
-    try {
-      await api.runs.cancel(r.id);
-      toast.success("Run cancelled");
-      await refresh();
-    } catch {
-      toast.error("Could not cancel the run.");
-    }
-  };
-
   const replay = async (r: RunSummary) => {
     try {
       const res = await api.runs.replay(r.worker_id, r.id);
@@ -253,6 +256,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     title: "Run history",
     subtitle: "Worker executions grouped by day.",
     items: sorted,
+    loading,
     idOf: (r) => r.id,
     searchOf: (r) => `${r.worker_name ?? r.worker_id} ${r.id} ${r.trigger_source}`,
     tagsOf: (r) =>
@@ -284,49 +288,54 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     ],
     view: { default: "list", grid: true },
     toolbarActions: (
-      <>
-        <button type="button" className="c-vpill" style={{ padding: "9px 12px" }} onClick={() => void exportCSV()}>
-          <Download size={14} /> Export CSV
-        </button>
-        <button
-          type="button"
-          className="c-vpill"
-          style={{ padding: "9px 12px" }}
-          disabled={exportingZip}
-          onClick={() => void exportZip()}
-        >
-          <Download size={14} /> {exportingZip ? "Exporting…" : "Export ZIP"}
-        </button>
-      </>
+      <DropdownMenu>
+        <DropdownMenuTrigger className="c-vpill" style={{ padding: "9px 12px", gap: 5 }}>
+          <Download size={14} /> Export <ChevronDown size={12} />
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" className="w-40 p-1">
+          <DropdownMenuItem
+            onClick={() => void exportCSV()}
+            className="flex items-center gap-2 text-sm text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <Download size={14} /> Export CSV
+          </DropdownMenuItem>
+          <DropdownMenuItem
+            disabled={exportingZip}
+            onClick={() => void exportZip()}
+            className="flex items-center gap-2 text-sm text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <Download size={14} /> {exportingZip ? "Exporting…" : "Export ZIP"}
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
     ),
     group: (r) => dayLabel(r.created_at ?? r.started_at, now),
     columns: {
-      template: "1.6fr 1fr .8fr 1fr 130px 40px",
-      headers: ["Worker", "Trigger", "Duration", "Started", "Status", ""],
+      template: "1.6fr 1fr .8fr 130px 1fr",
+      headers: ["Worker", "Trigger", "Duration", "Status", "Started"],
+      statusColumn: false,
+      menuColumn: false,
     },
     row: (r) => ({
-      leading: <Avatar name={r.worker_name ?? r.worker_id} />,
+      // V4 SPEC rule 3: no avatar for runs — non-person entity.
       primary: r.worker_name ?? r.worker_id,
       cols: [
         formatTrigger(r.trigger_source),
         formatDuration(r.duration_ms),
+        <StatusPill key="status" spec={runStatusPill(r.status)} />,
         formatRelative(r.created_at ?? r.started_at ?? ""),
       ],
-      status: runStatusPill(r.status),
-      menu:
-        r.status === "running" || r.status === "queued"
-          ? [{ label: "Cancel run", onSelect: () => void cancel(r), danger: true }]
-          : [{ label: "Open full run", onSelect: () => (window.location.href = `/runs/${r.id}`) }],
     }),
     card: (r) => ({
-      leading: <Avatar name={r.worker_name ?? r.worker_id} size={38} />,
+      // V4 SPEC rule 3: no avatar monogram for runs.
       name: r.worker_name ?? r.worker_id,
       description: `${formatTrigger(r.trigger_source)} · ${formatDuration(r.duration_ms)}`,
       status: runStatusPill(r.status),
     }),
     detail: (r) => ({
       header: {
-        leading: <Avatar name={r.worker_name ?? r.worker_id} size={42} />,
+        // V4 SPEC rule 3: no avatar in detail header for runs.
+        leading: undefined,
         title: r.worker_name ?? r.worker_id,
         sub: (
           <span className="c-dh-sub" style={{ margin: 0 }}>
@@ -337,7 +346,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
         actions: (
           <>
             {/* SPEC §4: ↑ worker link (worker_id on every run — BUILT). */}
-            <Link href={`/workers/${r.worker_id}`} className="c-vpill" style={{ padding: "6px 11px" }}>
+            <Link href={`/workers?sel=${encodeURIComponent(r.worker_id)}`} className="c-vpill" style={{ padding: "6px 11px" }}>
               ↑ Open worker
             </Link>
             <button
@@ -357,9 +366,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
             >
               Share
             </button>
-            <Link href={`/runs/${r.id}`} className="c-vpill" style={{ padding: "6px 11px" }}>
-              Open full run →
-            </Link>
           </>
         ),
       },
@@ -389,8 +395,8 @@ const h4: React.CSSProperties = {
 const kv: React.CSSProperties = { display: "grid", gridTemplateColumns: "140px 1fr", gap: "9px 16px" };
 const kvK: React.CSSProperties = { color: "var(--muted-foreground)", fontSize: 12.5 };
 const code: React.CSSProperties = {
-  border: "1px solid var(--line)",
-  borderRadius: 12,
+  border: "var(--bd-card)",
+  borderRadius: "var(--radius-card)",
   background: "var(--bg-2)",
   color: "var(--ink-soft)",
   padding: 13,

@@ -370,6 +370,10 @@ export interface WorkerDetail {
   owner_id?: string | null;
   visibility?: AssetVisibility;
   permissions?: AssetPermissions;
+  // P4 / #815: latest run output preview surfaced on the worker detail About tab.
+  // Text excerpt of the most recent successful run's result (≤500 chars).
+  latest_output?: string | null;
+  latest_output_run_id?: string | null;
 }
 
 // A feedback comment left on a worker (SPEC §12). Anyone who can SEE the worker
@@ -761,6 +765,7 @@ export interface CurrentUser {
   scopes?: string[];
   // Multi-member fields (populated when using username/password or PAT auth)
   role?: string;
+  is_admin?: boolean;
   username?: string | null;
 }
 
@@ -871,18 +876,6 @@ export interface SystemOverview {
   recent_runs: SystemOverviewRunItem[];
   scheduled_today: SystemOverviewScheduledItem[];
   needs_attention: SystemOverviewAttentionItem[];
-}
-
-export interface SystemMetrics {
-  workers_count: number;
-  runs_total: number;
-  runs_7d: number;
-  runs_failed_7d: number;
-  connections_count: number;
-  secrets_count: number;
-  active_triggers: number;
-  uptime_seconds: number;
-  drafts_last_hour?: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -1116,6 +1109,25 @@ export interface PersonalAccessToken {
 export interface PersonalAccessTokenCreate {
   token: string;
   pat: PersonalAccessToken;
+}
+
+// Workspace token (prefix wst_): API access to workspace-shared workers only.
+// Admin-only; the token value is returned once on create.
+export interface WorkspaceToken {
+  id: string;
+  name: string;
+  created_by?: string | null;
+  created_at: string;
+  last_used_at?: string | null;
+  expires_at?: string | null;
+  revoked_at?: string | null;
+}
+
+export interface WorkspaceTokenCreate {
+  id: string;
+  name: string;
+  token: string;
+  expires_at?: string | null;
 }
 
 export interface AuthMe {

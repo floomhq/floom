@@ -1,8 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatusPill } from "@/components/collection/StatusPill";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import type { ConnectServiceCard as ConnectServiceCardType } from "@/lib/emily-chat-types";
 
@@ -22,18 +22,11 @@ export function ConnectServiceCard({ card }: { card: ConnectServiceCardType }) {
   const description = APP_DESCRIPTIONS[card.appName] ?? `Allow Emily to use ${card.label}.`;
 
   return (
-    <div className="rounded-lg border border-border bg-card/60 overflow-hidden text-sm">
+    <div className="rounded-lg [border:var(--bd-card)] bg-card/60 overflow-hidden text-sm">
       <div className="flex items-center gap-2.5 px-3.5 py-2.5">
         <BrandLogo icon={card.appName} className="size-4 shrink-0" />
         <span className="font-medium flex-1">{connected ? card.label : `Connect ${card.label}`}</span>
-        {connected && (
-          <Badge
-            variant="secondary"
-            className="text-[10px] px-1.5 py-0.5 bg-green-500/10 text-green-700 border-green-500/20 font-normal"
-          >
-            Connected
-          </Badge>
-        )}
+        {connected && <StatusPill spec={{ tone: "ok", label: "Connected" }} />}
       </div>
       <div className="px-3.5 pb-3 space-y-2">
         {!connected ? (

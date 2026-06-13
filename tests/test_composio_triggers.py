@@ -469,8 +469,15 @@ def test_composio_events_without_signing_key_returns_503(monkeypatch, tmp_path):
     monkeypatch.setattr(composio_client, "enable_trigger", lambda *args, **kwargs: "ct_gmail_123")
 
     with TestClient(main.app) as client:
+        # #908: without the signing key, enabling the trigger now fails LOUDLY
+        # at worker-create time (was: created fine, then every delivery 503'd
+        # — shipped-but-broken with no signal).
         created = _create_worker(client)
-        assert created.status_code == 200, created.text
+        assert created.status_code != 200, created.text
+        assert "COMPOSIO_WEBHOOK_SIGNING_KEY" in created.text
+
+        # The receiver itself still answers 503 (checked before any worker
+        # lookup) so Composio's delivery attempts surface the misconfiguration.
         response = client.post(
             "/composio-events",
             json={"metadata": {"trigger_id": "ct_gmail_123", "trigger_slug": "GMAIL_NEW_EMAIL"}},

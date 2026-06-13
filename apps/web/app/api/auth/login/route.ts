@@ -4,9 +4,38 @@ import {
   deriveSessionToken,
   isCorrectSecret,
 } from "@/lib/web-session";
+import { forwardSecureSetCookies } from "@/lib/secure-set-cookie";
 
 const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
+
+// #923: secret-mode logins were brute-forceable — the backend rate-limits
+// /auth/login (username/password), but the legacy secret check happens
+// entirely in this route. Mirror the backend policy: 5 failures per IP per
+// 15-minute window. Per-instance memory is a deliberate trade-off on
+// serverless; it still throttles sustained single-instance brute force.
+const FAILED_WINDOW_MS = 15 * 60 * 1000;
+const FAILED_THRESHOLD = 5;
+const failedSecretAttempts = new Map<string, number[]>();
+
+function clientIp(req: NextRequest): string {
+  const forwarded = req.headers.get("x-forwarded-for");
+  if (forwarded) return forwarded.split(",")[0].trim();
+  return req.headers.get("x-real-ip") || "unknown";
+}
+
+function secretLoginLockedOut(ip: string): boolean {
+  const cutoff = Date.now() - FAILED_WINDOW_MS;
+  const attempts = (failedSecretAttempts.get(ip) || []).filter((t) => t > cutoff);
+  failedSecretAttempts.set(ip, attempts);
+  return attempts.length >= FAILED_THRESHOLD;
+}
+
+function recordFailedSecretLogin(ip: string): void {
+  const attempts = failedSecretAttempts.get(ip) || [];
+  attempts.push(Date.now());
+  failedSecretAttempts.set(ip, attempts);
+}
 
 /**
  * POST /api/auth/login
@@ -35,7 +64,10 @@ export async function POST(req: NextRequest) {
       }
     }
   } catch {
-    body = {};
+    // #944: malformed JSON used to fall through to the secret-mode check and
+    // surface a 401 "Invalid access secret." — a parse error is a 400, and
+    // internal auth-mode names stay out of public responses.
+    return NextResponse.json({ detail: "Invalid request body" }, { status: 400 });
   }
 
   // Multi-member flow: username + password
@@ -48,24 +80,36 @@ export async function POST(req: NextRequest) {
     const upstreamBody = await upstream.text();
     const res = new NextResponse(upstreamBody, {
       status: upstream.status,
-      headers: { "content-type": "application/json" },
+      headers: {
+        "content-type": "application/json",
+        // #941: auth responses are identity-bearing — never shared-cacheable
+        "cache-control": "private, no-store, max-age=0",
+      },
     });
-    // Forward the wos_session cookie from the backend
-    const setCookie = upstream.headers.get("set-cookie");
-    if (setCookie) {
-      res.headers.set("set-cookie", setCookie);
-    }
+    // Forward the wos_session cookie from the backend (#927: force Secure)
+    forwardSecureSetCookies(upstream, res.headers);
     return res;
   }
 
   // Legacy single-user flow: secret
+  const ip = clientIp(req);
+  if (secretLoginLockedOut(ip)) {
+    return NextResponse.json(
+      { detail: "too many failed login attempts; try again later" },
+      { status: 429 },
+    );
+  }
   const secret = typeof body.secret === "string" ? body.secret : "";
   if (!isCorrectSecret(secret)) {
-    return NextResponse.json({ detail: "Invalid access secret." }, { status: 401 });
+    recordFailedSecretLogin(ip);
+    // #944: one generic credential-failure message across both login modes.
+    return NextResponse.json({ detail: "invalid credentials" }, { status: 401 });
   }
+  failedSecretAttempts.delete(ip);
 
   const token = await deriveSessionToken();
   const res = NextResponse.json({ ok: true });
+  res.headers.set("cache-control", "private, no-store, max-age=0"); // #941
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
     secure: true,

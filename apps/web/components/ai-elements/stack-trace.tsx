@@ -10,8 +10,8 @@ export function StackTrace({ error }: { error?: string | null }) {
   }
   const lines = error.split("\n");
   return (
-    <div className="overflow-hidden rounded-[var(--radius-button)] border border-error/30 bg-error/10">
-      <div className="flex items-center gap-2 border-b border-error/20 px-3 py-2 text-sm font-medium text-error">
+    <div className="overflow-hidden rounded-[var(--radius-button)] [border:var(--bd-card)] bg-error/10">
+      <div className="flex items-center gap-2 [border-bottom:var(--bd-div)] px-3 py-2 text-sm font-medium text-error">
         <AlertTriangle className="size-4" />
         Error
       </div>
