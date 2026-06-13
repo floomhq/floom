@@ -91,6 +91,8 @@ def _claim_bootstrap_assets_for_new_admin(new_admin_id: str, repos: Repositories
     (cloud is multi-tenant and has no single bootstrap owner). Best-effort per
     table so a missing table/column never breaks setup.
     """
+    from models import SecretStatus
+
     summary: Dict[str, int] = {"workers": 0, "connections": 0, "secrets": 0}
     if (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() != "local":
         return summary
