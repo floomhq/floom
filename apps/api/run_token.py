@@ -104,6 +104,27 @@ WORKER_CALL_TOKEN_PREFIX = "wrt_"
 MAX_CALL_DEPTH = 3
 
 
+class WorkerCallDepthExceeded(ValueError):
+    """#994: a worker-call token cannot be minted at or beyond MAX_CALL_DEPTH."""
+
+
+def parse_call_depth(trigger_source: str | None) -> int:
+    """#994: extract the worker-call depth a run is at from its trigger_source.
+
+    Both call paths encode depth in trigger_source: agent ``invoke_worker:depth=N``
+    and script/token ``worker_call:depth=N``. A run with no marker is the root
+    (depth 0).
+    """
+    ts = str(trigger_source or "")
+    for marker in ("worker_call:depth=", "invoke_worker:depth="):
+        if ts.startswith(marker):
+            try:
+                return max(0, int(ts.split("=", 1)[1]))
+            except (ValueError, IndexError):
+                return 0
+    return 0
+
+
 class WorkerCallSecretMissing(ValueError):
     """Raised when no real signing secret is configured for worker-call tokens.
 
@@ -182,6 +203,14 @@ def issue_worker_call_token(
     secret: str | None = None,
 ) -> str:
     """Issue a signed token that allows a run to invoke specific child workers."""
+    # #994: cap worker-to-worker recursion. A token at or beyond MAX_CALL_DEPTH
+    # may not be minted, so a chain of script workers calling each other
+    # (call_worker) cannot recurse without bound.
+    if depth > MAX_CALL_DEPTH:
+        raise WorkerCallDepthExceeded(
+            f"Worker call depth {depth} exceeds the cap ({MAX_CALL_DEPTH}); "
+            "cannot issue a worker-call token this deep."
+        )
     payload: dict[str, Any] = {
         "user_id": user_id,
         "parent_run_id": parent_run_id,

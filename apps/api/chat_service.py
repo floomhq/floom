@@ -3831,7 +3831,11 @@ _APPROVALS_BASE_URL = (
 
 
 def _approval_public_token(row: Any) -> str:
-    secret = os.environ.get("FLOOM_SECRET") or "dev-secret-not-set"
+    # #998: fail closed — no signing with a public constant.
+    secret = (os.environ.get("FLOOM_SECRET") or "").strip()
+    if not secret:
+        from fastapi import HTTPException
+        raise HTTPException(status_code=503, detail="Server signing secret not configured")
     payload = ".".join(str(row[key] or "") for key in ("id", "run_id", "owner_id"))
     return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
 

@@ -62,8 +62,20 @@ def _legacy_grace_enabled() -> bool:
     return val in {"1", "true", "yes", "on"}
 
 
+class WebhookSigningSecretMissing(RuntimeError):
+    """#998: FLOOM_SECRET is required to sign/verify legacy webhook tokens."""
+
+
 def _legacy_platform_secret() -> str:
-    return os.environ.get("FLOOM_SECRET", "dev-secret-not-set")
+    # #998: never fall back to a public constant — a forged legacy webhook
+    # token must not validate when no real secret is configured.
+    secret = (os.environ.get("FLOOM_SECRET") or "").strip()
+    if not secret:
+        raise WebhookSigningSecretMissing(
+            "FLOOM_SECRET is not configured; legacy webhook tokens cannot be "
+            "signed or verified."
+        )
+    return secret
 
 
 def _legacy_token(worker_id: str) -> str:
@@ -167,8 +179,12 @@ def verify_webhook_token(
     if hmac.compare_digest(token, expected):
         return True
     if _legacy_grace_enabled():
-        # Always evaluate the legacy comparison to keep timing uniform.
-        return hmac.compare_digest(token, _legacy_token(worker_id))
+        # #998: with no real FLOOM_SECRET the legacy token cannot be valid —
+        # fail closed (reject) instead of comparing against a public constant.
+        try:
+            return hmac.compare_digest(token, _legacy_token(worker_id))
+        except WebhookSigningSecretMissing:
+            return False
     return False
 
 
