@@ -61,7 +61,7 @@ def client_main(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_SECRET", SECRET)
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     for name in list(sys.modules):
-        if name in ("main", "models", "worker_registry", "run_service", "chat_service") or name.startswith(("db", "auth", "contexts")):
+        if name in ("main", "models", "worker_registry", "run_service", "chat_service") or name.startswith(("routers", "services", "core", "db", "auth", "contexts")):
             sys.modules.pop(name, None)
     sys.modules["scheduler"] = types.SimpleNamespace(start_scheduler=lambda: None, stop_scheduler=lambda: None)
     main = importlib.import_module("main")
