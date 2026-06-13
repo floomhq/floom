@@ -1453,19 +1453,29 @@ class AgentDriver(SandboxDriver):
         # Inject worker-to-worker call capability when the manifest declares calls:
         _workeros_helper_dir: str | None = None
         if config.calls and user_id and run_id:
-            from run_token import issue_worker_call_token, MAX_CALL_DEPTH
+            from run_token import issue_worker_call_token, parse_call_depth
             _api_url = os.environ.get("WORKEROS_API_URL") or (
                 f"http://127.0.0.1:{os.environ.get('PORT', '8000')}"
             )
+            # #994: the token carries THIS run's call depth (from its
+            # trigger_source), so children created with it land one level
+            # deeper and the cap actually accumulates across the chain.
+            _self_depth = 0
+            try:
+                from db import get_repositories
+                _row = get_repositories().runs.get_any(run_id=run_id)
+                _self_depth = parse_call_depth((_row or {}).get("trigger_source"))
+            except Exception:
+                _self_depth = 0
             _wrt = issue_worker_call_token(
                 user_id=user_id,
                 parent_run_id=run_id,
                 callable_workers=list(config.calls),
-                depth=0,
+                depth=_self_depth,
             )
             env["WORKEROS_API_URL"] = _api_url
             env["WORKEROS_RUN_TOKEN"] = _wrt
-            env["WORKEROS_CALL_DEPTH"] = "0"
+            env["WORKEROS_CALL_DEPTH"] = str(_self_depth)
             # Write workeros.py into a temp dir and add to PYTHONPATH so that
             # run.py workers can do: from workeros import call_worker
             import tempfile
@@ -1490,6 +1500,23 @@ class AgentDriver(SandboxDriver):
                 output_dir=output_dir,
                 secrets=secrets,
             )
+        # #1000: the local-subprocess path (runner != e2b) runs on the API
+        # HOST, so it is a shell-injection surface (unlike E2B, where
+        # python -c inside the sandbox is fine). Refuse it unless explicitly
+        # opted in, and only allow a bare PATH executable — no slashes, no
+        # interpreter -c/-e/-m invocations.
+        if os.environ.get("WORKEROS_DEV") != "1" and os.environ.get("WORKEROS_ALLOW_LOCAL_RUNNER") != "1":
+            return {
+                "ok": False,
+                "error": "local subprocess runner is disabled (E2B only); set runner: e2b",
+            }
+        if "/" in cmd or "\\" in cmd:
+            return {"ok": False, "error": "command must be a bare PATH executable name"}
+        _INTERP = {"sh", "bash", "zsh", "dash", "ksh", "fish", "python", "python3",
+                   "node", "nodejs", "ruby", "perl", "php", "env", "eval", "exec"}
+        _CODE_FLAGS = {"-c", "-e", "--eval", "-m", "--command"}
+        if cmd.lower() in _INTERP and any(a in _CODE_FLAGS for a in cmd_args):
+            return {"ok": False, "error": "interpreter -c/-e/-m invocations are not allowed"}
         try:
             with _CWD_LOCK:
                 proc = subprocess.run(
@@ -1571,6 +1598,11 @@ class AgentDriver(SandboxDriver):
         if not local_root.exists():
             return
         for path in sorted(local_root.rglob("*")):
+            # #995: never follow symlinks into the sandbox — a planted link
+            # could exfiltrate host files (e.g. api.env, /etc/passwd).
+            if path.is_symlink():
+                logger.warning("Skipping symlink during tree upload: %s", path)
+                continue
             rel = path.relative_to(local_root).as_posix()
             remote_path = f"{remote_root}/{rel}"
             if path.is_dir():
