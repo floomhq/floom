@@ -779,9 +779,32 @@ def _register_git_workspace_resolver() -> None:
         import git_ops as engine_git_ops  # noqa: PLC0415
     except ImportError:
         return  # engine submodule too old — skip silently
-    if not hasattr(engine_git_ops, "set_workspace_id_resolver"):
-        return  # hook not yet in engine — skip silently
-    engine_git_ops.set_workspace_id_resolver(get_active_workspace_id)
+    if hasattr(engine_git_ops, "set_workspace_id_resolver"):
+        engine_git_ops.set_workspace_id_resolver(get_active_workspace_id)
+
+    # #1001: point the engine's _git_workspace() at the cloud's MATERIALIZED
+    # per-workspace git tree (var/workspaces/{id}, hydrated from the Supabase
+    # bundle) so versions-read AND rollback run in the same real repo — the
+    # engine default (WORKERS_DIR/{id}) is never materialized in cloud, so
+    # rollback 500'd. Falls back to engine default if the hook isn't present.
+    try:
+        engine_main = import_engine_module("main")
+    except Exception:
+        return
+    if not hasattr(engine_main, "set_git_workspace_resolver"):
+        return  # engine pin predates #1001
+
+    def _resolve_git_workspace(workspace_id):
+        if not workspace_id:
+            return None
+        try:
+            from apps.api.cloud_git_local import ensure_workspace_repo
+            return str(ensure_workspace_repo(workspace_id))
+        except Exception:
+            logger.warning("git workspace hydrate failed for %s", workspace_id, exc_info=True)
+            return None
+
+    engine_main.set_git_workspace_resolver(_resolve_git_workspace)
 
 
 def _ensure_magic_link_secret() -> None:
