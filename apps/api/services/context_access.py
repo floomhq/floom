@@ -19,17 +19,94 @@ from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
 from fastapi import HTTPException
+from pydantic import BaseModel
 
 from core.config import (
     SYSTEM_CONTEXT_DESCRIPTIONS,
     SYSTEM_CONTEXT_PACKS,
     _is_cloud_deploy,
 )
+from secret_scan import scan_bytes
 
 if TYPE_CHECKING:
     from db import Repositories
 
 logger = logging.getLogger("floom.api")
+
+
+class SecretWarning(BaseModel):
+    """A masked secret-detection finding. NEVER carries the raw value."""
+
+    pattern: str
+    line: int
+    masked: str
+
+
+def _block_secrets_in_contexts() -> bool:
+    """Strict mode (default OFF): reject context writes that contain a live
+    credential instead of warning. Env-gated so existing installs see no
+    behavior change."""
+    return os.environ.get("WORKEROS_BLOCK_SECRETS_IN_CONTEXTS") == "1"
+
+
+def _scan_context_write(file_path: str, data: bytes) -> List[SecretWarning]:
+    """Scan context-write bytes for high-confidence secrets. Returns masked
+    warnings only — the raw secret value is never returned or logged.
+
+    In strict mode (WORKEROS_BLOCK_SECRETS_IN_CONTEXTS=1) a non-empty result
+    raises 400; the detail names the pattern (masked) and points the operator
+    at the Secrets vault.
+    """
+    findings = scan_bytes(data)
+    if not findings:
+        return []
+    warnings = [SecretWarning(**f.to_dict()) for f in findings]
+    if _block_secrets_in_contexts():
+        first = warnings[0]
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                f"This file appears to contain a live credential "
+                f"({first.pattern}: {first.masked}). Store secrets in "
+                f"Settings → Secrets, not in a Brain pack."
+            ),
+        )
+    return warnings
+
+
+def _file_has_share_blocking_secret(rel: str, data: bytes) -> bool:
+    return bool(_scan_context_write(rel, data))
+
+
+def _assert_context_file_shareable(rel: str, target: Path) -> None:
+    if not target.is_file():
+        raise HTTPException(status_code=404, detail="Context file not found")
+    try:
+        data = target.read_bytes()
+    except OSError:
+        raise HTTPException(status_code=404, detail="Context file not found")
+    if _file_has_share_blocking_secret(rel, data):
+        raise HTTPException(
+            status_code=409,
+            detail="Move detected secrets to the Secrets vault before sharing this file",
+        )
+
+
+def _assert_context_pack_shareable(name: str) -> None:
+    from contexts import context_dir, iter_context_files
+
+    root = context_dir(name)
+    for path in iter_context_files(root):
+        rel = path.relative_to(root).as_posix()
+        try:
+            data = path.read_bytes()
+        except OSError:
+            continue
+        if _file_has_share_blocking_secret(rel, data):
+            raise HTTPException(
+                status_code=409,
+                detail=f"Move detected secrets to the Secrets vault before sharing {rel}",
+            )
 
 
 def _system_context_description(name: str) -> Optional[str]:

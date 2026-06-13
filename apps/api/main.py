@@ -475,6 +475,12 @@ from services.context_access import (
     _context_summary,
     _context_description,
     _workers_referencing_context,
+    SecretWarning,
+    _block_secrets_in_contexts,
+    _scan_context_write,
+    _file_has_share_blocking_secret,
+    _assert_context_file_shareable,
+    _assert_context_pack_shareable,
 )
 
 # Public-facing redaction + SSE event shaping cluster lives in
@@ -1913,12 +1919,6 @@ class ContextVisibilityUpdate(BaseModel):
 
 
 
-class SecretWarning(BaseModel):
-    """A masked secret-detection finding. NEVER carries the raw value."""
-
-    pattern: str
-    line: int
-    masked: str
 
 
 class ContextFileItem(BaseModel):
@@ -2728,36 +2728,8 @@ def _raise_context_quota_if_needed(name: str) -> None:
         )
 
 
-def _block_secrets_in_contexts() -> bool:
-    """Strict mode (default OFF): reject context writes that contain a live
-    credential instead of warning. Env-gated so existing installs see no
-    behavior change."""
-    return os.environ.get("WORKEROS_BLOCK_SECRETS_IN_CONTEXTS") == "1"
 
 
-def _scan_context_write(file_path: str, data: bytes) -> List[SecretWarning]:
-    """Scan context-write bytes for high-confidence secrets. Returns masked
-    warnings only — the raw secret value is never returned or logged.
-
-    In strict mode (WORKEROS_BLOCK_SECRETS_IN_CONTEXTS=1) a non-empty result
-    raises 400; the detail names the pattern (masked) and points the operator
-    at the Secrets vault.
-    """
-    findings = scan_bytes(data)
-    if not findings:
-        return []
-    warnings = [SecretWarning(**f.to_dict()) for f in findings]
-    if _block_secrets_in_contexts():
-        first = warnings[0]
-        raise HTTPException(
-            status_code=400,
-            detail=(
-                f"This file appears to contain a live credential "
-                f"({first.pattern}: {first.masked}). Store secrets in "
-                f"Settings → Secrets, not in a Brain pack."
-            ),
-        )
-    return warnings
 
 
 def _write_context_file(
@@ -3725,37 +3697,10 @@ def _json_noindex(payload: Dict[str, Any], *, status_code: int = 200) -> JSONRes
     return JSONResponse(payload, status_code=status_code, headers=_public_noindex_headers())
 
 
-def _file_has_share_blocking_secret(rel: str, data: bytes) -> bool:
-    return bool(_scan_context_write(rel, data))
 
 
-def _assert_context_file_shareable(rel: str, target: Path) -> None:
-    if not target.is_file():
-        raise HTTPException(status_code=404, detail="Context file not found")
-    try:
-        data = target.read_bytes()
-    except OSError:
-        raise HTTPException(status_code=404, detail="Context file not found")
-    if _file_has_share_blocking_secret(rel, data):
-        raise HTTPException(
-            status_code=409,
-            detail="Move detected secrets to the Secrets vault before sharing this file",
-        )
 
 
-def _assert_context_pack_shareable(name: str) -> None:
-    root = context_dir(name)
-    for path in iter_context_files(root):
-        rel = path.relative_to(root).as_posix()
-        try:
-            data = path.read_bytes()
-        except OSError:
-            continue
-        if _file_has_share_blocking_secret(rel, data):
-            raise HTTPException(
-                status_code=409,
-                detail=f"Move detected secrets to the Secrets vault before sharing {rel}",
-            )
 
 
 def _public_file_entry(name: str, root: Path, path: Path, token: str | None = None) -> Dict[str, Any]:
