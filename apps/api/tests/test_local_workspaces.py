@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import json
+import os
 import sys
 import types
 from pathlib import Path
@@ -246,6 +247,48 @@ def test_federico_login_maps_to_legacy_worker_owner(client_and_db):
     assert detail.json()["permissions"]["can_share"] is True
 
 
+def test_uuid_admin_session_sees_legacy_default_brain_packs(client_and_db, monkeypatch):
+    client, _db = client_and_db
+    monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
+
+    contexts_dir = Path(os.environ["FLOOM_CONTEXTS_DIR"])
+    legacy_pack = contexts_dir / "federico" / "company"
+    legacy_pack.mkdir(parents=True)
+    (legacy_pack / "README.md").write_text("# Company\nlegacy default brain.\n", encoding="utf-8")
+    (contexts_dir / "federico" / ".workeros-contexts.json").write_text(
+        '{"company": {"owner_id": "federico", "writeable": true}}\n',
+        encoding="utf-8",
+    )
+
+    setup = client.post(
+        "/auth/setup",
+        json={"username": "fede", "password": "ramen-stapler-42"},
+    )
+    assert setup.status_code == 201, setup.text
+    assert setup.json()["id"] != "federico"
+
+    me = client.get("/auth/me")
+    assert me.status_code == 200, me.text
+    assert me.json()["username"] == "fede"
+    assert me.json()["auth_method"] == "session"
+
+    listing = client.get("/contexts")
+    assert listing.status_code == 200, listing.text
+    packs = {row["name"]: row for row in listing.json()}
+    assert "company" in packs
+    assert packs["company"]["owner_id"] == "federico"
+    assert packs["company"]["permissions"]["is_owner"] is True
+    assert packs["company"]["permissions"]["can_edit"] is True
+
+    detail = client.get("/contexts/company")
+    assert detail.status_code == 200, detail.text
+    assert [file["path"] for file in detail.json()["files"]] == ["README.md"]
+
+    file_resp = client.get("/contexts/company/files/README.md")
+    assert file_resp.status_code == 200, file_resp.text
+    assert "legacy default brain" in file_resp.text
+
+
 def test_side_workspace_workers_are_isolated_and_editable(client_and_db):
     client, db = client_and_db
     created = client.post("/workspaces", json={"name": "Side workspace"})
@@ -367,4 +410,3 @@ def test_rename_workspace(client_and_db):
 
     assert client.patch("/workspaces/ws_doesnotexist", json={"name": "x"}).status_code == 404
     assert client.patch(f"/workspaces/{wid}", json={"name": ""}).status_code == 422
-

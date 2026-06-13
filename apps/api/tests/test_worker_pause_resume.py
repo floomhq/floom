@@ -79,17 +79,25 @@ def client_and_main(monkeypatch, tmp_path):
 
 def test_pause_then_resume(client_and_main):
     client, _ = client_and_main
-    assert client.get("/workers/pausable").json()["enabled"] is True
+    initial = client.get("/workers/pausable").json()
+    assert initial["enabled"] is True
+    assert initial["status"] == "ready"
 
     paused = client.post("/workers/pausable/pause")
     assert paused.status_code == 200, paused.text
     assert paused.json()["enabled"] is False
-    assert client.get("/workers/pausable").json()["enabled"] is False
+    assert paused.json()["status"] == "needs_attention"
+    paused_detail = client.get("/workers/pausable").json()
+    assert paused_detail["enabled"] is False
+    assert paused_detail["status"] == "needs_attention"
 
     resumed = client.post("/workers/pausable/resume")
     assert resumed.status_code == 200, resumed.text
     assert resumed.json()["enabled"] is True
-    assert client.get("/workers/pausable").json()["enabled"] is True
+    assert resumed.json()["status"] == "ready"
+    resumed_detail = client.get("/workers/pausable").json()
+    assert resumed_detail["enabled"] is True
+    assert resumed_detail["status"] == "ready"
 
 
 def test_pause_clears_next_run_at(client_and_main):

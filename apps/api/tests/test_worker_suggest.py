@@ -110,6 +110,7 @@ def test_suggest_returns_no_conflicts_when_no_openai_key(client_and_main, monkey
     """When OPENAI_API_KEY is unset, the endpoint returns safely with no conflicts."""
     client, _ = client_and_main
     monkeypatch.delenv("OPENAI_API_KEY", raising=False)
+    monkeypatch.delenv("PLATFORM_OPENAI_API_KEY", raising=False)
 
     resp = client.post(
         "/workers/ai-news-digest/suggest",
@@ -139,11 +140,7 @@ def test_suggest_returns_conflicts_from_llm(client_and_main, monkeypatch):
         ]
     }"""
 
-    with patch("openai.OpenAI") as mock_openai_cls:
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.return_value = mock_response
-
+    with patch("llm.completion", return_value=mock_response):
         resp = client.post(
             "/workers/ai-news-digest/suggest",
             json={"new_description": "Posts AI news every morning at 9am."},
@@ -163,11 +160,7 @@ def test_suggest_returns_no_conflicts_on_llm_error(client_and_main, monkeypatch)
     client, _ = client_and_main
     monkeypatch.setenv("OPENAI_API_KEY", "sk-test-fake")
 
-    with patch("openai.OpenAI") as mock_openai_cls:
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.side_effect = RuntimeError("network timeout")
-
+    with patch("llm.completion", side_effect=RuntimeError("network timeout")):
         resp = client.post(
             "/workers/ai-news-digest/suggest",
             json={"new_description": "Some description that would normally trigger a call."},
@@ -187,11 +180,7 @@ def test_suggest_no_conflicts_when_description_matches(client_and_main, monkeypa
     mock_response = MagicMock()
     mock_response.choices[0].message.content = '{"has_conflicts": false, "suggestions": []}'
 
-    with patch("openai.OpenAI") as mock_openai_cls:
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.return_value = mock_response
-
+    with patch("llm.completion", return_value=mock_response):
         resp = client.post(
             "/workers/ai-news-digest/suggest",
             json={"new_description": "Posts AI news to Discord every 5 minutes."},

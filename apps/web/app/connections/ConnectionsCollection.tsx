@@ -2,13 +2,14 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Server, KeyRound } from "lucide-react";
+import { AlertTriangle, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ConnectionItem, SecretItem, WorkerSummary } from "@/lib/types";
+import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { BrandLogo } from "@/components/connections/BrandLogo";
+import { RunStatusBadge } from "@/components/RunStatus";
 import {
   type UnifiedConn,
   STATUS_PILL,
@@ -53,7 +54,7 @@ function SetupRequiredCallout({ missingBySlug }: { missingBySlug: Map<string, st
   const totalWorkers = new Set(Array.from(missingBySlug.values()).flat()).size;
   return (
     <div
-      className="flex items-start gap-3 rounded-xl border border-amber-200 bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:border-amber-800/60 dark:bg-amber-950/30 dark:text-amber-200"
+      className="flex items-start gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
       role="alert"
     >
       <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -123,6 +124,115 @@ function KV({ rows }: { rows: [string, React.ReactNode][] }) {
   );
 }
 
+function EmailPeekPanel({ connectionId }: { connectionId: string }) {
+  const [emailPeek, setEmailPeek] = useState<
+    Array<{ subject: string; from_name: string; from_email: string; date: string }>
+  >([]);
+  const [loadingPeek, setLoadingPeek] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    setLoadingPeek(true);
+    api.connections
+      .peek(connectionId)
+      .then((result) => {
+        if (alive) setEmailPeek(result.emails ?? []);
+      })
+      .catch(() => {
+        if (alive) setEmailPeek([]);
+      })
+      .finally(() => {
+        if (alive) setLoadingPeek(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [connectionId]);
+
+  if (loadingPeek) return <div style={pad}>Loading recent emails...</div>;
+
+  return (
+    <div className="c-ltable">
+      <div className="c-lrow" style={{ gridTemplateColumns: "auto 1fr", alignItems: "start" }}>
+        <Mail className="mt-1 size-4 text-muted-foreground" />
+        <div className="c-lprimary">
+          <div className="c-lp-tx">
+            <div className="nm">Recent emails</div>
+            <div className="meta">Trust signal from the connected Gmail account.</div>
+          </div>
+        </div>
+      </div>
+      {emailPeek.map((email, index) => (
+        <div
+          key={`${email.from_email}-${email.date}-${index}`}
+          className="c-lrow"
+          style={{ gridTemplateColumns: "1fr auto" }}
+        >
+          <div className="c-lprimary">
+            <div className="c-lp-tx">
+              <div className="nm">{email.subject || "(No subject)"}</div>
+              <div className="meta">
+                {email.from_name || email.from_email}
+                {email.from_name && email.from_email ? ` <${email.from_email}>` : ""}
+              </div>
+            </div>
+          </div>
+          <span className="c-cell m">{email.date ? new Date(email.date).toLocaleDateString() : ""}</span>
+        </div>
+      ))}
+      {emailPeek.length === 0 && <div style={pad}>No recent emails available.</div>}
+    </div>
+  );
+}
+
+function ActivityPanel({ connectionId }: { connectionId: string }) {
+  const [activity, setActivity] = useState<RunSummary[]>([]);
+  const [loadingActivity, setLoadingActivity] = useState(true);
+
+  useEffect(() => {
+    let alive = true;
+    setLoadingActivity(true);
+    api.connections
+      .activity(connectionId)
+      .then((runs) => {
+        if (alive) setActivity(runs ?? []);
+      })
+      .catch(() => {
+        if (alive) setActivity([]);
+      })
+      .finally(() => {
+        if (alive) setLoadingActivity(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [connectionId]);
+
+  if (loadingActivity) return <div style={pad}>Loading activity...</div>;
+
+  return (
+    <div className="c-ltable">
+      {activity.map((run) => (
+        <Link
+          key={run.id}
+          href={`/runs?sel=${encodeURIComponent(run.id)}`}
+          className="c-lrow"
+          style={{ gridTemplateColumns: "1fr auto", textDecoration: "none" }}
+        >
+          <div className="c-lprimary">
+            <div className="c-lp-tx">
+              <div className="nm">{run.worker_name || run.worker_id}</div>
+              <div className="meta">{run.created_at ? new Date(run.created_at).toLocaleString() : run.id}</div>
+            </div>
+          </div>
+          <RunStatusBadge status={run.status} showSuccess />
+        </Link>
+      ))}
+      {activity.length === 0 && <div style={pad}>No recent activity.</div>}
+    </div>
+  );
+}
+
 export default function ConnectionsCollection({
   initialConnections,
 }: {
@@ -131,8 +241,9 @@ export default function ConnectionsCollection({
   const [connections, setConnections] = useState<ConnectionItem[]>(initialConnections);
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
+  const [loading, setLoading] = useState(initialConnections.length === 0);
 
-  const refresh = async () => {
+  const refresh = async (initial = false) => {
     const [c, s, w] = await Promise.allSettled([
       api.connections.list(),
       api.secrets.list(),
@@ -141,10 +252,11 @@ export default function ConnectionsCollection({
     if (c.status === "fulfilled") setConnections(c.value);
     if (s.status === "fulfilled") setSecrets(s.value);
     if (w.status === "fulfilled") setWorkers(w.value);
+    if (initial) setLoading(false);
   };
 
   useEffect(() => {
-    void refresh();
+    void refresh(true);
   }, []);
 
   const items = useMemo(() => toUnified(connections, secrets), [connections, secrets]);
@@ -186,6 +298,7 @@ export default function ConnectionsCollection({
     title: "Connections",
     subtitle: "Apps, MCP servers and secrets your workers can use.",
     items,
+    loading,
     idOf: (i) => i.id,
     searchOf: (i) => `${i.name} ${i.account} ${TYPE_LABEL[i.kind]}`,
     tagsOf: (i) =>
@@ -212,6 +325,7 @@ export default function ConnectionsCollection({
     columns: {
       template: "1.8fr 110px 1fr 120px 40px",
       headers: ["Connects to", "Type", "Detail", "Status", ""],
+      headerTransparent: true,
     },
     row: (i) => ({
       leading: <Logo item={i} />,
@@ -236,20 +350,11 @@ export default function ConnectionsCollection({
       status: STATUS_PILL[i.statusKey],
     }),
     detail: (i) => {
-      const fullHref =
-        i.kind === "mcp"
-          ? `/connections/mcp/${i.id}`
-          : i.kind === "secret"
-            ? `/connections/secrets`
-            : `/connections/${i.id}`;
       const actions = (
         <>
           <button type="button" className="c-addbtn" style={pillBtn} onClick={() => void test(i)}>
             Test
           </button>
-          <Link href={fullHref} className="c-vpill" style={{ padding: "6px 11px" }}>
-            Open full page →
-          </Link>
         </>
       );
       const header = {
@@ -267,6 +372,7 @@ export default function ConnectionsCollection({
       };
       if (i.kind === "connection" && i.connection) {
         const c = i.connection;
+        const isEmailConnection = c.app_name.toLowerCase().includes("gmail");
         return {
           header,
           tabs: [
@@ -307,16 +413,17 @@ export default function ConnectionsCollection({
             {
               key: "Activity",
               label: "Activity",
-              render: () => (
-                <div style={pad}>
-                  Recent activity lives on the{" "}
-                  <Link href={fullHref} style={{ color: "var(--accent)" }}>
-                    full connection page
-                  </Link>
-                  .
-                </div>
-              ),
+              render: () => <ActivityPanel connectionId={c.id} />,
             },
+            ...(isEmailConnection
+              ? [
+                  {
+                    key: "Recent emails",
+                    label: "Recent emails",
+                    render: () => <EmailPeekPanel connectionId={c.id} />,
+                  },
+                ]
+              : []),
           ],
         };
       }
@@ -436,7 +543,7 @@ export default function ConnectionsCollection({
                 key={href}
                 href={href}
                 className="c-lrow"
-                style={{ gridTemplateColumns: "1fr auto", textDecoration: "none", border: "1px solid var(--line)", borderRadius: 12, padding: "12px 14px" }}
+                style={{ gridTemplateColumns: "1fr auto", textDecoration: "none", border: "var(--bd-list)", borderRadius: "var(--radius-card)", padding: "12px 14px" }}
               >
                 <div className="c-lprimary">
                   <div className="c-lp-tx">
@@ -469,8 +576,8 @@ export default function ConnectionsCollection({
 const pad: React.CSSProperties = { color: "var(--muted-foreground)", padding: "8px 2px" };
 const pillBtn: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5 };
 const codeBlock: React.CSSProperties = {
-  border: "1px solid var(--line)",
-  borderRadius: 12,
+  border: "var(--bd-card)",
+  borderRadius: "var(--radius-card)",
   background: "var(--bg-2)",
   color: "var(--ink-soft)",
   padding: 13,

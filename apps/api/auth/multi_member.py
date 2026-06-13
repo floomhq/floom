@@ -60,12 +60,48 @@ def _local_shared_secret_context(request: Request) -> AuthContext:
                 role="member",
                 auth_method="secret",
             )
+        # #933: user-header scope means a trusted proxy MUST identify the user
+        # on every request. A request without x-floom-user used to fall back to
+        # the default ADMIN context, so a proxy that forgot to inject the
+        # header silently granted admin to everyone. Fail closed instead.
+        raise HTTPException(
+            status_code=401,
+            detail="x-floom-user header required when user-header scope is enabled",
+        )
+    # #933: FLOOM_SECRET is a root-equivalent credential by default (backwards
+    # compat for single-user installs). Deployments can demote it with
+    # WORKEROS_SHARED_SECRET_ROLE=member so secret leakage no longer equals
+    # full admin compromise.
+    if (os.environ.get("WORKEROS_SHARED_SECRET_ROLE") or "").strip().lower() == "member":
+        return AuthContext(user_id=user_id, role="member", auth_method="secret")
     return AuthContext(
         user_id=user_id,
         role="admin",
         auth_method="secret",
         scopes=("admin",),
     )
+
+
+def _require_active_token_user(user_id: str) -> None:
+    """#915/#916: tokens must die with their user.
+
+    Once the install has real user accounts (multi-member mode), any token
+    whose owning user is missing or disabled is rejected. Installs with an
+    empty users table (legacy single-user/dev) keep working unchanged.
+    """
+    from db import get_db
+
+    with get_db() as conn:
+        row = conn.execute(
+            "SELECT disabled FROM users WHERE id = ? LIMIT 1", (user_id,)
+        ).fetchone()
+        if row is not None:
+            if row["disabled"]:
+                raise HTTPException(status_code=401, detail="account disabled")
+            return
+        count_row = conn.execute("SELECT COUNT(*) AS cnt FROM users").fetchone()
+    if count_row and int(count_row["cnt"] or 0) > 0:
+        raise HTTPException(status_code=401, detail="invalid token")
 
 
 class MultiMemberAuthProvider:
@@ -159,6 +195,9 @@ class MultiMemberAuthProvider:
         user_id = str(payload.get("user_id") or "")
         if not user_id:
             raise HTTPException(status_code=401, detail="invalid run token: missing user_id")
+        # #916: a disabled/deleted user's in-flight runs must not keep minting
+        # access via child-run tokens for the rest of the token lifetime.
+        _require_active_token_user(user_id)
         return AuthContext(
             user_id=user_id,
             role="member",
@@ -172,6 +211,9 @@ class MultiMemberAuthProvider:
 
     async def _verify_pat(self, raw_token: str) -> AuthContext:
         from db import get_repositories, now_iso
+
+        if raw_token.startswith("wst_"):
+            return await self._verify_workspace_token(raw_token)
         repos = get_repositories()
         if repos.tokens is None:
             raise HTTPException(status_code=401, detail="unauthorized")
@@ -199,6 +241,49 @@ class MultiMemberAuthProvider:
             scopes=("admin",) if row.get("role") == "admin" else (),
         )
 
+    async def _verify_workspace_token(self, raw_token: str) -> AuthContext:
+        """Workspace API token (wst_): authenticates as the synthetic workspace
+        actor with MEMBER role — read+run on workspace-shared assets only.
+
+        The actor is never is_owner of anything a human can claim, so private
+        workers (including the minter's own) are structurally invisible, and
+        edit/delete/share are denied by the canonical permission rule. A
+        main.py middleware additionally restricts these tokens to GET/HEAD +
+        POST /workers/{id}/runs and blocks credential/config surfaces.
+        """
+        from db import get_db, now_iso
+        from db.sqlite import workspace_actor_id
+
+        token_hash = _hash_token(raw_token)
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT id, workspace_id, name, expires_at
+                FROM workspace_api_tokens
+                WHERE token_hash = ? AND revoked_at IS NULL
+                LIMIT 1
+                """,
+                (token_hash,),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=401, detail="invalid token")
+        if _is_expired(row["expires_at"]):
+            raise HTTPException(status_code=401, detail="token expired")
+        try:
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE workspace_api_tokens SET last_used_at = ? WHERE id = ?",
+                    (now_iso(), row["id"]),
+                )
+        except Exception:
+            pass
+        return AuthContext(
+            user_id=workspace_actor_id(str(row["workspace_id"])),
+            role="member",
+            auth_method="workspace_token",
+            username=row["name"],
+        )
+
     async def _verify_cli_api_token(self, raw_token: str) -> AuthContext:
         from db import get_db, now_iso
 
@@ -206,7 +291,7 @@ class MultiMemberAuthProvider:
         with get_db() as conn:
             row = conn.execute(
                 """
-                SELECT id, user_id, role, name
+                SELECT id, user_id, role, name, expires_at
                 FROM cli_api_tokens
                 WHERE token_hash = ? AND revoked_at IS NULL
                 LIMIT 1
@@ -215,6 +300,11 @@ class MultiMemberAuthProvider:
             ).fetchone()
         if row is None:
             raise HTTPException(status_code=401, detail="invalid token")
+        if _is_expired(row["expires_at"]):
+            raise HTTPException(status_code=401, detail="token expired")
+        # #915: validate the owning user's lifecycle — disabling or deleting a
+        # user must invalidate their CLI tokens, same as PATs and sessions.
+        _require_active_token_user(row["user_id"])
 
         try:
             with get_db() as conn:

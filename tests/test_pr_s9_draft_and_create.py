@@ -113,14 +113,12 @@ def client_with_tmp_workers(tmp_path, monkeypatch):
 # 1. Happy path: LLM returns valid YAML + files -> worker created
 # ---------------------------------------------------------------------------
 
-@patch("openai.OpenAI")
-def test_draft_and_create_happy_path(mock_openai_cls, client_with_tmp_workers):
+@patch("codegen_model.chat_completion_codegen")
+def test_draft_and_create_happy_path(mock_codegen, client_with_tmp_workers):
     """LLM returns valid files[] -> worker is written to disk and worker_id returned."""
     client, workers_dir = client_with_tmp_workers
 
-    mock_client = MagicMock()
-    mock_openai_cls.return_value = mock_client
-    mock_client.chat.completions.create.return_value = _mock_openai_response(
+    mock_codegen.return_value = _mock_openai_response(
         _llm_json_response(_valid_worker_yml(), include_files=True)
     )
 
@@ -171,9 +169,9 @@ trigger:
 """
 
 
-@patch("openai.OpenAI")
+@patch("codegen_model.chat_completion_codegen")
 def test_draft_and_create_pure_script_missing_command_returns_200(
-    mock_openai_cls, client_with_tmp_workers
+    mock_codegen, client_with_tmp_workers
 ):
     """exec.mode=pure-script + entry=run.py + NO command -> 200, not 502."""
     client, workers_dir = client_with_tmp_workers
@@ -194,11 +192,7 @@ def test_draft_and_create_pure_script_missing_command_returns_200(
         ],
     }
 
-    mock_client = MagicMock()
-    mock_openai_cls.return_value = mock_client
-    mock_client.chat.completions.create.return_value = _mock_openai_response(
-        json.dumps(payload)
-    )
+    mock_codegen.return_value = _mock_openai_response(json.dumps(payload))
 
     secret = os.environ.get("FLOOM_SECRET", "")
     headers = {"x-floom-secret": secret} if secret else {}
@@ -221,8 +215,8 @@ def test_draft_and_create_pure_script_missing_command_returns_200(
 # 2. Invalid YAML path: LLM returns broken YAML 3 times -> 502, no worker
 # ---------------------------------------------------------------------------
 
-@patch("openai.OpenAI")
-def test_draft_and_create_invalid_yaml_returns_502(mock_openai_cls, client_with_tmp_workers):
+@patch("codegen_model.chat_completion_codegen")
+def test_draft_and_create_invalid_yaml_returns_502(mock_codegen, client_with_tmp_workers):
     """LLM returns broken YAML on every attempt -> 502, no worker dir created."""
     client, workers_dir = client_with_tmp_workers
 
@@ -236,9 +230,7 @@ def test_draft_and_create_invalid_yaml_returns_502(mock_openai_cls, client_with_
         "outputs": [],
     })
 
-    mock_client = MagicMock()
-    mock_openai_cls.return_value = mock_client
-    mock_client.chat.completions.create.return_value = _mock_openai_response(broken_response)
+    mock_codegen.return_value = _mock_openai_response(broken_response)
 
     secret = os.environ.get("FLOOM_SECRET", "")
     headers = {"x-floom-secret": secret} if secret else {}
@@ -253,7 +245,7 @@ def test_draft_and_create_invalid_yaml_returns_502(mock_openai_cls, client_with_
     assert "not valid" in detail.lower() or "3 attempts" in detail
 
     # LLM called exactly 3 times
-    assert mock_client.chat.completions.create.call_count == 3
+    assert mock_codegen.call_count == 3
 
     # No worker dir should exist
     assert not (workers_dir / "bad-worker").exists(), "Worker dir must not be created on failure"
@@ -263,13 +255,10 @@ def test_draft_and_create_invalid_yaml_returns_502(mock_openai_cls, client_with_
 # 3. Pre-supplied files path: LLM must NOT be called
 # ---------------------------------------------------------------------------
 
-@patch("openai.OpenAI")
-def test_draft_and_create_pre_supplied_files(mock_openai_cls, client_with_tmp_workers):
+@patch("codegen_model.chat_completion_codegen")
+def test_draft_and_create_pre_supplied_files(mock_codegen, client_with_tmp_workers):
     """When files[] is provided, LLM is skipped and files are written directly."""
     client, workers_dir = client_with_tmp_workers
-
-    mock_client = MagicMock()
-    mock_openai_cls.return_value = mock_client
 
     secret = os.environ.get("FLOOM_SECRET", "")
     headers = {"x-floom-secret": secret} if secret else {}
@@ -289,7 +278,7 @@ def test_draft_and_create_pre_supplied_files(mock_openai_cls, client_with_tmp_wo
     assert data["worker_id"] == "upload-test-worker"
 
     # LLM must not have been called
-    mock_client.chat.completions.create.assert_not_called()
+    mock_codegen.assert_not_called()
 
     # Files on disk
     worker_dir = workers_dir / "upload-test-worker"

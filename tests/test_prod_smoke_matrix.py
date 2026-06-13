@@ -103,3 +103,62 @@ def test_render_report_includes_system_health_and_matrix():
     assert "slack-listener" in report
     assert "opendraft" in report
     assert "smoke start + cancel" in report
+
+
+def _result(mod, worker_id, status="completed", run_id="run_x"):
+    return mod.WorkerSmokeResult(worker_id, run_id, status, 1000, 10, "")
+
+
+def test_parse_report_pass_states_round_trips_rendered_report():
+    mod = _load_module()
+    report = mod._render_report(
+        report_date="2026-06-10",
+        api_base="https://workers-api.floom.dev",
+        metrics={},
+        alerts=[],
+        failures=[],
+        smoke_results=[
+            _result(mod, "weekly_update"),
+            _result(mod, "research_brief", status="failed"),
+        ],
+    )
+    states = mod._parse_report_pass_states(report)
+    assert states == {"weekly_update": "pass", "research_brief": "fail"}
+
+
+def test_find_regressions_only_flags_pass_to_fail():
+    mod = _load_module()
+    previous = {"weekly_update": "pass", "research_brief": "fail", "csv_enricher": "pass"}
+    current = [
+        _result(mod, "weekly_update", status="failed"),     # pass -> fail: regression
+        _result(mod, "research_brief", status="failed"),    # fail -> fail: not a regression
+        _result(mod, "csv_enricher"),                       # pass -> pass: fine
+        _result(mod, "brand-new-worker", status="failed"),  # no baseline: not a regression
+    ]
+    assert mod._find_regressions(previous, current) == ["weekly_update"]
+
+
+def test_previous_report_path_picks_latest_older(tmp_path):
+    mod = _load_module()
+    (tmp_path / "SMOKE-RESULTS-2026-05-29.md").write_text("old", encoding="utf-8")
+    (tmp_path / "SMOKE-RESULTS-2026-06-09.md").write_text("newer", encoding="utf-8")
+    (tmp_path / "SMOKE-RESULTS-2026-06-12.md").write_text("today", encoding="utf-8")
+    picked = mod._previous_report_path(tmp_path, "2026-06-12")
+    assert picked and picked.name == "SMOKE-RESULTS-2026-06-09.md"
+    assert mod._previous_report_path(tmp_path, "2026-05-29") is None
+
+
+def test_render_report_lists_regressions_section():
+    mod = _load_module()
+    report = mod._render_report(
+        report_date="2026-06-12",
+        api_base="https://workers-api.floom.dev",
+        metrics={},
+        alerts=[],
+        failures=[],
+        smoke_results=[_result(mod, "weekly_update", status="failed")],
+        regressions=["weekly_update"],
+        previous_report_name="SMOKE-RESULTS-2026-06-09.md",
+    )
+    assert "Regressions vs SMOKE-RESULTS-2026-06-09.md" in report
+    assert "- `weekly_update`" in report

@@ -249,12 +249,10 @@ class TestDraftFromPromptEndpoint:
         resp = client.post("/workers/draft-from-prompt", json={})
         assert resp.status_code == 422
 
-    @patch("openai.OpenAI")
-    def test_granola_hubspot_prompt_extracts_connections(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_granola_hubspot_prompt_extracts_connections(self, mock_codegen, client):
         """Full success path: granola+hubspot prompt returns those connections."""
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.return_value = _mock_openai_response(
+        mock_codegen.return_value = _mock_openai_response(
             _good_llm_json(name="granola-hubspot-sync", connections=["granola", "hubspot"])
         )
 
@@ -270,15 +268,13 @@ class TestDraftFromPromptEndpoint:
         assert data["suggested_name"]
         assert data["suggested_title"]
 
-    @patch("openai.OpenAI")
-    def test_generated_yaml_passes_parse_worker_manifest(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_generated_yaml_passes_parse_worker_manifest(self, mock_codegen, client):
         """YAML returned by the endpoint round-trips through parse_worker_manifest."""
         import yaml as pyyaml
         from models import parse_worker_manifest, WorkerContract
 
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.return_value = _mock_openai_response(
+        mock_codegen.return_value = _mock_openai_response(
             _good_llm_json()
         )
 
@@ -292,12 +288,10 @@ class TestDraftFromPromptEndpoint:
         result = parse_worker_manifest(raw)
         assert isinstance(result, WorkerContract)
 
-    @patch("openai.OpenAI")
-    def test_auth_gate_works_with_correct_secret(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_auth_gate_works_with_correct_secret(self, mock_codegen, client):
         """When FLOOM_SECRET is set, the correct header passes through."""
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.return_value = _mock_openai_response(
+        mock_codegen.return_value = _mock_openai_response(
             _good_llm_json()
         )
 
@@ -312,13 +306,11 @@ class TestDraftFromPromptEndpoint:
         finally:
             os.environ.pop("FLOOM_SECRET", None)
 
-    @patch("openai.OpenAI")
-    def test_markdown_fence_stripped_from_llm_response(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_markdown_fence_stripped_from_llm_response(self, mock_codegen, client):
         """LLM responses wrapped in markdown fences are stripped cleanly."""
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
         # Wrap in markdown fence
-        mock_client.chat.completions.create.return_value = _mock_openai_response(
+        mock_codegen.return_value = _mock_openai_response(
             "```json\n" + _good_llm_json() + "\n```"
         )
 
@@ -328,12 +320,10 @@ class TestDraftFromPromptEndpoint:
         )
         assert resp.status_code == 200, resp.text
 
-    @patch("openai.OpenAI")
-    def test_invalid_json_from_llm_returns_502(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_invalid_json_from_llm_returns_502(self, mock_codegen, client):
         """If the LLM returns non-JSON, the endpoint returns 502."""
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.return_value = _mock_openai_response(
+        mock_codegen.return_value = _mock_openai_response(
             "Here is a great worker! Just kidding this is not JSON."
         )
 
@@ -343,8 +333,8 @@ class TestDraftFromPromptEndpoint:
         )
         assert resp.status_code == 502
 
-    @patch("openai.OpenAI")
-    def test_unquoted_colon_yaml_retries_then_succeeds(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_unquoted_colon_yaml_retries_then_succeeds(self, mock_codegen, client):
         """If the LLM returns YAML with an unquoted colon in a string value on the
         first attempt, the endpoint must retry and succeed on the second attempt.
 
@@ -378,9 +368,7 @@ class TestDraftFromPromptEndpoint:
             "outputs": [{"name": "summary", "type": "markdown", "label": "Summary"}],
         })
 
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.side_effect = [
+        mock_codegen.side_effect = [
             _mock_openai_response(bad_response),
             _mock_openai_response(_good_llm_json()),
         ]
@@ -390,15 +378,15 @@ class TestDraftFromPromptEndpoint:
             json={"prompt": "Summarise meetings and post action items"},
         )
         assert resp.status_code == 200, resp.text
-        assert mock_client.chat.completions.create.call_count == 2
+        assert mock_codegen.call_count == 2
 
         # Second call must include the strict-quoting addendum
-        second_call_kwargs = mock_client.chat.completions.create.call_args_list[1].kwargs
+        second_call_kwargs = mock_codegen.call_args_list[1].kwargs
         system_content = second_call_kwargs["messages"][0]["content"]
         assert "PREVIOUS ATTEMPT FAILED YAML VALIDATION" in system_content
 
-    @patch("openai.OpenAI")
-    def test_three_consecutive_yaml_failures_returns_502(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_three_consecutive_yaml_failures_returns_502(self, mock_codegen, client):
         """If every retry attempt produces invalid YAML, the endpoint returns 502."""
         bad_yaml = (
             'schema_version: "0.3"\n'
@@ -418,20 +406,18 @@ class TestDraftFromPromptEndpoint:
             "outputs": [{"name": "summary", "type": "markdown", "label": "Summary"}],
         })
 
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.return_value = _mock_openai_response(bad_response)
+        mock_codegen.return_value = _mock_openai_response(bad_response)
 
         resp = client.post(
             "/workers/draft-from-prompt",
             json={"prompt": "Do something"},
         )
         assert resp.status_code == 502
-        assert mock_client.chat.completions.create.call_count == 3
+        assert mock_codegen.call_count == 3
         assert "after 3 attempts" in resp.json()["detail"]
 
-    @patch("openai.OpenAI")
-    def test_numeric_schema_version_and_missing_version_are_repaired(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_numeric_schema_version_and_missing_version_are_repaired(self, mock_codegen, client):
         """Generated YAML with schema_version 0.3 as a number and no version gets repaired."""
         import yaml as pyyaml
         from models import parse_worker_manifest, WorkerContract
@@ -449,9 +435,7 @@ class TestDraftFromPromptEndpoint:
             "trigger:\n"
             '  type: "manual"\n'
         )
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.return_value = _mock_openai_response(
+        mock_codegen.return_value = _mock_openai_response(
             json.dumps(
                 {
                     "worker_yml": bad_yaml,
@@ -573,14 +557,12 @@ trigger:
         }
         import json as json_mod
 
-        with patch("openai.OpenAI") as mock_cls:
-            mock_client_inst = MagicMock()
-            mock_cls.return_value = mock_client_inst
+        with patch("codegen_model.chat_completion_codegen") as mock_codegen:
             choice = MagicMock()
             choice.message.content = json_mod.dumps(llm_payload)
             response = MagicMock()
             response.choices = [choice]
-            mock_client_inst.chat.completions.create.return_value = response
+            mock_codegen.return_value = response
 
             resp = client.post(
                 "/workers/draft-from-prompt",
@@ -599,12 +581,10 @@ trigger:
 class TestRequirementsUX:
     """Verify that the requirements array is returned correctly and without duplicates."""
 
-    @patch("openai.OpenAI")
-    def test_granola_slack_prompt_returns_two_requirements_no_calendar(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_granola_slack_prompt_returns_two_requirements_no_calendar(self, mock_codegen, client):
         """Prompt with Granola + Slack should return exactly 2 requirements, no google-calendar."""
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.return_value = _mock_openai_response(
+        mock_codegen.return_value = _mock_openai_response(
             _good_llm_json(
                 name="granola-slack-sync",
                 connections=[],
@@ -631,12 +611,10 @@ class TestRequirementsUX:
         assert "slack" in apps
         assert "google-calendar" not in apps, "google-calendar must not appear for a Granola meetings prompt"
 
-    @patch("openai.OpenAI")
-    def test_hubspot_prompt_returns_oauth_method(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_hubspot_prompt_returns_oauth_method(self, mock_codegen, client):
         """Prompt for HubSpot CRM should return hubspot with method=oauth."""
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.return_value = _mock_openai_response(
+        mock_codegen.return_value = _mock_openai_response(
             _good_llm_json(
                 name="hubspot-crm-sync",
                 connections=["hubspot"],
@@ -665,13 +643,11 @@ class TestRequirementsUX:
             "HubSpot should not appear in required_secrets when method is oauth"
         )
 
-    @patch("openai.OpenAI")
-    def test_no_duplicate_app_in_requirements(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_no_duplicate_app_in_requirements(self, mock_codegen, client):
         """Even if LLM returns duplicate entries, response must deduplicate."""
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
         # LLM returns hubspot twice with different methods (the bad pattern we're fixing)
-        mock_client.chat.completions.create.return_value = _mock_openai_response(
+        mock_codegen.return_value = _mock_openai_response(
             _good_llm_json(
                 name="hubspot-dup-test",
                 connections=["hubspot"],
@@ -696,13 +672,11 @@ class TestRequirementsUX:
             f"hubspot must appear exactly once in requirements, got: {requirements}"
         )
 
-    @patch("openai.OpenAI")
-    def test_requirements_legacy_fallback_when_no_requirements_array(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_requirements_legacy_fallback_when_no_requirements_array(self, mock_codegen, client):
         """When LLM omits requirements array, fall back to required_connections + required_secrets."""
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
         # Old-style LLM response with no requirements field
-        mock_client.chat.completions.create.return_value = _mock_openai_response(
+        mock_codegen.return_value = _mock_openai_response(
             _good_llm_json(
                 name="legacy-test",
                 connections=["granola"],
@@ -731,12 +705,10 @@ class TestRequirementsUX:
         result = _detect_connections("summarise my granola meetings")
         assert "google-calendar" not in result
 
-    @patch("openai.OpenAI")
-    def test_granola_slack_have_both_available_methods(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_granola_slack_have_both_available_methods(self, mock_codegen, client):
         """Granola and Slack both support OAuth + API key; available_methods must list both."""
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.return_value = _mock_openai_response(
+        mock_codegen.return_value = _mock_openai_response(
             _good_llm_json(
                 name="granola-slack-sync",
                 connections=[],
@@ -769,12 +741,10 @@ class TestRequirementsUX:
             f"Slack should have both methods, got: {slack_req['available_methods']}"
         )
 
-    @patch("openai.OpenAI")
-    def test_apollo_has_api_key_only(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_apollo_has_api_key_only(self, mock_codegen, client):
         """Apollo is api_key only; available_methods must contain only 'api_key'."""
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
-        mock_client.chat.completions.create.return_value = _mock_openai_response(
+        mock_codegen.return_value = _mock_openai_response(
             _good_llm_json(
                 name="apollo-enricher",
                 connections=[],
@@ -798,13 +768,11 @@ class TestRequirementsUX:
             f"Apollo should be api_key only, got: {apollo_reqs[0]['available_methods']}"
         )
 
-    @patch("openai.OpenAI")
-    def test_llm_suggested_method_is_initial_value(self, mock_openai_cls, client):
+    @patch("codegen_model.chat_completion_codegen")
+    def test_llm_suggested_method_is_initial_value(self, mock_codegen, client):
         """The LLM-suggested method for an app wins as the initial method value."""
-        mock_client = MagicMock()
-        mock_openai_cls.return_value = mock_client
         # LLM suggests granola via api_key (even though both are available)
-        mock_client.chat.completions.create.return_value = _mock_openai_response(
+        mock_codegen.return_value = _mock_openai_response(
             _good_llm_json(
                 name="granola-worker",
                 connections=[],

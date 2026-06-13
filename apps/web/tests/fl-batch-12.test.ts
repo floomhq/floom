@@ -116,8 +116,8 @@ function test545WorkerShareCardShowsImportingState(): void {
 function test545WorkerShareCardRedirectsAfterImport(): void {
   const s = src("components/share/WorkerShareCard.tsx");
   assert(
-    s.includes("router.push") && s.includes("/workers/"),
-    "WorkerShareCard must redirect to the imported worker page after import",
+    s.includes("router.push") && s.includes("/workers?sel="),
+    "WorkerShareCard must redirect to the imported worker split-pane detail after import",
   );
 }
 

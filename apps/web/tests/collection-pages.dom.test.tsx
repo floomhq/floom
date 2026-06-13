@@ -99,13 +99,28 @@ describe("page components render with data (no client crash)", () => {
     const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
     render(<RunsCollection initialRuns={[run as never]} />);
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
-    expect(screen.getByText("Export CSV")).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /export/i })).toBeInTheDocument();
+    expect(screen.queryByText("Export CSV")).not.toBeInTheDocument();
+  });
+
+  it("RunsCollection renders runs returned by the client API when server data is empty", async () => {
+    const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
+    render(<RunsCollection initialRuns={[]} />);
+    expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
+    expect(screen.queryByText("No runs yet")).not.toBeInTheDocument();
   });
 
   it("ConnectionsCollection renders the connection", async () => {
     const { default: ConnectionsCollection } = await import("@/app/connections/ConnectionsCollection");
     render(<ConnectionsCollection initialConnections={[connection as never]} />);
     expect(await screen.findByText("GitHub")).toBeInTheDocument();
+  });
+
+  it("ConnectionsCollection renders connections returned by the client API when server data is empty", async () => {
+    const { default: ConnectionsCollection } = await import("@/app/connections/ConnectionsCollection");
+    render(<ConnectionsCollection initialConnections={[]} />);
+    expect(await screen.findByText("GitHub")).toBeInTheDocument();
+    expect(screen.queryByText("No connections yet")).not.toBeInTheDocument();
   });
 
   it("BrainCollection renders the folder", async () => {
@@ -118,5 +133,44 @@ describe("page components render with data (no client crash)", () => {
     const { default: ApprovalsCollection } = await import("@/app/approvals/ApprovalsCollection");
     render(<ApprovalsCollection />);
     expect(await screen.findByText("Reverse Match CRM")).toBeInTheDocument();
+  });
+
+  it("shows loading skeletons, not empty states, while first collection fetches are pending", async () => {
+    const { api } = await import("@/lib/api");
+
+    vi.mocked(api.workers.list).mockReturnValueOnce(new Promise(() => {}) as never);
+    const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
+    const workers = render(<WorkersCollection initialWorkers={[]} />);
+    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText("No workers yet")).not.toBeInTheDocument();
+    workers.unmount();
+
+    vi.mocked(api.runs.list).mockReturnValueOnce(new Promise(() => {}) as never);
+    const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
+    const runs = render(<RunsCollection initialRuns={[]} />);
+    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText("No run history yet")).not.toBeInTheDocument();
+    runs.unmount();
+
+    vi.mocked(api.connections.list).mockReturnValueOnce(new Promise(() => {}) as never);
+    const { default: ConnectionsCollection } = await import("@/app/connections/ConnectionsCollection");
+    const connections = render(<ConnectionsCollection initialConnections={[]} />);
+    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText("No connections yet")).not.toBeInTheDocument();
+    connections.unmount();
+
+    vi.mocked(api.contexts.list).mockReturnValueOnce(new Promise(() => {}) as never);
+    const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
+    const brain = render(<BrainCollection initialFolders={[]} />);
+    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText("No folders yet")).not.toBeInTheDocument();
+    brain.unmount();
+
+    vi.mocked(api.approvals.list).mockReturnValueOnce(new Promise(() => {}) as never);
+    const { default: ApprovalsCollection } = await import("@/app/approvals/ApprovalsCollection");
+    const approvals = render(<ApprovalsCollection />);
+    expect(screen.getByLabelText("Loading")).toBeInTheDocument();
+    expect(screen.queryByText("No pending approvals")).not.toBeInTheDocument();
+    approvals.unmount();
   });
 });

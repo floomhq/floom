@@ -87,7 +87,7 @@ export function useChatStream(): ChatStreamState {
   }, []);
 
   // Cross-tab / cross-instance sync: if another mounted instance (e.g. the dock
-  // while the full page is open, or a second tab) starts a new session or
+  // while another chat surface is open, or a second tab) starts a new session or
   // switches conversation, mirror it here.
   useEffect(() => {
     function onStorage(e: StorageEvent) {
@@ -736,6 +736,8 @@ function workerListCardFromResult(
     status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "completed")),
     actions: event.actions,
     streams: event.streams,
+    args: existing.args ?? ("preview" in existing ? existing.preview : undefined),
+    result: event.result,
     workers,
   };
 }
@@ -759,11 +761,11 @@ function runCardFromResult(
     optionalString(resource?.run_id);
   if (!isRun || !runId) return null;
 
-  const preview = "preview" in existing ? existing.preview : undefined;
+  const args = asRecord(existing.args) ?? ("preview" in existing ? asRecord(existing.preview) : null);
   const workerId =
     optionalString(resource?.worker_id) ??
     optionalString(nestedRun?.worker_id) ??
-    optionalString(asRecord(preview)?.id);
+    optionalString(args?.id);
   const workerName = optionalString(resource?.worker_name) ?? workerId ?? "Worker run";
   const actions =
     event.actions && event.actions.length > 0
@@ -776,7 +778,7 @@ function runCardFromResult(
                 id: "open_run",
                 label: "View run",
                 method: "GET" as const,
-                href: `/runs/${runId}?tab=logs`,
+                href: `/runs?sel=${encodeURIComponent(runId)}&tab=Trace`,
               },
             ]
           : event.actions;
@@ -788,6 +790,8 @@ function runCardFromResult(
     status: normalizeCardStatus(event.card?.status ?? (event.isError ? "failed" : "running")),
     actions,
     streams: event.streams,
+    args: existing.args ?? ("preview" in existing ? existing.preview : undefined),
+    result: event.result,
     toolName: normalizedTool || event.toolName,
     runId,
     workerId,
@@ -886,6 +890,7 @@ export function reduceSSEEvent(
         card_id: cardId,
         toolName: event.toolName,
         title: event.card?.title ?? getToolCardTitle(event.toolName, status),
+        args: event.args_preview ?? event.args,
         preview: event.args_preview as Record<string, unknown> | undefined,
         status,
         ...(event.resource ? {} : {}),
@@ -929,9 +934,7 @@ export function reduceSSEEvent(
                 ? { title: getToolCardTitle(toolName, newStatus) }
                 : {}),
             ...(event.actions ? { actions: event.actions } : {}),
-            ...(event.type === "tool-resource" && event.streams
-              ? { streams: event.streams }
-              : {}),
+            ...("streams" in event && event.streams ? { streams: event.streams } : {}),
           } as ToolCard;
           return { type: "tool-card" as const, card: updatedCard };
         });
@@ -960,6 +963,8 @@ export function reduceSSEEvent(
               : toolName
                 ? { title: getToolCardTitle(toolName, normalizeCardStatus(status)) }
                 : {}),
+            result: event.result,
+            isError: event.isError,
             ...(event.actions ? { actions: event.actions } : {}),
             ...(event.streams ? { streams: event.streams } : {}),
           } as ToolCard;
@@ -1019,7 +1024,9 @@ export function shouldAutoOpenRunDetails(card: ToolCard): card is RunCard {
 }
 
 export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
-  return shouldAutoOpenRunDetails(card) ? `/runs/${card.runId}?tab=logs` : null;
+  return shouldAutoOpenRunDetails(card) && card.runId
+    ? `/runs?sel=${encodeURIComponent(card.runId)}&tab=Trace`
+    : null;
 }
 
 // #825: Emily's answers link to app pages as REAL router hrefs (no DOM access /
@@ -1028,11 +1035,11 @@ export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
 export function getCardHref(card: ToolCard): string | null {
   switch (card.kind) {
     case "worker-create":
-      return card.workerId ? `/workers/${card.workerId}` : null;
+      return card.workerId ? `/workers?sel=${encodeURIComponent(card.workerId)}` : null;
     case "run":
-      return card.runId ? `/runs/${card.runId}` : null;
+      return card.runId ? `/runs?sel=${encodeURIComponent(card.runId)}` : null;
     case "artifact":
-      return card.runId ? `/runs/${card.runId}?tab=Output` : null;
+      return card.runId ? `/runs?sel=${encodeURIComponent(card.runId)}&tab=Output` : null;
     case "approval":
       return card.approvalId ? `/approvals?sel=${card.approvalId}` : "/approvals";
     case "connect-service":

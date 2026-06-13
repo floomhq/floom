@@ -8,6 +8,7 @@ import { toast } from "sonner";
 import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-logo";
+import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import type { LocalWorkspace } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,7 +40,8 @@ type WorkspaceState = {
 };
 
 function shortInitial(name: string): string {
-  const trimmed = name.trim();
+  const display = resolveWorkspaceName(name);
+  const trimmed = display.trim();
   if (!trimmed) return "?";
   return trimmed.slice(0, 2).toUpperCase();
 }
@@ -217,7 +219,7 @@ export function WorkspaceSwitcher() {
     return (
       <div className="px-3 pb-2">
         <div
-          className="flex h-10 items-center gap-2 rounded-md border border-line bg-transparent px-2.5 text-sm text-[var(--ink-mute)]"
+          className="flex h-10 items-center gap-2 rounded-md [border:var(--bd-card)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)]"
           aria-label="Loading workspaces"
         >
           <div className="size-6 shrink-0 rounded-md bg-muted" />
@@ -243,18 +245,20 @@ export function WorkspaceSwitcher() {
   return (
     <div className="px-3 pb-2">
       <DropdownMenu>
+        {/* V4 SPEC §2: workspace identity — mark + name + chevron-on-hover */}
         <DropdownMenuTrigger
           className={cn(
-            "flex h-10 w-full items-center gap-2 rounded-md border border-line bg-transparent px-2.5 text-sm font-medium text-ink transition-colors duration-150",
-            "hover:bg-[color-mix(in_srgb,var(--paper)_62%,transparent)]"
+            "group flex h-10 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm font-semibold text-ink transition-colors duration-150",
+            "hover:bg-[var(--active-nav-bg)] focus-visible:outline-none"
           )}
           aria-label="Switch workspace"
         >
+          {/* Workspace mark: company logo if available, else colored initial */}
           <div className="size-6 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_22%,transparent)] text-[var(--accent)] grid place-items-center text-[10px] font-semibold uppercase tracking-wide">
             {shortInitial(active.name)}
           </div>
-          <span className="flex-1 truncate text-left">{active.name}</span>
-          <ChevronsUpDown className="size-4 opacity-60" />
+          <span className="flex-1 truncate text-left">{resolveWorkspaceName(active.name)}</span>
+          <ChevronsUpDown className="size-4 opacity-0 group-hover:opacity-60 transition-opacity duration-100" />
         </DropdownMenuTrigger>
         {/* V9 (Federico 2026-06-02): "this can also be cleaner." The popover is
             split into two clear sections — the workspace LIST (active row
@@ -285,7 +289,7 @@ export function WorkspaceSwitcher() {
                   <div className="size-5 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)] grid place-items-center text-[9px] font-semibold uppercase">
                     {shortInitial(w.name)}
                   </div>
-                  <span className="flex-1 truncate">{w.name}</span>
+                  <span className="flex-1 truncate">{resolveWorkspaceName(w.name)}</span>
                   {isActive ? <Check className="size-4 opacity-80" /> : null}
                 </DropdownMenuItem>
               );
@@ -425,7 +429,7 @@ export function WorkspaceSwitcher() {
             <DialogTitle>New workspace</DialogTitle>
             <DialogDescription>
               Workspaces keep workers, runs, connections, secrets, and brain folders
-              isolated on this local WorkerOS instance.
+              isolated on this local Floom instance.
             </DialogDescription>
           </DialogHeader>
           <div className="space-y-3 py-2">

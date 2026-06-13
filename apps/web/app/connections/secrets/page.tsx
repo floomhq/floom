@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Badge } from "@/components/ui/badge";
+import { StatusPill } from "@/components/collection/StatusPill";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -13,6 +13,7 @@ import { toast } from "sonner";
 import type { SecretItem } from "@/lib/types";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { formatRelativeTime } from "@/components/connections/connection-data";
+import { useIsAdmin } from "@/lib/use-is-admin";
 
 export default function SecretsPage() {
   return (
@@ -43,7 +44,12 @@ function SecretsContent() {
   // Track which secrets have their "used by" list expanded on mobile
   const [expandedUsedBy, setExpandedUsedBy] = useState<Set<string>>(new Set());
 
+  // #943 — the secret inventory (names + which workers use them) maps the
+  // workspace's vendors and operational gaps. Owner/admin only.
+  const { isAdmin, pending: roleCheckPending } = useIsAdmin();
+
   const refresh = useCallback(async () => {
+    if (!isAdmin) return;
     try {
       const s = await api.secrets.list();
       setSecrets(s);
@@ -52,11 +58,16 @@ function SecretsContent() {
     } finally {
       setLoading(false);
     }
-  }, []);
+  }, [isAdmin]);
 
   useEffect(() => {
+    if (roleCheckPending) return;
+    if (!isAdmin) {
+      setLoading(false);
+      return;
+    }
     void refresh();
-  }, [refresh]);
+  }, [refresh, roleCheckPending, isAdmin]);
 
   async function handleAdd() {
     if (!addingName.trim() || !addingValue.trim()) {
@@ -128,6 +139,28 @@ function SecretsContent() {
     }
   }
 
+  // #943 — members see a restricted notice instead of the inventory.
+  if (!roleCheckPending && !isAdmin) {
+    return (
+      <div className="space-y-6">
+        <header>
+          <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
+          <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
+            Manage environment secrets for your workers. Values are write-only.
+          </p>
+        </header>
+        <ConnectionsTabs />
+        <Card className="[border:var(--bd-card)] shadow-none bg-card">
+          <CardContent className="py-8 text-center text-sm text-muted-foreground">
+            <KeyRound className="mx-auto mb-3 h-5 w-5 opacity-60" />
+            Secret names and worker mappings are restricted to workspace owners
+            and admins. Ask an admin if a worker is missing a credential.
+          </CardContent>
+        </Card>
+      </div>
+    );
+  }
+
   return (
     <div className="space-y-6">
       {/* Secrets lives under /connections/secrets (P2-9) and shares the
@@ -153,7 +186,7 @@ function SecretsContent() {
       <ConnectionsTabs />
 
       {addingOpen && (
-        <Card className="border-border shadow-none bg-card">
+        <Card className="[border:var(--bd-card)] shadow-none bg-card">
           <CardHeader>
             <CardTitle className="text-sm font-medium">Add new secret</CardTitle>
           </CardHeader>
@@ -164,14 +197,14 @@ function SecretsContent() {
                 placeholder="SECRET_NAME"
                 value={addingName}
                 onChange={(e) => setAddingName(e.target.value.toUpperCase().replace(/[^A-Z0-9_]/g, "_"))}
-                className="h-11 font-mono text-sm sm:h-9 sm:w-[220px] border-border"
+                className="h-11 font-mono text-sm sm:h-9 sm:w-[220px] [border:var(--bd-card)]"
               />
               <Input
                 type="password"
                 placeholder="Value (write-only)"
                 value={addingValue}
                 onChange={(e) => setAddingValue(e.target.value)}
-                className="h-11 text-sm sm:h-9 sm:flex-1 border-border"
+                className="h-11 text-sm sm:h-9 sm:flex-1 [border:var(--bd-card)]"
                 onKeyDown={(e) => { if (e.key === "Enter") handleAdd(); }}
               />
               <div className="flex gap-2">
@@ -201,7 +234,7 @@ function SecretsContent() {
             Array.from({ length: 4 }).map((_, i) => <Skeleton key={i} className="h-14 w-full" />)
           ) : secrets.length === 0 ? (
             <div className="py-12 flex flex-col items-center gap-3 text-center">
-              <div className="w-10 h-10 rounded-full bg-muted flex items-center justify-center">
+              <div className="w-10 h-10 rounded-[var(--radius-pill)] bg-muted flex items-center justify-center">
                 <KeyRound className="w-5 h-5 text-muted-foreground" />
               </div>
               <div>
@@ -293,27 +326,18 @@ function SecretsContent() {
                     {/* Action buttons: min 44px touch targets on mobile via padding */}
                     <div className="flex items-center gap-1 shrink-0">
                       {testResults[s.name] && (
-                        <Badge
-                          variant="outline"
-                          className={
-                            testResults[s.name].status === "valid"
-                              ? "text-emerald-600 border-emerald-200 bg-emerald-50 text-xs hidden sm:inline-flex"
-                              : "text-red-600 border-red-200 bg-red-50 text-xs hidden sm:inline-flex"
-                          }
-                          title={testResults[s.name].reason}
-                        >
-                          {testResults[s.name].status === "valid" ? "Valid" : "Invalid"}
-                        </Badge>
+                        <span className="hidden sm:inline-flex" title={testResults[s.name].reason}>
+                          <StatusPill
+                            spec={
+                              testResults[s.name].status === "valid"
+                                ? { tone: "ok", label: "Valid" }
+                                : { tone: "err", label: "Invalid" }
+                            }
+                          />
+                        </span>
                       )}
                       {/* S29v: only show pill when state needs attention. */}
-                      {s.status !== "set" && (
-                        <Badge
-                          variant="outline"
-                          className="text-red-600 border-red-200 bg-red-50 text-xs"
-                        >
-                          Missing
-                        </Badge>
-                      )}
+                      {s.status !== "set" && <StatusPill spec={{ tone: "err", label: "Missing" }} />}
                       <Button
                         variant="ghost"
                         size="sm"
@@ -357,7 +381,7 @@ function SecretsContent() {
                         placeholder="New value (write-only)"
                         value={updatingValue}
                         onChange={(e) => setUpdatingValue(e.target.value)}
-                        className="h-11 text-sm border-border sm:h-8 sm:flex-1"
+                        className="h-11 text-sm [border:var(--bd-card)] sm:h-8 sm:flex-1"
                         onKeyDown={(e) => { if (e.key === "Enter") handleUpdate(s.name); if (e.key === "Escape") setUpdatingName(null); }}
                         autoFocus
                       />

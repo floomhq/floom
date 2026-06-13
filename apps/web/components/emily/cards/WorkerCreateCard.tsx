@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, Circle, Loader2, XCircle, Play, ExternalLink } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { StatusPill } from "@/components/collection/StatusPill";
 import { cn } from "@/lib/utils";
 import type { WorkerCreateCard as WorkerCreateCardType } from "@/lib/emily-chat-types";
 
@@ -52,31 +52,17 @@ export function WorkerCreateCard({ card }: { card: WorkerCreateCardType }) {
   const isFailed = card.step === "failed";
 
   return (
-    <div className="rounded-lg border border-border bg-card/60 overflow-hidden text-sm">
+    <div className="rounded-lg [border:var(--bd-card)] bg-card/60 overflow-hidden text-sm">
       {/* Header */}
-      <div className="flex items-center gap-2.5 px-3.5 py-2.5 border-b border-border/50">
+      <div className="flex items-center gap-2.5 px-3.5 py-2.5 [border-bottom:var(--bd-div)]/50">
         <span
-          className="size-2 rounded-full shrink-0"
+          className="size-2 rounded-[var(--radius-pill)] shrink-0"
           style={{ background: "#59AAF8" }}
           aria-hidden="true"
         />
         <span className="font-medium flex-1 min-w-0 truncate">{card.workerName}</span>
-        {isReady && (
-          <Badge
-            variant="secondary"
-            className="text-[10px] px-1.5 py-0.5 bg-green-500/10 text-green-700 border-green-500/20 font-normal"
-          >
-            Ready
-          </Badge>
-        )}
-        {isFailed && (
-          <Badge
-            variant="secondary"
-            className="text-[10px] px-1.5 py-0.5 bg-red-500/10 text-red-600 border-red-500/20 font-normal"
-          >
-            Failed
-          </Badge>
-        )}
+        {isReady && <StatusPill spec={{ tone: "ok", label: "Ready" }} />}
+        {isFailed && <StatusPill spec={{ tone: "err", label: "Failed" }} />}
       </div>
 
       {/* Steps */}
@@ -96,7 +82,7 @@ export function WorkerCreateCard({ card }: { card: WorkerCreateCardType }) {
             <a
               key={action.id}
               href={action.href}
-              className="inline-flex h-7 items-center gap-1.5 rounded-md border border-border bg-background px-2.5 text-xs font-normal text-foreground hover:bg-accent transition-colors"
+              className="inline-flex h-7 items-center gap-1.5 rounded-md [border:var(--bd-card)] bg-background px-2.5 text-xs font-normal text-foreground hover:bg-accent transition-colors"
             >
               {action.id === "run_worker" && <Play className="size-3" />}
               {action.id === "open_worker" && <ExternalLink className="size-3" />}

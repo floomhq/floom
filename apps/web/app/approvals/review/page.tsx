@@ -8,7 +8,7 @@ import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { notifyApprovalsChanged } from "@/lib/useApprovalsSync";
-import { WorkerosMark } from "@/components/share/ShareCardShell";
+import { FloomMark } from "@/components/share/ShareCardShell";
 import { GenericOutput } from "@/components/generic-output";
 import { ApprovalActionItems, approvalActionLine } from "@/components/share/ApprovalActionItems";
 import type { ApprovalRow, Artifact } from "@/lib/types";
@@ -232,14 +232,14 @@ function PreviewUnavailable({
 }) {
   return (
     <div className="flex min-h-[220px] items-center justify-center p-5">
-      <div className="max-w-lg rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--paper)] p-5 text-sm">
+      <div className="max-w-lg rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--paper)] p-5 text-sm">
         <p className="font-medium text-[var(--ink)]">{title}</p>
         <p className="mt-2 leading-6 text-[var(--ink-soft)]">{detail}</p>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={onRetry}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] px-3 text-sm hover:bg-[var(--bg-2)]"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 text-sm hover:bg-[var(--bg-2)]"
           >
             <RotateCcw className="h-3.5 w-3.5" />
             Retry
@@ -247,7 +247,7 @@ function PreviewUnavailable({
           <a
             href={href}
             download
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] px-3 text-sm hover:bg-[var(--bg-2)]"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 text-sm hover:bg-[var(--bg-2)]"
           >
             <Download className="h-3.5 w-3.5" />
             Download
@@ -285,7 +285,7 @@ function TablePreview({ rows }: { rows: string[][] }) {
           {visibleRows.map((row, rowIndex) => (
             <tr key={rowIndex} className={rowIndex === 0 ? "bg-[var(--bg-2)] font-medium" : "odd:bg-[var(--bg-2)]/45"}>
               {Array.from({ length: colCount }).map((_, colIndex) => (
-                <td key={colIndex} className="max-w-[260px] border border-[var(--border-soft)] px-2.5 py-1.5 align-top">
+                <td key={colIndex} className="max-w-[260px] [border:var(--bd-card)] px-2.5 py-1.5 align-top">
                   <span className="block truncate" title={row[colIndex] ?? ""}>
                     {row[colIndex] ?? ""}
                   </span>
@@ -296,7 +296,7 @@ function TablePreview({ rows }: { rows: string[][] }) {
         </tbody>
       </table>
       {(rows.length > TABLE_PREVIEW_ROWS || rows.some((row) => row.length > TABLE_PREVIEW_COLS)) && (
-        <p className="border-t border-[var(--border-soft)] px-3 py-2 text-xs text-[var(--ink-soft)]">
+        <p className="[border-top:var(--bd-div)] px-3 py-2 text-xs text-[var(--ink-soft)]">
           Showing first {Math.min(rows.length, TABLE_PREVIEW_ROWS)} rows and {colCount} columns.
         </p>
       )}
@@ -360,7 +360,7 @@ function ArtifactObjectUrlPreview({
   if (kind === "video") {
     return (
       <div className="flex min-h-[360px] items-center justify-center bg-[var(--bg-2)] p-4">
-        <video src={src} controls className="max-h-[52vh] max-w-full rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-black">
+        <video src={src} controls className="max-h-[52vh] max-w-full rounded-[var(--radius-button)] [border:var(--bd-card)] bg-black">
           <a href={href}>Download video</a>
         </video>
       </div>
@@ -435,7 +435,7 @@ function TextArtifactPreview({
           srcDoc={text}
           sandbox=""
           referrerPolicy="no-referrer"
-          className="h-[52vh] min-h-[420px] w-full border-0 bg-white"
+          className="h-[52vh] min-h-[420px] w-full [border:0] bg-white"
         />
       </div>
     );
@@ -531,9 +531,9 @@ function PdfArtifactPreview({ href, file }: { href: string; file: PreviewFile })
 
   return (
     <div className="flex max-h-[56vh] min-h-[420px] flex-col bg-[var(--bg-2)]">
-      <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-soft)] bg-[var(--paper)] px-4 py-2 text-xs text-[var(--ink-soft)]">
+      <div className="flex shrink-0 items-center justify-between [border-bottom:var(--bd-div)] bg-[var(--paper)] px-4 py-2 text-xs text-[var(--ink-soft)]">
         <span>{pageCount ? `Page 1 of ${pageCount}` : `Rendering ${file.title}`}</span>
-        <a href={href} download className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] px-2.5 hover:bg-[var(--bg-2)]">
+        <a href={href} download className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-2.5 hover:bg-[var(--bg-2)]">
           <Download className="h-3.5 w-3.5" />
           Download
         </a>
@@ -665,8 +665,8 @@ function ApprovalFilePreview({
   return (
     <div>
       <h2 className="text-sm font-medium text-[var(--ink)]">File preview</h2>
-      <div className="mt-2 overflow-hidden rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)]">
-        <div className="flex min-w-0 items-center justify-between gap-3 border-b border-[var(--border-soft)] px-4 py-3">
+      <div className="mt-2 overflow-hidden rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)]">
+        <div className="flex min-w-0 items-center justify-between gap-3 [border-bottom:var(--bd-div)] px-4 py-3">
           <span className="flex min-w-0 items-center gap-2">
             {fileKindIcon(kind)}
             <span className="min-w-0">
@@ -678,7 +678,7 @@ function ApprovalFilePreview({
             <a
               href={href}
               download
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] px-2.5 text-xs font-medium text-[var(--ink)] hover:bg-[var(--paper)]"
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-2.5 text-xs font-medium text-[var(--ink)] hover:bg-[var(--paper)]"
             >
               <Download className="h-3.5 w-3.5" />
               Download
@@ -876,7 +876,7 @@ function ReviewContent() {
                 onClick={() => setIndex((i) => Math.max(0, i - 1))}
                 disabled={index === 0 || !!busy}
                 aria-label="Previous approval"
-                className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-button)] border border-[var(--border-soft)] disabled:opacity-40 hover:bg-[var(--bg-2)]"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] disabled:opacity-40 hover:bg-[var(--bg-2)]"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
               </button>
@@ -886,7 +886,7 @@ function ReviewContent() {
                 onClick={() => setIndex((i) => Math.min(rows.length - 1, i + 1))}
                 disabled={index >= rows.length - 1 || !!busy}
                 aria-label="Next approval"
-                className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-button)] border border-[var(--border-soft)] disabled:opacity-40 hover:bg-[var(--bg-2)]"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] disabled:opacity-40 hover:bg-[var(--bg-2)]"
               >
                 <ChevronRight className="h-3.5 w-3.5" />
               </button>
@@ -897,13 +897,13 @@ function ReviewContent() {
 
       {/* Wave 3: ONE fixed-height 480px card */}
       <div
-        className="flex w-full max-w-[560px] flex-col rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--paper)] shadow-[var(--shadow-card)]"
+        className="flex w-full max-w-[560px] flex-col rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--paper)] shadow-[var(--shadow-card)]"
         style={{ height: "480px" }}
       >
         {/* Card header: brand + "Approval request" + shared-link marker */}
-        <div className="flex shrink-0 items-center justify-between border-b border-[var(--border-soft)] px-5 py-3.5">
+        <div className="flex shrink-0 items-center justify-between [border-bottom:var(--bd-div)] px-5 py-3.5">
           <div className="flex items-center gap-2.5">
-            <WorkerosMark size={18} />
+            <FloomMark size={18} />
             <span className="text-sm font-medium text-[var(--ink)]">Approval request</span>
           </div>
           {isSignedLink && (
@@ -921,13 +921,13 @@ function ReviewContent() {
               <div className="h-20 animate-pulse rounded bg-[var(--bg-2)]" />
             </div>
           ) : loadError ? (
-            <div className="flex h-full flex-col justify-center rounded-[var(--radius-button)] border border-red-200 bg-red-50/80 px-4 py-4 text-sm text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300">
+            <div className="flex h-full flex-col justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-red-50/80 px-4 py-4 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">
               <div className="font-medium">Could not load approvals.</div>
               <div className="mt-1">{loadError}</div>
               <button
                 type="button"
                 onClick={() => void load()}
-                className="mt-3 inline-flex h-8 w-fit items-center rounded-[var(--radius-button)] border border-red-200 px-3 text-xs font-medium hover:bg-red-100 dark:border-red-800 dark:hover:bg-red-900/40"
+                className="mt-3 inline-flex h-8 w-fit items-center rounded-[var(--radius-button)] [border:var(--bd-btn)] px-3 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/40"
               >
                 Retry
               </button>
@@ -943,7 +943,7 @@ function ReviewContent() {
           ) : (
             <>
               {/* Plain-language action line */}
-              <div className="rounded-[var(--radius-button)] border border-[color-mix(in_srgb,var(--pending)_24%,var(--border-soft))] bg-[color-mix(in_srgb,var(--pending)_8%,var(--bg-2))] px-4 py-3">
+              <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--pending)_8%,var(--bg-2))] px-4 py-3">
                 <p className="text-[14px] font-semibold leading-snug text-[var(--ink)]">
                   {approvalActionLine(approval.label, decisionInput)}
                 </p>
@@ -960,7 +960,7 @@ function ReviewContent() {
 
               {/* Proposed output via GenericOutput */}
               {approval.preview && (
-                <div className="max-h-[120px] overflow-y-auto rounded-[var(--radius-button)] border border-[var(--border-soft)] bg-[var(--bg-2)] p-4">
+                <div className="max-h-[120px] overflow-y-auto rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] p-4">
                   <GenericOutput type={inferPreviewType(approval.preview)} value={approval.preview} />
                 </div>
               )}
@@ -988,13 +988,13 @@ function ReviewContent() {
         </div>
 
         {/* Pinned footer: chatbox feedback row + Reject / Approve */}
-        <div className="shrink-0 border-t border-[var(--border-soft)]">
+        <div className="shrink-0 [border-top:var(--bd-div)]">
           {/* Chatbox — resizable, auto-grows, drag-and-drop for images and files */}
           <div
-            className={`mx-3 mt-3 flex items-start gap-2 rounded-[var(--radius-button)] border px-3 py-2 transition-colors ${
+            className={`mx-3 mt-3 flex items-start gap-2 rounded-[var(--radius-button)] [border:var(--bd-input)] px-3 py-2 transition-colors ${
               dragOver
-                ? "border-[var(--primary)] bg-[color-mix(in_srgb,var(--primary)_6%,var(--bg-2))]"
-                : "border-[var(--border-soft)] bg-[var(--bg-2)]"
+                ? "bg-[color-mix(in_srgb,var(--primary)_6%,var(--bg-2))]"
+                : "bg-[var(--bg-2)]"
             }`}
             onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
             onDragLeave={() => setDragOver(false)}
@@ -1040,7 +1040,7 @@ function ReviewContent() {
               {chatFiles.map((f, i) => (
                 <span
                   key={i}
-                  className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] border border-[var(--border-soft)] bg-[var(--bg-2)] px-2 py-0.5 text-xs text-[var(--ink-soft)]"
+                  className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--bg-2)] px-2 py-0.5 text-xs text-[var(--ink-soft)]"
                 >
                   <ImageIcon className="h-3 w-3" />
                   {f.name}
@@ -1072,7 +1072,7 @@ function ReviewContent() {
               type="button"
               onClick={reject}
               disabled={!!busy || !approval}
-              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-button)] border border-[var(--border-soft)] px-4 text-sm font-medium text-destructive disabled:opacity-40"
+              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-4 text-sm font-medium text-destructive disabled:opacity-40"
             >
               <XCircle className="h-4 w-4" />
               {busy === "reject" ? "Rejecting…" : "Reject"}

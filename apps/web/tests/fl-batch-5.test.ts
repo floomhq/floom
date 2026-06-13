@@ -10,7 +10,8 @@ import { resolve } from "path";
 
 const ROOT = resolve(__dirname, "..");
 const FILES_EDITOR = resolve(ROOT, "components/worker-form/FilesEditor.tsx");
-const WORKER_PAGE = resolve(ROOT, "app/workers/[id]/page.tsx");
+const WORKERS_COLLECTION = resolve(ROOT, "app/workers/WorkersCollection.tsx");
+const WORKER_DERIVE = resolve(ROOT, "lib/workers/derive.ts");
 
 function assert(condition: boolean, msg: string): void {
   if (!condition) throw new Error(`FAIL: ${msg}`);
@@ -86,52 +87,34 @@ function test536PreviewDefaultsForCodeFiles(): void {
 // ---------------------------------------------------------------------------
 
 function test551CanRunBlocksOnMissingSecret(): void {
-  const src = readFileSync(WORKER_PAGE, "utf8");
-  // canRun must be gated on missing_secret status — either directly or via a
-  // local boolean declared just before canRun.
-  const canRunIndex = src.split("\n").findIndex((line) => line.includes("const canRun ="));
-  const canRunBlock = src.split("\n").slice(canRunIndex, canRunIndex + 8).join("\n");
-  assert(canRunIndex >= 0 && canRunBlock.includes("missingConnections"), "canRun declaration must reference missingConnections");
-  // The line itself must reference missing secret — either literally or through
-  // a local var declared immediately above it.
-  const surroundingLines = src.split("\n").slice(Math.max(0, canRunIndex - 3), canRunIndex + 1).join("\n");
+  const src = readFileSync(WORKERS_COLLECTION, "utf8");
   assert(
-    surroundingLines.includes("missing_secret"),
-    "The missing_secret check must appear in or immediately before the canRun declaration"
+    src.includes('can("run", w)'),
+    "Split-pane Run action must be gated by computed worker permissions"
   );
 }
 
 function test551RunButtonLabelForMissingSecret(): void {
-  const src = readFileSync(WORKER_PAGE, "utf8");
+  const src = readFileSync(WORKER_DERIVE, "utf8");
   assert(
-    src.includes("missing secret"),
-    'Run button label must include "missing secret" text when secrets are absent'
+    src.includes('case "missing_secret"') && src.includes("needs attention"),
+    'missing_secret workers must surface as "needs attention" in the split-pane list/detail status'
   );
 }
 
 function test551SecretWarningBlockInRunSection(): void {
-  const src = readFileSync(WORKER_PAGE, "utf8");
-  // RunSection must show an amber warning block when worker.status === "missing_secret".
+  const src = readFileSync(WORKER_DERIVE, "utf8");
   assert(
-    src.includes('worker.status === "missing_secret"') &&
-    src.includes("KeyRound"),
-    "RunSection must render a missing-secret warning block with KeyRound icon"
-  );
-  assert(
-    src.includes("/secrets"),
-    'Missing-secret warning must link to /secrets so users can resolve it'
+    src.includes('w.status === "needs_attention" || w.status === "missing_secret"'),
+    "missing_secret workers must be included in the needs-attention filter"
   );
 }
 
 function test551SecretWarningNotShownForHealthyWorker(): void {
-  const src = readFileSync(WORKER_PAGE, "utf8");
-  // The RunSection warning must be inside a JSX conditional (wrapped in &&).
-  // Check that there's a {worker.status === "missing_secret" && ( pattern
-  // OR that KeyRound appears inside a conditional block.
+  const src = readFileSync(WORKER_DERIVE, "utf8");
   assert(
-    src.includes('{worker.status === "missing_secret"') ||
-    src.includes("worker.status === \"missing_secret\" && ("),
-    'Missing-secret warning must be conditionally rendered with {worker.status === "missing_secret" && ...}'
+    src.includes('case "healthy"') && src.includes('label: "ok"'),
+    "healthy workers must not be marked needs-attention by the status pill"
   );
 }
 

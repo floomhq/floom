@@ -3,6 +3,7 @@
 // Inspired by Vercel AI Elements. MIT License.
 
 import { useState } from "react";
+import type { ReactNode } from "react";
 import { ChevronDown, Hammer, XCircle, Maximize2, Minimize2, Copy, Check } from "lucide-react";
 import { Collapsible, CollapsibleContent, CollapsibleTrigger } from "@/components/ui/collapsible";
 import { cn } from "@/lib/utils";
@@ -13,19 +14,28 @@ export function Tool({
   result,
   isError = false,
   callId,
+  status,
+  duration,
   className,
+  children,
 }: {
   name: string;
   args?: unknown;
   result?: unknown;
   isError?: boolean;
   callId?: string;
+  status?: string;
+  duration?: string;
   className?: string;
+  children?: ReactNode;
 }) {
-  const state = result === undefined ? "called" : isError ? "error" : "done";
+  const normalizedStatus = normalizeStatus(status);
+  const state = normalizedStatus ?? (result === undefined && !children ? "called" : isError ? "error" : "done");
+  const displayState = status ? humanizeStatus(status) : state;
+  const showState = Boolean(status) || state !== "done";
   return (
     <Collapsible defaultOpen={state !== "done"}>
-      <div className={cn("rounded-[var(--radius-button)] border border-border bg-card", className)}>
+      <div className={cn("rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card", className)}>
         <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
           <div className="flex min-w-0 items-center gap-2">
             {isError ? (
@@ -39,33 +49,52 @@ export function Tool({
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
+            {duration && <span className="text-[11px] text-muted-foreground">{duration}</span>}
             {/* S29l (ChatGPT-audit): "done" pill is decoration once the
                 Hammer icon + (in failure case) XCircle already signal state.
-                Show pill only for error + called (in-flight). */}
-            {state !== "done" && (
+                Show it again only when callers pass an explicit status because
+                chat tool cards need status parity with run details. */}
+            {showState && (
               <span
                 className={cn(
-                  "rounded border px-1.5 py-0.5 text-[11px] font-medium",
+                  "rounded-[var(--radius-button)] [border:var(--bd-pill)] px-1.5 py-0.5 text-[11px] font-medium",
                   state === "error"
-                    ? "border-error/30 bg-error/10 text-error"
-                    : "border-pending/30 bg-pending/10 text-pending",
+                    ? "bg-error/10 text-error"
+                    : state === "done"
+                      ? "bg-muted/50 text-muted-foreground"
+                      : "bg-pending/10 text-pending",
                 )}
               >
-                {state}
+                {displayState}
               </span>
             )}
             <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-[panel-open]:rotate-180" />
           </div>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="space-y-3 border-t border-border p-3">
-            <ToolBlock label="Args" value={args} />
+          <div className="space-y-3 [border-top:var(--bd-div)] p-3">
+            {args !== undefined && <ToolBlock label="Args" value={args} />}
             {result !== undefined && <ToolBlock label={isError ? "Error" : "Result"} value={result} />}
+            {children}
           </div>
         </CollapsibleContent>
       </div>
     </Collapsible>
   );
+}
+
+function normalizeStatus(status: string | undefined): "called" | "done" | "error" | undefined {
+  if (!status) return undefined;
+  const normalized = status.toLowerCase();
+  if (normalized === "completed" || normalized === "ready" || normalized === "succeeded" || normalized === "done") {
+    return "done";
+  }
+  if (normalized === "failed" || normalized === "error" || normalized === "cancelled") return "error";
+  return "called";
+}
+
+function humanizeStatus(status: string): string {
+  return status.replace(/[_-]+/g, " ");
 }
 
 function ToolBlock({ label, value }: { label: string; value: unknown }) {

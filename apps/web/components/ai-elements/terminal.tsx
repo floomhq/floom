@@ -17,11 +17,11 @@ export function Terminal({
 }) {
   return (
     <div className={cn(
-      "overflow-hidden rounded-[var(--radius-button)] border border-border bg-[var(--bg-2)] text-foreground",
-      "dark:bg-[#0d0d0d] dark:text-[#e8e8e8] dark:border-white/10",
+      "overflow-hidden rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] text-foreground",
+      "dark:bg-[#0d0d0d] dark:text-[#e8e8e8]",
       className,
     )}>
-      <div className="flex items-center gap-2 border-b border-line dark:border-white/10 px-3 py-2 text-xs text-muted-foreground dark:text-white/70">
+      <div className="flex items-center gap-2 [border-bottom:var(--bd-div)] px-3 py-2 text-xs text-muted-foreground dark:text-white/70">
         <TerminalSquare className="size-3.5" />
         Logs
       </div>

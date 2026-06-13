@@ -6,6 +6,10 @@ on:
   pull_request:
     branches: [main]
 
+# #938: least-privilege token — CI only reads the repo.
+permissions:
+  contents: read
+
 jobs:
   api-tests:
     name: API tests (pytest)
@@ -16,6 +20,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # #938: don't leave the GITHUB_TOKEN in .git/config on the
+          # self-hosted runner after the job finishes.
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -30,8 +38,10 @@ jobs:
         env:
           WORKEROS_DEPLOY: local
           WORKEROS_ROOT: ${{ github.workspace }}
-          FLOOM_SECRET: ci-test-secret
-          OPENAI_API_KEY: sk-test-fake-key
+          # #938: random per-run values — nothing that pattern-matches a real
+          # credential lives in the workflow file or repeats across runs.
+          FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          OPENAI_API_KEY: sk-test-${{ github.run_id }}
         # #604: -p no:warnings keeps output clean; all test files auto-discovered.
         run: pytest tests/ -v --tb=short -p no:warnings
 
@@ -41,6 +51,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # #938: don't leave the GITHUB_TOKEN in .git/config on the
+          # self-hosted runner after the job finishes.
+          persist-credentials: false
 
       - uses: actions/setup-python@v5
         with:
@@ -55,8 +69,10 @@ jobs:
         env:
           WORKEROS_DEPLOY: local
           WORKEROS_ROOT: ${{ github.workspace }}
-          FLOOM_SECRET: ci-test-secret
-          OPENAI_API_KEY: sk-test-fake-key
+          # #938: random per-run values — nothing that pattern-matches a real
+          # credential lives in the workflow file or repeats across runs.
+          FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          OPENAI_API_KEY: sk-test-${{ github.run_id }}
         # #604: root pytest.ini points at tests/ (66 files). These cover the
         # full worker runtime — agent driver, E2B sandbox, run orchestration —
         # and were previously not run in CI.
@@ -71,6 +87,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # #938: don't leave the GITHUB_TOKEN in .git/config on the
+          # self-hosted runner after the job finishes.
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:
@@ -107,6 +127,10 @@ jobs:
 
     steps:
       - uses: actions/checkout@v4
+        with:
+          # #938: don't leave the GITHUB_TOKEN in .git/config on the
+          # self-hosted runner after the job finishes.
+          persist-credentials: false
 
       - uses: actions/setup-node@v4
         with:

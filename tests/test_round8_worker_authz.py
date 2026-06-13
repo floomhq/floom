@@ -1045,15 +1045,39 @@ def test_system_metrics_and_overview_are_user_scoped(monkeypatch, tmp_path):
 def test_shipped_worker_directories_match_protected_set(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     shipped_worker_ids = _tracked_worker_ids()
+    protected = set(main.PROTECTED_STOCK_WORKER_IDS)
 
-    assert shipped_worker_ids == set(main.PROTECTED_STOCK_WORKER_IDS)
+    # #940 deliberately broke shipped == protected: tenant-specific bundles
+    # (real Gmail/PostHog/GSC/CRM data) still ship as directories but are no
+    # longer protected, which makes them owner-scoped and owner-deletable.
+    # The invariants that remain:
+    #   1. every protected stock worker must actually ship, and
+    #   2. the #940-curated-out tenant workers must NEVER regain protected
+    #      status (protected grants every user view/run via _worker_can_view).
+    assert protected <= shipped_worker_ids, (
+        f"protected stock workers missing from workers/: {sorted(protected - shipped_worker_ids)}"
+    )
+    for tenant_worker in (
+        "gmail-summarize-latest",
+        "openpaper-posthog-daily",
+        "seo-opportunity-digest",
+        "linkedin-post-engagements",
+        "cv_writeup",
+        "weekly_update",
+    ):
+        assert tenant_worker not in protected, (
+            f"{tenant_worker} is tenant-specific and was curated out by #940; "
+            "it must not regain PROTECTED_STOCK_WORKER_IDS status"
+        )
 
 
 def test_protected_stock_worker_direct_mutations_are_blocked(monkeypatch, tmp_path):
-    main = _load_api(monkeypatch, tmp_path, stock_workers=("linkedin-post-engagements",))
+    # csv_enricher: still in PROTECTED_STOCK_WORKER_IDS after the #940
+    # curation (linkedin-post-engagements no longer is, so it stopped 403ing).
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("csv_enricher",))
     client = TestClient(main.app)
 
-    payload = _worker_payload("linkedin-post-engagements", title="Probe Replacement")
+    payload = _worker_payload("csv_enricher", title="Probe Replacement")
     files_payload = {
         "files": [
             {"path": "worker.yml", "content": payload["worker_yml"]},
@@ -1062,19 +1086,19 @@ def test_protected_stock_worker_direct_mutations_are_blocked(monkeypatch, tmp_pa
     }
 
     blocked_checks = {
-        "delete": client.delete("/workers/linkedin-post-engagements", headers=_headers("user-a")),
+        "delete": client.delete("/workers/csv_enricher", headers=_headers("user-a")),
         "patch": client.patch(
-            "/workers/linkedin-post-engagements",
+            "/workers/csv_enricher",
             headers=_headers("user-a"),
             json={"trigger_type": "manual"},
         ),
         "put": client.put(
-            "/workers/linkedin-post-engagements",
+            "/workers/csv_enricher",
             headers=_headers("user-a"),
             json=payload,
         ),
         "files": client.put(
-            "/workers/linkedin-post-engagements/files",
+            "/workers/csv_enricher/files",
             headers=_headers("user-a"),
             json=files_payload,
         ),
@@ -1083,3 +1107,47 @@ def test_protected_stock_worker_direct_mutations_are_blocked(monkeypatch, tmp_pa
     for name, response in blocked_checks.items():
         assert response.status_code == 403, f"{name}: {response.status_code} {response.text}"
         assert response.json() == {"detail": "Stock workers cannot be modified through the API"}
+
+
+def test_973_private_cross_owner_not_in_list_or_bundle(monkeypatch, tmp_path):
+    """#973: a member must not read/list/bundle another owner's PRIVATE worker.
+
+    The pentest saw can_view=false yet 200 on read/bundle on the cloud
+    deployment. This pins the engine contract: list excludes it, detail 404s,
+    bundle.zip 404s, and the permission object (when reachable) is can_view
+    false — never a 200 body for the private cross-owner worker.
+    """
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    created = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("private-secret-worker", title="Private Secret"),
+    )
+    assert created.status_code == 200, created.text
+    # ensure it is private (engine default), not workspace-shared
+    assert client.get("/workers/private-secret-worker", headers=_headers("user-a")).status_code == 200
+
+    # user-b: list must not contain it
+    listing = client.get("/workers", headers=_headers("user-b"))
+    assert listing.status_code == 200, listing.text
+    ids = {w["id"] for w in listing.json()}
+    assert "private-secret-worker" not in ids, "private cross-owner worker leaked into list (#973)"
+
+    # user-b: detail and bundle must 404 (never expose source)
+    assert client.get("/workers/private-secret-worker", headers=_headers("user-b")).status_code == 404
+    bundle = client.get("/workers/private-secret-worker/bundle.zip", headers=_headers("user-b"))
+    assert bundle.status_code == 404, f"bundle leaked private worker source (#973): {bundle.status_code}"
+
+    # user-b: global search must not surface it
+    search = client.get("/search?q=Private+Secret&types=workers", headers=_headers("user-b"))
+    assert search.status_code == 200, search.text
+    search_ids = {item["id"] for item in search.json().get("results", []) if item.get("type") == "worker"}
+    assert "private-secret-worker" not in search_ids, "private cross-owner worker leaked via /search (#973)"
+
+    # owner still has full access (detail, bundle, and search find it)
+    assert client.get("/workers/private-secret-worker/bundle.zip", headers=_headers("user-a")).status_code == 200
+    owner_search = client.get("/search?q=Private+Secret&types=workers", headers=_headers("user-a"))
+    owner_ids = {item["id"] for item in owner_search.json().get("results", []) if item.get("type") == "worker"}
+    assert "private-secret-worker" in owner_ids

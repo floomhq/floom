@@ -34,8 +34,8 @@ export const STUB_MESSAGES: ChatMessage[] = [
           step: "ready",
           status: "completed",
           actions: [
-            { id: "open_worker", label: "Open", href: "/workers/weekly-github-digest" },
-            { id: "run_worker", label: "Run now", href: "/workers/weekly-github-digest/runs", method: "POST" },
+            { id: "open_worker", label: "Open", href: "/workers?sel=weekly-github-digest" },
+            { id: "run_worker", label: "Run now", href: "/workers?sel=weekly-github-digest" },
           ],
         },
       },

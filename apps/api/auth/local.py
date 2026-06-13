@@ -31,5 +31,16 @@ class SharedSecretAuthProvider:
             if header_user:
                 if not re.fullmatch(r"[A-Za-z0-9_.:@-]{1,128}", header_user):
                     raise HTTPException(status_code=400, detail="invalid x-floom-user")
-                user_id = header_user
+                # #933: a proxy-scoped user is a member, not admin.
+                return AuthContext(user_id=header_user, email=None, role="member")
+            # #933: with user-header scope on, a request without x-floom-user
+            # must fail closed — falling back to the default admin context let
+            # a misconfigured proxy grant admin to every request.
+            raise HTTPException(
+                status_code=401,
+                detail="x-floom-user header required when user-header scope is enabled",
+            )
+        # #933: allow demoting the shared secret from root-equivalent to member.
+        if (os.environ.get("WORKEROS_SHARED_SECRET_ROLE") or "").strip().lower() == "member":
+            return AuthContext(user_id=user_id, email=None, role="member")
         return AuthContext(user_id=user_id, email=None, scopes=("admin",))

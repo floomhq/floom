@@ -15,21 +15,28 @@ const ACTIVE_WORKSPACE_COOKIE_KEY = "workeros.activeWorkspaceId";
 
 export async function serverFetch<T>(
   path: string,
-  options?: RequestInit & { next?: { revalidate?: number | false; tags?: string[] } }
+  options?: RequestInit & {
+    next?: { revalidate?: number | false; tags?: string[] };
+    includeWorkspace?: boolean;
+  }
 ): Promise<T> {
-  const { next, ...fetchOptions } = options ?? {};
+  const { next, includeWorkspace = true, ...fetchOptions } = options ?? {};
   const cookieStore = await cookies();
   const workspaceCookie = cookieStore.get(ACTIVE_WORKSPACE_COOKIE_KEY)?.value || "";
-  const activeWorkspace =
-    workspaceCookie && workspaceCookie !== "local-default" ? decodeURIComponent(workspaceCookie) : "";
+  const backendSession = cookieStore.get("wos_session")?.value || "";
+  const activeWorkspace = workspaceCookie ? decodeURIComponent(workspaceCookie) : "local-default";
+  const headers = new Headers(fetchOptions.headers);
+  headers.set("content-type", "application/json");
+  headers.set("x-floom-secret", API_SECRET);
+  if (includeWorkspace && activeWorkspace) {
+    headers.set("x-workeros-workspace", activeWorkspace);
+  }
+  if (backendSession) {
+    headers.set("cookie", `wos_session=${backendSession}`);
+  }
   const res = await fetch(`${API_BASE}${path}`, {
     ...fetchOptions,
-    headers: {
-      "content-type": "application/json",
-      "x-floom-secret": API_SECRET,
-      ...(activeWorkspace ? { "x-workeros-workspace": activeWorkspace } : {}),
-      ...fetchOptions?.headers,
-    },
+    headers,
     // next.js cache config — passed through as NextFetchRequestConfig
     ...(next ? { next } : {}),
   });
@@ -48,9 +55,16 @@ export async function serverFetch<T>(
 
 /** Fetch worker list (trimmed list-shape, 30s cache). */
 export async function fetchWorkerList() {
-  return serverFetch<import("./types").WorkerSummary[]>("/workers?shape=list", {
-    next: { revalidate: 30 },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 8000);
+  try {
+    return await serverFetch<import("./types").WorkerSummary[]>("/workers?shape=list", {
+      next: { revalidate: 30 },
+      signal: controller.signal,
+    });
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 /** Fetch overview stats (10s cache — user-specific). */
@@ -93,7 +107,7 @@ export async function fetchConnections() {
 export async function fetchPublicWorker(id: string, token: string) {
   return serverFetch<import("./types").PublicWorker>(
     `/workers/public/${encodeURIComponent(id)}?token=${encodeURIComponent(token)}`,
-    { next: { revalidate: 30 } }
+    { next: { revalidate: 30 }, includeWorkspace: false }
   );
 }
 
@@ -101,6 +115,6 @@ export async function fetchPublicWorker(id: string, token: string) {
 export async function fetchStandaloneShare(token: string) {
   return serverFetch<import("./types").StandaloneShare>(
     `/s/${encodeURIComponent(token)}`,
-    { next: { revalidate: false } }
+    { next: { revalidate: false }, includeWorkspace: false }
   );
 }

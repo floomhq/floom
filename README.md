@@ -40,8 +40,52 @@ cp apps/api/.env.example apps/api/.env
 ```
 
 **Required:**
-- `OPENAI_API_KEY` — powers all agent-mode workers
+- `OPENAI_API_KEY` — the default model provider (powers Emily, agent-mode workers, and codegen)
 - `E2B_API_KEY` — sandbox execution (get one at e2b.dev)
+
+**Model providers (OpenAI by default, or AWS Bedrock / Claude):**
+
+The backend is provider-agnostic: each model call is selected by a *model id* and
+routed through litellm. OpenAI is the zero-config default. To use another provider,
+point the per-role model vars at that provider's id and supply its credentials:
+
+| Env var | Role | Default |
+| --- | --- | --- |
+| `WORKEROS_WORKER_AGENT_MODEL` | tool-calling worker agents | `gpt-5.5` |
+| `WORKEROS_CHAT_MODEL` | Emily (chat assistant) | `gpt-5.4-mini` |
+| `WORKEROS_CODEGEN_MODEL` | worker codegen / draft / repair | `gpt-5.5` |
+| `WORKEROS_SUGGEST_MODEL` | worker-edit conflict check | codegen model |
+
+Example — AWS Bedrock (Claude Sonnet 4.6):
+
+```bash
+WORKEROS_WORKER_AGENT_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
+WORKEROS_CHAT_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
+WORKEROS_CODEGEN_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION_NAME=us-west-2
+```
+
+Other litellm providers work the same way — set a role's model id to a provider-prefixed
+id and supply that provider's key. Tool-call reliability and prompt caching vary by
+provider (caching auto-applies on OpenAI and Anthropic/Bedrock only):
+
+| Provider | Model id example | Key |
+| --- | --- | --- |
+| Anthropic (direct) | `anthropic/claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
+| Google Gemini | `gemini/gemini-2.5-pro` | `GEMINI_API_KEY` |
+| Groq | `groq/llama-3.3-70b-versatile` | `GROQ_API_KEY` |
+
+Anthropic models on Bedrock require submitting the one-time "use case details" form
+in the Bedrock console (per region). Prompt caching of the static system prompt is
+applied automatically on Anthropic/Bedrock for both codegen and agent (worker +
+Emily) calls; OpenAI caches prefixes server-side.
+
+**Web search:** Emily and web-search workers use a provider-agnostic `web_search`
+function tool that works on every model (including Bedrock/Claude), not OpenAI's
+hosted tool. It defaults to free DuckDuckGo (no key); set `SERPER_API_KEY` for
+Google-quality results (serper.dev).
 
 **Recommended for production:**
 - `FLOOM_SECRET` — operator secret that gates all API requests. Omit entirely for unauthenticated local dev.

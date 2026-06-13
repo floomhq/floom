@@ -19,7 +19,8 @@ export const GENERAL_ACCESS_OPTIONS: GeneralAccessOption[] = [
   {
     value: "workspace",
     label: "Workspace",
-    description: "Anyone in the workspace can view and duplicate.",
+    description:
+      "Transfers this worker to the workspace. Members can view and run it; only admins can edit it.",
   },
 ];
 

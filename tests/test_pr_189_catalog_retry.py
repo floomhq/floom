@@ -103,6 +103,18 @@ def test_catalog_endpoint_recovers_after_one_failure():
     from fastapi.testclient import TestClient
     from main import app
 
+    # #919 made this endpoint require an auth context, so the request now
+    # exercises the auth provider. Sibling tests in the full suite leave a
+    # cached provider/repositories pair behind that can point at a torn-down
+    # DB ("no such table: users" on the dev-mode fallback). Reset both caches
+    # and make sure the active FLOOM_DB has its schema.
+    import db
+    from auth.factory import get_auth_provider
+
+    get_auth_provider.cache_clear()
+    db.get_repositories.cache_clear()
+    db.init_db()
+
     # A sibling test/conftest may set FLOOM_SECRET in this process; send the
     # active value so auth passes regardless of whether a secret is configured.
     secret = os.environ.get("FLOOM_SECRET", "")
