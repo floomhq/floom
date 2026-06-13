@@ -16,6 +16,8 @@ import type {
 import { formatVersionRows } from "@/lib/workers/versions";
 import { WORKER_DETAIL_TABS, type WorkerDetailTab } from "@/lib/workers/tabs";
 import { formatDuration } from "@/lib/runs/format";
+import { modelLabel } from "@/lib/model-labels";
+import { runtimeSummary } from "@/lib/runtime-labels";
 import {
   Dialog,
   DialogContent,
@@ -134,6 +136,31 @@ function coerceInputValue(value: string, type?: string): unknown {
 
 function Loading() {
   return <div style={muted}>Loading…</div>;
+}
+
+function friendlyToken(value?: string | null): string {
+  const raw = value?.trim();
+  if (!raw) return "Not set";
+  if (raw === "cron") return "Schedule";
+  if (raw === "composio") return "Connection event";
+  return raw
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function ConfigInfoGrid({ rows }: { rows: Array<[string, React.ReactNode]> }) {
+  return (
+    <div className="grid grid-cols-[minmax(96px,140px)_minmax(0,1fr)] gap-x-4 gap-y-2 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3 text-sm">
+      {rows.map(([key, value]) => (
+        <div key={key} className="contents">
+          <span className="text-[12.5px] text-muted-foreground">{key}</span>
+          <span className="min-w-0 break-words text-foreground">{value}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // SPEC §4 + rule #4: Overview is OUTPUT-FIRST — latest result/artifacts and an
@@ -503,8 +530,24 @@ function ToolsTab({ w }: { w: WorkerSummary }) {
 function ConfigTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
   if (!d) return <Loading />;
+  const runtime = d.config?.runtime;
+  const modelId = runtime?.model ?? d.config?.model;
+  const runtimeRows: Array<[string, React.ReactNode]> = [
+    [
+      "Runtime",
+      runtimeSummary({
+        runner: runtime?.runner ?? d.runner ?? w.runner,
+        runtime: runtime?.type ?? w.runtime,
+      }),
+    ],
+  ];
+  if (runtime?.mode) runtimeRows.push(["Mode", friendlyToken(runtime.mode)]);
+  if (runtime?.entrypoint) {
+    runtimeRows.push(["Entrypoint", <span key="entrypoint" className="font-mono text-xs">{runtime.entrypoint}</span>]);
+  }
+  if (modelId) runtimeRows.push(["Model", modelLabel(modelId)]);
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
+    <div className="flex flex-col gap-5">
       <section>
         <h4 style={h4}>Tools</h4>
         <ToolsTab w={w} />
@@ -515,27 +558,30 @@ function ConfigTab({ w }: { w: WorkerSummary }) {
       </section>
       <section>
         <h4 style={h4}>Triggers</h4>
-        <div style={kv}>
-          <span style={kvK}>Trigger</span>
-          <span>{w.trigger_type}</span>
-          {d.webhook_url && (
-            <>
-              <span style={kvK}>Webhook</span>
-              <span style={{ fontFamily: "var(--font-mono)" }}>{d.webhook_url}</span>
-            </>
-          )}
-          <span style={kvK}>Status</span>
-          {/* TODO(#788): pause/resume toggle — "paused" is enabled:false today. */}
-          <span>{d.enabled === false ? "Paused" : "Enabled"}</span>
-        </div>
+        <ConfigInfoGrid
+          rows={[
+            ["Trigger", friendlyToken(d.config?.trigger?.type ?? w.trigger_type)],
+            ...(d.config?.trigger?.cron
+              ? [["Schedule", d.config.trigger.cron] as [string, React.ReactNode]]
+              : []),
+            ...(d.config?.trigger?.timezone
+              ? [["Timezone", d.config.trigger.timezone] as [string, React.ReactNode]]
+              : []),
+            ...(d.webhook_url
+              ? [["Webhook", <span key="webhook" className="font-mono text-xs">{d.webhook_url}</span>] as [string, React.ReactNode]]
+              : []),
+            [
+              "Status",
+              // TODO(#788): pause/resume toggle — "paused" is enabled:false today.
+              <span key="status" className="c-vpill">{d.enabled === false ? "Paused" : "Enabled"}</span>,
+            ],
+          ]}
+        />
       </section>
       <section>
         <h4 style={h4}>Limits</h4>
-        <div style={kv}>
-          <span style={kvK}>Runtime</span>
-          <span>{w.runner}</span>
-          {/* TODO(#793): monthly spend cap field. */}
-        </div>
+        <ConfigInfoGrid rows={runtimeRows} />
+        {/* TODO(#793): monthly spend cap field. */}
       </section>
       {FEEDBACK_BACKEND_AVAILABLE && (
         <section>
@@ -686,7 +732,7 @@ function WorkerDetailActions({
               )}
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setRunOpen(false)}>
+              <Button type="button" variant="secondary" onClick={() => setRunOpen(false)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={running}>
@@ -728,7 +774,7 @@ function WorkerDetailActions({
               </div>
             )}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
+              <Button type="button" variant="secondary" onClick={() => setEditOpen(false)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={!d || saving}>
@@ -918,6 +964,4 @@ const h4: React.CSSProperties = {
   color: "var(--muted-foreground)",
   margin: "0 0 9px",
 };
-const kv: React.CSSProperties = { display: "grid", gridTemplateColumns: "140px 1fr", gap: "9px 16px" };
-const kvK: React.CSSProperties = { color: "var(--muted-foreground)", fontSize: 12.5 };
 const pillBtn: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5 };

@@ -23,7 +23,8 @@ describe("WorkerBrainEditor", () => {
     await user.click(screen.getByRole("button", { name: "Remove company-facts" }));
     expect(onChange).toHaveBeenLastCalledWith([]);
 
-    await user.selectOptions(screen.getByLabelText("Attach folder"), "pricing");
+    await user.click(screen.getByRole("button", { name: /Attach a folder/ }));
+    await user.click(screen.getByRole("option", { name: "pricing" }));
     await user.click(screen.getByRole("button", { name: /Attach/ }));
     expect(onChange).toHaveBeenLastCalledWith(["company-facts", "pricing"]);
   });
