@@ -179,11 +179,27 @@ def _config_from_manifest(
     # block inside parse_worker_manifest itself (read + write paths), so no
     # cloud-side lift is needed. Workers ingested before that change are still
     # handled correctly on read because parse_worker_manifest is idempotent.
-    parsed = parse_worker_manifest(manifest_raw)
-    if isinstance(parsed, WorkerContract):
-        config = worker_contract_to_worker_config(parsed, worker_id)
-    else:
-        config = parsed if isinstance(parsed, WorkerConfig) else WorkerConfig(**manifest_raw)
+    try:
+        parsed = parse_worker_manifest(manifest_raw)
+        if isinstance(parsed, WorkerContract):
+            config = worker_contract_to_worker_config(parsed, worker_id)
+        else:
+            config = parsed if isinstance(parsed, WorkerConfig) else WorkerConfig(**manifest_raw)
+    except Exception:
+        # A legacy/malformed persisted manifest (e.g. missing the strict
+        # id/trigger/runtime fields the current WorkerConfig requires) must NOT
+        # take down the entire /workers list — one bad recipe was 422-ing the
+        # whole list endpoint. Degrade to a minimal valid config so the worker
+        # still lists and resolves; mirrors the detail-path fallback in main.py.
+        _repo_logger.warning(
+            "worker %s: manifest failed strict parse; using degraded config", worker_id
+        )
+        config = WorkerConfig(
+            id=worker_id,
+            name=str((manifest_raw or {}).get("name") or worker_id),
+            trigger={"type": "manual"},
+            runtime={"type": "python", "entrypoint": "run.py"},
+        )
     if trigger_type:
         config.trigger.type = trigger_type
     if cron_expr:
