@@ -118,6 +118,7 @@ def get_worker_detail(
         repos=repos,
         role=_worker_repo_role(auth),
         include_grants=True,
+        owner_aliases={auth.user_id, auth.username or ""},
     )
 
 

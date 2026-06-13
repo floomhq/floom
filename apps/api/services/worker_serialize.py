@@ -402,6 +402,7 @@ def _build_worker_detail(
     repos: Repositories,
     role: Optional[str] = None,
     include_grants: bool = False,
+    owner_aliases: Optional[set[str]] = None,
 ) -> WorkerDetail:
     from models import WorkerConfig, WorkerDetail, WorkerFile
     worker = _get_visible_worker(
@@ -500,16 +501,22 @@ def _build_worker_detail(
         except Exception:
             worker_files = _worker_files_from_manifest(worker)
 
-    # Build webhook URL if this worker has a webhook trigger
+    # Build webhook URL if this worker has a webhook trigger.
+    # #978: the webhook URL carries a bearer token that triggers a run with no
+    # session auth (POST /webhooks/{id}?token=...). A view-only grantee
+    # (specific-people grant = VIEW only) must NOT receive a durable execution
+    # capability, so only surface it to callers who can actually run the worker
+    # (owner / workspace admin / run rights). Treat it as a secret.
     from webhook_service import build_webhook_url as _build_webhook_url
     webhook_url: Optional[str] = None
     if _worker_has_webhook_trigger(worker, config):
-        try:
-            # Token derives from the worker's current rotatable secret (backfilled
-            # lazily if absent), so this always surfaces the working current URL.
-            webhook_url = _build_webhook_url(worker["id"], repos=repos)
-        except Exception:
-            logger.warning("Could not build webhook URL for %s", worker["id"], exc_info=True)
+        if _worker_permissions(worker, user_id=user_id, repos=repos, owner_aliases=owner_aliases).can_run:
+            try:
+                # Token derives from the worker's current rotatable secret (backfilled
+                # lazily if absent), so this always surfaces the working current URL.
+                webhook_url = _build_webhook_url(worker["id"], repos=repos)
+            except Exception:
+                logger.warning("Could not build webhook URL for %s", worker["id"], exc_info=True)
 
     triggers_spec = _build_triggers_spec(worker)
 
@@ -559,7 +566,7 @@ def _build_worker_detail(
         public_link=_worker_public_link(worker) if str(worker.get("visibility") or "private") == "public" else None,
         owner_id=worker.get("owner_id"),
         visibility=str(worker.get("visibility") or "private"),
-        permissions=_worker_permissions(worker, user_id=user_id, repos=repos),
+        permissions=_worker_permissions(worker, user_id=user_id, repos=repos, owner_aliases=owner_aliases),
     )
 
 

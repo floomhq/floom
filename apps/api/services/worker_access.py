@@ -337,6 +337,7 @@ def _worker_permissions(
     *,
     user_id: str,
     repos: "Repositories",
+    owner_aliases: Optional[set[str]] = None,
 ) -> "AssetPermissions":
     """Compute the requesting user's access matrix for a worker.
 
@@ -350,13 +351,17 @@ def _worker_permissions(
 
     asset_access = getattr(repos, "asset_access", None)
     worker_id = str(worker.get("id") or "")
-    owner_id = worker.get("owner_id")
+    owner_id = str(worker.get("owner_id") or "")
     visibility = str(worker.get("visibility") or "private")
     # #767/#768: a specific-people grant adds VIEW access for the grantee, never
     # run/edit/delete/share (those stay with the owner / workspace admins). The
     # engine asset_access rule does not know about the app-level asset_grants
     # table, so the grant is layered in here.
     granted = bool(worker_id) and _canonical_worker_id(worker_id) in _granted_worker_ids()
+    aliases = {user_id}
+    if owner_aliases:
+        aliases.update(alias for alias in owner_aliases if alias)
+    is_owner = (not owner_id) or owner_id in aliases
     if asset_access is not None and worker_id and owner_id:
         try:
             perms = asset_access.get_permissions(
@@ -366,18 +371,17 @@ def _worker_permissions(
                 asset_id=worker_id,
             )
             return AssetPermissions(
-                is_owner=bool(perms.get("is_owner", owner_id == user_id)),
-                can_view=bool(perms.get("can_view", True)) or granted,
-                can_edit=bool(perms.get("can_edit", True)),
-                can_run=bool(perms.get("can_run", True)),
-                can_delete=bool(perms.get("can_delete", True)),
-                can_share=bool(perms.get("can_share", True)),
+                is_owner=is_owner or bool(perms.get("is_owner", False)),
+                can_view=is_owner or bool(perms.get("can_view", True)) or granted,
+                can_edit=is_owner or bool(perms.get("can_edit", True)),
+                can_run=is_owner or bool(perms.get("can_run", True)),
+                can_delete=is_owner or bool(perms.get("can_delete", True)),
+                can_share=is_owner or bool(perms.get("can_share", True)),
             )
         except Exception:
             logger.debug("permission probe failed for worker %s", worker_id, exc_info=True)
     # Fallback: stock/FS worker (no DB row) — the viewer who can see it is the
     # de-facto owner on the single-owner engine.
-    is_owner = (not owner_id) or owner_id == user_id
     shared = visibility == "workspace"
     return AssetPermissions(
         is_owner=is_owner,
