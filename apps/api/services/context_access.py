@@ -19,7 +19,7 @@ import re
 from pathlib import Path
 from typing import TYPE_CHECKING, Any, Dict, List, Optional
 
-from fastapi import HTTPException
+from fastapi import HTTPException, UploadFile
 from pydantic import BaseModel
 
 from core.config import (
@@ -752,3 +752,23 @@ def _write_context_file(
     item.secret_warnings = secret_warnings
     item.has_secret_warning = bool(secret_warnings)
     return item
+
+
+def _format_limit_mb(size_bytes: int) -> str:
+    mb = size_bytes / (1024 * 1024)
+    return f"{mb:.0f} MB" if mb.is_integer() else f"{mb:.1f} MB"
+
+
+async def _read_context_upload_bytes(upload: UploadFile, remaining_bytes: int) -> bytes:
+    data = bytearray()
+    while True:
+        chunk = await upload.read(1024 * 1024)
+        if not chunk:
+            break
+        data.extend(chunk)
+        if len(data) > remaining_bytes:
+            raise HTTPException(
+                status_code=413,
+                detail=f"Brain upload is too large. Upload files up to {_format_limit_mb(_context_upload_limit_bytes())}.",
+            )
+    return bytes(data)
