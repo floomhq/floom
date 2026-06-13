@@ -840,25 +840,26 @@ def _ensure_magic_link_secret() -> None:
 
 
 def _install_worker_call_signing_key() -> None:
-    """Give the engine a real worker-call-token signing secret in cloud.
+    """Register the cloud worker-call signing secret via the engine's #992 hook.
 
-    Engine #972 made run_token._worker_call_signing_key fail closed when
-    FLOOM_SECRET is unset (no more public "dev-secret-not-set" fallback), so
-    worker-to-worker chaining (manifest calls: + call_worker) raises
-    WorkerCallSecretMissing at run dispatch in cloud — because cloud strips
-    FLOOM_SECRET to keep the engine's x-floom-secret request gate disabled
-    (auth is Supabase JWT/PAT, see main.py).
+    Engine #972 made run_token._worker_call_signing_key fail closed when no
+    secret is configured, and cloud strips FLOOM_SECRET to keep the engine's
+    x-floom-secret request gate disabled (auth is Supabase JWT/PAT, see main.py),
+    so worker-to-worker chaining (manifest calls: + call_worker) would raise
+    WorkerCallSecretMissing at run dispatch.
 
-    Patch the resolver so that when no explicit secret is supplied it falls back
-    to a stable, non-public key derived from SUPABASE_SERVICE_ROLE_KEY (mirrors
-    _ensure_magic_link_secret). Both ends — issue (e2b_driver/agent_driver) and
-    validate (engine auth_middleware + cloud SupabaseAuthProvider) — funnel
-    through this one function in the same process, so they always agree, and the
-    token is signed with a REAL secret (satisfying #972) without re-enabling the
-    auth gate. An explicit FLOOM_SECRET passed by the engine still wins.
+    Engine #992 added the first-class run_token.set_worker_call_secret_resolver
+    hook (resolution step 2, after an explicit secret arg and before the env
+    vars). Register a resolver returning a stable, non-public key derived from
+    SUPABASE_SERVICE_ROLE_KEY (mirrors _ensure_magic_link_secret). Both ends —
+    issue (e2b_driver/agent_driver) and validate (engine auth_middleware + cloud
+    SupabaseAuthProvider) — funnel through the same resolver in-process, so they
+    always agree, and tokens are signed with a REAL secret (satisfying #972)
+    without re-enabling the auth gate. An explicit FLOOM_SECRET still wins (the
+    resolver is consulted only when no explicit secret is supplied).
 
-    Cloud-side workaround; matching engine PR tracked to add a first-class
-    worker-call signing-secret hook so this can be deleted.
+    Replaces the prior private-symbol monkeypatch of run_token._worker_call_
+    signing_key now that #992 provides the public hook.
     """
     service_key = (os.environ.get("SUPABASE_SERVICE_ROLE_KEY") or "").strip()
     if not service_key:
@@ -876,19 +877,17 @@ def _install_worker_call_signing_key() -> None:
     try:
         run_token = import_engine_module("run_token")
     except Exception as exc:  # pragma: no cover - engine must be importable here
-        logger.warning("worker-call signing-key override skipped: %s", exc)
+        logger.warning("worker-call signing-key resolver skipped: %s", exc)
         return
 
-    existing = getattr(run_token, "_worker_call_signing_key", None)
-    if existing is None or getattr(existing, "_workeros_cloud_patched", False):
+    if not hasattr(run_token, "set_worker_call_secret_resolver"):
+        logger.warning(
+            "engine run_token lacks set_worker_call_secret_resolver (#992); "
+            "worker-to-worker chaining will fail closed until the engine is bumped"
+        )
         return
 
-    def _cloud_worker_call_signing_key(secret: str | None = None) -> str:
-        key = (secret or "").strip()
-        return key if key else derived
-
-    _cloud_worker_call_signing_key._workeros_cloud_patched = True  # type: ignore[attr-defined]
-    run_token._worker_call_signing_key = _cloud_worker_call_signing_key
+    run_token.set_worker_call_secret_resolver(lambda: derived)
 
 
 def _register_secrets_key_resolver() -> None:

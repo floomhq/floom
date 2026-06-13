@@ -4,68 +4,87 @@ export const dynamic = "force-dynamic";
 
 import { useCallback, useEffect, useState } from "react";
 import { toast } from "sonner";
-import { AlertTriangle, CheckCircle2, Edit3, Save, X } from "lucide-react";
+import { AlertTriangle, Edit3, MessageCircle, RotateCcw, Save, X } from "lucide-react";
+import Link from "next/link";
 
 import { api } from "@/lib/api";
 import type { VersionSummary, WorkspaceAgentInfo } from "@/lib/types";
-import { formatRelative } from "@/lib/formatters";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
+import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
+import { EmilyAvatar } from "@/components/emily/EmilyAvatar";
+import { modelLabel } from "@/lib/model-labels";
 
-type TabKey = "instructions" | "prompt" | "channels";
+type TabKey = "base" | "instructions" | "prompt";
 
-const TABS: TabKey[] = ["instructions", "prompt", "channels"];
+const TABS: TabKey[] = ["base", "instructions", "prompt"];
+
 function validTab(value: string): value is TabKey {
   return TABS.includes(value as TabKey);
 }
 
-function InstructionsHistoryMenu({
+// Inline "Versions" dropdown reused by both editable layers (base + workspace).
+// Lazily loads the version list when opened and rolls back in place.
+function HistoryMenu({
+  loadVersions,
+  rollback,
   onRollback,
   refreshKey,
+  confirmLabel,
 }: {
+  loadVersions: () => Promise<VersionSummary[]>;
+  rollback: (versionId: string) => Promise<string>;
   onRollback: (content: string) => void;
   refreshKey: number;
+  confirmLabel: string;
 }) {
   const [versions, setVersions] = useState<VersionSummary[]>([]);
   const [loading, setLoading] = useState(false);
   const [loadedOnce, setLoadedOnce] = useState(false);
   const [rollingBack, setRollingBack] = useState<string | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<VersionSummary | null>(null);
 
-  const loadVersions = useCallback(async () => {
+  const refresh = useCallback(async () => {
     setLoading(true);
     try {
-      setVersions(await api.system.listWorkspaceVersions());
+      setVersions(await loadVersions());
     } catch {
       setVersions([]);
     } finally {
       setLoading(false);
       setLoadedOnce(true);
     }
-  }, []);
+  }, [loadVersions]);
 
+  // Re-fetch when a save/rollback bumps the key, but only if already opened
+  // once (avoids fetching for users who never open the dropdown).
   useEffect(() => {
-    if (loadedOnce) void loadVersions();
+    if (loadedOnce) void refresh();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [refreshKey]);
 
-  async function handleRollback(v: VersionSummary) {
-    if (
-      !confirm(
-        `Restore workspace instructions to version ${v.sha} (saved ${formatRelative(v.timestamp)})?\n\nThis will overwrite the current instructions.`
-      )
-    ) {
-      return;
-    }
+  async function doRollback() {
+    if (!pendingRestore) return;
+    const v = pendingRestore;
+    setPendingRestore(null);
     setRollingBack(v.id);
     try {
-      const content = await api.system.rollbackWorkspaceInstructions(v.id);
+      const content = await rollback(v.id);
       onRollback(content);
-      await loadVersions();
+      await refresh();
       toast.success(`Rolled back to version ${v.sha}`);
     } catch (e: unknown) {
       toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
@@ -75,15 +94,39 @@ function InstructionsHistoryMenu({
   }
 
   return (
-    <VersionHistoryMenu
-      versions={versions}
-      loading={loading && !loadedOnce}
-      restoringId={rollingBack}
-      onOpen={() => {
-        if (!loadedOnce) void loadVersions();
-      }}
-      onRestore={(v) => void handleRollback(v)}
-    />
+    <>
+      <VersionHistoryMenu
+        versions={versions}
+        loading={loading && !loadedOnce}
+        restoringId={rollingBack}
+        onOpen={() => {
+          if (!loadedOnce) void refresh();
+        }}
+        onRestore={(v) => setPendingRestore(v)}
+      />
+
+      <Dialog
+        open={!!pendingRestore}
+        onOpenChange={(open) => { if (!open) setPendingRestore(null); }}
+      >
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Restore version {pendingRestore?.sha}?</DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            {confirmLabel} The current version is saved automatically before restoring.
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingRestore(null)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void doRollback()}>
+              Restore
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -91,28 +134,46 @@ export default function AssistantPage() {
   const initial =
     typeof window !== "undefined" && validTab(window.location.hash.replace(/^#/, ""))
       ? (window.location.hash.replace(/^#/, "") as TabKey)
-      : "instructions";
+      : "base";
   const [tab, setTab] = useState<TabKey>(initial);
   const [agent, setAgent] = useState<WorkspaceAgentInfo | null>(null);
+
+  // Layer 1: base instructions (built-in Emily persona, applies to ALL conversations).
+  const [base, setBase] = useState("");
+  const [originalBase, setOriginalBase] = useState("");
+  const [baseIsCustom, setBaseIsCustom] = useState(false);
+  const [editingBase, setEditingBase] = useState(false);
+  const [savingBase, setSavingBase] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState(false);
+
+  // Layer 2: workspace instructions (per-workspace, layered after base).
   const [instructions, setInstructions] = useState("");
   const [originalInstructions, setOriginalInstructions] = useState("");
-  const [loading, setLoading] = useState(true);
-  const [saving, setSaving] = useState(false);
   const [editingInstructions, setEditingInstructions] = useState(false);
+  const [saving, setSaving] = useState(false);
+
+  const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [versionsKey, setVersionsKey] = useState(0);
+  const [baseVersionsKey, setBaseVersionsKey] = useState(0);
 
   const dirty = instructions !== originalInstructions;
+  const baseDirty = base !== originalBase;
 
   const load = useCallback(async () => {
     setLoading(true);
     setError(null);
     try {
-      const [agentRes, instructionsRes] = await Promise.all([
+      const [agentRes, baseRes, instructionsRes] = await Promise.all([
         api.system.workspaceAgent(),
+        api.system.workspaceBasePersona(),
         api.system.workspaceInstructions(),
       ]);
       setAgent(agentRes);
+      setBase(baseRes.content);
+      setOriginalBase(baseRes.content);
+      setBaseIsCustom(baseRes.is_custom);
       setInstructions(instructionsRes);
       setOriginalInstructions(instructionsRes);
     } catch (err) {
@@ -138,7 +199,52 @@ export default function AssistantPage() {
   function changeTab(value: string) {
     if (!validTab(value)) return;
     setTab(value);
-    window.history.replaceState(null, "", `${window.location.pathname}#${value}`);
+    window.history.replaceState(null, "", `/assistant#${value}`);
+  }
+
+  async function saveBase() {
+    if (!base.trim()) {
+      toast.error("Base instructions cannot be empty");
+      return;
+    }
+    setSavingBase(true);
+    try {
+      await api.system.updateWorkspaceBasePersona(base);
+      setOriginalBase(base);
+      setBaseIsCustom(true);
+      setEditingBase(false);
+      toast.success("Base instructions saved");
+      setBaseVersionsKey((k) => k + 1);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save base instructions");
+    } finally {
+      setSavingBase(false);
+    }
+  }
+
+  async function resetBase() {
+    setResetting(true);
+    try {
+      await api.system.resetWorkspaceBasePersona();
+      setResetConfirm(false);
+      setEditingBase(false);
+      toast.success("Base instructions reset to the built-in default");
+      setBaseVersionsKey((k) => k + 1);
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to reset base instructions");
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  function handleBaseRollback(content: string) {
+    setBase(content);
+    setOriginalBase(content);
+    setBaseIsCustom(true);
+    setEditingBase(false);
+    setBaseVersionsKey((k) => k + 1);
   }
 
   async function saveInstructions() {
@@ -171,23 +277,60 @@ export default function AssistantPage() {
   return (
     <div className="space-y-6">
       <div>
-        <div className="flex flex-wrap items-center gap-2">
-          <h1 className="text-2xl font-semibold tracking-tight">Agent</h1>
+        <div className="flex flex-wrap items-center gap-3">
+          <div className="flex items-center gap-2">
+            <EmilyAvatar size="md" />
+            <div>
+              <div className="flex items-center gap-1.5">
+                <h1 className="text-2xl font-semibold tracking-tight">Emily</h1>
+                {/* #541: same presence treatment as the chat surfaces — Emily
+                    is a coworker who is around, not a config object. */}
+                <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
+              </div>
+              <p className="text-xs text-muted-foreground">Chief of Staff</p>
+            </div>
+          </div>
+          <Link
+            href="/chat"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 text-sm font-medium text-ink hover:bg-[var(--active-nav-bg)] transition-colors"
+          >
+            <MessageCircle className="w-3.5 h-3.5" />
+            Talk to Emily
+          </Link>
           {agent?.model ? (
-            <Badge variant="outline" className="font-mono text-xs">
-              {agent.model}
+            <Badge variant="outline" className="text-xs">
+              {modelLabel(agent.model)}
             </Badge>
+          ) : null}
+          {/* Visibility (Share) control: Private <-> Shared with workspace.
+              The assistant is a shared workspace tool (default Shared). STEP 5. */}
+          {agent ? (
+            <span className="ml-auto">
+              <AssetVisibilityControl
+                visibility={agent.visibility}
+                canShare={agent.permissions?.can_share ?? true}
+                noun="Emily"
+                titleLabel="Emily visibility"
+                onApply={async (next) => {
+                  const updated = await api.system.setAssistantVisibility(next);
+                  setAgent(updated);
+                  return updated.visibility;
+                }}
+              />
+            </span>
           ) : null}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          Workspace instructions, final prompt, and channel wiring.
+          How Emily works for this workspace — her persona, what she knows
+          about your company, and the prompt she runs on. To get work done,
+          just talk to her.
         </p>
       </div>
 
       {error ? (
         <Alert variant="destructive">
           <AlertTriangle className="size-4" />
-          <AlertTitle>Couldn&apos;t load the agent</AlertTitle>
+          <AlertTitle>Couldn&apos;t load the assistant</AlertTitle>
           <AlertDescription>{error}</AlertDescription>
         </Alert>
       ) : null}
@@ -195,11 +338,94 @@ export default function AssistantPage() {
       <Tabs value={tab} onValueChange={changeTab}>
         <div className="-mx-1 max-w-full overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
           <TabsList>
-            <TabsTrigger value="instructions">Instructions</TabsTrigger>
-            <TabsTrigger value="prompt">Final prompt</TabsTrigger>
-            <TabsTrigger value="channels">Channels</TabsTrigger>
+            <TabsTrigger value="base">Persona</TabsTrigger>
+            <TabsTrigger value="instructions">Workspace notes</TabsTrigger>
+            <TabsTrigger value="prompt">Compiled prompt</TabsTrigger>
           </TabsList>
         </div>
+
+        <TabsContent value="base" className="space-y-3">
+          {loading ? (
+            <>
+              <Skeleton className="h-4 w-44" />
+              <Skeleton className="h-80 w-full" />
+            </>
+          ) : (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h2 className="text-sm font-medium">Emily persona</h2>
+                    <Badge variant="outline" className="text-xs">
+                      {baseIsCustom ? "Custom" : "Built-in default"}
+                    </Badge>
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted-foreground">
+                    Emily&apos;s core identity and style.
+                  </p>
+                </div>
+                {editingBase ? (
+                  <div className="flex items-center gap-2">
+                    <Button
+                      size="sm"
+                      variant="outline"
+                      onClick={() => {
+                        setBase(originalBase);
+                        setEditingBase(false);
+                      }}
+                      disabled={savingBase}
+                    >
+                      <X className="size-3.5" />
+                      Cancel
+                    </Button>
+                    <Button size="sm" onClick={saveBase} disabled={!baseDirty || savingBase}>
+                      <Save className="size-3.5" />
+                      {savingBase ? "Saving" : "Save"}
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="flex items-center gap-2">
+                    <HistoryMenu
+                      refreshKey={baseVersionsKey}
+                      loadVersions={() => api.system.listWorkspaceBaseVersions()}
+                      rollback={(id) => api.system.rollbackWorkspaceBasePersona(id)}
+                      onRollback={handleBaseRollback}
+                      confirmLabel="This will overwrite your current base instructions."
+                    />
+                    {baseIsCustom ? (
+                      <Button
+                        size="sm"
+                        variant="outline"
+                        onClick={() => setResetConfirm(true)}
+                        disabled={resetting}
+                      >
+                        <RotateCcw className="size-3.5" />
+                        Reset to default
+                      </Button>
+                    ) : null}
+                    {agent?.permissions?.can_edit === false ? (
+                      <span className="text-xs text-muted-foreground">View only</span>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => setEditingBase(true)}>
+                        <Edit3 className="size-3.5" />
+                        Edit
+                      </Button>
+                    )}
+                  </div>
+                )}
+              </div>
+              <Textarea
+                value={base}
+                onChange={(event) => {
+                  if (editingBase) setBase(event.target.value);
+                }}
+                readOnly={!editingBase}
+                className="min-h-[28rem] font-mono text-xs leading-relaxed read-only:bg-muted/40"
+                spellCheck={false}
+              />
+            </>
+          )}
+        </TabsContent>
 
         <TabsContent value="instructions" className="space-y-3">
           {loading ? (
@@ -211,9 +437,9 @@ export default function AssistantPage() {
             <>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-medium">Workspace instructions</h2>
+                  <h2 className="text-sm font-medium">Workspace notes</h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Saved in workspace.md and prepended to the agent prompt.
+                    Workspace-specific context and preferences.
                   </p>
                 </div>
                 {editingInstructions ? (
@@ -237,14 +463,23 @@ export default function AssistantPage() {
                   </div>
                 ) : (
                   <div className="flex items-center gap-2">
-                    <InstructionsHistoryMenu
+                    <HistoryMenu
                       refreshKey={versionsKey}
+                      loadVersions={() => api.system.listWorkspaceVersions()}
+                      rollback={(id) => api.system.rollbackWorkspaceInstructions(id)}
                       onRollback={handleInstructionsRollback}
+                      confirmLabel="This will overwrite your current workspace instructions."
                     />
-                    <Button size="sm" variant="outline" onClick={() => setEditingInstructions(true)}>
-                      <Edit3 className="size-3.5" />
-                      Edit
-                    </Button>
+                    {agent?.permissions?.can_edit === false ? (
+                      <span className="text-xs text-muted-foreground">
+                        View only · editing the workspace prompt requires Admin
+                      </span>
+                    ) : (
+                      <Button size="sm" variant="outline" onClick={() => setEditingInstructions(true)}>
+                        <Edit3 className="size-3.5" />
+                        Edit
+                      </Button>
+                    )}
                   </div>
                 )}
               </div>
@@ -268,37 +503,52 @@ export default function AssistantPage() {
             <>
               <div className="flex items-center justify-between gap-3">
                 <div>
-                  <h2 className="text-sm font-medium">Final system prompt</h2>
+                  <h2 className="text-sm font-medium">Compiled prompt</h2>
                   <p className="mt-0.5 text-xs text-muted-foreground">
-                    Read-only preview of the base agent prompt plus your saved workspace instructions.
+                    Read-only preview of Emily&apos;s full system prompt.
                   </p>
                 </div>
                 <Badge variant="outline" className="text-xs">Read-only</Badge>
               </div>
-              <pre className="max-h-[42rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-[var(--border-default)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
+              <pre className="max-h-[42rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
                 {agent.system_prompt}
               </pre>
             </>
           )}
         </TabsContent>
 
-        <TabsContent value="channels" className="space-y-4">
-          {/* M78 manual channel-ID form removed — channel linking (Slack + WhatsApp)
-              now lives in Settings → Channels (engine-owned, per-user DM model). */}
-          <div className="rounded-[var(--radius-card)] border border-[var(--border-default)] bg-muted/40 p-4 text-sm text-muted-foreground">
-            Channel connections (Slack · WhatsApp) have moved to{" "}
-            <a
-              href="/settings#channels"
-              className="font-medium text-foreground underline underline-offset-2 hover:opacity-80"
-            >
-              Settings → Channels
-            </a>
-            .
-          </div>
-        </TabsContent>
-
       </Tabs>
+
+      <Dialog
+        open={resetConfirm}
+        onOpenChange={(open) => { if (!open) setResetConfirm(false); }}
+      >
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Reset base instructions?</DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            This removes your custom base instructions and restores the built-in default. Your
+            current version is saved to history first, so you can roll back.
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResetConfirm(false)} disabled={resetting}>
+              Cancel
+            </Button>
+            <Button onClick={() => void resetBase()} disabled={resetting}>
+              {resetting ? "Resetting" : "Reset to default"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <p className="text-xs text-muted-foreground">
+        To use this assistant from Slack, go to{" "}
+        <a href="/settings#slack" className="font-medium text-foreground underline-offset-2 hover:underline">
+          Settings &rarr; Slack
+        </a>
+        .
+      </p>
     </div>
   );
 }
-
