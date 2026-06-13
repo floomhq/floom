@@ -2395,3 +2395,69 @@ class _SqliteView(BaseModel):
     rows: Optional[List[List[Any]]] = None
     row_count: Optional[int] = None
     truncated: Optional[bool] = None
+
+
+class WorkspaceMemberOut(BaseModel):
+    workspace_id: str
+    user_id: str
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    role: Literal["owner", "admin", "member"]
+    status: Literal["active", "invited", "removed"] = "active"
+    invited_by: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class WorkspaceMembersResponse(BaseModel):
+    """Members list + the caller's own identity/role so the web UI gates the
+    invite / change-role / remove / transfer affordances without re-deriving
+    authority from member rows."""
+
+    members: List[WorkspaceMemberOut]
+    workspace_id: str
+    my_user_id: str
+    my_role: Optional[Literal["owner", "admin", "member"]] = None
+
+
+class WorkspaceMemberInviteRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    # ``owner`` is rejected (use transfer ownership); default to the least
+    # privileged role, matching Notion/Linear invite defaults.
+    role: Literal["admin", "member"] = "member"
+
+
+class WorkspaceMemberRoleUpdate(BaseModel):
+    role: Literal["admin", "member"]
+
+
+class WorkspaceTransferOwnerRequest(BaseModel):
+    new_owner_id: str = Field(..., min_length=1)
+
+
+class WorkspaceShareLinkResponse(BaseModel):
+    url: str
+    token: str
+
+
+class WorkspaceImportResponse(BaseModel):
+    workers_imported: List[str] = []
+    contexts_imported: List[str] = []
+    skipped: List[Dict[str, str]] = []
+    id_remaps: Dict[str, str] = {}
+    required_secrets: List[str] = []
+    required_connections: List[str] = []
+    workspace_md_present: bool = False
+
+
+class ChangelogEntry(BaseModel):
+    asset_type: str  # "worker" | "context" | "workspace_instructions"
+    asset_id: str
+    asset_name: str
+    sha: str
+    message: str
+    committed_at: str
+
+
+class _WorkspaceSettingValue(BaseModel):
+    value: str = Field(..., max_length=4000)
