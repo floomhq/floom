@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import sys
 import tempfile
 from pathlib import Path
 
@@ -20,6 +21,11 @@ def _boot(tmp_path: Path):
 
     importlib.reload(contexts)
     importlib.reload(db)
+    # Purge router modules so reloading main rebuilds their handlers against the
+    # freshly-reloaded db (routers hold Depends(get_repos) directly; without this
+    # they'd keep a stale get_repos and 404 on the test's worker rows).
+    for _rn in [x for x in list(sys.modules) if x.startswith("routers")]:
+        sys.modules.pop(_rn, None)
     importlib.reload(main)
     return main, TestClient(main.app)
 
