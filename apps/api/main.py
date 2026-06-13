@@ -3786,15 +3786,25 @@ def create_worker_run(
     _enforce_run_create_quota(auth, worker_id)
 
     # Create the run record first so we have a run_id for per-run file staging.
-    run_id = create_run(
-        worker_id,
-        payload.inputs,
-        trigger_source,
-        status=RunStatus.RUNNING.value,
-        user_id=auth.user_id,
-        trigger_ref=trigger_ref,
-        repos=repos,
-    )
+    from run_service import SpendCapExceeded
+
+    try:
+        run_id = create_run(
+            worker_id,
+            payload.inputs,
+            trigger_source,
+            status=RunStatus.RUNNING.value,
+            user_id=auth.user_id,
+            trigger_ref=trigger_ref,
+            repos=repos,
+        )
+    except SpendCapExceeded as exc:
+        # #793: refuse cleanly (not a 500) with a machine-readable code the UI
+        # surfaces on the Limits tab.
+        raise HTTPException(
+            status_code=402,
+            detail={"error_code": "spend_cap_exceeded", "message": str(exc)},
+        ) from exc
     bound_by = auth.user_id or "anonymous"
     try:
         resolved_inputs = _resolve_file_input_references(

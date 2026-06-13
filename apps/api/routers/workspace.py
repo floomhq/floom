@@ -824,7 +824,11 @@ def get_workspace_settings(
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
 ) -> Dict[str, str]:
-    """#794/#797: workspace behaviour toggles + model defaults (key→value map)."""
+    """#794/#797: workspace behaviour toggles + model defaults (key→value map).
+
+    Also surfaces the read-only `current_month_spend_usd` (#797) so the Settings
+    System tab can render spend-against-cap without a separate fetch.
+    """
     from db import get_db
 
     ws = _active_workspace_id(request)
@@ -832,7 +836,14 @@ def get_workspace_settings(
         rows = conn.execute(
             "SELECT key, value FROM workspace_settings WHERE workspace_id = ?", (ws,)
         ).fetchall()
-    return {str(r["key"]): str(r["value"]) for r in rows}
+    out = {str(r["key"]): str(r["value"]) for r in rows}
+    try:
+        from run_service import _workspace_month_to_date_cost_usd
+
+        out["current_month_spend_usd"] = f"{_workspace_month_to_date_cost_usd():.4f}"
+    except Exception:
+        pass
+    return out
 
 
 @workspace_router.put("/workspace/settings/{key}", status_code=204)
