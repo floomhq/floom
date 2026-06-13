@@ -16,7 +16,20 @@ import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
+from fastapi.responses import JSONResponse
+
 logger = logging.getLogger("floom.api")
+
+
+def _public_noindex_headers() -> Dict[str, str]:
+    return {
+        "X-Robots-Tag": "noindex, nofollow",
+        "Cache-Control": "no-store",
+    }
+
+
+def _json_noindex(payload: Dict[str, Any], *, status_code: int = 200) -> JSONResponse:
+    return JSONResponse(payload, status_code=status_code, headers=_public_noindex_headers())
 
 
 # ---------------------------------------------------------------------------
