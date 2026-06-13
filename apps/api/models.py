@@ -2257,3 +2257,7 @@ class _WorkerSuggestResponse(BaseModel):
 
 class _WorkerSuggestRequest(BaseModel):
     new_description: str
+
+
+class _ImportFromShareRequest(BaseModel):
+    token: str
