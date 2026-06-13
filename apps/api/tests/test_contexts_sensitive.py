@@ -146,6 +146,8 @@ def client(monkeypatch, tmp_path):
             "alerting", "mcp_server",
         ]):
             sys.modules.pop(name)
+    for _rn in [x for x in list(sys.modules) if x.startswith("routers")]:
+        sys.modules.pop(_rn, None)
 
     stub_names = [
         "e2b", "e2b.sandbox", "openai", "anthropic", "composio_openai",
