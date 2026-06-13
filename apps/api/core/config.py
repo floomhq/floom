@@ -56,6 +56,10 @@ DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024
 # A workspace template bundles every operator worker + knowledge pack, so it is
 # larger than a single worker bundle. Cap it generously but bounded.
 WORKSPACE_IMPORT_BODY_LIMIT_BYTES = 50 * 1024 * 1024
+# #931: zip-bomb guards for /workspace/import — uncompressed expansion and entry
+# count are bounded independently of the compressed body size.
+_MAX_IMPORT_UNCOMPRESSED_BYTES = 200 * 1024 * 1024
+_MAX_IMPORT_ENTRIES = 5000
 DEFAULT_CHAT_MESSAGE_MAX_CHARS = 20_000
 
 
@@ -79,7 +83,9 @@ RATE_LIMIT_RULES = [
     (re.compile(r"^/cli-auth/devices$"), (5, 60.0)),
     (re.compile(r"^/workers/from-bundle$"), (10, 60.0)),
     (re.compile(r"^/workspace/import$"), (10, 60.0)),
-    (re.compile(r"^/workspace/export$"), (20, 60.0)),
+    # #948: a full-workspace ZIP per request — keep bulk re-download slow.
+    # 5 per hour is generous for humans and starves scripted exfiltration.
+    (re.compile(r"^/workspace/export$"), (5, 3600.0)),
     (re.compile(r"^/workers$"), (20, 60.0)),
     (re.compile(r"^/connections/connect/[^/]+$"), (10, 60.0)),
     (re.compile(r"^/connections$"), (20, 60.0)),

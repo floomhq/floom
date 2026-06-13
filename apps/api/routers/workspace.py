@@ -35,9 +35,15 @@ from fastapi import (
 )
 from fastapi.responses import PlainTextResponse
 
+import logging
+
 from auth import AuthContext, get_auth_context
-from auth.guards import _require_workspace_write
-from core.config import WORKSPACE_IMPORT_BODY_LIMIT_BYTES
+from auth.guards import _require_admin, _require_workspace_write
+from core.config import (
+    WORKSPACE_IMPORT_BODY_LIMIT_BYTES,
+    _MAX_IMPORT_ENTRIES,
+    _MAX_IMPORT_UNCOMPRESSED_BYTES,
+)
 from core.urls import _public_api_base_url
 from db import Repositories, get_repos
 from models import (
@@ -77,6 +83,8 @@ from services.workspace_ops import (
 
 _WORKSPACE_INSTRUCTIONS_ASSET_TYPE = "workspace_instructions"
 _WORKSPACE_BASE_PERSONA_ASSET_TYPE = "workspace_base_persona"
+
+logger = logging.getLogger("floom.api")
 
 workspace_router = APIRouter()
 
@@ -226,6 +234,11 @@ def export_workspace(
     NO secret values or connection tokens are ever written — only the NAMES of
     required secrets/connections so the importer knows what to reconnect.
     """
+    # #925: a full-workspace download is an admin capability — a compromised
+    # member session must not be able to exfiltrate the whole workspace.
+    _require_admin(auth)
+    # #925/#948: every export is audit-logged with the actor.
+    logger.info("workspace export by user=%s role=%s", auth.user_id, auth.role)
     payload = _build_workspace_template_zip(
         user_id=auth.user_id, repos=repos, exported_at=exported_at
     )
@@ -296,14 +309,49 @@ async def import_workspace(
     except zipfile.BadZipFile as exc:
         raise HTTPException(status_code=400, detail=f"Not a valid zip file: {exc}")
 
-    # Reject symlink members (security).
-    for info in zf.infolist():
+    # #931: zip-bomb guards, mirroring POST /workers/from-bundle. The 50 MB
+    # compressed cap alone let a highly-compressed archive expand to gigabytes
+    # in memory. Enforce entry count + declared uncompressed size up front,
+    # then re-guard the running total during extraction (lying headers).
+    infolist = zf.infolist()
+    if len(infolist) > _MAX_IMPORT_ENTRIES:
+        raise HTTPException(
+            status_code=413,
+            detail=f"Template has too many entries ({len(infolist)} > {_MAX_IMPORT_ENTRIES})",
+        )
+    declared_total = 0
+    for info in infolist:
+        # Reject symlink members (security).
         file_type = (info.external_attr >> 16) & 0o170000
         if file_type == 0o120000:
             raise HTTPException(
                 status_code=400,
                 detail=f"Template contains unsupported symlink: {info.filename!r}",
             )
+        declared_total += info.file_size
+        if declared_total > _MAX_IMPORT_UNCOMPRESSED_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Template too large: uncompressed size exceeds "
+                    f"{_MAX_IMPORT_UNCOMPRESSED_BYTES // (1024 * 1024)} MB"
+                ),
+            )
+    extracted_total = 0
+
+    def _read_member_guarded(member_name: str) -> bytes:
+        nonlocal extracted_total
+        data = zf.read(member_name)
+        extracted_total += len(data)
+        if extracted_total > _MAX_IMPORT_UNCOMPRESSED_BYTES:
+            raise HTTPException(
+                status_code=413,
+                detail=(
+                    f"Template too large: uncompressed size exceeds "
+                    f"{_MAX_IMPORT_UNCOMPRESSED_BYTES // (1024 * 1024)} MB"
+                ),
+            )
+        return data
 
     names = zf.namelist()
 
@@ -320,7 +368,7 @@ async def import_workspace(
             inner = "/".join(parts[2:])
             # Decode worker bundle files as text (they are YAML/py/md/txt).
             try:
-                content = zf.read(name).decode("utf-8")
+                content = _read_member_guarded(name).decode("utf-8")
             except UnicodeDecodeError:
                 raise HTTPException(
                     status_code=400,
@@ -330,7 +378,7 @@ async def import_workspace(
         elif parts[0] == "contexts" and len(parts) >= 3:
             cname = parts[1]
             inner = "/".join(parts[2:])
-            context_files.setdefault(cname, []).append((inner, zf.read(name)))
+            context_files.setdefault(cname, []).append((inner, _read_member_guarded(name)))
         # workspace.md / workspace.json and anything else are intentionally
         # ignored for import (workspace.md is operator-agent config that the
         # importer reviews, not auto-overwritten).

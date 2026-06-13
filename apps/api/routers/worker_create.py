@@ -35,7 +35,7 @@ from services.worker_registry_ops import (
     _persist_discovered_workers,
     _rewrite_worker_yml_id,
 )
-from services.worker_serialize import _DEFAULT_RUN_PY_STUB, _build_worker_detail
+from services.worker_serialize import _DEFAULT_RUN_PY_STUB, _build_worker_detail, _is_secret_bearing_export_path
 
 import logging
 
@@ -176,6 +176,13 @@ async def create_worker_from_bundle(
             parts = rel.split("/")
             if any(p in ("", "..") for p in parts):
                 raise HTTPException(status_code=400, detail=f"Invalid path in bundle: {rel!r}")
+            # #932: strip secret-bearing files (.env, credentials.json, *.key, ...)
+            # — export filters them out, so import must too, or a crafted bundle
+            # can plant secrets that later leak via worker detail/share endpoints
+            # or get committed to the workspace git repo.
+            if _is_secret_bearing_export_path(rel):
+                logger.info("from-bundle: stripped secret-bearing file %r", rel)
+                continue
             data = zf.read(zip_name)
             # Re-guard the running total in case a ZipInfo header under-reported
             # the real uncompressed size (defends against a lying header).
