@@ -904,6 +904,9 @@ export interface ConnectionItem {
   display_name?: string | null;
   last_checked_at?: string | null;
   last_check_status?: string | null;
+  last_used_at?: string | null;
+  last_used_by?: string | null;
+  owner_id?: string | null;
   mcp_label?: string | null;
   mcp_url?: string | null;
   mcp_transport?: "streamable_http" | "sse" | "stdio";
