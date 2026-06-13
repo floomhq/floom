@@ -2333,3 +2333,65 @@ class ContextFileItem(BaseModel):
 class ContextDetail(ContextSummary):
     files: List[ContextFileItem] = Field(default_factory=list)
     used_by: List[ContextWorkerRef] = Field(default_factory=list)
+
+
+class ContextCategoryRequest(BaseModel):
+    category: Optional[str] = None  # #780; empty/null clears it
+
+
+class ContextCreateRequest(BaseModel):
+    writeable: bool = False
+    # Sensitive (the default) excludes the context from git versioning — it may
+    # hold credentials. Set false to opt the context into git history (versions,
+    # rollback). See contexts.is_context_sensitive.
+    sensitive: bool = True
+    category: Optional[str] = None  # #780: content-category tag
+
+
+class ContextDeleteResponse(BaseModel):
+    status: str
+    referenced_by: List[str] = Field(default_factory=list)
+
+
+class ContextFileMoveRequest(BaseModel):
+    new_path: str  # #770: destination path within the same context
+
+
+class ContextSecretScanFile(BaseModel):
+    path: str
+    secret_warnings: List[SecretWarning] = Field(default_factory=list)
+
+
+class ContextSecretScanResponse(BaseModel):
+    name: str
+    scanned_files: int
+    flagged_files: List[ContextSecretScanFile] = Field(default_factory=list)
+
+
+class ContextSensitiveRequest(BaseModel):
+    sensitive: bool
+
+
+class ContextTextWriteRequest(BaseModel):
+    content: str
+    tags: Optional[List[str]] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class ContextUploadResponse(BaseModel):
+    files: List[ContextFileItem]
+    total_size_bytes: int
+
+
+class ContextVisibilityUpdate(BaseModel):
+    """Set a brain pack's visibility. ``specific_people`` reserved (UI hides it)."""
+    visibility: Literal["private", "workspace", "specific_people"]
+
+
+class _SqliteView(BaseModel):
+    tables: List[str] = Field(default_factory=list)
+    table: Optional[str] = None
+    columns: Optional[List[str]] = None
+    rows: Optional[List[List[Any]]] = None
+    row_count: Optional[int] = None
+    truncated: Optional[bool] = None
