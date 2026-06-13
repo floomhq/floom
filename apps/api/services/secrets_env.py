@@ -236,3 +236,12 @@ def _available_secret_names_for_user(user_id: str, repos: "Repositories") -> set
     # worker sandbox. Keeping this DB-only makes worker-secret behaviour identical
     # in OSS and cloud — each owner brings their own worker key. See ARCHITECTURE.md.
     return set(repos.secrets.list_names(user_id=user_id))
+
+
+def _platform_openai_api_key() -> Optional[str]:
+    """The platform's OWN OpenAI key — powers Emily, prompt-to-worker drafting,
+    and codegen. Env-managed and reserved. PLATFORM_OPENAI_API_KEY is canonical;
+    OPENAI_API_KEY is the back-compat fallback so existing single-key deploys keep
+    working. This is NOT a worker key: workers bring their own OPENAI_API_KEY via
+    the secrets DB, and the platform key must never reach a worker sandbox."""
+    return os.environ.get("PLATFORM_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY") or None
