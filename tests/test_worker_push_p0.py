@@ -178,37 +178,37 @@ def test_delete_reaps_orphan_dir_without_db_row(monkeypatch, tmp_path):
 
 
 def test_stock_name_post_forks_to_user_owned_copy(monkeypatch, tmp_path):
-    main = _load_api(monkeypatch, tmp_path, stock_workers=("gmail_inbox_manager",))
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("csv_enricher",))
     client = TestClient(main.app)
-    stock_yml_before = (Path(main.WORKERS_DIR) / "gmail_inbox_manager" / "worker.yml").read_text(encoding="utf-8")
+    stock_yml_before = (Path(main.WORKERS_DIR) / "csv_enricher" / "worker.yml").read_text(encoding="utf-8")
 
     created = client.post(
         "/workers",
         headers=_headers(),
-        json=_worker_payload("gmail_inbox_manager", title="Customized Gmail Cleaner", is_example=True),
+        json=_worker_payload("csv_enricher", title="Customized CSV Enricher", is_example=True),
     )
 
     assert created.status_code == 200, created.text
     body = created.json()
-    assert body["id"] == "gmail-inbox-manager-copy"
-    assert body["id"] != "gmail_inbox_manager"
+    assert body["id"] == "csv-enricher-copy"
+    assert body["id"] != "csv_enricher"
     copied_yml = (Path(main.WORKERS_DIR) / body["id"] / "worker.yml").read_text(encoding="utf-8")
-    assert "name: gmail-inbox-manager-copy" in copied_yml
+    assert "name: csv-enricher-copy" in copied_yml
     assert "is_example: false" in copied_yml
-    assert (Path(main.WORKERS_DIR) / "gmail_inbox_manager" / "worker.yml").read_text(encoding="utf-8") == stock_yml_before
+    assert (Path(main.WORKERS_DIR) / "csv_enricher" / "worker.yml").read_text(encoding="utf-8") == stock_yml_before
 
 
 def test_stock_name_put_is_blocked(monkeypatch, tmp_path):
-    main = _load_api(monkeypatch, tmp_path, stock_workers=("gmail_inbox_manager",))
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("csv_enricher",))
     client = TestClient(main.app)
-    stock_dir = Path(main.WORKERS_DIR) / "gmail_inbox_manager"
+    stock_dir = Path(main.WORKERS_DIR) / "csv_enricher"
     stock_yml_before = (stock_dir / "worker.yml").read_text(encoding="utf-8")
     stock_run_before = (stock_dir / "run.py").read_text(encoding="utf-8")
 
     updated = client.put(
-        "/workers/gmail_inbox_manager",
+        "/workers/csv_enricher",
         headers=_headers(),
-        json=_worker_payload("gmail_inbox_manager", title="Customized Gmail Cleaner", is_example=True),
+        json=_worker_payload("csv_enricher", title="Customized CSV Enricher", is_example=True),
     )
 
     assert updated.status_code == 403, updated.text
@@ -218,22 +218,22 @@ def test_stock_name_put_is_blocked(monkeypatch, tmp_path):
 
 
 def test_stock_name_put_remains_blocked_after_existing_copy(monkeypatch, tmp_path):
-    main = _load_api(monkeypatch, tmp_path, stock_workers=("gmail_inbox_manager",))
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("csv_enricher",))
     client = TestClient(main.app)
 
     created = client.post(
         "/workers",
         headers=_headers(),
-        json=_worker_payload("gmail_inbox_manager", title="First Gmail Cleaner"),
+        json=_worker_payload("csv_enricher", title="First CSV Enricher"),
     )
     blocked = client.put(
-        "/workers/gmail_inbox_manager",
+        "/workers/csv_enricher",
         headers=_headers(),
-        json=_worker_payload("gmail_inbox_manager", title="Second Gmail Cleaner"),
+        json=_worker_payload("csv_enricher", title="Second CSV Enricher"),
     )
 
     assert created.status_code == 200, created.text
-    assert created.json()["id"] == "gmail-inbox-manager-copy"
+    assert created.json()["id"] == "csv-enricher-copy"
     assert blocked.status_code == 403, blocked.text
     assert blocked.json() == {"detail": "Stock workers cannot be modified through the API"}
 

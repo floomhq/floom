@@ -42,7 +42,14 @@ def _load_main(monkeypatch, tmp_path, *, secret: str | None = None, extra_env: d
     for key, value in (extra_env or {}).items():
         monkeypatch.setenv(key, value)
     for name in list(sys.modules):
-        if name == "main" or name == "db" or name.startswith("db.") or name == "auth" or name.startswith("auth."):
+        if (
+            name == "main"
+            or name == "run_token"
+            or name == "db"
+            or name.startswith("db.")
+            or name == "auth"
+            or name.startswith("auth.")
+        ):
             sys.modules.pop(name, None)
     db = importlib.import_module("db")
     db.init_db()
@@ -208,7 +215,11 @@ def test_cli_token_for_legacy_install_without_users_still_works(monkeypatch, tmp
 # ---------------------------------------------------------------------------
 
 def test_run_token_rejected_when_user_disabled(monkeypatch, tmp_path):
-    main = _load_main(monkeypatch, tmp_path)
+    main = _load_main(
+        monkeypatch,
+        tmp_path,
+        extra_env={"WORKEROS_WORKER_CALL_SECRET": "test-worker-call-secret"},
+    )
     from run_token import issue_worker_call_token
 
     with _client(main) as client:
