@@ -18394,6 +18394,8 @@ from channels.whatsapp import (
     _send_whatsapp_typing_indicator,
     _parse_whatsapp_inbound,
     _handle_whatsapp_message,
+    WhatsAppBindingStore,
+    set_whatsapp_binding_store,
 )
 app.include_router(whatsapp_router)
 

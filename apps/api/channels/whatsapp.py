@@ -37,7 +37,7 @@ import os
 import re
 import urllib.parse
 from datetime import datetime, timedelta, timezone
-from typing import Any, Dict, List, Optional, Tuple
+from typing import Any, Dict, List, Optional, Protocol, Tuple
 
 import requests
 from fastapi import BackgroundTasks, Depends, HTTPException, Request, Response
@@ -69,6 +69,68 @@ WHATSAPP_TEXT_MAX = 4096
 
 # Workspace ID used when no workspace is pinned on a binding (backwards compat).
 _DEFAULT_WORKSPACE_ID = "local-default"
+
+
+# ---------------------------------------------------------------------------
+# Binding-persistence seam (#1007)
+# ---------------------------------------------------------------------------
+#
+# The engine persists WhatsApp sender bindings in the local SQLite
+# ``whatsapp_sender_bindings`` table.  A multi-tenant host (managed-deployment)
+# needs them in Postgres/Supabase instead.  Rather than have the host
+# monkeypatch the private ``_whatsapp_*`` functions via ``setattr`` (fragile,
+# and bypassed entirely for callers that imported the symbol at module load —
+# e.g. main.py:_whatsapp_create_claim), the engine exposes a first-class
+# registration seam mirroring ``set_worker_call_secret_resolver`` and
+# ``set_context_scope_resolver``.
+#
+# The host registers a store ONCE at startup; the binding read/claim/reset
+# helpers delegate to it at CALL time.  Because resolution happens per call
+# (not at import), a caller holding a direct reference to the engine function
+# still gets the host implementation — which is exactly what the old
+# setattr-rebind could not guarantee.
+
+
+class WhatsAppBindingStore(Protocol):
+    """Host-pluggable persistence for WhatsApp sender bindings (#1007).
+
+    managed-deployment registers a Supabase-backed implementation at startup via
+    :func:`set_whatsapp_binding_store`; OSS leaves it unset and the engine uses
+    its local SQLite ``whatsapp_sender_bindings`` table.  The method contracts
+    mirror the engine's own ``_whatsapp_binding_info`` / ``_whatsapp_create_claim``
+    / ``_reset_binding_to_pending`` exactly so the two are drop-in equivalent.
+    """
+
+    def binding_info(self, wa_id: str) -> Optional[Tuple[str, str]]:
+        """Return ``(user_id, workspace_id)`` for an active binding, else None."""
+        ...
+
+    def create_claim(self, wa_id: str, profile_name: str = "") -> Dict[str, str]:
+        """Create/refresh a pending claim; return the claim dict.
+
+        Same shape as :func:`_whatsapp_create_claim`:
+        ``{wa_id, claim_token, claim_url, claim_expires_at, status}``.
+        """
+        ...
+
+    def reset_to_pending(self, wa_id: str) -> Optional[str]:
+        """Flip an active binding back to pending; return a fresh claim_url or None."""
+        ...
+
+
+_whatsapp_binding_store: Optional[WhatsAppBindingStore] = None
+
+
+def set_whatsapp_binding_store(store: Optional[WhatsAppBindingStore]) -> None:
+    """Register a host binding store, or ``None`` to use the local SQLite store.
+
+    Called once at startup by a downstream host (e.g. managed-deployment) so binding
+    reads/claims/resets are persisted in its own multi-tenant store.  This is the
+    supported replacement for monkeypatching the private ``_whatsapp_*`` helpers
+    (#1007); pass ``None`` to clear (OSS mode).
+    """
+    global _whatsapp_binding_store
+    _whatsapp_binding_store = store
 
 
 # ---------------------------------------------------------------------------
@@ -161,6 +223,12 @@ def _whatsapp_binding_info(wa_id: str) -> Optional[Tuple[str, str]]:
     Updates last_seen_at as a side-effect.  workspace_id falls back to
     'local-default' when the column is NULL (pre-migration 65 rows).
     """
+    if _whatsapp_binding_store is not None:
+        try:
+            return _whatsapp_binding_store.binding_info(wa_id)
+        except Exception:
+            logger.exception("WhatsApp binding store .binding_info failed")
+            return None
     from db import get_db, now_iso
     normalized = _normalize_whatsapp_wa_id(wa_id)
     if not normalized:
@@ -201,6 +269,8 @@ def _whatsapp_create_claim(wa_id: str, profile_name: str = "") -> Dict[str, str]
       generating a new token.  An existing *active* binding is left intact
       (the sender is already bound; the claim prompt should not have been sent).
     """
+    if _whatsapp_binding_store is not None:
+        return _whatsapp_binding_store.create_claim(wa_id, profile_name)
     import secrets as pysecrets
     from db import get_db, now_iso
     normalized = _normalize_whatsapp_wa_id(wa_id)
@@ -263,6 +333,12 @@ def _reset_binding_to_pending(wa_id: str) -> Optional[str]:
     Returns the new claim_url so the caller can send it to the sender.
     Called at message-time when the pinned workspace no longer exists.
     """
+    if _whatsapp_binding_store is not None:
+        try:
+            return _whatsapp_binding_store.reset_to_pending(wa_id)
+        except Exception:
+            logger.exception("WhatsApp binding store .reset_to_pending failed")
+            return None
     import secrets as pysecrets
     from db import get_db, now_iso
     normalized = _normalize_whatsapp_wa_id(wa_id)
