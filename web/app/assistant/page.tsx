@@ -56,7 +56,7 @@ function InstructionsHistoryMenu({
   async function handleRollback(v: VersionSummary) {
     if (
       !confirm(
-        `Restore workspace instructions to version ${v.version_number} (saved ${formatRelative(v.created_at)})?\n\nThis will overwrite the current instructions.`
+        `Restore workspace instructions to version ${v.sha} (saved ${formatRelative(v.timestamp)})?\n\nThis will overwrite the current instructions.`
       )
     ) {
       return;
@@ -66,7 +66,7 @@ function InstructionsHistoryMenu({
       const content = await api.system.rollbackWorkspaceInstructions(v.id);
       onRollback(content);
       await loadVersions();
-      toast.success(`Rolled back to version ${v.version_number}`);
+      toast.success(`Rolled back to version ${v.sha}`);
     } catch (e: unknown) {
       toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
     } finally {

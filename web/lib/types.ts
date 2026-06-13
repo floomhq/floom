@@ -761,6 +761,7 @@ export interface CurrentUser {
   user_id: string;
   email?: string | null;
   display_name?: string | null;
+  picture?: string | null;
   workspace_id?: string | null;
   scopes?: string[];
   // Multi-member fields (populated when using username/password or PAT auth)

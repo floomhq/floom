@@ -2266,7 +2266,7 @@ function FileHistoryMenu({
   async function handleRestore(v: VersionSummary) {
     if (
       !confirm(
-        `Restore "${fileName}" to v${v.version_number}?\n\nThis replaces the current contents. The current version is saved as a new revision first.`
+        `Restore "${fileName}" to v${v.sha}?\n\nThis replaces the current contents. The current version is saved as a new revision first.`
       )
     ) {
       return;
@@ -2287,7 +2287,7 @@ function FileHistoryMenu({
       await api.contexts.saveTextFile(packName, filePath, restoredContent);
       onRestored(restoredContent);
       await loadVersions();
-      toast.success(`Restored ${fileName} to v${v.version_number}`);
+      toast.success(`Restored ${fileName} to v${v.sha}`);
     } catch (err: unknown) {
       toast.error(err instanceof Error ? err.message : "Restore failed");
     } finally {

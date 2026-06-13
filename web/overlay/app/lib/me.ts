@@ -1,4 +1,4 @@
-import type { CurrentUser } from "../../lib/types";
+import type { CurrentUser } from "../../../lib/types";
 
 export const SESSION_COOKIE = "workeros_cloud_session";
 
