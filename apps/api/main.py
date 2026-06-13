@@ -2577,9 +2577,10 @@ async def draft_worker_from_prompt(
     if len(prompt) > 4000:
         raise HTTPException(status_code=400, detail="prompt must be 4000 characters or fewer")
 
-    openai_key = _platform_openai_api_key() or ""
-    if not openai_key:
-        raise HTTPException(status_code=503, detail="PLATFORM_OPENAI_API_KEY not configured")
+    import llm as _llm
+    from codegen_model import codegen_model as _codegen_model
+    if not _llm.provider_credentials_present(_codegen_model()):
+        raise HTTPException(status_code=503, detail="No LLM provider configured: set OPENAI_API_KEY or AWS credentials for the configured model")
     _enforce_draft_rate_limit(request)
 
     # Pre-detect connections for the prompt to give the LLM a hint
@@ -2594,11 +2595,8 @@ Detected Composio apps that may be needed: {detected_connections if detected_con
 
 Generate the full WorkerContract YAML and metadata JSON as specified. Make sure the YAML is valid and passes schema_version "0.3" validation. Always include version: "0.1.0" in the top-level manifest. Remember: every string scalar in the YAML must be wrapped in double quotes."""
 
-    from openai import OpenAI
     import yaml as pyyaml
     from models import parse_worker_manifest
-
-    client = OpenAI(api_key=openai_key)
 
     max_attempts = 3
     last_yaml_error: Optional[str] = None
@@ -2615,7 +2613,7 @@ Generate the full WorkerContract YAML and metadata JSON as specified. Make sure 
                 "Treat colons inside strings as parse hazards and quote the whole value."
             )
 
-        parsed = _call_draft_llm(client, user_message, extra_instructions)
+        parsed = _call_draft_llm(user_message, extra_instructions)
         worker_yml = parsed.get("worker_yml", "")
         if not worker_yml:
             last_yaml_error = "empty worker_yml returned"
@@ -3057,12 +3055,11 @@ async def draft_and_create_worker(
     if len(prompt) > 4000:
         raise HTTPException(status_code=400, detail="prompt must be 4000 characters or fewer")
 
-    openai_key = _platform_openai_api_key() or ""
-    if not openai_key:
-        raise HTTPException(status_code=503, detail="PLATFORM_OPENAI_API_KEY not configured")
+    import llm as _llm
+    from codegen_model import codegen_model as _codegen_model
+    if not _llm.provider_credentials_present(_codegen_model()):
+        raise HTTPException(status_code=503, detail="No LLM provider configured: set OPENAI_API_KEY or AWS credentials for the configured model")
     _enforce_draft_rate_limit(request)
-
-    from openai import OpenAI
 
     prompt_lower = prompt.lower()
     detected_connections = _detect_connections(prompt_lower)
@@ -3076,8 +3073,6 @@ async def draft_and_create_worker(
         "Always include version: \"0.1.0\" in the top-level manifest. "
         "Remember: every string scalar in the YAML must be wrapped in double quotes."
     )
-
-    client = OpenAI(api_key=openai_key)
 
     max_attempts = 3
     last_yaml_error: Optional[str] = None
@@ -3094,7 +3089,7 @@ async def draft_and_create_worker(
                 "Do not leave any string unquoted."
             )
 
-        parsed_llm = _call_draft_llm(client, user_message, extra_instructions)
+        parsed_llm = _call_draft_llm(user_message, extra_instructions)
         worker_yml_str = parsed_llm.get("worker_yml", "")
         if not worker_yml_str:
             last_yaml_error = "empty worker_yml returned"
