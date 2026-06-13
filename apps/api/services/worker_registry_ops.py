@@ -46,10 +46,7 @@ logger = logging.getLogger("floom.api")
 _SENSITIVE_FILE_NAMES = frozenset({".env", ".env.local", ".env.production", ".env.development"})
 _SENSITIVE_FILE_SUFFIXES = frozenset({".pem", ".key", ".p12", ".pfx", ".crt", ".cer", ".p8", ".der", ".ppk"})
 
-class DraftFile(BaseModel):
-    """A single file in a skill bundle returned by draft-from-prompt."""
-    path: str      # e.g. "worker.yml", "run.py", "SKILL.md", "lib/granola_client.py"
-    content: str   # UTF-8 text content
+from models import DraftFile  # re-export: DraftFile now lives in models.py
 
 
 def _git_join(*parts: str) -> str:

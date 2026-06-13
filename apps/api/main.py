@@ -118,6 +118,15 @@ from db import DB_PATH, Repositories, WorkspaceMemberRepository, assistant_row_i
 from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
 from secret_scan import scan_bytes
 from models import (
+    DraftFromPromptRequest,
+    DraftFromPromptInputField,
+    DraftFromPromptOutputField,
+    RequirementItem,
+    DraftFromPromptResponse,
+    NewWorkerFromPromptRequest,
+    NewWorkerFromPromptResponse,
+    DraftAndCreateRequest,
+    DraftAndCreateResponse,
     _AuthSetupRequest,
     _LoginRequest,
     _PATCreateRequest,
@@ -2772,30 +2781,12 @@ def update_worker(
 
 
 
-class DraftFromPromptRequest(BaseModel):
-    prompt: str
 
 
-class DraftFromPromptInputField(BaseModel):
-    name: str
-    type: str
-    label: str
-    required: bool = False
-    default: Optional[Any] = None
 
 
-class DraftFromPromptOutputField(BaseModel):
-    name: str
-    type: str
-    label: str
 
 
-class RequirementItem(BaseModel):
-    """One integration requirement: a single app with exactly one auth method."""
-    app: str
-    method: str  # "oauth" or "api_key" -- the CURRENT selection (default = LLM suggestion)
-    available_methods: List[str] = []  # both "oauth" and "api_key" if both supported; otherwise just the one
-    reason: str = ""
 
 
 # ---------------------------------------------------------------------------
@@ -2822,21 +2813,6 @@ class RequirementItem(BaseModel):
 
 
 
-class DraftFromPromptResponse(BaseModel):
-    worker_yml: str
-    skill_md: Optional[str] = None
-    suggested_name: str
-    suggested_title: str
-    # New: one entry per app, method is "oauth" or "api_key"
-    requirements: List[RequirementItem] = []
-    # Skill-bundle: all files returned by the LLM (worker.yml, run.py, SKILL.md, lib/*.py, etc.)
-    # When present, the frontend should use these files directly instead of constructing them.
-    files: List[DraftFile] = []
-    # Legacy fields kept for backward compatibility
-    required_connections: List[str]
-    required_secrets: List[str]
-    inputs: List[DraftFromPromptInputField]
-    outputs: List[DraftFromPromptOutputField]
 
 
 
@@ -3089,16 +3065,8 @@ Generate the full WorkerContract YAML and metadata JSON as specified. Make sure 
 # This eliminates the Vercel 60s timeout on draft-from-prompt (task #18).
 # ---------------------------------------------------------------------------
 
-class NewWorkerFromPromptRequest(BaseModel):
-    prompt: str
-    mode: str = "draft"  # "draft" | "create"
-    parent_worker_id: Optional[str] = None
 
 
-class NewWorkerFromPromptResponse(BaseModel):
-    run_id: str
-    worker_id: str = "worker-author"
-    status: str = "running"
 
 
 
@@ -3166,20 +3134,8 @@ def new_worker_from_prompt(
 # POST /workers/draft-and-create — draft + register in one round-trip
 # ---------------------------------------------------------------------------
 
-class DraftAndCreateRequest(BaseModel):
-    prompt: str = ""
-    # Optional pre-built files to skip the LLM step (used for .md / .py uploads)
-    files: List[DraftFile] = []
 
 
-class DraftAndCreateResponse(BaseModel):
-    worker_id: str
-    # FIX 4 (2026-05-29): both creation paths run the smoke+repair safety net.
-    # smoke_status: "passed" | "failed" | "skipped" | None. When "failed" the
-    # worker is created but DISABLED (stays editable) — surface the reason so
-    # the caller does not present it as a clean, ready worker.
-    smoke_status: Optional[str] = None
-    smoke_reason: Optional[str] = None
 
 
 
