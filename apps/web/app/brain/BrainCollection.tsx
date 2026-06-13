@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Folder, Lock, Users } from "lucide-react";
@@ -187,17 +187,32 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     </span>
   );
 
+  const categoryTags = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          folders
+            .map((folder) => folder.category?.trim())
+            .filter((category): category is string => Boolean(category)),
+        ),
+      )
+        .sort((a, b) => a.localeCompare(b))
+        .map((category) => ({ value: category, label: category })),
+    [folders],
+  );
+
   const config: CollectionConfig<ContextSummary> = {
     title: "Brain",
     subtitle: "Reusable folders of files your workers can read before they act.",
     items: folders,
     loading,
     idOf: (c) => c.name,
-    searchOf: (c) => `${c.name} ${c.description ?? ""}`,
+    searchOf: (c) => `${c.name} ${c.description ?? ""} ${c.category ?? ""}`,
     tagsOf: (c) =>
       ({
         visibility: [c.visibility === "workspace" ? "shared" : "private"],
         status: [writeKey(c)],
+        content: c.category ? [c.category] : [],
       }) as Partial<Record<TagFamilyKey, string[]>>,
     tags: {
       status: [
@@ -208,6 +223,7 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
         { value: "private", label: "Private" },
         { value: "shared", label: "Shared" },
       ],
+      ...(categoryTags.length > 0 ? { content: categoryTags } : {}),
     },
     counts: [
       { value: folders.length, label: "folders" },
