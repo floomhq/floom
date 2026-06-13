@@ -220,9 +220,9 @@ export function WorkspaceSwitcher() {
 
   if (!state) {
     return (
-      <div className="px-3 pb-2">
+      <div className="w-full">
         <div
-          className="flex h-10 items-center gap-2 rounded-md [border:var(--bd-card)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)]"
+          className="flex h-10 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)]"
           aria-label="Loading workspaces"
         >
           <div className="size-6 shrink-0 rounded-md bg-muted" />
@@ -239,14 +239,14 @@ export function WorkspaceSwitcher() {
 
   if (!active) {
     return (
-      <div className="px-3 pb-2 text-xs text-[var(--ink-mute)]">
+      <div className="w-full px-2.5 text-xs text-[var(--ink-mute)]">
         {error ?? "No workspaces yet"}
       </div>
     );
   }
 
   return (
-    <div className="px-3 pb-2">
+    <div className="w-full">
       <DropdownMenu>
         {/* V4 SPEC §2: workspace identity — mark + name + chevron-on-hover */}
         <DropdownMenuTrigger
@@ -272,7 +272,7 @@ export function WorkspaceSwitcher() {
         <DropdownMenuContent
           align="start"
           side="bottom"
-          className="w-56 p-1"
+          className="w-56 border-0 p-1 shadow-pop ring-0 outline-none"
           sideOffset={6}
         >
           <DropdownMenuGroup>
@@ -349,7 +349,7 @@ export function WorkspaceSwitcher() {
                   secrets, no connections); Duplicate = live copy in this
                   instance with agents + instructions, connections & secrets
                   NOT copied (intentional: they must be reconnected). */}
-              <DropdownMenuSubContent className="w-64 p-1">
+              <DropdownMenuSubContent className="w-64 border-0 p-1 shadow-pop ring-0 outline-none">
                 <DropdownMenuItem
                   closeOnClick={false}
                   disabled={exporting}
