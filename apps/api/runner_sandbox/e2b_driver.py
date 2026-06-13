@@ -935,6 +935,7 @@ class E2BSandboxDriver(SandboxDriver):
                 _emit_command_output(chunk, "warning", "[e2b] stderr: ", log_fn)
 
             _cmd_envs: dict[str, str] = {
+                **secrets,
                 "FLOOM_RUN_ID": run_id,
                 "FLOOM_TRACE_ID": trace_id,
                 "WORKEROS_API_URL": _sandbox_envs["WORKEROS_API_URL"],
