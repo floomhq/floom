@@ -969,19 +969,40 @@ def _cors_allowed_origins() -> List[str]:
     if configured.strip():
         return [origin.strip() for origin in configured.split(",") if origin.strip()]
 
-    origins = ["https://workers.floom.dev"]
+    # #921: explicit production origins only — no wildcard subdomain match.
+    origins = ["https://workers.floom.dev", "https://workeros.floom.dev"]
     if os.environ.get("WORKEROS_DEV"):
         origins.extend(["http://localhost:3000", "http://localhost:3011"])
     return origins
 
 
-def _cors_allowed_origin_regex() -> str:
+def _cors_allowed_origin_regex() -> Optional[str]:
     configured = os.environ.get("ALLOWED_ORIGIN_REGEX", "")
     if configured.strip():
         return configured.strip()
     if os.environ.get("WORKEROS_DEV"):
         return r"^https://[a-z0-9-]+\.workeros-[a-z0-9-]+\.vercel\.app$"
-    return r"^https://([a-z0-9-]+\.)*floom\.dev$"
+    # #921: the old default `^https://([a-z0-9-]+\.)*floom\.dev$` allowed ANY
+    # floom.dev subdomain to make credentialed requests — one compromised
+    # subdomain meant workspace-wide CSRF. Production now relies on the explicit
+    # allowlist above; set ALLOWED_ORIGIN_REGEX to opt back in.
+    return None
+
+
+# #921: with allow_credentials=True, enumerate methods and headers instead of
+# reflecting whatever a cross-origin attacker asks for.
+_CORS_ALLOWED_METHODS = ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"]
+_CORS_ALLOWED_HEADERS = [
+    "Authorization",
+    "Content-Type",
+    "Accept",
+    "Cache-Control",
+    "X-Requested-With",
+    "X-Floom-Secret",
+    "X-Floom-User",
+    "X-Workeros-Workspace",
+    "X-Workeros-Run-Token",
+]
 
 
 app.add_middleware(
@@ -989,8 +1010,8 @@ app.add_middleware(
     allow_origins=_cors_allowed_origins(),
     allow_origin_regex=_cors_allowed_origin_regex(),
     allow_credentials=True,
-    allow_methods=["*"],
-    allow_headers=["*"],
+    allow_methods=_CORS_ALLOWED_METHODS,
+    allow_headers=_CORS_ALLOWED_HEADERS,
 )
 
 
@@ -1500,8 +1521,12 @@ print(
 
 @app.exception_handler(ValueError)
 async def value_error_handler(_request, exc: ValueError):
-    logger.warning("Validation error: %s", exc)
-    return JSONResponse(status_code=400, content={"detail": str(exc)})
+    # #920: ValueErrors bubble up from arbitrary internal code and can carry
+    # filesystem paths, config values, or provider internals. Log the detail
+    # server-side; clients get a generic message. Field-level validation errors
+    # reach clients via the Pydantic handler, not this one.
+    logger.warning("Validation error: %s", exc, exc_info=exc)
+    return JSONResponse(status_code=400, content={"detail": "Invalid request"})
 
 
 
@@ -4580,6 +4605,7 @@ from routers.secrets import (
     SecretUpsertRequest,
     SecretTestResult,
     SecretName,
+    _require_secret_mutation_allowed,
     upsert_secret,
     delete_secret,
     test_secret,

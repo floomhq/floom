@@ -61,6 +61,10 @@ def integrations_catalog(
     limit: int = Query(30, ge=1, le=100),
     search: str = Query("", max_length=120),
     category: str = Query("", max_length=200),
+    # #919: requires a real auth context — without it, any Bearer token or
+    # cookie slipped past the shared-secret middleware check and could
+    # enumerate the catalog (and burn Composio quota) unauthenticated.
+    auth: AuthContext = Depends(get_auth_context),
 ) -> IntegrationCatalogResponse:
     """Return the integration catalog, with optional comma-separated category OR-filter.
 
@@ -136,7 +140,12 @@ class CatalogToolItem(BaseModel):
 
 
 @integrations_router.get("/integrations/catalog/{slug}/tools", response_model=List[CatalogToolItem])
-def integrations_catalog_tools(slug: str, limit: int = 100) -> List[CatalogToolItem]:
+def integrations_catalog_tools(
+    slug: str,
+    limit: int = 100,
+    # #919: same auth requirement as the catalog listing above.
+    auth: AuthContext = Depends(get_auth_context),
+) -> List[CatalogToolItem]:
     """Return up to `limit` tools for a Composio toolkit slug, cached 1 h.
 
     Designed for the Browse catalog tools modal. Default limit raised to 100

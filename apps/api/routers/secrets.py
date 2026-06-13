@@ -17,7 +17,7 @@ alongside ``main``.
 from __future__ import annotations
 
 import logging
-from typing import Annotated, Any, List, Optional
+from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
 from fastapi import Path as PathParam
@@ -36,6 +36,26 @@ from services.secrets_env import (
 from services.worker_access import _list_visible_workers
 
 logger = logging.getLogger("floom.api")
+
+
+def _require_secret_mutation_allowed(auth: AuthContext, existing: Optional[Dict[str, Any]], name: str) -> None:
+    """#952: members may create secrets and manage their own, but must not
+    overwrite or delete a secret someone else created.
+
+    Per-user secret repositories (OSS SQLite) never surface another user's rows,
+    so this is a no-op there. Workspace-scoped repositories (cloud) return the
+    workspace row with its creator's user_id — where, before this guard, any
+    member could replace or delete the admin's API keys.
+    """
+    if existing is None or auth.is_admin:
+        return
+    creator = str(existing.get("user_id") or "")
+    if creator and creator != auth.user_id:
+        raise HTTPException(
+            status_code=403,
+            detail=f"only an admin or the creator can modify secret {name!r}",
+        )
+
 
 secrets_router = APIRouter()
 
@@ -77,13 +97,15 @@ def upsert_secret(
             status_code=400,
             detail="Secret value must not contain newline or control characters",
         )
+    _require_secret_mutation_allowed(auth, repos.secrets.get(user_id=auth.user_id, name=name), name)
     repos.secrets.set(
         user_id=auth.user_id,
         name=name,
         value=payload.value,
         status=SecretStatus.SET.value,
     )
-    logger.info("Secret %s upserted", name)
+    # #952: secret mutations are audit-logged with the actor (never the value).
+    logger.info("Secret %s upserted by user=%s role=%s", name, auth.user_id, auth.role)
     # Re-encrypt .secrets.enc if workspace is connected to GitHub
     _cfg = _git_cfg_get(auth.user_id)
     if _cfg and _cfg.get("github_pat") and _cfg.get("repo_full_name"):
@@ -110,10 +132,13 @@ def delete_secret(
                 "be deleted via the secrets API."
             ),
         )
-    if repos.secrets.get(user_id=auth.user_id, name=name) is None:
+    existing = repos.secrets.get(user_id=auth.user_id, name=name)
+    if existing is None:
         raise HTTPException(status_code=404, detail=f"Secret {name!r} not found in .env")
+    _require_secret_mutation_allowed(auth, existing, name)
     repos.secrets.delete(user_id=auth.user_id, name=name)
-    logger.info("Secret %s deleted", name)
+    # #952: secret mutations are audit-logged with the actor (never the value).
+    logger.info("Secret %s deleted by user=%s role=%s", name, auth.user_id, auth.role)
     # Re-encrypt .secrets.enc if workspace is connected to GitHub
     _cfg = _git_cfg_get(auth.user_id)
     if _cfg and _cfg.get("github_pat") and _cfg.get("repo_full_name"):

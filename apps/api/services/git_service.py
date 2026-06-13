@@ -366,3 +366,18 @@ def _workers_git_prefix() -> str:
         return WORKERS_DIR.relative_to(_git_workspace()).as_posix()
     except ValueError:
         return "workers"
+
+
+def _require_sha_in_asset_history(workspace: "Path", sha: str, rel_path: str) -> None:
+    """#928: rollback/restore SHAs must come from the target asset's own git
+    history. The workspace repo is shared across users and assets, so an
+    arbitrary commit id would let a caller materialize file states from other
+    users' workers or brain packs into an asset they control."""
+    import git_ops as _git_ops
+    from fastapi import HTTPException
+
+    if not _git_ops.sha_in_path_history(workspace, sha, rel_path):
+        raise HTTPException(
+            status_code=404,
+            detail=f"Commit {sha!r} not found in this asset's history",
+        )

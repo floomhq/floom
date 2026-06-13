@@ -75,7 +75,7 @@ from services.context_access import (
     _workers_referencing_context,
     _write_context_file,
 )
-from services.git_service import _git_author, _git_workspace
+from services.git_service import _git_author, _git_workspace, _require_sha_in_asset_history
 
 contexts_router = APIRouter()
 
@@ -216,6 +216,7 @@ def restore_context_file_version(
     rel = _context_file_path_or_400(file_path)
     workspace = _git_workspace()
     git_path = _context_git_path(safe_name, rel)
+    _require_sha_in_asset_history(workspace, sha, git_path)
 
     try:
         _git_ops.checkout_path(workspace, sha, git_path)
@@ -256,6 +257,7 @@ def rollback_context(
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
     workspace = _git_workspace()
     ctx_git_path = _context_git_path(safe_name)
+    _require_sha_in_asset_history(workspace, sha, ctx_git_path)
 
     try:
         _git_ops.checkout_path(workspace, sha, ctx_git_path)
