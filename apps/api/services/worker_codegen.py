@@ -392,7 +392,11 @@ _draft_rate_lock = threading.Lock()
 _draft_rate_store: Dict[str, collections.deque] = {}
 
 
-_DRAFT_RATE_LIMIT_HOUR = int(os.environ.get("WORKEROS_DRAFT_RATE_HOUR", "20"))
+def _draft_rate_limit_hour() -> int:
+    # Read live (not at import) so the env-driven cap stays correct across test
+    # reloads: this module is not reloaded per-test the way main.py was, so a
+    # frozen import-time constant would ignore a test's WORKEROS_DRAFT_RATE_HOUR.
+    return int(os.environ.get("WORKEROS_DRAFT_RATE_HOUR", "20"))
 
 
 _DRAFT_RATE_WINDOW_SECONDS = 3600.0
@@ -427,7 +431,7 @@ def _claim_draft_slot(request: Request) -> Optional[int]:
         if not dq:
             _draft_rate_store.pop(key, None)
             dq = _draft_rate_store.setdefault(key, collections.deque())
-        if len(dq) >= _DRAFT_RATE_LIMIT_HOUR:
+        if len(dq) >= _draft_rate_limit_hour():
             oldest = dq[0]
             retry_after = max(1, int(_DRAFT_RATE_WINDOW_SECONDS - (now - oldest)))
             return retry_after
@@ -459,7 +463,7 @@ def _enforce_draft_rate_limit(request: Request) -> None:
     if retry_after is not None:
         raise HTTPException(
             status_code=429,
-            detail=f"Draft rate limit reached: {_DRAFT_RATE_LIMIT_HOUR}/hour. Try again later.",
+            detail=f"Draft rate limit reached: {_draft_rate_limit_hour()}/hour. Try again later.",
             headers={"Retry-After": str(retry_after)},
         )
 
