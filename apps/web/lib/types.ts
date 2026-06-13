@@ -522,6 +522,8 @@ export interface ContextSummary {
   system?: boolean;
   /** True when the operator cannot edit or delete this pack. */
   read_only?: boolean;
+  /** Optional content category tag, e.g. marketing/accounting/research/data. */
+  category?: string | null;
   /** Sensitive packs are never committed to git or pushed to GitHub. Default: true. */
   sensitive?: boolean;
   // Members STEP 4: ownership + per-asset visibility + computed permissions.
