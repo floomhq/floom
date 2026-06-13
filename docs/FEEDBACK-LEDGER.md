@@ -184,7 +184,7 @@ Genuinely open items (all tracked in WORKPLAN-20260529-road-to-100.md):
 | O6 | "Smoke past, I don't think, is enough" — deeper worker testing (USR 287) | ✅ | S38 PR #204 — prod smoke runs recorded with run_ids, status, duration, output heads. |
 | O7 | "MCPs should be live, right, so we can already connect some MCPs as well" (USR 281, 298) | ❌ | MCP tab + HTTP MCP shipped (PR #206). Stdio import flow genuinely open — see E5/E7. |
 
-## Q. S47 HITL (NovaSearch P0)
+## Q. S47 HITL (TeamB P0)
 
 | # | Item | Status | Where |
 |---|---|---|---|

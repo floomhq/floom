@@ -74,7 +74,7 @@ PR #33:
 Vercel SSO protection on workers.floom.dev was disabled (project setting `ssoProtection: null`) so the production URL is now publicly accessible. The web frontend was rebuilt + redeployed + aliased; the previous 14h-stale production alias `workeros-98fmvo5ci...` -> new `workeros-ajwban6pt...` (commits #29-#33).
 
 Verified live on https://workers.floom.dev :
-- **`/workers`** -> 200 OK. Folders sidebar shows `All folders / Operations(3) / Recruiting(3) / Research(1)`. Tag chips render the full set (`brief, candidate, compliance, contractors, crm, csv, cv, dach, enrichment, gmail, intake, markdown, matching, novasearch, operations, rates, recruiting, reporting, research, spreadsheet, strategy, summary, updates, writeup`). All 7 workers list with `Runner: e2b`.
+- **`/workers`** -> 200 OK. Folders sidebar shows `All folders / Operations(3) / Recruiting(3) / Research(1)`. Tag chips render the full set (`brief, candidate, compliance, contractors, crm, csv, cv, dach, enrichment, gmail, intake, markdown, matching, teamb, operations, rates, recruiting, reporting, research, spreadsheet, strategy, summary, updates, writeup`). All 7 workers list with `Runner: e2b`.
 - **`/workers/new`** -> 200 OK. Prompt-to-worker UI renders with textarea, Generate button, Cmd+Enter hint, and 5 example prompts.
 - **`/connections/browse`** -> 200 OK. `1-30 of 1,043 integrations`, `Page 1 of 35`, category tabs (`All / Popular / Productivity / Email / CRM / Social / Marketing / Data / Collaboration`) all render. Gmail, GitHub, Google Calendar, Notion, Slack, Supabase, HubSpot, Linear, Airtable, Discord, Figma, etc. all listed with Connect buttons.
 

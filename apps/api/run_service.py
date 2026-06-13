@@ -2594,7 +2594,7 @@ _PLATFORM_SECRET_NAMES: frozenset[str] = frozenset({
     "FLOOM_RUN_TIMEOUT",
     # NOTE: OPENAI_API_KEY is INTENTIONALLY NOT in this list. Workers
     # legitimately need it to call OpenAI from inside the sandbox (research_brief,
-    # csv_enricher, cv_writeup etc. all declare secrets: [OPENAI_API_KEY]).
+    # csv_enricher, resume_helper etc. all declare secrets: [OPENAI_API_KEY]).
     # Workeros v0 is single-user, so the platform owner == the worker author,
     # and sharing the OpenAI key is acceptable. When the platform goes
     # multi-tenant (skills-neo v0.y), this needs to change: each tenant must

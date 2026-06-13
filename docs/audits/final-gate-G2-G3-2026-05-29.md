@@ -95,8 +95,8 @@ Triggered every operator-visible worker with a real input, polled to terminal.
 | env-vars-worker | run_07fc182b3da3 | completed |
 | research_brief | run_8d6159efd298 | completed |
 | csv_enricher | run_ea865938e5e0 | completed |
-| reverse_match_crm | run_e6e5d0194163 | completed |
-| cv_writeup | run_99d8b2ea9f89 | completed |
+| crm_matcher | run_e6e5d0194163 | completed |
+| resume_helper | run_99d8b2ea9f89 | completed |
 | github-pr-summary | run_50c4ab5b4747 | completed |
 | openblog | run_1fac6d24c6c7 | completed (4m29s) |
 | opendraft | run_279270f792f5 | running (valid input accepted; long ~30-44m; historical baseline passes) |

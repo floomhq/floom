@@ -93,7 +93,7 @@ All items below are SHIPPED unless flagged otherwise. Anything not on this list 
 
 ### Stock workers (live, 12 total)
 
-8 pure-script Python workers (legacy run.py path, agentless): csv_enricher, cv_writeup, dach_compliance, e2b_test, gmail_intake_brief, input_types_test, reverse_match_crm, schedule_test, webhook_secret_test, webhook_test.
+8 pure-script Python workers (legacy run.py path, agentless): csv_enricher, resume_helper, dach_compliance, e2b_test, gmail_intake_brief, input_types_test, crm_matcher, schedule_test, webhook_secret_test, webhook_test.
 
 2 agent-mode skill workers (markdown SKILL.md, OpenAI tool loop): research_brief, weekly_update.
 

@@ -45,9 +45,9 @@ workers got a real uploaded-file SHA reference + required text fields).
 | # | Worker | HTTP | run_id | Final status |
 |---|--------|------|--------|--------------|
 | 1 | weekly_update | 200 | `run_b51dd521dcef` | completed |
-| 2 | cv_writeup | 200 | `run_b3fd473d3fef` | completed (after file upload) |
+| 2 | resume_helper | 200 | `run_b3fd473d3fef` | completed (after file upload) |
 | 3 | dach_compliance | 200 | `run_09cd796988a7` | completed |
-| 4 | reverse_match_crm | 200 | `run_608251122b6e` | completed (file + job_brief) |
+| 4 | crm_matcher | 200 | `run_608251122b6e` | completed (file + job_brief) |
 | 5 | gmail_intake_brief | 200 | `run_1188169320b5` | completed |
 | 6 | github-digest | 200 | `run_ce834ebaacc0` | completed |
 | 7 | openblog | 200 | `run_11045729d76c` | completed |
@@ -62,7 +62,7 @@ section-by-section writer then refiner; last log entry 8s before final check) â€
 PASS (healthy long-running real engine), consistent with the documented OS opendraft real-engine
 behavior. **Zero workers failed.**
 
-Note on file-input workers: cv_writeup / csv_enricher / reverse_match_crm correctly REJECT
+Note on file-input workers: resume_helper / csv_enricher / crm_matcher correctly REJECT
 plain inputs and require a SHA-256 reference from `/uploads` (HTTP 400 with a precise message â€”
 this is correct boundary validation, the #256 error-message improvement). After a real file
 upload they all completed.

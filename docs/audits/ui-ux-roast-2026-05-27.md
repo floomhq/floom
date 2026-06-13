@@ -82,7 +82,7 @@ What's still holding the score down: the run detail H1 still shows a raw slug (`
 
 | # | Page | Finding |
 |---|------|---------|
-| P2.1 | /workers | **Folder pills show full path with no truncation hierarchy.** "Operations/Data 1", "Recruiting/NovaSearch 2" — the hierarchy prefix adds visual noise. The count number has no spacing from the folder name (renders as "Operations/Data1" in the DOM). |
+| P2.1 | /workers | **Folder pills show full path with no truncation hierarchy.** "Operations/Data 1", "Recruiting/TeamB 2" — the hierarchy prefix adds visual noise. The count number has no spacing from the folder name (renders as "Operations/Data1" in the DOM). |
 | P2.2 | /workers/[id] Code tab | **worker.yml renders without syntax highlighting in the right panel.** Only run.py and requirements.txt get highlight.js treatment. worker.yml shows unstyled text in the right panel (dark background but no YAML token colors). This may be a mime-type detection issue. |
 | P2.3 | /runs | **"History" card header adds no value.** The page is "Runs", the section is "History" — redundant. Remove or replace with something useful like run count. |
 | P2.4 | /connections | **"Last used Never" on all connections.** Accurate but noisy for new/test accounts. Only show "Last used" metadata when there's actual usage data. "Never" reads as a health warning when it's just a new connection. |

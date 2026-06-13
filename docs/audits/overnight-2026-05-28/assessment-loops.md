@@ -69,7 +69,7 @@ artifacts dir: docs/audits/overnight-2026-05-28/be-cycle-N/
 
 4. **Worker smoke (lane D)** — actually invoke every stock worker
    - research_brief, weekly_update, csv_enricher, dach_compliance,
-     reverse_match_crm, cv_writeup, gmail_intake_brief, e2b_test, schedule_test,
+     crm_matcher, resume_helper, gmail_intake_brief, e2b_test, schedule_test,
      webhook_test, webhook_secret_test, input_types_test
    - Real inputs (use `worker.example_input`)
    - Wait for completion, log status/duration/output

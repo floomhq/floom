@@ -7,7 +7,6 @@
     "dev:web": "cd apps/web && npm run dev",
     "dev": "echo 'Run dev:api and dev:web in separate terminals'",
     "build:web": "cd apps/web && npm run build",
-    "test:novasearch": "python3 tests/novasearch_regression.py",
     "test:crud": "python3 tests/crud_regression.py"
   }
 }
