@@ -29,6 +29,13 @@ def _isolate_test_globals():
         get_auth_provider.cache_clear()
     except Exception:
         pass
+    # The failed-login lockout store moved from main into services.auth_ops, which
+    # is not reloaded per-test the way main.py is; clear it so lockout state from
+    # one test never bleeds into the next (e.g. test_password_policy_lockout).
+    _auth_ops = sys.modules.get("services.auth_ops")
+    _store = getattr(_auth_ops, "_failed_login_attempts", None)
+    if isinstance(_store, dict):
+        _store.clear()
     try:
         yield
     finally:
