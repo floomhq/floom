@@ -668,6 +668,20 @@ def _ensure_runs_artifacts_archived_column(conn: sqlite3.Connection) -> None:
         conn.execute("ALTER TABLE runs ADD COLUMN artifacts_archived INTEGER DEFAULT 0 NOT NULL")
 
 
+def _migrate_run_cost_accounting(conn: sqlite3.Connection) -> None:
+    columns = _table_columns(conn, "runs")
+    if "total_tokens" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN total_tokens INTEGER")
+    if "total_cost_usd" not in columns:
+        conn.execute("ALTER TABLE runs ADD COLUMN total_cost_usd REAL")
+    columns = _table_columns(conn, "runs")
+    if {"worker_id", "created_at"} <= columns:
+        conn.execute(
+            "CREATE INDEX IF NOT EXISTS idx_runs_worker_created "
+            "ON runs(worker_id, created_at)"
+        )
+
+
 def _migrate_file_owners(conn: sqlite3.Connection) -> None:
     _execute_sql_script(conn,
         """
@@ -1985,11 +1999,7 @@ MIGRATIONS: list[Migration] = [
     # -- migration 76: persisted per-run cost accounting (#793 spend cap, #795
     # approval cost-so-far). Populated at terminal status from the transcript
     # usage row; NULL = not yet computed / pure-script run with no LLM tokens.
-    """
-    ALTER TABLE runs ADD COLUMN total_tokens INTEGER;
-    ALTER TABLE runs ADD COLUMN total_cost_usd REAL;
-    CREATE INDEX IF NOT EXISTS idx_runs_worker_created ON runs(worker_id, created_at);
-    """,
+    _migrate_run_cost_accounting,
     # -- migration 77: approval cost-so-far snapshot (#795). Captured at
     # approval creation from the live transcript; estimate, surfaced on the
     # approval Run tab so the page needs no separate run fetch.
