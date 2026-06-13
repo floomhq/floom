@@ -32,7 +32,7 @@ describe("Settings nav groups (§4)", () => {
 
   it("group labels carry the name when known", () => {
     expect(groupLabel("workspace", "Floom")).toBe("Workspace · Floom");
-    expect(groupLabel("account", "vivek@floom.dev")).toBe("Account · vivek@floom.dev");
+    expect(groupLabel("account", "admin@example.com")).toBe("Account · admin@example.com");
     expect(groupLabel("workspace")).toBe("Workspace");
   });
 

@@ -2,11 +2,11 @@
 private workers (they bypass visibility=private for any member).
 
 Root cause: PUBLIC_STOCK_WORKER_IDS (and PROTECTED_STOCK_WORKER_IDS, consulted
-by Emily's _worker_can_view) listed Federico's real private workers
-(Gmail/DACH/kugelaudio/CV/GSC/LinkedIn/CRM/weekly_update). _get_visible_worker
-returns stock ids to ANY member regardless of visibility, so members could
-list/run them. Fix: curate both sets to ship-with-product templates + system
-workers only.
+by Emily's _worker_can_view) listed real private workers that read a tenant's
+connected accounts (personal Gmail / CRM / analytics / recruiting integrations).
+_get_visible_worker returns stock ids to ANY member regardless of visibility, so
+members could list/run them. Fix: curate both sets to ship-with-product
+templates + system workers only.
 
 Run: cd apps/api && python -m pytest tests/test_stock_worker_visibility_872.py -q
 """
@@ -22,31 +22,16 @@ API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
-# the worker ids the issue identified as Federico's REAL private workers
+# Account-reading example/template workers: these ship as is_example demos but
+# must NEVER be in the cross-member stock-bypass sets — a member should only
+# see/run them after owning a copy, never via the stock visibility bypass.
 PRIVATE_WORKERS = {
-    "cv_writeup",
-    "dach_compliance",
-    "gmail_intake_brief",
     "gmail_inbox_manager",
-    "kugelaudio-bug-intake",
-    "kugelaudio-meeting-pipeline",
-    "linkedin-post-engagements",
-    "search_console_insights",
-    "reverse_match_crm",
-    "weekly_update",
-    # Gmail/CRM tenant-specific workers that only appeared in PROTECTED
+    "gmail_intake_brief",
     "gmail-inbox-manager-plus",
     "gmail-smart-replies",
-    "canopy-crm-sync",
-    # Residual leak caught in the follow-up curation pass: these read Federico's
-    # REAL connected accounts (Gmail / OpenPaper PostHog / openpaper.dev GSC +
-    # Notion) and are is_example:false. gmail-summarize-latest, openpaper-posthog
-    # -daily and seo-opportunity-digest were still in PROTECTED_STOCK_WORKER_IDS
-    # (and gmail-summarize-latest also in PUBLIC), so _worker_can_view bypassed
-    # ownership for every member until they were removed.
     "gmail-summarize-latest",
-    "openpaper-posthog-daily",
-    "seo-opportunity-digest",
+    "linkedin-post-engagements",
 }
 
 # genuine ship-with-product templates that MUST remain accessible

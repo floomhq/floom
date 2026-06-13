@@ -108,11 +108,11 @@ RATE_LIMIT_RULES = [
 # PUBLIC_STOCK_WORKER_IDS alone is NOT enough: any tenant-private worker still
 # listed here keeps leaking (a non-owner member can view AND run it). This set
 # is curated to the same standard — genuine ship-with-product example/demo
-# templates + engine/system workers only. Tenant-specific workers that read
-# Federico's real Gmail / PostHog / GSC / Notion / CRM data are removed:
-#   - gmail-summarize-latest  reads the operator's real Gmail inbox (is_example:false)
-#   - openpaper-posthog-daily reads the real OpenPaper PostHog project + emails it
-#   - seo-opportunity-digest  reads real openpaper.dev GSC data + writes to Notion
+# templates + engine/system workers only. Tenant-specific workers that read the
+# operator's real Gmail / analytics / search-console / CRM data are removed —
+# e.g. a worker that summarizes a real connected inbox, one that reads a real
+# product-analytics project, or one that reads real search-console data and
+# writes to a connected notes/docs tool. When unsure, EXCLUDE.
 # Removing them here also correctly makes them owner-deletable and owner-scoped
 # (they were never real stock). When unsure, EXCLUDE.
 PROTECTED_STOCK_WORKER_IDS = frozenset(
@@ -137,8 +137,8 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
 # #872 SECURITY: PUBLIC_STOCK_WORKER_IDS are returned to ANY member regardless
 # of visibility=private (the ownership guards check stock IDs first, by design
 # for genuine ship-with-product templates). This set previously included a
-# tenant's REAL private workers (Gmail/DACH/kugelaudio/CV/GSC/LinkedIn/CRM/
-# weekly_update), leaking their existence and letting members trigger runs.
+# tenant's REAL private workers (personal Gmail / CRM / analytics / recruiting
+# integrations), leaking their existence and letting members trigger runs.
 # Curated down to genuinely-shareable example/demo templates only. Stock =
 # ships-with-product examples, never a tenant's data. A removed worker now
 # correctly 404s for a non-owner member.
@@ -147,15 +147,15 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
 # belongs here ONLY if it is BOTH (a) marked `is_example: true` in worker.yml
 # AND (b) a generic pattern demo that touches no person-specific account data or
 # real client/business logic. `is_example: true` alone is NOT sufficient — many
-# of the tenant's REAL workers (cv_writeup, dach_compliance, gmail_intake_brief,
-# kugelaudio-*, reverse_match_crm, weekly_update) carry that flag yet operate on
-# Federico's actual Gmail/CRM/client data, so they are excluded. When unsure,
+# of the operator's REAL workers carry that flag yet operate on personal
+# Gmail/CRM/client data, so they are excluded. When unsure,
 # EXCLUDE: a wrongly-excluded worker merely isn't a public template; a
 # wrongly-included one leaks a tenant's private worker.
 #
-# gmail-summarize-latest is excluded: it reads the operator's real connected
-# Gmail inbox ("the latest message from your Gmail inbox") and is itself marked
-# `is_example: false` — i.e. not a ship-with-product example.
+# Note: demo workers that READ a connected account (e.g. the gmail-* example
+# templates) ship as `is_example: true` examples but are deliberately kept OUT
+# of this cross-member visibility-bypass set — a member should only see/run them
+# once they own a copy, never via the stock bypass.
 PUBLIC_STOCK_WORKER_IDS = frozenset(
     {
         "csv_enricher",          # is_example, enriches arbitrary CSV rows — no real data source
