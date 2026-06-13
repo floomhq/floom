@@ -580,3 +580,56 @@ def _get_timeseries_batch(
         return repos.workers.timeseries_batch(user_id=user_id, worker_ids=worker_ids, days=days)
     except sqlite3.OperationalError:
         return {}
+
+
+_WORKSPACE_EXPORT_SECRET_BASENAMES = frozenset({
+    ".env",
+    ".netrc",
+    ".npmrc",
+    ".pypirc",
+    "credentials",
+    "credentials.json",
+    "secrets.json",
+    "secrets.yaml",
+    "secrets.yml",
+    ".secrets",
+})
+
+
+def _is_secret_bearing_export_path(rel: str) -> bool:
+    """True if a worker-dir file may carry secret values (excluded from export)."""
+    base = rel.rsplit("/", 1)[-1].lower()
+    if base in _WORKSPACE_EXPORT_SECRET_BASENAMES:
+        return True
+    # .env, .env.local, .env.production, foo.env, etc.
+    if base == ".env" or base.startswith(".env.") or base.endswith(".env"):
+        return True
+    # Private keys / certs.
+    if base.endswith((".pem", ".key", ".p12", ".pfx")):
+        return True
+    return False
+
+
+def _iter_worker_dir_files(worker_id: str):
+    """Yield (relpath, bytes) for every exportable file in a worker's dir.
+
+    Skips symlinks (security), __pycache__ / *.pyc cruft, and any
+    secret-bearing file (``.env`` and friends — see
+    ``_is_secret_bearing_export_path``) so a template never carries a secret
+    VALUE.
+    """
+    from worker_registry import WORKERS_DIR
+
+    base = (WORKERS_DIR / worker_id).resolve()
+    if not base.is_dir():
+        return
+    for path in sorted(base.rglob("*")):
+        if path.is_symlink() or not path.is_file():
+            continue
+        rel = path.relative_to(base).as_posix()
+        parts = rel.split("/")
+        if "__pycache__" in parts or rel.endswith(".pyc"):
+            continue
+        if _is_secret_bearing_export_path(rel):
+            continue
+        yield rel, path.read_bytes()

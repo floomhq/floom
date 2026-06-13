@@ -1727,13 +1727,7 @@ def _get_last_run_for_worker(
 
 
 
-def _platform_openai_api_key() -> Optional[str]:
-    """The platform's OWN OpenAI key — powers Emily, prompt-to-worker drafting,
-    and codegen. Env-managed and reserved. PLATFORM_OPENAI_API_KEY is canonical;
-    OPENAI_API_KEY is the back-compat fallback so existing single-key deploys keep
-    working. This is NOT a worker key: workers bring their own OPENAI_API_KEY via
-    the secrets DB, and the platform key must never reach a worker sandbox."""
-    return os.environ.get("PLATFORM_OPENAI_API_KEY") or os.environ.get("OPENAI_API_KEY") or None
+from services.secrets_env import _platform_openai_api_key  # noqa: E402  (re-export)
 
 
 
@@ -6612,62 +6606,13 @@ def _is_exportable_operator_worker(w: Dict[str, Any]) -> bool:
 
 
 
-# Filenames / patterns that may hold secret VALUES and must NEVER be exported in
-# a workspace template. A worker bundle is worker.yml + run.py / SKILL.md +
-# requirements.txt + lib/*; a .env (or similar) is operator credential state,
-# not bundle content. Defense-in-depth: a real worker dir should not contain
-# these, but if one does we drop it rather than leak a secret value.
-_WORKSPACE_EXPORT_SECRET_BASENAMES = frozenset({
-    ".env",
-    ".netrc",
-    ".npmrc",
-    ".pypirc",
-    "credentials",
-    "credentials.json",
-    "secrets.json",
-    "secrets.yaml",
-    "secrets.yml",
-    ".secrets",
-})
-
-
-def _is_secret_bearing_export_path(rel: str) -> bool:
-    """True if a worker-dir file may carry secret values (excluded from export)."""
-    base = rel.rsplit("/", 1)[-1].lower()
-    if base in _WORKSPACE_EXPORT_SECRET_BASENAMES:
-        return True
-    # .env, .env.local, .env.production, foo.env, etc.
-    if base == ".env" or base.startswith(".env.") or base.endswith(".env"):
-        return True
-    # Private keys / certs.
-    if base.endswith((".pem", ".key", ".p12", ".pfx")):
-        return True
-    return False
-
-
-def _iter_worker_dir_files(worker_id: str):
-    """Yield (relpath, bytes) for every exportable file in a worker's dir.
-
-    Skips symlinks (security), __pycache__ / *.pyc cruft, and any
-    secret-bearing file (``.env`` and friends — see
-    ``_is_secret_bearing_export_path``) so a template never carries a secret
-    VALUE.
-    """
-    from worker_registry import WORKERS_DIR
-
-    base = (WORKERS_DIR / worker_id).resolve()
-    if not base.is_dir():
-        return
-    for path in sorted(base.rglob("*")):
-        if path.is_symlink() or not path.is_file():
-            continue
-        rel = path.relative_to(base).as_posix()
-        parts = rel.split("/")
-        if "__pycache__" in parts or rel.endswith(".pyc"):
-            continue
-        if _is_secret_bearing_export_path(rel):
-            continue
-        yield rel, path.read_bytes()
+# Worker-dir export helpers (secret-bearing-path filter + file iterator) live in
+# services.worker_serialize; re-exported here for backward-compat call sites.
+from services.worker_serialize import (  # noqa: E402  (re-export)
+    _WORKSPACE_EXPORT_SECRET_BASENAMES,
+    _is_secret_bearing_export_path,
+    _iter_worker_dir_files,
+)
 
 
 def _build_workspace_template_zip(
