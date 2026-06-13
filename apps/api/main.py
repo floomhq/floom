@@ -1717,7 +1717,7 @@ async def auth_middleware(request: Request, call_next):
         bearer_token_header = authorization_header[7:].strip()
     if bearer_token_header.startswith("wrt_"):
         try:
-            worker_call_payload = validate_worker_call_token(bearer_token_header, secret=secret)
+            worker_call_payload = validate_worker_call_token(bearer_token_header)
         except ValueError as exc:
             return _JSONResponse(status_code=401, content={"detail": str(exc)})
         # #916: a run token is only as alive as its user — reject at the
