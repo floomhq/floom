@@ -379,6 +379,10 @@ from services.worker_serialize import (
     _WORKER_FILE_IGNORE,
 )
 from services.worker_access import (
+    _active_local_workspace_id,
+    _AssetAccessEntry,
+    _require_members_repo,
+    _asset_access_list,
     _raise_if_protected_worker_mutation,
     _canonical_worker_id,
     _slugify_worker_id,
@@ -962,11 +966,6 @@ def _member_out(row: Dict[str, Any]) -> WorkspaceMemberOut:
     )
 
 
-def _require_members_repo(repos: Repositories) -> WorkspaceMemberRepository:
-    members = getattr(repos, "members", None)
-    if members is None:
-        raise HTTPException(status_code=501, detail="Membership not available")
-    return members
 
 
 def _ensure_owner_membership(
@@ -3667,86 +3666,8 @@ def list_workers(
 
 
 
-class _AssetAccessEntry(BaseModel):
-    user_id: Optional[str] = None
-    email: Optional[str] = None
-    display_name: Optional[str] = None
-    role: str  # "owner" | "editor" | "viewer"
-    source: str  # "owner" | "workspace" | "grant"
 
 
-def _asset_access_list(
-    *,
-    asset_type: str,
-    asset_id: str,
-    owner_id: str,
-    visibility: str,
-    auth: AuthContext,
-    repos: Repositories,
-) -> List[_AssetAccessEntry]:
-    """#768: who can access this asset and why. Always the owner; workspace
-    members when visibility=workspace; grantees when visibility=specific_people
-    (grants are also surfaced if any exist, since they confer access)."""
-    entries: List[_AssetAccessEntry] = []
-    seen_emails: set[str] = set()
-
-    # owner (resolve display info from the users table if available)
-    owner_email = None
-    owner_name = None
-    try:
-        if repos.users is not None:
-            urow = repos.users.get(user_id=owner_id)
-            if urow:
-                owner_email = urow.get("email")
-                owner_name = urow.get("display_name") or urow.get("username")
-    except Exception:
-        pass
-    entries.append(_AssetAccessEntry(
-        user_id=owner_id, email=owner_email, display_name=owner_name,
-        role="owner", source="owner",
-    ))
-    if owner_email:
-        seen_emails.add(owner_email.lower())
-
-    if visibility == "workspace":
-        try:
-            members_repo = _require_members_repo(repos)
-            workspace_id = _active_local_workspace_id(auth)
-            for m in members_repo.list(workspace_id=workspace_id):
-                if str(m.get("user_id")) == str(owner_id):
-                    continue
-                email = (m.get("email") or "")
-                role = "editor" if str(m.get("role")) in ("owner", "admin") else "viewer"
-                entries.append(_AssetAccessEntry(
-                    user_id=str(m.get("user_id")), email=email or None,
-                    display_name=m.get("display_name"), role=role, source="workspace",
-                ))
-                if email:
-                    seen_emails.add(email.lower())
-        except Exception:
-            logger.debug("access list: workspace members lookup failed", exc_info=True)
-
-    # grants (always surfaced — a grant confers access regardless of the tier)
-    try:
-        with get_db() as conn:
-            rows = conn.execute(
-                "SELECT grantee_email FROM asset_grants "
-                "WHERE asset_type=? AND asset_id=? AND owner_id=? ORDER BY created_at",
-                (asset_type, asset_id, owner_id),
-            ).fetchall()
-        for r in rows:
-            email = str(r["grantee_email"] or "")
-            if not email or email.lower() in seen_emails:
-                continue
-            seen_emails.add(email.lower())
-            entries.append(_AssetAccessEntry(
-                user_id=None, email=email, display_name=None,
-                role="viewer", source="grant",
-            ))
-    except Exception:
-        logger.debug("access list: grant lookup failed", exc_info=True)
-
-    return entries
 
 
 @app.get("/workers/{worker_id}/access", response_model=List[_AssetAccessEntry])
@@ -7188,7 +7109,6 @@ from routers.workspaces import (
     LocalWorkspaceListResponse,
     CurrentUserResponse,
     _local_workspace_out,
-    _active_local_workspace_id,
     _require_local_workspace_mode,
     _duplicate_workspace_name,
     get_current_user,
