@@ -116,8 +116,9 @@ class TestChatErrorEmitterWiring:
         )
 
     def test_background_task_error_part_is_sanitized(self):
-        main_src = Path(__file__).resolve().parents[1].joinpath("main.py").read_text(encoding="utf-8")
+        # post_chat now lives in the extracted routers/chat.py (modular refactor).
+        chat_src = Path(__file__).resolve().parents[1].joinpath("routers", "chat.py").read_text(encoding="utf-8")
         # the /chat background task emitter must not put a raw exception
-        assert '"error": safe_llm_error_message(exc, action="Chat")' in main_src, (
+        assert '"error": safe_llm_error_message(exc, action="Chat")' in chat_src, (
             "/chat background-task error part reverted to raw str(exc) (#951)"
         )

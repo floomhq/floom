@@ -2503,7 +2503,11 @@ class _UserCreateRequest(BaseModel):
     username: str
     password: str
     display_name: Optional[str] = None
-    role: str = "member"
+    # #975: role is intentionally NOT accepted here. New users are always
+    # created as 'member'; promotion to admin is a separate explicit PATCH
+    # /users/{id} action (admin-gated, auditable). Accepting role at create
+    # let an admin (or a CSRF #947 forced request) mint a backdoor admin in
+    # one call with no audit trail.
 
 
 class _UserUpdateRequest(BaseModel):

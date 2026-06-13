@@ -327,7 +327,11 @@ def _workspace_share_payload(user_id: str) -> str:
 
 
 def _workspace_share_token(user_id: str) -> str:
-    secret = os.environ.get("FLOOM_SECRET") or "dev-secret-not-set"
+    # #998: never sign/verify a public share token with a public constant —
+    # a missing secret would let anyone forge share links. Fail closed.
+    secret = (os.environ.get("FLOOM_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(status_code=503, detail="Server signing secret not configured")
     return hmac.new(
         secret.encode("utf-8"),
         _workspace_share_payload(user_id).encode("utf-8"),
