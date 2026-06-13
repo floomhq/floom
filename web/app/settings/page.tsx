@@ -2,135 +2,429 @@
 
 export const dynamic = "force-dynamic";
 
-import Link from "next/link";
-import { Suspense, useCallback, useEffect, useRef, useState } from "react";
-import { useSearchParams } from "next/navigation";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
 import type {
+  CurrentUser,
+  LocalWorkspaceListResponse,
+  PersonalAccessToken,
   PlatformConfig,
   SystemInfo,
+  VersionSummary,
   WorkspaceAgentInfo,
-  WorkspaceImportResult,
+  WorkspaceMember,
+  WorkspaceMembersResponse,
+  WorkspaceRole,
+  WorkspaceToken,
 } from "@/lib/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Switch } from "@/components/ui/switch";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
-import { CliCommandPanel } from "@/components/CliCommandPanel";
+import { Textarea } from "@/components/ui/textarea";
+import { CollectionView } from "@/components/collection/CollectionView";
+import { emptyState } from "@/lib/collection/url-state";
+import type { CollectionConfig, CollectionState } from "@/lib/collection/types";
+import { SETTINGS_NAV, settingsGroup, groupLabel } from "@/lib/settings/nav-groups";
+import { resolveWorkspaceName } from "@/lib/workspace/display-name";
+import { GitWorkspacePanel } from "@/components/GitWorkspacePanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
 import { SlackConnect } from "@/components/assistant/SlackConnect";
-import { AlertTriangle, CheckCircle2, Download, Trash2 } from "lucide-react";
+import { ClaimSuccessOverlay, type ClaimChannel } from "@/components/channels/ClaimSuccessOverlay";
+import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
+import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
+import { EmilyAvatar } from "@/components/emily/EmilyAvatar";
+import { modelLabel } from "@/lib/model-labels";
+import { cn } from "@/lib/utils";
+import {
+  AlertTriangle,
+  Bot,
+  ChevronRight,
+  CheckCircle2,
+  Code2,
+  Copy,
+  History,
+  KeyRound,
+  MessageSquare,
+  Palette,
+  QrCode,
+  RotateCcw,
+  Save,
+  Settings,
+  ShieldAlert,
+  Trash2,
+  UserPlus,
+  Users,
+  X,
+} from "lucide-react";
 
-// S22f: Notifications tab is currently hidden. The TabKey type still includes
-// it so the URL ?tab=notifications doesn't blow up; we just silently fall back
-// to "api" when a hidden tab is requested.
-type TabKey =
-  | "workspace"
-  | "api"
-  | "system"
-  | "assistant"
-  | "notifications"
-  | "appearance"
-  | "channels"
-  | "data"
-  | "danger";
+function PersonalAccessTokensPanel() {
+  const [tokens, setTokens] = useState<PersonalAccessToken[] | null>(null);
+  const [newTokenName, setNewTokenName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createdToken, setCreatedToken] = useState<string | null>(null);
 
-const VISIBLE_TAB_KEYS: TabKey[] = ["workspace", "api", "system", "channels", "appearance", "data", "danger"];
-const TAB_KEYS: TabKey[] = [
-  "workspace",
-  "api",
-  "system",
-  "assistant",
-  "notifications",
-  "channels",
-  "appearance",
-  "data",
-  "danger",
-];
-const API_PROXY_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
-const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
+  const load = useCallback(async () => {
+    try {
+      const list = await api.tokens.list();
+      setTokens(list);
+    } catch {
+      // /auth/tokens 404/401 means multi-member not active — hide silently
+    }
+  }, []);
 
-type TelemetryPreferenceResponse = {
-  product_telemetry_enabled: boolean;
-};
+  useEffect(() => { void load(); }, [load]);
 
-type TelemetryExportResponse = {
-  events: Record<string, unknown>[];
-};
+  if (tokens === null) return null; // Not yet loaded or not available
 
-function isValidTab(value: string | null): value is TabKey {
-  return value !== null && TAB_KEYS.includes(value as TabKey);
-}
-
-function activeWorkspaceHeaders(headers?: HeadersInit): Headers {
-  const next = new Headers(headers);
-  if (typeof window === "undefined") return next;
-  const workspaceId = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
-  if (workspaceId && workspaceId !== "local-default") {
-    next.set("x-workeros-workspace", workspaceId);
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    const name = newTokenName.trim();
+    if (!name || creating) return;
+    setCreating(true);
+    setCreatedToken(null);
+    try {
+      const result = await api.tokens.create(name);
+      setCreatedToken(result.token);
+      setNewTokenName("");
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to create token");
+    } finally {
+      setCreating(false);
+    }
   }
-  return next;
-}
 
-export default function SettingsPage() {
+  async function handleRevoke(id: string, name: string) {
+    try {
+      await api.tokens.revoke(id);
+      toast.success(`Revoked "${name}"`);
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to revoke token");
+    }
+  }
+
+  async function copyToken(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success("Token copied to clipboard");
+    } catch {
+      toast.error("Could not copy to clipboard");
+    }
+  }
+
   return (
-    <Suspense fallback={<div className="p-6 text-sm text-muted-foreground">Loading settings...</div>}>
-      <SettingsContent />
-    </Suspense>
+    <section className="space-y-3">
+      <h2 className="text-sm font-medium text-muted-foreground">Personal access tokens</h2>
+      <p className="text-sm text-muted-foreground">
+        Use tokens to authenticate API and MCP requests without a shared secret.
+        Token values are shown once — store them securely.
+      </p>
+
+      {createdToken && (
+        <Alert>
+          <CheckCircle2 className="size-4" />
+          <AlertTitle>Token created</AlertTitle>
+          <AlertDescription>
+            <div className="mt-2 flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs">
+              <span className="flex-1 break-all">{createdToken}</span>
+              <button
+                type="button"
+                onClick={() => void copyToken(createdToken)}
+                className="shrink-0 text-muted-foreground hover:text-foreground"
+              >
+                <Copy className="size-3.5" />
+              </button>
+            </div>
+            <p className="mt-1 text-xs text-muted-foreground">
+              This value won&apos;t be shown again.
+            </p>
+          </AlertDescription>
+        </Alert>
+      )}
+
+      <form onSubmit={handleCreate} className="flex gap-2">
+        <Input
+          placeholder="Token name (e.g. ci-pipeline)"
+          value={newTokenName}
+          onChange={(e) => setNewTokenName(e.target.value)}
+          className="max-w-xs"
+        />
+        <Button type="submit" size="sm" disabled={!newTokenName.trim() || creating}>
+          {creating ? "Creating…" : "Create token"}
+        </Button>
+      </form>
+
+      {tokens.length > 0 ? (
+        <div className="space-y-1">
+          {tokens.map((t) => (
+            <div key={t.id} className="flex items-center gap-3 rounded-lg [border:var(--bd-card)] px-3 py-2 text-sm">
+              <div className="flex-1 min-w-0">
+                <span className="font-medium">{t.name}</span>
+                {t.last_used_at && (
+                  <span className="ml-2 text-xs text-muted-foreground">
+                    last used {new Date(t.last_used_at).toLocaleDateString()}
+                  </span>
+                )}
+              </div>
+              <button
+                type="button"
+                onClick={() => void handleRevoke(t.id, t.name)}
+                className="text-muted-foreground hover:text-destructive"
+                aria-label={`Revoke ${t.name}`}
+              >
+                <Trash2 className="size-3.5" />
+              </button>
+            </div>
+          ))}
+        </div>
+      ) : (
+        <p className="text-sm text-muted-foreground">No tokens yet.</p>
+      )}
+    </section>
   );
 }
 
+// Workspace token (wst_): admin-only API access to workspace-shared workers.
+// Mirrors PersonalAccessTokensPanel; members get 403 → admins-only notice.
+export function WorkspaceTokensPanel() {
+  const [tokens, setTokens] = useState<WorkspaceToken[] | null>(null);
+  const [forbidden, setForbidden] = useState(false);
+  const [newTokenName, setNewTokenName] = useState("");
+  const [creating, setCreating] = useState(false);
+  const [createdToken, setCreatedToken] = useState<string | null>(null);
+
+  const load = useCallback(async () => {
+    try {
+      const list = await api.workspace.tokens.list();
+      setTokens(list);
+      setForbidden(false);
+    } catch {
+      // 403 (member) or 404 (endpoint not active) — show the admins-only note.
+      setForbidden(true);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function handleCreate(e: React.FormEvent) {
+    e.preventDefault();
+    const name = newTokenName.trim();
+    if (!name || creating) return;
+    setCreating(true);
+    setCreatedToken(null);
+    try {
+      const result = await api.workspace.tokens.create(name);
+      setCreatedToken(result.token);
+      setNewTokenName("");
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to create workspace token");
+    } finally {
+      setCreating(false);
+    }
+  }
+
+  async function handleRevoke(id: string, name: string) {
+    try {
+      await api.workspace.tokens.revoke(id);
+      toast.success(`Revoked "${name}"`);
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to revoke workspace token");
+    }
+  }
+
+  async function copyToken(value: string) {
+    try {
+      await navigator.clipboard.writeText(value);
+      toast.success("Token copied to clipboard");
+    } catch {
+      toast.error("Could not copy to clipboard");
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-medium text-muted-foreground">Workspace token</h2>
+      {forbidden ? (
+        <p className="text-sm text-muted-foreground">
+          Only workspace admins can manage the workspace token.
+        </p>
+      ) : tokens === null ? null : (
+        <>
+          <p className="text-sm text-muted-foreground">
+            A workspace token gives API access to workspace-shared workers only — no
+            private workers. Admins only. Token values are shown once — store them
+            securely.
+          </p>
+
+          {createdToken && (
+            <Alert>
+              <CheckCircle2 className="size-4" />
+              <AlertTitle>Workspace token created</AlertTitle>
+              <AlertDescription>
+                <div className="mt-2 flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs">
+                  <span className="flex-1 break-all">{createdToken}</span>
+                  <button
+                    type="button"
+                    onClick={() => void copyToken(createdToken)}
+                    className="shrink-0 text-muted-foreground hover:text-foreground"
+                    aria-label="Copy workspace token"
+                  >
+                    <Copy className="size-3.5" />
+                  </button>
+                </div>
+                <p className="mt-1 text-xs text-muted-foreground">
+                  This value won&apos;t be shown again.
+                </p>
+              </AlertDescription>
+            </Alert>
+          )}
+
+          <form onSubmit={handleCreate} className="flex gap-2">
+            <Input
+              placeholder="Token name (e.g. shared-runner)"
+              value={newTokenName}
+              onChange={(e) => setNewTokenName(e.target.value)}
+              className="max-w-xs"
+            />
+            <Button type="submit" size="sm" disabled={!newTokenName.trim() || creating}>
+              {creating ? "Creating…" : "Create token"}
+            </Button>
+          </form>
+
+          {tokens.length > 0 ? (
+            <div className="space-y-1">
+              {tokens.map((t) => (
+                <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm">
+                  <div className="flex-1 min-w-0">
+                    <span className="font-medium">{t.name}</span>
+                    <span className="ml-2 text-xs text-muted-foreground">
+                      created {new Date(t.created_at).toLocaleDateString()}
+                    </span>
+                    {t.last_used_at && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        last used {new Date(t.last_used_at).toLocaleDateString()}
+                      </span>
+                    )}
+                    {t.expires_at && (
+                      <span className="ml-2 text-xs text-muted-foreground">
+                        expires {new Date(t.expires_at).toLocaleDateString()}
+                      </span>
+                    )}
+                  </div>
+                  {t.revoked_at ? (
+                    <span className="text-xs text-muted-foreground">revoked</span>
+                  ) : (
+                    <button
+                      type="button"
+                      onClick={() => void handleRevoke(t.id, t.name)}
+                      className="text-muted-foreground hover:text-destructive"
+                      aria-label={`Revoke ${t.name}`}
+                    >
+                      <Trash2 className="size-3.5" />
+                    </button>
+                  )}
+                </div>
+              ))}
+            </div>
+          ) : (
+            <p className="text-sm text-muted-foreground">No workspace tokens yet.</p>
+          )}
+        </>
+      )}
+    </section>
+  );
+}
+
+type SectionKey = (typeof SETTINGS_NAV)[number]["key"];
+
+const SECTION_KEYS = SETTINGS_NAV.map((item) => item.key);
+
+function isValidSection(value: string | null): value is SectionKey {
+  return value !== null && SECTION_KEYS.includes(value as SectionKey);
+}
+
+function sectionFromCandidate(value: string | null): SectionKey | null {
+  const candidate =
+    value === "api" ? "developer" :
+    value === "slack" ? "channels" :
+    value === "notifications" ? "channels" :
+    value === "git" ? "developer" :
+    value;
+  return isValidSection(candidate) ? candidate : null;
+}
+
+export default function SettingsPage() {
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+  if (!mounted) {
+    return <div className="p-6 text-sm text-muted-foreground">Loading settings...</div>;
+  }
+  return <SettingsContent />;
+}
+
 function SettingsContent() {
-  const searchParams = useSearchParams();
-  const fromInstallChannel = searchParams.get("from_install");
-  // S28: tabs use URL hash now (#api, #danger, etc.). Fall back to legacy
-  // ?tab= for old links.
-  // S30: own the hash via the History API instead of router.replace. The App
-  // Router treated a same-pathname `#hash` navigation as an append (clicking
-  // System then Appearance produced `/settings#system#appearance`), so the tab
-  // could only switch once per load. We are the single source of truth for the
-  // hash now: state drives history.replaceState, and a hashchange listener
-  // keeps deep-links + back/forward in sync.
-  const initialTab = (() => {
+  const [search, setSearch] = useState(() =>
+    typeof window !== "undefined" ? window.location.search : ""
+  );
+  const searchParams = useMemo(() => new URLSearchParams(search), [search]);
+  const initialSection = (() => {
     const fromHash =
       typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : null;
-    const fromQuery = searchParams.get("tab");
-    const candidate = fromHash || fromQuery;
-    // S22f: hidden tab (e.g. notifications) requested via URL falls back to workspace.
-    return isValidTab(candidate) && VISIBLE_TAB_KEYS.includes(candidate)
-      ? candidate
-      : "workspace";
+    const fromQuery = searchParams.get("sel") || searchParams.get("tab");
+    return sectionFromCandidate(fromQuery || fromHash);
   })();
-  const [tab, setTab] = useState<TabKey>(initialTab);
+  const [collectionState, setCollectionState] = useState<CollectionState>(() => ({
+    ...emptyState("list"),
+    sel: initialSection,
+  }));
 
   const [info, setInfo] = useState<SystemInfo | null>(null);
   const [platformConfig, setPlatformConfig] = useState<PlatformConfig | null>(null);
-  const [workspaceAgent, setWorkspaceAgent] = useState<WorkspaceAgentInfo | null>(null);
-  const [workspaceAgentLoading, setWorkspaceAgentLoading] = useState(false);
-  const [workspaceAgentError, setWorkspaceAgentError] = useState<string | null>(null);
-  const [reloading, setReloading] = useState(false);
   const [clearing, setClearing] = useState(false);
+  const [claimedWhatsAppToken, setClaimedWhatsAppToken] = useState<string | null>(null);
+  const [waClaimBanner, setWaClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
+  const [claimedSlackToken, setClaimedSlackToken] = useState<string | null>(null);
+  const [slackClaimBanner, setSlackClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
+  // Federico 2026-06-11: a successful claim shows a full-screen confirmation,
+  // not just an inline banner. Channel-aware copy; null = no overlay.
+  const [claimSuccess, setClaimSuccess] = useState<ClaimChannel | null>(null);
+  const [fromInstallChannel, setFromInstallChannel] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [workspaceList, setWorkspaceList] = useState<LocalWorkspaceListResponse | null>(null);
+  const [isAdmin, setIsAdmin] = useState(true);
+
+  useEffect(() => {
+    void (async () => {
+      try {
+        const u = await api.me();
+        setCurrentUser(u);
+        setIsAdmin(u.is_admin ?? (u.role == null ? true : u.role === "admin" || u.role === "owner"));
+      } catch {}
+      try {
+        setWorkspaceList(await api.workspace.list());
+      } catch {}
+    })();
+  }, []);
   // PR S19 (I-44): type-to-confirm text for the Clear runs button.
   const [clearConfirmText, setClearConfirmText] = useState("");
-
-  // Duplicate workspace: export this workspace as a .zip template / import one.
-  const [exporting, setExporting] = useState(false);
-  const [importing, setImporting] = useState(false);
-  const [importResult, setImportResult] = useState<WorkspaceImportResult | null>(null);
-  const importFileRef = useRef<HTMLInputElement | null>(null);
-  const [telemetryEnabled, setTelemetryEnabled] = useState<boolean | null>(null);
-  const [telemetryLoading, setTelemetryLoading] = useState(false);
-  const [telemetrySaving, setTelemetrySaving] = useState(false);
-  const [telemetryExporting, setTelemetryExporting] = useState(false);
-  const [telemetryDeleting, setTelemetryDeleting] = useState(false);
-  const [telemetryLastExportCount, setTelemetryLastExportCount] = useState<number | null>(null);
 
   const loadData = useCallback(async () => {
     try {
@@ -150,96 +444,105 @@ function SettingsContent() {
   }, [loadData]);
 
   useEffect(() => {
-    if (window.location.hash.replace(/^#/, "") === "assistant") {
-      window.location.replace("/assistant#instructions");
-    }
-  }, []);
-
-  const loadTelemetryPreference = useCallback(async () => {
-    setTelemetryLoading(true);
-    try {
-      const res = await fetch(`${API_PROXY_BASE}/telemetry/preferences`, {
-        headers: activeWorkspaceHeaders(),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as TelemetryPreferenceResponse;
-      setTelemetryEnabled(Boolean(body.product_telemetry_enabled));
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to load data settings");
-    } finally {
-      setTelemetryLoading(false);
-    }
-  }, []);
-
-  useEffect(() => {
-    if (tab !== "data" || telemetryEnabled !== null || telemetryLoading) return;
-    void loadTelemetryPreference();
-  }, [loadTelemetryPreference, tab, telemetryEnabled, telemetryLoading]);
-
-  // Keep state in sync with the URL hash for deep-links and back/forward.
-  useEffect(() => {
-    function syncFromHash() {
-      const fromHash = window.location.hash.replace(/^#/, "");
-      if (isValidTab(fromHash) && VISIBLE_TAB_KEYS.includes(fromHash)) {
-        setTab((prev) => (prev === fromHash ? prev : fromHash));
+    const token = (searchParams.get("whatsapp_claim") || "").trim();
+    if (!token || token === claimedWhatsAppToken) return;
+    setClaimedWhatsAppToken(token);
+    void (async () => {
+      try {
+        await api.whatsapp.claim(token);
+        setClaimSuccess("whatsapp");
+      } catch (e: unknown) {
+        const raw = e instanceof Error ? e.message : "";
+        const friendly =
+          raw === "WhatsApp claim not found"
+            ? "This link was not found or the number is already linked."
+            : raw === "WhatsApp claim expired"
+              ? "This link has expired. Text the Floom number again to get a new one."
+              : raw || "Failed to link WhatsApp.";
+        toast.error(friendly);
+        setWaClaimBanner({ ok: false, message: friendly });
+      } finally {
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete("whatsapp_claim");
+        const qs = params.size ? `?${params.toString()}` : "";
+        const hash = typeof window !== "undefined" ? window.location.hash : "";
+        const path = typeof window !== "undefined" ? window.location.pathname : "/settings";
+        window.history.replaceState(null, "", `${path}${qs}${hash}`);
+        setSearch(window.location.search);
       }
-    }
-    window.addEventListener("hashchange", syncFromHash);
-    return () => window.removeEventListener("hashchange", syncFromHash);
+    })();
+  }, [claimedWhatsAppToken, searchParams]);
+
+  useEffect(() => {
+    const token = (searchParams.get("slack_claim") || "").trim();
+    if (!token || token === claimedSlackToken) return;
+    setClaimedSlackToken(token);
+    void (async () => {
+      try {
+        await api.slack.claim(token);
+        setClaimSuccess("slack");
+      } catch (e: unknown) {
+        const raw = e instanceof Error ? e.message : "";
+        const friendly =
+          raw === "Slack claim not found"
+            ? "This link was not found or the identity is already linked."
+            : raw === "Slack claim expired"
+              ? "This link has expired. Send Emily a DM in Slack to get a new one."
+              : raw || "Failed to link Slack identity.";
+        toast.error(friendly);
+        setSlackClaimBanner({ ok: false, message: friendly });
+      } finally {
+        const params = new URLSearchParams(searchParams.toString());
+        params.delete("slack_claim");
+        const qs = params.size ? `?${params.toString()}` : "";
+        const hash = typeof window !== "undefined" ? window.location.hash : "";
+        const path = typeof window !== "undefined" ? window.location.pathname : "/settings";
+        window.history.replaceState(null, "", `${path}${qs}${hash}`);
+        setSearch(window.location.search);
+      }
+    })();
+  }, [claimedSlackToken, searchParams]);
+
+  // #552: consume ?from_install=<channel> placed by the login page after an
+  // install-param sign-in, route to the relevant tab, show a banner.
+  useEffect(() => {
+    const channel = searchParams.get("from_install");
+    if (!channel) return;
+    setFromInstallChannel(channel);
+    const tabMap: Record<string, SectionKey> = { slack: "channels", cli: "developer" };
+    const dest = tabMap[channel];
+    if (dest) setCollectionState((prev) => ({ ...prev, sel: dest, tab: null }));
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("from_install");
+    params.delete("tab");
+    if (dest) params.set("sel", dest);
+    const qs = params.size ? `?${params.toString()}` : "";
+    window.history.replaceState(null, "", `${window.location.pathname}${qs}`);
+    setSearch(window.location.search);
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Lazy-load the workspace agent prompt + tools only when the tab is opened —
-  // the system prompt can be large, so we don't fetch it on every settings view.
-  // NOTE: workspaceAgentLoading is intentionally excluded from the dep array.
-  // Including it caused the effect to re-run (and cancel the in-flight fetch)
-  // the moment setWorkspaceAgentLoading(true) was called, leaving loading=true
-  // forever. The guard below still reads the current value via closure; the only
-  // triggers we want are a tab switch or data arriving (workspaceAgent).
-  // eslint-disable-next-line react-hooks/exhaustive-deps
+  // Keep state in sync with ?sel= for deep-links/back-forward. Hash is accepted
+  // only as a compatibility input for older links.
   useEffect(() => {
-    if (tab !== "assistant" || workspaceAgent || workspaceAgentLoading) return;
-    let cancelled = false;
-    setWorkspaceAgentLoading(true);
-    setWorkspaceAgentError(null);
-    api.system
-      .workspaceAgent()
-      .then((res) => {
-        if (!cancelled) setWorkspaceAgent(res);
-      })
-      .catch((e: unknown) => {
-        if (!cancelled) setWorkspaceAgentError(e instanceof Error ? e.message : "Failed to load");
-      })
-      .finally(() => {
-        if (!cancelled) setWorkspaceAgentLoading(false);
-      });
-    return () => {
-      cancelled = true;
-    };
-  }, [tab, workspaceAgent]);
-
-  function handleTabChange(value: string) {
-    if (!isValidTab(value)) return;
-    setTab(value);
-    // S30: set the hash to exactly the clicked tab via the History API so it
-    // REPLACES rather than appends. Drop the legacy ?tab= param if present.
-    const params = new URLSearchParams(searchParams.toString());
-    params.delete("tab");
-    const qs = params.size ? `?${params.toString()}` : "";
-    window.history.replaceState(null, "", `/settings${qs}#${value}`);
-  }
-
-  async function handleReload() {
-    setReloading(true);
-    try {
-      const res = await api.workers.reload();
-      toast.success(`Loaded ${res.workers_loaded} workers`);
-      void loadData();
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to reload");
-    } finally {
-      setReloading(false);
+    function syncFromLocation() {
+      const params = new URLSearchParams(window.location.search);
+      const fromQuery = sectionFromCandidate(params.get("sel") || params.get("tab"));
+      const raw = window.location.hash.replace(/^#/, "");
+      const fromHash = sectionFromCandidate(raw);
+      const nextSel = fromQuery || fromHash;
+      if (nextSel) {
+        setCollectionState((prev) => (prev.sel === nextSel ? prev : { ...prev, sel: nextSel, tab: null }));
+      }
+      setSearch(window.location.search);
     }
-  }
+    window.addEventListener("hashchange", syncFromLocation);
+    window.addEventListener("popstate", syncFromLocation);
+    return () => {
+      window.removeEventListener("hashchange", syncFromLocation);
+      window.removeEventListener("popstate", syncFromLocation);
+    };
+  }, []);
 
   async function handleClearRuns() {
     if (clearConfirmText.trim() !== "DELETE ALL RUNS") return;
@@ -256,111 +559,6 @@ function SettingsContent() {
     }
   }
 
-  async function handleExportWorkspace() {
-    setExporting(true);
-    try {
-      const { blob, filename } = await api.workspace.exportTemplate();
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = filename;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      toast.success("Workspace template downloaded");
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to export workspace");
-    } finally {
-      setExporting(false);
-    }
-  }
-
-  async function handleImportWorkspace(file: File) {
-    setImporting(true);
-    setImportResult(null);
-    try {
-      const result = await api.workspace.importTemplate(file);
-      setImportResult(result);
-      const n = result.workers_imported.length + result.contexts_imported.length;
-      toast.success(
-        n > 0 ? `Imported ${n} item${n === 1 ? "" : "s"}` : "Nothing new to import"
-      );
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to import workspace");
-    } finally {
-      setImporting(false);
-      if (importFileRef.current) importFileRef.current.value = "";
-    }
-  }
-
-  async function updateTelemetryPreference(enabled: boolean) {
-    setTelemetrySaving(true);
-    try {
-      const res = await fetch(`${API_PROXY_BASE}/telemetry/preferences`, {
-        method: "PUT",
-        headers: activeWorkspaceHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ product_telemetry_enabled: enabled }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as TelemetryPreferenceResponse;
-      setTelemetryEnabled(Boolean(body.product_telemetry_enabled));
-      toast.success(enabled ? "Product telemetry enabled" : "Product telemetry disabled");
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to update data settings");
-    } finally {
-      setTelemetrySaving(false);
-    }
-  }
-
-  async function handleExportTelemetry() {
-    setTelemetryExporting(true);
-    try {
-      const res = await fetch(`${API_PROXY_BASE}/telemetry/export?limit=1000`, {
-        headers: activeWorkspaceHeaders(),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as TelemetryExportResponse;
-      const events = Array.isArray(body.events) ? body.events : [];
-      const blob = new Blob([JSON.stringify({ events }, null, 2)], {
-        type: "application/json",
-      });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url;
-      a.download = `workeros-telemetry-${new Date().toISOString().slice(0, 10)}.json`;
-      document.body.appendChild(a);
-      a.click();
-      a.remove();
-      URL.revokeObjectURL(url);
-      setTelemetryLastExportCount(events.length);
-      toast.success(`Exported ${events.length} telemetry event${events.length === 1 ? "" : "s"}`);
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to export telemetry");
-    } finally {
-      setTelemetryExporting(false);
-    }
-  }
-
-  async function handleDeleteTelemetry() {
-    if (!confirm("Delete all product telemetry events for this workspace?")) return;
-    setTelemetryDeleting(true);
-    try {
-      const res = await fetch(`${API_PROXY_BASE}/telemetry/workspace`, {
-        method: "DELETE",
-        headers: activeWorkspaceHeaders(),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const body = (await res.json()) as { deleted?: number };
-      setTelemetryLastExportCount(0);
-      toast.success(`Deleted ${body.deleted ?? 0} telemetry event${body.deleted === 1 ? "" : "s"}`);
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to delete telemetry");
-    } finally {
-      setTelemetryDeleting(false);
-    }
-  }
-
   async function copySecretName(name: string) {
     try {
       await navigator.clipboard.writeText(name);
@@ -370,467 +568,343 @@ function SettingsContent() {
     }
   }
 
+  const workspaceName = resolveWorkspaceName(
+    workspaceList?.workspaces.find((workspace) => workspace.id === workspaceList.active_id)?.name,
+  );
+  const accountName =
+    currentUser?.display_name?.trim() ||
+    currentUser?.email?.trim() ||
+    currentUser?.username?.trim() ||
+    "Federico";
+
+  const config = useMemo<CollectionConfig<SettingsNavItemWithIcon>>(() => {
+    const items = SETTINGS_NAV.map((item) => ({ ...item, icon: iconForSection(item.key) }));
+    return {
+      title: "Settings",
+      subtitle: "Workspace settings and your account settings, kept separate.",
+      items,
+      idOf: (item) => item.key,
+      searchOf: (item) => `${item.label} ${item.description} ${item.scope}`,
+      tagsOf: (item) => ({ type: [item.scope] }),
+      tags: {
+        type: [
+          { value: "workspace", label: "Workspace" },
+          { value: "account", label: "Account" },
+        ],
+      },
+      counts: [
+        { value: settingsGroup("workspace").length, label: "workspace" },
+        { value: settingsGroup("account").length, label: "account" },
+      ],
+      view: { default: "list", grid: true },
+      group: (item) =>
+        item.scope === "workspace"
+          ? groupLabel("workspace", workspaceName)
+          : groupLabel("account", accountName),
+      columns: { template: "1fr 24px", headers: ["Section", ""], statusColumn: false, menuColumn: false },
+      row: (item) => ({
+        leading: <SettingsIcon icon={item.icon} />,
+        primary: item.label,
+        secondary: item.description,
+        cols: [<ChevronRight key="chevron" className="size-4 text-[var(--muted-foreground)]" />],
+      }),
+      card: (item) => ({
+        leading: <SettingsIcon icon={item.icon} />,
+        name: item.label,
+        description: (
+          <>
+            {item.scope === "workspace" ? groupLabel("workspace", workspaceName) : groupLabel("account", accountName)}
+            {" · "}
+            {item.description}
+          </>
+        ),
+        status: { tone: "idle", label: item.scope === "workspace" ? "Workspace" : "Account" },
+      }),
+      detail: (item) => ({
+        header: {
+          leading: <SettingsIcon icon={item.icon} />,
+          title: item.label,
+          sub: (
+            <span>
+              {item.scope === "workspace"
+                ? groupLabel("workspace", workspaceName)
+                : groupLabel("account", accountName)}
+              {" · "}
+              {item.description}
+            </span>
+          ),
+        },
+        tabs: [
+          {
+            key: "settings",
+            label: item.label,
+            render: () => renderSection(item.key),
+          },
+        ],
+      }),
+      states: {
+        empty: { title: "No settings found" },
+      },
+    };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [accountName, clearConfirmText, clearing, info, isAdmin, platformConfig, workspaceName]);
+
+  function handleCollectionChange(next: CollectionState) {
+    setCollectionState(next);
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("tab");
+    if (next.sel && isValidSection(next.sel)) params.set("sel", next.sel);
+    else params.delete("sel");
+    const qs = params.size ? `?${params.toString()}` : "";
+    window.history.replaceState(null, "", `${window.location.pathname}${qs}`);
+    setSearch(window.location.search);
+  }
+
+  function renderSection(key: SectionKey) {
+    switch (key) {
+      case "system":
+        return (
+          <SystemSection
+            info={info}
+            platformConfig={platformConfig}
+            canEdit={isAdmin}
+            onCopySecretName={copySecretName}
+          />
+        );
+      case "channels":
+        return <ChannelsTab canManageWorkspace={isAdmin} />;
+      case "assistant":
+        return <AssistantSettingsPanel canManageWorkspace={isAdmin} />;
+      case "members":
+        return <MembersSettingsPanel />;
+      case "versions":
+        return <VersionHistorySettingsPanel />;
+      case "workspace_tokens":
+        return <WorkspaceTokensPanel />;
+      case "danger":
+        return (
+          <DangerSection
+            canEdit={isAdmin}
+            clearConfirmText={clearConfirmText}
+            setClearConfirmText={setClearConfirmText}
+            clearing={clearing}
+            onClearRuns={handleClearRuns}
+          />
+        );
+      case "developer":
+        return (
+          <DeveloperSection />
+        );
+      case "appearance":
+        return <AppearanceSection />;
+    }
+  }
+
   return (
     <div className="space-y-6">
-      <div>
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="mt-1 text-sm text-muted-foreground">
-          System configuration and access.
-        </p>
-      </div>
+      {claimSuccess && (
+        <ClaimSuccessOverlay
+          channel={claimSuccess}
+          onContinue={() => {
+            setClaimSuccess(null);
+            window.location.href = "/";
+          }}
+        />
+      )}
 
-      {fromInstallChannel ? (
+      {waClaimBanner && (
+        <Alert variant={waClaimBanner.ok ? "default" : "destructive"}>
+          {waClaimBanner.ok ? (
+            <CheckCircle2 className="size-4" />
+          ) : (
+            <AlertTriangle className="size-4" />
+          )}
+          <AlertTitle>{waClaimBanner.ok ? "WhatsApp linked" : "WhatsApp link failed"}</AlertTitle>
+          <AlertDescription>{waClaimBanner.message}</AlertDescription>
+        </Alert>
+      )}
+
+      {slackClaimBanner && (
+        <Alert variant={slackClaimBanner.ok ? "default" : "destructive"}>
+          {slackClaimBanner.ok ? (
+            <CheckCircle2 className="size-4" />
+          ) : (
+            <AlertTriangle className="size-4" />
+          )}
+          <AlertTitle>{slackClaimBanner.ok ? "Slack linked" : "Slack link failed"}</AlertTitle>
+          <AlertDescription>{slackClaimBanner.message}</AlertDescription>
+        </Alert>
+      )}
+
+      {fromInstallChannel && (
         <Alert>
-          <AlertTriangle className="h-4 w-4" />
           <AlertTitle>
-            {fromInstallChannel === "slack" ? "Connect Slack to continue" : `Finish ${fromInstallChannel} setup`}
+            {fromInstallChannel === "slack" ? "Connect Slack to continue" :
+             fromInstallChannel === "cli" ? "Get your CLI access token below" :
+             `Complete your ${fromInstallChannel} setup`}
           </AlertTitle>
           <AlertDescription>
             {fromInstallChannel === "slack"
-              ? "Open Assistant to connect Slack OAuth for this workspace."
-              : "This install channel needs platform credentials before setup can finish."}
+              ? "You were sent here from Slack. Add your workspace below to start using the assistant."
+              : "Complete the setup for your channel integration."}
+            {" "}
+            <button
+              type="button"
+              className="underline underline-offset-2 hover:opacity-80"
+              onClick={() => setFromInstallChannel(null)}
+            >
+              Dismiss
+            </button>
           </AlertDescription>
         </Alert>
-      ) : null}
+      )}
 
-      {/* S22f: hide Notifications tab. Roast P1: it shipped two "Soon"
-          placeholder toggles, which read as "this team ships features that
-          don't exist yet". When the feature ships, restore the tab. */}
-      <Tabs value={tab} onValueChange={handleTabChange}>
-        {/* S30: on narrow viewports the w-fit tab strip ran off the right edge
-            (scrollWidth 489 > 375) and clipped "Danger zone", forcing a
-            horizontal page scroll. Wrap it in an overflow-x-auto, full-width
-            container with a hidden scrollbar so the page stays at viewport
-            width while the strip scrolls internally. Desktop is unchanged: the
-            strip fits, so nothing scrolls. */}
-        <div className="-mx-1 max-w-full overflow-x-auto px-1 [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
-        <TabsList>
-          <TabsTrigger value="workspace">Workspace</TabsTrigger>
-          <TabsTrigger value="api">API access</TabsTrigger>
-          <TabsTrigger value="system">System</TabsTrigger>
-          <TabsTrigger value="channels">Channels</TabsTrigger>
-          <TabsTrigger value="appearance">Appearance</TabsTrigger>
-          <TabsTrigger value="data">Data</TabsTrigger>
-          <TabsTrigger value="danger">Danger zone</TabsTrigger>
-        </TabsList>
-        </div>
-
-        <TabsContent value="workspace" className="space-y-4">
-          <WorkspaceSettingsTab />
-        </TabsContent>
-
-        <TabsContent value="api" className="space-y-4">
-          <CliCommandPanel />
-        </TabsContent>
-
-        <TabsContent value="channels" className="space-y-8 pt-6">
-          <CloudChannelsTab />
-        </TabsContent>
-
-        <TabsContent value="system" className="space-y-8">
-          {/* S29s: dropped Card wrappers. Match sister tabs (API access,
-              Appearance) which also flat-section now. */}
-          <section className="space-y-3">
-            <h2 className="text-sm font-medium text-muted-foreground">System info</h2>
-            <div className="space-y-3 text-sm">
-              {info ? (
-                <>
-                  <Row label="Version" value={info.version} mono />
-                  <Row label="Started at" value={info.started_at} mono />
-                  <Row label="Python" value={info.python_version} mono />
-                  <Row label="Runner" value={info.runner} />
-                </>
-              ) : (
-                <div className="space-y-3">
-                  {[120, 96, 80].map((w, i) => (
-                    <div key={i} className="flex justify-between items-center">
-                      <Skeleton className="h-4" style={{ width: 80 }} />
-                      <Skeleton className="h-4" style={{ width: w }} />
-                    </div>
-                  ))}
-                </div>
-              )}
-            </div>
-          </section>
-
-          <section className="space-y-3">
-            <h2 className="text-sm font-medium text-muted-foreground">Platform configuration</h2>
-            <div className="space-y-3">
-              {!platformConfig ? (
-                <Skeleton className="h-12 w-full" />
-              ) : (
-                <>
-                  <div className="flex items-center justify-between bg-muted p-3">
-                    <span className="text-sm">Configured</span>
-                    <span className="text-sm font-medium">
-                      {platformConfig.set_count}/{platformConfig.required_count}
-                    </span>
-                  </div>
-                  {platformConfig.all_required_set ? (
-                    <Alert>
-                      <CheckCircle2 className="size-4" />
-                      <AlertTitle>All required secrets are set</AlertTitle>
-                      <AlertDescription>
-                        Workers can run with full platform configuration.
-                      </AlertDescription>
-                    </Alert>
-                  ) : (
-                    <Alert variant="destructive">
-                      <AlertTriangle className="size-4" />
-                      <AlertTitle>
-                        {platformConfig.missing.length} required{" "}
-                        {platformConfig.missing.length === 1 ? "secret" : "secrets"} missing
-                      </AlertTitle>
-                      <AlertDescription>
-                        <div className="mt-2 space-y-1.5">
-                          {platformConfig.missing.map((name) => (
-                            <div
-                              key={name}
-                              className="flex items-center justify-between gap-2"
-                            >
-                              <code className="text-xs">{name}</code>
-                              <Button
-                                variant="outline"
-                                size="sm"
-                                onClick={() => void copySecretName(name)}
-                              >
-                                Copy name
-                              </Button>
-                            </div>
-                          ))}
-                        </div>
-                      </AlertDescription>
-                    </Alert>
-                  )}
-                </>
-              )}
-            </div>
-          </section>
-        </TabsContent>
-
-        <TabsContent value="assistant" className="space-y-8">
-          <section className="space-y-2">
-            <h2 className="text-sm font-medium text-muted-foreground">Workspace agent</h2>
-            <p className="text-sm text-muted-foreground">
-              This is the assistant behind <code className="text-foreground">/chat</code>. It reads
-              your workspace and can manage workers, runs, secrets, connections, brain packs, and
-              approvals on your behalf. The instructions and tools below are read-only.
-            </p>
-          </section>
-
-          {workspaceAgentLoading && !workspaceAgent ? (
-            <div className="space-y-3">
-              <Skeleton className="h-4 w-40" />
-              <Skeleton className="h-48 w-full" />
-            </div>
-          ) : workspaceAgentError ? (
-            <Alert variant="destructive">
-              <AlertTriangle className="size-4" />
-              <AlertTitle>Couldn&apos;t load the workspace agent</AlertTitle>
-              <AlertDescription>{workspaceAgentError}</AlertDescription>
-            </Alert>
-          ) : workspaceAgent ? (
-            <>
-              <section className="space-y-3">
-                <div className="flex items-center justify-between">
-                  <h3 className="text-sm font-medium">System instructions</h3>
-                  <Badge variant="outline" className="text-xs">
-                    Read-only
-                  </Badge>
-                </div>
-                <p className="text-xs text-muted-foreground">
-                  The full system prompt the agent runs with, including the live workspace snapshot.
-                </p>
-                <pre className="max-h-[28rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] border border-[var(--border-default)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
-                  {workspaceAgent.system_prompt}
-                </pre>
-              </section>
-
-              <section className="space-y-3">
-                <h3 className="text-sm font-medium">
-                  Tools <span className="text-muted-foreground">({workspaceAgent.tools.length})</span>
-                </h3>
-                <p className="text-xs text-muted-foreground">
-                  The management actions the agent can call. It never returns secret values.
-                </p>
-                <div className="divide-y divide-[var(--border-default)] rounded-[var(--radius-button)] border border-[var(--border-default)]">
-                  {workspaceAgent.tools.map((tool) => (
-                    <div key={tool.name} className="px-3 py-2.5">
-                      <code className="text-xs font-medium text-foreground">{tool.name}</code>
-                      {tool.description && (
-                        <p className="mt-0.5 text-xs text-muted-foreground">{tool.description}</p>
-                      )}
-                    </div>
-                  ))}
-                </div>
-              </section>
-            </>
-          ) : null}
-
-          {/* Duplicate workspace (Notion-template style). Export bundles your
-              workers + knowledge packs + workspace agent config into one .zip;
-              import unpacks one into this workspace. Secrets/connections are
-              NEVER bundled — you reconnect those after import. */}
-          <section className="space-y-4 border-t border-[var(--border-default)] pt-8">
-            <div className="space-y-1">
-              <h2 className="text-sm font-medium text-muted-foreground">Duplicate workspace</h2>
-              <p className="text-sm text-muted-foreground">
-                Move or share your whole setup as a template.
-              </p>
-            </div>
-
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">Export this workspace as a template</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Bundles your workers and knowledge packs into one .zip. Secrets and
-                  connections are not included — you&apos;ll reconnect those.
-                </p>
-              </div>
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0"
-                onClick={handleExportWorkspace}
-                disabled={exporting}
-              >
-                {exporting ? "Exporting..." : "Export template"}
-              </Button>
-            </div>
-
-            <div className="flex items-start justify-between gap-4">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">Import a workspace template</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Adds the template&apos;s workers and knowledge packs to this workspace.
-                  Existing items are kept — nothing is overwritten.
-                </p>
-              </div>
-              <input
-                ref={importFileRef}
-                type="file"
-                accept=".zip,application/zip"
-                className="hidden"
-                onChange={(e) => {
-                  const file = e.target.files?.[0];
-                  if (file) void handleImportWorkspace(file);
-                }}
-              />
-              <Button
-                variant="outline"
-                size="sm"
-                className="shrink-0"
-                onClick={() => importFileRef.current?.click()}
-                disabled={importing}
-              >
-                {importing ? "Importing..." : "Import template"}
-              </Button>
-            </div>
-
-            {importResult ? (
-              <Alert>
-                <CheckCircle2 className="size-4" />
-                <AlertTitle>
-                  Imported {importResult.workers_imported.length}{" "}
-                  {importResult.workers_imported.length === 1 ? "worker" : "workers"} and{" "}
-                  {importResult.contexts_imported.length}{" "}
-                  {importResult.contexts_imported.length === 1 ? "knowledge pack" : "knowledge packs"}
-                </AlertTitle>
-                <AlertDescription>
-                  <div className="mt-2 space-y-2 text-xs">
-                    {importResult.workers_imported.length > 0 && (
-                      <p>
-                        Workers:{" "}
-                        <span className="text-foreground">
-                          {importResult.workers_imported.join(", ")}
-                        </span>
-                      </p>
-                    )}
-                    {importResult.contexts_imported.length > 0 && (
-                      <p>
-                        Knowledge packs:{" "}
-                        <span className="text-foreground">
-                          {importResult.contexts_imported.join(", ")}
-                        </span>
-                      </p>
-                    )}
-                    {importResult.skipped.length > 0 && (
-                      <p className="text-muted-foreground">
-                        Skipped {importResult.skipped.length} item
-                        {importResult.skipped.length === 1 ? "" : "s"} that already existed.
-                      </p>
-                    )}
-                    {(importResult.required_secrets.length > 0 ||
-                      importResult.required_connections.length > 0) && (
-                      <p className="text-muted-foreground">
-                        Reconnect these so the imported workers can run:{" "}
-                        <span className="text-foreground">
-                          {[
-                            ...importResult.required_secrets,
-                            ...importResult.required_connections,
-                          ].join(", ")}
-                        </span>
-                        .
-                      </p>
-                    )}
-                  </div>
-                </AlertDescription>
-              </Alert>
-            ) : null}
-          </section>
-        </TabsContent>
-
-        <TabsContent value="notifications" className="space-y-4">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-sm font-medium">Email notifications</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              <ToggleRow
-                title="Email on run failure"
-                description="Send an email when a worker run ends in error."
-                disabled
-              />
-              <ToggleRow
-                title="Email on connection expiry"
-                description="Warn when a connected account is about to lose access."
-                disabled
-              />
-              <p className="text-xs text-muted-foreground">
-                Email delivery is not wired up yet. Toggles will activate once
-                outbound email is configured.
-              </p>
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="appearance" className="space-y-3">
-          {/* S29z: explicit three-button toggle (System / Light / Dark)
-              instead of a single cycling button. Sidebar keeps the
-              compact cycle button; here we show all three at once. */}
-          <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
-          <p className="text-sm text-muted-foreground">
-            Choose how Floom looks. System follows your operating system.
-          </p>
-          <ThemeModeToggleGroup />
-        </TabsContent>
-
-        <TabsContent value="data" className="space-y-6">
-          <section className="space-y-3">
-            <div>
-              <h2 className="text-sm font-medium text-muted-foreground">Product telemetry</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Telemetry is workspace-scoped and sanitized before storage. Token-shaped
-                strings, email addresses, cookies, authorization headers, and secret-like
-                fields are redacted server-side.
-              </p>
-            </div>
-
-            <div className="flex items-start justify-between gap-4 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-card p-4">
-              <div className="min-w-0">
-                <p className="text-sm font-medium">Collect product telemetry</p>
-                <p className="mt-0.5 text-xs text-muted-foreground">
-                  Used for product quality, reliability, and usage analytics for this workspace.
-                </p>
-              </div>
-              <Switch
-                checked={Boolean(telemetryEnabled)}
-                disabled={telemetryLoading || telemetrySaving || telemetryEnabled === null}
-                onCheckedChange={(checked) => void updateTelemetryPreference(checked)}
-              />
-            </div>
-
-            {telemetryLoading ? (
-              <div className="text-xs text-muted-foreground">Loading data controls...</div>
-            ) : null}
-          </section>
-
-          <section className="space-y-3 border-t border-[var(--border-default)] pt-6">
-            <div>
-              <h2 className="text-sm font-medium text-muted-foreground">Export and deletion</h2>
-              <p className="mt-1 text-sm text-muted-foreground">
-                Download or delete product telemetry events for the active workspace.
-              </p>
-            </div>
-
-            <div className="flex flex-wrap items-center gap-2">
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleExportTelemetry}
-                disabled={telemetryExporting}
-              >
-                <Download className="size-3.5" />
-                {telemetryExporting ? "Exporting..." : "Export telemetry"}
-              </Button>
-              <Button
-                type="button"
-                variant="outline"
-                size="sm"
-                onClick={handleDeleteTelemetry}
-                disabled={telemetryDeleting}
-                className="text-destructive hover:text-destructive"
-              >
-                <Trash2 className="size-3.5" />
-                {telemetryDeleting ? "Deleting..." : "Delete telemetry"}
-              </Button>
-            </div>
-
-            {telemetryLastExportCount !== null ? (
-              <p className="text-xs text-muted-foreground">
-                Last export contained {telemetryLastExportCount} event
-                {telemetryLastExportCount === 1 ? "" : "s"}.
-              </p>
-            ) : null}
-          </section>
-        </TabsContent>
-
-        <TabsContent value="danger" className="space-y-4">
-          <Card className="border-destructive/40">
-            <CardHeader>
-              <CardTitle className="text-sm font-medium text-destructive">Danger zone</CardTitle>
-            </CardHeader>
-            <CardContent className="space-y-4">
-              <div className="space-y-3">
-                <div>
-                  <p className="text-sm font-medium">Clear run history</p>
-                  <p className="mt-0.5 text-xs text-muted-foreground">
-                    Deletes all runs, logs, artifacts, and approvals. Cannot be undone.
-                  </p>
-                </div>
-                {/* PR S19 (I-44): type-to-confirm, same pattern as delete-worker.
-                    Previous version was a single-click after a tap → click chain
-                    which is too easy to fat-finger. */}
-                <Label htmlFor="clear-runs-confirm" className="text-xs text-muted-foreground">
-                  Type <code className="text-foreground">DELETE ALL RUNS</code> to confirm.
-                </Label>
-                <Input
-                  id="clear-runs-confirm"
-                  value={clearConfirmText}
-                  onChange={(e) => setClearConfirmText(e.target.value)}
-                  placeholder="DELETE ALL RUNS"
-                  className="max-w-sm"
-                />
-                <Button
-                  variant="destructive"
-                  size="sm"
-                  className="shrink-0"
-                  onClick={handleClearRuns}
-                  disabled={clearing || clearConfirmText.trim() !== "DELETE ALL RUNS"}
-                >
-                  {clearing ? "Clearing..." : "Delete all runs"}
-                </Button>
-              </div>
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      <CollectionView
+        config={config}
+        state={collectionState}
+        onChange={handleCollectionChange}
+      />
     </div>
   );
 }
 
-function Row({
+type SettingsIconType = typeof Settings;
+type SettingsNavItemWithIcon = (typeof SETTINGS_NAV)[number] & { icon: SettingsIconType };
+
+function iconForSection(key: SectionKey): SettingsIconType {
+  switch (key) {
+    case "system":
+      return Settings;
+    case "channels":
+      return MessageSquare;
+    case "assistant":
+      return Bot;
+    case "members":
+      return Users;
+    case "versions":
+      return History;
+    case "workspace_tokens":
+      return KeyRound;
+    case "danger":
+      return ShieldAlert;
+    case "developer":
+      return Code2;
+    case "appearance":
+      return Palette;
+  }
+}
+
+function SettingsIcon({ icon: Icon }: { icon: SettingsIconType }) {
+  return (
+    <span className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] text-[var(--ink-soft)]">
+      <Icon className="size-4" />
+    </span>
+  );
+}
+
+function SystemSection({
+  info,
+  platformConfig,
+  canEdit,
+  onCopySecretName,
+}: {
+  info: SystemInfo | null;
+  platformConfig: PlatformConfig | null;
+  canEdit: boolean;
+  onCopySecretName: (name: string) => Promise<void>;
+}) {
+  return (
+    <div className="space-y-8">
+      {!canEdit ? <ReadOnlyNotice /> : null}
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">System info</h2>
+        <div className="space-y-2 text-sm">
+          {info ? (
+            <>
+              <SystemInfoRow label="Version" value={info.version} mono />
+              <SystemInfoRow label="Started at" value={info.started_at} mono />
+              <SystemInfoRow label="Python" value={info.python_version} mono />
+              <SystemInfoRow label="Runner" value={info.runner} />
+            </>
+          ) : (
+            <div className="space-y-3">
+              {[120, 96, 80].map((w, i) => (
+                <div key={i} className="flex items-center justify-between">
+                  <Skeleton className="h-4" style={{ width: 80 }} />
+                  <Skeleton className="h-4" style={{ width: w }} />
+                </div>
+              ))}
+            </div>
+          )}
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Workspace</h2>
+        <WorkspaceInfoSettings canEdit={canEdit} />
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Behaviour</h2>
+        <BehaviourSettings canEdit={canEdit} />
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Model defaults &amp; limits</h2>
+        <ModelDefaults canEdit={canEdit} />
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Platform configuration</h2>
+        <div className="space-y-3">
+          {!platformConfig ? (
+            <Skeleton className="h-12 w-full" />
+          ) : (
+            <>
+              <div className="flex items-center justify-between rounded-[var(--radius-card)] bg-muted p-3">
+                <span className="text-sm">Configured</span>
+                <span className="text-sm font-medium">
+                  {platformConfig.set_count}/{platformConfig.required_count}
+                </span>
+              </div>
+              {platformConfig.all_required_set ? (
+                <Alert>
+                  <CheckCircle2 className="size-4" />
+                  <AlertTitle>All required secrets are set</AlertTitle>
+                  <AlertDescription>
+                    Workers can run with full platform configuration.
+                  </AlertDescription>
+                </Alert>
+              ) : (
+                <Alert variant="destructive">
+                  <AlertTriangle className="size-4" />
+                  <AlertTitle>
+                    {platformConfig.missing.length} required{" "}
+                    {platformConfig.missing.length === 1 ? "secret" : "secrets"} missing
+                  </AlertTitle>
+                  <AlertDescription>
+                    <div className="mt-2 space-y-1.5">
+                      {platformConfig.missing.map((name) => (
+                        <div key={name} className="flex items-center justify-between gap-2">
+                          <code className="text-xs">{name}</code>
+                          <Button variant="outline" size="sm" onClick={() => void onCopySecretName(name)}>
+                            Copy name
+                          </Button>
+                        </div>
+                      ))}
+                    </div>
+                  </AlertDescription>
+                </Alert>
+              )}
+            </>
+          )}
+        </div>
+      </section>
+    </div>
+  );
+}
+
+function SystemInfoRow({
   label,
   value,
   mono,
@@ -840,109 +914,151 @@ function Row({
   mono?: boolean;
 }) {
   return (
-    <div className="flex items-center justify-between">
+    <div className="flex min-w-0 items-start justify-between gap-4 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-3">
       <span className="text-muted-foreground">{label}</span>
-      <span className={`font-medium ${mono ? "font-mono" : ""}`}>{value}</span>
+      <span className={`min-w-0 break-words text-right font-medium ${mono ? "font-mono" : ""}`}>{value}</span>
     </div>
   );
 }
 
-const WS_KEY = "workeros.activeWorkspaceId";
+const MCP_INSTALL_SNIPPET = `{
+  "mcpServers": {
+    "floom": { "command": "npx", "args": ["-y", "@floomhq/workeros", "mcp"] }
+  }
+}`;
 
-function WorkspaceSettingsTab() {
-  const [wsId, setWsId] = useState<string | null>(null);
-  const [wsName, setWsName] = useState<string>("");
-  const [editName, setEditName] = useState<string>("");
-  const [saving, setSaving] = useState(false);
-  const [memberCount, setMemberCount] = useState<number | null>(null);
+const CLI_INSTALL_SNIPPET = `npm i -g @floomhq/workeros
+workeros login
+workeros run <worker>`;
 
-  useEffect(() => {
-    const id = typeof window !== "undefined" ? window.localStorage.getItem(WS_KEY) : null;
-    if (!id || id === "local-default") return;
-    setWsId(id);
-    // Fetch workspace list to get name + role
-    fetch(`${API_PROXY_BASE}/workspaces`, { headers: activeWorkspaceHeaders() })
-      .then((r) => r.json())
-      .then((d: { workspaces?: { id: string; name: string; role: string }[] }) => {
-        const ws = (d.workspaces ?? []).find((w) => w.id === id);
-        if (ws) { setWsName(ws.name); setEditName(ws.name); }
-      })
-      .catch(() => {});
-    // Fetch member count (returns 403 for non-admins — silently ignored)
-    fetch(`${API_PROXY_BASE}/workspaces/${id}/members`, { headers: activeWorkspaceHeaders() })
-      .then((r) => r.ok ? r.json() : null)
-      .then((d: { members?: unknown[] } | null) => {
-        if (d) setMemberCount((d.members ?? []).length);
-      })
-      .catch(() => {});
-  }, []);
-
-  async function handleRename() {
-    if (!wsId || !editName.trim() || editName.trim() === wsName) return;
-    setSaving(true);
+function CopyCodeCard({ title, description, value }: { title: string; description: string; value: string }) {
+  async function copy() {
     try {
-      const res = await fetch(`${API_PROXY_BASE}/workspaces/${wsId}`, {
-        method: "PATCH",
-        headers: activeWorkspaceHeaders({ "Content-Type": "application/json" }),
-        body: JSON.stringify({ name: editName.trim() }),
-      });
-      if (!res.ok) throw new Error(`HTTP ${res.status}`);
-      const updated = (await res.json()) as { name: string };
-      setWsName(updated.name);
-      setEditName(updated.name);
-      toast.success("Workspace renamed");
-    } catch (e: unknown) {
-      toast.error(e instanceof Error ? e.message : "Failed to rename workspace");
-    } finally {
-      setSaving(false);
+      await navigator.clipboard.writeText(value);
+      toast.success("Copied");
+    } catch {
+      toast.error("Could not copy");
     }
   }
-
-  if (!wsId) {
-    return (
-      <p className="text-sm text-muted-foreground py-4">No active workspace selected.</p>
-    );
-  }
-
   return (
-    <div className="space-y-6">
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Workspace name</h2>
-        <div className="flex gap-2 max-w-sm">
-          <Input
-            value={editName}
-            onChange={(e) => setEditName(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void handleRename(); }}
-            className="text-sm"
-            placeholder="Workspace name"
-          />
-          <Button
-            size="sm"
-            disabled={saving || !editName.trim() || editName.trim() === wsName}
-            onClick={() => void handleRename()}
-          >
-            {saving ? "Saving…" : "Rename"}
-          </Button>
+    <div className="space-y-3">
+      <div className="flex items-center justify-between gap-3">
+        <div>
+          <h2 className="text-sm font-medium">{title}</h2>
+          <p className="text-xs text-muted-foreground">{description}</p>
         </div>
-      </section>
+        <Button type="button" variant="outline" onClick={() => void copy()}>
+          <Copy className="size-3.5" />
+          Copy
+        </Button>
+      </div>
+      <pre className="overflow-auto rounded-[var(--radius-button)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]">
+        {value}
+      </pre>
+    </div>
+  );
+}
 
-      <section className="space-y-3">
-        <h2 className="text-sm font-medium text-muted-foreground">Team</h2>
-        <div className="flex items-center justify-between max-w-sm rounded-lg border border-border bg-card p-3">
-          <div>
-            <p className="text-sm font-medium">Members</p>
-            {memberCount !== null && (
-              <p className="text-xs text-muted-foreground">
-                {memberCount} active {memberCount === 1 ? "member" : "members"}
-              </p>
-            )}
-          </div>
-          <Link href="/members" className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2">
-            Manage →
-          </Link>
+function DeveloperSection() {
+  return (
+    <Tabs defaultValue="mcp">
+      <TabsList>
+        <TabsTrigger value="mcp">MCP</TabsTrigger>
+        <TabsTrigger value="cli">CLI</TabsTrigger>
+        <TabsTrigger value="tokens">Tokens</TabsTrigger>
+        <TabsTrigger value="git">Git</TabsTrigger>
+      </TabsList>
+      <TabsContent value="mcp" className="space-y-4">
+        <CopyCodeCard
+          title="Agent install"
+          description="Copy this into Claude Desktop, Cursor, VS Code, Windsurf, Cline, or any MCP client."
+          value={MCP_INSTALL_SNIPPET}
+        />
+      </TabsContent>
+      <TabsContent value="cli" className="space-y-4">
+        <CopyCodeCard
+          title="CLI install"
+          description="Install the CLI, authenticate, and run a worker from your terminal."
+          value={CLI_INSTALL_SNIPPET}
+        />
+      </TabsContent>
+      <TabsContent value="tokens" className="space-y-4">
+        <PersonalAccessTokensPanel />
+      </TabsContent>
+      <TabsContent value="git" className="space-y-4">
+        <GitWorkspacePanel />
+      </TabsContent>
+    </Tabs>
+  );
+}
+
+function AppearanceSection() {
+  return (
+    <div className="space-y-3">
+      <h2 className="text-sm font-medium text-muted-foreground">Theme</h2>
+      <p className="text-sm text-muted-foreground">
+        Choose how Floom looks. System follows your operating system.
+      </p>
+      <ThemeModeToggleGroup />
+    </div>
+  );
+}
+
+function DangerSection({
+  canEdit,
+  clearConfirmText,
+  setClearConfirmText,
+  clearing,
+  onClearRuns,
+}: {
+  canEdit: boolean;
+  clearConfirmText: string;
+  setClearConfirmText: (value: string) => void;
+  clearing: boolean;
+  onClearRuns: () => Promise<void>;
+}) {
+  if (!canEdit) {
+    return <ReadOnlyNotice message="Danger actions are hidden because this account cannot perform workspace-destructive operations." />;
+  }
+  return (
+    <div className="space-y-4">
+      <section className="space-y-4">
+        <div>
+          <p className="text-sm font-medium text-destructive">Clear run history</p>
+          <p className="mt-0.5 text-xs text-muted-foreground">
+            Deletes all runs, logs, artifacts, and approvals. Cannot be undone.
+          </p>
         </div>
+        <Label htmlFor="clear-runs-confirm" className="text-xs text-muted-foreground">
+          Type <code className="text-foreground">DELETE ALL RUNS</code> to confirm.
+        </Label>
+        <Input
+          id="clear-runs-confirm"
+          value={clearConfirmText}
+          onChange={(e) => setClearConfirmText(e.target.value)}
+          placeholder="DELETE ALL RUNS"
+          className="max-w-sm"
+        />
+        <Button
+          variant="destructive"
+          size="sm"
+          className="shrink-0"
+          onClick={() => void onClearRuns()}
+          disabled={clearing || clearConfirmText.trim() !== "DELETE ALL RUNS"}
+        >
+          {clearing ? "Clearing..." : "Delete all runs"}
+        </Button>
       </section>
     </div>
+  );
+}
+
+function ReadOnlyNotice({ message = "Workspace controls are view only for this account." }: { message?: string }) {
+  return (
+    <Alert>
+      <AlertTitle>View only</AlertTitle>
+      <AlertDescription>{message}</AlertDescription>
+    </Alert>
   );
 }
 
@@ -950,10 +1066,14 @@ function ToggleRow({
   title,
   description,
   disabled,
+  checked,
+  onCheckedChange,
 }: {
   title: string;
   description: string;
   disabled?: boolean;
+  checked?: boolean;
+  onCheckedChange?: (value: boolean) => void;
 }) {
   return (
     <div className="flex items-start justify-between gap-4">
@@ -961,103 +1081,1143 @@ function ToggleRow({
         <p className="text-sm font-medium">{title}</p>
         <p className="mt-0.5 text-xs text-muted-foreground">{description}</p>
       </div>
-      <Switch disabled={disabled} />
+      <Switch disabled={disabled} checked={checked} onCheckedChange={onCheckedChange} />
       {disabled ? (
         <Badge variant="outline" className="text-xs">
-          Soon
+          View only
         </Badge>
       ) : null}
     </div>
   );
 }
 
-// ---------------------------------------------------------------------------
-// Cloud channels tab — uses engine's SlackConnect (synced from engine/apps/web)
-// plus a WhatsApp card with QR code. Engine owns the bind/unlink endpoints;
-// the cloud overlay simply surfaces the same UI with workspace-aware headers.
-// ---------------------------------------------------------------------------
+// #794: workspace behaviour toggles, backed by the workspace-settings KV
+// (admin-only writes — the server enforces #804). Members see them read-only.
+const BEHAVIOUR_TOGGLES: { key: string; title: string; description: string }[] = [
+  {
+    key: "approval_default",
+    title: "Require approval by default",
+    description: "New workers pause for review before taking external actions.",
+  },
+  {
+    // MUST be "auto_pause_enabled" — run_service._auto_pause_on_consecutive_
+    // failures_enabled() reads exactly this key (the UI shipped writing
+    // "auto_pause", which the runner never read — dead toggle).
+    key: "auto_pause_enabled",
+    title: "Auto-pause on repeated failures",
+    description: "Pause a worker automatically after consecutive failed runs.",
+  },
+  {
+    // Canonical key per #794's proposal; enforcement is tracked there.
+    key: "failure_email_enabled",
+    title: "Email me on run failures",
+    description: "Send a notification when a run ends in error.",
+  },
+];
 
+export function BehaviourSettings({ canEdit = true }: { canEdit?: boolean }) {
+  return <BehaviourSettingsInner canEdit={canEdit} />;
+}
+
+function BehaviourSettingsInner({ canEdit }: { canEdit: boolean }) {
+  const [values, setValues] = useState<Record<string, string> | null>(null);
+
+  useEffect(() => {
+    api.workspace
+      .getSettings()
+      .then(setValues)
+      .catch(() => setValues({}));
+  }, []);
+
+  const toggle = (key: string, next: boolean) => {
+    if (!canEdit) return;
+    setValues((prev) => ({ ...(prev ?? {}), [key]: next ? "true" : "false" }));
+    api.workspace.setSetting(key, next ? "true" : "false").catch((err) => {
+      toast.error((err as Error).message || "Could not save setting");
+      // Re-sync from the server on failure.
+      api.workspace.getSettings().then(setValues).catch(() => {});
+    });
+  };
+
+  if (values === null) return <Skeleton className="h-24 w-full" />;
+  return (
+    <div className="space-y-4">
+      {BEHAVIOUR_TOGGLES.map((t) => (
+        <ToggleRow
+          key={t.key}
+          title={t.title}
+          description={t.description}
+          disabled={!canEdit}
+          checked={values[t.key] === "true"}
+          onCheckedChange={(v) => toggle(t.key, v)}
+        />
+      ))}
+    </div>
+  );
+}
+
+
+// #797: workspace model defaults & limits, persisted to the same workspace
+// settings KV. Free-text/number inputs save on blur (admin-only writes; the
+// server enforces #804).
+const MODEL_DEFAULT_FIELDS: {
+  key: string;
+  label: string;
+  placeholder: string;
+  type: "text" | "number";
+  hint: string;
+}[] = [
+  { key: "default_model", label: "Default model", placeholder: "e.g. claude-opus-4-8", type: "text", hint: "Used by new workers that don't pin a model." },
+  { key: "max_output_tokens", label: "Max output tokens", placeholder: "e.g. 4096", type: "number", hint: "Per-run output ceiling." },
+  { key: "spend_cap_usd", label: "Monthly spend cap (USD)", placeholder: "e.g. 100", type: "number", hint: "Soft cap for run costs this month." },
+];
+
+// #791: workspace region / timezone / company domain, persisted to the
+// workspace settings KV (rename lives in the switcher).
+const WORKSPACE_INFO_FIELDS: { key: string; label: string; placeholder: string; hint: string }[] = [
+  { key: "region", label: "Region", placeholder: "e.g. us-east / eu-west", hint: "Where workers run (informational on OSS)." },
+  { key: "timezone", label: "Timezone", placeholder: "e.g. America/New_York", hint: "Default timezone for schedules & display." },
+  { key: "company_domain", label: "Company domain", placeholder: "e.g. acme.com", hint: "Used for the workspace logo." },
+];
+
+export function WorkspaceInfoSettings({ canEdit = true }: { canEdit?: boolean }) {
+  const [values, setValues] = useState<Record<string, string> | null>(null);
+
+  useEffect(() => {
+    api.workspace.getSettings().then(setValues).catch(() => setValues({}));
+  }, []);
+
+  const save = (key: string, value: string) => {
+    if (!canEdit) return;
+    api.workspace.setSetting(key, value).catch((err) => {
+      toast.error((err as Error).message || "Could not save setting");
+    });
+  };
+
+  if (values === null) return <Skeleton className="h-28 w-full" />;
+  return (
+    <div className="space-y-4">
+      {WORKSPACE_INFO_FIELDS.map((f) => (
+        <div key={f.key} className="space-y-1.5">
+          <Label htmlFor={`ws-${f.key}`} className="text-sm">{f.label}</Label>
+          <Input
+            id={`ws-${f.key}`}
+            defaultValue={values[f.key] ?? ""}
+            placeholder={f.placeholder}
+            className="max-w-xs"
+            disabled={!canEdit}
+            onBlur={(e) => {
+              if (!canEdit) return;
+              const v = e.target.value.trim();
+              if (v !== (values[f.key] ?? "")) {
+                setValues((prev) => ({ ...(prev ?? {}), [f.key]: v }));
+                save(f.key, v);
+              }
+            }}
+          />
+          <p className="text-xs text-muted-foreground">{f.hint}</p>
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function ModelDefaults({ canEdit = true }: { canEdit?: boolean }) {
+  const [values, setValues] = useState<Record<string, string> | null>(null);
+
+  useEffect(() => {
+    api.workspace.getSettings().then(setValues).catch(() => setValues({}));
+  }, []);
+
+  const save = (key: string, value: string) => {
+    if (!canEdit) return;
+    api.workspace.setSetting(key, value).catch((err) => {
+      toast.error((err as Error).message || "Could not save setting");
+    });
+  };
+
+  if (values === null) return <Skeleton className="h-28 w-full" />;
+  return (
+    <div className="space-y-4">
+      {MODEL_DEFAULT_FIELDS.map((f) => (
+        f.key === "default_model" ? (
+          <div key={f.key} className="c-ltable">
+            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
+              <div className="c-lp-tx">
+                <div className="nm">{f.label}</div>
+                <div className="sub">{f.hint}</div>
+              </div>
+              <span className="c-vpill">{modelLabel(values[f.key])}</span>
+            </div>
+          </div>
+        ) : (
+        <div key={f.key} className="space-y-1.5">
+          <Label htmlFor={`md-${f.key}`} className="text-sm">{f.label}</Label>
+          <Input
+            id={`md-${f.key}`}
+            type={f.type}
+            defaultValue={values[f.key] ?? ""}
+            placeholder={f.placeholder}
+            className="max-w-xs"
+            disabled={!canEdit}
+            onBlur={(e) => {
+              if (!canEdit) return;
+              const v = e.target.value.trim();
+              if (v !== (values[f.key] ?? "")) {
+                setValues((prev) => ({ ...(prev ?? {}), [f.key]: v }));
+                save(f.key, v);
+              }
+            }}
+          />
+          <p className="text-xs text-muted-foreground">{f.hint}</p>
+        </div>
+        )
+      ))}
+    </div>
+  );
+}
+
+function SettingsHistoryMenu({
+  loadVersions,
+  rollback,
+  onRollback,
+  refreshKey,
+  confirmLabel,
+  canRestore,
+}: {
+  loadVersions: () => Promise<VersionSummary[]>;
+  rollback: (versionId: string) => Promise<string>;
+  onRollback: (content: string) => void;
+  refreshKey: number;
+  confirmLabel: string;
+  canRestore: boolean;
+}) {
+  const [versions, setVersions] = useState<VersionSummary[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const [rollingBack, setRollingBack] = useState<string | null>(null);
+  const [pendingRestore, setPendingRestore] = useState<VersionSummary | null>(null);
+
+  const refresh = useCallback(async () => {
+    setLoading(true);
+    try {
+      setVersions(await loadVersions());
+    } catch {
+      setVersions([]);
+    } finally {
+      setLoading(false);
+      setLoadedOnce(true);
+    }
+  }, [loadVersions]);
+
+  useEffect(() => {
+    if (loadedOnce) void refresh();
+  }, [loadedOnce, refresh, refreshKey]);
+
+  async function doRollback() {
+    if (!pendingRestore) return;
+    const v = pendingRestore;
+    setPendingRestore(null);
+    setRollingBack(v.id);
+    try {
+      const content = await rollback(v.id);
+      onRollback(content);
+      await refresh();
+      toast.success(`Rolled back to version ${v.sha}`);
+    } catch (e: unknown) {
+      toast.error(`Rollback failed: ${e instanceof Error ? e.message : "unknown"}`);
+    } finally {
+      setRollingBack(null);
+    }
+  }
+
+  return (
+    <>
+      <VersionHistoryMenu
+        versions={versions}
+        loading={loading && !loadedOnce}
+        canRestore={canRestore}
+        restoringId={rollingBack}
+        onOpen={() => {
+          if (!loadedOnce) void refresh();
+        }}
+        onRestore={(v) => setPendingRestore(v)}
+      />
+      <Dialog open={!!pendingRestore} onOpenChange={(open) => { if (!open) setPendingRestore(null); }}>
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Restore version {pendingRestore?.sha}?</DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            {confirmLabel} The current version is saved automatically before restoring.
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingRestore(null)}>
+              Cancel
+            </Button>
+            <Button onClick={() => void doRollback()}>
+              Restore
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
+function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: boolean }) {
+  const [agent, setAgent] = useState<WorkspaceAgentInfo | null>(null);
+  const [base, setBase] = useState("");
+  const [originalBase, setOriginalBase] = useState("");
+  const [baseIsCustom, setBaseIsCustom] = useState(false);
+  const [editingBase, setEditingBase] = useState(false);
+  const [savingBase, setSavingBase] = useState(false);
+  const [resetConfirm, setResetConfirm] = useState(false);
+  const [resetting, setResetting] = useState(false);
+  const [instructions, setInstructions] = useState("");
+  const [originalInstructions, setOriginalInstructions] = useState("");
+  const [editingInstructions, setEditingInstructions] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+  const [versionsKey, setVersionsKey] = useState(0);
+  const [baseVersionsKey, setBaseVersionsKey] = useState(0);
+
+  const canEdit = canManageWorkspace && agent?.permissions?.can_edit !== false;
+  const dirty = instructions !== originalInstructions;
+  const baseDirty = base !== originalBase;
+
+  const load = useCallback(async () => {
+    setLoading(true);
+    setError(null);
+    try {
+      const [agentRes, baseRes, instructionsRes] = await Promise.all([
+        api.system.workspaceAgent(),
+        api.system.workspaceBasePersona(),
+        api.system.workspaceInstructions(),
+      ]);
+      setAgent(agentRes);
+      setBase(baseRes.content);
+      setOriginalBase(baseRes.content);
+      setBaseIsCustom(baseRes.is_custom);
+      setInstructions(instructionsRes);
+      setOriginalInstructions(instructionsRes);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : "Failed to load workspace agent");
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+  }, [load]);
+
+  async function saveBase() {
+    if (!canEdit || !base.trim()) return;
+    setSavingBase(true);
+    try {
+      await api.system.updateWorkspaceBasePersona(base);
+      setOriginalBase(base);
+      setBaseIsCustom(true);
+      setEditingBase(false);
+      setBaseVersionsKey((k) => k + 1);
+      toast.success("Base instructions saved");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save base instructions");
+    } finally {
+      setSavingBase(false);
+    }
+  }
+
+  async function saveInstructions() {
+    if (!canEdit || !instructions.trim()) return;
+    setSaving(true);
+    try {
+      await api.system.updateWorkspaceInstructions(instructions);
+      setOriginalInstructions(instructions);
+      setEditingInstructions(false);
+      setVersionsKey((k) => k + 1);
+      toast.success("Instructions saved");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to save instructions");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  async function resetBase() {
+    if (!canEdit) return;
+    setResetting(true);
+    try {
+      await api.system.resetWorkspaceBasePersona();
+      setResetConfirm(false);
+      setEditingBase(false);
+      setBaseVersionsKey((k) => k + 1);
+      toast.success("Base instructions reset to the built-in default");
+      await load();
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Failed to reset base instructions");
+    } finally {
+      setResetting(false);
+    }
+  }
+
+  if (error) {
+    return (
+      <Alert variant="destructive">
+        <AlertTriangle className="size-4" />
+        <AlertTitle>Couldn&apos;t load the assistant</AlertTitle>
+        <AlertDescription>{error}</AlertDescription>
+      </Alert>
+    );
+  }
+
+  return (
+    <div className="space-y-6">
+      {!canEdit ? <ReadOnlyNotice message="Assistant editing controls are hidden because this account cannot edit workspace assistant settings." /> : null}
+      <div className="flex flex-wrap items-center gap-3">
+        <EmilyAvatar size="md" />
+        <div className="min-w-0">
+          <h2 className="text-sm font-medium">Emily</h2>
+          <p className="text-xs text-muted-foreground">Persona, workspace notes, and compiled prompt.</p>
+        </div>
+        {agent?.model ? <Badge variant="outline" className="text-xs">{modelLabel(agent.model)}</Badge> : null}
+        {agent ? (
+          <span className="ml-auto">
+            <AssetVisibilityControl
+              visibility={agent.visibility}
+              canShare={canEdit && (agent.permissions?.can_share ?? true)}
+              noun="Emily"
+              titleLabel="Emily visibility"
+              onApply={async (next) => {
+                const updated = await api.system.setAssistantVisibility(next);
+                setAgent(updated);
+                return updated.visibility;
+              }}
+            />
+          </span>
+        ) : null}
+      </div>
+
+      <Tabs defaultValue="base">
+        <TabsList>
+          <TabsTrigger value="base">Persona</TabsTrigger>
+          <TabsTrigger value="instructions">Workspace notes</TabsTrigger>
+          <TabsTrigger value="prompt">Compiled prompt</TabsTrigger>
+        </TabsList>
+        <TabsContent value="base" className="space-y-3">
+          {loading ? <Skeleton className="h-80 w-full" /> : (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <div className="flex items-center gap-2">
+                    <h3 className="text-sm font-medium">Emily persona</h3>
+                    <Badge variant="outline" className="text-xs">{baseIsCustom ? "Custom" : "Built-in default"}</Badge>
+                  </div>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Emily&apos;s core identity and style.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <SettingsHistoryMenu
+                    refreshKey={baseVersionsKey}
+                    loadVersions={() => api.system.listWorkspaceBaseVersions()}
+                    rollback={(id) => api.system.rollbackWorkspaceBasePersona(id)}
+                    onRollback={(content) => {
+                      setBase(content);
+                      setOriginalBase(content);
+                      setBaseIsCustom(true);
+                      setEditingBase(false);
+                      setBaseVersionsKey((k) => k + 1);
+                    }}
+                    confirmLabel="This will overwrite your current base instructions."
+                    canRestore={canEdit}
+                  />
+                  {editingBase ? (
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => { setBase(originalBase); setEditingBase(false); }} disabled={savingBase}>
+                        <X className="size-3.5" />
+                        Cancel
+                      </Button>
+                      <Button size="sm" onClick={() => void saveBase()} disabled={!baseDirty || savingBase}>
+                        <Save className="size-3.5" />
+                        {savingBase ? "Saving" : "Save"}
+                      </Button>
+                    </>
+                  ) : canEdit ? (
+                    <>
+                      {baseIsCustom ? (
+                        <Button size="sm" variant="outline" onClick={() => setResetConfirm(true)} disabled={resetting}>
+                          <RotateCcw className="size-3.5" />
+                          Reset
+                        </Button>
+                      ) : null}
+                      <Button size="sm" variant="outline" onClick={() => setEditingBase(true)}>Edit</Button>
+                    </>
+                  ) : null}
+                </div>
+              </div>
+              <Textarea
+                value={base}
+                onChange={(event) => { if (editingBase) setBase(event.target.value); }}
+                readOnly={!editingBase}
+                className="min-h-[22rem] font-mono text-xs leading-relaxed read-only:bg-muted/40"
+                spellCheck={false}
+              />
+            </>
+          )}
+        </TabsContent>
+        <TabsContent value="instructions" className="space-y-3">
+          {loading ? <Skeleton className="h-80 w-full" /> : (
+            <>
+              <div className="flex flex-wrap items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-medium">Workspace notes</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Workspace-specific context and preferences.</p>
+                </div>
+                <div className="flex items-center gap-2">
+                  <SettingsHistoryMenu
+                    refreshKey={versionsKey}
+                    loadVersions={() => api.system.listWorkspaceVersions()}
+                    rollback={(id) => api.system.rollbackWorkspaceInstructions(id)}
+                    onRollback={(content) => {
+                      setInstructions(content);
+                      setOriginalInstructions(content);
+                      setEditingInstructions(false);
+                      setVersionsKey((k) => k + 1);
+                    }}
+                    confirmLabel="This will overwrite your current workspace instructions."
+                    canRestore={canEdit}
+                  />
+                  {editingInstructions ? (
+                    <>
+                      <Button size="sm" variant="outline" onClick={() => { setInstructions(originalInstructions); setEditingInstructions(false); }} disabled={saving}>
+                        <X className="size-3.5" />
+                        Cancel
+                      </Button>
+                      <Button size="sm" onClick={() => void saveInstructions()} disabled={!dirty || saving}>
+                        <Save className="size-3.5" />
+                        {saving ? "Saving" : "Save"}
+                      </Button>
+                    </>
+                  ) : canEdit ? (
+                    <Button size="sm" variant="outline" onClick={() => setEditingInstructions(true)}>Edit</Button>
+                  ) : null}
+                </div>
+              </div>
+              <Textarea
+                value={instructions}
+                onChange={(event) => { if (editingInstructions) setInstructions(event.target.value); }}
+                readOnly={!editingInstructions}
+                className="min-h-[22rem] font-mono text-xs leading-relaxed read-only:bg-muted/40"
+                spellCheck={false}
+              />
+            </>
+          )}
+        </TabsContent>
+        <TabsContent value="prompt" className="space-y-3">
+          {loading || !agent ? <Skeleton className="h-96 w-full" /> : (
+            <>
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <h3 className="text-sm font-medium">Compiled prompt</h3>
+                  <p className="mt-0.5 text-xs text-muted-foreground">Read-only preview of Emily&apos;s full system prompt.</p>
+                </div>
+                <Badge variant="outline" className="text-xs">Read-only</Badge>
+              </div>
+              <pre className="max-h-[36rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
+                {agent.system_prompt}
+              </pre>
+            </>
+          )}
+        </TabsContent>
+      </Tabs>
+
+      <Dialog open={resetConfirm} onOpenChange={(open) => { if (!open) setResetConfirm(false); }}>
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Reset base instructions?</DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            This removes your custom base instructions and restores the built-in default.
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setResetConfirm(false)} disabled={resetting}>Cancel</Button>
+            <Button onClick={() => void resetBase()} disabled={resetting}>{resetting ? "Resetting" : "Reset to default"}</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+const ROLE_LABEL: Record<WorkspaceRole, string> = {
+  owner: "Owner",
+  admin: "Admin",
+  member: "Member",
+};
+
+function RoleBadge({ role }: { role: WorkspaceRole }) {
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1 rounded-[var(--radius-pill)] px-2 py-0.5 text-xs font-medium",
+        role === "owner"
+          ? "bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--accent)]"
+          : "bg-[var(--bg-2)] text-[var(--ink-soft)]",
+      )}
+    >
+      {ROLE_LABEL[role]}
+    </span>
+  );
+}
+
+function looksLikeUuid(value: string): boolean {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i.test(value);
+}
+
+function memberLabel(m: WorkspaceMember, currentUser?: CurrentUser | null, isMe?: boolean): string {
+  const fallbackUser =
+    isMe
+      ? currentUser?.display_name?.trim() || currentUser?.username?.trim() || currentUser?.email?.trim()
+      : null;
+  const label = m.display_name?.trim() || m.email?.trim() || fallbackUser || "";
+  if (label) return label;
+  return looksLikeUuid(m.user_id) ? "Workspace member" : m.user_id;
+}
+
+function memberInitial(m: WorkspaceMember, currentUser?: CurrentUser | null, isMe?: boolean): string {
+  const base = memberLabel(m, currentUser, isMe);
+  return base.slice(0, 2).toUpperCase();
+}
+
+function MembersSettingsPanel() {
+  const [data, setData] = useState<WorkspaceMembersResponse | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [inviteEmail, setInviteEmail] = useState("");
+  const [inviteRole, setInviteRole] = useState<"admin" | "member">("member");
+  const [inviting, setInviting] = useState(false);
+  const [busyUser, setBusyUser] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
+  const [pendingAction, setPendingAction] = useState<
+    | { kind: "remove"; member: WorkspaceMember }
+    | { kind: "transfer"; member: WorkspaceMember }
+    | null
+  >(null);
+
+  const load = useCallback(async () => {
+    try {
+      const res = await api.members.list();
+      setData(res);
+      setError(null);
+    } catch (err) {
+      setError((err as Error).message || "Failed to load members");
+    }
+  }, []);
+
+  useEffect(() => {
+    void load();
+    api.me().then(setCurrentUser).catch(() => setCurrentUser(null));
+  }, [load]);
+
+  const myRole = data?.my_role ?? null;
+  const myMember = data?.members.find((m) => m.user_id === data.my_user_id) ?? null;
+  const effectiveMyRole =
+    myRole ??
+    myMember?.role ??
+    (currentUser?.is_admin || currentUser?.role === "admin" || currentUser?.role === "owner" ? "admin" : null);
+  const canManage = effectiveMyRole === "owner" || effectiveMyRole === "admin";
+  const isOwner = effectiveMyRole === "owner" || myMember?.role === "owner";
+  const sortedMembers = data?.members ?? [];
+
+  async function handleInvite(e: React.FormEvent) {
+    e.preventDefault();
+    const email = inviteEmail.trim();
+    if (!email || inviting || !canManage) return;
+    setInviting(true);
+    try {
+      await api.members.invite(email, inviteRole);
+      setInviteEmail("");
+      toast.success(`Invited ${email}`);
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to invite member");
+    } finally {
+      setInviting(false);
+    }
+  }
+
+  async function handleSetRole(m: WorkspaceMember, role: "admin" | "member") {
+    if (m.role === role || !isOwner) return;
+    setBusyUser(m.user_id);
+    try {
+      await api.members.setRole(m.user_id, role);
+      toast.success(`${memberLabel(m, currentUser, m.user_id === data?.my_user_id)} is now ${ROLE_LABEL[role]}`);
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to change role");
+    } finally {
+      setBusyUser(null);
+    }
+  }
+
+  async function runPendingAction() {
+    if (!pendingAction) return;
+    const action = pendingAction;
+    setPendingAction(null);
+    setBusyUser(action.member.user_id);
+    try {
+      if (action.kind === "remove") {
+        await api.members.remove(action.member.user_id);
+        toast.success(`Removed ${memberLabel(action.member, currentUser, action.member.user_id === data?.my_user_id)}`);
+      } else {
+        await api.members.transferOwner(action.member.user_id);
+        toast.success(`${memberLabel(action.member, currentUser, action.member.user_id === data?.my_user_id)} is now the Owner`);
+      }
+      await load();
+    } catch (err) {
+      toast.error((err as Error).message || "Member action failed");
+    } finally {
+      setBusyUser(null);
+    }
+  }
+
+  if (!data && !error) return <Skeleton className="h-48 w-full" />;
+
+  return (
+    <div className="space-y-6">
+      {error ? (
+        <Alert variant="destructive">
+          <AlertTriangle className="size-4" />
+          <AlertTitle>Couldn&apos;t load members</AlertTitle>
+          <AlertDescription>{error}</AlertDescription>
+        </Alert>
+      ) : null}
+      {!canManage ? <ReadOnlyNotice message="Member management controls are hidden because this account is not Owner or Admin." /> : null}
+
+      {canManage ? (
+        <form onSubmit={handleInvite} className="flex flex-col gap-2 rounded-[var(--radius-card)] bg-[var(--bg-2)] p-4 sm:flex-row sm:items-center">
+          <div className="flex flex-1 items-center gap-2">
+            <UserPlus className="size-4 shrink-0 text-[var(--ink-mute)]" />
+            <Input
+              type="email"
+              value={inviteEmail}
+              onChange={(e) => setInviteEmail(e.target.value)}
+              placeholder="teammate@company.com"
+              className="flex-1"
+              aria-label="Invite member by email"
+              maxLength={254}
+            />
+          </div>
+          <div className="inline-flex rounded-[var(--radius-button)] bg-[var(--bg-card)] p-0.5">
+            {(["member", "admin"] as const).map((role) => (
+              <button
+                key={role}
+                type="button"
+                className={cn(
+                  "h-8 px-3 text-sm",
+                  inviteRole === role ? "rounded-[var(--radius-button)] bg-[var(--bg-2)] text-foreground" : "text-muted-foreground",
+                )}
+                onClick={() => setInviteRole(role)}
+              >
+                {ROLE_LABEL[role]}
+              </button>
+            ))}
+          </div>
+          <Button type="submit" disabled={!inviteEmail.trim() || inviting}>
+            {inviting ? "Inviting..." : "Invite"}
+          </Button>
+        </form>
+      ) : null}
+
+      <div className="space-y-1">
+        {sortedMembers.map((m) => {
+          const isMe = m.user_id === data?.my_user_id;
+          const isBusy = busyUser === m.user_id;
+          const canChangeRole = isOwner && m.role !== "owner" && !isMe;
+          const canRemove =
+            canManage &&
+            m.role !== "owner" &&
+            !isMe &&
+            !(effectiveMyRole === "admin" && m.role === "admin");
+          const canTransfer = isOwner && m.role !== "owner" && m.status === "active";
+          return (
+            <div key={m.user_id} className="flex flex-wrap items-center gap-3 [border-bottom:var(--bd-div)] py-3 last:[border-bottom:0]">
+              <div className="grid size-9 shrink-0 place-items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] text-[11px] font-medium text-foreground">
+                {memberInitial(m, currentUser, isMe)}
+              </div>
+              <div className="min-w-0 flex-1">
+                <div className="flex items-center gap-2">
+                  <span className="truncate text-sm font-medium text-foreground">{memberLabel(m, currentUser, isMe)}</span>
+                  {isMe ? <span className="text-[11px] text-[var(--ink-mute)]">You</span> : null}
+                </div>
+                {m.email && m.email !== memberLabel(m, currentUser, isMe) ? (
+                  <p className="truncate text-xs text-[var(--ink-mute)]">{m.email}</p>
+                ) : null}
+              </div>
+              {m.status === "invited" ? (
+                <span className="rounded-[var(--radius-pill)] bg-[var(--bg-2)] px-2 py-0.5 text-[11px] text-[var(--ink-mute)]">
+                  Invited
+                </span>
+              ) : null}
+              <RoleBadge role={m.role} />
+              {canChangeRole ? (
+                <Button
+                  size="sm"
+                  variant="ghost"
+                  disabled={isBusy}
+                  onClick={() => void handleSetRole(m, m.role === "member" ? "admin" : "member")}
+                >
+                  Make {m.role === "member" ? "admin" : "member"}
+                </Button>
+              ) : null}
+              {canTransfer ? (
+                <Button size="sm" variant="ghost" disabled={isBusy} onClick={() => setPendingAction({ kind: "transfer", member: m })}>
+                  Transfer
+                </Button>
+              ) : null}
+              {canRemove ? (
+                <Button size="sm" variant="ghost" className="text-destructive" disabled={isBusy} onClick={() => setPendingAction({ kind: "remove", member: m })}>
+                  Remove
+                </Button>
+              ) : null}
+            </div>
+          );
+        })}
+        {sortedMembers.length === 0 ? (
+          <div className="py-8 text-center text-sm text-[var(--ink-mute)]">No members yet.</div>
+        ) : null}
+      </div>
+
+      <Dialog open={!!pendingAction} onOpenChange={(open) => { if (!open) setPendingAction(null); }}>
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>
+              {pendingAction?.kind === "transfer" ? "Transfer ownership?" : "Remove member?"}
+            </DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            {pendingAction?.kind === "transfer"
+              ? `Transfer ownership to ${pendingAction ? memberLabel(pendingAction.member, currentUser, pendingAction.member.user_id === data?.my_user_id) : "this member"}? You will be demoted to Admin.`
+              : `Remove ${pendingAction ? memberLabel(pendingAction.member, currentUser, pendingAction.member.user_id === data?.my_user_id) : "this member"} from this workspace?`}
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPendingAction(null)}>Cancel</Button>
+            <Button variant={pendingAction?.kind === "remove" ? "destructive" : "default"} onClick={() => void runPendingAction()}>
+              {pendingAction?.kind === "transfer" ? "Transfer" : "Remove"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </div>
+  );
+}
+
+function VersionHistorySettingsPanel() {
+  const [workspaceVersions, setWorkspaceVersions] = useState<VersionSummary[] | null>(null);
+  const [baseVersions, setBaseVersions] = useState<VersionSummary[] | null>(null);
+
+  useEffect(() => {
+    void (async () => {
+      const [workspace, base] = await Promise.allSettled([
+        api.system.listWorkspaceVersions(),
+        api.system.listWorkspaceBaseVersions(),
+      ]);
+      setWorkspaceVersions(workspace.status === "fulfilled" ? workspace.value : []);
+      setBaseVersions(base.status === "fulfilled" ? base.value : []);
+    })();
+  }, []);
+
+  return (
+    <div className="space-y-6">
+      <Alert>
+        <AlertTitle>Workspace changelog</AlertTitle>
+        <AlertDescription>
+          Merged multi-asset timeline is tracked as #772; this view shows the built workspace instruction histories.
+        </AlertDescription>
+      </Alert>
+      <VersionList title="Workspace notes" versions={workspaceVersions} />
+      <VersionList title="Base persona" versions={baseVersions} />
+    </div>
+  );
+}
+
+function VersionList({ title, versions }: { title: string; versions: VersionSummary[] | null }) {
+  return (
+    <section className="space-y-3">
+      <h2 className="text-sm font-medium text-muted-foreground">{title}</h2>
+      {versions === null ? (
+        <Skeleton className="h-24 w-full" />
+      ) : versions.length === 0 ? (
+        <p className="text-sm text-muted-foreground">No commits yet.</p>
+      ) : (
+        <div className="space-y-1">
+          {versions.map((v, index) => (
+            <div key={`${v.asset_type}-${v.id}-${index}`} className="flex items-center justify-between gap-3 [border-bottom:var(--bd-div)] py-2 text-sm last:[border-bottom:0]">
+              <div className="min-w-0">
+                <p className="truncate font-medium">{v.message}</p>
+                <p className="text-xs text-muted-foreground">
+                  <span className="font-mono">{v.sha}</span> · {v.author} · {new Date(v.timestamp).toLocaleString()}
+                </p>
+              </div>
+              {index === 0 ? <Badge variant="outline">Current</Badge> : null}
+            </div>
+          ))}
+        </div>
+      )}
+    </section>
+  );
+}
+
+// SPEC §12: Channels — how you reach Emily/workers (inbound), set once.
+// Slack (live), WhatsApp (coming), and "install in your agent" over MCP/CLI.
+// ---------------------------------------------------------------------------
+// WhatsApp QR — static inline SVG generated from the fixed wa.me deep-link.
+// No external service, no npm dep. The QR data was generated offline with
+// qrcode (Python) for https://wa.me/16503999709 at error-correction M.
+// To regenerate: python3 -c "import qrcode; ..." (see git history for script).
+// ---------------------------------------------------------------------------
 const WA_BOT_NUMBER = "16503999709";
 const WA_LINK = `https://wa.me/${WA_BOT_NUMBER}`;
 
 // Pre-computed QR path for WA_LINK (29×29 modules, 2-module border).
-// chart.googleapis.com/chart is shut down — inline static SVG, no external service.
 const WA_QR_PATH =
   "M2,2h1v1h-1z M3,2h1v1h-1z M4,2h1v1h-1z M5,2h1v1h-1z M6,2h1v1h-1z M7,2h1v1h-1z M8,2h1v1h-1z M15,2h1v1h-1z M18,2h1v1h-1z M20,2h1v1h-1z M21,2h1v1h-1z M22,2h1v1h-1z M23,2h1v1h-1z M24,2h1v1h-1z M25,2h1v1h-1z M26,2h1v1h-1z M2,3h1v1h-1z M8,3h1v1h-1z M10,3h1v1h-1z M11,3h1v1h-1z M12,3h1v1h-1z M13,3h1v1h-1z M18,3h1v1h-1z M20,3h1v1h-1z M26,3h1v1h-1z M2,4h1v1h-1z M4,4h1v1h-1z M5,4h1v1h-1z M6,4h1v1h-1z M8,4h1v1h-1z M10,4h1v1h-1z M12,4h1v1h-1z M13,4h1v1h-1z M17,4h1v1h-1z M18,4h1v1h-1z M20,4h1v1h-1z M22,4h1v1h-1z M23,4h1v1h-1z M24,4h1v1h-1z M26,4h1v1h-1z M2,5h1v1h-1z M4,5h1v1h-1z M5,5h1v1h-1z M6,5h1v1h-1z M8,5h1v1h-1z M10,5h1v1h-1z M12,5h1v1h-1z M15,5h1v1h-1z M16,5h1v1h-1z M20,5h1v1h-1z M22,5h1v1h-1z M23,5h1v1h-1z M24,5h1v1h-1z M26,5h1v1h-1z M2,6h1v1h-1z M4,6h1v1h-1z M5,6h1v1h-1z M6,6h1v1h-1z M8,6h1v1h-1z M11,6h1v1h-1z M12,6h1v1h-1z M16,6h1v1h-1z M20,6h1v1h-1z M22,6h1v1h-1z M23,6h1v1h-1z M24,6h1v1h-1z M26,6h1v1h-1z M2,7h1v1h-1z M8,7h1v1h-1z M11,7h1v1h-1z M12,7h1v1h-1z M15,7h1v1h-1z M20,7h1v1h-1z M26,7h1v1h-1z M2,8h1v1h-1z M3,8h1v1h-1z M4,8h1v1h-1z M5,8h1v1h-1z M6,8h1v1h-1z M7,8h1v1h-1z M8,8h1v1h-1z M10,8h1v1h-1z M12,8h1v1h-1z M14,8h1v1h-1z M16,8h1v1h-1z M18,8h1v1h-1z M20,8h1v1h-1z M21,8h1v1h-1z M22,8h1v1h-1z M23,8h1v1h-1z M24,8h1v1h-1z M25,8h1v1h-1z M26,8h1v1h-1z M10,9h1v1h-1z M12,9h1v1h-1z M13,9h1v1h-1z M14,9h1v1h-1z M16,9h1v1h-1z M17,9h1v1h-1z M18,9h1v1h-1z M2,10h1v1h-1z M8,10h1v1h-1z M10,10h1v1h-1z M11,10h1v1h-1z M14,10h1v1h-1z M15,10h1v1h-1z M17,10h1v1h-1z M18,10h1v1h-1z M19,10h1v1h-1z M20,10h1v1h-1z M23,10h1v1h-1z M24,10h1v1h-1z M25,10h1v1h-1z M2,11h1v1h-1z M4,11h1v1h-1z M6,11h1v1h-1z M7,11h1v1h-1z M10,11h1v1h-1z M13,11h1v1h-1z M14,11h1v1h-1z M15,11h1v1h-1z M17,11h1v1h-1z M18,11h1v1h-1z M21,11h1v1h-1z M22,11h1v1h-1z M23,11h1v1h-1z M24,11h1v1h-1z M25,11h1v1h-1z M2,12h1v1h-1z M4,12h1v1h-1z M5,12h1v1h-1z M7,12h1v1h-1z M8,12h1v1h-1z M9,12h1v1h-1z M10,12h1v1h-1z M12,12h1v1h-1z M13,12h1v1h-1z M14,12h1v1h-1z M17,12h1v1h-1z M18,12h1v1h-1z M20,12h1v1h-1z M21,12h1v1h-1z M22,12h1v1h-1z M23,12h1v1h-1z M25,12h1v1h-1z M26,12h1v1h-1z M2,13h1v1h-1z M5,13h1v1h-1z M6,13h1v1h-1z M10,13h1v1h-1z M13,13h1v1h-1z M16,13h1v1h-1z M19,13h1v1h-1z M20,13h1v1h-1z M21,13h1v1h-1z M23,13h1v1h-1z M26,13h1v1h-1z M6,14h1v1h-1z M7,14h1v1h-1z M8,14h1v1h-1z M9,14h1v1h-1z M12,14h1v1h-1z M14,14h1v1h-1z M16,14h1v1h-1z M17,14h1v1h-1z M19,14h1v1h-1z M20,14h1v1h-1z M26,14h1v1h-1z M2,15h1v1h-1z M6,15h1v1h-1z M7,15h1v1h-1z M9,15h1v1h-1z M11,15h1v1h-1z M15,15h1v1h-1z M16,15h1v1h-1z M17,15h1v1h-1z M21,15h1v1h-1z M25,15h1v1h-1z M2,16h1v1h-1z M4,16h1v1h-1z M8,16h1v1h-1z M9,16h1v1h-1z M13,16h1v1h-1z M14,16h1v1h-1z M17,16h1v1h-1z M18,16h1v1h-1z M19,16h1v1h-1z M21,16h1v1h-1z M22,16h1v1h-1z M23,16h1v1h-1z M25,16h1v1h-1z M26,16h1v1h-1z M2,17h1v1h-1z M4,17h1v1h-1z M6,17h1v1h-1z M9,17h1v1h-1z M12,17h1v1h-1z M13,17h1v1h-1z M17,17h1v1h-1z M21,17h1v1h-1z M23,17h1v1h-1z M24,17h1v1h-1z M26,17h1v1h-1z M2,18h1v1h-1z M5,18h1v1h-1z M8,18h1v1h-1z M11,18h1v1h-1z M12,18h1v1h-1z M13,18h1v1h-1z M14,18h1v1h-1z M15,18h1v1h-1z M18,18h1v1h-1z M19,18h1v1h-1z M20,18h1v1h-1z M21,18h1v1h-1z M22,18h1v1h-1z M24,18h1v1h-1z M10,19h1v1h-1z M12,19h1v1h-1z M14,19h1v1h-1z M15,19h1v1h-1z M16,19h1v1h-1z M18,19h1v1h-1z M22,19h1v1h-1z M2,20h1v1h-1z M3,20h1v1h-1z M4,20h1v1h-1z M5,20h1v1h-1z M6,20h1v1h-1z M7,20h1v1h-1z M8,20h1v1h-1z M11,20h1v1h-1z M13,20h1v1h-1z M15,20h1v1h-1z M16,20h1v1h-1z M18,20h1v1h-1z M20,20h1v1h-1z M22,20h1v1h-1z M26,20h1v1h-1z M2,21h1v1h-1z M8,21h1v1h-1z M14,21h1v1h-1z M16,21h1v1h-1z M18,21h1v1h-1z M22,21h1v1h-1z M25,21h1v1h-1z M26,21h1v1h-1z M2,22h1v1h-1z M4,22h1v1h-1z M5,22h1v1h-1z M6,22h1v1h-1z M8,22h1v1h-1z M11,22h1v1h-1z M12,22h1v1h-1z M13,22h1v1h-1z M15,22h1v1h-1z M17,22h1v1h-1z M18,22h1v1h-1z M19,22h1v1h-1z M20,22h1v1h-1z M21,22h1v1h-1z M22,22h1v1h-1z M24,22h1v1h-1z M2,23h1v1h-1z M4,23h1v1h-1z M5,23h1v1h-1z M6,23h1v1h-1z M8,23h1v1h-1z M13,23h1v1h-1z M14,23h1v1h-1z M17,23h1v1h-1z M18,23h1v1h-1z M19,23h1v1h-1z M20,23h1v1h-1z M25,23h1v1h-1z M26,23h1v1h-1z M2,24h1v1h-1z M4,24h1v1h-1z M5,24h1v1h-1z M6,24h1v1h-1z M8,24h1v1h-1z M14,24h1v1h-1z M15,24h1v1h-1z M16,24h1v1h-1z M23,24h1v1h-1z M24,24h1v1h-1z M26,24h1v1h-1z M2,25h1v1h-1z M8,25h1v1h-1z M11,25h1v1h-1z M12,25h1v1h-1z M14,25h1v1h-1z M16,25h1v1h-1z M18,25h1v1h-1z M19,25h1v1h-1z M21,25h1v1h-1z M22,25h1v1h-1z M26,25h1v1h-1z M2,26h1v1h-1z M3,26h1v1h-1z M4,26h1v1h-1z M5,26h1v1h-1z M6,26h1v1h-1z M7,26h1v1h-1z M8,26h1v1h-1z M10,26h1v1h-1z M11,26h1v1h-1z M13,26h1v1h-1z M16,26h1v1h-1z M18,26h1v1h-1z M20,26h1v1h-1z M23,26h1v1h-1z M26,26h1v1h-1z";
 
-function CloudChannelsTab() {
+function WhatsAppQR() {
+  return (
+    <div className="flex flex-col items-center gap-2">
+      <svg
+        xmlns="http://www.w3.org/2000/svg"
+        viewBox="0 0 29 29"
+        width={120}
+        height={120}
+        shapeRendering="crispEdges"
+        aria-label="WhatsApp QR code"
+        role="img"
+        className="rounded-[var(--radius-button)] [border:var(--bd-card)]"
+      >
+        <rect width="29" height="29" fill="white" />
+        <path fill="black" d={WA_QR_PATH} />
+      </svg>
+      <a
+        href={WA_LINK}
+        target="_blank"
+        rel="noopener noreferrer"
+        className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
+      >
+        +1 650-399-9709
+      </a>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// SlackBindingStatus — per-user DM identity status + unlink
+// ---------------------------------------------------------------------------
+function SlackBindingStatus() {
+  const [binding, setBinding] = useState<import("@/lib/types").SlackBindingMe | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [unlinking, setUnlinking] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setBinding(await api.slack.bindingMe());
+    } catch {
+      // endpoint may not exist on older engines — fail silently
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function handleUnlink() {
+    if (!confirm("Unlink your Slack identity from this account?")) return;
+    setUnlinking(true);
+    try {
+      await api.slack.unlink();
+      toast.success("Slack identity unlinked");
+      void load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to unlink Slack");
+    } finally {
+      setUnlinking(false);
+    }
+  }
+
+  if (loading) return <Skeleton className="h-8 w-48" />;
+  if (!binding) return null;
+  if (!binding.linked) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        DM Emily in Slack to link your identity.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] bg-muted/40 px-3 py-2">
+      <div className="min-w-0">
+        <p className="text-xs font-medium text-foreground truncate">
+          {binding.profile_name
+            ? `${binding.profile_name} (${binding.slack_user_id})`
+            : binding.slack_user_id}
+        </p>
+        <p className="text-[11px] text-muted-foreground">Team {binding.slack_team_id}</p>
+      </div>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="shrink-0 text-muted-foreground hover:text-destructive"
+        onClick={() => void handleUnlink()}
+        disabled={unlinking}
+      >
+        {unlinking ? "Unlinking..." : "Unlink"}
+      </Button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// WhatsAppBindingStatus — per-user binding status + unlink
+// ---------------------------------------------------------------------------
+function WhatsAppBindingStatus() {
+  const [binding, setBinding] = useState<import("@/lib/types").WhatsAppBindingMe | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [unlinking, setUnlinking] = useState(false);
+
+  const load = useCallback(async () => {
+    try {
+      setBinding(await api.whatsapp.bindingMe());
+    } catch {
+      // endpoint may not exist on older engines — fail silently
+    } finally {
+      setLoading(false);
+    }
+  }, []);
+
+  useEffect(() => { void load(); }, [load]);
+
+  async function handleUnlink() {
+    if (!confirm("Unlink your WhatsApp number from this account?")) return;
+    setUnlinking(true);
+    try {
+      await api.whatsapp.unlink();
+      toast.success("WhatsApp number unlinked");
+      void load();
+    } catch (e: unknown) {
+      toast.error(e instanceof Error ? e.message : "Failed to unlink WhatsApp");
+    } finally {
+      setUnlinking(false);
+    }
+  }
+
+  if (loading) return <Skeleton className="h-8 w-48" />;
+  if (!binding) return null;
+  if (!binding.linked) {
+    return (
+      <p className="text-xs text-muted-foreground">
+        Scan the QR or text the number above, then tap the link Emily sends you.
+      </p>
+    );
+  }
+
+  return (
+    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] bg-muted/40 px-3 py-2">
+      <div className="min-w-0">
+        <p className="text-xs font-medium text-foreground truncate">
+          {binding.profile_name
+            ? `${binding.profile_name} (${binding.wa_id_masked})`
+            : binding.wa_id_masked}
+        </p>
+        <p className="text-[11px] text-muted-foreground">Linked to this account</p>
+      </div>
+      <Button
+        variant="ghost"
+        size="sm"
+        className="shrink-0 text-muted-foreground hover:text-destructive"
+        onClick={() => void handleUnlink()}
+        disabled={unlinking}
+      >
+        {unlinking ? "Unlinking..." : "Unlink"}
+      </Button>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// ChannelsTab — Slack + WhatsApp + Agent install
+// ---------------------------------------------------------------------------
+function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
+  const [qrOpen, setQrOpen] = useState(false);
   return (
     <div className="space-y-4">
-      <section className="space-y-3">
-        <div>
-          <h2 className="text-sm font-medium">Messaging</h2>
-          <p className="text-xs text-muted-foreground">
-            Where workers reach you and where Emily can be reached.
-          </p>
-        </div>
-
-        {/* Slack */}
-        <div className="space-y-3 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-card p-4">
-          <div className="flex items-center gap-2.5">
-            <svg viewBox="0 0 256 256" className="size-5 shrink-0" aria-hidden="true" focusable="false">
-              <path fill="#E01E5A" d="M53.8,161.3c0,14.8-12,26.8-26.8,26.8S0,176.2,0,161.3s12-26.8,26.8-26.8h26.8V161.3z M67.3,161.3 c0-14.8,12-26.8,26.8-26.8s26.8,12,26.8,26.8v67.1c0,14.8-12,26.8-26.8,26.8s-26.8-12-26.8-26.8V161.3z" />
-              <path fill="#36C5F0" d="M94.1,53.6c-14.8,0-26.8-12-26.8-26.8S79.3,0,94.1,0s26.8,12,26.8,26.8v26.8H94.1z M94.1,67.3 c14.8,0,26.8,12,26.8,26.8s-12,26.8-26.8,26.8H26.8C12,120.9,0,108.9,0,94.1s12-26.8,26.8-26.8H94.1z" />
-              <path fill="#2EB67D" d="M201.5,94.1c0-14.8,12-26.8,26.8-26.8s26.8,12,26.8,26.8s-12,26.8-26.8,26.8h-26.8V94.1z M188.1,94.1 c0,14.8-12,26.8-26.8,26.8s-26.8-12-26.8-26.8V26.8C134.4,12,146.4,0,161.3,0s26.8,12,26.8,26.8V94.1z" />
-              <path fill="#ECB22E" d="M161.3,201.5c14.8,0,26.8,12,26.8,26.8s-12,26.8-26.8,26.8s-26.8-12-26.8-26.8v-26.8H161.3z M161.3,188.1 c-14.8,0-26.8-12-26.8-26.8s12-26.8,26.8-26.8h67.3c14.8,0,26.8,12,26.8,26.8s-12,26.8-26.8,26.8H161.3z" />
-            </svg>
-            <h3 className="text-sm font-medium">Slack</h3>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Install Emily to your Slack workspace, then DM her to link your identity.
-          </p>
-          <SlackConnect />
-        </div>
-
-        {/* WhatsApp */}
-        <div className="space-y-3 rounded-[var(--radius-card)] border border-[var(--border-default)] bg-card p-4">
-          <div className="flex items-center gap-2.5">
-            <svg viewBox="0 0 24 24" className="size-5 shrink-0 text-[#25D366]" aria-hidden="true" focusable="false">
-              <use href="#brand-whatsapp" />
-            </svg>
-            <h3 className="text-sm font-medium">WhatsApp</h3>
-          </div>
-          <p className="text-xs text-muted-foreground">
-            Text Emily on WhatsApp. She&apos;ll reply with a link to bind your number to this account.
-          </p>
-          <div className="flex flex-wrap items-start gap-6">
-            <div className="flex flex-col items-center gap-2">
-              <svg
-                xmlns="http://www.w3.org/2000/svg"
-                viewBox="0 0 29 29"
-                width={120}
-                height={120}
-                shapeRendering="crispEdges"
-                aria-label="WhatsApp QR code"
-                role="img"
-                className="rounded-md border border-[var(--border-default)]"
-              >
-                <rect width="29" height="29" fill="white" />
-                <path fill="black" d={WA_QR_PATH} />
-              </svg>
-              <a
-                href={WA_LINK}
-                target="_blank"
-                rel="noopener noreferrer"
-                className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
-              >
-                +1 650-399-9709
-              </a>
-            </div>
-            <div className="flex-1 min-w-[160px]">
-              <ol className="space-y-1.5 text-xs text-muted-foreground">
-                <li>1. Scan the QR or text <span className="font-medium text-foreground">+1 650-399-9709</span>.</li>
-                <li>2. Emily replies with a claim link — tap it.</li>
-                <li>3. Your number is bound to this account.</li>
-              </ol>
+      <Tabs defaultValue="slack">
+        <TabsList>
+          <TabsTrigger value="slack">Slack</TabsTrigger>
+          <TabsTrigger value="email">Email</TabsTrigger>
+          <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
+        </TabsList>
+        <TabsContent value="slack" className="space-y-4">
+          <div className="c-ltable">
+            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
+              <div className="c-lp-tx">
+                <div className="nm">Slack workspace</div>
+                <div className="sub">Add Emily to Slack, then DM her to link your identity.</div>
+              </div>
+              {canManageWorkspace ? (
+                <SlackConnect />
+              ) : (
+                <span className="c-vpill">View only</span>
+              )}
             </div>
           </div>
-        </div>
-      </section>
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">Your link status</p>
+            <SlackBindingStatus />
+          </div>
+        </TabsContent>
+        <TabsContent value="email" className="space-y-4">
+          <div className="c-ltable">
+            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
+              <div className="c-lp-tx">
+                <div className="nm">Email</div>
+                <div className="sub">Email channel setup is not connected for this workspace yet.</div>
+              </div>
+              <span className="c-vpill">Not connected</span>
+            </div>
+          </div>
+        </TabsContent>
+        <TabsContent value="whatsapp" className="space-y-4">
+          <div className="c-ltable">
+            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
+              <div className="c-lp-tx">
+                <div className="nm">WhatsApp</div>
+                <div className="sub">Scan the QR code to start a chat and bind your number.</div>
+              </div>
+              <Button type="button" variant="outline" onClick={() => setQrOpen(true)}>
+                <QrCode className="size-3.5" />
+                Show QR
+              </Button>
+            </div>
+          </div>
+          <div className="space-y-1.5">
+            <p className="text-xs font-medium text-muted-foreground">Your link status</p>
+            <WhatsAppBindingStatus />
+          </div>
+        </TabsContent>
+      </Tabs>
+      <Dialog open={qrOpen} onOpenChange={setQrOpen}>
+        <DialogContent className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Link WhatsApp</DialogTitle>
+            <DialogDescription>Scan this QR code, send Emily a message, then open the claim link she replies with.</DialogDescription>
+          </DialogHeader>
+          <WhatsAppQR />
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

@@ -4,7 +4,7 @@ import { Suspense, useCallback, useEffect, useState } from "react";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { StatusPill } from "@/components/collection/StatusPill";
+import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
@@ -326,18 +326,27 @@ function SecretsContent() {
                     {/* Action buttons: min 44px touch targets on mobile via padding */}
                     <div className="flex items-center gap-1 shrink-0">
                       {testResults[s.name] && (
-                        <span className="hidden sm:inline-flex" title={testResults[s.name].reason}>
-                          <StatusPill
-                            spec={
-                              testResults[s.name].status === "valid"
-                                ? { tone: "ok", label: "Valid" }
-                                : { tone: "err", label: "Invalid" }
-                            }
-                          />
-                        </span>
+                        <Badge
+                          variant="outline"
+                          className={
+                            testResults[s.name].status === "valid"
+                              ? "text-emerald-600 [border:var(--bd-card)] bg-emerald-50 text-xs hidden sm:inline-flex"
+                              : "text-red-600 [border:var(--bd-card)] bg-red-50 text-xs hidden sm:inline-flex"
+                          }
+                          title={testResults[s.name].reason}
+                        >
+                          {testResults[s.name].status === "valid" ? "Valid" : "Invalid"}
+                        </Badge>
                       )}
                       {/* S29v: only show pill when state needs attention. */}
-                      {s.status !== "set" && <StatusPill spec={{ tone: "err", label: "Missing" }} />}
+                      {s.status !== "set" && (
+                        <Badge
+                          variant="outline"
+                          className="text-red-600 [border:var(--bd-card)] bg-red-50 text-xs"
+                        >
+                          Missing
+                        </Badge>
+                      )}
                       <Button
                         variant="ghost"
                         size="sm"

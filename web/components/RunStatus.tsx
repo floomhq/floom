@@ -1,6 +1,5 @@
 import { CheckCircle2, Clock, Loader2, XCircle, Pause } from "lucide-react";
-import { StatusPill } from "@/components/collection/StatusPill";
-import type { PillTone } from "@/lib/collection/types";
+import { Badge } from "@/components/ui/badge";
 
 const SUCCESS_STATES = new Set(["completed", "success", "succeeded"]);
 const ERROR_STATES = new Set(["failed", "error", "cancelled"]);
@@ -38,13 +37,13 @@ export function RunStatusGlyph({
   return <Clock className={`${cls} text-muted-foreground`} />;
 }
 
-const STATUS_TONE: Record<ReturnType<typeof classify>, PillTone> = {
-  success: "ok",
-  error: "err",
-  running: "run",
-  queued: "idle",
-  approval: "pending",
-  unknown: "idle",
+const BADGE_STYLE: Record<string, string> = {
+  success: "bg-success/10 text-success font-medium",
+  error: "bg-error/10 text-error font-semibold",
+  running: "bg-pending/10 text-pending font-medium",
+  queued: "bg-muted text-muted-foreground font-medium",
+  approval: "bg-muted text-muted-foreground font-medium",
+  unknown: "bg-muted text-muted-foreground font-medium",
 };
 
 // S29l (ChatGPT-audit P-2): pills are decoration when status is the
@@ -70,5 +69,9 @@ export function RunStatusBadge({
       : kind === "success"
       ? "Completed"
       : humanized.charAt(0).toUpperCase() + humanized.slice(1);
-  return <StatusPill spec={{ tone: STATUS_TONE[kind], label }} />;
+  return (
+    <Badge variant="outline" className={BADGE_STYLE[kind]}>
+      {label}
+    </Badge>
+  );
 }

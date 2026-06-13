@@ -1,4 +1,4 @@
-import type { CurrentUser } from "../../lib/types";
+import type { CurrentUser } from "@/lib/types";
 
 export const SESSION_COOKIE = "workeros_cloud_session";
 
@@ -73,18 +73,12 @@ export function parseCurrentUser(rawCookieValue: string | undefined | null): Cur
     jwt.name,
     jwt.full_name,
   ) ?? email;
-  const picture = firstString(
-    userMetadata.picture,
-    userMetadata.avatar_url,
-    userMetadata.avatarUrl,
-    jwt.picture,
-    jwt.avatar_url,
-  );
 
+  // The engine's CurrentUser has no avatar field — the engine renders initials.
+  // Cloud matches that (no fork): return the engine-shaped user, initials only.
   return {
     user_id: userId,
     email,
     display_name: displayName,
-    picture,
   };
 }

@@ -1,7 +1,6 @@
 import { RefreshCw, Trash2, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
-import { StatusPill } from "@/components/collection/StatusPill";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "./BrandLogo";
 import {
@@ -13,13 +12,33 @@ import {
 
 function statusBadge(status: string) {
   if (status === "active") {
-    return <StatusPill spec={{ tone: "ok", label: "Active" }} />;
+    return (
+      <Badge
+        variant="outline"
+        className="[border:var(--bd-pill)] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] text-[var(--positive)]"
+      >
+        Active
+      </Badge>
+    );
   }
   if (status === "initiated") {
-    return <StatusPill spec={{ tone: "pending", label: "Connecting" }} />;
+    return (
+      <Badge
+        variant="outline"
+        className="[border:var(--bd-pill)] bg-[color-mix(in_srgb,#9a6a16_10%,transparent)] text-[#8a5d12]"
+      >
+        Connecting
+      </Badge>
+    );
   }
-  const label = status === "expired" ? "Expired" : status === "failed" ? "Failed" : "Inactive";
-  return <StatusPill spec={{ tone: "err", label }} />;
+  return (
+    <Badge
+      variant="outline"
+      className="[border:var(--bd-pill)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] text-[var(--negative)]"
+    >
+      {status === "expired" ? "Expired" : status === "failed" ? "Failed" : "Inactive"}
+    </Badge>
+  );
 }
 
 function checkStatusLabel(checkStatus?: string): string {

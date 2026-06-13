@@ -23,7 +23,7 @@ export function workerStatusPill(w: WorkerSummary): { tone: PillTone; label: str
     case "needs_attention":
       return { tone: "warn", label: "needs attention" };
     case "missing_secret":
-      return { tone: "warn", label: "missing secret" };
+      return { tone: "warn", label: "needs attention" };
     case "healthy":
       return { tone: "ok", label: "ok" };
     default:

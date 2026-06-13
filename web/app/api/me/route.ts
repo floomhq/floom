@@ -3,7 +3,10 @@ import { cookies } from "next/headers";
 import { SESSION_COOKIE, parseCurrentUser } from "../../lib/me";
 import { verifySession } from "@/lib/verify-session";
 
-export async function GET() {
+// Optional arg: the cloud me-cache-941 test calls GET() with no args, while the
+// engine's auth-route-cache-headers-941 test (synced in, runs against this route)
+// calls GET(req). Optional satisfies both without changing behavior.
+export async function GET(_req?: Request) {
   const cookieStore = await cookies();
   const raw = cookieStore.get(SESSION_COOKIE)?.value;
   // #935: only present a user when the session JWT signature verifies (when

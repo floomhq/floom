@@ -13,6 +13,9 @@
 # testing
 /coverage
 
+# runtime: per-workspace git repos created by the API at runtime
+/var/
+
 # next.js
 /.next/
 /out/

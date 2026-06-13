@@ -2,9 +2,8 @@
 
 import { RefreshCw, Trash2, Zap } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { Badge } from "@/components/ui/badge";
 import { cn } from "@/lib/utils";
-import { StatusPill } from "@/components/collection/StatusPill";
-import type { StatusPillSpec } from "@/lib/collection/types";
 import { BrandLogo } from "./BrandLogo";
 import { formatTimestamp, type ConnectionView } from "./connection-data";
 
@@ -15,16 +14,25 @@ import { formatTimestamp, type ConnectionView } from "./connection-data";
 // row that appears on hover (the card is dense; full action set fits via
 // hover-reveal without making the resting state busy).
 
-function statusBadgeSpec(status: string): StatusPillSpec {
+function statusBadgeStyle(status: string): { label: string; cls: string } {
   if (status === "active") {
-    return { tone: "ok", label: "Active" };
+    return {
+      label: "Active",
+      cls: "[border:var(--bd-pill)] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] text-[var(--positive)]",
+    };
   }
   if (status === "initiated") {
-    return { tone: "pending", label: "Connecting" };
+    return {
+      label: "Connecting",
+      cls: "[border:var(--bd-pill)] bg-[color-mix(in_srgb,#9a6a16_10%,transparent)] text-[#8a5d12]",
+    };
   }
   const lbl =
     status === "expired" ? "Expired" : status === "failed" ? "Failed" : "Inactive";
-  return { tone: "err", label: lbl };
+  return {
+    label: lbl,
+    cls: "[border:var(--bd-pill)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] text-[var(--negative)]",
+  };
 }
 
 export function ConnectionGridCard({
@@ -48,7 +56,7 @@ export function ConnectionGridCard({
   onRefresh: (connection: ConnectionView) => void;
   onTest: (connection: ConnectionView) => void;
 }) {
-  const statusSpec = statusBadgeSpec(connection.status);
+  const { label, cls } = statusBadgeStyle(connection.status);
 
   return (
     <article className="group grid h-[172px] grid-rows-[auto_1fr_auto] rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] transition-[background-color,box-shadow] duration-150 ease-[var(--ease)] hover:bg-[var(--bg-2)] hover:shadow-md">
@@ -68,7 +76,9 @@ export function ConnectionGridCard({
           isn't busy. */}
       <div className="min-w-0 pt-3 flex items-start justify-between gap-2">
         <div className="flex flex-col gap-1.5 min-w-0">
-          <StatusPill spec={statusSpec} />
+          <Badge variant="outline" className={cn("w-fit text-[11px]", cls)}>
+            {label}
+          </Badge>
           {connection.lastUsedAt && (
             <span className="text-[11px] text-[var(--ink-mute)] truncate">
               Used {formatTimestamp(connection.lastUsedAt)}

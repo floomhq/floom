@@ -80,7 +80,12 @@ export const OVERLAY_FILES = [
   "app/connections/connected-accounts/[id]/route.ts",
   "app/page.tsx",
   "app/privacy/page.tsx",
-  "app/settings/page.tsx",
+  // app/settings/page.tsx de-forked 2026-06-13: the overlay copy was a stale
+  // subset (1063 vs engine 2223 lines) missing WorkspaceTokensPanel /
+  // BehaviourSettings / ModelDefaults / WorkspaceInfoSettings. The engine
+  // settings page is fully cloud-compatible (all API calls go through lib/api ->
+  // cloud proxy + workspace headers; its WhatsApp QR uses the same +1 650-399-9709
+  // number the overlay hardcoded). Engine settings flows through unmodified.
   "app/settings/members/page.tsx",
   "app/join/page.tsx",
   "app/members/page.tsx",

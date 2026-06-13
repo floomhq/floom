@@ -225,7 +225,6 @@ function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
     ? (user?.email || "Signed in")
     : (user?.email ? "Signed in" : "WorkerOS");
   const initial = profileInitials(primary);
-  const picture = user?.picture ?? null;
 
   async function logout() {
     try {
@@ -240,19 +239,9 @@ function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
   return (
     <div className="flex items-center gap-2 border-t border-[var(--border-soft)] px-3 py-3">
       <div className="flex items-center gap-2 min-w-0 flex-1">
-        {picture ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={picture}
-            alt={`${primary} avatar`}
-            className="size-7 shrink-0 rounded-full border border-[var(--border-soft)] object-cover"
-            referrerPolicy="no-referrer"
-          />
-        ) : (
-          <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-[var(--border-soft)] grid place-items-center text-[11px] font-medium">
-            {initial}
-          </div>
-        )}
+        <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-[var(--border-soft)] grid place-items-center text-[11px] font-medium">
+          {initial}
+        </div>
         <div className="min-w-0 leading-tight">
           <p className="text-xs font-medium text-foreground truncate">
             {primary}
