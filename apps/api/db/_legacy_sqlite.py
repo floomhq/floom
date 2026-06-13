@@ -1361,7 +1361,7 @@ MIGRATIONS: list[Migration] = [
     _ensure_runs_artifacts_archived_column,
     # -- migration 33: persist real display name (email/login) for connections --
     # display_name stores the unredacted email resolved from Composio so the
-    # /connections page can show "depontefede@gmail.com" instead of
+    # /connections page can show "owner@example.com" instead of
     # "Connected account". Additive only — no existing columns dropped.
     """
     ALTER TABLE composio_connections ADD COLUMN display_name TEXT;

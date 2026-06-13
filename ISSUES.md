@@ -303,7 +303,7 @@ This is essentially merging `/connections/browse` into the connections page or l
 
 **Where:** Same as #8
 
-**Symptom:** Every connection card shows "Connected as unknown account" instead of the actual signed-in identity (e.g. `depontefede@gmail.com`).
+**Symptom:** Every connection card shows "Connected as unknown account" instead of the actual signed-in identity (e.g. `owner@example.com`).
 
 **Root cause:** `ConnectionItem` has no `accountLabel`/`account_label` field. Frontend reads `connection.accountLabel` (`ConnectionCard.tsx:79`) which is undefined; some upstream code likely substitutes "unknown account".
 
@@ -969,7 +969,7 @@ Screenshots referenced (need pulling from Mac): `~/Desktop/Screenshot 2026-05-26
 - **Action:** Pull screenshot via `ssh mac` to know specifics.
 
 ### I-12 — Some connections still show "Federico" as account label
-- **What:** `account_label` falls back to "federico" instead of `depontefede@gmail.com` for some rows. Sweep should refresh; some rows are missed OR the provider response shape doesn't include email reliably.
+- **What:** `account_label` falls back to "federico" instead of `owner@example.com` for some rows. Sweep should refresh; some rows are missed OR the provider response shape doesn't include email reliably.
 - **Fix:** Look at `_fetch_provider_email` for the affected providers; force a re-fetch.
 
 ### I-13 — Skeletons still too basic (S18 partial)
