@@ -41,6 +41,7 @@ from core.config import WORKSPACE_IMPORT_BODY_LIMIT_BYTES
 from core.urls import _public_api_base_url
 from db import Repositories, get_repos
 from models import (
+    DraftFile,
     ChangelogEntry,
     VersionSummary,
     WorkspaceImportResponse,
@@ -61,7 +62,7 @@ from services.worker_access import (
     _require_members_repo,
 )
 from services.worker_codegen import _enforce_draft_rate_limit
-from services.worker_registry_ops import DraftFile, _register_worker_from_files
+from services.worker_registry_ops import _register_worker_from_files
 from services.workspace_ops import (
     _active_workspace_id,
     _build_workspace_template_zip,

@@ -118,6 +118,7 @@ from db import DB_PATH, Repositories, WorkspaceMemberRepository, assistant_row_i
 from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
 from secret_scan import scan_bytes
 from models import (
+    DraftFile,
     DraftFromPromptRequest,
     DraftFromPromptInputField,
     DraftFromPromptOutputField,
@@ -386,7 +387,6 @@ from services.worker_mutation import (
     _mutate_worker_contexts,
 )
 from services.worker_registry_ops import (
-    DraftFile,
     _git_join,
     _skill_version_id,
     _rewrite_worker_yml_id,

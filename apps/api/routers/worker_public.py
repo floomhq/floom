@@ -48,7 +48,7 @@ from services.share_links import (
     _worker_short_link_response,
 )
 from services.worker_access import _canonical_worker_id, _get_visible_worker
-from services.worker_registry_ops import DraftFile, _register_worker_from_files
+from services.worker_registry_ops import _register_worker_from_files
 
 worker_public_router = APIRouter()
 
