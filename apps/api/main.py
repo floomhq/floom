@@ -1142,6 +1142,19 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
         return None
     if path.startswith("/contexts"):
         return None
+    # #872 FINDING-3: the Slack/WhatsApp webhook handlers advertise (and enforce)
+    # a 1 MB cap via channels.common._MAX_WEBHOOK_BODY_BYTES, but the global
+    # 256 KB DEFAULT_JSON_BODY_LIMIT_BYTES below fired first — so the advertised
+    # 1 MB was a lie and any 256 KB-1 MB Slack event was 413'd before the
+    # route's own (signature-gated) size check ran. Exempt them here so each
+    # route's explicit 1 MB cap + HMAC verification governs.
+    if path in {
+        "/slack/events",
+        "/slack/commands",
+        "/slack/interactivity",
+        "/whatsapp/webhook",
+    }:
+        return None
     return DEFAULT_JSON_BODY_LIMIT_BYTES
 
 
