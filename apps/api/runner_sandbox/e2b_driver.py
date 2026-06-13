@@ -708,12 +708,20 @@ class E2BSandboxDriver(SandboxDriver):
         # is NOT sufficient for worker-to-worker calling.
         _worker_call_token: str | None = None
         if config and config.calls and user_id:
-            from run_token import issue_worker_call_token  # noqa: PLC0415
+            from run_token import issue_worker_call_token, parse_call_depth  # noqa: PLC0415
+            # #994: token carries this run's depth so the chain's cap accumulates.
+            _self_depth = 0
+            try:
+                from db import get_repositories  # noqa: PLC0415
+                _row = get_repositories().runs.get_any(run_id=run_id)
+                _self_depth = parse_call_depth((_row or {}).get("trigger_source"))
+            except Exception:
+                _self_depth = 0
             _worker_call_token = issue_worker_call_token(
                 user_id=user_id,
                 parent_run_id=run_id,
                 callable_workers=list(config.calls),
-                depth=0,
+                depth=_self_depth,
             )
         _sandbox_envs = {
             "FLOOM_RUN_ID": run_id,
@@ -722,7 +730,7 @@ class E2BSandboxDriver(SandboxDriver):
             # Scoped capability token — valid only for /runs/{run_id}/composio-execute/*
             # Never inject the full FLOOM_SECRET into sandboxes (it grants full API access).
             "WORKEROS_RUN_TOKEN": _worker_call_token if _worker_call_token else make_run_token(run_id),
-            **({"WORKEROS_CALL_DEPTH": "0"} if _worker_call_token else {}),
+            **({"WORKEROS_CALL_DEPTH": str(_self_depth)} if _worker_call_token else {}),  # #994
         }
         # Propagate the codegen model override so the worker-author meta-worker
         # (which generates code from inside the sandbox) uses the same model the
@@ -750,6 +758,12 @@ class E2BSandboxDriver(SandboxDriver):
             made_dirs = {workdir}
             for fpath in worker_dir.rglob("*"):
                 rel = fpath.relative_to(worker_dir)
+                # #995: never follow symlinks — a crafted bundle could symlink
+                # `x -> /etc/passwd` / the host api.env and exfiltrate host
+                # files into the sandbox. Skip the link entirely.
+                if fpath.is_symlink():
+                    log_fn(f"[e2b] Skipping symlink in bundle: {rel.as_posix()}", "warning")
+                    continue
                 # Skip any stale inputs/ dir that may exist in older bundles.
                 if rel.parts and rel.parts[0] == "inputs":
                     continue
@@ -926,7 +940,7 @@ class E2BSandboxDriver(SandboxDriver):
             }
             if _worker_call_token:
                 _cmd_envs["WORKEROS_RUN_TOKEN"] = _worker_call_token
-                _cmd_envs["WORKEROS_CALL_DEPTH"] = "0"
+                _cmd_envs["WORKEROS_CALL_DEPTH"] = str(_self_depth)  # #994
             proc = sandbox.commands.run(
                 command,
                 cwd=workdir,

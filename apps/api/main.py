@@ -51,7 +51,7 @@ from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Dict, Iterable, List, Literal, NotRequired, Optional, TypedDict
+from typing import Annotated, Any, Callable, Dict, Iterable, List, Literal, NotRequired, Optional, TypedDict
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -177,19 +177,41 @@ from worker_registry import (
 import git_ops as _git_ops
 
 
+# #1001: a host (workeros-cloud) maintains its per-workspace git repos in its
+# own materialized tree (var/workspaces/{id}), NOT WORKERS_DIR/{id}. It registers
+# a resolver here so EVERY engine git op — versions read AND rollback — runs in
+# the same real tree (mirrors run_token.set_worker_call_secret_resolver). Pass
+# None to clear (OSS mode). Receives the active workspace_id (or None).
+_git_workspace_resolver: "Optional[Callable[[Optional[str]], Optional[Path | str]]]" = None
+
+
+def set_git_workspace_resolver(resolver: "Optional[Callable[[Optional[str]], Optional[Path | str]]]") -> None:
+    global _git_workspace_resolver
+    _git_workspace_resolver = resolver
+
+
 def _git_workspace() -> Path:
     """Return the git workspace root for the current request.
 
     OSS (single-tenant): WORKEROS_WORKSPACE_DIR env var, or WORKERS_DIR.parent.
-    Cloud (multi-tenant): WORKERS_DIR / {workspace_id} — one git repo per workspace,
-    resolved via the workspace_id resolver registered by workeros-cloud at startup.
+    Cloud (multi-tenant): a host-registered resolver (#1001) returns the real
+    materialized per-workspace git root; else WORKERS_DIR / {workspace_id}.
     """
     custom = os.environ.get("WORKEROS_WORKSPACE_DIR", "").strip()
     if custom:
         return Path(custom).resolve()
     workspace_id = _git_ops.get_active_workspace_id()
+    # #1001: host resolver wins — points read AND rollback at one consistent tree.
+    if _git_workspace_resolver is not None:
+        try:
+            resolved = _git_workspace_resolver(workspace_id)
+        except Exception:
+            logger.warning("git workspace resolver failed for %s", workspace_id, exc_info=True)
+            resolved = None
+        if resolved:
+            return Path(resolved).resolve()
     if workspace_id:
-        # Cloud: each workspace has its own git repo under WORKERS_DIR
+        # Cloud default (no resolver): each workspace has its own git repo.
         return (WORKERS_DIR / workspace_id).resolve()
     # OSS: single workspace at WORKERS_DIR.parent
     return WORKERS_DIR.parent.resolve()
@@ -219,7 +241,15 @@ from run_service import (
 )
 from run_service import register_sse_publisher, register_part_publisher
 
-load_dotenv()
+# #997: do NOT load a `.env` from the process cwd in production — a stale dev
+# .env (or one an attacker drops in the cwd) would silently inject config/
+# secrets. The explicit fixed-location loader below (WORKEROS_API_ENV_FILE /
+# ~/.config/workeros/api.env) is the supported path; production sets env vars
+# via the orchestrator. The cwd convenience load is gated to dev mode only.
+if os.environ.get("WORKEROS_DEV") == "1":
+    import sys as _sys
+    load_dotenv()
+    print("[workeros] WORKEROS_DEV=1: loaded .env from cwd (dev only)", file=_sys.stderr)
 try:
     api_env_override = os.environ.get("WORKEROS_API_ENV_FILE") or os.environ.get("FLOOM_API_ENV_FILE")
     api_env_path = (
@@ -1825,7 +1855,13 @@ def _worker_call_run_metadata(auth: AuthContext) -> tuple[str | None, str | None
     parent_run_id = str(auth.run_token_payload.get("parent_run_id") or "").strip() or None
     if not parent_run_id:
         return None, None
-    return "worker_call", parent_run_id
+    # #994: encode the child's call depth so the chain is trackable and the
+    # next level enforces the cap (holder depth + 1).
+    try:
+        holder_depth = int(auth.run_token_payload.get("depth") or 0)
+    except (TypeError, ValueError):
+        holder_depth = 0
+    return f"worker_call:depth={holder_depth + 1}", parent_run_id
 
 
 def _worker_call_token_allows_request(
@@ -1837,7 +1873,15 @@ def _worker_call_token_allows_request(
 ) -> bool:
     """Allow worker-call bearer tokens only on child creation and child polling."""
     if method == "POST" and _RE_WORKER_RUN_CREATE.match(path):
-        return True
+        # #994: a run whose token is already at the depth cap may not spawn
+        # another child — bounds worker-to-worker recursion on the script path.
+        from run_token import MAX_CALL_DEPTH
+
+        try:
+            depth = int(token_payload.get("depth") or 0)
+        except (TypeError, ValueError):
+            depth = 0
+        return depth < MAX_CALL_DEPTH
     run_match = _RE_RUN_DETAIL.match(path)
     if method != "GET" or run_match is None or repos is None:
         return False
@@ -1845,7 +1889,7 @@ def _worker_call_token_allows_request(
     if not run_row:
         return False
     return (
-        str(run_row.get("trigger_source") or "") == "worker_call"
+        str(run_row.get("trigger_source") or "").startswith("worker_call")  # #994: depth-suffixed
         and str(run_row.get("trigger_ref") or "") == str(token_payload.get("parent_run_id") or "")
     )
 
@@ -7515,7 +7559,11 @@ def _worker_public_payload(worker: Dict[str, Any]) -> str:
 
 
 def _worker_public_token(worker: Dict[str, Any]) -> str:
-    secret = os.environ.get("FLOOM_SECRET") or "dev-secret-not-set"
+    # #998: never sign/verify a public share token with a public constant —
+    # a missing secret would let anyone forge share links. Fail closed.
+    secret = (os.environ.get("FLOOM_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(status_code=503, detail="Server signing secret not configured")
     return hmac.new(
         secret.encode("utf-8"),
         _worker_public_payload(worker).encode("utf-8"),
@@ -12241,7 +12289,11 @@ def _workspace_share_payload(user_id: str) -> str:
 
 
 def _workspace_share_token(user_id: str) -> str:
-    secret = os.environ.get("FLOOM_SECRET") or "dev-secret-not-set"
+    # #998: never sign/verify a public share token with a public constant —
+    # a missing secret would let anyone forge share links. Fail closed.
+    secret = (os.environ.get("FLOOM_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(status_code=503, detail="Server signing secret not configured")
     return hmac.new(
         secret.encode("utf-8"),
         _workspace_share_payload(user_id).encode("utf-8"),
@@ -13612,7 +13664,11 @@ def _approval_public_payload(approval: Dict[str, Any]) -> str:
 
 
 def _approval_public_token(approval: Dict[str, Any]) -> str:
-    secret = os.environ.get("FLOOM_SECRET") or "dev-secret-not-set"
+    # #998: never sign/verify a public share token with a public constant —
+    # a missing secret would let anyone forge share links. Fail closed.
+    secret = (os.environ.get("FLOOM_SECRET") or "").strip()
+    if not secret:
+        raise HTTPException(status_code=503, detail="Server signing secret not configured")
     return hmac.new(
         secret.encode("utf-8"),
         _approval_public_payload(approval).encode("utf-8"),
