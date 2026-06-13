@@ -45,6 +45,8 @@ def client(monkeypatch, tmp_path):
             "alerting", "mcp_server",
         ]):
             sys.modules.pop(name)
+        for _rn in [x for x in list(sys.modules) if x.startswith('routers')]:
+            sys.modules.pop(_rn, None)
     for stub in ["e2b", "e2b.sandbox", "openai", "anthropic", "composio_openai",
                  "composio_core", "slowapi", "slowapi.util", "slowapi.errors",
                  "resend", "supabase", "gotrue"]:
