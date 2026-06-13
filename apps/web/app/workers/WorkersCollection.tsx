@@ -10,6 +10,7 @@ import type {
   WorkerDetail,
   WorkerContextSpec,
   WorkerConnectionSpec,
+  WorkerFile,
   VersionSummary,
   RunSummary,
 } from "@/lib/types";
@@ -462,7 +463,7 @@ function SourceTab({ w }: { w: WorkerSummary }) {
   }
 
   async function saveFiles() {
-    if (saving) return;
+    if (!d || saving) return;
     setSaving(true);
     try {
       const updated = await api.workers.updateFiles(
