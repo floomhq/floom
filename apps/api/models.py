@@ -2513,3 +2513,80 @@ class _PATCreateRequest(BaseModel):
 class _PATCreateResponse(BaseModel):
     token: str  # raw value — shown once, never stored
     pat: _PATOut
+
+
+class DraftFile(BaseModel):
+    """A single file in a skill bundle returned by draft-from-prompt."""
+    path: str      # e.g. "worker.yml", "run.py", "SKILL.md", "lib/granola_client.py"
+    content: str   # UTF-8 text content
+
+
+class DraftFromPromptRequest(BaseModel):
+    prompt: str
+
+
+class DraftFromPromptInputField(BaseModel):
+    name: str
+    type: str
+    label: str
+    required: bool = False
+    default: Optional[Any] = None
+
+
+class DraftFromPromptOutputField(BaseModel):
+    name: str
+    type: str
+    label: str
+
+
+class RequirementItem(BaseModel):
+    """One integration requirement: a single app with exactly one auth method."""
+    app: str
+    method: str  # "oauth" or "api_key" -- the CURRENT selection (default = LLM suggestion)
+    available_methods: List[str] = []  # both "oauth" and "api_key" if both supported; otherwise just the one
+    reason: str = ""
+
+
+class DraftFromPromptResponse(BaseModel):
+    worker_yml: str
+    skill_md: Optional[str] = None
+    suggested_name: str
+    suggested_title: str
+    # New: one entry per app, method is "oauth" or "api_key"
+    requirements: List[RequirementItem] = []
+    # Skill-bundle: all files returned by the LLM (worker.yml, run.py, SKILL.md, lib/*.py, etc.)
+    # When present, the frontend should use these files directly instead of constructing them.
+    files: List[DraftFile] = []
+    # Legacy fields kept for backward compatibility
+    required_connections: List[str]
+    required_secrets: List[str]
+    inputs: List[DraftFromPromptInputField]
+    outputs: List[DraftFromPromptOutputField]
+
+
+class NewWorkerFromPromptRequest(BaseModel):
+    prompt: str
+    mode: str = "draft"  # "draft" | "create"
+    parent_worker_id: Optional[str] = None
+
+
+class NewWorkerFromPromptResponse(BaseModel):
+    run_id: str
+    worker_id: str = "worker-author"
+    status: str = "running"
+
+
+class DraftAndCreateRequest(BaseModel):
+    prompt: str = ""
+    # Optional pre-built files to skip the LLM step (used for .md / .py uploads)
+    files: List[DraftFile] = []
+
+
+class DraftAndCreateResponse(BaseModel):
+    worker_id: str
+    # FIX 4 (2026-05-29): both creation paths run the smoke+repair safety net.
+    # smoke_status: "passed" | "failed" | "skipped" | None. When "failed" the
+    # worker is created but DISABLED (stays editable) — surface the reason so
+    # the caller does not present it as a clean, ready worker.
+    smoke_status: Optional[str] = None
+    smoke_reason: Optional[str] = None
