@@ -123,6 +123,8 @@ export interface CollectionConfig<T> {
   idOf: (item: T) => string;
   /** Free-text fields searched by the search box. */
   searchOf: (item: T) => string;
+  /** Optional placeholder override for the shared collection search box. */
+  searchPlaceholder?: string;
   /** The tag values an item HAS, per family (compared against active tags). */
   tagsOf?: (item: T) => Partial<Record<TagFamilyKey, string[]>>;
 

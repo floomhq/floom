@@ -213,7 +213,7 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       { value: folders.length, label: "folders" },
       { value: folders.reduce((n, c) => n + (c.file_count ?? 0), 0), label: "files" },
     ],
-    view: { default: "list", grid: true },
+    view: { default: "grid", grid: true },
     columns: {
       template: "1.8fr 1fr 1fr 40px",
       headers: ["Folder", "Files", "Updated", ""],
