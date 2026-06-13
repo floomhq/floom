@@ -142,6 +142,17 @@ def _enable_composio_trigger(config: "WorkerConfig", worker_id: str) -> str:
     signature = _composio_trigger_signature(config)
     if not signature:
         raise RuntimeError(f"Worker {worker_id} does not declare trigger.composio")
+    # #908: without the signing key the /composio-events receiver 503s every
+    # delivery, so an enabled trigger is shipped-but-broken. Fail at enable
+    # time with the operator fix instead of silently never firing.
+    if not os.environ.get("COMPOSIO_WEBHOOK_SIGNING_KEY", "").strip():
+        raise RuntimeError(
+            f"Cannot enable Composio trigger for worker {worker_id}: "
+            "COMPOSIO_WEBHOOK_SIGNING_KEY is not configured, so the "
+            "/composio-events receiver rejects all deliveries (503). Set the "
+            "env var from the Composio dashboard webhook settings and register "
+            f"the webhook URL ({_composio_webhook_url()}) there, then retry."
+        )
     try:
         from composio_client import enable_trigger
         return enable_trigger(
