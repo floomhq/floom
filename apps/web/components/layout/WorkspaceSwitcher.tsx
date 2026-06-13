@@ -272,7 +272,7 @@ export function WorkspaceSwitcher() {
         <DropdownMenuContent
           align="start"
           side="bottom"
-          className="w-56 border-0 p-1 [box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.10)] ring-0 outline-none dark:[box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.50)]"
+          className="w-56 border-0 p-1 ![box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.10)] ring-0 outline-none dark:![box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.50)]"
           sideOffset={6}
         >
           <DropdownMenuGroup>
@@ -349,7 +349,7 @@ export function WorkspaceSwitcher() {
                   secrets, no connections); Duplicate = live copy in this
                   instance with agents + instructions, connections & secrets
                   NOT copied (intentional: they must be reconnected). */}
-              <DropdownMenuSubContent className="w-64 border-0 p-1 [box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.10)] ring-0 outline-none dark:[box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.50)]">
+              <DropdownMenuSubContent className="w-64 border-0 p-1 ![box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.10)] ring-0 outline-none dark:![box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.50)]">
                 <DropdownMenuItem
                   closeOnClick={false}
                   disabled={exporting}
