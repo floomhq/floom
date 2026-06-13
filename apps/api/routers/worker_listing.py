@@ -214,7 +214,12 @@ def list_workers(
                 owner_id=w.get("owner_id"),
                 visibility=str(w.get("visibility") or "private"),
                 starred=w["id"] in _starred_ids,  # #782
-                permissions=_worker_permissions(w, user_id=worker_user_id, repos=repos),
+                permissions=_worker_permissions(
+                    w,
+                    user_id=worker_user_id,
+                    repos=repos,
+                    owner_aliases={auth.user_id, auth.username or ""},
+                ),
             )
         )
     return result
