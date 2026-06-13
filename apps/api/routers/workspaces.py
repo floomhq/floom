@@ -21,6 +21,7 @@ from pydantic import BaseModel, Field
 
 from auth import AuthContext, get_auth_context
 from core.config import _is_cloud_deploy
+from services.worker_access import _active_local_workspace_id
 
 workspaces_router = APIRouter()
 
@@ -69,16 +70,6 @@ def _local_workspace_out(row: Dict[str, Any]) -> LocalWorkspaceOut:
         region=(row.get("region") if isinstance(row, dict) else None) or None,  # #791
         timezone=(row.get("timezone") if isinstance(row, dict) else None) or None,  # #791
     )
-
-
-def _active_local_workspace_id(auth: AuthContext) -> str:
-    from auth.local_workspaces import DEFAULT_WORKSPACE_ID, local_workspace_base_user_id
-
-    base_user_id = local_workspace_base_user_id(auth.user_id)
-    if auth.user_id == base_user_id:
-        return DEFAULT_WORKSPACE_ID
-    marker = "__"
-    return auth.user_id.split(marker, 1)[1]
 
 
 def _require_local_workspace_mode() -> None:
