@@ -1,7 +1,7 @@
 """#804: server-side member read-only guard on PUT /workspace and PUT /workspace/base.
 
 Members must be blocked by the SERVER (403), not merely hidden in the UI — this is
-the security fix Federico flagged to land before any member-facing assistant UI.
+the security fix the operator flagged to land before any member-facing assistant UI.
 
 Two layers of proof:
   1. Unit — the guard helper `_require_workspace_write` directly: admin/owner allowed,

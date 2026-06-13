@@ -1,6 +1,6 @@
 # Emily Agentic Chat — Wireframes
 
-Static HTML wireframes for Federico to review before implementation. Open `index.html` in any browser.
+Static HTML wireframes for the operator to review before implementation. Open `index.html` in any browser.
 
 ## Screens
 

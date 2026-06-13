@@ -4,7 +4,7 @@
 **Dispatcher:** Claude (Workeros UI lane).
 **Codex session id:** `019e6b57-e32d-7242-821e-e42e9446d049`
 **Codex model:** `gpt-5.4` @ medium reasoning.
-**Reason:** Federico delegated these to Codex per the standing rule "code/implementation/merge questions go to Codex, not Federico" (MEMORY.md 2026-05-25).
+**Reason:** the operator delegated these to Codex per the standing rule "code/implementation/merge questions go to Codex, not the operator" (MEMORY.md 2026-05-25).
 
 > Note: a first dispatch at `xhigh` reasoning ran out of turn budget mid-investigation (Codex burned the turn budget on doc reads). This run was re-dispatched with `medium` reasoning + a "decide from prompt context only, no file reads" directive. Verdicts below come from that second run.
 
@@ -29,7 +29,7 @@ Context provided in-prompt (no file reads required): Workeros tech stack, DB tab
 ### Question 2 — Claude-skill port path (opendraft, openblog) tonight
 
 - **Pick:** (a) Manual shim
-- **Why:** Tonight's goal is stress-testing two real skills, not inventing the permanent abstraction. Manual shims give you the fastest proof of Federico's wedge without touching runtime semantics; if the wedge fails, you have not overbuilt an adapter or CLI around the wrong contract.
+- **Why:** Tonight's goal is stress-testing two real skills, not inventing the permanent abstraction. Manual shims give you the fastest proof of the operator's wedge without touching runtime semantics; if the wedge fails, you have not overbuilt an adapter or CLI around the wrong contract.
 - **Next step:** Create `workers/opendraft/worker.yml` and `workers/openblog/worker.yml` as hand-written shims pointing at the imported skill content.
 
 ### Question 3 — Full agent logs UI on /runs/<id>

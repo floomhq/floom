@@ -9,7 +9,7 @@ import { BrandLogo } from "./BrandLogo";
 import { formatTimestamp, type ConnectionView } from "./connection-data";
 
 // S28: Connected tab now uses the SAME grid + card shape as /connections/browse
-// (CatalogCard). Federico explicit: "should simply be same design as #browse".
+// (CatalogCard). the operator explicit: "should simply be same design as #browse".
 // 172px tall, auto-fill min-176px wide. Logo + name + account + status badge
 // + Reconnect button at bottom. Test/Refresh/Disconnect hidden as an icon
 // row that appears on hover (the card is dense; full action set fits via

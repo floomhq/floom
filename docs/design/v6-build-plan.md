@@ -1,6 +1,6 @@
 # v6 Share-Page Build Plan
 
-This plan implements the Federico-approved v6 share-page designs (signed-off spec:
+This plan implements the the operator-approved v6 share-page designs (signed-off spec:
 `/tmp/workeros-designs-v6.html`) as real React in `apps/web`. Four public share surfaces are
 reskinned to the v6 system: the worker share (`/w/[id]`), the run page (`/runs/[id]` via
 `RunDetailSplitPane`), the brain file/pack share (`/s/[token]`, the standalone share card that

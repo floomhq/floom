@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // humanizeCron — turn a 5-field cron expression into plain English.
 //
-// Federico (2026-06-02): trigger chips showed raw `0 9 * * * UTC` — "who can
+// the operator (2026-06-02): trigger chips showed raw `0 9 * * * UTC` — "who can
 // read this cryptic stuff?". This converts the common patterns (every-minute,
 // every-N-minutes, hourly, daily, weekday, weekly, monthly) into readable text,
 // falling back to the raw expression for anything exotic so we never lie about

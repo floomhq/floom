@@ -53,7 +53,7 @@ function sourceFileKind(path: string, language?: string) {
 //   - table    -> parsed grid
 //   - code     -> plain wrapped text (Preview) vs syntax-highlighted (Raw)
 // Generic .yaml/.yml get a single view — their "Preview" would be identical
-// to the syntax-highlighted source (the confusing dual-tab Federico flagged).
+// to the syntax-highlighted source (the confusing dual-tab the operator flagged).
 // worker.yml is special-cased separately (structured summary), handled by
 // `hasWorkerYamlSummary`.
 function supportsRenderedPreview(path: string, binary?: boolean): boolean {
@@ -299,7 +299,7 @@ function FilesEditorView({ files, selectedPath, onSelect }: FilesEditorViewProps
   // (256px), no Card wrapper, path shown once as a quiet header above content.
   return (
     <div className="flex flex-col gap-4 lg:flex-row lg:gap-6 lg:items-start max-w-5xl">
-      {/* FIX 2 (Federico 2026-05-29): the file rail must stay visible while a
+      {/* FIX 2 (the operator 2026-05-29): the file rail must stay visible while a
           long file (e.g. a big run.py) scrolls. Sticky to the viewport with a
           top offset that clears the sticky mobile header (h-14 ≈ 56px); on
           desktop there is no top header over <main>, so it simply pins 72px
@@ -365,7 +365,7 @@ function ReadOnlyFileContent({ file }: { file: WorkerFile }) {
 
   // worker.yml and other rendered kinds (markdown / html / table): Preview + Raw.
   // All source files with a rendered view use the same two-tab pattern — "Summary"
-  // was removed (Federico: "same as brain, fully aligned, consistent").
+  // was removed (the operator: "same as brain, fully aligned, consistent").
   if (hasWorkerYamlSummary(file.path, file.binary) || supportsRenderedPreview(file.path, file.binary)) {
     return (
       <Tabs defaultValue="preview" className="bg-muted/20">

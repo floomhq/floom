@@ -6,7 +6,7 @@
 **Auditor**: claude-opus-4-7 adversarial probe agent (subbed in for the kimi-named brief)
 **Constraints honored**: no backend code changes; only random UUIDs on DELETEs; created-then-cleaned test data; uptime verified post-probe (4059s same process, no crash)
 
-> Single-user system caveat: Workeros is a single-tenant deployment (only Federico's data). Findings that depend on cross-user PII leak (Round 6 CRIT-4) are scoped to "what would leak if a 2nd user existed" and to single-user-specific issues (Composio IDs, system internals).
+> Single-user system caveat: Workeros is a single-tenant deployment (only the operator's data). Findings that depend on cross-user PII leak (Round 6 CRIT-4) are scoped to "what would leak if a 2nd user existed" and to single-user-specific issues (Composio IDs, system internals).
 
 ---
 
@@ -21,7 +21,7 @@
 ### Top-3 Ranked
 
 1. **NEW-1 (P0) — POST /workers Pydantic input echo amplification (2.0x).** The Round 6 HIGH-6 fix only patched the malformed-JSON path. A request with valid JSON + missing required fields still echoes the input verbatim. 1MB request → 2MB response. 10MB request → 20MB response (verified 5.3s server time). FastAPI/Pydantic default behavior; need a custom `RequestValidationError` exception handler that strips/truncates `input` and `ctx`.
-2. **NEW-2 (P1) — `/cli-auth/devices` is unauthenticated + unbounded + abuse path leaks FLOOM_SECRET via phishing.** Anyone on the internet can create CLI device codes (no auth). Each entry sits in `_cli_auth_devices` for up to 600s. No max-cap on the dict. Worse: if Federico is socially engineered into entering an attacker-supplied `XXXX-YYYY` code on `https://workers.floom.dev/cli-auth?code=`, the attacker can poll and exfiltrate the full `FLOOM_SECRET` (full admin keys to Workeros prod).
+2. **NEW-2 (P1) — `/cli-auth/devices` is unauthenticated + unbounded + abuse path leaks FLOOM_SECRET via phishing.** Anyone on the internet can create CLI device codes (no auth). Each entry sits in `_cli_auth_devices` for up to 600s. No max-cap on the dict. Worse: if the operator is socially engineered into entering an attacker-supplied `XXXX-YYYY` code on `https://workers.floom.dev/cli-auth?code=`, the attacker can poll and exfiltrate the full `FLOOM_SECRET` (full admin keys to Workeros prod).
 3. **NEW-3 (P1) — Secret name/value have no length cap.** A 10,000-char name AND a 10MB value were both accepted and persisted to `.env`. Attacker with secret can fill disk, slow .env reload, and potentially break dotenv parsing.
 
 ### Round 6 verification (TL;DR)
@@ -29,7 +29,7 @@
 | Round 6 ID | Status on prod 2026-05-28 | Evidence |
 |---|---|---|
 | CRIT-3 DELETE /connections IDOR | **FIXED** ✓ | random UUID → `HTTP 404 {"detail":"Connection not found"}` |
-| CRIT-4 GET /connections PII leak | **N/A — single-tenant** | Only Federico's data exists; no cross-user leak possible. Composio raw IDs still exposed (NEW-7). |
+| CRIT-4 GET /connections PII leak | **N/A — single-tenant** | Only the operator's data exists; no cross-user leak possible. Composio raw IDs still exposed (NEW-7). |
 | HIGH-6 1MB DoS amplification | **PARTIAL FIX** ✗ | Round 6 patched the JSON-decode-error branch (140-byte response now). The validation-error branch on POST /workers is **still 2.0x amplifying** (NEW-1). |
 
 ---
@@ -108,9 +108,9 @@ HTTP=200 size=210
 
 (a) **Unbounded in-memory map (P2-ish DoS surface)**: No size cap on `_cli_auth_devices`. `_cli_auth_prune_expired` only removes entries past `expires_at`. An attacker could create ~10K entries in 10 min before any expire. Memory exhaustion possible.
 
-(b) **Phishing leak of FLOOM_SECRET (P1)**: Standard OAuth device flow risk. Attacker creates a device code, sends Federico the user code (`67UB-P3JQ`) in a believable context ("hey can you approve this CLI auth I'm doing"). Federico hits `https://workers.floom.dev/cli-auth?code=67UB-P3JQ`, sees a generic approve screen, clicks approve. Attacker polls `/cli-auth/poll/<device_code>` and receives the entire FLOOM_SECRET. The approved device cleanup is single-use (line 5751), so detection is hard.
+(b) **Phishing leak of FLOOM_SECRET (P1)**: Standard OAuth device flow risk. Attacker creates a device code, sends the operator the user code (`67UB-P3JQ`) in a believable context ("hey can you approve this CLI auth I'm doing"). the operator hits `https://workers.floom.dev/cli-auth?code=67UB-P3JQ`, sees a generic approve screen, clicks approve. Attacker polls `/cli-auth/poll/<device_code>` and receives the entire FLOOM_SECRET. The approved device cleanup is single-use (line 5751), so detection is hard.
 
-**Root-cause hypothesis**: (a) missing `len(_cli_auth_devices) > MAX_PENDING` check + missing IP-based rate-limit on `/cli-auth/devices`. (b) the approval UI on `workers.floom.dev/cli-auth` should show the `client_name`, the IP/timestamp of the device-code creation, and require Federico to confirm he initiated the flow on THIS machine. The current code only stores `client_name` (attacker-controlled) and shows a generic prompt.
+**Root-cause hypothesis**: (a) missing `len(_cli_auth_devices) > MAX_PENDING` check + missing IP-based rate-limit on `/cli-auth/devices`. (b) the approval UI on `workers.floom.dev/cli-auth` should show the `client_name`, the IP/timestamp of the device-code creation, and require the operator to confirm he initiated the flow on THIS machine. The current code only stores `client_name` (attacker-controlled) and shows a generic prompt.
 
 **Suggested fix**:
 - Cap `_cli_auth_devices` at e.g. 1000 entries (reject new with 429).
@@ -226,7 +226,7 @@ $ curl -H "x-floom-secret: $SECRET" \
  "user_id":"federico","auth_config_id":"ac_REDACTED"}
 ```
 
-`composio_connection_id` and `auth_config_id` are Composio's stable identifiers. If COMPOSIO_API_KEY is ever leaked (rotated, stolen, or via a sub-service), these IDs allow direct authenticated calls to Composio for federico's connected accounts. Single-tenant context means these are Federico-only, but the exposure is unnecessary — the FastAPI internal UUID `id` is sufficient for clients.
+`composio_connection_id` and `auth_config_id` are Composio's stable identifiers. If COMPOSIO_API_KEY is ever leaked (rotated, stolen, or via a sub-service), these IDs allow direct authenticated calls to Composio for federico's connected accounts. Single-tenant context means these are the operator-only, but the exposure is unnecessary — the FastAPI internal UUID `id` is sufficient for clients.
 
 **Suggested fix**: strip `composio_connection_id` from the serializer. The frontend doesn't need it; all operations should go through Floom's internal UUID.
 

@@ -56,14 +56,14 @@ Tag families (rendered in this order, visually separated by a thin gap):
 | **Content** (user labels) | operations · recruiting · dach · prod · client-acme | multi-select | free-form tags on items. |
 
 Rules:
-- **All tags are multi-select. Default = all selected (nothing filtered / everything shows).** Click chips to narrow; a "Clear" / deselect-all returns to showing everything. No single-select, no switches, anywhere. (Federico 2026-06-08: "multi-select always, select-all default, deselect-all option, super intuitive.")
+- **All tags are multi-select. Default = all selected (nothing filtered / everything shows).** Click chips to narrow; a "Clear" / deselect-all returns to showing everything. No single-select, no switches, anywhere. (the operator 2026-06-08: "multi-select always, select-all default, deselect-all option, super intuitive.")
 - Chips, on top, under the search row. Active chip = filled (dark) with an ✕ to clear.
 - Search and tags AND each other (search within the active tag filter).
 - A leading "Tags" label is optional; on dense pages drop it.
 - "+ more" overflow when a family is long; opens a popover.
 - In SPLIT mode the search + tag bar move into the **left list column** (compact), never above the detail tabs.
 
-### 1a. Connections is ONE list; Type is just a tag (Federico, 2026-06-08)
+### 1a. Connections is ONE list; Type is just a tag (the operator, 2026-06-08)
 Connected / MCP / Secrets are all "things that connect a worker to something external." They are
 ONE Collection. **Type (Connection · MCP · Secret) is a multi-select tag**, not a separate list or a
 switch. What matters per row is *what it connects you to*, so the list uses **common columns**:
@@ -83,7 +83,7 @@ detail pane — they do NOT create separate table schemas. One list, type filter
   folder → split (folder's files on the right). Same as every other collection. (Answers "why can't
   I go to full-page list/grid on Brain.")
 
-### 2a. The canonical List row (match the real app — see Federico's Connections screenshot)
+### 2a. The canonical List row (match the real app — see the operator's Connections screenshot)
 The real Connections list is the fidelity bar. Every list row everywhere uses it:
 ```
 [ logo/avatar ]  Primary name (semibold)        col A      col B     [status pill]   ⋯
@@ -269,7 +269,7 @@ Each page ships behind the same component; no big-bang.
 1. **Connections = one list, Type is a multi-select tag** (§1a). RESOLVED — no schema swap, no switch.
 2. **All tags multi-select; default = all selected; deselect-all available** (§1). RESOLVED.
 3. **Card star → hover** (§2b). RESOLVED.
-4. Remaining minor: Runs content tags inherit the parent worker's tags by default (can add run-level tags later). Low stakes; default stands unless Federico objects.
+4. Remaining minor: Runs content tags inherit the parent worker's tags by default (can add run-level tags later). Low stakes; default stands unless the operator objects.
 
 ---
 
@@ -340,5 +340,5 @@ These supersede earlier text where they conflict. All verified in `final.html`.
 
 **Channels (Slack / WhatsApp / agent-install) — NEW, needs a home + a reality check.**
 - Channels = how you reach Emily/workers (inbound): Slack, WhatsApp, and "install in your agent" (MCP/CLI). Distinct from Connections (what workers reach OUT to).
-- **DECISION:** Channels = a **Settings tab** (Slack · WhatsApp · Agent-install), NOT its own nav page. Rationale (Federico): **nav placement follows frequency** — Connections is high-frequency (own page); Channels is set-once/low-frequency (Settings). General principle: high-frequency surfaces get nav; set-and-forget config lives in Settings.
+- **DECISION:** Channels = a **Settings tab** (Slack · WhatsApp · Agent-install), NOT its own nav page. Rationale (the operator): **nav placement follows frequency** — Connections is high-frequency (own page); Channels is set-once/low-frequency (Settings). General principle: high-frequency surfaces get nav; set-and-forget config lives in Settings.
 - **Reality check needed:** the UI says "install in WhatsApp/Slack/your agent" — does it actually work, and is setup genuinely one-step? **This must be verified (extend the agent-interface audit or a follow-up) and any gaps filed for Vivek.** Don't ship "install" UI that doesn't work.

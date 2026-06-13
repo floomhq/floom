@@ -260,7 +260,7 @@ export function WorkspaceSwitcher() {
           <span className="flex-1 truncate text-left">{resolveWorkspaceName(active.name)}</span>
           <ChevronsUpDown className="size-4 opacity-0 group-hover:opacity-60 transition-opacity duration-100" />
         </DropdownMenuTrigger>
-        {/* V9 (Federico 2026-06-02): "this can also be cleaner." The popover is
+        {/* V9 (the operator 2026-06-02): "this can also be cleaner." The popover is
             split into two clear sections — the workspace LIST (active row
             carries the checkmark) and the ACTIONS group below a divider — with
             consistent spacing. The active workspace name is shown only here in
@@ -323,7 +323,7 @@ export function WorkspaceSwitcher() {
               <Pencil className="size-4" />
               Rename workspace
             </DropdownMenuItem>
-            {/* G10 (Federico 2026-06-03): Members lives in the workspace cluster,
+            {/* G10 (the operator 2026-06-03): Members lives in the workspace cluster,
                 peer to "New workspace". One model both products: on the OS it
                 shows you as Owner; Cloud shows real members. */}
             <DropdownMenuItem
@@ -333,7 +333,7 @@ export function WorkspaceSwitcher() {
               <Users className="size-4" />
               Members
             </DropdownMenuItem>
-            {/* G1 (Federico 2026-06-03, img #91/#94): the four template actions
+            {/* G1 (the operator 2026-06-03, img #91/#94): the four template actions
                 are collapsed into ONE "Workspace actions" row that reveals them
                 on hover — peer to "New workspace" — instead of a flat list. */}
             <DropdownMenuSub>

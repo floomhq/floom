@@ -1,4 +1,4 @@
-# All Federico workeros complaints from session logs (n=116)
+# All the operator workeros complaints from session logs (n=116)
 
 ## [2026-05-15T23:38:21]
 and one more thing: i do think that skill sharing matters. i want to be able to send skills via link. i thinkg this is necessary indeed. again, we can copy the page for it. dont know if this messes a lot with access since by default files are private now i guess? also, i do still

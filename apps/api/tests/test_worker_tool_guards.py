@@ -432,7 +432,7 @@ def test_stock_worker_always_listed_and_runnable_for_member(env, monkeypatch):
 
 # Workers that were previously in PUBLIC_STOCK_WORKER_IDS and/or
 # PROTECTED_STOCK_WORKER_IDS but are actually the tenant's real private workers
-# (they read Federico's real Gmail / PostHog / GSC / Notion / CRM data). They
+# (they read the operator's real Gmail / PostHog / GSC / Notion / CRM data). They
 # must NOT be world-accessible via EITHER set (#872). _worker_can_view grants
 # read/run when a worker is in PUBLIC *or* PROTECTED, so both must be clean.
 _REMOVED_PRIVATE_WORKER_IDS = (

@@ -18,7 +18,7 @@ Each round of audits writes a set of reports under `docs/audits/<agent>-YYYY-MM-
 
 ## Future: virgin VPS audit environment
 
-Federico requested that external auditors hit a virgin VPS, not prod. Setup script TBD at `scripts/setup-audit-vps.sh`. Until that exists, rotate FLOOM_SECRET after every external audit.
+the operator requested that external auditors hit a virgin VPS, not prod. Setup script TBD at `scripts/setup-audit-vps.sh`. Until that exists, rotate FLOOM_SECRET after every external audit.
 
 ## Index
 

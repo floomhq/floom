@@ -99,7 +99,7 @@ function humanizeStatus(status: string): string {
 
 function ToolBlock({ label, value }: { label: string; value: unknown }) {
   // S29k (Q3 Codex verdict): Tool input/output payloads were visually capped
-  // at max-h-280 with no escape. Federico needs the full payload for
+  // at max-h-280 with no escape. the operator needs the full payload for
   // debugging. Now: Expand button removes the cap; Copy lifts the formatted
   // value to clipboard so users can paste into a diff tool.
   const [expanded, setExpanded] = useState(false);

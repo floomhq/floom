@@ -1,13 +1,13 @@
-# Workeros: Supabase + auth wiring brief (for the agent dispatched by Federico)
+# Workeros: Supabase + auth wiring brief (for the agent dispatched by the operator)
 
-**Audience:** the agent (Codex or other) Federico will dispatch to wire Workeros
+**Audience:** the agent (Codex or other) the operator will dispatch to wire Workeros
 to Supabase Auth + Supabase Postgres on the `-cloud` deployment, while keeping
 the local v0 (SQLite + `x-floom-secret`) working unchanged.
 
 **Author:** Claude (orchestrating Workeros UI/UX overnight); prep + briefing
-only. The agent Federico dispatches owns the actual implementation.
+only. The agent the operator dispatches owns the actual implementation.
 
-**Constraint Federico stated:** "keep it all super modular so auth and db are
+**Constraint the operator stated:** "keep it all super modular so auth and db are
 basically interchangeable so that cloud and local don't drift too far from
 each other."
 
@@ -28,7 +28,7 @@ vs `WORKEROS_DEPLOY=cloud` env switch so we stop drifting two repos.
 ### Repo
 - `/root/workeros` — this repo (single-user v0). FastAPI + Next.js 16 + SQLite.
   Production: https://workers.floom.dev (web), https://workers-api.floom.dev (api).
-- `-cloud` repo — Federico says outdated. Don't touch as-is; absorb its delta
+- `-cloud` repo — the operator says outdated. Don't touch as-is; absorb its delta
   into this repo behind the env switch.
 
 ### Auth (today)
@@ -179,7 +179,7 @@ New routes (only rendered when `NEXT_PUBLIC_WORKEROS_DEPLOY=cloud`):
 - `/auth/logout` — calls `supabase.auth.signOut()`
 
 Sidebar footer: "Local user" (when local) OR user email + avatar (when cloud,
-read from Supabase session). Federico explicitly asked for this in round 9:
+read from Supabase session). the operator explicitly asked for this in round 9:
 > "Floom v0 at bottom left sucks. replace. maybe with user profile? like
 > local user for this or so?"
 
@@ -251,7 +251,7 @@ Phased so neither mode breaks at any step.
 
 ---
 
-## Open questions (defer to Federico)
+## Open questions (defer to the operator)
 
 1. **Multi-tenant org model?** Or one Supabase user = one workspace? The
    `-cloud` repo may already have an opinion here.
@@ -259,7 +259,7 @@ Phased so neither mode breaks at any step.
    brief but the User row should carry `plan` + `quota` columns.
 3. **Composio user_id**: in local we send `"federico"`. In cloud, do we send
    the Supabase UUID, or generate a Composio-specific tenant ID and store the
-   mapping? UUID is simpler. UUID it is unless Federico says otherwise.
+   mapping? UUID is simpler. UUID it is unless the operator says otherwise.
 4. **Webhook secrets per-worker.** Today they're stored plaintext in SQLite.
    In cloud they should be Postgres `pgsodium`-encrypted at rest or rely on
    Supabase Vault.
@@ -276,11 +276,11 @@ Phased so neither mode breaks at any step.
 3. `apps/api/connections_service.py` (and adjacent) — Composio integration.
 4. `apps/api/run_service.py` — run lifecycle + SSE stream from S22d.
 5. `apps/web/lib/api.ts` — frontend API client (header source).
-6. `apps/web/components/layout/sidebar.tsx` — the "Floom v0" footer Federico
+6. `apps/web/components/layout/sidebar.tsx` — the "Floom v0" footer the operator
    wants replaced.
 7. `openapi.json` (curl `/openapi.json` against local API) — 48 routes; the
    migration touches each.
-8. The `-cloud` repo (Federico to share path) — diff against this one.
+8. The `-cloud` repo (the operator to share path) — diff against this one.
 
 ---
 
