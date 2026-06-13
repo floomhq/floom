@@ -193,10 +193,17 @@ def _clear_rate_buckets() -> None:
     for per-IP/per-user rate limits (e.g. the 20/hour draft-from-prompt cap).
     Across a full suite the bucket fills up and unrelated later tests get a 429
     ("Draft rate limit reached"). Clearing it per test makes limits deterministic.
+
+    The draft rate store moved from main into services.worker_codegen
+    (_draft_rate_store), so it is reset there now — same class of state as the
+    integrations/uploads caches handled in _clear_router_caches.
     """
-    main_mod = sys.modules.get("main")
-    for attr in ("_rate_buckets", "_draft_rate_store"):
-        store = getattr(main_mod, attr, None)
+    for mod_name, attr in (
+        ("main", "_rate_buckets"),
+        ("services.worker_codegen", "_draft_rate_store"),
+    ):
+        mod = sys.modules.get(mod_name)
+        store = getattr(mod, attr, None)
         if isinstance(store, dict):
             store.clear()
 
