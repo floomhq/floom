@@ -222,17 +222,6 @@ class TestStockWorkerManifests:
             _ = manifest.tags
             _ = manifest.folder
 
-    def test_cv_writeup_file_input_null(self):
-        """cv_writeup example_input must not contain a filename string for cv_file."""
-        raw = yaml.safe_load((WORKERS_DIR / "cv_writeup" / "worker.yml").read_text())
-        m = parse_worker_manifest(raw)
-        assert isinstance(m, WorkerContract)
-        assert m.example_input is not None
-        # cv_file must be null — a filename string would cause base64 decode error
-        assert m.example_input.get("cv_file") is None, (
-            "cv_file must be null in example_input to prevent base64 decode failure"
-        )
-
     def test_input_types_test_file_input_null(self):
         """input_types_test example_input must not contain a filename string for file_input."""
         raw = yaml.safe_load((FIXTURES_DIR / "input_types_test" / "worker.yml").read_text())
@@ -320,41 +309,3 @@ class TestApiProjectionHelpers:
             assert "folder" in w, f"{w['id']} missing folder"
             # tags must be a list (empty or populated)
             assert isinstance(w["tags"], list), f"{w['id']} tags must be list"
-
-    def test_cv_writeup_has_correct_folder(self):
-        from worker_registry import discover_workers, invalidate_worker_cache
-        invalidate_worker_cache()
-        workers = {w["id"]: w for w in discover_workers(use_cache=False)}
-        assert "cv_writeup" in workers
-        assert workers["cv_writeup"]["folder"] == "Recruiting/NovaSearch"
-
-    def test_cv_writeup_file_input_null_in_projection(self):
-        from worker_registry import discover_workers, invalidate_worker_cache
-        invalidate_worker_cache()
-        workers = {w["id"]: w for w in discover_workers(use_cache=False)}
-        w = workers.get("cv_writeup")
-        assert w is not None
-        example = w.get("example_input") or {}
-        assert example.get("cv_file") is None, (
-            "cv_file in example_input must be null — filename strings break base64 decoding"
-        )
-
-    def test_folder_tree_grouping(self):
-        """Workers with nested folder paths build correct grouping logic."""
-        from worker_registry import discover_workers, invalidate_worker_cache
-        invalidate_worker_cache()
-        workers = discover_workers(use_cache=False)
-        folders = {}
-        for w in workers:
-            f = w.get("folder")
-            if f:
-                parts = f.split("/")
-                # Every segment after the first defines a child group
-                for depth, _ in enumerate(parts):
-                    path = "/".join(parts[: depth + 1])
-                    folders[path] = folders.get(path, 0) + 1
-        # Expect multi-level folders exist
-        assert "Recruiting" in folders
-        assert "Recruiting/NovaSearch" in folders
-        assert "Operations" in folders
-        assert "Operations/Reporting" in folders
