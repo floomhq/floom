@@ -292,8 +292,8 @@ html.dark {
   --sidebar-glass: oklch(0.19 0 0);
   --sidebar-glass-shadow: 0 1px 0 hsl(0 0% 0% / 0.3);
   --card-glass: var(--paper);
-  --card-border: var(--line);
-  --card-shadow: var(--shadow-sm);
+  --card-border: none;
+  --card-shadow: none;
   --bg-app: var(--bg);
   --bg-card: var(--card-glass);
   --grid-card-bg: color-mix(in srgb, var(--bg-2) 62%, var(--bg));
@@ -307,7 +307,7 @@ html.dark {
   --radius-pill: 9999px;
   --radius-input: 10px;
   --radius-squircle: 9px;
-  --shadow-card: var(--shadow-sm);
+  --shadow-card: none;
   /* v4: active nav bg uses single-blue alpha blend — same hue as accent */
   --active-nav-bg: color-mix(in srgb, var(--accent) 18%, transparent);
   --active-nav-text: var(--accent);
@@ -811,10 +811,10 @@ html.dark .grain {
 /* status pill — outlined/tinted + leading dot (SPEC §2a) */
 .c-pill { display:inline-flex; align-items:center; gap:6px; border-radius:var(--radius-pill); font-size:11.5px; padding:3px 10px; font-weight:500; border:var(--bd-pill); }
 .c-pill .dot { width:6px; height:6px; border-radius:var(--radius-pill); background:currentColor; }
-.c-pill.ok   { background:color-mix(in srgb, var(--success) 12%, transparent); color:var(--success); }
-.c-pill.err  { background:color-mix(in srgb, var(--warning) 14%, transparent); color:var(--warning); }
-.c-pill.warn,.c-pill.pending { background:color-mix(in srgb, var(--pending) 16%, transparent); color:var(--pending); }
-.c-pill.run  { background:color-mix(in srgb, var(--info) 14%, transparent); color:var(--info); }
+.c-pill.ok   { background:color-mix(in srgb, var(--success) 8%, transparent); color:color-mix(in srgb, var(--success) 78%, var(--ink)); }
+.c-pill.err  { background:color-mix(in srgb, var(--warning) 9%, transparent); color:color-mix(in srgb, var(--warning) 78%, var(--ink)); }
+.c-pill.warn,.c-pill.pending { background:color-mix(in srgb, var(--pending) 9%, transparent); color:color-mix(in srgb, var(--pending) 76%, var(--ink)); }
+.c-pill.run  { background:color-mix(in srgb, var(--info) 8%, transparent); color:color-mix(in srgb, var(--info) 78%, var(--ink)); }
 .c-pill.idle { background:var(--bg-2); color:var(--muted-foreground); }
 
 /* grid cards (SPEC §2b — calm: avatar+name, desc, one status line) */
