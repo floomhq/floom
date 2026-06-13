@@ -2241,3 +2241,19 @@ class VersionSummary(BaseModel):
     asset_type: str   # kept for API compat
     asset_id: str     # kept for API compat
     change_source: Optional[str] = None
+
+
+class _WorkerSuggestion(BaseModel):
+    field: str
+    current: str
+    suggested: str
+    reason: str
+
+
+class _WorkerSuggestResponse(BaseModel):
+    has_conflicts: bool
+    suggestions: list[_WorkerSuggestion]
+
+
+class _WorkerSuggestRequest(BaseModel):
+    new_description: str
