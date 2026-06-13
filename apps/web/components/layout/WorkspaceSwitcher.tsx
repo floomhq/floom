@@ -9,6 +9,7 @@ import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-logo";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
+import { getWorkspaceActionCopy, isCloudMode } from "@/lib/workspace/action-copy";
 import type { LocalWorkspace } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,6 +64,8 @@ export function WorkspaceSwitcher() {
   const [duplicating, setDuplicating] = useState(false);
   const [sharingLink, setSharingLink] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
+  // #1005: cloud speaks invite copy, OSS speaks template-zip copy.
+  const copy = getWorkspaceActionCopy(isCloudMode());
 
   useEffect(() => {
     let cancelled = false;
@@ -151,7 +154,7 @@ export function WorkspaceSwitcher() {
       a.click();
       a.remove();
       URL.revokeObjectURL(url);
-      toast.success("Workspace template exported");
+      toast.success(copy.exportToast);
     } catch (err) {
       toast.error((err as Error).message || "Failed to export template");
     } finally {
@@ -205,11 +208,11 @@ export function WorkspaceSwitcher() {
         copied = false;
       }
       toast.success(
-        copied ? "Template link copied to clipboard" : "Template link ready",
+        copied ? copy.shareCopied : copy.shareReady,
         { description: copied ? undefined : url }
       );
     } catch (err) {
-      toast.error((err as Error).message || "Failed to create template link");
+      toast.error((err as Error).message || copy.shareFailed);
     } finally {
       setSharingLink(false);
     }
@@ -355,10 +358,10 @@ export function WorkspaceSwitcher() {
                 >
                   <div className="flex items-center gap-2">
                     <Download className="size-4 shrink-0" />
-                    <span>{exporting ? "Exporting…" : "Export workspace"}</span>
+                    <span>{exporting ? copy.exporting : copy.exportLabel}</span>
                   </div>
                   <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
-                    Download a zip of agents + instructions (no secrets)
+                    {copy.exportHelp}
                   </span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -385,10 +388,10 @@ export function WorkspaceSwitcher() {
                 >
                   <div className="flex items-center gap-2">
                     <Copy className="size-4 shrink-0" />
-                    <span>{duplicating ? "Duplicating…" : "Duplicate workspace"}</span>
+                    <span>{duplicating ? copy.duplicating : copy.duplicateLabel}</span>
                   </div>
                   <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
-                    Copies agents + instructions. Connections &amp; secrets are not copied — reconnect after.
+                    {copy.duplicateHelp}
                   </span>
                 </DropdownMenuItem>
                 <DropdownMenuItem
@@ -399,10 +402,10 @@ export function WorkspaceSwitcher() {
                 >
                   <div className="flex items-center gap-2">
                     <Link2 className="size-4 shrink-0" />
-                    <span>{sharingLink ? "Creating link…" : "Share as template link"}</span>
+                    <span>{sharingLink ? copy.sharing : copy.shareLabel}</span>
                   </div>
                   <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
-                    Shareable link to the exported zip — no secrets included
+                    {copy.shareHelp}
                   </span>
                 </DropdownMenuItem>
               </DropdownMenuSubContent>
