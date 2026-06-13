@@ -453,6 +453,10 @@ from services.public_worker import (
     _public_worker_response,
     _load_public_worker,
     _public_worker_share_from_worker,
+    _public_file_entry,
+    _public_brain_file_share,
+    _public_brain_pack_share,
+    _standalone_share_payload,
 )
 
 # Context (knowledge-pack) access-control + serialization cluster lives in
@@ -3703,115 +3707,16 @@ def _json_noindex(payload: Dict[str, Any], *, status_code: int = 200) -> JSONRes
 
 
 
-def _public_file_entry(name: str, root: Path, path: Path, token: str | None = None) -> Dict[str, Any]:
-    rel = path.relative_to(root).as_posix()
-    meta = context_file_metadata(root, path, pack_metadata=load_context_metadata().get(name) or {})
-    raw = path.read_bytes()
-    mime_type = str(meta.get("mime_type") or guess_mime_type(rel))
-    binary = bool(meta.get("is_binary")) or is_binary_file(rel, mime_type)
-    content_text: str | None = None
-    if not binary and len(raw) <= PUBLIC_SHARE_TEXT_PREVIEW_LIMIT:
-        content_text = raw.decode("utf-8", errors="replace")
-    entry = {
-        "path": rel,
-        "size": int(meta.get("size") or len(raw)),
-        "mime_type": mime_type,
-        "display_type": meta.get("display_type") or "File",
-        "is_binary": binary,
-        "updated_at": meta.get("updated_at"),
-        "description": meta.get("description"),
-        "tags": meta.get("tags") or [],
-        "metadata": meta.get("metadata") or {},
-        "content_text": content_text,
-    }
-    if token:
-        entry["download_url"] = f"{_frontend_base_url()}/s/{urllib.parse.quote(token, safe='')}/download"
-    return entry
-
-
-def _public_brain_file_share(row: Dict[str, Any]) -> Dict[str, Any]:
-    owner_id = str(row.get("owner_id") or "")
-    name = str(row.get("entity_id") or "")
-    rel = str(row.get("file_path") or "")
-    token = str(row.get("token") or "")
-    with use_context_scope(context_scope_for_user(owner_id)):
-        safe_name = _context_name_or_400(name)
-        rel = _context_file_path_or_400(rel)
-        target = _safe_context_file_or_400(safe_name, rel)
-        _assert_context_file_shareable(rel, target)
-        root = context_dir(safe_name)
-        summary = _context_summary(safe_name, load_context_metadata(), user_id=owner_id)
-        file_entry = _public_file_entry(safe_name, root, target, token)
-    return {
-        "entity_type": "brain_file",
-        "title": Path(rel).name,
-        "description": f"{safe_name} / {rel}",
-        "pack": {
-            "name": summary.name,
-            "description": summary.description,
-            "file_count": summary.file_count,
-            "total_size_bytes": summary.total_size_bytes,
-        },
-        "file": file_entry,
-        "files": [file_entry],
-    }
-
-
-def _public_brain_pack_share(row: Dict[str, Any]) -> Dict[str, Any]:
-    owner_id = str(row.get("owner_id") or "")
-    name = str(row.get("entity_id") or "")
-    with use_context_scope(context_scope_for_user(owner_id)):
-        safe_name = _context_name_or_400(name)
-        _assert_context_pack_shareable(safe_name)
-        root = context_dir(safe_name)
-        if not root.is_dir():
-            raise HTTPException(status_code=404, detail="Brain pack not found")
-        metadata = load_context_metadata()
-        summary = _context_summary(safe_name, metadata, user_id=owner_id)
-        files = [
-            _public_file_entry(safe_name, root, path)
-            for path in sorted(iter_context_files(root), key=lambda p: p.relative_to(root).as_posix())
-        ]
-    preview_file = next((f for f in files if f.get("content_text")), files[0] if files else None)
-    return {
-        "entity_type": "brain_pack",
-        "title": summary.name,
-        "description": summary.description or f"{summary.file_count} files",
-        "pack": {
-            "name": summary.name,
-            "description": summary.description,
-            "file_count": summary.file_count,
-            "total_size_bytes": summary.total_size_bytes,
-            "updated_at": summary.updated_at,
-        },
-        "file": preview_file,
-        "files": files,
-    }
 
 
 
 
 
 
-def _standalone_share_payload(token: str, repos: Repositories) -> Dict[str, Any]:
-    row = _load_standalone_share_row(token)
-    if row:
-        entity_type = str(row.get("entity_type") or "")
-        if entity_type == "worker":
-            worker = repos.workers.get_any(worker_id=str(row.get("entity_id") or ""))
-            if not worker or str(worker.get("owner_id") or "") != str(row.get("owner_id") or ""):
-                raise HTTPException(status_code=404, detail="Share link not found")
-            return _public_worker_share_from_worker(worker)
-        if entity_type == "brain_file":
-            return _public_brain_file_share(row)
-        if entity_type == "brain_pack":
-            return _public_brain_pack_share(row)
-        raise HTTPException(status_code=404, detail="Share link not found")
 
-    # Backward compatibility for worker short links created before the unified
-    # share table existed.
-    worker = _load_short_link_public_worker(token, repos)
-    return _public_worker_share_from_worker(worker)
+
+
+
 
 
 class _ImportFromShareRequest(BaseModel):
