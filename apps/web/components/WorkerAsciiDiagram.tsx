@@ -476,7 +476,7 @@ export function WorkerAsciiDiagram({
           (overflow-x-auto) instead of dragging the page wider than the
           viewport. */}
       <div
-        className="max-w-full overflow-x-auto border border-[var(--line)] bg-[var(--bg-card)] px-5 py-4"
+        className="max-w-full overflow-x-auto bg-[var(--bg-2)] px-5 py-4"
         style={{ borderRadius: "var(--radius-card)" }}
       >
         {/* The diagram is a positioned stack: the text grid (box-drawing) plus
@@ -553,7 +553,7 @@ export function WorkerAsciiDiagram({
             Real BrandLogo SVGs (same vocabulary as WorkerIconPills). Hidden
             when the worker declares no connections. */}
         {conns.length > 0 && (
-          <div className="mt-4 flex flex-wrap items-center gap-2 border-t border-[var(--line)] pt-3">
+          <div className="mt-4 flex flex-wrap items-center gap-2 [border-top:var(--bd-div)] pt-3">
             <span
               className="text-[10px] font-semibold uppercase tracking-[0.1em] text-[var(--ink-faint)]"
               style={{ fontFamily: "var(--font-mono)" }}
@@ -565,7 +565,7 @@ export function WorkerAsciiDiagram({
                 <span
                   key={slug}
                   title={slug}
-                  className="inline-flex items-center gap-1.5 border border-[var(--line-soft)] bg-[var(--bg-2)] px-1.5 py-1 text-[11px] text-[var(--ink-soft)]"
+                  className="inline-flex items-center gap-1.5 bg-[var(--bg-card)] px-1.5 py-1 text-[11px] text-[var(--ink-soft)]"
                   style={{ borderRadius: "var(--radius-squircle)" }}
                 >
                   <BrandLogo icon={slug} className="size-3.5" />

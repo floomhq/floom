@@ -1,10 +1,16 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { AlertTriangle, ChevronRight, ChevronLeft, ChevronDown, Maximize2, Minimize2, PenSquare, Download, History } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, PenSquare, Download, History, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Badge } from "@/components/ui/badge";
 import { Separator } from "@/components/ui/separator";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 
@@ -13,6 +19,13 @@ import { MarkdownText } from "./MarkdownText";
 import { PromptInput } from "./PromptInput";
 import { FileChip } from "./FileChip";
 import { ToolCardRenderer } from "./cards/ToolCardRenderer";
+import {
+  Message,
+  MessageAction,
+  MessageActions,
+  MessageContent,
+  MessageResponse,
+} from "@/components/ai-elements/message";
 import {
   getAutoOpenRunDetailsHref,
   shouldAutoOpenRunDetails,
@@ -67,7 +80,7 @@ function RecentChats({
         <div
           role="menu"
           onMouseLeave={() => setOpen(false)}
-          className="absolute right-0 top-full z-30 mt-1 max-h-72 w-64 overflow-auto rounded-[12px] border border-border bg-[var(--bg-card)] p-1 shadow-[var(--shadow-pop)]"
+          className="absolute right-0 top-full z-30 mt-1 max-h-72 w-64 overflow-auto rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-1 shadow-[var(--shadow-pop)]"
         >
           {items === null && <div className="px-2 py-3 text-xs text-muted-foreground">Loading…</div>}
           {items?.length === 0 && (
@@ -83,7 +96,7 @@ function RecentChats({
                 onLoadConversation(c.id);
               }}
               className={cn(
-                "flex w-full items-center gap-2 rounded-[8px] px-2 py-1.5 text-left text-xs hover:bg-[var(--bg-2)]",
+                "flex w-full items-center gap-2 rounded-[var(--radius-button)] px-2 py-1.5 text-left text-xs hover:bg-[var(--bg-2)]",
                 c.id === activeConversationId && "bg-[var(--bg-2)]"
               )}
             >
@@ -165,7 +178,7 @@ function TypingIndicator() {
         {[0, 1, 2].map((i) => (
           <div
             key={i}
-            className="size-1.5 rounded-full bg-muted-foreground/40 animate-bounce"
+            className="size-1.5 rounded-[var(--radius-pill)] bg-muted-foreground/40 animate-bounce"
             style={{ animationDelay: `${i * 150}ms` }}
           />
         ))}
@@ -176,15 +189,47 @@ function TypingIndicator() {
 
 // ── Message renderer ──────────────────────────────────────────────────────────
 
+function assistantMessageText(msg: ChatMessage): string {
+  return (msg.parts ?? [])
+    .filter((part) => part.type === "text")
+    .map((part) => part.text)
+    .join("\n\n")
+    .trim();
+}
+
+function MessageCopyAction({ text }: { text: string }) {
+  const [copied, setCopied] = useState(false);
+  const copy = useCallback(() => {
+    if (!text) return;
+    const write = navigator.clipboard?.writeText?.(text);
+    if (!write) return;
+    write
+      .then(() => {
+        setCopied(true);
+        window.setTimeout(() => setCopied(false), 1200);
+      })
+      .catch(() => {});
+  }, [text]);
+
+  if (!text) return null;
+  return (
+    <MessageAction label={copied ? "Copied" : "Copy"} tooltip={copied ? "Copied" : "Copy"} onClick={copy}>
+      {copied ? <Check className="size-3" /> : <Copy className="size-3" />}
+    </MessageAction>
+  );
+}
+
 function MessageRow({ msg }: { msg: ChatMessage }) {
   if (msg.role === "user") {
     return (
-      <div className="flex justify-end">
-        <div className="max-w-[85%] space-y-1.5">
+      <Message from="user">
+        <div className="flex max-w-[85%] flex-col items-end gap-1.5">
           {msg.text && (
-            <div className="rounded-2xl rounded-tr-sm bg-muted/60 px-3.5 py-2.5 text-sm text-foreground">
-              <p className="whitespace-pre-wrap leading-relaxed">{msg.text}</p>
-            </div>
+            <MessageContent className="rounded-[var(--radius-card)] bg-muted/60 px-3.5 py-2.5 text-foreground">
+              <MessageResponse className="whitespace-pre-wrap">
+                <p>{msg.text}</p>
+              </MessageResponse>
+            </MessageContent>
           )}
           {msg.files && msg.files.length > 0 && (
             <div className="flex flex-wrap gap-1.5 justify-end">
@@ -193,27 +238,41 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
               ))}
             </div>
           )}
+          <MessageActions className="justify-end pr-1">
+            <MessageCopyAction text={msg.text ?? ""} />
+          </MessageActions>
         </div>
-      </div>
+      </Message>
     );
   }
 
   // assistant
+  const text = assistantMessageText(msg);
   return (
-    <div className="flex items-start gap-2.5">
+    <Message from="assistant" className="flex-row items-start gap-2.5">
       <EmilyAvatar size="sm" />
-      <div className="flex-1 min-w-0 space-y-2.5">
+      {/* min-w-0 + overflow-hidden prevent long URLs and code from blowing out the rail */}
+      <div className="flex-1 min-w-0 overflow-hidden space-y-2.5">
         {msg.parts?.map((part, i) => {
           if (part.type === "text") {
-            return <MarkdownText key={i} text={part.text} />;
+            return (
+              <MessageContent key={i}>
+                <MessageResponse>
+                  <MarkdownText text={part.text} />
+                </MessageResponse>
+              </MessageContent>
+            );
           }
           if (part.type === "tool-card") {
             return <ToolCardRenderer key={i} card={part.card} />;
           }
           return null;
         })}
+        <MessageActions>
+          <MessageCopyAction text={text} />
+        </MessageActions>
       </div>
-    </div>
+    </Message>
   );
 }
 
@@ -235,7 +294,7 @@ function EmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
             key={s}
             type="button"
             onClick={() => onSuggest(s)}
-            className="rounded-full border border-border bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
           >
             {s}
           </button>
@@ -247,14 +306,35 @@ function EmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
 
 // ── EmilyChat core (shared by dock and full-page) ────────────────────────────
 
+interface ChatCoreActions {
+  newSession: () => void;
+  exportChat: () => void;
+  loadConversation: (id: string) => void;
+  conversationId: string | null;
+  // hasMessages is tracked via state in the host to avoid reading ref during render
+}
+
 interface EmilyChatCoreProps {
   fullPage?: boolean;
+  /** #902 create-worker mode: create-primed composer placeholder (wireframe
+   *  newWorker(): Emily full-screen, placeholder "Create me: a worker that…"). */
+  createMode?: boolean;
+  /** #902: pre-fill the composer (legacy /workers/new?prompt= deep links). */
+  primeInput?: string;
   onOpenRunDetails?: () => void;
+  /** When provided, the core omits its own controls row (host renders them in the header). */
+  hideControls?: boolean;
+  /** Mutable ref that receives action callbacks so the host header can drive them. */
+  actionsRef?: React.MutableRefObject<ChatCoreActions | null>;
+  /** Called whenever hasMessages changes so host can update disabled state without reading a ref in render. */
+  onHasMessagesChange?: (has: boolean) => void;
+  /** Called whenever conversationId changes so host can highlight active chat without reading a ref in render. */
+  onConversationIdChange?: (id: string | null) => void;
 }
 
 const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
 
-function EmilyChatCore({ fullPage = false, onOpenRunDetails }: EmilyChatCoreProps) {
+function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpenRunDetails, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange }: EmilyChatCoreProps) {
   const {
     messages,
     conversationId,
@@ -266,7 +346,7 @@ function EmilyChatCore({ fullPage = false, onOpenRunDetails }: EmilyChatCoreProp
     loadConversation,
   } = useChatStream();
   const router = useRouter();
-  const [input, setInput] = useState("");
+  const [input, setInput] = useState(primeInput ?? "");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -384,7 +464,41 @@ function EmilyChatCore({ fullPage = false, onOpenRunDetails }: EmilyChatCoreProp
     exportConversationMarkdown(messages, conversationId);
   }, [messages, conversationId]);
 
+  const handleNew = useCallback(() => {
+    newSession();
+    isNearBottomRef.current = true;
+    setShowScrollButton(false);
+    openedRunDetailsRef.current.clear();
+    runDetailsNavReadyRef.current = false;
+  }, [newSession]);
+
   const hasMessages = messages.length > 0;
+
+  // Expose actions to host (e.g. dock header) via ref
+  useEffect(() => {
+    if (actionsRef) {
+      actionsRef.current = {
+        newSession: handleNew,
+        exportChat: handleExport,
+        loadConversation: (id: string) => {
+          loadConversation(id);
+          isNearBottomRef.current = true;
+          setShowScrollButton(false);
+        },
+        conversationId,
+      };
+    }
+  });
+
+  // Propagate hasMessages to host so it can update disabled state in render
+  useEffect(() => {
+    onHasMessagesChange?.(hasMessages);
+  }, [hasMessages, onHasMessagesChange]);
+
+  // Propagate conversationId to host so it can highlight active chat in render
+  useEffect(() => {
+    onConversationIdChange?.(conversationId);
+  }, [conversationId, onConversationIdChange]);
   const errorAlreadyVisible = Boolean(
     error &&
       messages.some((message) =>
@@ -395,32 +509,31 @@ function EmilyChatCore({ fullPage = false, onOpenRunDetails }: EmilyChatCoreProp
 
   return (
     <div className={cn("flex flex-col h-full", fullPage && "max-w-2xl mx-auto w-full")}>
-      {/* Controls: New chat + Export — reachable in both dock and full-page */}
-      <div
-        className={cn(
-          "flex shrink-0 items-center justify-end gap-1 border-b border-border/60",
-          fullPage ? "px-6 py-2" : "px-3 py-1.5"
-        )}
-      >
-        <ChatControls
-          onNew={() => {
-            newSession();
-            // Reset scroll state for the fresh conversation
-            isNearBottomRef.current = true;
-            setShowScrollButton(false);
-            openedRunDetailsRef.current.clear();
-            runDetailsNavReadyRef.current = false;
-          }}
-          onExport={handleExport}
-          canExport={hasMessages}
-          activeConversationId={conversationId}
-          onLoadConversation={(id) => {
-            loadConversation(id);
-            isNearBottomRef.current = true;
-            setShowScrollButton(false);
-          }}
-        />
-      </div>
+      {/* Controls: New chat + Export — shown on full-page; dock header renders them when hideControls */}
+      {!hideControls && (
+        <div
+          className={cn(
+            "flex shrink-0 items-center justify-end gap-1 [border-bottom:var(--bd-div)]/60",
+            fullPage ? "px-6 py-2" : "px-3 py-1.5"
+          )}
+        >
+          <ChatControls
+            onNew={() => {
+              handleNew();
+              isNearBottomRef.current = true;
+              setShowScrollButton(false);
+            }}
+            onExport={handleExport}
+            canExport={hasMessages}
+            activeConversationId={conversationId}
+            onLoadConversation={(id) => {
+              loadConversation(id);
+              isNearBottomRef.current = true;
+              setShowScrollButton(false);
+            }}
+          />
+        </div>
+      )}
 
       {/* Message list */}
       <div
@@ -442,9 +555,10 @@ function EmilyChatCore({ fullPage = false, onOpenRunDetails }: EmilyChatCoreProp
               <MessageRow key={msg.id} msg={msg} />
             ))}
             {error && !errorAlreadyVisible && (
-              <div className="flex items-start gap-2.5 rounded-lg border border-destructive/30 bg-destructive/5 px-3.5 py-3 text-xs text-destructive">
-                <AlertTriangle className="mt-0.5 size-3.5 shrink-0" />
-                <p className="leading-relaxed">{error}</p>
+              /* Quiet inline system note — muted, no alarming red. SPEC §9: "calm, not alarmed". */
+              <div className="flex items-start gap-2 rounded-lg bg-[var(--bg-2)] px-3 py-2.5 text-xs text-[var(--ink-soft)]">
+                <AlertTriangle className="mt-0.5 size-3 shrink-0 opacity-60" />
+                <p className="leading-relaxed break-words min-w-0">{error}</p>
               </div>
             )}
             {isStreaming && <TypingIndicator />}
@@ -459,7 +573,7 @@ function EmilyChatCore({ fullPage = false, onOpenRunDetails }: EmilyChatCoreProp
             type="button"
             onClick={() => scrollToBottom(true)}
             aria-label="Scroll to bottom"
-            className="sticky bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-full border border-border bg-background px-3 py-1.5 text-xs text-muted-foreground shadow-md hover:text-foreground hover:shadow-lg transition-all"
+            className="sticky bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-background px-3 py-1.5 text-xs text-muted-foreground shadow-md hover:text-foreground hover:shadow-lg transition-all"
           >
             <ChevronDown className="size-3.5" />
             Scroll to bottom
@@ -467,13 +581,9 @@ function EmilyChatCore({ fullPage = false, onOpenRunDetails }: EmilyChatCoreProp
         )}
       </div>
 
-      {/* Input */}
+      {/* Input — error intentionally NOT repeated here; it already shows as an
+          inline system note in the message thread (errorAlreadyVisible guard above). */}
       <div className={cn("shrink-0", fullPage ? "px-6 pb-6 pt-3" : "px-3 pb-3 pt-0")}>
-        {error && (
-          <div className="mb-2 rounded border border-destructive/30 bg-destructive/10 px-3 py-2 text-xs text-destructive">
-            {error}
-          </div>
-        )}
         <Separator className="mb-3" />
         <PromptInput
           value={input}
@@ -482,7 +592,7 @@ function EmilyChatCore({ fullPage = false, onOpenRunDetails }: EmilyChatCoreProp
           onFilesChange={setAttachedFiles}
           attachedFiles={attachedFiles}
           disabled={isStreaming}
-          placeholder="Message Emily..."
+          placeholder={createMode ? "Create me: a worker that…" : "Message Emily..."}
         />
         <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
           Emily can make mistakes. Verify important results.
@@ -501,7 +611,7 @@ type DockMode = "collapsed" | "rail" | "wide" | "full";
 // Widths per APP-UI-V4-SPEC §2: rail 330px (collapse 46px), widen 560px, full.
 const DOCK_WIDTH: Record<DockMode, string> = {
   collapsed: "w-[46px]",
-  rail: "w-full md:w-[330px] md:max-w-[30vw]",
+  rail: "w-full md:w-[330px]",
   wide: "w-full md:w-[560px] md:max-w-[52vw]",
   full: "fixed inset-0 z-50 w-full", // full-screen overlay
 };
@@ -512,12 +622,20 @@ export function EmilyDock({ className }: { className?: string }) {
   const cycleExpand = () =>
     setMode((m) => (m === "rail" ? "wide" : m === "wide" ? "full" : "rail"));
   const collapseForRunDetails = useCallback(() => setMode("collapsed"), []);
+  // actionsRef lets the dock header drive new/export/recent without prop-drilling
+  const coreActionsRef = useRef<ChatCoreActions | null>(null);
+  // hasMessages as state so the Export menu item disables correctly (can't read ref in render)
+  const [coreHasMessages, setCoreHasMessages] = useState(false);
+  // Active conversation ID as state for recent-chats active highlight (can't read ref in render)
+  const [coreConversationId, setCoreConversationId] = useState<string | null>(null);
+  // Local state for recent chats popover in the header ⋯ menu
+  const [recentItems, setRecentItems] = useState<import("@/lib/types").ConversationSummary[] | null>(null);
 
   return (
     <div
       className={cn(
-        "flex h-full flex-col bg-background shrink-0",
-        mode !== "full" && "border-l border-border",
+        "flex h-full flex-col bg-background shrink-0 overflow-hidden",
+        mode !== "full" && "[border-left:var(--bd-div)]",
         DOCK_WIDTH[mode],
         className
       )}
@@ -539,34 +657,91 @@ export function EmilyDock({ className }: { className?: string }) {
         </div>
       )}
 
-      {/* Full header — shown only when open */}
+      {/* V4 SPEC §Emily rail: 56px header — avatar + Emily + green dot + fullscreen + ⋯ menu */}
       {open && (
-        <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-border px-4">
+        <div className="flex h-14 shrink-0 items-center gap-2 [border-bottom:var(--bd-div)] px-3">
           <EmilyAvatar size="sm" />
-          <div className="flex-1 min-w-0">
+          <div className="flex-1 min-w-0 flex items-center gap-1.5">
             <p className="text-sm font-semibold leading-none truncate">Emily</p>
-            <p className="text-[11px] text-muted-foreground leading-none mt-0.5">Chief of Staff</p>
+            {/* Green presence dot */}
+            <span
+              className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500"
+              aria-label="Online"
+            />
           </div>
-          <Badge
-            variant="secondary"
-            className="text-[10px] px-1.5 py-0.5 bg-green-500/10 text-green-600 border-green-500/20 shrink-0 font-normal"
-          >
-            Online
-          </Badge>
+          {/* Fullscreen toggle */}
           <Button
             size="sm"
             variant="ghost"
-            className="size-7 p-0"
+            className="size-7 p-0 text-muted-foreground hover:text-foreground"
             onClick={cycleExpand}
             title={mode === "full" ? "Shrink Emily" : "Expand Emily"}
             aria-label={mode === "full" ? "Shrink Emily" : "Expand Emily"}
           >
             {mode === "full" ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
           </Button>
+          {/* ⋯ menu: New chat / Export / Recent chats */}
+          <DropdownMenu onOpenChange={(open) => {
+            if (open) {
+              api.conversations.list(20)
+                .then((rows) => setRecentItems(rows))
+                .catch(() => setRecentItems([]));
+            }
+          }}>
+            <DropdownMenuTrigger
+              className="inline-flex size-7 items-center justify-center rounded-[var(--radius-button)] text-muted-foreground hover:bg-[var(--active-nav-bg)] hover:text-foreground transition-colors"
+              title="More"
+              aria-label="More options"
+            >
+              <MoreHorizontal className="size-4" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" side="bottom" sideOffset={6} className="w-44 p-1">
+              <DropdownMenuItem
+                onClick={() => coreActionsRef.current?.newSession()}
+                className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+              >
+                <PenSquare className="size-4" />
+                New chat
+              </DropdownMenuItem>
+              <DropdownMenuItem
+                onClick={() => coreActionsRef.current?.exportChat()}
+                disabled={!coreHasMessages}
+                className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+              >
+                <Download className="size-4" />
+                Export
+              </DropdownMenuItem>
+              {recentItems && recentItems.length > 0 && (
+                <>
+                  <DropdownMenuSeparator className="-mx-1 my-1" />
+                  <div className="px-2 pt-1 pb-0.5 text-[10px] font-medium uppercase tracking-wider text-[var(--ink-mute)]">
+                    Recent chats
+                  </div>
+                  {recentItems.slice(0, 8).map((c) => (
+                    <DropdownMenuItem
+                      key={c.id}
+                      onClick={() => coreActionsRef.current?.loadConversation(c.id)}
+                      className={cn(
+                        "flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink",
+                        c.id === coreConversationId && "bg-[var(--active-nav-bg)]"
+                      )}
+                    >
+                      <History className="size-3.5 shrink-0 opacity-60" />
+                      <span className="flex-1 truncate text-xs">{c.title?.trim() || "Untitled chat"}</span>
+                      {c.message_count != null && (
+                        <span className="shrink-0 text-[10px] text-muted-foreground">{c.message_count}</span>
+                      )}
+                    </DropdownMenuItem>
+                  ))}
+                </>
+              )}
+            </DropdownMenuContent>
+          </DropdownMenu>
+          {/* Collapse button */}
           <Button
             size="sm"
             variant="ghost"
-            className="size-7 p-0"
+            className="size-7 p-0 text-muted-foreground hover:text-foreground"
             onClick={() => setMode("collapsed")}
             title="Collapse Emily"
             aria-label="Collapse Emily"
@@ -578,7 +753,13 @@ export function EmilyDock({ className }: { className?: string }) {
 
       {/* Chat content — ALWAYS mounted so useChatStream state survives collapse */}
       <div className={cn("flex-1 min-h-0 overflow-hidden", !open && "hidden")}>
-        <EmilyChatCore onOpenRunDetails={collapseForRunDetails} />
+        <EmilyChatCore
+          onOpenRunDetails={collapseForRunDetails}
+          hideControls
+          actionsRef={coreActionsRef}
+          onHasMessagesChange={setCoreHasMessages}
+          onConversationIdChange={setCoreConversationId}
+        />
       </div>
     </div>
   );
@@ -595,7 +776,7 @@ export function EmilyMobileSheet() {
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Open Emily"
-          className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-full bg-background shadow-lg border border-border"
+          className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-[var(--radius-pill)] bg-background shadow-lg [border:var(--bd-card)]"
         >
           <EmilyAvatar size="sm" />
         </button>
@@ -608,12 +789,12 @@ export function EmilyMobileSheet() {
             className="absolute inset-0 bg-black/40"
             onClick={() => setOpen(false)}
           />
-          <div className="relative flex h-[85vh] flex-col rounded-t-2xl border-t border-border bg-background">
-            <div className="flex h-14 shrink-0 items-center gap-2.5 border-b border-border px-4">
+          <div className="relative flex h-[85vh] flex-col rounded-t-2xl [border-top:var(--bd-div)] bg-background">
+            <div className="flex h-14 shrink-0 items-center gap-2 [border-bottom:var(--bd-div)] px-3">
               <EmilyAvatar size="sm" />
-              <div className="flex-1 min-w-0">
+              <div className="flex-1 min-w-0 flex items-center gap-1.5">
                 <p className="text-sm font-semibold leading-none truncate">Emily</p>
-                <p className="text-[11px] text-muted-foreground leading-none mt-0.5">Chief of Staff</p>
+                <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
               </div>
               <Button
                 size="sm"
@@ -639,18 +820,24 @@ export function EmilyMobileSheet() {
 
 // ── Full-page chat (used by /chat route) ──────────────────────────────────────
 
-export function EmilyChatPage() {
+export function EmilyChatPage({
+  createMode = false,
+  primeInput,
+}: {
+  createMode?: boolean;
+  primeInput?: string;
+} = {}) {
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
-      <div className="flex items-center gap-3 border-b border-border px-6 py-4">
-        <EmilyAvatar size="md" />
-        <div>
-          <p className="text-base font-semibold leading-none">Emily</p>
-          <p className="text-xs text-muted-foreground mt-0.5">Chief of Staff</p>
+      <div className="flex h-14 shrink-0 items-center gap-2 [border-bottom:var(--bd-div)] px-4">
+        <EmilyAvatar size="sm" />
+        <div className="flex-1 min-w-0 flex items-center gap-1.5">
+          <p className="text-sm font-semibold leading-none">Emily</p>
+          <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
         </div>
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
-        <EmilyChatCore fullPage />
+        <EmilyChatCore fullPage createMode={createMode} primeInput={primeInput} />
       </div>
     </div>
   );

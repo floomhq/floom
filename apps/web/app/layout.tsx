@@ -15,9 +15,24 @@ const geistMono = Geist_Mono({
   subsets: ["latin"],
 });
 
+// #926/#945: the whole app renders dynamically. The CSP script-src nonce
+// (middleware.ts) is minted per request and must be stamped onto inline
+// scripts during SSR — impossible for build-time-static pages. Independently,
+// the security audit (#945) flagged statically pre-rendered protected shells
+// served with public cache headers as a cache-safety footgun. This is an
+// auth-gated dashboard: page data is client-fetched, shells are cheap, CDN
+// caching of them was never load-bearing.
+export const dynamic = "force-dynamic";
+
 export const metadata: Metadata = {
-  title: "WorkerOS",
+  title: "Floom",
   description: "Workers that use your tools. Run them on schedule, webhook, or approval.",
+  icons: {
+    // Single SVG favicon that adapts via prefers-color-scheme inside the SVG.
+    // Browsers that support media-query favicons get separate light/dark PNGs
+    // via the <link> tags injected in the <head> below.
+    icon: "/icon.svg",
+  },
 };
 
 export default function RootLayout({

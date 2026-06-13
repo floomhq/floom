@@ -4,8 +4,8 @@ import { BrandLogo } from "./BrandLogo";
 
 export function ConnectionsEmptyState({ onConnect }: { onConnect: () => void }) {
   return (
-    <div className="rounded-lg border border-dashed border-[var(--line-strong)] bg-[var(--glass-bg)] px-5 py-10 text-center">
-      <div className="mx-auto flex size-11 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--paper)]">
+    <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--glass-bg)] px-5 py-10 text-center">
+      <div className="mx-auto flex size-11 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)]">
         <BrandLogo icon="gmail" className="size-5" />
       </div>
       <p className="mx-auto mt-4 max-w-md text-sm font-medium text-[var(--ink)]">

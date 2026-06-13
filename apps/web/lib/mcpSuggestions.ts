@@ -5,7 +5,7 @@
 //
 // Curation principles:
 // - Only MCPs with a maintained npm package, exposing tools agents would
-//   actually call inside a Workeros worker.
+//   actually call inside a Floom worker.
 // - env_vars listed are the ONLY ones the MCP needs. Workers can satisfy
 //   them via the existing /secrets surface.
 // - Description is one line, no marketing.

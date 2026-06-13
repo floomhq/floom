@@ -1,7 +1,7 @@
 /**
  * The Collection model (SPEC §0, §8a).
  *
- * Almost every page in Workeros is a Collection: a list/grid of items with a
+ * Almost every page in Floom is a Collection: a list/grid of items with a
  * search box, a multi-select tag bar, and a 30/70 split detail. Pages become
  * thin configs of `<Collection>`; this file is the shared type surface.
  */
@@ -57,8 +57,8 @@ export interface StatusPillSpec {
 
 /** One rendered list row (SPEC §2a canonical row). */
 export interface ListRowSpec {
-  /** Brand logo node (white chip) or seeded avatar. */
-  leading: ReactNode;
+  /** Brand logo node or semantic icon. Omit for non-person entities (V4 SPEC rule 3). */
+  leading?: ReactNode;
   primary: ReactNode;
   secondary?: ReactNode;
   /** Collection-specific middle columns (between sub and status). */
@@ -79,6 +79,12 @@ export interface ListColumns {
   /** CSS grid-template-columns for the row + header. */
   template: string;
   headers: string[];
+  /** When true the header row is transparent (no grey bar), hairline only. */
+  headerTransparent?: boolean;
+  /** Render the canonical status slot after `cols`; defaults to true. */
+  statusColumn?: boolean;
+  /** Render the trailing row-actions slot; defaults to true. */
+  menuColumn?: boolean;
 }
 
 /** One detail tab (SPEC §3). */
@@ -91,7 +97,7 @@ export interface DetailTab {
 
 export interface DetailHeader {
   leading: ReactNode;
-  title: string;
+  title: ReactNode;
   /** Right-aligned primary/secondary actions + overflow. */
   actions?: ReactNode;
   /** Subtitle row (visibility pill, description, app logos). */
@@ -151,9 +157,10 @@ export interface CollectionConfig<T> {
   banner?: ReactNode;
 }
 
-/** Grid card (SPEC §2b — avatar+name, 1-line desc, one status line). */
+/** Grid card (SPEC §2b — name, 2-line desc, status pill + tool logos). */
 export interface CardSpec {
-  leading: ReactNode;
+  /** Optional leading element (lock icon when private). Omit for non-person entities (V4 rule 3). */
+  leading?: ReactNode;
   name: ReactNode;
   description?: ReactNode;
   status?: StatusPillSpec | null;

@@ -8,7 +8,6 @@ import Link from "next/link";
 import {
   ArrowUp,
   CalendarClock,
-  ChevronRight,
 } from "lucide-react";
 
 import { api } from "@/lib/api";
@@ -33,8 +32,11 @@ import { BrandLogo } from "@/components/connections/BrandLogo";
 
 export type { SystemOverviewAttentionItem };
 
+// Spec rule 2: flat-by-token — all borders from CSS variables, never hardcoded.
+// --bd-card is `none` per design tokens; use the full border shorthand so the
+// computed border width is 0px when the token is none.
 const cardClass =
-  "rounded-[var(--radius-card)] border border-[var(--border-default)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
+  "rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
 
 const providerNameAliases: Record<string, string> = {
   github: "GitHub",
@@ -99,7 +101,7 @@ function MetricCard({
   const className = cn(
     cardClass,
     "flex flex-col overflow-hidden",
-    href && "cursor-pointer transition-colors hover:border-[var(--border-strong)]",
+    href && "cursor-pointer transition-colors hover:bg-[var(--bg-2)]",
   );
   const body = (
     <>
@@ -255,7 +257,7 @@ function WorkerRowIcon({ workerId, workerName }: { workerId: string; workerName?
   const resolved = workerIcon({ id: workerId, name: workerName || undefined });
   return (
     <span
-      className="inline-flex shrink-0 items-center justify-center size-5 bg-[var(--accent-soft)] text-[var(--accent)] ring-1 ring-[var(--accent-line)]"
+      className="inline-flex shrink-0 items-center justify-center size-5 bg-[var(--accent-soft)] text-[var(--accent)] [border:var(--bd-card)]"
       style={{ borderRadius: "var(--radius-squircle)" }}
       aria-hidden="true"
     >
@@ -295,37 +297,36 @@ function WorkerActivity({
       ) : runs.length === 0 ? (
         <p className="flex flex-1 items-center justify-center py-8 text-center text-sm text-[var(--text-muted)]">No runs yet.</p>
       ) : (
-        <div className="flex-1 min-h-0 overflow-y-auto divide-y divide-[var(--border-soft)]">
+        <div className="flex-1 min-h-0 overflow-y-auto [&>*+*]:[border-top:var(--bd-div)]">
           {visibleRuns.map((run) => {
             const meta = statusMeta(run.status);
             return (
               <Link
                 key={run.run_id}
                 href={`/runs?sel=${run.run_id}`}
-                className="flex items-center justify-between gap-3 px-2 py-1.5 transition-colors hover:bg-[var(--active-nav-bg)]"
+                className="flex items-center gap-3 px-2 py-1.5 transition-colors hover:bg-[var(--active-nav-bg)]"
               >
-                <div className="min-w-0">
-                  <div className="flex min-w-0 items-center gap-2">
-                    <span className="size-2 shrink-0 rounded-full" style={{ backgroundColor: meta.color }} />
-                    <span className="text-xs font-medium" style={{ color: meta.color }}>
-                      {meta.label}
-                    </span>
-                    <WorkerRowIcon workerId={run.worker_id} workerName={run.worker_name} />
-                    <span className="truncate text-sm font-medium text-[var(--text-primary)]">
-                      {run.worker_name || humanizeSlug(run.worker_id, "Worker")}
-                    </span>
-                  </div>
-                  <p className="mt-1 flex flex-wrap items-center gap-1.5 text-xs text-[var(--text-muted)]">
+                <WorkerRowIcon workerId={run.worker_id} workerName={run.worker_name} />
+                <div className="min-w-0 flex-1">
+                  <span className="truncate text-sm font-medium text-[var(--text-primary)]">
+                    {run.worker_name || humanizeSlug(run.worker_id, "Worker")}
+                  </span>
+                  <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-[var(--text-muted)]">
                     <span>{run.started_at ? formatRelative(run.started_at) : "Queued"}</span>
                     <span aria-hidden="true">·</span>
                     <span>{formatDuration(run.duration_ms)}</span>
-                    <span aria-hidden="true">·</span>
-                    <span className="rounded-full border border-[var(--border-soft)] px-2 py-0.5">
-                      {formatTriggerSource(run.trigger_source)}
-                    </span>
                   </p>
                 </div>
-                <ChevronRight className="size-4 shrink-0 text-[var(--text-muted)]" aria-hidden="true" />
+                {/* V4 SPEC §4: status pill right-aligned, no inline colored status word */}
+                <span
+                  className="shrink-0 rounded-[var(--radius-pill)] px-2 py-0.5 text-[11px] font-medium leading-none"
+                  style={{
+                    color: meta.color,
+                    background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
+                  }}
+                >
+                  {meta.label}
+                </span>
               </Link>
             );
           })}
@@ -400,7 +401,7 @@ function ComingUp({
                     {item.worker_name || humanizeSlug(item.worker_id, "Worker")}
                   </span>
                   {item.paused && (
-                    <span className="shrink-0 rounded-[var(--radius-pill)] border border-[var(--line)] px-1.5 py-px text-[10px] font-medium leading-none text-[var(--text-muted)]">
+                    <span className="shrink-0 rounded-[var(--radius-pill)] [border:var(--bd-card)] px-1.5 py-px text-[10px] font-medium leading-none text-[var(--text-muted)]">
                       Paused
                     </span>
                   )}
@@ -549,7 +550,9 @@ export function OverviewDashboard({
       </section>
 
       {/* Metric tiles with sparklines — S45 */}
-      <div className="grid grid-cols-1 gap-3 md:grid-cols-2 xl:grid-cols-4 xl:[&>*]:min-h-[118px]">
+      {/* Spec §5c: 2×2 grid at <880px, 4-col at xl. Using `sm:` (640px) as the
+          first breakpoint keeps the 2×2 layout on all mobile/tablet sizes. */}
+      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4 xl:[&>*]:min-h-[118px]">
         {metrics.map((metric) => (
           <MetricCard key={metric.label} {...metric} loading={loading} />
         ))}

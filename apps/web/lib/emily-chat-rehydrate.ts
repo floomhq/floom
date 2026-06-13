@@ -63,6 +63,8 @@ function toGenericCard(row: ConversationToolCardRow): GenericToolCard {
     card_id: row.id || callId,
     toolName,
     title: getToolCardTitle(toolName, status),
+    args: row.args_preview ?? undefined,
+    result: row.result_preview ?? undefined,
     preview:
       (row.args_preview as Record<string, unknown> | undefined) ?? undefined,
     status,
@@ -94,6 +96,8 @@ function toWorkerListCard(row: ConversationToolCardRow): WorkerListCard | null {
     callId,
     card_id: row.id || callId,
     status: normalizeStatus(row.status),
+    args: row.args_preview ?? undefined,
+    result: row.result_preview ?? undefined,
     workers,
     ...(row.streams ? { streams: row.streams } : {}),
     ...(row.actions && row.actions.length
@@ -135,6 +139,8 @@ function toRunCard(row: ConversationToolCardRow): RunCard | null {
     status: normalizeStatus(row.status),
     toolName: normalized || row.toolName || undefined,
     runId,
+    args: row.args_preview ?? undefined,
+    result: row.result_preview ?? undefined,
     ...(workerId ? { workerId } : {}),
     workerName,
     ...(row.streams ? { streams: row.streams } : {}),

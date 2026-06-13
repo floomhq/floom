@@ -1,6 +1,7 @@
 import { RefreshCw, Trash2, Zap } from "lucide-react";
 import { Badge } from "@/components/ui/badge";
 import { Button } from "@/components/ui/button";
+import { StatusPill } from "@/components/collection/StatusPill";
 import { cn } from "@/lib/utils";
 import { BrandLogo } from "./BrandLogo";
 import {
@@ -12,33 +13,13 @@ import {
 
 function statusBadge(status: string) {
   if (status === "active") {
-    return (
-      <Badge
-        variant="outline"
-        className="border-[color-mix(in_srgb,var(--positive)_24%,var(--line))] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] text-[var(--positive)]"
-      >
-        Active
-      </Badge>
-    );
+    return <StatusPill spec={{ tone: "ok", label: "Active" }} />;
   }
   if (status === "initiated") {
-    return (
-      <Badge
-        variant="outline"
-        className="border-[color-mix(in_srgb,#9a6a16_24%,var(--line))] bg-[color-mix(in_srgb,#9a6a16_10%,transparent)] text-[#8a5d12]"
-      >
-        Connecting
-      </Badge>
-    );
+    return <StatusPill spec={{ tone: "pending", label: "Connecting" }} />;
   }
-  return (
-    <Badge
-      variant="outline"
-      className="border-[color-mix(in_srgb,var(--negative)_24%,var(--line))] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] text-[var(--negative)]"
-    >
-      {status === "expired" ? "Expired" : status === "failed" ? "Failed" : "Inactive"}
-    </Badge>
-  );
+  const label = status === "expired" ? "Expired" : status === "failed" ? "Failed" : "Inactive";
+  return <StatusPill spec={{ tone: "err", label }} />;
 }
 
 function checkStatusLabel(checkStatus?: string): string {
@@ -74,11 +55,11 @@ export function ConnectionCard({
   const hiddenCount = Math.max(connection.scopes.length - visibleScopes.length, 0);
 
   return (
-    <article className="group rounded-lg border border-[var(--line)] bg-[var(--glass-bg-strong)] p-4 shadow-sm transition-colors hover:border-[var(--line-strong)] hover:bg-[var(--paper)] focus-within:border-[var(--line-strong)]">
+    <article className="group rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--glass-bg-strong)] p-4 shadow-sm transition-colors hover:bg-[var(--paper)]">
       <div className="grid min-h-[116px] grid-cols-[minmax(0,1fr)_auto] gap-4">
         <div className="min-w-0">
           <div className="flex items-start gap-3">
-            <div className="flex size-10 shrink-0 items-center justify-center rounded-lg border border-[var(--line)] bg-[var(--paper)]">
+            <div className="flex size-10 shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)]">
               <BrandLogo icon={connection.icon} className="size-5" />
             </div>
             <div className="min-w-0">
@@ -201,7 +182,7 @@ function ScopeChip({ scope, muted = false }: { scope: string; muted?: boolean })
     <Badge
       variant="outline"
       className={cn(
-        "max-w-full border-[var(--line)] bg-[var(--paper-2)] px-2 font-mono text-[0.68rem] text-[var(--ink-soft)]",
+        "max-w-full [border:var(--bd-pill)] bg-[var(--paper-2)] px-2 font-mono text-[0.68rem] text-[var(--ink-soft)]",
         muted && "font-sans text-[var(--ink-mute)]"
       )}
       title={scope}

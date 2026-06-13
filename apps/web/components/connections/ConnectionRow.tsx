@@ -45,7 +45,7 @@ function ConnectingProgressBar() {
       style={{ background: "color-mix(in srgb,#9a6a16 12%,transparent)" }}
     >
       <div
-        className="absolute inset-y-0 w-1/3 rounded-full"
+        className="absolute inset-y-0 w-1/3 rounded-[var(--radius-pill)]"
         style={{
           background: "#b07a1a",
           animation: "conn-progress 1.6s cubic-bezier(0.4,0,0.2,1) infinite",
@@ -64,14 +64,14 @@ function StatusPill({ status }: { status: string }) {
   // call: the audit found a blank cell reads as missing data, not as healthy.)
   if (status === "active") {
     return (
-      <span className="inline-flex items-center rounded-full border border-[color-mix(in_srgb,var(--positive)_24%,var(--line))] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] px-2 py-0.5 text-[11px] font-medium text-[var(--positive)]">
+      <span className="inline-flex items-center rounded-[var(--radius-pill)] [border:var(--bd-pill)] bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] px-2 py-0.5 text-[11px] font-medium text-[var(--positive)]">
         Active
       </span>
     );
   }
   if (status === "initiated") {
     return (
-      <span className="inline-flex items-center gap-1 rounded-full border border-[color-mix(in_srgb,#9a6a16_24%,var(--line))] bg-[color-mix(in_srgb,#9a6a16_10%,transparent)] px-2 py-0.5 text-[11px] font-medium text-[#8a5d12]">
+      <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] [border:var(--bd-pill)] bg-[color-mix(in_srgb,#9a6a16_10%,transparent)] px-2 py-0.5 text-[11px] font-medium text-[#8a5d12]">
         <svg
           aria-hidden="true"
           className="size-2.5 shrink-0 animate-spin"
@@ -94,9 +94,9 @@ function StatusPill({ status }: { status: string }) {
       : "Inactive";
   const cls =
     map[status] ??
-    "border-[color-mix(in_srgb,var(--negative)_24%,var(--line))] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] text-[var(--negative)]";
+    "[border:var(--bd-pill)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] text-[var(--negative)]";
   return (
-    <span className={cn("inline-flex items-center rounded-full border px-2 py-0.5 text-[11px] font-medium", cls)}>
+    <span className={cn("inline-flex items-center rounded-[var(--radius-pill)] px-2 py-0.5 text-[11px] font-medium", cls)}>
       {label}
     </span>
   );
@@ -143,9 +143,9 @@ export function ConnectionRow({
     <div
       id={`connection-${connection.id}`}
       className={cn(
-        "relative border-b border-[var(--border-default)] last:border-b-0 transition-colors",
+        "relative [border-bottom:var(--bd-div)] last:[border-bottom:0] transition-colors",
         highlighted &&
-          "bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] ring-1 ring-inset ring-[color-mix(in_srgb,var(--positive)_40%,transparent)]"
+          "bg-[color-mix(in_srgb,var(--positive)_10%,transparent)]"
       )}
     >
       {/* Clickable main row */}
@@ -161,7 +161,7 @@ export function ConnectionRow({
         )}
       >
         {/* Logo */}
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-lg border border-[var(--border-default)] bg-[var(--bg-card)]">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-card)]">
           <BrandLogo icon={connection.icon} className="size-4" />
         </div>
 
@@ -307,7 +307,7 @@ export function ConnectionRow({
 
       {/* Expanded peek — same background, no box, just additional content */}
       {expanded && (
-        <div className="border-t border-[var(--border-default)] bg-[color-mix(in_srgb,var(--active-nav-bg)_60%,transparent)] px-3 py-3 md:pl-[64px]">
+        <div className="[border-top:var(--bd-div)] bg-[color-mix(in_srgb,var(--active-nav-bg)_60%,transparent)] px-3 py-3 md:pl-[64px]">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
             <span className="text-[var(--ink-soft)]">
               {connection.accountLabel}

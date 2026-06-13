@@ -78,16 +78,14 @@ def client_with_tmp_workers(tmp_path, monkeypatch):
     return tc, tmp_path
 
 
-@patch("openai.OpenAI")
-def test_duplicate_generated_id_gets_distinct_suffix(mock_openai_cls, client_with_tmp_workers):
+@patch("codegen_model.chat_completion_codegen")
+def test_duplicate_generated_id_gets_distinct_suffix(mock_codegen, client_with_tmp_workers):
     """Two drafts that both yield 'applicant-followup' both succeed; the
     second gets a distinct id instead of a 409."""
     client, workers_dir = client_with_tmp_workers
 
-    mock_client = MagicMock()
-    mock_openai_cls.return_value = mock_client
     # The author always returns the same id regardless of prompt (#186).
-    mock_client.chat.completions.create.return_value = _mock_openai_response(
+    mock_codegen.return_value = _mock_openai_response(
         _llm_json_response(_valid_worker_yml())
     )
 

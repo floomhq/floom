@@ -10,11 +10,14 @@ import {
 // its TabsList from, so these assertions guard the live strip.
 
 describe("Settings nav groups (§4)", () => {
-  it("Workspace group is System·Git·Channels·Danger", () => {
+  it("Workspace group is System·Channels·Assistant·Members·Version history·Workspace token·Danger", () => {
     expect(settingsGroup("workspace").map((i) => i.label)).toEqual([
       "System",
-      "Git",
       "Channels",
+      "Assistant",
+      "Members",
+      "Version history",
+      "Workspace token",
       "Danger",
     ]);
   });
@@ -24,7 +27,7 @@ describe("Settings nav groups (§4)", () => {
   });
 
   it("count strip reflects the live groups", () => {
-    expect(settingsCounts()).toBe("4 workspace · 2 account");
+    expect(settingsCounts()).toBe("7 workspace · 2 account");
   });
 
   it("group labels carry the name when known", () => {
@@ -38,7 +41,7 @@ describe("Settings nav groups (§4)", () => {
     expect(new Set(keys).size).toBe(keys.length);
   });
 
-  it("Danger is the only UI-hidden admin item (server enforces the rest)", () => {
-    expect(SETTINGS_NAV.filter((i) => i.adminOnly).map((i) => i.key)).toEqual(["danger"]);
+  it("every row carries list copy for the Collection", () => {
+    expect(SETTINGS_NAV.every((i) => i.description.length > 0)).toBe(true);
   });
 });

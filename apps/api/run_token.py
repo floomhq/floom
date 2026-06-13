@@ -36,7 +36,7 @@ import json
 import os
 import secrets as _pysecrets
 import time
-from typing import Any
+from typing import Any, Callable
 
 MAX_TTL_SECONDS = 14_400  # 4 hours
 
@@ -104,10 +104,84 @@ WORKER_CALL_TOKEN_PREFIX = "wrt_"
 MAX_CALL_DEPTH = 3
 
 
+class WorkerCallDepthExceeded(ValueError):
+    """#994: a worker-call token cannot be minted at or beyond MAX_CALL_DEPTH."""
+
+
+def parse_call_depth(trigger_source: str | None) -> int:
+    """#994: extract the worker-call depth a run is at from its trigger_source.
+
+    Both call paths encode depth in trigger_source: agent ``invoke_worker:depth=N``
+    and script/token ``worker_call:depth=N``. A run with no marker is the root
+    (depth 0).
+    """
+    ts = str(trigger_source or "")
+    for marker in ("worker_call:depth=", "invoke_worker:depth="):
+        if ts.startswith(marker):
+            try:
+                return max(0, int(ts.split("=", 1)[1]))
+            except (ValueError, IndexError):
+                return 0
+    return 0
+
+
+class WorkerCallSecretMissing(ValueError):
+    """Raised when no real signing secret is configured for worker-call tokens.
+
+    #972: the old code fell back to a public constant ("dev-secret-not-set"),
+    so any deployment without FLOOM_SECRET signed worker-call tokens with a
+    key an attacker already knows — allowing forged wrt_ tokens and arbitrary
+    call_worker() invocations. Fail closed instead of signing/validating with
+    a guessable key.
+
+    Subclasses ValueError so existing `except ValueError` validation handlers
+    reject the token (401) rather than 500 on a misconfigured server, while
+    the issue path surfaces it as a clear run failure.
+    """
+
+
+# #992: the worker-call signing secret is decoupled from FLOOM_SECRET so a
+# multi-tenant host (managed-deployment) that deliberately strips FLOOM_SECRET (to
+# keep the x-floom-secret gate off; auth is Supabase JWT/PAT) can still sign
+# wrt_ tokens with a real secret. Resolution order:
+#   1. explicit `secret` arg
+#   2. registered resolver (host sets it at startup; mirrors
+#      contexts.set_context_scope_resolver)
+#   3. WORKEROS_WORKER_CALL_SECRET env var
+#   4. FLOOM_SECRET env var (OSS default)
+#   5. none -> raise (preserves #972 fail-closed: never sign with a constant)
+_worker_call_secret_resolver: "Callable[[], str | None] | None" = None
+
+
+def set_worker_call_secret_resolver(resolver: "Callable[[], str | None] | None") -> None:
+    """Register a callable returning the worker-call signing secret, or None.
+
+    The host (e.g. managed-deployment) registers this at startup so wrt_ tokens are
+    signed with a real secret derived from its own config, without re-enabling
+    the FLOOM_SECRET / x-floom-secret gate. Pass None to clear (OSS mode).
+    """
+    global _worker_call_secret_resolver
+    _worker_call_secret_resolver = resolver
+
+
 def _worker_call_signing_key(secret: str | None = None) -> str:
-    if secret is None:
-        secret = os.environ.get("FLOOM_SECRET")
-    return (secret or "dev-secret-not-set").strip()
+    candidate = secret
+    if candidate is None and _worker_call_secret_resolver is not None:
+        try:
+            candidate = _worker_call_secret_resolver()
+        except Exception:
+            candidate = None
+    if candidate is None:
+        candidate = os.environ.get("WORKEROS_WORKER_CALL_SECRET") or os.environ.get("FLOOM_SECRET")
+    key = (candidate or "").strip()
+    if not key:
+        raise WorkerCallSecretMissing(
+            "No worker-call signing secret is configured. Set "
+            "WORKEROS_WORKER_CALL_SECRET (or FLOOM_SECRET), or register a "
+            "resolver via set_worker_call_secret_resolver(); worker-call tokens "
+            "are never signed with a public constant (#972)."
+        )
+    return key
 
 
 def _wrt_b64url_encode(data: bytes) -> str:
@@ -129,6 +203,14 @@ def issue_worker_call_token(
     secret: str | None = None,
 ) -> str:
     """Issue a signed token that allows a run to invoke specific child workers."""
+    # #994: cap worker-to-worker recursion. A token at or beyond MAX_CALL_DEPTH
+    # may not be minted, so a chain of script workers calling each other
+    # (call_worker) cannot recurse without bound.
+    if depth > MAX_CALL_DEPTH:
+        raise WorkerCallDepthExceeded(
+            f"Worker call depth {depth} exceeds the cap ({MAX_CALL_DEPTH}); "
+            "cannot issue a worker-call token this deep."
+        )
     payload: dict[str, Any] = {
         "user_id": user_id,
         "parent_run_id": parent_run_id,

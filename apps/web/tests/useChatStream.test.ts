@@ -60,6 +60,31 @@ describe("Emily chat tool cards", () => {
     expect(completedCard?.title).toBe("Listed your workers");
   });
 
+  it("keeps generic tool inputs separate from outputs after completion", () => {
+    const call: ChatSSEEvent = {
+      type: "tool-call",
+      callId: "call_context",
+      toolName: "contexts__read",
+      args: { path: "customer-notes.md" },
+      args_preview: { path: "customer-notes.md" },
+    };
+    const result: ChatSSEEvent = {
+      type: "tool-result",
+      callId: "call_context",
+      toolName: "contexts__read",
+      isError: false,
+      result: { ok: true, content: "ACME renewal notes" },
+    };
+
+    const messages = reduceSSEEvent(reduceSSEEvent([], call, "assistant_1"), result, "assistant_1");
+    const completedCard = toolCards(messages)[0]?.card;
+
+    expect(completedCard?.kind).toBe("generic");
+    if (completedCard?.kind !== "generic") throw new Error("expected generic card");
+    expect(completedCard.args).toEqual({ path: "customer-notes.md" });
+    expect(completedCard.result).toEqual({ ok: true, content: "ACME renewal notes" });
+  });
+
   it("normalizes dotted, underscored, and spaced tool names before labeling", () => {
     expect(normalizeToolName("approvals__list_pending")).toBe("approvals.list_pending");
     expect(normalizeToolName("approvals.list pending")).toBe("approvals.list_pending");
@@ -182,7 +207,7 @@ describe("Emily chat tool cards", () => {
     if (card?.kind !== "run") throw new Error("expected run card");
     expect(card.toolName).toBe("runs.get");
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
-    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs/run_123?tab=logs");
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_123&tab=Trace");
   });
 
   it("recovers View run from the live nested runs.get result shape", () => {
@@ -233,11 +258,101 @@ describe("Emily chat tool cards", () => {
         id: "open_run",
         label: "View run",
         method: "GET",
-        href: "/runs/run_live_123?tab=logs",
+        href: "/runs?sel=run_live_123&tab=Trace",
       },
     ]);
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
-    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs/run_live_123?tab=logs");
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_live_123&tab=Trace");
+  });
+
+  it("keeps run auto-open href stable after finish reconciliation", () => {
+    const call: ChatSSEEvent = {
+      type: "tool-call",
+      callId: "call_live_run_details",
+      toolName: "runs__get",
+      args: { run_id: "run_live_456" },
+      args_preview: { run_id: "run_live_456" },
+      card: {
+        id: "card_call_live_run_details",
+        kind: "run",
+        title: "runs.get",
+        status: "starting",
+      },
+    };
+    const result: ChatSSEEvent = {
+      type: "tool-result",
+      callId: "call_live_run_details",
+      toolName: "runs__get",
+      isError: false,
+      result: { ok: true, run: { id: "run_live_456", worker_id: "research_brief" } },
+      card: {
+        id: "card_call_live_run_details",
+        kind: "run",
+        title: "Opened run details",
+        status: "running",
+      },
+    };
+    const finish: ChatSSEEvent = {
+      type: "finish",
+      conversation_id: "conv_1",
+      cards: [
+        {
+          id: "card_call_live_run_details",
+          callId: "call_live_run_details",
+          kind: "run",
+          status: "completed",
+        },
+      ],
+    };
+
+    const messages = [call, result, finish].reduce(
+      (acc, event) => reduceSSEEvent(acc, event, "assistant_1"),
+      [] as ChatMessage[]
+    );
+    const card = toolCards(messages)[0]?.card;
+
+    if (card?.kind !== "run") throw new Error("expected run card");
+    expect(card.status).toBe("completed");
+    expect(shouldAutoOpenRunDetails(card)).toBe(true);
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_live_456&tab=Trace");
+  });
+
+  it("preserves run stream handles while reconciling worker-run card progress", () => {
+    const call: ChatSSEEvent = {
+      type: "tool-call",
+      callId: "call_worker_run",
+      toolName: "workers__run",
+      args: { id: "research_brief" },
+      args_preview: { id: "research_brief" },
+    };
+    const result: ChatSSEEvent = {
+      type: "tool-result",
+      callId: "call_worker_run",
+      toolName: "workers__run",
+      isError: false,
+      result: { ok: true, run_id: "run_stream_1" },
+      card: { kind: "run", status: "running" },
+      resource: { kind: "run", run_id: "run_stream_1", worker_id: "research_brief" },
+      streams: { events: "/runs/run_stream_1/events", parts: "/runs/run_stream_1/stream" },
+    };
+    const progress: ChatSSEEvent = {
+      type: "tool-progress",
+      callId: "call_worker_run",
+      card_id: "call_worker_run",
+      status: "running",
+      stage: "executing",
+    };
+
+    const messages = [call, result, progress].reduce(
+      (acc, event) => reduceSSEEvent(acc, event, "assistant_1"),
+      [] as ChatMessage[]
+    );
+    const card = toolCards(messages)[0]?.card;
+
+    if (card?.kind !== "run") throw new Error("expected run card");
+    expect(card.streams?.parts).toBe("/runs/run_stream_1/stream");
+    expect(card.status).toBe("running");
+    expect(shouldAutoOpenRunDetails(card)).toBe(false);
   });
 
   it("does not auto-open run cards from worker runs", () => {

@@ -496,6 +496,23 @@ def _dispatch_terminal_run_alerts(
         )
         if status != RunStatus.FAILED.value:
             return
+        # #794: workspace 'failure_email_enabled' toggle — email the workspace's
+        # configured address on ANY run failure (distinct from the per-worker
+        # email_to alert above). Best-effort; skipped when no recipient/RESEND.
+        try:
+            if _workspace_toggle("failure_email_enabled", env_var="WORKEROS_FAILURE_EMAIL", default=False):
+                recipients = _workspace_failure_email_recipients()
+                if recipients:
+                    _send_email_notification(
+                        to_addrs=recipients,
+                        worker_name=worker_id,
+                        run_id=run_id,
+                        worker_id=worker_id,
+                        status=status,
+                        error=error,
+                    )
+        except Exception:
+            logger.debug("workspace failure-email dispatch failed for run %s", run_id, exc_info=True)
         try:
             from alerting import alert_worker_failure_if_needed
 
@@ -1205,22 +1222,15 @@ def _repair_run_py(
 
     Returns the corrected file, or None if no key / call failed / no change.
     """
-    # Codegen prefers the worker owner's own key, then the platform key
-    # (PLATFORM_OPENAI_API_KEY, falling back to OPENAI_API_KEY for back-compat).
-    api_key = (
-        secrets.get("OPENAI_API_KEY")
-        or os.environ.get("PLATFORM_OPENAI_API_KEY")
-        or os.environ.get("OPENAI_API_KEY")
-    )
-    if not api_key:
-        log_fn("Smoke repair skipped: no OPENAI_API_KEY available", level="warning")
+    import llm
+    from codegen_model import chat_completion_codegen, codegen_model
+
+    # Repair uses the platform-configured codegen model and provider credentials from
+    # the environment (OpenAI key, or AWS creds for Bedrock), resolved by the seam.
+    if not llm.provider_credentials_present(codegen_model()):
+        log_fn("Smoke repair skipped: no LLM provider credentials available", level="warning")
         return None
     try:
-        from openai import OpenAI
-
-        from codegen_model import chat_completion_codegen
-
-        client = OpenAI(api_key=api_key)
         user_content = (
             "This run.py failed its first run with:\n"
             f"{failure[:1500]}\n\n"
@@ -1238,7 +1248,6 @@ def _repair_run_py(
             "of them, not just the first."
         )
         resp = chat_completion_codegen(
-            client,
             messages=[
                 {"role": "system", "content": _SMOKE_REPAIR_SYSTEM_PROMPT},
                 {"role": "user", "content": user_content},
@@ -1906,6 +1915,78 @@ def _snapshot_worker_bundle(run_id: str, worker_id: str, config: Optional[Worker
         logger.warning("Run %s bundle snapshot failed for worker %s: %s", run_id, worker_id, exc)
         return None
 
+class SpendCapExceeded(ValueError):
+    """#793: the worker's month-to-date cost has reached its monthly spend cap."""
+
+
+def _persist_run_cost(run_id: str) -> None:
+    """Compute + store total_tokens/total_cost_usd for a terminal run (#793/#795)."""
+    from db import get_db
+    from cost import estimate_cost_usd, total_tokens_from_transcript
+
+    tokens = total_tokens_from_transcript(run_id)
+    cost = estimate_cost_usd(tokens)
+    with get_db() as conn:
+        conn.execute(
+            "UPDATE runs SET total_tokens = ?, total_cost_usd = ? WHERE id = ?",
+            (tokens, cost, run_id),
+        )
+
+
+def _worker_month_to_date_cost_usd(worker_id: str) -> float:
+    """Sum of total_cost_usd for this worker's runs in the current UTC month."""
+    from db import get_db
+
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(total_cost_usd), 0.0) AS spent FROM runs "
+                "WHERE worker_id = ? "
+                "AND created_at >= strftime('%Y-%m-01T00:00:00+00:00', 'now')",
+                (worker_id,),
+            ).fetchone()
+        return float(row["spent"] or 0.0) if row else 0.0
+    except Exception:
+        logger.debug("month-to-date cost lookup failed for %s", worker_id, exc_info=True)
+        return 0.0
+
+
+def _spend_cap_for_config(config: Any) -> Optional[float]:
+    try:
+        cap = config.runtime.limits.max_monthly_cost_usd if config and config.runtime and config.runtime.limits else None
+    except Exception:
+        return None
+    return float(cap) if cap is not None else None
+
+
+def _workspace_monthly_spend_cap_usd() -> Optional[float]:
+    """#797: the workspace-level monthly spend cap from settings, or None."""
+    raw = (_workspace_setting("monthly_spend_cap_usd") or "").strip()
+    if not raw:
+        return None
+    try:
+        cap = float(raw)
+        return cap if cap >= 0 else None
+    except ValueError:
+        return None
+
+
+def _workspace_month_to_date_cost_usd() -> float:
+    """#797: sum of total_cost_usd across ALL runs in the current UTC month."""
+    from db import get_db
+
+    try:
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COALESCE(SUM(total_cost_usd), 0.0) AS spent FROM runs "
+                "WHERE created_at >= strftime('%Y-%m-01T00:00:00+00:00', 'now')"
+            ).fetchone()
+        return float(row["spent"] or 0.0) if row else 0.0
+    except Exception:
+        logger.debug("workspace month-to-date cost lookup failed", exc_info=True)
+        return 0.0
+
+
 def create_run(
     worker_id: str,
     inputs: Dict[str, Any],
@@ -1924,6 +2005,25 @@ def create_run(
     if not owner_id:
         raise ValueError(f"Worker {worker_id} owner not found")
     config = loaded[1] if loaded else None
+    # #793: refuse dispatch when the worker has already spent its monthly cap.
+    _cap = _spend_cap_for_config(config)
+    if _cap is not None:
+        _spent = _worker_month_to_date_cost_usd(worker_id)
+        if _spent >= _cap:
+            raise SpendCapExceeded(
+                f"Worker {worker_id} has reached its monthly spend cap "
+                f"(${_spent:.2f} of ${_cap:.2f}). Raise the cap or wait for next month."
+            )
+    # #797: workspace-level monthly spend cap — aggregate ALL workers' month-to-
+    # date cost against the workspace budget.
+    _ws_cap = _workspace_monthly_spend_cap_usd()
+    if _ws_cap is not None:
+        _ws_spent = _workspace_month_to_date_cost_usd()
+        if _ws_spent >= _ws_cap:
+            raise SpendCapExceeded(
+                f"Workspace has reached its monthly spend cap "
+                f"(${_ws_spent:.2f} of ${_ws_cap:.2f}). Raise it in Settings or wait for next month."
+            )
     instance = loaded[2] if loaded else None
     if instance and not instance.get("enabled", True):
         raise ValueError(f"Worker {worker_id} is disabled")
@@ -2026,6 +2126,13 @@ def update_run_status(
     )
 
     if worker_id and status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
+        # #793/#795: persist per-run cost at terminal status (best-effort) so
+        # the monthly-spend aggregate and approval cost-so-far don't have to
+        # re-read transcripts later. Never let cost accounting break a run.
+        try:
+            _persist_run_cost(run_id)
+        except Exception:
+            logger.debug("run cost persistence failed for %s", run_id, exc_info=True)
         _dispatch_terminal_run_alerts(
             run_id=run_id,
             worker_id=worker_id,
@@ -2140,13 +2247,24 @@ def _candidate_output_path(run_id: str, output: Any, outputs: Dict[str, Any], ar
     artifact = _output_artifact(output, artifacts)
     if artifact and artifact.get("path"):
         return Path(str(artifact["path"]))
-    root = ARTIFACTS_DIR / run_id
+    # #913: declared/echoed output paths are author-controlled. `root / path`
+    # with an absolute path DISCARDS root entirely (pathlib semantics), so a
+    # manifest declaring `path: /etc/passwd` pointed the validator at the host
+    # filesystem and leaked file contents through smoke-test mismatch errors.
+    # Confine both to the run's artifact directory; out-of-bounds paths are
+    # treated as "output missing", never read.
     declared_path = getattr(output, "path", None)
     if declared_path:
-        return (root / declared_path).resolve()
+        try:
+            return _safe_artifact_path(run_id, str(declared_path))
+        except ValueError:
+            return None
     value = outputs.get(getattr(output, "name", ""))
     if isinstance(value, str) and _looks_like_relative_path(value):
-        return (root / value.strip()).resolve()
+        try:
+            return _safe_artifact_path(run_id, value.strip())
+        except ValueError:
+            return None
     return None
 
 
@@ -2707,6 +2825,13 @@ def _workspace_toggle(key: str, *, env_var: str, default: bool) -> bool:
     if raw is not None:
         return raw.strip().lower() not in _FALSEY
     return default
+
+
+def _workspace_failure_email_recipients() -> list[str]:
+    """#794: where workspace failure emails go — the `failure_email_to`
+    workspace setting (comma-separated), else NOTIFY_EMAIL / WORKEROS_ALERT_EMAIL."""
+    raw = _workspace_setting("failure_email_to") or os.environ.get("NOTIFY_EMAIL") or os.environ.get("WORKEROS_ALERT_EMAIL") or ""
+    return [addr.strip() for addr in raw.split(",") if addr.strip()]
 
 
 def _auto_pause_on_consecutive_failures_enabled() -> bool:
@@ -3545,6 +3670,16 @@ def execute_run(
             preview_type = decision_required.get("preview_type") or decision_required.get("type")
             preview_payload = decision_required.get("preview_payload")
             preview_payload_json = json.dumps(preview_payload) if isinstance(preview_payload, (dict, list)) else None
+            # #795: snapshot the run's cost-so-far onto the approval so the
+            # Run tab renders "1.2k tok · $0.01" without a separate run fetch.
+            # Best-effort estimate from whatever the transcript has at pause.
+            try:
+                from cost import estimate_cost_usd, total_tokens_from_transcript
+
+                _tokens_so_far = total_tokens_from_transcript(run_id)
+                _cost_so_far = estimate_cost_usd(_tokens_so_far)
+            except Exception:
+                _tokens_so_far, _cost_so_far = None, None
             try:
                 repos_obj.approvals.create(
                     owner_id=owner_id,
@@ -3559,6 +3694,8 @@ def execute_run(
                     preview_type=(str(preview_type) if preview_type else None),
                     preview_payload_json=preview_payload_json,
                     decision_input_json=decision_input_json,
+                    tokens_so_far=_tokens_so_far,
+                    cost_usd_so_far=_cost_so_far,
                 )
             except Exception as exc:
                 logger.error("Failed to create approval row for run %s: %s", run_id, exc)

@@ -354,6 +354,50 @@ def _collect_failure_streams(session: requests.Session, api_base: str, secret: s
     return [(worker_id, counts[worker_id], totals[worker_id]) for worker_id in counts]
 
 
+_SMOKE_REPORT_RE = re.compile(r"SMOKE-RESULTS-(\d{4}-\d{2}-\d{2})\.md$")
+
+
+def _previous_report_path(reports_dir: Path, report_date: str) -> Path | None:
+    """Most recent SMOKE-RESULTS-*.md strictly older than report_date."""
+    candidates: list[tuple[str, Path]] = []
+    for path in reports_dir.glob("SMOKE-RESULTS-*.md"):
+        match = _SMOKE_REPORT_RE.search(path.name)
+        if match and match.group(1) < report_date:
+            candidates.append((match.group(1), path))
+    if not candidates:
+        return None
+    return max(candidates)[1]
+
+
+def _parse_report_pass_states(report_text: str) -> dict[str, str]:
+    """worker_id -> 'pass'|'fail' from a report's smoke pass/fail table."""
+    states: dict[str, str] = {}
+    in_table = False
+    for line in report_text.splitlines():
+        if line.startswith("## "):
+            in_table = line.strip() == "## Active Workers — Smoke Pass/Fail"
+            continue
+        if not in_table or not line.startswith("|"):
+            continue
+        cells = [cell.strip() for cell in line.strip("|").split("|")]
+        if len(cells) < 3 or cells[0] in {"Worker", ""} or set(cells[0]) <= {"-"}:
+            continue
+        states[cells[0]] = "pass" if "PASS" in cells[2] else "fail"
+    return states
+
+
+def _find_regressions(
+    previous_states: dict[str, str],
+    smoke_results: list[WorkerSmokeResult],
+) -> list[str]:
+    """Workers that passed in the previous report and fail now (#614)."""
+    return sorted(
+        result.worker_id
+        for result in smoke_results
+        if result.pass_state != "pass" and previous_states.get(result.worker_id) == "pass"
+    )
+
+
 def _format_table(headers: list[str], rows: list[list[str]]) -> str:
     widths = [len(header) for header in headers]
     for row in rows:
@@ -376,6 +420,8 @@ def _render_report(
     alerts: list[dict[str, Any]],
     failures: list[tuple[str, int, int]],
     smoke_results: list[WorkerSmokeResult],
+    regressions: list[str] | None = None,
+    previous_report_name: str | None = None,
 ) -> str:
     runs_7d = int(metrics.get("runs_7d") or 0)
     runs_failed_7d = int(metrics.get("runs_failed_7d") or 0)
@@ -463,6 +509,23 @@ def _render_report(
                 ],
             ),
             "",
+        ]
+    )
+
+    if regressions:
+        lines.extend(
+            [
+                f"## ⚠️ Regressions vs {previous_report_name or 'previous report'}",
+                "",
+                "Workers that passed in the previous report and FAIL now:",
+                "",
+            ]
+            + [f"- `{worker_id}`" for worker_id in regressions]
+            + [""]
+        )
+
+    lines.extend(
+        [
             "## Summary",
             "",
         ]
@@ -550,6 +613,18 @@ def main(argv: list[str] | None = None) -> int:
     failures = _collect_failure_streams(session, args.api, secret)
 
     report_date = datetime.now().date().isoformat()
+    output_path = Path(args.output) if args.output else REPO_ROOT / "docs" / "workers" / f"SMOKE-RESULTS-{report_date}.md"
+
+    # #614: regression = passed in the most recent prior report, fails now.
+    previous_path = _previous_report_path(output_path.parent, report_date)
+    previous_states: dict[str, str] = {}
+    if previous_path is not None:
+        try:
+            previous_states = _parse_report_pass_states(previous_path.read_text(encoding="utf-8"))
+        except Exception:
+            previous_states = {}
+    regressions = _find_regressions(previous_states, smoke_results)
+
     report = _render_report(
         report_date=report_date,
         api_base=args.api,
@@ -557,12 +632,16 @@ def main(argv: list[str] | None = None) -> int:
         alerts=alerts,
         failures=failures,
         smoke_results=smoke_results,
+        regressions=regressions,
+        previous_report_name=previous_path.name if previous_path else None,
     )
-    output_path = Path(args.output) if args.output else REPO_ROOT / "docs" / "workers" / f"SMOKE-RESULTS-{report_date}.md"
     output_path.parent.mkdir(parents=True, exist_ok=True)
     output_path.write_text(report, encoding="utf-8")
     print(str(output_path))
 
+    if regressions:
+        print(f"REGRESSIONS ({len(regressions)}): {', '.join(regressions)}")
+        return 2
     failures_present = any(result.pass_state != "pass" for result in smoke_results)
     if failures_present:
         return 1

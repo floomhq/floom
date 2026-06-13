@@ -74,10 +74,98 @@ def context_scope_for_user(user_id: str | None) -> str | None:
         return None
     if not raw:
         return None
+    raw = effective_context_user_id(raw)
     if _CONTEXT_SCOPE_NAME_RE.fullmatch(raw):
         return raw
     digest = hashlib.sha256(raw.encode("utf-8")).hexdigest()[:32]
     return f"user-{digest}"
+
+
+def _bootstrap_context_user_id() -> str:
+    configured = (os.environ.get("WORKEROS_USER_ID") or "").strip()
+    return configured or "federico"
+
+
+def _scope_has_context_dirs(scope: str) -> bool:
+    if not _CONTEXT_SCOPE_NAME_RE.fullmatch(scope):
+        return False
+    root = CONTEXTS_DIR / scope
+    if not root.is_dir():
+        return False
+    try:
+        return any(
+            child.is_dir() and not child.is_symlink() and not child.name.startswith(".")
+            for child in root.iterdir()
+        )
+    except OSError:
+        return False
+
+
+def _can_use_bootstrap_context_scope(user_id: str, bootstrap_id: str) -> bool:
+    """True when a real local admin owns the bootstrap/default context scope.
+
+    Multi-member setup can create a UUID admin while pre-existing Brain packs
+    remain under the bootstrap user scope (usually ``federico``). This check is
+    intentionally narrow: it never applies in cloud mode, never applies to
+    non-default derived workspace IDs, and requires either a single configured
+    account or an active owner row for ``local-default``.
+    """
+    deploy_mode = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy_mode != "local":
+        return False
+    if os.environ.get("WORKEROS_ENABLE_USER_HEADER_SCOPE") != "1":
+        return False
+    if not user_id or user_id == bootstrap_id:
+        return False
+    if re.search(r"__ws_[a-f0-9]{14}$", user_id):
+        return False
+    if _scope_has_context_dirs(user_id):
+        return False
+    if not _scope_has_context_dirs(bootstrap_id):
+        return False
+    try:
+        from db import get_db
+
+        with get_db() as conn:
+            user = conn.execute(
+                "SELECT 1 FROM users WHERE id = ? AND disabled = 0 LIMIT 1",
+                (user_id,),
+            ).fetchone()
+            if user is None:
+                return False
+            bootstrap_user = conn.execute(
+                "SELECT 1 FROM users WHERE id = ? AND disabled = 0 LIMIT 1",
+                (bootstrap_id,),
+            ).fetchone()
+            if bootstrap_user is not None:
+                return False
+            owner = conn.execute(
+                """
+                SELECT 1 FROM workspace_members
+                WHERE workspace_id = 'local-default'
+                  AND user_id = ?
+                  AND role = 'owner'
+                  AND status = 'active'
+                LIMIT 1
+                """,
+                (user_id,),
+            ).fetchone()
+            if owner is not None:
+                return True
+            count = conn.execute("SELECT COUNT(*) AS count FROM users").fetchone()
+            return int(count["count"] if count is not None else 0) == 1
+    except Exception:
+        return False
+
+
+def effective_context_user_id(user_id: str | None) -> str:
+    raw = str(user_id or "").strip()
+    if not raw:
+        return raw
+    bootstrap_id = _bootstrap_context_user_id()
+    if _can_use_bootstrap_context_scope(raw, bootstrap_id):
+        return bootstrap_id
+    return raw
 
 
 @contextmanager

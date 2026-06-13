@@ -138,14 +138,17 @@ def _public_stock_ids_block() -> str:
     return "\n".join(contents)
 
 
-def test_590_kugelaudio_workers_are_public():
-    """kugelaudio workers have is_example:true in their worker.yml and must
-    be in PUBLIC_STOCK_WORKER_IDS."""
+def test_590_demo_workers_are_public():
+    """Genuine demo workers remain in PUBLIC_STOCK_WORKER_IDS.
+
+    #872 later removed tenant/private workers such as kugelaudio from the public
+    stock bypass, so this legacy regression now locks the current safe demo set.
+    """
     block = _public_stock_ids_block()
     assert block, "PUBLIC_STOCK_WORKER_IDS not found in main.py"
-    for worker in ("kugelaudio-bug-intake", "kugelaudio-meeting-pipeline"):
+    for worker in ("csv_enricher", "github-digest", "node-smoke-test", "research_brief"):
         assert worker in block, (
-            f"{worker!r} has is_example:true in its worker.yml but is missing "
+            f"{worker!r} is a genuine demo worker but is missing "
             "from PUBLIC_STOCK_WORKER_IDS"
         )
 

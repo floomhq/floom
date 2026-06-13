@@ -78,6 +78,7 @@ def test_agent_driver_fallback_uses_default_agent_model(monkeypatch, tmp_path):
     )
     from runner_sandbox import agent_driver
     from runner_sandbox.agent_driver import AgentDriver
+    import llm
 
     workers_dir = tmp_path / "workers"
     bundle_dir = workers_dir / "default-model-worker"
@@ -137,5 +138,5 @@ def test_agent_driver_fallback_uses_default_agent_model(monkeypatch, tmp_path):
     )
 
     assert result.status == "success"
-    assert captured["model"] == DEFAULT_WORKER_AGENT_MODEL
+    assert captured["model"] == llm.agent_model(DEFAULT_WORKER_AGENT_MODEL)
     assert captured["model"] != "gpt-5-mini"

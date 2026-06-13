@@ -116,8 +116,8 @@ def client_with_tmp_workers(tmp_path, monkeypatch):
     return tc, tmp_path
 
 
-@patch("openai.OpenAI")
-def test_dedupe_against_repo_row_not_on_filesystem(mock_openai_cls, client_with_tmp_workers):
+@patch("codegen_model.chat_completion_codegen")
+def test_dedupe_against_repo_row_not_on_filesystem(mock_codegen, client_with_tmp_workers):
     """An id that exists only as a repo/DB row (not on this request's
     filesystem) must be deduped, so draft-and-create returns a distinct id and
     does not 409."""
@@ -145,10 +145,8 @@ def test_dedupe_against_repo_row_not_on_filesystem(mock_openai_cls, client_with_
     assert repos.workers.get_any(worker_id="applicant-followup") is not None
     assert not (workers_dir / "applicant-followup").exists()
 
-    mock_client = MagicMock()
-    mock_openai_cls.return_value = mock_client
     # The LLM author returns the same colliding id.
-    mock_client.chat.completions.create.return_value = _mock_openai_response(
+    mock_codegen.return_value = _mock_openai_response(
         _llm_json_response(_valid_worker_yml())
     )
 

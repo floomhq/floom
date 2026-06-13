@@ -107,6 +107,46 @@ def test_attach_persists_to_worker_yml(client):
     assert "persisted" in names
 
 
+def test_attach_patches_contexts_without_full_yaml_rewrite(client):
+    c, wdir = client
+    worker_yml = wdir / "worker.yml"
+    worker_yml.write_text(
+        """\
+schema_version: "0.3"
+# keep-comment
+name: "ctx-worker"
+title: "Ctx Worker"
+description: "mounts packs"
+version: "0.1.0"
+trigger:
+  type: "manual"
+exec:
+  entry: "run.py"
+  runtime: "python311"
+  runner: "e2b"
+  command: "python run.py"
+  contexts:
+    - legacy-pack
+inputs: []
+connections: []
+contexts: []
+""",
+        encoding="utf-8",
+    )
+
+    resp = c.post("/workers/ctx-worker/contexts", json={"name": "kept", "writeable": True})
+    assert resp.status_code == 200, resp.text
+    text = worker_yml.read_text(encoding="utf-8")
+    assert "# keep-comment" in text
+    assert 'schema_version: "0.3"' in text
+    assert "  contexts:" not in text
+
+    import yaml
+    doc = yaml.safe_load(text)
+    assert doc["contexts"] == [{"name": "kept", "writeable": True}]
+    assert "contexts" not in doc["exec"]
+
+
 def test_detach_missing_context_404(client):
     c, _ = client
     assert c.delete("/workers/ctx-worker/contexts/never-attached").status_code == 404

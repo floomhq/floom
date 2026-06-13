@@ -15,12 +15,12 @@ let loginRedirectStarted = false;
 export function getActiveWorkspaceId(): string | null {
   if (typeof window === "undefined") return null;
   const value = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
-  return value && value !== "local-default" ? value : null;
+  return value || "local-default";
 }
 
 export function setActiveWorkspaceId(workspaceId: string | null) {
   if (typeof window === "undefined") return;
-  if (!workspaceId || workspaceId === "local-default") {
+  if (!workspaceId) {
     window.localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
     window.document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=; Path=/; Max-Age=0; SameSite=Lax`;
   } else {
@@ -672,7 +672,6 @@ export const api = {
     info: () => fetchJson<import("./types").SystemInfo>("/system/info"),
     platformConfig: () => fetchJson<import("./types").PlatformConfig>("/system/platform-config"),
     overview: () => fetchJson<import("./types").SystemOverview>("/system/overview"),
-    metrics: () => fetchJson<import("./types").SystemMetrics>("/system/metrics"),
     clearRuns: () => fetchJson<import("./types").ActionResponse>("/runs/clear", { method: "POST" }),
     workspaceAgent: () =>
       fetchJson<import("./types").WorkspaceAgentInfo>("/system/workspace-agent"),
@@ -802,7 +801,7 @@ export const api = {
         body: JSON.stringify({ return_to }),
       }),
     // Consume a Slack claim token (from ?slack_claim=) and bind the Slack
-    // sender identity to the authenticated Workeros user.
+    // sender identity to the authenticated Floom user.
     claim: (token: string) =>
       fetchJson<{ ok: boolean; slack_team_id: string; slack_user_id: string; user_id: string }>(
         "/slack/bindings/claim",
@@ -898,6 +897,20 @@ export const api = {
     // workspace as an importable template .zip (no secret values).
     shareLink: () =>
       fetchJson<import("./types").WorkspaceShareLink>("/workspace/share-link"),
+    // Workspace tokens (prefix wst_): API access to workspace-shared workers
+    // only — no private workers. Admin-only; value is returned once on create.
+    tokens: {
+      list: () => fetchJson<import("./types").WorkspaceToken[]>("/workspace/tokens"),
+      create: (name: string, expiresAt?: string) =>
+        fetchJson<import("./types").WorkspaceTokenCreate>("/workspace/tokens", {
+          method: "POST",
+          body: JSON.stringify({ name, expires_at: expiresAt }),
+        }),
+      revoke: (tokenId: string) =>
+        fetchJson<null>(`/workspace/tokens/${encodeURIComponent(tokenId)}`, {
+          method: "DELETE",
+        }),
+    },
   },
   // Workspace members (STEP 2). Engine-owned membership: the OSS engine is the
   // single-owner degenerate case (you = Owner); Cloud serves the same shape with

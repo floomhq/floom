@@ -2,6 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type {
@@ -15,9 +16,21 @@ import type {
 import { formatVersionRows } from "@/lib/workers/versions";
 import { WORKER_DETAIL_TABS, type WorkerDetailTab } from "@/lib/workers/tabs";
 import { formatDuration } from "@/lib/runs/format";
-import { Dialog, DialogContent, DialogHeader, DialogTitle } from "@/components/ui/dialog";
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog";
+import { Input } from "@/components/ui/input";
+import { Label } from "@/components/ui/label";
+import { Textarea } from "@/components/ui/textarea";
+import { Button } from "@/components/ui/button";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
-import { Collection, Avatar } from "@/components/collection";
+import { Collection } from "@/components/collection";
+import { FileText, Folder, Lock } from "lucide-react";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import { CodeBlock } from "@/components/file-viewer/code-block";
@@ -46,6 +59,12 @@ function rel(ts?: string | null): string {
   const h = Math.round(mins / 60);
   if (h < 24) return `${h}h ago`;
   return `${Math.round(h / 24)}d ago`;
+}
+
+function displayBrandCopy(value?: string | null): string {
+  const legacyAllCapsSuffix = new RegExp(`\\bWorker${"OS"}\\b`, "g");
+  const legacyTitle = new RegExp(`\\bWorker${"os"}\\b`, "g");
+  return (value ?? "").replace(legacyAllCapsSuffix, "Floom").replace(legacyTitle, "Floom");
 }
 
 // ---- detail (lazy WorkerDetail, cached so tab switches don't refetch) ----
@@ -94,6 +113,23 @@ async function persistYml(d: WorkerDetail, patchedYml: string): Promise<WorkerDe
     ? text.map((f) => (f.path === "worker.yml" ? { ...f, content: patchedYml } : f))
     : [{ path: "worker.yml", content: patchedYml }, ...text];
   return api.workers.updateFiles(d.id, files);
+}
+
+function patchTopLevelScalar(yaml: string, key: string, value: string): string {
+  const line = `${key}: ${JSON.stringify(value)}`;
+  const re = new RegExp(`^${key}:.*$`, "m");
+  if (re.test(yaml)) return yaml.replace(re, line);
+  return `${line}\n${yaml.trimStart()}`;
+}
+
+function coerceInputValue(value: string, type?: string): unknown {
+  const kind = (type ?? "string").toLowerCase();
+  if (kind === "number" || kind === "integer") {
+    const n = Number(value);
+    return Number.isFinite(n) ? n : value;
+  }
+  if (kind === "boolean") return value === "true";
+  return value;
 }
 
 function Loading() {
@@ -159,6 +195,7 @@ function OverviewTab({ w }: { w: WorkerSummary }) {
 }
 
 function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
+  const description = displayBrandCopy(w.long_description || w.description) || "No description yet.";
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <WorkerAsciiDiagram
@@ -169,13 +206,13 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
         inputs={(d?.config?.inputs ?? []).map((i) => ({ name: i.name, label: i.label, type: i.type }))}
         outputs={(d?.config?.outputs ?? []).map((o) => ({ name: o.name, label: o.label, type: o.type }))}
       />
-      <p style={{ margin: 0 }}>{w.long_description || w.description || "No description yet."}</p>
+      <p style={{ margin: 0 }}>{description}</p>
       {d?.use_cases && d.use_cases.length > 0 && (
         <div>
           <h4 style={h4}>Use cases</h4>
           <ul style={{ margin: 0, paddingLeft: 18, color: "var(--ink-soft)" }}>
             {d.use_cases.map((u, i) => (
-              <li key={i}>{u}</li>
+              <li key={i}>{displayBrandCopy(u)}</li>
             ))}
           </ul>
         </div>
@@ -183,7 +220,7 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
       {d?.how_it_works && (
         <div>
           <h4 style={h4}>How it works</h4>
-          <p style={{ margin: 0, color: "var(--ink-soft)" }}>{d.how_it_works}</p>
+          <p style={{ margin: 0, color: "var(--ink-soft)" }}>{displayBrandCopy(d.how_it_works)}</p>
         </div>
       )}
     </div>
@@ -320,8 +357,63 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
   );
 }
 
-// SPEC §11: Source is file SUB-TABS (worker.yml/SKILL.md/run.py/requirements.txt),
-// NOT a left-sidebar file list.
+function sourceFolder(path: string): string {
+  const parts = path.split("/").filter(Boolean);
+  if (parts.length <= 1) return "Root";
+  return parts.slice(0, -1).join("/");
+}
+
+function sourceFileName(path: string): string {
+  return path.split("/").filter(Boolean).pop() || path;
+}
+
+function SourceFileTree({
+  files,
+  activePath,
+  onSelect,
+}: {
+  files: ReturnType<typeof orderedSourceFiles>;
+  activePath: string;
+  onSelect: (path: string) => void;
+}) {
+  const groups = new Map<string, typeof files>();
+  for (const file of files) {
+    const folder = sourceFolder(file.path);
+    const list = groups.get(folder) ?? [];
+    list.push(file);
+    groups.set(folder, list);
+  }
+
+  return (
+    <div className="max-h-[min(58vh,520px)] overflow-y-auto rounded-[var(--radius-card)] bg-transparent p-0">
+      {Array.from(groups.entries()).map(([folder, group]) => (
+        <div key={folder} className="mb-2 last:mb-0">
+          <div className="flex min-w-0 items-center gap-1.5 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
+            <Folder className="size-3.5 shrink-0" />
+            <span className="truncate">{folder}</span>
+          </div>
+          <div className="space-y-0.5">
+            {group.map((file) => (
+              <button
+                key={file.path}
+                type="button"
+                className={`flex w-full min-w-0 items-center gap-2 rounded-[var(--radius-button)] px-2 py-1.5 text-left text-xs transition-colors ${
+                  file.path === activePath ? "bg-[var(--bg-2)] text-foreground" : "text-muted-foreground hover:bg-[var(--bg-2)] hover:text-foreground"
+                }`}
+                title={file.path}
+                onClick={() => onSelect(file.path)}
+              >
+                <FileText className="size-3.5 shrink-0" />
+                <span className="min-w-0 flex-1 truncate font-mono">{sourceFileName(file.path)}</span>
+              </button>
+            ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  );
+}
+
 function SourceTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
   const [active, setActive] = useState<string | null>(null);
@@ -330,20 +422,19 @@ function SourceTab({ w }: { w: WorkerSummary }) {
   if (ordered.length === 0) return <div style={muted}>No source files.</div>;
   const file = ordered.find((f) => f.path === active) ?? ordered[0];
   return (
-    <div>
-      <div style={{ display: "flex", gap: 2, marginBottom: 12, flexWrap: "wrap" }}>
-        {ordered.map((f) => (
-          <button
-            key={f.path}
-            type="button"
-            className={`c-dtab ${f.path === file.path ? "on" : ""}`}
-            onClick={() => setActive(f.path)}
-          >
-            {f.path}
-          </button>
-        ))}
+    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(180px,240px)_minmax(0,1fr)]">
+      <SourceFileTree files={ordered} activePath={file.path} onSelect={setActive} />
+      <div className="min-w-0">
+        <div className="mb-2 flex min-w-0 items-center justify-between gap-3">
+          <div className="min-w-0 truncate font-mono text-xs text-muted-foreground" title={file.path}>
+            {file.path}
+          </div>
+          <span className="shrink-0 text-[11px] text-muted-foreground">
+            {ordered.length} {ordered.length === 1 ? "file" : "files"}
+          </span>
+        </div>
+        <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} surface="flat" />
       </div>
-      <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} />
     </div>
   );
 }
@@ -466,20 +557,227 @@ const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }
   Config: ConfigTab,
 };
 
+function WorkerDetailActions({
+  w,
+  onUpdated,
+  canManage = false,
+}: {
+  w: WorkerSummary;
+  onUpdated: (w: WorkerSummary) => void;
+  canManage?: boolean;
+}) {
+  const [d, applyDetail] = useWorkerDetail(w.id);
+  const [runOpen, setRunOpen] = useState(false);
+  const [editOpen, setEditOpen] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [saving, setSaving] = useState(false);
+  const [runInputs, setRunInputs] = useState<Record<string, string>>({});
+  const [name, setName] = useState(w.name);
+  const [description, setDescription] = useState(w.description ?? "");
+
+  const inputs = d?.config?.inputs ?? w.inputs ?? [];
+
+  useEffect(() => {
+    if (!runOpen) return;
+    const next: Record<string, string> = {};
+    for (const input of inputs) {
+      const fallback = input.default == null ? "" : String(input.default);
+      next[input.name] = runInputs[input.name] ?? fallback;
+    }
+    setRunInputs(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [runOpen, d?.id]);
+
+  useEffect(() => {
+    if (!editOpen) return;
+    setName(d?.name ?? w.name);
+    setDescription(d?.description ?? w.description ?? "");
+  }, [editOpen, d?.description, d?.name, w.description, w.name]);
+
+  async function submitRun(event: React.FormEvent) {
+    event.preventDefault();
+    if (running) return;
+    setRunning(true);
+    try {
+      const payload: Record<string, unknown> = {};
+      for (const input of inputs) {
+        const raw = runInputs[input.name] ?? "";
+        if (raw !== "") payload[input.name] = coerceInputValue(raw, input.type);
+      }
+      const result = await api.workers.run(w.id, payload);
+      toast.success("Run queued");
+      setRunOpen(false);
+      if (result.run_id) window.location.href = `/runs?sel=${encodeURIComponent(result.run_id)}`;
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not run worker");
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function submitEdit(event: React.FormEvent) {
+    event.preventDefault();
+    if (!d || saving) return;
+    const nextName = name.trim();
+    const nextDescription = description.trim();
+    if (!nextName) {
+      toast.error("Worker name is required.");
+      return;
+    }
+    setSaving(true);
+    try {
+      let yaml = workerYml(d);
+      yaml = patchTopLevelScalar(yaml, "name", nextName);
+      yaml = patchTopLevelScalar(yaml, "description", nextDescription);
+      const updated = await persistYml(d, yaml);
+      applyDetail(updated);
+      onUpdated({ ...w, name: updated.name, description: updated.description });
+      toast.success("Worker updated");
+      setEditOpen(false);
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update worker");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <>
+      {(canManage || can("run", w)) && (
+        <button type="button" className="c-addbtn" style={pillBtn} onClick={() => setRunOpen(true)}>
+          Run
+        </button>
+      )}
+      {(canManage || can("edit", w)) && (
+        <button type="button" className="c-vpill" style={pillBtn} onClick={() => setEditOpen(true)}>
+          Edit
+        </button>
+      )}
+
+      <Dialog open={runOpen} onOpenChange={setRunOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <form onSubmit={(event) => void submitRun(event)} className="space-y-4">
+            <DialogHeader>
+              <DialogTitle>Run {w.name}</DialogTitle>
+              <DialogDescription>Provide inputs for this manual run.</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-3">
+              {inputs.length === 0 ? (
+                <p className="rounded-[var(--radius-card)] bg-[var(--bg-2)] p-3 text-sm text-muted-foreground">
+                  This worker has no required inputs.
+                </p>
+              ) : (
+                inputs.map((input) => (
+                  <div key={input.name} className="space-y-1.5">
+                    <Label htmlFor={`run-${w.id}-${input.name}`}>{input.label || input.name}</Label>
+                    <Input
+                      id={`run-${w.id}-${input.name}`}
+                      value={runInputs[input.name] ?? ""}
+                      placeholder={input.placeholder || input.description || input.name}
+                      onChange={(event) =>
+                        setRunInputs((prev) => ({ ...prev, [input.name]: event.target.value }))
+                      }
+                    />
+                    {input.description ? (
+                      <p className="text-xs text-muted-foreground">{input.description}</p>
+                    ) : null}
+                  </div>
+                ))
+              )}
+            </div>
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setRunOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={running}>
+                {running ? "Running..." : "Run"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="sm:max-w-lg">
+          <form onSubmit={(event) => void submitEdit(event)} className="space-y-4">
+            <DialogHeader>
+              <DialogTitle>Edit worker</DialogTitle>
+              <DialogDescription>Update the worker identity without leaving the split detail.</DialogDescription>
+            </DialogHeader>
+            {!d ? (
+              <Loading />
+            ) : (
+              <div className="space-y-3">
+                <div className="space-y-1.5">
+                  <Label htmlFor={`edit-${w.id}-name`}>Name</Label>
+                  <Input
+                    id={`edit-${w.id}-name`}
+                    value={name}
+                    onChange={(event) => setName(event.target.value)}
+                  />
+                </div>
+                <div className="space-y-1.5">
+                  <Label htmlFor={`edit-${w.id}-description`}>Description</Label>
+                  <Textarea
+                    id={`edit-${w.id}-description`}
+                    value={description}
+                    onChange={(event) => setDescription(event.target.value)}
+                    className="min-h-24"
+                  />
+                </div>
+              </div>
+            )}
+            <DialogFooter>
+              <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
+                Cancel
+              </Button>
+              <Button type="submit" disabled={!d || saving}>
+                {saving ? "Saving..." : "Save"}
+              </Button>
+            </DialogFooter>
+          </form>
+        </DialogContent>
+      </Dialog>
+    </>
+  );
+}
+
 export default function WorkersCollection({
   initialWorkers,
 }: {
   initialWorkers: WorkerSummary[];
 }) {
+  const router = useRouter();
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
+  const [loading, setLoading] = useState(initialWorkers.length === 0);
+  const [canManageWorkers, setCanManageWorkers] = useState(false);
 
   useEffect(() => {
+    let alive = true;
     setFavorites(getFavorites());
+    const meRequest = typeof api.me === "function" ? api.me() : Promise.resolve(null);
+    meRequest
+      .then((user) => {
+        if (alive) {
+          setCanManageWorkers(
+            user?.is_admin ?? (user?.role === "admin" || user?.role === "owner"),
+          );
+        }
+      })
+      .catch(() => {});
     api.workers
       .list({ include_archived: true })
-      .then((all) => setWorkers(all.filter((w) => !isSystemWorker(w))))
-      .catch(() => {});
+      .then((all) => {
+        if (alive) setWorkers(all.filter((w) => !isSystemWorker(w)));
+      })
+      .catch(() => {})
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
   }, []);
 
   const toggleStar = useCallback((id: string) => {
@@ -500,8 +798,9 @@ export default function WorkersCollection({
     title: "Workers",
     subtitle: "Your AI workers.",
     items: sortWorkersByRecentActivity(visible),
+    loading,
     idOf: (w) => w.id,
-    searchOf: (w) => `${w.name} ${w.description ?? ""} ${(w.tags ?? []).join(" ")}`,
+    searchOf: (w) => `${w.name} ${displayBrandCopy(w.description)} ${(w.tags ?? []).join(" ")}`,
     tagsOf: (w) =>
       workerTags(w, { starred: favorites.has(w.id), now }) as Partial<Record<TagFamilyKey, string[]>>,
     tags: {
@@ -531,54 +830,53 @@ export default function WorkersCollection({
     ],
     view: { default: "grid", grid: true },
     columns: {
-      template: "1.8fr 1fr 1fr 140px 40px",
+      template: "1.9fr 1fr 1fr 130px 40px", // #895: wireframe pageWorkers grid
       headers: ["Worker", "Tools", "Last run", "Status", ""],
     },
     row: (w) => ({
-      leading: <Avatar name={w.name} />,
-      primary: w.name,
-      secondary: w.description,
+      // V4 SPEC rule 3: no avatar for workers.
+      // Lock icon: inline after title at baseline (small + muted), never as leading.
+      leading: undefined,
+      primary: w.visibility === "private"
+        ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" /></span>
+        : w.name,
+      secondary: displayBrandCopy(w.description),
       cols: [
         <WorkerIconPills key="t" worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
         rel(w.recent_stats?.last_run_at),
       ],
       status: workerStatusPill(w),
-      menu: [{ label: "Open", onSelect: () => (window.location.href = `/workers/${w.id}`) }],
+      menu: [{ label: "Open", onSelect: () => (window.location.href = `/workers?sel=${encodeURIComponent(w.id)}`) }],
     }),
     card: (w) => ({
-      leading: <Avatar name={w.name} size={38} />,
-      name: w.name,
-      description: w.description,
+      // V4 SPEC rule 3: no avatar monogram. Lock is small+muted inline after name.
+      leading: undefined,
+      name: w.visibility === "private"
+        ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" /></span>
+        : w.name,
+      description: displayBrandCopy(w.description),
       status: workerStatusPill(w),
       toolLogos: <WorkerIconPills worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
       star: { on: favorites.has(w.id), onToggle: () => toggleStar(w.id) },
     }),
     detail: (w) => {
-      const editable = can("edit", w);
-      const viewOnly = isViewOnly(w);
+      const viewOnly = !canManageWorkers && isViewOnly(w);
       const actions = (
-        <>
-          {/* SPEC §4: Run opens the inputs flow on the full worker page (the
-              dedicated Run-with-inputs modal is §5). */}
-          {can("run", w) && (
-            <Link href={`/workers/${w.id}#run`} className="c-addbtn" style={pillBtn}>
-              Run
-            </Link>
-          )}
-          {editable && (
-            <Link href={`/workers/${w.id}?edit=1`} className="c-vpill" style={pillBtn}>
-              Edit
-            </Link>
-          )}
-          <Link href={`/workers/${w.id}`} className="c-vpill" style={pillBtn}>
-            Open full page →
-          </Link>
-        </>
+        <WorkerDetailActions
+          w={w}
+          canManage={canManageWorkers}
+          onUpdated={(updated) =>
+            setWorkers((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)))
+          }
+        />
       );
       return {
         header: {
-          leading: <Avatar name={w.name} size={42} />,
-          title: w.name,
+          // V4 SPEC rule 3: no avatar monogram in detail header. Lock inline after title.
+          leading: undefined,
+          title: w.visibility === "private"
+            ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3.5 text-[var(--muted-foreground)] translate-y-px" /></span>
+            : w.name,
           actions,
           sub: (
             <>
@@ -588,8 +886,8 @@ export default function WorkersCollection({
                   View only
                 </span>
               )}
-              <span className="c-dh-sub" style={{ margin: 0 }}>
-                {w.description}
+              <span className="c-dh-desc">
+                {displayBrandCopy(w.description)}
               </span>
             </>
           ),
@@ -602,10 +900,8 @@ export default function WorkersCollection({
         }),
       };
     },
-    add: {
-      label: "New worker",
-      onSelect: () => (window.location.href = "/workers/new"),
-    },
+    // Contextual toolbar action only; the global sidebar CTA was removed for v4.
+    add: { label: "Add", onSelect: () => router.push("/chat?mode=create") }, // #902: create = Emily flow
     states: {
       empty: { title: "No workers yet", help: "Create your first worker to get started." },
     },

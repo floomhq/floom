@@ -118,9 +118,9 @@ export function VersionDiffPanel({
   ).sort();
 
   return (
-    <div className="border-t border-[var(--border-default)] bg-[var(--bg-2)]">
+    <div className="[border-top:var(--bd-div)] bg-[var(--bg-2)]">
       {/* Toolbar */}
-      <div className="flex items-center justify-between gap-2 border-b border-[var(--border-default)] px-3 py-1.5">
+      <div className="flex items-center justify-between gap-2 [border-bottom:var(--bd-div)] px-3 py-1.5">
         {/* File tabs */}
         <div className="flex min-w-0 items-center gap-0.5 overflow-x-auto">
           {filePaths.map((p) => {
@@ -145,7 +145,7 @@ export function VersionDiffPanel({
         </div>
 
         {/* Diff / Full toggle */}
-        <div className="flex shrink-0 items-center rounded-md border border-[var(--border-default)] bg-[var(--bg-card)] p-0.5">
+        <div className="flex shrink-0 items-center rounded-md [border:var(--bd-card)] bg-[var(--bg-card)] p-0.5">
           <button
             onClick={() => setMode("diff")}
             className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors ${
@@ -182,7 +182,7 @@ export function VersionDiffPanel({
 
       {/* Footer */}
       {canRestore && (
-        <div className="flex items-center justify-between border-t border-[var(--border-default)] px-4 py-2.5">
+        <div className="flex items-center justify-between [border-top:var(--bd-div)] px-4 py-2.5">
           <p className="text-xs text-muted-foreground">
             Restoring replaces this file&apos;s current contents with commit {versionSha}.
           </p>

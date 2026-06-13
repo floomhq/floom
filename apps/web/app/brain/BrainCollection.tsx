@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Folder } from "lucide-react";
+import { Folder, Lock, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatRelative } from "@/lib/formatters";
 import type { ContextSummary, ContextDetail } from "@/lib/types";
@@ -129,7 +129,7 @@ function UsedByTab({ folder }: { folder: ContextSummary }) {
       {used.map((ref) => (
         <Link
           key={ref.worker_id}
-          href={`/workers/${encodeURIComponent(ref.worker_id)}`}
+          href={`/workers?sel=${encodeURIComponent(ref.worker_id)}`}
           className="c-lrow"
           style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
         >
@@ -147,10 +147,23 @@ function UsedByTab({ folder }: { folder: ContextSummary }) {
 
 export default function BrainCollection({ initialFolders }: { initialFolders: ContextSummary[] }) {
   const [folders, setFolders] = useState<ContextSummary[]>(initialFolders);
+  // Show a loading skeleton until the first fetch completes so we never flash
+  // "No folders yet" before the real data arrives (14a: empty-initial-state bug).
+  const [loading, setLoading] = useState(initialFolders.length === 0);
 
-  const refresh = () => api.contexts.list().then(setFolders).catch(() => {});
+  const refresh = async (initial = false) => {
+    try {
+      const data = await api.contexts.list();
+      setFolders(data);
+    } catch {
+      // leave existing state intact on error
+    } finally {
+      if (initial) setLoading(false);
+    }
+  };
+
   useEffect(() => {
-    void refresh();
+    void refresh(true);
   }, []);
 
   const remove = async (c: ContextSummary) => {
@@ -163,10 +176,22 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     }
   };
 
+  const folderTitle = (c: ContextSummary) => (
+    <span className="inline-flex min-w-0 items-baseline gap-1.5">
+      <span className="truncate">{c.name}</span>
+      {c.visibility === "workspace" ? (
+        <Users className="size-3 text-[var(--muted-foreground)] translate-y-px" aria-label="Shared" />
+      ) : (
+        <Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" aria-label="Private" />
+      )}
+    </span>
+  );
+
   const config: CollectionConfig<ContextSummary> = {
     title: "Brain",
     subtitle: "Reusable folders of files your workers can read before they act.",
     items: folders,
+    loading,
     idOf: (c) => c.name,
     searchOf: (c) => `${c.name} ${c.description ?? ""}`,
     tagsOf: (c) =>
@@ -190,8 +215,9 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     ],
     view: { default: "list", grid: true },
     columns: {
-      template: "1.8fr 1fr 1fr 120px 40px",
-      headers: ["Folder", "Files", "Updated", "Access", ""],
+      template: "1.8fr 1fr 1fr 40px",
+      headers: ["Folder", "Files", "Updated", ""],
+      statusColumn: false,
     },
     row: (c) => ({
       leading: (
@@ -199,10 +225,9 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
           <Folder size={16} />
         </span>
       ),
-      primary: c.name,
+      primary: folderTitle(c),
       secondary: c.description ?? undefined,
       cols: [`${c.file_count ?? 0} files`, formatRelative(c.updated_at ?? "")],
-      status: c.read_only ? { tone: "idle", label: "Read only" } : { tone: "ok", label: "Writeable" },
       menu: c.read_only ? undefined : [{ label: "Delete", onSelect: () => void remove(c), danger: true }],
     }),
     card: (c) => ({
@@ -227,19 +252,9 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
           <>
             <span className="c-vpill">{visibilityLabel(c.visibility)}</span>
             {c.read_only && <span className="c-vpill">Read only</span>}
-            <span className="c-dh-sub" style={{ margin: 0 }}>
-              {c.description ?? `${c.file_count ?? 0} files · ${formatBytes(c.total_size_bytes)}`}
-            </span>
+            <span className="c-vpill">{c.file_count ?? 0} files</span>
+            <span className="c-vpill">{formatBytes(c.total_size_bytes)}</span>
           </>
-        ),
-        actions: (
-          <Link
-            href={`/contexts?pack=${encodeURIComponent(c.name)}`}
-            className="c-vpill"
-            style={{ padding: "6px 11px" }}
-          >
-            Open full page →
-          </Link>
         ),
       },
       tabs: [

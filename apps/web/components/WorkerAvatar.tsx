@@ -3,8 +3,9 @@
 // colours overall, as a rule." Single mono treatment across all workers,
 // matching the floomhq/relay + skills-neo membership-mark pattern.
 //
-// Style: muted bg + foreground initials + thin line ring. One color
-// register, no per-worker variation. Stays circular (radius via --r-pill).
+// Style: muted bg + foreground initials. One color register, no per-worker
+// variation. Account/profile marks use the same rounded-square system shape as
+// workspace and worker marks.
 //
 // M36: avatarUrl prop added for Google OAuth picture. The UI is wired;
 // the backend MUST expose a `picture` (or `avatar_url`) field on the
@@ -45,7 +46,7 @@ export function WorkerAvatar({ seed, name, className, size = "size-9", avatarUrl
         alt={`${display} avatar`}
         referrerPolicy="no-referrer"
         className={cn(
-          "shrink-0 rounded-full object-cover border border-line",
+          "shrink-0 rounded-[var(--radius-button)] object-cover",
           size,
           className,
         )}
@@ -56,7 +57,7 @@ export function WorkerAvatar({ seed, name, className, size = "size-9", avatarUrl
   return (
     <div
       className={cn(
-        "shrink-0 rounded-full grid place-items-center font-medium tracking-tight bg-muted text-foreground border border-line",
+        "shrink-0 rounded-[var(--radius-button)] grid place-items-center font-medium tracking-tight bg-muted text-foreground",
         size,
         className,
       )}

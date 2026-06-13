@@ -142,13 +142,24 @@ def _seed_visibility_db(path: Path) -> None:
     c.commit(); c.close()
 
 
-def test_emily_list_admin_sees_all(tmp_path, monkeypatch):
+def test_emily_list_admin_defaults_to_own_and_shared_only(tmp_path, monkeypatch):
     db = tmp_path / "vis1.db"
     _seed_visibility_db(db)
     monkeypatch.setenv("WORKEROS_DB", str(db))
     monkeypatch.setenv("FLOOM_DB", str(db))
     import chat_service
     res = chat_service._tool_workers_list_all({}, "admin-1")
+    ids = {w["id"] for w in res["workers"]}
+    assert ids == {"w-admin", "w-shared"}, ids
+
+
+def test_emily_list_admin_can_explicitly_include_all_users(tmp_path, monkeypatch):
+    db = tmp_path / "vis1-all.db"
+    _seed_visibility_db(db)
+    monkeypatch.setenv("WORKEROS_DB", str(db))
+    monkeypatch.setenv("FLOOM_DB", str(db))
+    import chat_service
+    res = chat_service._tool_workers_list_all({"include_all_users": True}, "admin-1")
     ids = {w["id"] for w in res["workers"]}
     assert ids == {"w-admin", "w-member", "w-seed", "w-shared"}, ids
 
