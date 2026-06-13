@@ -53,13 +53,19 @@ def _as_role(main, **ctx):
     main.app.dependency_overrides[get_auth_context] = lambda: AuthContext(**ctx)
 
 
+def _settings_without_readonly(payload: dict) -> dict:
+    # #797 added a read-only `current_month_spend_usd` mirror to the settings
+    # map; this #794 round-trip only asserts the stored key/value pairs.
+    return {k: v for k, v in payload.items() if k != "current_month_spend_usd"}
+
+
 def test_admin_round_trip(app_main, client):
     _as_role(app_main, user_id="alice", role="admin")
-    assert client.get("/workspace/settings").json() == {}
+    assert _settings_without_readonly(client.get("/workspace/settings").json()) == {}
 
     assert client.put("/workspace/settings/approval_default", json={"value": "required"}).status_code == 204
     assert client.put("/workspace/settings/auto_pause", json={"value": "true"}).status_code == 204
-    assert client.get("/workspace/settings").json() == {
+    assert _settings_without_readonly(client.get("/workspace/settings").json()) == {
         "approval_default": "required",
         "auto_pause": "true",
     }
