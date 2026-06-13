@@ -188,7 +188,7 @@ class TestFolderValidator:
     def test_rejects_empty_path_segment(self):
         from pydantic import ValidationError
         with pytest.raises(ValidationError, match="non-empty"):
-            parse_worker_manifest(_minimal_contract(folder="Recruiting//NovaSearch"))
+            parse_worker_manifest(_minimal_contract(folder="Recruiting//TeamB"))
 
     def test_exactly_64_chars_is_accepted(self):
         m = parse_worker_manifest(_minimal_contract(folder="A" * 64))

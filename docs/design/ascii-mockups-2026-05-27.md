@@ -299,7 +299,7 @@ For failed runs, Output panel is replaced by Error panel (same shape, red):
 
 the operator 2026-05-27: "/workers don't agree, too noisy". Current page has 5 sections (Recent / Favourites / Folders / Tags / All) — cut to Drive-clone with one tab row.
 
-Looking at the live page screenshot (2026-05-26): Recent shows 3 cards with NO sparkline + NO stats (Recruiting/NovaSearch x2, Recruiting/Compliance). "Recent" should mean "ran recently" — workers with zero runs do not belong there.
+Looking at the live page screenshot (2026-05-26): Recent shows 3 cards with NO sparkline + NO stats (Recruiting/TeamB x2, Recruiting/Compliance). "Recent" should mean "ran recently" — workers with zero runs do not belong there.
 
 ```
 Fixes vs. live:

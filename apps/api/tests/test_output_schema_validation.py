@@ -159,7 +159,7 @@ def test_file_kind_output_is_skipped_by_schema_validator():
     / emptiness / JSON parseability), NOT by the scalar-type contract. A file
     output's value is a path string (or absent), so the json/csv type check must
     NOT apply — otherwise legitimate file-mode workers (the majority of
-    number-stats / median / sum-column / cv_writeup on prod) would falsely fail.
+    number-stats / median / sum-column / resume_helper on prod) would falsely fail.
     Regression guard for the behavior-change scan (15 false positives -> 0)."""
     cfg = _config([
         WorkerOutput(

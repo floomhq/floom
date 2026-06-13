@@ -18,7 +18,7 @@ Status: both workers PORTED, LOAD, RUN, and COMPLETE. Two pre-existing runtime q
 - Multi-LLM: anthropic, openai, google-genai (Gemini).
 - Export: weasyprint (PDF, no LaTeX), python-docx, raw LaTeX. weasyprint pulls native libs (cairo, pango, gdk-pixbuf).
 - Typical runtime: 10–20 minutes, 5–80 pages, 10k–20k words.
-- Hosted alternative: https://openpaper.dev.
+- Hosted alternative: https://example.com.
 - No SKILL.md upstream. CLI-shaped.
 
 **Inputs (upstream).** Topic, level, citation style, length, language, model choice. Most are CLI flags.

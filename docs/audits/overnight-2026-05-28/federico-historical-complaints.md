@@ -181,7 +181,7 @@ New worker | Define your worker and its interface. also needs update actually, t
 <task-notification> | <task-id>a9e4d0603e54f0947</task-id> | <tool-use-id>toolu_011LkSLDryLVZEfKNFbbG5yA</tool-use-id> | <output-file>/tmp/claude-0/-root/ab820815-591d-4b3e-9574-0470acf889a8/tasks/a9e4d0603e54f0947.output</output-file> | <status>completed</status> | <summary>Agen
 
 ## [2026-05-26T07:03:13]
-Overnight watchdog for workeros launch readiness. State-aware per [[feedback_watchdog_state_aware_bounded]]. |  | Two sonnet Agents in flight: | - ad586e7d209da20e4 (e2b-migrate): migrating 5 pure-script stock workers (csv_enricher, cv_writeup, dach_compliance, gmail_intake_brief
+Overnight watchdog for workeros launch readiness. State-aware per [[feedback_watchdog_state_aware_bounded]]. |  | Two sonnet Agents in flight: | - ad586e7d209da20e4 (e2b-migrate): migrating 5 pure-script stock workers (csv_enricher, resume_helper, dach_compliance, gmail_intake_brief
 
 ## [2026-05-26T07:08:24]
 <task-notification> | <task-id>ad586e7d209da20e4</task-id> | <tool-use-id>toolu_01JdZVycEWna9GsTnx3p9w5W</tool-use-id> | <output-file>/tmp/claude-0/-root/ab820815-591d-4b3e-9574-0470acf889a8/tasks/ad586e7d209da20e4.output</output-file> | <status>completed</status> | <summary>Agen

@@ -114,7 +114,7 @@ The loop terminates when the agent calls the final output-writer or hits `exec.l
 
 ## 3. The `worker.yml` schema
 
-Schema version: `0.3`. Every field below has been used in production workers in this repo (see `workers/research_brief/worker.yml`, `workers/cv_writeup/worker.yml` for live references).
+Schema version: `0.3`. Every field below has been used in production workers in this repo (see `workers/research_brief/worker.yml`, `workers/resume_helper/worker.yml` for live references).
 
 ```yaml
 schema_version: "0.3"
@@ -573,7 +573,7 @@ The draft-and-create endpoint runs an LLM with this contract baked in. Look at `
 Read these end-to-end before writing your first one:
 
 - `workers/research_brief/` — agent mode, manual trigger, markdown output.
-- `workers/cv_writeup/` — agent mode, file input + multiple outputs, branded format.
+- `workers/resume_helper/` — agent mode, file input + multiple outputs, branded format.
 - `workers/csv_enricher/` — script mode, CSV passthrough, OpenAI per row.
 - `workers/github-digest/` — schedule trigger, Composio GitHub connection.
 - `workers/gmail_intake_brief/` — composio trigger, Gmail connection, approval-gated output.

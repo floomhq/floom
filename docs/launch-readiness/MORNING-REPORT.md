@@ -25,7 +25,7 @@ The API is solid: auth, security headers, rate limiting, secret isolation, E2E r
 | [#29](https://github.com/floomhq/workeros/pull/29) | Cut approvals and pause/unpause endpoints, `/runs/{id}/approve`, `/workers/{id}/pause`, `/approvals` all return 404. Verified live. |
 | [#30](https://github.com/floomhq/workeros/pull/30) | Prompt-to-worker on `/workers/new`, `POST /workers/draft-from-prompt` endpoint ships; UI wires the new worker creation step. |
 | [#31](https://github.com/floomhq/workeros/pull/31) | Inline secrets + OAuth on `/workers/new` Step 2, white-labeled "Connection" replaces "Composio" in all user-facing strings; 0 occurrences of "Composio" remain in `apps/web/src`. |
-| [#32](https://github.com/floomhq/workeros/pull/32) | Migrated 5 stock workers to E2B-native `run.py` contract, all 5 (`csv_enricher`, `cv_writeup`, `dach_compliance`, `reverse_match_crm`, `gmail_intake_brief`) now read `inputs.json` + write `result.json`. 22 em-dashes replaced throughout. |
+| [#32](https://github.com/floomhq/workeros/pull/32) | Migrated 5 stock workers to E2B-native `run.py` contract, all 5 (`csv_enricher`, `resume_helper`, `dach_compliance`, `crm_matcher`, `gmail_intake_brief`) now read `inputs.json` + write `result.json`. 22 em-dashes replaced throughout. |
 | [#33](https://github.com/floomhq/workeros/pull/33) | Fix `draft-from-prompt` YAML reliability, stricter system prompt requiring double-quoted strings + `response_format=json_object` + 3-attempt retry loop on `parse_worker_manifest` failure. Live smoke 5/5, 0 retries. |
 
 ---
