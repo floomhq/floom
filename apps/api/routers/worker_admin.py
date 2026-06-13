@@ -21,9 +21,10 @@ import json
 import logging
 import re
 import zipfile
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Request, Response
+from pydantic import BaseModel, Field
 
 from auth import AuthContext, get_auth_context
 from db import Repositories, get_repos
@@ -122,6 +123,100 @@ def get_worker_detail(
     )
 
 
+class _RequestEditAccessBody(BaseModel):
+    message: Optional[str] = Field(default=None, max_length=2000)
+
+
+@worker_admin_router.post("/workers/{worker_id}/request-edit", status_code=201)
+def request_worker_edit_access(
+    worker_id: str,
+    body: _RequestEditAccessBody,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """#807: a member viewing a locked (workspace-shared, not owned) worker
+    asks the owner/admin for edit access. 404 if the worker isn't visible,
+    403 if the caller already has edit rights. Records a pending request
+    (idempotent) and notifies the owner best-effort.
+    """
+    import sqlite3
+    import uuid as _uuid_mod
+    from db import get_db, now_iso
+
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(
+        worker_id, user_id=auth.user_id, repos=repos,
+        role=_worker_repo_role(auth), include_grants=True,
+    )
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    perms = _worker_permissions(
+        worker, user_id=auth.user_id, repos=repos,
+        owner_aliases={auth.user_id, auth.username or ""},
+    )
+    if perms.can_edit:
+        raise HTTPException(status_code=403, detail="You already have edit access to this worker.")
+
+    req_id = f"editreq_{_uuid_mod.uuid4().hex[:12]}"
+    created = False
+    with get_db() as conn:
+        try:
+            conn.execute(
+                "INSERT INTO edit_access_requests (id, worker_id, requester_id, message, status, created_at) "
+                "VALUES (?, ?, ?, ?, 'pending', ?)",
+                (req_id, worker_id, auth.user_id, (body.message or None), now_iso()),
+            )
+            created = True
+        except sqlite3.IntegrityError:
+            # idempotent: a pending request from this member already exists
+            created = False
+    if created:
+        try:
+            from alerting import _send_email  # noqa: PLC0415
+
+            _send_email(
+                f"Edit-access request for worker {worker.get('name') or worker_id}",
+                f"{auth.username or auth.user_id} requested edit access to "
+                f"'{worker.get('name') or worker_id}'."
+                + (f"\n\nMessage: {body.message}" if body.message else ""),
+            )
+        except Exception:
+            logger.debug("edit-access request email failed (non-fatal)", exc_info=True)
+    return {"ok": True, "pending": True}
+
+
+@worker_admin_router.get("/workers/{worker_id}/edit-requests")
+def list_worker_edit_requests(
+    worker_id: str,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> List[Dict[str, Any]]:
+    """#807: the owner/admin lists pending edit-access requests for a worker."""
+    from db import get_db
+
+    worker_id = _canonical_worker_id(worker_id)
+    worker = _get_visible_worker(
+        worker_id, user_id=auth.user_id, repos=repos,
+        role="admin" if auth.is_admin else _worker_repo_role(auth),
+    )
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    perms = _worker_permissions(
+        worker, user_id=auth.user_id, repos=repos,
+        owner_aliases={auth.user_id, auth.username or ""},
+    )
+    if not (perms.can_edit or auth.is_admin):
+        raise HTTPException(status_code=403, detail="Only the owner or an admin can view edit requests.")
+    with get_db() as conn:
+        rows = conn.execute(
+            "SELECT id, worker_id, requester_id, message, status, created_at "
+            "FROM edit_access_requests WHERE worker_id = ? AND status = 'pending' "
+            "ORDER BY created_at DESC",
+            (worker_id,),
+        ).fetchall()
+    return [dict(r) for r in rows]
+
+
 @worker_admin_router.get("/workers/{worker_id}/bundle.zip")
 def download_worker_bundle(
     worker_id: str,
@@ -169,7 +264,14 @@ def set_worker_visibility(
     """
     _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    worker = _get_visible_worker(
+        worker_id,
+        user_id=auth.user_id,
+        repos=repos,
+        # donation model: workspace-shared workers are owned by the synthetic
+        # workspace actor, so the admin doing the unshare is not their owner.
+        role="admin" if auth.is_admin else None,
+    )
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
@@ -192,6 +294,7 @@ def set_worker_visibility(
             asset_type="worker",
             asset_id=worker_id,
             visibility=payload.visibility,
+            actor_role="admin" if auth.is_admin else None,
         )
     except PermissionError as exc:
         raise HTTPException(status_code=403, detail=str(exc)) from exc
@@ -210,7 +313,15 @@ def set_worker_visibility(
         author_email=author_email,
     )
 
-    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+    # Donation model: after share-transfer the caller is no longer the owner,
+    # but they can still VIEW the now-workspace-shared worker — fetch the
+    # response with the member/admin role path, not the owner-scoped default.
+    return _build_worker_detail(
+        worker_id,
+        user_id=auth.user_id,
+        repos=repos,
+        role="admin" if auth.is_admin else "member",
+    )
 
 
 @worker_admin_router.post("/workers/{worker_id}/restore", response_model=WorkerDetail)

@@ -22,6 +22,7 @@ from services.worker_access import (
     _db_worker_owners,
     _delete_worker_impl,
     _get_visible_worker,
+    _worker_for_mutation,
 )
 from services.worker_mutation import (
     _mutate_worker_contexts,
@@ -180,13 +181,18 @@ def delete_worker(
     # to _delete_worker_impl when the worker has no DB row at all; only deny when
     # a DB row exists but isn't visible to the caller (owned by someone else).
     canonical_id = _canonical_worker_id(worker_id)
-    if _get_visible_worker(canonical_id, user_id=auth.user_id, repos=repos) is None:
-        # Check whether any DB row exists for this worker_id regardless of ownership.
-        # _db_worker_owners() reads the raw workers table and maps id → owner_id.
-        # If the id appears there, a real DB-backed worker exists that the caller
-        # cannot see — that is the ownership-protection case; raise 404.
-        # If the id does not appear, it is a true orphan (directory without DB row);
-        # let _delete_worker_impl handle it (it will rmtree the dir and return 204).
+    if canonical_id in _db_worker_owners():
+        # DB-backed worker: mutation rights are required — the caller must be
+        # its owner, or an admin when it is workspace-shared (donation model:
+        # the sharer is NOT the owner anymore and must get 404 here even
+        # though the bundle dir still exists on disk; the filesystem-visibility
+        # fallback below must never bypass DB ownership).
+        if _worker_for_mutation(canonical_id, auth, repos) is None:
+            raise HTTPException(status_code=404, detail="Worker not found")
+    elif _get_visible_worker(canonical_id, user_id=auth.user_id, repos=repos) is None:
+        # No DB row anywhere: a true orphan (directory without DB row) falls
+        # through so _delete_worker_impl can reap it (issue #810); anything
+        # else invisible stays a 404.
         if canonical_id in _db_worker_owners():
             raise HTTPException(status_code=404, detail="Worker not found")
     _delete_worker_impl(worker_id, auth.user_id, repos)
