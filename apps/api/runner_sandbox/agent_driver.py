@@ -1453,19 +1453,29 @@ class AgentDriver(SandboxDriver):
         # Inject worker-to-worker call capability when the manifest declares calls:
         _workeros_helper_dir: str | None = None
         if config.calls and user_id and run_id:
-            from run_token import issue_worker_call_token, MAX_CALL_DEPTH
+            from run_token import issue_worker_call_token, parse_call_depth
             _api_url = os.environ.get("WORKEROS_API_URL") or (
                 f"http://127.0.0.1:{os.environ.get('PORT', '8000')}"
             )
+            # #994: the token carries THIS run's call depth (from its
+            # trigger_source), so children created with it land one level
+            # deeper and the cap actually accumulates across the chain.
+            _self_depth = 0
+            try:
+                from db import get_repositories
+                _row = get_repositories().runs.get_any(run_id=run_id)
+                _self_depth = parse_call_depth((_row or {}).get("trigger_source"))
+            except Exception:
+                _self_depth = 0
             _wrt = issue_worker_call_token(
                 user_id=user_id,
                 parent_run_id=run_id,
                 callable_workers=list(config.calls),
-                depth=0,
+                depth=_self_depth,
             )
             env["WORKEROS_API_URL"] = _api_url
             env["WORKEROS_RUN_TOKEN"] = _wrt
-            env["WORKEROS_CALL_DEPTH"] = "0"
+            env["WORKEROS_CALL_DEPTH"] = str(_self_depth)
             # Write workeros.py into a temp dir and add to PYTHONPATH so that
             # run.py workers can do: from workeros import call_worker
             import tempfile
