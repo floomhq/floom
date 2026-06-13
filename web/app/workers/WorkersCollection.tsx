@@ -385,7 +385,7 @@ function SourceFileTree({
   }
 
   return (
-    <div className="max-h-[min(58vh,520px)] overflow-y-auto rounded-[var(--radius-card)] bg-[var(--bg-2)] p-2">
+    <div className="max-h-[min(58vh,520px)] overflow-y-auto rounded-[var(--radius-card)] bg-transparent p-0">
       {Array.from(groups.entries()).map(([folder, group]) => (
         <div key={folder} className="mb-2 last:mb-0">
           <div className="flex min-w-0 items-center gap-1.5 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
@@ -398,7 +398,7 @@ function SourceFileTree({
                 key={file.path}
                 type="button"
                 className={`flex w-full min-w-0 items-center gap-2 rounded-[var(--radius-button)] px-2 py-1.5 text-left text-xs transition-colors ${
-                  file.path === activePath ? "bg-[var(--bg-card)] text-foreground" : "text-muted-foreground hover:bg-[var(--bg-3)] hover:text-foreground"
+                  file.path === activePath ? "bg-[var(--bg-2)] text-foreground" : "text-muted-foreground hover:bg-[var(--bg-2)] hover:text-foreground"
                 }`}
                 title={file.path}
                 onClick={() => onSelect(file.path)}
@@ -433,7 +433,7 @@ function SourceTab({ w }: { w: WorkerSummary }) {
             {ordered.length} {ordered.length === 1 ? "file" : "files"}
           </span>
         </div>
-        <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} />
+        <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} surface="flat" />
       </div>
     </div>
   );

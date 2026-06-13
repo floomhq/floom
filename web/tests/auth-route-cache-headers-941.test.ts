@@ -23,7 +23,7 @@ describe("#941 cache headers on authenticated JSON routes", () => {
       jsonUpstream({ username: "u", role: "owner", scopes: ["*"] }),
     );
     const { GET } = await import("@/app/api/me/route");
-    const res = await GET();
+    const res = await GET(new NextRequest("https://workers.floom.dev/api/me"));
     expect(res.headers.get("cache-control")).toBe(NO_STORE);
   });
 

@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, Circle, Loader2, XCircle, Play, ExternalLink } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { StatusPill } from "@/components/collection/StatusPill";
 import { cn } from "@/lib/utils";
 import type { WorkerCreateCard as WorkerCreateCardType } from "@/lib/emily-chat-types";
 
@@ -61,22 +61,8 @@ export function WorkerCreateCard({ card }: { card: WorkerCreateCardType }) {
           aria-hidden="true"
         />
         <span className="font-medium flex-1 min-w-0 truncate">{card.workerName}</span>
-        {isReady && (
-          <Badge
-            variant="secondary"
-            className="text-[10px] px-1.5 py-0.5 bg-green-500/10 text-green-700 [border:var(--bd-card)] font-normal"
-          >
-            Ready
-          </Badge>
-        )}
-        {isFailed && (
-          <Badge
-            variant="secondary"
-            className="text-[10px] px-1.5 py-0.5 bg-red-500/10 text-red-600 [border:var(--bd-card)] font-normal"
-          >
-            Failed
-          </Badge>
-        )}
+        {isReady && <StatusPill spec={{ tone: "ok", label: "Ready" }} />}
+        {isFailed && <StatusPill spec={{ tone: "err", label: "Failed" }} />}
       </div>
 
       {/* Steps */}
