@@ -2261,3 +2261,11 @@ class _WorkerSuggestRequest(BaseModel):
 
 class _ImportFromShareRequest(BaseModel):
     token: str
+
+
+class WorkerCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    worker_yml: str
+    run_py: str
+    skill_md: Optional[str] = None
