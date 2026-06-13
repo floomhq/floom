@@ -50,3 +50,19 @@ def _isolate_test_globals():
             os.environ.pop("WORKEROS_MIN_FREE_DISK_BYTES", None)
         else:
             os.environ["WORKEROS_MIN_FREE_DISK_BYTES"] = disk_threshold
+        # Drop any EMPTY stub modules a test left behind. Some fixtures
+        # (test_sqlite_viewer_777, test_brain_tags_780, test_contexts_sensitive)
+        # install bare ModuleType stubs for openai/anthropic/e2b/etc. via
+        # sys.modules.setdefault. If one survives, a later test's
+        # `from openai import AsyncOpenAI` (through the agents SDK, used by
+        # test_web_search / test_llm) fails with ModuleNotFound. Popping the bare
+        # stub here forces the real package to reimport on next use.
+        import types as _types
+        for _m in (
+            "openai", "anthropic", "e2b", "e2b.sandbox", "composio_openai",
+            "composio_core", "slowapi", "slowapi.util", "slowapi.errors",
+            "resend", "supabase", "gotrue",
+        ):
+            _mod = sys.modules.get(_m)
+            if isinstance(_mod, _types.ModuleType) and not getattr(_mod, "__file__", None):
+                sys.modules.pop(_m, None)
