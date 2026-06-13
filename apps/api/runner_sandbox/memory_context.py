@@ -49,4 +49,3 @@ def ensure_memory_context_pack(
         log_fn(f"[memory] Failed to update memory metadata for {name!r}: {exc}", "warning")
     log_fn(f"[memory] Memory pack {name!r} ready", "debug")
     return name
-
