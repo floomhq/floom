@@ -317,7 +317,8 @@ async def suggest_worker_updates(
     """
     import json as _json
     import os as _os
-    from openai import OpenAI as _OpenAI
+    import llm as _llm
+    from codegen_model import codegen_model as _codegen_model
     from worker_registry import WORKERS_DIR as _WORKERS_DIR
 
     worker_id = _canonical_worker_id(worker_id)
@@ -330,8 +331,8 @@ async def suggest_worker_updates(
         getattr(worker, "manifest_yaml", "") or ""
     )
 
-    api_key = _platform_openai_api_key()
-    if not api_key:
+    suggest_model = _os.environ.get("WORKEROS_SUGGEST_MODEL") or _codegen_model()
+    if not _llm.provider_credentials_present(suggest_model):
         return _WorkerSuggestResponse(has_conflicts=False, suggestions=[])
 
     prompt = (
@@ -347,9 +348,8 @@ async def suggest_worker_updates(
     )
 
     try:
-        client = _OpenAI(api_key=api_key)
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
+        response = _llm.completion(
+            model=suggest_model,
             messages=[{"role": "user", "content": prompt}],
             response_format={"type": "json_object"},
             temperature=0,

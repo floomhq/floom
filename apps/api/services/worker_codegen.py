@@ -478,11 +478,10 @@ def _detect_connections(prompt_lower: str) -> List[str]:
 
 
 def _call_draft_llm(
-    client: Any,
     user_message: str,
     extra_system_instructions: Optional[str] = None,
 ) -> Dict[str, Any]:
-    """Single OpenAI call returning a parsed JSON payload. Raises HTTPException on transport/JSON errors."""
+    """Single LLM call returning a parsed JSON payload. Raises HTTPException on transport/JSON errors."""
     system_prompt = _DRAFT_SYSTEM_PROMPT
     if extra_system_instructions:
         system_prompt = f"{system_prompt}\n\n{extra_system_instructions}"
@@ -491,7 +490,6 @@ def _call_draft_llm(
         from codegen_model import chat_completion_codegen
 
         response = chat_completion_codegen(
-            client,
             messages=[
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message},
