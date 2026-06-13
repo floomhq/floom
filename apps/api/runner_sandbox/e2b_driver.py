@@ -758,6 +758,12 @@ class E2BSandboxDriver(SandboxDriver):
             made_dirs = {workdir}
             for fpath in worker_dir.rglob("*"):
                 rel = fpath.relative_to(worker_dir)
+                # #995: never follow symlinks — a crafted bundle could symlink
+                # `x -> /etc/passwd` / the host api.env and exfiltrate host
+                # files into the sandbox. Skip the link entirely.
+                if fpath.is_symlink():
+                    log_fn(f"[e2b] Skipping symlink in bundle: {rel.as_posix()}", "warning")
+                    continue
                 # Skip any stale inputs/ dir that may exist in older bundles.
                 if rel.parts and rel.parts[0] == "inputs":
                     continue
