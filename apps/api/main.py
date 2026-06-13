@@ -426,6 +426,20 @@ from services.workspace_ops import (
     _workspace_share_token,
     _safe_zip_rel,
 )
+from services.health_ops import (
+    _HEALTH_CACHE,
+    _HEALTH_CACHE_TTL_SECONDS,
+    _HEALTH_MIN_FREE_DISK_GB,
+    _health_check_db,
+    _health_check_disk,
+    _health_check_openai,
+    _health_check_e2b,
+    _health_check_composio,
+    _health_check_scheduler,
+    _run_health_checks,
+    _prometheus_escape,
+    _prometheus_label,
+)
 from services.auth_ops import (
     _SESSION_TTL_SECONDS,
     _MAGIC_LINK_FALLBACK_SECRET,
@@ -1408,152 +1422,31 @@ print(
 # Health checks
 # ---------------------------------------------------------------------------
 
-_HEALTH_CACHE: Dict[str, Any] = {"checked_at": 0.0, "payload": None}
-_HEALTH_CACHE_TTL_SECONDS = 60.0
 
 
-def _health_check_db() -> Dict[str, Any]:
-    with get_db() as conn:
-        conn.execute("SELECT 1").fetchone()
-    return {"ok": True}
 
 
 # Minimum free disk before /health flips to degraded. A full disk silently
 # corrupts SQLite writes and 507s worker-create while /health stayed "ok" at
 # 0 bytes free (2026-06-02 P1). Override with HEALTH_MIN_FREE_DISK_GB.
-_HEALTH_MIN_FREE_DISK_GB = float(os.environ.get("HEALTH_MIN_FREE_DISK_GB", "5") or "5")
 
 
-def _health_check_disk() -> Dict[str, Any]:
-    """Warn before the disk fills. Checks the filesystem holding the SQLite DB."""
-    db_path = str(DB_PATH)
-    target = db_path if os.path.exists(db_path) else (os.path.dirname(db_path) or "/")
-    usage = shutil.disk_usage(target if os.path.exists(target) else "/")
-    free_gb = usage.free / (1024**3)
-    ok = free_gb >= _HEALTH_MIN_FREE_DISK_GB
-    result: Dict[str, Any] = {
-        "ok": ok,
-        "free_gb": round(free_gb, 2),
-        "min_free_gb": _HEALTH_MIN_FREE_DISK_GB,
-    }
-    if not ok:
-        result["error"] = f"low disk: {free_gb:.2f}GB free < {_HEALTH_MIN_FREE_DISK_GB}GB"
-    return result
 
 
-def _health_check_e2b() -> Dict[str, Any]:
-    if not os.environ.get("E2B_API_KEY"):
-        return {"ok": False, "error": "E2B_API_KEY missing"}
-    import concurrent.futures
-
-    from e2b import Sandbox
-
-    def _list_sandboxes() -> None:
-        Sandbox.list(limit=1).next_items()
-
-    executor = concurrent.futures.ThreadPoolExecutor(
-        max_workers=1,
-        thread_name_prefix="workeros-e2b-health",
-    )
-    try:
-        future = executor.submit(_list_sandboxes)
-        future.result(timeout=3)
-    except concurrent.futures.TimeoutError:
-        return {"ok": False, "error": "E2B health check timed out after 3s"}
-    finally:
-        executor.shutdown(wait=False, cancel_futures=True)
-    return {"ok": True}
 
 
-def _health_check_openai() -> Dict[str, Any]:
-    key = _platform_openai_api_key()
-    if not key:
-        return {"ok": False, "error": "PLATFORM_OPENAI_API_KEY missing"}
-    response = requests.get(
-        "https://api.openai.com/v1/models",
-        headers={"Authorization": f"Bearer {key}"},
-        timeout=3,
-    )
-    return {"ok": response.status_code == 200, "status_code": response.status_code}
 
 
-def _health_check_composio() -> Dict[str, Any]:
-    key = os.environ.get("COMPOSIO_API_KEY")
-    if not key:
-        return {"ok": False, "error": "COMPOSIO_API_KEY missing"}
-    response = requests.get(
-        "https://backend.composio.dev/api/v3/toolkits",
-        headers={"x-api-key": key},
-        params={"limit": 1},
-        timeout=3,
-    )
-    return {"ok": response.status_code == 200, "status_code": response.status_code}
 
 
-def _health_check_scheduler() -> Dict[str, Any]:
-    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
-    if deploy != "local":
-        return {"ok": True, "enabled": False, "deploy": deploy}
-    try:
-        from scheduler import scheduler_status
-        return scheduler_status()
-    except Exception as exc:
-        return {"ok": False, "error": str(exc)[:300]}
 
 
-def _run_health_checks() -> Dict[str, Any]:
-    now = time.monotonic()
-    cached = _HEALTH_CACHE.get("payload")
-    if cached is not None and now - float(_HEALTH_CACHE.get("checked_at") or 0.0) < _HEALTH_CACHE_TTL_SECONDS:
-        return cached
-    checks: Dict[str, Any] = {}
-    for name, fn in {
-        "db": _health_check_db,
-        "disk": _health_check_disk,
-        "e2b": _health_check_e2b,
-        "openai": _health_check_openai,
-        "composio": _health_check_composio,
-        "scheduler": _health_check_scheduler,
-    }.items():
-        try:
-            checks[name] = fn()
-        except Exception as exc:
-            checks[name] = {"ok": False, "error": str(exc)[:300]}
-    payload = {
-        "status": "ok" if all(check.get("ok") for check in checks.values()) else "degraded",
-        "checks": checks,
-        "checked_at": datetime.now(timezone.utc).isoformat(),
-    }
-    _HEALTH_CACHE["checked_at"] = now
-    _HEALTH_CACHE["payload"] = payload
-    return payload
 
 
-@app.get("/healthz")
-def healthz():
-    """Liveness probe — exempt from x-floom-secret."""
-    return {"status": "ok"}
 
 
-@app.get("/health")
-def health():
-    """Readiness probe — public, minimal.
-
-    #853 RCA: this endpoint returned the full dependency-check payload (disk
-    free space, E2B/OpenAI/Composio status, scheduler thread name) without
-    auth — infrastructure reconnaissance for free. Probes only need the
-    aggregate status; the detailed checks moved to GET /health/details
-    (admin-only).
-    """
-    payload = _run_health_checks()
-    return {"status": payload["status"], "checked_at": payload["checked_at"]}
 
 
-@app.get("/health/details")
-def health_details(auth: AuthContext = Depends(get_auth_context)):
-    """Full dependency checks — admin only (#853)."""
-    _require_admin(auth)
-    return _run_health_checks()
 
 
 # ---------------------------------------------------------------------------
@@ -4852,6 +4745,10 @@ app.include_router(auth_router)
 from routers.worker_create import worker_create_router
 app.include_router(worker_create_router)
 
+# System health + metrics routes (/health, /healthz, /metrics, /system/metrics).
+from routers.system_health import system_health_router
+app.include_router(system_health_router)
+
 from routers.uploads import (
     uploads_router,
     upload_file,
@@ -5893,175 +5790,14 @@ async def api_workspace_agent_named_mcp(request: Request) -> Response:
 
 
 
-@app.get("/system/metrics")
-def system_metrics(
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-):
-    """Operational metrics for the dashboard / external monitors.
-
-    Gated by x-floom-secret like other admin routes. Returns a flat counters
-    payload suitable for cron-scraped JSON monitoring.
-    """
-    workers = repos.workers.list(user_id=auth.user_id)
-    _runs_page, runs_total = repos.runs.list(user_id=auth.user_id, limit=1, offset=0)
-    _runs_7d_page, runs_7d = repos.runs.list(
-        user_id=auth.user_id,
-        since=(datetime.now(timezone.utc) - timedelta(days=7)).isoformat(),
-        limit=1,
-        offset=0,
-    )
-    _failed_7d_page, runs_failed_7d = repos.runs.list(
-        user_id=auth.user_id,
-        statuses=[RunStatus.FAILED.value],
-        since=(datetime.now(timezone.utc) - timedelta(days=7)).isoformat(),
-        limit=1,
-        offset=0,
-    )
-    connections_count = len(repos.connections.list(user_id=auth.user_id))
-    secrets_count = len(repos.secrets.list(user_id=auth.user_id))
-    active_triggers = sum(
-        1
-        for worker in workers
-        if worker.get("enabled") and worker.get("trigger_type") != "manual"
-    )
-    try:
-        from runner_sandbox.agent_driver import cancel_flag_db_read_errors_total
-        cancel_flag_errors = cancel_flag_db_read_errors_total()
-    except Exception:
-        cancel_flag_errors = 0
-    return {
-        "workers_count": len(workers),
-        "runs_total": int(runs_total or 0),
-        "runs_7d": int(runs_7d or 0),
-        "runs_failed_7d": int(runs_failed_7d or 0),
-        "connections_count": int(connections_count or 0),
-        "secrets_count": int(secrets_count or 0),
-        "active_triggers": int(active_triggers or 0),
-        "drafts_last_hour": _drafts_last_hour_total(),
-        "cancel_flag_db_read_errors": int(cancel_flag_errors or 0),
-        "uptime_seconds": int(time.time() - _PROCESS_START_TIME),
-    }
 
 
-def _prometheus_escape(value: str) -> str:
-    return value.replace("\\", "\\\\").replace("\n", "\\n").replace('"', '\\"')
 
 
-def _prometheus_label(worker_id: str, status: str | None = None) -> str:
-    labels = [f'worker_id="{_prometheus_escape(worker_id)}"']
-    if status is not None:
-        labels.append(f'status="{_prometheus_escape(status)}"')
-    return "{" + ",".join(labels) + "}"
 
 
-_METRICS_DB_CONNECTION_ERRORS_TOTAL = 0
 
 
-@app.get("/metrics", response_class=PlainTextResponse)
-def prometheus_metrics(auth: AuthContext = Depends(get_auth_context)):
-    """Prometheus text exposition for runtime health."""
-    buckets = [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600]
-    try:
-        from runner_sandbox.agent_driver import cancel_flag_db_read_errors_total
-        cancel_flag_errors = cancel_flag_db_read_errors_total()
-    except Exception:
-        cancel_flag_errors = 0
-    try:
-        with get_db() as conn:
-            run_rows = conn.execute(
-                """
-                SELECT r.worker_id, r.status, COUNT(*) AS total
-                FROM runs r
-                JOIN workers w ON w.id = r.worker_id
-                WHERE w.owner_id = ?
-                GROUP BY r.worker_id, r.status
-                """,
-                (auth.user_id,),
-            ).fetchall()
-            duration_rows = conn.execute(
-                """
-                SELECT r.worker_id, r.duration_ms
-                FROM runs r
-                JOIN workers w ON w.id = r.worker_id
-                WHERE w.owner_id = ?
-                  AND r.duration_ms IS NOT NULL
-                  AND r.status IN ('completed', 'failed')
-                """,
-                (auth.user_id,),
-            ).fetchall()
-            spawn_errors = conn.execute(
-                """
-                SELECT COUNT(*) AS total
-                FROM runs r
-                JOIN workers w ON w.id = r.worker_id
-                WHERE w.owner_id = ?
-                  AND r.error_code IN ('e2b_sandbox_error', 'missing_e2b_key')
-                """,
-                (auth.user_id,),
-            ).fetchone()["total"]
-            active_runs = conn.execute(
-                """
-                SELECT COUNT(*) AS total
-                FROM runs r
-                JOIN workers w ON w.id = r.worker_id
-                WHERE w.owner_id = ?
-                  AND r.status IN ('queued', 'running')
-                """,
-                (auth.user_id,),
-            ).fetchone()["total"]
-    except Exception:
-        global _METRICS_DB_CONNECTION_ERRORS_TOTAL
-        _METRICS_DB_CONNECTION_ERRORS_TOTAL += 1
-        logger.exception("Prometheus metrics DB query failed")
-        return PlainTextResponse(
-            f"workeros_db_connection_errors_total {_METRICS_DB_CONNECTION_ERRORS_TOTAL}\n",
-            status_code=500,
-            media_type="text/plain; version=0.0.4",
-        )
-
-    lines = [
-        "# HELP workeros_runs_total Total runs by worker and status.",
-        "# TYPE workeros_runs_total counter",
-    ]
-    for row in run_rows:
-        lines.append(
-            f"workeros_runs_total{_prometheus_label(row['worker_id'], row['status'])} {int(row['total'] or 0)}"
-        )
-    lines.extend([
-        "# HELP workeros_run_duration_seconds Run duration histogram by worker.",
-        "# TYPE workeros_run_duration_seconds histogram",
-    ])
-    durations_by_worker: Dict[str, List[float]] = collections.defaultdict(list)
-    for row in duration_rows:
-        durations_by_worker[row["worker_id"]].append(float(row["duration_ms"]) / 1000.0)
-    for worker_id, durations in sorted(durations_by_worker.items()):
-        cumulative = 0
-        for bucket in buckets:
-            cumulative = sum(1 for duration in durations if duration <= bucket)
-            lines.append(
-                f'workeros_run_duration_seconds_bucket{{worker_id="{_prometheus_escape(worker_id)}",le="{bucket}"}} {cumulative}'
-            )
-        lines.append(
-            f'workeros_run_duration_seconds_bucket{{worker_id="{_prometheus_escape(worker_id)}",le="+Inf"}} {len(durations)}'
-        )
-        lines.append(f"workeros_run_duration_seconds_sum{_prometheus_label(worker_id)} {sum(durations):.3f}")
-        lines.append(f"workeros_run_duration_seconds_count{_prometheus_label(worker_id)} {len(durations)}")
-    lines.extend([
-        "# HELP workeros_sandbox_spawn_errors_total Total E2B sandbox spawn/config errors.",
-        "# TYPE workeros_sandbox_spawn_errors_total counter",
-        f"workeros_sandbox_spawn_errors_total {int(spawn_errors or 0)}",
-        "# HELP workeros_db_connection_errors_total Total DB connection/query errors observed by metrics.",
-        "# TYPE workeros_db_connection_errors_total counter",
-        f"workeros_db_connection_errors_total {_METRICS_DB_CONNECTION_ERRORS_TOTAL}",
-        "# HELP workeros_cancel_flag_db_read_errors_total Total cancel flag DB read failures treated as cancelled.",
-        "# TYPE workeros_cancel_flag_db_read_errors_total counter",
-        f"workeros_cancel_flag_db_read_errors_total {int(cancel_flag_errors or 0)}",
-        "# HELP workeros_active_runs Active queued or running runs.",
-        "# TYPE workeros_active_runs gauge",
-        f"workeros_active_runs {int(active_runs or 0)}",
-    ])
-    return PlainTextResponse("\n".join(lines) + "\n", media_type="text/plain; version=0.0.4")
 
 
 # ---------------------------------------------------------------------------
