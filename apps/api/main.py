@@ -51,7 +51,7 @@ from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Dict, Iterable, List, Literal, NotRequired, Optional, TypedDict
+from typing import Annotated, Any, Callable, Dict, Iterable, List, Literal, NotRequired, Optional, TypedDict
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -177,19 +177,41 @@ from worker_registry import (
 import git_ops as _git_ops
 
 
+# #1001: a host (workeros-cloud) maintains its per-workspace git repos in its
+# own materialized tree (var/workspaces/{id}), NOT WORKERS_DIR/{id}. It registers
+# a resolver here so EVERY engine git op — versions read AND rollback — runs in
+# the same real tree (mirrors run_token.set_worker_call_secret_resolver). Pass
+# None to clear (OSS mode). Receives the active workspace_id (or None).
+_git_workspace_resolver: "Optional[Callable[[Optional[str]], Optional[Path | str]]]" = None
+
+
+def set_git_workspace_resolver(resolver: "Optional[Callable[[Optional[str]], Optional[Path | str]]]") -> None:
+    global _git_workspace_resolver
+    _git_workspace_resolver = resolver
+
+
 def _git_workspace() -> Path:
     """Return the git workspace root for the current request.
 
     OSS (single-tenant): WORKEROS_WORKSPACE_DIR env var, or WORKERS_DIR.parent.
-    Cloud (multi-tenant): WORKERS_DIR / {workspace_id} — one git repo per workspace,
-    resolved via the workspace_id resolver registered by workeros-cloud at startup.
+    Cloud (multi-tenant): a host-registered resolver (#1001) returns the real
+    materialized per-workspace git root; else WORKERS_DIR / {workspace_id}.
     """
     custom = os.environ.get("WORKEROS_WORKSPACE_DIR", "").strip()
     if custom:
         return Path(custom).resolve()
     workspace_id = _git_ops.get_active_workspace_id()
+    # #1001: host resolver wins — points read AND rollback at one consistent tree.
+    if _git_workspace_resolver is not None:
+        try:
+            resolved = _git_workspace_resolver(workspace_id)
+        except Exception:
+            logger.warning("git workspace resolver failed for %s", workspace_id, exc_info=True)
+            resolved = None
+        if resolved:
+            return Path(resolved).resolve()
     if workspace_id:
-        # Cloud: each workspace has its own git repo under WORKERS_DIR
+        # Cloud default (no resolver): each workspace has its own git repo.
         return (WORKERS_DIR / workspace_id).resolve()
     # OSS: single workspace at WORKERS_DIR.parent
     return WORKERS_DIR.parent.resolve()
