@@ -288,15 +288,21 @@ class TestMultiTriggerRoundTrip:
 # ---------------------------------------------------------------------------
 
 def _read_draft_system_prompt() -> str:
-    """Read _DRAFT_SYSTEM_PROMPT value from main.py source without executing it."""
-    main_path = os.path.join(os.path.dirname(__file__), "..", "apps", "api", "main.py")
-    with open(main_path) as f:
+    """Read _DRAFT_SYSTEM_PROMPT value from source without executing it.
+
+    The prompt moved from main.py into services/worker_codegen.py during the
+    API modularization; read it there.
+    """
+    src_path = os.path.join(
+        os.path.dirname(__file__), "..", "apps", "api", "services", "worker_codegen.py"
+    )
+    with open(src_path) as f:
         content = f.read()
     # Extract the prompt string: starts after _DRAFT_SYSTEM_PROMPT = """
     start_marker = '_DRAFT_SYSTEM_PROMPT = """'
     end_marker = '"""'
     start = content.find(start_marker)
-    assert start != -1, "_DRAFT_SYSTEM_PROMPT not found in main.py"
+    assert start != -1, "_DRAFT_SYSTEM_PROMPT not found in worker_codegen.py"
     start += len(start_marker)
     end = content.find(end_marker, start)
     assert end != -1, "closing triple-quote not found"
