@@ -2269,3 +2269,67 @@ class WorkerCreateRequest(BaseModel):
     worker_yml: str
     run_py: str
     skill_md: Optional[str] = None
+
+
+class SecretWarning(BaseModel):
+    """A masked secret-detection finding. NEVER carries the raw value."""
+
+    pattern: str
+    line: int
+    masked: str
+
+
+class ContextWorkerRef(BaseModel):
+    worker_id: str
+    worker_name: str
+
+
+class ContextSummary(BaseModel):
+    name: str
+    file_count: int
+    total_size_bytes: int
+    updated_at: Optional[str] = None
+    writeable: bool = False
+    worker_count: int = 0
+    description: Optional[str] = None
+    # Engine/system knowledge packs (e.g. worker-author-style) are surfaced
+    # read-only so operators can SEE what shapes worker generation, but cannot
+    # edit or delete them. Operator-created packs have system=False.
+    system: bool = False
+    read_only: bool = False
+    category: Optional[str] = None  # #780: content-category tag
+    # Sensitive packs are never committed to git or pushed to GitHub.
+    # Sensitive is the DEFAULT — set sensitive=False to opt in to git tracking.
+    sensitive: bool = True
+    # Members STEP 4: ownership + per-asset visibility + computed permissions.
+    # Mirrors the worker surface so the same Share control renders on brain packs.
+    owner_id: Optional[str] = None
+    visibility: str = "private"
+    permissions: AssetPermissions = Field(default_factory=AssetPermissions)
+
+
+class ContextFileItem(BaseModel):
+    path: str
+    size: int
+    mime_type: str
+    updated_at: str
+    is_binary: bool
+    description: Optional[str] = None
+    display_type: str = "File"
+    tags: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    # Set when the file's content matched a high-confidence secret pattern.
+    # The UI badges these so operators can move the credential to Secrets.
+    has_secret_warning: bool = False
+    # Populated only on the write/upload response (and the audit scan), so the
+    # operator sees WHAT was detected (masked) without re-scanning. Never
+    # persisted to disk, never contains the raw value.
+    secret_warnings: List[SecretWarning] = Field(default_factory=list)
+    # Set on a restore response when the restored version was a "deleted"
+    # snapshot, so the History UI knows the file was removed (not written).
+    deleted: bool = False
+
+
+class ContextDetail(ContextSummary):
+    files: List[ContextFileItem] = Field(default_factory=list)
+    used_by: List[ContextWorkerRef] = Field(default_factory=list)
