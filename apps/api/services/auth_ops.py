@@ -22,7 +22,8 @@ import os
 import secrets as pysecrets
 import threading
 import time
-from typing import TYPE_CHECKING, Dict, List
+from datetime import datetime, timedelta, timezone
+from typing import TYPE_CHECKING, Dict, List, Optional
 
 from fastapi import HTTPException, Response
 
@@ -315,3 +316,48 @@ def _validate_magic_link(token: str) -> str:
     if not user_id:
         raise HTTPException(status_code=400, detail="Invalid magic link")
     return user_id
+
+
+_TOKEN_DEFAULT_TTL_DAYS = 90
+
+
+def _max_token_ttl_days() -> int:
+    """#924/#949: maximum API-token lifetime in days. 0 disables the cap
+    (legacy never-expiring behavior, explicit opt-out only)."""
+    raw = (os.environ.get("WORKEROS_PAT_MAX_TTL_DAYS") or "").strip()
+    if not raw:
+        return _TOKEN_DEFAULT_TTL_DAYS
+    try:
+        value = int(raw)
+    except ValueError:
+        return _TOKEN_DEFAULT_TTL_DAYS
+    return max(value, 0)
+
+
+def _default_token_expiry() -> Optional[str]:
+    max_days = _max_token_ttl_days()
+    if max_days <= 0:
+        return None
+    return (datetime.now(timezone.utc) + timedelta(days=max_days)).isoformat()
+
+
+def _enforce_token_ttl_cap(requested: Optional[str]) -> Optional[str]:
+    """Apply the default TTL when no expiry is requested and reject expiries
+    beyond the configured cap."""
+    max_days = _max_token_ttl_days()
+    if not requested:
+        return _default_token_expiry()
+    try:
+        parsed = datetime.fromisoformat(requested)
+    except ValueError:
+        raise HTTPException(status_code=422, detail="expires_at must be an ISO-8601 timestamp")
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=timezone.utc)
+    if parsed <= datetime.now(timezone.utc):
+        raise HTTPException(status_code=422, detail="expires_at must be in the future")
+    if max_days > 0 and parsed > datetime.now(timezone.utc) + timedelta(days=max_days):
+        raise HTTPException(
+            status_code=422,
+            detail=f"expires_at exceeds the maximum token lifetime of {max_days} days",
+        )
+    return parsed.isoformat()
