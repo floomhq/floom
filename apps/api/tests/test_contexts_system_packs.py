@@ -62,6 +62,11 @@ def client_and_main(monkeypatch, tmp_path):
         "auth.interface", "auth.local", "contexts",
     ]:
         sys.modules.pop(name, None)
+    # Purge router modules too: routes carry response_model=WorkerDetail bound at
+    # router-build time. Without this, a cached router validates against a stale
+    # WorkerDetail/RecentStats after models is reloaded -> 422 recent_stats.
+    for _rn in [x for x in list(sys.modules) if x.startswith("routers")]:
+        sys.modules.pop(_rn, None)
 
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
