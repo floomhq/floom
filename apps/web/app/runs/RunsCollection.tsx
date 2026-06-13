@@ -258,6 +258,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     items: sorted,
     loading,
     idOf: (r) => r.id,
+    view: { default: "grid", grid: true },
     searchOf: (r) => `${r.worker_name ?? r.worker_id} ${r.id} ${r.trigger_source}`,
     tagsOf: (r) =>
       ({
@@ -286,7 +287,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       { value: sorted.filter((r) => r.status === "failed").length, label: "failed" },
       { value: sorted.filter((r) => r.status === "running").length, label: "running" },
     ],
-    view: { default: "list", grid: true },
     toolbarActions: (
       <DropdownMenu>
         <DropdownMenuTrigger className="c-vpill" style={{ padding: "9px 12px", gap: 5 }}>
@@ -336,7 +336,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       header: {
         // V4 SPEC rule 3: no avatar in detail header for runs.
         leading: undefined,
-        title: r.worker_name ?? r.worker_id,
+        title: `Run · ${r.worker_name ?? r.worker_id}`,
         sub: (
           <span className="c-dh-sub" style={{ margin: 0 }}>
             {formatTrigger(r.trigger_source)} · {formatDuration(r.duration_ms)} ·{" "}
@@ -349,14 +349,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
             <Link href={`/workers?sel=${encodeURIComponent(r.worker_id)}`} className="c-vpill" style={{ padding: "6px 11px" }}>
               ↑ Open worker
             </Link>
-            <button
-              type="button"
-              className="c-vpill"
-              style={{ padding: "6px 11px" }}
-              onClick={() => void replay(r)}
-            >
-              Replay
-            </button>
             {/* TODO(#765): run share link — backend pending; honest stub for now. */}
             <button
               type="button"
@@ -365,6 +357,14 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
               onClick={() => toast("Sharing a run is coming soon (#765).")}
             >
               Share
+            </button>
+            <button
+              type="button"
+              className="c-vpill"
+              style={{ padding: "6px 11px" }}
+              onClick={() => void replay(r)}
+            >
+              Replay
             </button>
           </>
         ),
