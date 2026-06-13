@@ -92,6 +92,8 @@ def app_main(monkeypatch, tmp_path):
         "auth.interface", "auth.local", "contexts", "chat_service",
     ]:
         sys.modules.pop(name, None)
+    for _rn in [x for x in list(sys.modules) if x.startswith('routers')]:
+        sys.modules.pop(_rn, None)
 
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None, stop_scheduler=lambda: None,
