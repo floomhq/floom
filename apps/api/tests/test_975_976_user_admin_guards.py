@@ -31,7 +31,7 @@ def _load_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_SECRET", "")
     for name in list(sys.modules):
-        if name in ("main", "models", "worker_registry", "run_service", "chat_service") or name.startswith(("db", "auth", "contexts")):
+        if name in ("main", "models", "worker_registry", "run_service", "chat_service") or name.startswith(("routers", "services", "core", "db", "auth", "contexts")):
             sys.modules.pop(name, None)
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None, stop_scheduler=lambda: None
