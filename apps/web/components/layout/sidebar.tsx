@@ -122,7 +122,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
       <Link
         href="/chat?mode=create"
         onClick={() => onNavigate?.()}
-        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] [border:var(--bd-btn)] bg-[var(--bg-2)] px-2.5 text-sm font-medium text-ink hover:bg-[var(--bg-3)] transition-colors duration-150"
+        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm font-medium text-[var(--ink-soft)] hover:bg-[var(--bg-3)] hover:text-ink transition-colors duration-150"
       >
         <Plus className="w-4 h-4" />
         <span>New worker</span>
@@ -130,7 +130,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
       <button
         type="button"
         onClick={onSearch}
-        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] [border:var(--bd-input)] bg-[var(--bg-2)] px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[var(--bg-3)] hover:text-ink transition-colors duration-150"
+        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[var(--bg-3)] hover:text-ink transition-colors duration-150"
         aria-label="Open command palette"
       >
         <Search className="w-4 h-4 opacity-70" />
@@ -226,7 +226,7 @@ export function Sidebar() {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
 
         {/* ── Nav header: workspace identity + collapse chevron ─────────────── */}
-        <div className={cn("flex items-center [border-bottom:var(--bd-div)]", collapsed ? "justify-center h-14 px-0" : "h-14 px-2 gap-1")}>
+        <div className={cn("flex items-center [border-bottom:var(--bd-div)]", collapsed ? "justify-center h-14 px-0" : "h-14 px-2 gap-1 mt-2")}>
           {collapsed ? (
             /* Icon-rail: just the mark, clicking expands */
             <button
