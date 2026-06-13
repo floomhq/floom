@@ -80,11 +80,17 @@ def download_upload(
 
     filename = row["filename"] or file_id
     media_type = normalize_media_type(row["media_type"])
+    # #929: uploads may be HTML/XML. FileResponse(filename=...) already forces
+    # Content-Disposition: attachment; nosniff stops browsers from second-
+    # guessing the media type and executing stored markup same-origin.
     return FileResponse(
         path,
         filename=filename,
         media_type=media_type,
-        headers={"Cache-Control": "no-store"},
+        headers={
+            "Cache-Control": "no-store",
+            "X-Content-Type-Options": "nosniff",
+        },
     )
 
 

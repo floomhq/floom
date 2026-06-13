@@ -117,7 +117,8 @@ class TestCandidateOutputPath:
 class TestImportZipGuards:
     def test_too_many_entries_rejected(self, monkeypatch, tmp_path):
         main = _load_main(monkeypatch, tmp_path)
-        monkeypatch.setattr(main, "_MAX_IMPORT_ENTRIES", 3)
+        import routers.workspace as _wsr
+        monkeypatch.setattr(_wsr, "_MAX_IMPORT_ENTRIES", 3)
         payload = _zip_bytes({f"workers/w/file{i}.txt": b"x" for i in range(4)})
         with _client(main) as client:
             resp = client.post(
@@ -130,7 +131,8 @@ class TestImportZipGuards:
 
     def test_uncompressed_size_cap_rejected(self, monkeypatch, tmp_path):
         main = _load_main(monkeypatch, tmp_path)
-        monkeypatch.setattr(main, "_MAX_IMPORT_UNCOMPRESSED_BYTES", 64)
+        import routers.workspace as _wsr
+        monkeypatch.setattr(_wsr, "_MAX_IMPORT_UNCOMPRESSED_BYTES", 64)
         payload = _zip_bytes({"workers/w/big.txt": b"A" * 1024})
         with _client(main) as client:
             resp = client.post(

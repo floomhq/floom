@@ -10,6 +10,7 @@ fixtures); the public URL is built from ``core.urls._frontend_base_url``.
 
 from __future__ import annotations
 
+import hashlib
 import re
 import secrets as pysecrets
 import sqlite3
@@ -28,42 +29,58 @@ def _mint_standalone_share_token() -> str:
     return f"fls_{pysecrets.token_urlsafe(18).replace('-', '').replace('_', '')[:24]}"
 
 
+def _hash_share_token(token: str) -> str:
+    """#934: share tokens are bearer credentials — store only their SHA-256."""
+    return hashlib.sha256(token.encode("utf-8")).hexdigest()
+
+
+_SHARE_LINKS_TABLE_SQL = """
+    CREATE TABLE IF NOT EXISTS standalone_share_links (
+        token_hash TEXT PRIMARY KEY,
+        entity_type TEXT NOT NULL,
+        entity_id TEXT NOT NULL,
+        file_path TEXT NOT NULL DEFAULT '',
+        owner_id TEXT NOT NULL,
+        created_at TEXT NOT NULL,
+        UNIQUE(entity_type, entity_id, file_path, owner_id)
+    );
+    CREATE INDEX IF NOT EXISTS idx_standalone_share_links_entity
+        ON standalone_share_links(entity_type, entity_id, file_path, owner_id);
+"""
+
+
 def _ensure_standalone_share_links_table() -> None:
     from db import get_db
     with get_db() as conn:
-        conn.executescript(
-            """
-            CREATE TABLE IF NOT EXISTS standalone_share_links (
-                token TEXT PRIMARY KEY,
-                entity_type TEXT NOT NULL,
-                entity_id TEXT NOT NULL,
-                file_path TEXT NOT NULL DEFAULT '',
-                owner_id TEXT NOT NULL,
-                created_at TEXT NOT NULL,
-                UNIQUE(entity_type, entity_id, file_path, owner_id)
-            );
-            CREATE INDEX IF NOT EXISTS idx_standalone_share_links_entity
-                ON standalone_share_links(entity_type, entity_id, file_path, owner_id);
-            """
-        )
-
-
-def _load_standalone_share_row(token: str) -> Optional[Dict[str, Any]]:
-    from db import get_db
-    if not re.fullmatch(r"fls_[A-Za-z0-9]{6,80}", token or ""):
-        raise HTTPException(status_code=404, detail="Share link not found")
-    _ensure_standalone_share_links_table()
-    with get_db() as conn:
-        row = conn.execute(
-            """
-            SELECT token, entity_type, entity_id, file_path, owner_id, created_at
-            FROM standalone_share_links
-            WHERE token = ?
-            LIMIT 1
-            """,
-            (token,),
-        ).fetchone()
-    return dict(row) if row else None
+        cols = {row["name"] for row in conn.execute("PRAGMA table_info(standalone_share_links)")}
+        if "token" in cols and "token_hash" not in cols:
+            # #934 migration: legacy rows stored the raw token. Hash them in
+            # place so a database dump no longer hands out every active link.
+            rows = conn.execute(
+                "SELECT token, entity_type, entity_id, file_path, owner_id, created_at "
+                "FROM standalone_share_links"
+            ).fetchall()
+            conn.execute("ALTER TABLE standalone_share_links RENAME TO standalone_share_links_legacy")
+            conn.executescript(_SHARE_LINKS_TABLE_SQL)
+            for row in rows:
+                conn.execute(
+                    """
+                    INSERT OR IGNORE INTO standalone_share_links
+                        (token_hash, entity_type, entity_id, file_path, owner_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    """,
+                    (
+                        _hash_share_token(str(row["token"])),
+                        row["entity_type"],
+                        row["entity_id"],
+                        row["file_path"],
+                        row["owner_id"],
+                        row["created_at"],
+                    ),
+                )
+            conn.execute("DROP TABLE standalone_share_links_legacy")
+            return
+        conn.executescript(_SHARE_LINKS_TABLE_SQL)
 
 
 def _create_or_get_standalone_share_link(
@@ -78,52 +95,59 @@ def _create_or_get_standalone_share_link(
     if not entity_id or not owner_id:
         raise HTTPException(status_code=409, detail="Item cannot be shared")
     _ensure_standalone_share_links_table()
+    # #934: only SHA-256(token) is stored, so the raw value of an existing row
+    # cannot be returned — re-sharing ROTATES the link (the old URL stops
+    # resolving). Revocation already deleted-and-reminted, so rotation is the
+    # established product semantic for share links.
+    token = ""
+    ts = now_iso()
     with get_db() as conn:
-        existing = conn.execute(
-            """
-            SELECT token FROM standalone_share_links
-            WHERE entity_type = ? AND entity_id = ? AND file_path = ? AND owner_id = ?
-            LIMIT 1
-            """,
-            (entity_type, entity_id, safe_file_path, owner_id),
-        ).fetchone()
-        if existing:
-            token = str(existing["token"])
-        else:
-            token = ""
-            ts = now_iso()
-            for _ in range(8):
-                candidate = _mint_standalone_share_token()
-                try:
-                    conn.execute(
-                        """
-                        INSERT INTO standalone_share_links
-                            (token, entity_type, entity_id, file_path, owner_id, created_at)
-                        VALUES (?, ?, ?, ?, ?, ?)
-                        """,
-                        (candidate, entity_type, entity_id, safe_file_path, owner_id, ts),
-                    )
-                    token = candidate
-                    break
-                except sqlite3.IntegrityError:
-                    dup = conn.execute(
-                        """
-                        SELECT token FROM standalone_share_links
-                        WHERE entity_type = ? AND entity_id = ? AND file_path = ? AND owner_id = ?
-                        LIMIT 1
-                        """,
-                        (entity_type, entity_id, safe_file_path, owner_id),
-                    ).fetchone()
-                    if dup:
-                        token = str(dup["token"])
-                        break
-            if not token:
-                raise HTTPException(status_code=500, detail="Could not create share link")
+        for _ in range(8):
+            candidate = _mint_standalone_share_token()
+            try:
+                conn.execute(
+                    """
+                    INSERT INTO standalone_share_links
+                        (token_hash, entity_type, entity_id, file_path, owner_id, created_at)
+                    VALUES (?, ?, ?, ?, ?, ?)
+                    ON CONFLICT(entity_type, entity_id, file_path, owner_id) DO UPDATE SET
+                        token_hash = excluded.token_hash,
+                        created_at = excluded.created_at
+                    """,
+                    (_hash_share_token(candidate), entity_type, entity_id, safe_file_path, owner_id, ts),
+                )
+                token = candidate
+                break
+            except sqlite3.IntegrityError:
+                # token_hash PK collision (astronomically unlikely) — retry.
+                continue
+    if not token:
+        raise HTTPException(status_code=500, detail="Could not create share link")
     return {
         "token": token,
         "url": _standalone_share_url(token),
         "entity_type": entity_type,
     }
+
+
+def _load_standalone_share_row(token: str) -> Optional[Dict[str, Any]]:
+    from db import get_db
+    if not re.fullmatch(r"fls_[A-Za-z0-9]{6,80}", token or ""):
+        raise HTTPException(status_code=404, detail="Share link not found")
+    _ensure_standalone_share_links_table()
+    with get_db() as conn:
+        # #934: lookup is by SHA-256 of the presented token — the raw value is
+        # never stored, so a DB dump can't be replayed as live share links.
+        row = conn.execute(
+            """
+            SELECT entity_type, entity_id, file_path, owner_id, created_at
+            FROM standalone_share_links
+            WHERE token_hash = ?
+            LIMIT 1
+            """,
+            (_hash_share_token(token),),
+        ).fetchone()
+    return dict(row) if row else None
 
 
 def _revoke_standalone_share_link(

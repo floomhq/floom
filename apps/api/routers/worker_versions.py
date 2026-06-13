@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from auth import AuthContext, get_auth_context
 from db import Repositories, get_repos
 from models import VersionSummary, WorkerDetail
-from services.git_service import _git_author, _git_workspace, _workers_git_prefix
+from services.git_service import _git_author, _git_workspace, _require_sha_in_asset_history, _workers_git_prefix
 from services.worker_access import _get_visible_worker, _raise_if_protected_worker_mutation
 from services.worker_registry_ops import (
     _embed_files_in_skill_version,
@@ -111,6 +111,7 @@ def rollback_worker(
     workspace = _git_workspace()
     prefix = _workers_git_prefix()
     worker_git_path = f"{prefix}/{worker_id}"
+    _require_sha_in_asset_history(workspace, sha, worker_git_path)
 
     try:
         _git_ops.checkout_path(workspace, sha, worker_git_path)
