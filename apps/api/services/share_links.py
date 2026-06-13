@@ -18,7 +18,7 @@ from typing import Any, Dict, Literal, Optional
 
 from fastapi import HTTPException
 
-from core.urls import _frontend_base_url
+from core.urls import _frontend_base_url, _short_link_base_url
 
 def _standalone_share_url(token: str) -> str:
     return f"{_frontend_base_url()}/s/{urllib.parse.quote(token, safe='')}"
@@ -146,3 +146,99 @@ def _revoke_standalone_share_link(
             (entity_type, entity_id, file_path or "", owner_id),
         )
     return {"revoked": cursor.rowcount > 0}
+
+
+# Worker short-links: the per-worker /w/<short_id> redirect store (sibling of the
+# standalone share-link table above; one short_id per (worker, owner)).
+def _mint_worker_short_id() -> str:
+    return f"fls_{pysecrets.token_urlsafe(8).replace('-', '').replace('_', '')[:10]}"
+
+
+def _ensure_worker_short_links_table() -> None:
+    from db import get_db
+    with get_db() as conn:
+        conn.executescript(
+            """
+            CREATE TABLE IF NOT EXISTS worker_short_links (
+                short_id TEXT PRIMARY KEY,
+                worker_id TEXT NOT NULL REFERENCES workers(id) ON DELETE CASCADE,
+                owner_id TEXT NOT NULL,
+                created_at TEXT NOT NULL,
+                UNIQUE(worker_id, owner_id)
+            );
+            CREATE INDEX IF NOT EXISTS idx_worker_short_links_worker_owner
+                ON worker_short_links(worker_id, owner_id);
+            """
+        )
+
+
+def _worker_short_link_response(worker: Dict[str, Any]) -> Dict[str, str]:
+    from db import get_db, now_iso
+    worker_id = str(worker.get("id") or "")
+    owner_id = str(worker.get("owner_id") or "")
+    if not worker_id or not owner_id:
+        raise HTTPException(status_code=409, detail="Worker cannot be shared")
+    _ensure_worker_short_links_table()
+    with get_db() as conn:
+        existing = conn.execute(
+            """
+            SELECT short_id FROM worker_short_links
+            WHERE worker_id = ? AND owner_id = ?
+            LIMIT 1
+            """,
+            (worker_id, owner_id),
+        ).fetchone()
+        if existing:
+            short_id = str(existing["short_id"])
+        else:
+            ts = now_iso()
+            for _ in range(5):
+                short_id = _mint_worker_short_id()
+                try:
+                    conn.execute(
+                        """
+                        INSERT INTO worker_short_links (short_id, worker_id, owner_id, created_at)
+                        VALUES (?, ?, ?, ?)
+                        """,
+                        (short_id, worker_id, owner_id, ts),
+                    )
+                    break
+                except sqlite3.IntegrityError:
+                    owner_existing = conn.execute(
+                        """
+                        SELECT short_id FROM worker_short_links
+                        WHERE worker_id = ? AND owner_id = ?
+                        LIMIT 1
+                        """,
+                        (worker_id, owner_id),
+                    ).fetchone()
+                    if owner_existing:
+                        short_id = str(owner_existing["short_id"])
+                        break
+                    short_id = ""
+            if not short_id:
+                raise HTTPException(status_code=500, detail="Could not mint short link")
+    return {"short_id": short_id, "short_url": f"{_short_link_base_url()}/{short_id}"}
+
+
+def _load_short_link_public_worker(short_id: str, repos: "Repositories") -> Dict[str, Any]:
+    from db import get_db
+    if not re.fullmatch(r"fls_[A-Za-z0-9]{6,64}", short_id or ""):
+        raise HTTPException(status_code=404, detail="Short link not found")
+    _ensure_worker_short_links_table()
+    with get_db() as conn:
+        row = conn.execute(
+            """
+            SELECT worker_id, owner_id
+            FROM worker_short_links
+            WHERE short_id = ?
+            LIMIT 1
+            """,
+            (short_id,),
+        ).fetchone()
+    if not row:
+        raise HTTPException(status_code=404, detail="Short link not found")
+    worker = repos.workers.get_any(worker_id=str(row["worker_id"]))
+    if not worker or str(worker.get("owner_id") or "") != str(row["owner_id"]):
+        raise HTTPException(status_code=404, detail="Short link not found")
+    return worker
