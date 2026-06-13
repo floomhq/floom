@@ -34,7 +34,7 @@ export function Tool({
   const displayState = status ? humanizeStatus(status) : state;
   const showState = Boolean(status) || state !== "done";
   return (
-    <Collapsible defaultOpen={state !== "done"}>
+    <Collapsible defaultOpen={false}>
       <div className={cn("rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card", className)}>
         <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
           <div className="flex min-w-0 items-center gap-2">
