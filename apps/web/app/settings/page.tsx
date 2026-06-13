@@ -392,7 +392,7 @@ function SettingsContent() {
     return sectionFromCandidate(fromQuery || fromHash);
   })();
   const [collectionState, setCollectionState] = useState<CollectionState>(() => ({
-    ...emptyState("list"),
+    ...emptyState("grid"),
     sel: initialSection,
   }));
 
@@ -596,7 +596,7 @@ function SettingsContent() {
         { value: settingsGroup("workspace").length, label: "workspace" },
         { value: settingsGroup("account").length, label: "account" },
       ],
-      view: { default: "list", grid: true },
+      view: { default: "grid", grid: true },
       group: (item) =>
         item.scope === "workspace"
           ? groupLabel("workspace", workspaceName)

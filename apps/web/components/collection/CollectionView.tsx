@@ -176,7 +176,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
       <input
         type="search"
         aria-label="Search"
-        placeholder={`Search ${config.title.toLowerCase()}…`}
+        placeholder={config.searchPlaceholder ?? `Search ${config.title.toLowerCase()}…`}
         value={state.q}
         onChange={(e) => setQuery(e.target.value)}
       />
