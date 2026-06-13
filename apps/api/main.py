@@ -118,6 +118,14 @@ from db import DB_PATH, Repositories, WorkspaceMemberRepository, assistant_row_i
 from files import blob_path, ensure_blob_dir, extension_for_file, is_sha256, normalize_media_type
 from secret_scan import scan_bytes
 from models import (
+    _AuthSetupRequest,
+    _LoginRequest,
+    _PATCreateRequest,
+    _PATCreateResponse,
+    _PATOut,
+    _UserCreateRequest,
+    _UserOut,
+    _UserUpdateRequest,
     WorkspaceMemberOut,
     WorkspaceMembersResponse,
     WorkspaceMemberInviteRequest,
@@ -408,6 +416,33 @@ from services.workspace_ops import (
     _workspace_share_payload,
     _workspace_share_token,
     _safe_zip_rel,
+)
+from services.auth_ops import (
+    _SESSION_TTL_SECONDS,
+    _MAGIC_LINK_FALLBACK_SECRET,
+    _MIN_PASSWORD_LENGTH,
+    _COMMON_PASSWORDS,
+    _FAILED_LOGIN_LOCKOUT_THRESHOLD,
+    _FAILED_LOGIN_WINDOW_SECONDS,
+    _BOOTSTRAP_SECRETS_TO_SEED,
+    _failed_login_attempts,
+    _failed_login_lock,
+    _bcrypt_hash,
+    _bcrypt_verify,
+    _claim_bootstrap_assets_for_new_admin,
+    _clear_failed_logins,
+    _is_sequential_password,
+    _issue_magic_link,
+    _login_locked_out,
+    _magic_link_secret,
+    _prune_expired_sessions,
+    _record_failed_login,
+    _require_multi_member_repos,
+    _seed_bootstrap_secrets,
+    _session_cookie_secure,
+    _set_session_cookie,
+    _validate_magic_link,
+    _validate_new_password,
 )
 from services.worker_codegen import (
     _available_methods_for_app,
@@ -1749,97 +1784,10 @@ def _connection_slug_for_worker_card(connection: Any) -> Optional[str]:
 
 
 
-_BOOTSTRAP_SECRETS_TO_SEED: tuple[str, ...] = ("OPENAI_API_KEY", "E2B_API_KEY")
 
 
-def _seed_bootstrap_secrets(user_id: str, repos: Repositories) -> int:
-    """Copy bootstrap-owned env secrets into the DB on first setup.
-
-    The secrets UI and worker status checks are DB-backed. On a fresh install
-    the process env may already carry OPENAI_API_KEY, but the secrets table has
-    no row yet, so the operator sees the worker-author/defaulted worker as
-    "missing secret" even though the key is present. Seed the bootstrap user's
-    row from env exactly once when it is absent or empty.
-    """
-    seeded = 0
-    for name in _BOOTSTRAP_SECRETS_TO_SEED:
-        value = os.environ.get(name)
-        if not value or not value.strip():
-            continue
-        try:
-            existing = repos.secrets.get(user_id=user_id, name=name)
-        except Exception:
-            logger.warning("Failed to read bootstrap secret row for %s", name, exc_info=True)
-            continue
-        if existing and existing.get("value"):
-            continue
-        try:
-            repos.secrets.set(user_id=user_id, name=name, value=value, status=SecretStatus.SET.value)
-            seeded += 1
-        except Exception:
-            logger.warning("Failed to seed bootstrap secret %s", name, exc_info=True)
-    return seeded
 
 
-def _claim_bootstrap_assets_for_new_admin(new_admin_id: str, repos: Repositories) -> Dict[str, int]:
-    """First-account setup: transfer the bootstrap (local-default) identity's
-    workers, connections, and secrets to the newly-created admin.
-
-    On an OSS install everything is seeded under the bootstrap user
-    (``_bootstrap_user_id`` / ``WORKEROS_USER_ID``). When the first admin account
-    is created via ``/auth/setup`` it gets a fresh uuid and would otherwise own
-    NOTHING: it can SEE the seed workers (admin listing is role-aware) but cannot
-    RUN them, because a run executes with the worker OWNER's connections/secrets
-    and the owner is the bootstrap id, not the admin. Claiming the bootstrap
-    assets makes the admin the real owner, so the seed workers run with the
-    admin's own connections.
-
-    Idempotent and safe: no-op when admin == bootstrap, or off the local deploy
-    (cloud is multi-tenant and has no single bootstrap owner). Best-effort per
-    table so a missing table/column never breaks setup.
-    """
-    summary: Dict[str, int] = {"workers": 0, "connections": 0, "secrets": 0}
-    if (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() != "local":
-        return summary
-    bootstrap_id = _bootstrap_user_id()
-    if not bootstrap_id or bootstrap_id == new_admin_id:
-        return summary
-    from db import get_db as _get_db
-    with _get_db() as conn:
-        for table, col, key in (
-            ("workers", "owner_id", "workers"),
-            ("composio_connections", "user_id", "connections"),
-        ):
-            try:
-                summary[key] = conn.execute(
-                    f"UPDATE {table} SET {col} = ? WHERE {col} = ?",
-                    (new_admin_id, bootstrap_id),
-                ).rowcount
-            except Exception:
-                logger.warning("claim-on-setup: could not move %s", table, exc_info=True)
-        conn.commit()
-    # Secrets: the value lives outside the metadata row, so copy value-safely via
-    # the repo (don't UPDATE the table). Then seed any env-provided bootstrap
-    # secrets the admin still lacks (e.g. OPENAI_API_KEY from process env).
-    try:
-        for name in repos.secrets.list_names(user_id=bootstrap_id):
-            existing = repos.secrets.get(user_id=new_admin_id, name=name)
-            if existing and existing.get("value"):
-                continue
-            src = repos.secrets.get(user_id=bootstrap_id, name=name)
-            if src and src.get("value"):
-                repos.secrets.set(
-                    user_id=new_admin_id, name=name,
-                    value=src["value"], status=SecretStatus.SET.value,
-                )
-                summary["secrets"] += 1
-    except Exception:
-        logger.warning("claim-on-setup: could not copy secrets", exc_info=True)
-    try:
-        summary["secrets"] += _seed_bootstrap_secrets(new_admin_id, repos)
-    except Exception:
-        pass
-    return summary
 
 
 
@@ -5125,6 +5073,10 @@ app.include_router(contexts_router)
 from routers.workspace import workspace_router
 app.include_router(workspace_router)
 
+# Auth + users route group (setup/login/logout/magic/me, user CRUD, PAT tokens).
+from routers.auth import auth_router
+app.include_router(auth_router)
+
 from routers.uploads import (
     uploads_router,
     upload_file,
@@ -7196,10 +7148,8 @@ async def mcp_http_endpoint(
 import secrets as _secrets_mod
 from auth.multi_member import SESSION_COOKIE, _hash_token as _hash_pat
 
-_SESSION_TTL_SECONDS = 7 * 24 * 3600  # 7 days
 # Per-process fallback HMAC key for magic links when no env var is set (local dev only).
 # Tokens signed with this key are valid only for the lifetime of the process.
-_MAGIC_LINK_FALLBACK_SECRET: str = pysecrets.token_hex(32)
 
 # #850: 12+ characters per NIST SP 800-63B (length over composition rules —
 # arbitrary complexity requirements are intentionally omitted). 800-63B does
@@ -7207,552 +7157,89 @@ _MAGIC_LINK_FALLBACK_SECRET: str = pysecrets.token_hex(32)
 # and context-specific words (the username), so those checks are below.
 # Applies to new/changed passwords only; existing shorter passwords keep
 # working at login.
-_MIN_PASSWORD_LENGTH = 12
 
 # Starter blocklist: common breach-corpus passwords that pass the 12-char
 # minimum. Compared lowercase.
-_COMMON_PASSWORDS = frozenset({
-    "password1234",
-    "password12345",
-    "password123456",
-    "passwordpassword",
-    "123456789012",
-    "1234567890123",
-    "12345678901234",
-    "qwertyuiop123",
-    "qwerty123456",
-    "1q2w3e4r5t6y",
-    "abc123456789",
-    "iloveyou1234",
-    "administrator",
-    "adminpassword",
-    "welcome123456",
-    "letmein123456",
-    "passw0rd1234",
-})
 
 
-def _is_sequential_password(lowered: str) -> bool:
-    """True when every step is the same/next character (e.g. 123456789012,
-    abcdefghijkl, aaaaaaaaaaaa)."""
-    return all(0 <= ord(b) - ord(a) <= 1 for a, b in zip(lowered, lowered[1:]))
 
 
-def _validate_new_password(password: str | None, *, username: str | None = None) -> None:
-    if not password or len(password) < _MIN_PASSWORD_LENGTH:
-        raise HTTPException(
-            status_code=422,
-            detail=f"password must be at least {_MIN_PASSWORD_LENGTH} characters",
-        )
-    lowered = password.lower()
-    if lowered in _COMMON_PASSWORDS or _is_sequential_password(lowered):
-        raise HTTPException(
-            status_code=422,
-            detail="password is too common or predictable; choose something less guessable",
-        )
-    if username and len(username) >= 4 and username.lower() in lowered:
-        raise HTTPException(
-            status_code=422,
-            detail="password must not contain your username",
-        )
 
 
-def _prune_expired_sessions(session_repo) -> None:
-    # #849 RCA: SqliteUserSessionRepository.prune_expired existed but was never
-    # called, so expired sessions accumulated forever. Called on every
-    # session-creating endpoint (setup/login/magic-link) — those already hit
-    # the DB, and pruning is one indexed DELETE. Best-effort: a prune failure
-    # must never block a login.
-    from datetime import datetime, timezone as _tz
-
-    try:
-        session_repo.prune_expired(now_iso=datetime.now(_tz.utc).isoformat())
-    except Exception:
-        logger.warning("session prune failed (non-fatal)", exc_info=True)
 
 
 # #850: per-username lockout after repeated failed logins. The 5/min per-IP
 # rate limit does not stop distributed credential-stuffing; this does. Keyed
 # by username only (an attacker rotating IPs still locks out), which trades a
 # bounded 15-minute targeted-DoS window for brute-force protection.
-_FAILED_LOGIN_WINDOW_SECONDS = 15 * 60
-_FAILED_LOGIN_LOCKOUT_THRESHOLD = 5
-_failed_login_attempts: Dict[str, List[float]] = {}
-_failed_login_lock = threading.Lock()
 
 
-def _login_locked_out(username: str) -> bool:
-    cutoff = time.time() - _FAILED_LOGIN_WINDOW_SECONDS
-    with _failed_login_lock:
-        attempts = [t for t in _failed_login_attempts.get(username, []) if t > cutoff]
-        _failed_login_attempts[username] = attempts
-        return len(attempts) >= _FAILED_LOGIN_LOCKOUT_THRESHOLD
 
 
-def _record_failed_login(username: str) -> None:
-    with _failed_login_lock:
-        _failed_login_attempts.setdefault(username, []).append(time.time())
 
 
-def _clear_failed_logins(username: str) -> None:
-    with _failed_login_lock:
-        _failed_login_attempts.pop(username, None)
 
 
-def _session_cookie_secure() -> bool:
-    return os.environ.get("WORKEROS_INSECURE_COOKIES") != "1"
 
 
-def _set_session_cookie(response: Response, session_id: str) -> None:
-    response.set_cookie(
-        SESSION_COOKIE,
-        session_id,
-        httponly=True,
-        samesite="lax",
-        max_age=_SESSION_TTL_SECONDS,
-        secure=_session_cookie_secure(),
-    )
 
 
-class _AuthSetupRequest(BaseModel):
-    username: str
-    password: str
-    display_name: Optional[str] = None
 
 
-class _LoginRequest(BaseModel):
-    username: str
-    password: str
 
 
-class _UserOut(BaseModel):
-    id: str
-    username: str
-    display_name: Optional[str] = None
-    role: str
-    disabled: bool
-    created_at: str
 
 
-class _UserCreateRequest(BaseModel):
-    username: str
-    password: str
-    display_name: Optional[str] = None
-    role: str = "member"
 
 
-class _UserUpdateRequest(BaseModel):
-    display_name: Optional[str] = None
-    role: Optional[str] = None
-    disabled: Optional[bool] = None
-    password: Optional[str] = None
 
 
-class _PATOut(BaseModel):
-    id: str
-    name: str
-    last_used_at: Optional[str] = None
-    created_at: str
-    expires_at: Optional[str] = None
 
 
-class _PATCreateRequest(BaseModel):
-    name: str
-    expires_at: Optional[str] = None
 
 
-class _PATCreateResponse(BaseModel):
-    token: str  # raw value — shown once, never stored
-    pat: _PATOut
 
 
-def _bcrypt_hash(password: str) -> str:
-    try:
-        import bcrypt
-        return bcrypt.hashpw(password.encode(), bcrypt.gensalt()).decode()
-    except ImportError:
-        raise HTTPException(status_code=500, detail="bcrypt not installed")
 
 
-def _bcrypt_verify(password: str, hashed: str) -> bool:
-    try:
-        import bcrypt
-        return bcrypt.checkpw(password.encode(), hashed.encode())
-    except ImportError:
-        return False
 
 
-def _require_multi_member_repos(repos: Repositories):
-    if repos.users is None or repos.sessions is None or repos.tokens is None:
-        raise HTTPException(status_code=503, detail="multi-member not available")
-    return repos.users, repos.sessions, repos.tokens
 
 
-@app.post("/auth/setup", response_model=_UserOut, status_code=201)
-def auth_setup(
-    payload: _AuthSetupRequest,
-    response: Response,
-    repos: Repositories = Depends(get_repos),
-) -> _UserOut:
-    """Create the first admin account. Returns 409 if any user already exists."""
-    user_repo, session_repo, _ = _require_multi_member_repos(repos)
-    if user_repo.count() > 0:
-        raise HTTPException(status_code=409, detail="workspace already set up")
-    username = payload.username.strip()
-    if not username:
-        raise HTTPException(status_code=422, detail="username required")
-    password = payload.password
-    _validate_new_password(password, username=username)
-    user_id = str(_uuid_mod.uuid4())
-    pw_hash = _bcrypt_hash(password)
-    row = user_repo.create(
-        user_id=user_id,
-        username=username,
-        display_name=payload.display_name,
-        password_hash=pw_hash,
-        role="admin",
-    )
-    # Claim the bootstrap (local-default) identity's seed workers, connections,
-    # and secrets for this first admin, so they OWN the seed data and can run it
-    # (a run uses the owner's connections). Without this the admin owns nothing
-    # and seed workers fail to run despite being visible. Non-fatal.
-    try:
-        _claimed = _claim_bootstrap_assets_for_new_admin(user_id, repos)
-        if any(_claimed.values()):
-            logger.info("claim-on-setup: first admin %s claimed %s", user_id, _claimed)
-    except Exception:
-        logger.warning("claim-on-setup failed (non-fatal)", exc_info=True)
-    # Auto-login: issue a session cookie so the browser is immediately logged in
-    _prune_expired_sessions(session_repo)  # #849
-    session_id = _secrets_mod.token_urlsafe(32)
-    from datetime import datetime, timedelta, timezone as _tz
-    expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
-    session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
-    _set_session_cookie(response, session_id)
-    return _UserOut(id=row["id"], username=row["username"], display_name=row.get("display_name"),
-                    role=row["role"], disabled=bool(row["disabled"]), created_at=row["created_at"])
 
 
-@app.post("/auth/login")
-def auth_login(
-    payload: _LoginRequest,
-    response: Response,
-    repos: Repositories = Depends(get_repos),
-) -> dict:
-    """Authenticate with username+password; sets a session cookie."""
-    user_repo, session_repo, _ = _require_multi_member_repos(repos)
-    username = payload.username
-    # #850: per-username lockout — checked before the credential comparison so
-    # a locked account does not keep burning bcrypt work for an attacker.
-    if _login_locked_out(username):
-        raise HTTPException(
-            status_code=429,
-            detail="too many failed login attempts; try again later",
-        )
-    user = user_repo.get_by_username(username=username)
-    if user is None or not _bcrypt_verify(payload.password, user.get("password_hash") or ""):
-        _record_failed_login(username)
-        raise HTTPException(status_code=401, detail="invalid credentials")
-    if user.get("disabled"):
-        raise HTTPException(status_code=403, detail="account disabled")
-    _clear_failed_logins(username)
-    _prune_expired_sessions(session_repo)  # #849
-    session_id = _secrets_mod.token_urlsafe(32)
-    from datetime import datetime, timedelta, timezone as _tz
-    expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
-    try:
-        session_repo.create(session_id=session_id, user_id=user["id"], expires_at=expires)
-    except ValueError:
-        # #848: user was disabled between the credential check above and the
-        # session insert (TOCTOU) — the atomic guard in create() caught it.
-        raise HTTPException(status_code=403, detail="account disabled")
-    _set_session_cookie(response, session_id)
-    return {
-        "id": user["id"],
-        "username": user["username"],
-        "display_name": user.get("display_name"),
-        "role": user["role"],
-        "redirect_to": "/overview",
-    }
 
 
-@app.post("/auth/logout")
-def auth_logout(
-    request: Request,
-    response: Response,
-    repos: Repositories = Depends(get_repos),
-) -> dict:
-    """Invalidate the current session cookie."""
-    session_id = request.cookies.get(SESSION_COOKIE)
-    if session_id and repos.sessions is not None:
-        try:
-            repos.sessions.delete(session_id=session_id)
-        except Exception:
-            pass
-    response.delete_cookie(SESSION_COOKIE)
-    return {"ok": True}
 
 
-def _magic_link_secret() -> str:
-    """Return the HMAC key for magic-link tokens.
-
-    Checks WORKEROS_MAGIC_LINK_SECRET first (dedicated key), then falls back to
-    FLOOM_SECRET (shared operator secret). Never raises — falls back to a
-    module-level random key so local installs without env vars still work.
-    """
-    return (
-        os.environ.get("WORKEROS_MAGIC_LINK_SECRET", "").strip()
-        or os.environ.get("FLOOM_SECRET", "").strip()
-        or _MAGIC_LINK_FALLBACK_SECRET
-    )
 
 
-def _issue_magic_link(*, user_id: str, ttl_seconds: int = 900) -> str:
-    """Issue a stateless HMAC-signed magic-link token for a user."""
-    payload = {
-        "user_id": user_id,
-        "nonce": pysecrets.token_urlsafe(18),
-        "exp": int(time.time()) + ttl_seconds,
-    }
-    encoded = _b64url_encode(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
-    signature = hmac.new(_magic_link_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).hexdigest()
-    return f"{encoded}.{signature}"
 
 
-def _validate_magic_link(token: str) -> str:
-    """Validate a magic-link token and return the user_id. Raises HTTPException on failure."""
-    try:
-        encoded, signature = token.split(".", 1)
-    except ValueError as exc:
-        raise HTTPException(status_code=400, detail="Invalid magic link") from exc
-    expected = hmac.new(_magic_link_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256).hexdigest()
-    if not hmac.compare_digest(expected, signature):
-        raise HTTPException(status_code=400, detail="Invalid magic link")
-    try:
-        payload = json.loads(_b64url_decode(encoded).decode("utf-8"))
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail="Invalid magic link") from exc
-    if int(payload.get("exp") or 0) < int(time.time()):
-        raise HTTPException(status_code=400, detail="Magic link expired")
-    user_id = str(payload.get("user_id") or "")
-    if not user_id:
-        raise HTTPException(status_code=400, detail="Invalid magic link")
-    return user_id
 
 
-@app.post("/auth/magic-link")
-def auth_issue_magic_link(
-    auth: AuthContext = Depends(get_auth_context),
-) -> dict:
-    """Issue a one-time sign-in URL for the authenticated user (multi-member mode only)."""
-    token = _issue_magic_link(user_id=auth.user_id)
-    url = f"{_frontend_base_url()}/auth/magic/{token}"
-    return {"url": url, "expires_in": 900}
 
 
-@app.get("/auth/magic/{token}")
-def auth_consume_magic_link(
-    token: str,
-    response: Response,
-    repos: Repositories = Depends(get_repos),
-) -> dict:
-    """Consume a magic-link token and create a session (multi-member mode only)."""
-    user_id = _validate_magic_link(token)
-    try:
-        user_repo, session_repo, _ = _require_multi_member_repos(repos)
-    except HTTPException:
-        raise HTTPException(status_code=400, detail="Magic links require multi-member auth mode")
-    user = user_repo.get(user_id=user_id)
-    if not user:
-        raise HTTPException(status_code=404, detail="User not found")
-    if user.get("disabled"):
-        raise HTTPException(status_code=403, detail="Account disabled")
-    _prune_expired_sessions(session_repo)  # #849
-    from datetime import datetime, timedelta, timezone as _tz
-    session_id = pysecrets.token_urlsafe(32)
-    expires = (datetime.now(_tz.utc) + timedelta(seconds=_SESSION_TTL_SECONDS)).isoformat()
-    try:
-        session_repo.create(session_id=session_id, user_id=user_id, expires_at=expires)
-    except ValueError:
-        # #848: user was disabled between the check above and the session
-        # insert (TOCTOU) — the atomic guard in create() caught it.
-        raise HTTPException(status_code=403, detail="Account disabled")
-    _set_session_cookie(response, session_id)
-    return {"ok": True, "redirect_to": "/overview"}
 
 
-@app.get("/auth/me")
-def auth_me(auth: AuthContext = Depends(get_auth_context)) -> dict:
-    """Return the current authenticated user's profile."""
-    return {
-        "user_id": auth.user_id,
-        "username": auth.username,
-        "role": auth.role,
-        "auth_method": auth.auth_method,
-        "is_admin": auth.is_admin,
-    }
 
 
-@app.get("/auth/setup-required")
-def auth_setup_required(repos: Repositories = Depends(get_repos)) -> dict:
-    """Public endpoint — returns whether the workspace needs initial setup.
-
-    Used by the login page to decide whether to show the setup form.
-    """
-    if repos.users is None:
-        return {"required": False}
-    return {"required": repos.users.count() == 0}
 
 
 # --- User management (admin only) ---
 
 
-@app.get("/users", response_model=List[_UserOut])
-def list_users(
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> List[_UserOut]:
-    _require_admin(auth)
-    user_repo, _, _ = _require_multi_member_repos(repos)
-    rows = user_repo.list()
-    return [_UserOut(id=r["id"], username=r["username"], display_name=r.get("display_name"),
-                     role=r["role"], disabled=bool(r["disabled"]), created_at=r["created_at"]) for r in rows]
 
 
-@app.post("/users", response_model=_UserOut, status_code=201)
-def create_user(
-    payload: _UserCreateRequest,
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> _UserOut:
-    _require_admin(auth)
-    user_repo, _, _ = _require_multi_member_repos(repos)
-    username = payload.username.strip()
-    if not username:
-        raise HTTPException(status_code=422, detail="username required")
-    if payload.role not in ("admin", "member"):
-        raise HTTPException(status_code=422, detail="role must be admin or member")
-    _validate_new_password(payload.password, username=username)
-    if user_repo.get_by_username(username=username) is not None:
-        raise HTTPException(status_code=409, detail="username already taken")
-    user_id = str(_uuid_mod.uuid4())
-    pw_hash = _bcrypt_hash(payload.password)
-    row = user_repo.create(
-        user_id=user_id,
-        username=username,
-        display_name=payload.display_name,
-        password_hash=pw_hash,
-        role=payload.role,
-    )
-    return _UserOut(id=row["id"], username=row["username"], display_name=row.get("display_name"),
-                    role=row["role"], disabled=bool(row["disabled"]), created_at=row["created_at"])
 
 
-@app.patch("/users/{uid}", response_model=_UserOut)
-def update_user(
-    uid: str = PathParam(...),
-    payload: _UserUpdateRequest = Body(...),
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> _UserOut:
-    _require_admin(auth)
-    user_repo, _, _ = _require_multi_member_repos(repos)
-    updates: dict = {}
-    if payload.display_name is not None:
-        updates["display_name"] = payload.display_name
-    if payload.role is not None:
-        if payload.role not in ("admin", "member"):
-            raise HTTPException(status_code=422, detail="role must be admin or member")
-        updates["role"] = payload.role
-    if payload.disabled is not None:
-        updates["disabled"] = 1 if payload.disabled else 0
-    if payload.password is not None:
-        existing_user = user_repo.get(user_id=uid)
-        _validate_new_password(
-            payload.password,
-            username=(existing_user or {}).get("username"),
-        )
-        updates["password_hash"] = _bcrypt_hash(payload.password)
-    row = user_repo.update(user_id=uid, **updates)
-    if row is None:
-        raise HTTPException(status_code=404, detail="user not found")
-    return _UserOut(id=row["id"], username=row["username"], display_name=row.get("display_name"),
-                    role=row["role"], disabled=bool(row["disabled"]), created_at=row["created_at"])
 
 
-@app.delete("/users/{uid}", status_code=204)
-def delete_user(
-    uid: str = PathParam(...),
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> None:
-    _require_admin(auth)
-    user_repo, _, _ = _require_multi_member_repos(repos)
-    if uid == auth.user_id:
-        raise HTTPException(status_code=400, detail="cannot delete your own account")
-    if not user_repo.delete(user_id=uid):
-        raise HTTPException(status_code=404, detail="user not found")
 
 
 # --- Personal access tokens (current user) ---
 
 
-@app.get("/auth/tokens", response_model=List[_PATOut])
-def list_tokens(
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> List[_PATOut]:
-    _, _, token_repo = _require_multi_member_repos(repos)
-    rows = token_repo.list(user_id=auth.user_id)
-    return [_PATOut(**{k: r[k] for k in ("id", "name", "last_used_at", "created_at", "expires_at")}) for r in rows]
-
-
-@app.post("/auth/tokens", response_model=_PATCreateResponse, status_code=201)
-def create_token(
-    payload: _PATCreateRequest,
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> _PATCreateResponse:
-    _, _, token_repo = _require_multi_member_repos(repos)
-    name = payload.name.strip()
-    if not name:
-        raise HTTPException(status_code=422, detail="token name required")
-    raw = "wos_" + _secrets_mod.token_urlsafe(32)
-    token_hash = _hash_pat(raw)
-    token_id = str(_uuid_mod.uuid4())
-    try:
-        row = token_repo.create(
-            token_id=token_id,
-            user_id=auth.user_id,
-            name=name,
-            token_hash=token_hash,
-            expires_at=payload.expires_at,
-        )
-    except Exception as _pat_exc:
-        # FK constraint failure means auth.user_id has no row in the users
-        # table — this happens in dev mode (ghost auth, no setup done).
-        # Surface a clear 409 rather than a raw 500.
-        import sqlite3 as _sqlite3
-        if isinstance(_pat_exc, _sqlite3.IntegrityError):
-            raise HTTPException(
-                status_code=409,
-                detail="Personal access tokens require a real user account. "
-                       "Complete workspace setup at /login first.",
-            ) from _pat_exc
-        raise
-    pat = _PATOut(**{k: row[k] for k in ("id", "name", "last_used_at", "created_at", "expires_at")})
-    return _PATCreateResponse(token=raw, pat=pat)
-
-
-@app.delete("/auth/tokens/{token_id}", status_code=204)
-def delete_token(
-    token_id: str = PathParam(...),
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> None:
-    _, _, token_repo = _require_multi_member_repos(repos)
-    if not token_repo.delete(token_id=token_id, user_id=auth.user_id):
-        raise HTTPException(status_code=404, detail="token not found")
 
 
 
@@ -7763,22 +7250,10 @@ def delete_token(
 
 
 
-@app.post("/auth/tokens/{token_id}/rotate", response_model=_PATCreateResponse)
-def rotate_token(
-    token_id: str = PathParam(...),
-    auth: AuthContext = Depends(get_auth_context),
-    repos: Repositories = Depends(get_repos),
-) -> _PATCreateResponse:
-    """#784: rotate a PAT in place — issues a fresh raw value while keeping the
-    same token id/name. The old value stops working immediately; the new value
-    is shown once."""
-    _, _, token_repo = _require_multi_member_repos(repos)
-    raw = "wos_" + _secrets_mod.token_urlsafe(32)
-    row = token_repo.rotate(token_id=token_id, user_id=auth.user_id, token_hash=_hash_pat(raw))
-    if row is None:
-        raise HTTPException(status_code=404, detail="token not found")
-    pat = _PATOut(**{k: row[k] for k in ("id", "name", "last_used_at", "created_at", "expires_at")})
-    return _PATCreateResponse(token=raw, pat=pat)
+
+
+
+
 
 
 if __name__ == "__main__":
