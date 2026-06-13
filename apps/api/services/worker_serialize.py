@@ -31,6 +31,7 @@ from services.run_serialize import _make_run_summary
 from services.secrets_env import _available_secret_names_for_user
 from services.worker_access import (
     _normalize_trigger_type,
+    _trigger_label,
     _available_connection_slugs_for_user,
     _get_visible_worker,
     _worker_connection_slugs,
@@ -633,3 +634,80 @@ def _iter_worker_dir_files(worker_id: str):
         if _is_secret_bearing_export_path(rel):
             continue
         yield rel, path.read_bytes()
+
+
+def _get_last_run_for_worker(
+    worker_id: str,
+    *,
+    user_id: str,
+    repos: Repositories,
+) -> Optional[Dict[str, Any]]:
+    row = repos.workers.get_last_run(user_id=user_id, worker_id=worker_id)
+    return dict(row) if row else None
+
+
+def _build_triggers_list(worker: Dict[str, Any]) -> List[str]:
+    """Extract all configured trigger labels from a worker dict.
+
+    Prefers triggers_json (multi-trigger) if present; falls back to single trigger.
+    Returns labels like ['Manual', 'Cron · 0 9 * * *', 'Webhook', 'On gmail · new_email'].
+    """
+    # Try multi-trigger first (from DB triggers_json column)
+    triggers_json = worker.get("triggers_json")
+    if triggers_json:
+        try:
+            triggers_list = json.loads(triggers_json)
+            if isinstance(triggers_list, list) and triggers_list:
+                return [_trigger_label(t) for t in triggers_list if isinstance(t, dict)]
+        except Exception:
+            pass
+
+    # Fall back to single-trigger logic from config
+    config: Dict[str, Any] = worker.get("config") or {}
+    trigger: Dict[str, Any] = config.get("trigger") or {}
+    trigger_type = _normalize_trigger_type(worker.get("trigger_type") or trigger.get("type"))
+    trigger_with_type = dict(trigger)
+    trigger_with_type.setdefault("type", trigger_type)
+    label = _trigger_label(trigger_with_type)
+    return [label] if label else [trigger_type.title()]
+
+
+def _connection_slug_for_worker_card(connection: Any) -> Optional[str]:
+    """Return a display slug for list-card connection icons.
+
+    Worker manifests have accepted several connection shapes over time:
+    plain app slugs, typed app dicts, and MCP dicts. A malformed/null entry in
+    one worker must not take down the whole `/workers` list endpoint.
+    """
+    if isinstance(connection, str):
+        return connection
+    if not isinstance(connection, dict):
+        return None
+
+    mcp = connection.get("mcp")
+    if isinstance(mcp, dict):
+        label = mcp.get("label")
+        if isinstance(label, str) and label.strip():
+            return label
+
+    for key in ("app", "slug", "toolkit", "label", "name"):
+        value = connection.get(key)
+        if isinstance(value, str) and value.strip():
+            return value
+
+    return None
+
+
+def _starred_worker_ids(user_id: str) -> set[str]:
+    """#782: the set of worker ids the user has starred."""
+    from db import get_db
+
+    try:
+        with get_db() as conn:
+            rows = conn.execute(
+                "SELECT worker_id FROM user_worker_prefs WHERE user_id = ? AND starred = 1",
+                (user_id,),
+            ).fetchall()
+        return {str(r["worker_id"]) for r in rows}
+    except Exception:
+        return set()
