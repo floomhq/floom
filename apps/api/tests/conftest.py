@@ -36,6 +36,13 @@ def _isolate_test_globals():
     _store = getattr(_auth_ops, "_failed_login_attempts", None)
     if isinstance(_store, dict):
         _store.clear()
+    # The /health 60s result cache moved into services.health_ops (not reloaded
+    # per-test); reset it so a cached health payload never bleeds across tests.
+    _health_ops = sys.modules.get("services.health_ops")
+    _hc = getattr(_health_ops, "_HEALTH_CACHE", None)
+    if isinstance(_hc, dict):
+        _hc["checked_at"] = 0.0
+        _hc["payload"] = None
     try:
         yield
     finally:
