@@ -20,7 +20,8 @@ import { useRouter, useSearchParams } from "next/navigation";
 import type { WorkerSummary } from "@/lib/types";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
-import { ShareWorkerButton } from "@/components/ShareWorkerButton";
+import { StatusPill } from "@/components/collection/StatusPill";
+import { workerStatusPill } from "@/lib/workers/derive";
 
 // Cloud-only: extend WorkerSummary with workspace visibility (adds "shared") + owner.
 // Use Omit to replace the engine's narrower literal union with the cloud's broader type.
@@ -722,6 +723,14 @@ function EmptyWorkersState() {
   );
 }
 
+// Mirror the engine's brand-copy transform (WorkersCollection.displayBrandCopy):
+// legacy "WorkerOS"/"Workeros" → "Floom" in user-facing description text.
+function displayBrandCopy(value?: string | null): string {
+  return (value ?? "")
+    .replace(new RegExp(`\\bWorker${"OS"}\\b`, "g"), "Floom")
+    .replace(new RegExp(`\\bWorker${"os"}\\b`, "g"), "Floom");
+}
+
 function WorkerCard({
   worker,
   isFavorite,
@@ -732,11 +741,9 @@ function WorkerCard({
   onFavoriteToggle: (id: string) => void;
 }) {
   const hoverDescription = firstLine(worker.long_description);
-  const stats = worker.recent_stats;
-  const description =
-    worker.archived && worker.archive_reason
-      ? worker.archive_reason
-      : worker.description || "No description.";
+  // EXACT engine card (components/collection/CollectionGrid + WorkersCollection card spec):
+  // c-gtop holds the name (with private lock); icons live in c-gfoot's c-gtools.
+  const description = displayBrandCopy(worker.description);
 
   return (
     <Link
@@ -744,7 +751,6 @@ function WorkerCard({
       className="c-gcard group"
       title={hoverDescription || undefined}
     >
-      {/* Star — absolute top-right, shown on hover (engine pattern) */}
       <button
         type="button"
         title={isFavorite ? "Remove from favourites" : "Add to favourites"}
@@ -756,55 +762,29 @@ function WorkerCard({
         className={`star ${isFavorite ? "on" : ""}`}
         aria-pressed={isFavorite}
       >
-        <Star size={14} fill={isFavorite ? "currentColor" : "none"} />
+        <Star size={16} fill={isFavorite ? "currentColor" : "none"} />
       </button>
-
-      {/* Top row: icon pills inline next to nothing (engine: c-gtop holds leading + name) */}
       <div className="c-gtop">
-        {worker.archived ? (
-          <span
-            className="inline-flex items-center gap-1 rounded-[var(--radius-button)] border border-border bg-muted/60 px-2 py-0.5 text-[11px] text-muted-foreground"
-            title="Archived"
-          >
-            <Archive className="size-3" />
-            Archived
-          </span>
-        ) : (
-          <WorkerIconPills
-            worker={worker}
-            inputs={worker.inputs ?? []}
-            connections={worker.connections}
-            triggerType={worker.trigger_type}
-            size="sm"
-            max={4}
-          />
-        )}
+        <div className="c-gnm">
+          {worker.visibility === "private" ? (
+            <span className="inline-flex items-baseline gap-1.5">
+              {worker.name}
+              <Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" />
+            </span>
+          ) : (
+            worker.name
+          )}
+        </div>
       </div>
-
-      {/* Name */}
-      <div className={`c-gnm mt-2 line-clamp-2 ${worker.archived ? "text-muted-foreground" : ""}`}>
-        {worker.name}
-      </div>
-
-      {/* Description */}
-      <div className="c-gd">{description}</div>
-
-      {/* Footer: last-run time + dot status + share */}
+      {description != null && <div className="c-gd">{description}</div>}
       <div className="c-gfoot">
-        <CardFooterLine
-          stats={stats}
-          status={worker.archived ? undefined : worker.status}
-          visibility={worker.visibility}
-        />
-        {!worker.archived && (
-          // biome-ignore lint/a11y/useKeyWithClickEvents: parent Link handles keyboard
-          <span
-            className="shrink-0"
-            onClick={(e) => e.preventDefault()}
-          >
-            <ShareWorkerButton workerId={worker.id} workerName={worker.name} variant="icon" />
-          </span>
-        )}
+        <StatusPill spec={workerStatusPill(worker as unknown as WorkerSummary)} />
+        <div className="c-gtools">
+          <WorkerIconPills
+            worker={{ id: worker.id, name: worker.name, connections: worker.connections }}
+            max={3}
+          />
+        </div>
       </div>
     </Link>
   );
