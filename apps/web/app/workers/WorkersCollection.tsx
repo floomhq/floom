@@ -742,16 +742,37 @@ function WorkerDetailActions({
   );
 }
 
+/**
+ * A host-injected top-level view (#1006). workeros-cloud passes its
+ * cross-tenant "workspace-admin" view here so it can compose the engine
+ * `WorkersCollection` instead of forking the whole 869-line component. The
+ * host decides visibility (e.g. only pass it when `api.me().is_admin`); the
+ * engine stays generic and renders the switcher only when views are supplied.
+ */
+export type WorkersExtraView = {
+  /** Stable key, also the active-view id. */
+  key: string;
+  /** Label shown in the top-of-collection view switcher. */
+  label: string;
+  /** Rendered in place of the workers Collection when this view is active. */
+  render: () => React.ReactNode;
+};
+
+const WORKERS_VIEW_KEY = "workers";
+
 export default function WorkersCollection({
   initialWorkers,
+  extraViews = [],
 }: {
   initialWorkers: WorkerSummary[];
+  extraViews?: WorkersExtraView[];
 }) {
   const router = useRouter();
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(initialWorkers.length === 0);
   const [canManageWorkers, setCanManageWorkers] = useState(false);
+  const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
 
   useEffect(() => {
     let alive = true;
@@ -907,7 +928,44 @@ export default function WorkersCollection({
     },
   };
 
-  return <Collection config={config} />;
+  // OSS path: no host views -> render the Collection exactly as before.
+  if (extraViews.length === 0) {
+    return <Collection config={config} />;
+  }
+
+  // Host path (cloud): a top-level switcher between the workers Collection and
+  // each injected view. Reuses the app's tab styling (c-dtabs / c-dtab).
+  const activeExtra = extraViews.find((v) => v.key === activeView);
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="c-dtabs px-4 pt-3" role="tablist" aria-label="Workers views">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeView === WORKERS_VIEW_KEY}
+          className={`c-dtab ${activeView === WORKERS_VIEW_KEY ? "on" : ""}`}
+          onClick={() => setActiveView(WORKERS_VIEW_KEY)}
+        >
+          Workers
+        </button>
+        {extraViews.map((v) => (
+          <button
+            type="button"
+            role="tab"
+            key={v.key}
+            aria-selected={activeView === v.key}
+            className={`c-dtab ${activeView === v.key ? "on" : ""}`}
+            onClick={() => setActiveView(v.key)}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1">
+        {activeExtra ? activeExtra.render() : <Collection config={config} />}
+      </div>
+    </div>
+  );
 }
 
 const muted: React.CSSProperties = { color: "var(--muted-foreground)" };
