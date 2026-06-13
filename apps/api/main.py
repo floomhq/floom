@@ -1278,6 +1278,14 @@ async def auth_middleware(request: Request, call_next):
             worker_call_payload = validate_worker_call_token(bearer_token_header, secret=secret)
         except ValueError as exc:
             return _JSONResponse(status_code=401, content={"detail": str(exc)})
+        # #916: a run token is only as alive as its user — reject at the
+        # perimeter when the owning account is disabled or deleted.
+        try:
+            from auth.multi_member import _require_active_token_user  # noqa: PLC0415
+
+            _require_active_token_user(str(worker_call_payload.get("user_id") or ""))
+        except HTTPException as exc:
+            return _JSONResponse(status_code=exc.status_code, content={"detail": exc.detail})
         worker_call_repos = None
         if request.method == "GET" and _RE_RUN_DETAIL.match(path):
             try:

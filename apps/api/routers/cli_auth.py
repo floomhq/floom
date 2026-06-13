@@ -68,7 +68,10 @@ def _issue_cli_auth_pat(*, user_id: str, client_name: str, repos: "Repositories"
     # Fix: the token inherits the approver's role, never more. Unknown role
     # strings clamp to "member" so a bad value can't widen privileges.
     from db import get_db, now_iso
+    from services.auth_ops import _default_token_expiry
     token_role = role if role in ("admin", "member") else "member"
+    # #924/#949: CLI tokens get a bounded lifetime instead of living forever.
+    expires_at = _default_token_expiry()
     raw = "wos_" + _secrets_mod.token_urlsafe(32)
     token_id = str(_uuid_mod.uuid4())
     token_name = f"CLI device: {(client_name or 'unknown').strip() or 'unknown'}"
@@ -77,10 +80,10 @@ def _issue_cli_auth_pat(*, user_id: str, client_name: str, repos: "Repositories"
             conn.execute(
                 """
                 INSERT INTO cli_api_tokens
-                    (id, token_hash, user_id, role, name, created_at, last_used_at, revoked_at)
-                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL)
+                    (id, token_hash, user_id, role, name, created_at, last_used_at, revoked_at, expires_at)
+                VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, ?)
                 """,
-                (token_id, _hash_pat(raw), user_id, token_role, token_name, now_iso()),
+                (token_id, _hash_pat(raw), user_id, token_role, token_name, now_iso(), expires_at),
             )
     except Exception as exc:
         logger.exception("Could not issue CLI auth token for user %s", user_id)
@@ -88,6 +91,10 @@ def _issue_cli_auth_pat(*, user_id: str, client_name: str, repos: "Repositories"
             status_code=500,
             detail="Could not issue CLI API token",
         ) from exc
+    logger.info(
+        "cli token minted: user=%s role=%s name=%r expires_at=%s",
+        user_id, token_role, token_name, expires_at,
+    )
     return raw
 
 

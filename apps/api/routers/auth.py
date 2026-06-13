@@ -38,13 +38,17 @@ from models import (
     _UserUpdateRequest,
 )
 from services.auth_ops import (
+    _MAGIC_LINK_FALLBACK_SECRET,
     _SESSION_TTL_SECONDS,
     _bcrypt_hash,
     _bcrypt_verify,
     _claim_bootstrap_assets_for_new_admin,
     _clear_failed_logins,
+    _default_token_expiry,
+    _enforce_token_ttl_cap,
     _issue_magic_link,
     _login_locked_out,
+    _magic_link_secret,
     _prune_expired_sessions,
     _record_failed_login,
     _require_multi_member_repos,
@@ -170,6 +174,15 @@ def auth_issue_magic_link(
     auth: AuthContext = Depends(get_auth_context),
 ) -> dict:
     """Issue a one-time sign-in URL for the authenticated user (multi-member mode only)."""
+    # #917: the per-process random fallback key makes links unverifiable after a
+    # restart and ties a security-critical signing key to process lifetime. Refuse
+    # issuance instead of silently minting links only this process can validate;
+    # consumption of already-issued links is unaffected.
+    if _magic_link_secret() is _MAGIC_LINK_FALLBACK_SECRET:
+        raise HTTPException(
+            status_code=503,
+            detail="Magic links require WORKEROS_MAGIC_LINK_SECRET or FLOOM_SECRET to be configured",
+        )
     token = _issue_magic_link(user_id=auth.user_id)
     url = f"{_frontend_base_url()}/auth/magic/{token}"
     return {"url": url, "expires_in": 900}
@@ -314,6 +327,18 @@ def delete_user(
         raise HTTPException(status_code=400, detail="cannot delete your own account")
     if not user_repo.delete(user_id=uid):
         raise HTTPException(status_code=404, detail="user not found")
+    # #915: cli_api_tokens has no FK cascade to users — revoke explicitly so a
+    # deleted user's CLI tokens can't outlive the account. (The auth provider
+    # also rejects tokens for missing users; this keeps the table clean.)
+    try:
+        from db import get_db, now_iso
+        with get_db() as conn:
+            conn.execute(
+                "UPDATE cli_api_tokens SET revoked_at = ? WHERE user_id = ? AND revoked_at IS NULL",
+                (now_iso(), uid),
+            )
+    except Exception:
+        logger.exception("failed to revoke CLI tokens for deleted user %s", uid)
 
 
 @auth_router.get("/auth/tokens", response_model=List[_PATOut])
@@ -336,6 +361,8 @@ def create_token(
     name = payload.name.strip()
     if not name:
         raise HTTPException(status_code=422, detail="token name required")
+    # #924/#949: tokens are bounded by default — no more accidental forever-keys.
+    expires_at = _enforce_token_ttl_cap(payload.expires_at)
     raw = "wos_" + _secrets_mod.token_urlsafe(32)
     token_hash = _hash_pat(raw)
     token_id = str(_uuid_mod.uuid4())
@@ -345,7 +372,7 @@ def create_token(
             user_id=auth.user_id,
             name=name,
             token_hash=token_hash,
-            expires_at=payload.expires_at,
+            expires_at=expires_at,
         )
     except Exception as _pat_exc:
         # FK constraint failure means auth.user_id has no row in the users

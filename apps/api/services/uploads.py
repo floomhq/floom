@@ -22,6 +22,7 @@ import json
 import logging
 import mimetypes
 import os
+import secrets as pysecrets
 import sqlite3
 import tempfile
 import threading
@@ -205,11 +206,18 @@ def _upload_url_ttl_seconds() -> int:
         return 3600
 
 
+# #930: when no signing secret is configured, fall back to a per-process random
+# key instead of a hardcoded public string. Download tokens can no longer be
+# forged offline; they just stop validating across restarts (the documented
+# trade-off for unconfigured local installs).
+_UPLOAD_FALLBACK_SIGNING_KEY: str = pysecrets.token_hex(32)
+
+
 def _upload_signing_key() -> bytes:
     key = (
         os.environ.get("WORKEROS_UPLOAD_URL_SIGNING_SECRET")
         or os.environ.get("FLOOM_SECRET")
-        or "local-dev-upload-url-signing"
+        or _UPLOAD_FALLBACK_SIGNING_KEY
     )
     return key.encode("utf-8")
 
