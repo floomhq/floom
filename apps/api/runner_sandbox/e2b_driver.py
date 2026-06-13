@@ -18,6 +18,7 @@ from pathlib import PurePosixPath
 from typing import Any, Callable, Dict, Optional
 
 from .base import SandboxDriver
+from .memory_context import ensure_memory_context_pack
 from models import WorkerConfig, WorkerResult
 from contexts import CONTEXTS_DIR, context_dir, context_scope_for_user, normalize_context_mount, use_context_scope
 from runner_utils import ARTIFACTS_DIR
@@ -1059,6 +1060,7 @@ class E2BSandboxDriver(SandboxDriver):
             made_dirs.add(contexts_root)
 
         with use_context_scope(context_scope_for_user(user_id)):
+            ensure_memory_context_pack(config=config, user_id=user_id, log_fn=log_fn)
             for raw_context in config.contexts:
                 try:
                     context = normalize_context_mount(raw_context)
