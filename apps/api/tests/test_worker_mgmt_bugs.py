@@ -142,6 +142,48 @@ def test_worker_routes_resolve_slug_equivalent_id(app_ctx):
     assert client.get("/workers/sales-summary").status_code == 404
 
 
+def test_workers_shape_list_empty_workspace_returns_200(monkeypatch, tmp_path):
+    workers_dir = tmp_path / "workers"
+    workers_dir.mkdir()
+    db_path = tmp_path / "empty-workeros.db"
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    monkeypatch.setenv("FLOOM_SECRET", "worker-mgmt-secret-empty")
+    monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    monkeypatch.setenv("WORKEROS_DB", str(db_path))
+    monkeypatch.setenv("FLOOM_DB", str(db_path))
+
+    for name in [
+        "db",
+        "db._legacy_sqlite",
+        "db.sqlite",
+        "db.factory",
+        "db.dependency",
+        "db.interface",
+        "models",
+        "worker_registry",
+        "runner_utils",
+        "run_service",
+        "scheduler",
+        "main",
+    ]:
+        sys.modules.pop(name, None)
+
+    db = importlib.import_module("db")
+    db.init_db()
+    db.get_repositories.cache_clear()
+    main = importlib.import_module("main")
+    main.invalidate_worker_cache()
+
+    from fastapi.testclient import TestClient
+
+    client = TestClient(main.app, headers={"x-floom-secret": "worker-mgmt-secret-empty"})
+    resp = client.get("/workers?shape=list")
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == []
+    db.get_repositories.cache_clear()
+
+
 def test_scheduler_skips_missing_required_scheduled_inputs(app_ctx, monkeypatch):
     _client, main, scheduler = app_ctx
     monkeypatch.setattr(scheduler, "start_run", lambda *args, **kwargs: None)

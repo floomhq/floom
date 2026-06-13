@@ -1,7 +1,7 @@
 "use client";
 
 import { CheckCircle2, Loader2, XCircle, FileText, ExternalLink, Clock } from "lucide-react";
-import { Badge } from "@/components/ui/badge";
+import { StatusPill } from "@/components/collection/StatusPill";
 import type { RunCard as RunCardType } from "@/lib/emily-chat-types";
 
 export function RunCard({ card }: { card: RunCardType }) {
@@ -24,16 +24,8 @@ export function RunCard({ card }: { card: RunCardType }) {
         {duration && isCompleted && (
           <span className="text-xs text-muted-foreground shrink-0">{duration}</span>
         )}
-        {isPending && (
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0.5 bg-amber-500/10 text-amber-700 [border:var(--bd-pill)] font-normal">
-            Needs approval
-          </Badge>
-        )}
-        {isRunning && (
-          <Badge variant="secondary" className="text-[10px] px-1.5 py-0.5 bg-blue-500/10 text-blue-700 [border:var(--bd-pill)] font-normal">
-            Running
-          </Badge>
-        )}
+        {isPending && <StatusPill spec={{ tone: "pending", label: "Needs approval" }} />}
+        {isRunning && <StatusPill spec={{ tone: "run", label: "Running" }} />}
       </div>
 
       {(logLines !== undefined || artifact) && (
