@@ -508,6 +508,15 @@ from services.context_access import (
     _context_summary,
     _context_description,
     _workers_referencing_context,
+    _context_upload_limit_bytes,
+    _contexts_git_prefix,
+    _context_git_path,
+    _git_commit_context,
+    _increment_file_ref_counts,
+    _require_readable_context_for_user,
+    _context_detail,
+    _raise_context_quota_if_needed,
+    _write_context_file,
     _block_secrets_in_contexts,
     _scan_context_write,
     _file_has_share_blocking_secret,
@@ -824,12 +833,6 @@ async def insufficient_disk_space_handler(_request: Request, exc: InsufficientDi
     )
 
 
-def _context_upload_limit_bytes() -> int:
-    try:
-        configured = int(os.environ.get("WORKEROS_CONTEXT_UPLOAD_MAX_BYTES", ""))
-    except ValueError:
-        configured = 0
-    return configured if configured > 0 else DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES
 
 
 def _context_upload_body_limit_bytes() -> int:
@@ -1802,59 +1805,14 @@ def _workspace_base_persona_asset_id(request: Request | None = None) -> str:
 
 
 
-def _contexts_git_prefix() -> str:
-    """Relative path of the contexts dir within the workspace git root.
-
-    OSS: git root is WORKERS_DIR.parent, contexts at 'contexts/'.
-    Cloud: contexts live under CONTEXTS_DIR/workspace_id which may be outside the
-    workers-scoped git root. If so, fall back to 'contexts' and note that contexts
-    versioning in cloud requires a unified workspace dir (v2 cloud work).
-    """
-    if _git_ops.get_active_workspace_id():
-        # In cloud, CONTEXTS_DIR may be a separate FS root from WORKERS_DIR.
-        # Try to compute relative path; if outside git root, use 'contexts' as
-        # a best-effort path (commits will no-op if the path doesn't exist).
-        try:
-            return CONTEXTS_DIR.relative_to(_git_workspace()).as_posix()
-        except ValueError:
-            return "contexts"
-    try:
-        return CONTEXTS_DIR.relative_to(_git_workspace()).as_posix()
-    except ValueError:
-        return "contexts"
 
 
 
 
-def _context_git_path(name: str, rel_path: Optional[str] = None) -> str:
-    try:
-        base = context_dir(name).relative_to(_git_workspace()).as_posix()
-        return _git_join(base, rel_path or "")
-    except Exception:
-        return _git_join(_contexts_git_prefix(), name, rel_path or "")
 
 
 
 
-def _git_commit_context(
-    name: str,
-    rel_path: Optional[str] = None,
-    *,
-    message: str,
-    author_name: str = "WorkerOS",
-    author_email: str = "workeros@local",
-) -> None:
-    if is_context_sensitive(name):
-        return  # sensitive contexts never enter git
-    try:
-        workspace = _git_workspace()
-        with _git_ops_lock:
-            _ensure_git_workspace_ready(workspace)
-            rel = _context_git_path(name, rel_path)
-            _git_ops.commit_paths(workspace, [rel], message, author_name, author_email)
-            _git_ops.push_background(workspace)
-    except Exception as exc:
-        logger.warning("git commit failed for context %s: %s", name, exc)
 
 
 def _git_commit_workspace_md(
@@ -2413,24 +2371,6 @@ def rematerialize_worker_from_db(worker_id: str) -> bool:
 _ARTIFACTS_DIR = Path(os.environ.get("FLOOM_ARTIFACTS_DIR", "../../data/artifacts")).resolve()
 
 
-def _increment_file_ref_counts(file_ids: List[str]) -> None:
-    """Increment file ref_counts in one short transaction tolerant of run bursts.
-
-    Uses ``get_db()`` so the DB path is resolved dynamically from the configured
-    ``WORKEROS_DB``/``FLOOM_DB`` env (the canonical resolution every other read
-    path uses), instead of the module-import-time ``DB_PATH`` global. The stale
-    global could diverge from the live path (deploy-dir swaps / test suites that
-    re-pin the DB), silently writing ref_count updates to the wrong database.
-    """
-    if not file_ids:
-        return
-    counts = collections.Counter(file_ids)
-    with get_db() as conn:
-        for file_id, count in counts.items():
-            conn.execute(
-                "UPDATE files SET ref_count = ref_count + ? WHERE id = ?",
-                (count, file_id),
-            )
 
 
 def _resolve_file_input_references(
@@ -2611,142 +2551,16 @@ def _gc_orphan_blobs(*, limit: int = 500) -> int:
 # ---------------------------------------------------------------------------
 
 
-def _require_readable_context_for_user(
-    name: str,
-    *,
-    user_id: str,
-    metadata: dict[str, dict[str, Any]] | None = None,
-    repos: Optional[Repositories] = None,
-) -> tuple[str, dict[str, dict[str, Any]]]:
-    """Read access: operator-visible packs OR read-only system packs.
-
-    Mutating endpoints must keep using ``_require_context_for_user`` so system
-    packs stay non-editable (it returns 404 for them).
-    """
-    safe_name = _context_name_or_400(name)
-    meta = metadata if metadata is not None else load_context_metadata()
-    if not context_dir(safe_name).is_dir():
-        raise HTTPException(status_code=404, detail="Context not found")
-    if _is_system_context_pack(safe_name, meta):
-        return safe_name, meta
-    if not _context_visible_to_user(
-        safe_name, user_id=user_id, metadata=meta, repos=repos
-    ):
-        raise HTTPException(status_code=404, detail="Context not found")
-    return safe_name, meta
-
-
-def _context_detail(
-    name: str,
-    metadata: dict[str, dict[str, Any]] | None = None,
-    *,
-    repos: Optional[Repositories] = None,
-    user_id: str = "federico",
-    path_prefix: str | None = None,
-) -> ContextDetail:
-    root = context_dir(name)
-    if not root.is_dir():
-        raise HTTPException(status_code=404, detail="Context not found")
-    meta = metadata if metadata is not None else load_context_metadata()
-    # #783: optional path_prefix narrows the (otherwise flat) file list to one
-    # subfolder so the Brain UI can navigate nested folders. Normalized to a
-    # trailing-slash dir prefix; matched against each file's posix relpath.
-    norm_prefix = ""
-    if path_prefix and path_prefix.strip("/"):
-        norm_prefix = path_prefix.strip("/") + "/"
-    files = [
-        ContextFileItem(**context_file_metadata(root, path, pack_metadata=meta.get(name) or {}))
-        for path in sorted(iter_context_files(root), key=lambda p: p.relative_to(root).as_posix())
-        if not norm_prefix or path.relative_to(root).as_posix().startswith(norm_prefix)
-    ]
-    summary = _context_summary(name, meta, repos=repos, user_id=user_id)
-    # Compute used_by and worker_count when repos is available.
-    used_by: List[ContextWorkerRef] = []
-    if repos is not None:
-        try:
-            for worker in repos.workers.list(user_id=user_id):
-                try:
-                    contexts = (worker.get("config") or {}).get("contexts") or []
-                    if name in context_mount_names(contexts):
-                        used_by.append(ContextWorkerRef(
-                            worker_id=str(worker["id"]),
-                            worker_name=str(worker.get("name") or worker["id"]),
-                        ))
-                except Exception:
-                    continue
-        except Exception:
-            pass
-    description = _context_description(root)
-    if description is None and summary.system:
-        description = _system_context_description(name)
-    summary.worker_count = len(used_by)
-    summary.description = description
-    return ContextDetail(
-        **summary.model_dump(),
-        files=files,
-        used_by=used_by,
-    )
-
-
-def _raise_context_quota_if_needed(name: str) -> None:
-    total = context_total_size(context_dir(name))
-    if total > MAX_CONTEXT_BYTES:
-        raise HTTPException(
-            status_code=400,
-            detail=f"Context exceeds 50MB total size limit ({total} bytes)",
-        )
 
 
 
 
 
 
-def _write_context_file(
-    name: str,
-    file_path: str,
-    data: bytes,
-    *,
-    user_id: str,
-    tags: List[str] | None = None,
-    file_metadata: Dict[str, Any] | None = None,
-) -> ContextFileItem:
-    root = context_dir(name)
-    if not root.is_dir():
-        raise HTTPException(status_code=404, detail="Context not found")
-    # Detective control at the write boundary: scan BEFORE persisting so strict
-    # mode can reject without ever writing the secret to disk.
-    secret_warnings = _scan_context_write(file_path, data)
-    destination = _safe_context_file_or_400(name, file_path)
-    previous = destination.read_bytes() if destination.exists() else None
-    destination.parent.mkdir(parents=True, exist_ok=True)
-    destination.write_bytes(data)
-    try:
-        _raise_context_quota_if_needed(name)
-    except HTTPException:
-        if previous is None:
-            destination.unlink(missing_ok=True)
-        else:
-            destination.write_bytes(previous)
-        raise
-    if tags is not None or file_metadata is not None:
-        pack_meta = set_context_file_metadata(
-            name,
-            file_path,
-            tags=tags,
-            file_metadata=file_metadata,
-            owner_id=user_id,
-        )
-    else:
-        set_context_metadata(name, owner_id=user_id)
-        pack_meta = load_context_metadata().get(name) or {}
-    # Persist the warning flag so list/detail views badge the file even after
-    # the write response is gone. (Cleared when a later write comes back clean.)
-    set_context_file_secret_flag(name, file_path, bool(secret_warnings))
-    pack_meta = load_context_metadata().get(name) or pack_meta
-    item = ContextFileItem(**context_file_metadata(root, destination, pack_metadata=pack_meta))
-    item.secret_warnings = secret_warnings
-    item.has_secret_warning = bool(secret_warnings)
-    return item
+
+
+
+
 
 
 async def _read_context_upload_bytes(upload: UploadFile, remaining_bytes: int) -> bytes:
