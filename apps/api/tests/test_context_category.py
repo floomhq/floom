@@ -30,7 +30,7 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(tmp_path / "contexts"))
     monkeypatch.setenv("FLOOM_SECRET", SECRET)
     for name in list(sys.modules):
-        if name in ("main", "db", "contexts") or name.startswith("db.") or name == "auth" or name.startswith("auth."):
+        if name in ("main", "db", "contexts") or name.startswith("db.") or name == "auth" or name.startswith("auth.") or name.startswith("routers"):
             sys.modules.pop(name, None)
     db = importlib.import_module("db")
     db.init_db()
