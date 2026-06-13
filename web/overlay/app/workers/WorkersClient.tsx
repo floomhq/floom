@@ -722,8 +722,6 @@ function EmptyWorkersState() {
   );
 }
 
-const CARD_HEIGHT = "h-[188px]";
-
 function WorkerCard({
   worker,
   isFavorite,
@@ -741,77 +739,74 @@ function WorkerCard({
       : worker.description || "No description.";
 
   return (
-    <Card
-      className={`group ${CARD_HEIGHT} gap-0 py-0 hover:shadow-sm transition-shadow overflow-hidden`}
+    <Link
+      href={`/workers/${worker.id}`}
+      className="c-gcard group"
       title={hoverDescription || undefined}
     >
-      <Link href={`/workers/${worker.id}`} className="flex h-full flex-col">
-        <div className="flex items-center justify-between gap-2 rounded-t-[var(--radius-card)] border-b border-[var(--border-default)] bg-[color-mix(in_srgb,var(--foreground)_7%,var(--bg-card))] px-3.5 py-2.5">
-          {worker.archived ? (
-            <span
-              className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] border border-border bg-card/60 px-2 py-1 text-[11px] text-muted-foreground"
-              title="Archived"
-            >
-              <Archive className="size-3" />
-              Archived
-            </span>
-          ) : (
-            <WorkerIconPills
-              worker={worker}
-              inputs={worker.inputs ?? []}
-              connections={worker.connections}
-              triggerType={worker.trigger_type}
-              size="sm"
-              max={8}
-            />
-          )}
-          {!worker.archived && (
-            <div className="flex items-center gap-0.5 shrink-0">
-              <ShareWorkerButton workerId={worker.id} workerName={worker.name} variant="icon" />
-              <button
-                type="button"
-                title={isFavorite ? "Remove from favourites" : "Add to favourites"}
-                onClick={(e) => {
-                  e.preventDefault();
-                  e.stopPropagation();
-                  onFavoriteToggle(worker.id);
-                }}
-                className={`-my-1.5 -mr-1.5 flex size-9 shrink-0 items-center justify-center rounded transition-colors sm:my-0 sm:-mr-1 sm:size-6 ${
-                  isFavorite
-                    ? "text-[var(--accent)] hover:opacity-80"
-                    : "text-muted-foreground/40 hover:text-[var(--accent)]"
-                }`}
-              >
-                <Star className={`size-3.5 ${isFavorite ? "fill-current" : ""}`} />
-              </button>
-            </div>
-          )}
-        </div>
+      {/* Star — absolute top-right, shown on hover (engine pattern) */}
+      <button
+        type="button"
+        title={isFavorite ? "Remove from favourites" : "Add to favourites"}
+        onClick={(e) => {
+          e.preventDefault();
+          e.stopPropagation();
+          onFavoriteToggle(worker.id);
+        }}
+        className={`star ${isFavorite ? "on" : ""}`}
+        aria-pressed={isFavorite}
+      >
+        <Star size={14} fill={isFavorite ? "currentColor" : "none"} />
+      </button>
 
-        <div className="flex flex-1 flex-col gap-1.5 p-4">
-          <h3
-            className={`text-sm font-medium leading-snug overflow-hidden shrink-0 ${
-              worker.archived ? "text-muted-foreground" : ""
-            }`}
-            style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 }}
+      {/* Top row: icon pills inline next to nothing (engine: c-gtop holds leading + name) */}
+      <div className="c-gtop">
+        {worker.archived ? (
+          <span
+            className="inline-flex items-center gap-1 rounded-[var(--radius-button)] border border-border bg-muted/60 px-2 py-0.5 text-[11px] text-muted-foreground"
+            title="Archived"
           >
-            {worker.name}
-          </h3>
-          <p
-            className="text-[13px] leading-snug text-muted-foreground overflow-hidden shrink-0"
-            style={{ display: "-webkit-box", WebkitBoxOrient: "vertical", WebkitLineClamp: 2 }}
-          >
-            {description}
-          </p>
-          <div className="flex-1" />
-          <CardFooterLine
-            stats={stats}
-            status={worker.archived ? undefined : worker.status}
-            visibility={worker.visibility}
+            <Archive className="size-3" />
+            Archived
+          </span>
+        ) : (
+          <WorkerIconPills
+            worker={worker}
+            inputs={worker.inputs ?? []}
+            connections={worker.connections}
+            triggerType={worker.trigger_type}
+            size="sm"
+            max={4}
           />
-        </div>
-      </Link>
-    </Card>
+        )}
+      </div>
+
+      {/* Name */}
+      <div className={`c-gnm mt-2 line-clamp-2 ${worker.archived ? "text-muted-foreground" : ""}`}>
+        {worker.name}
+      </div>
+
+      {/* Description */}
+      <div className="c-gd">{description}</div>
+
+      {/* Footer: last-run time + dot status + share */}
+      <div className="c-gfoot">
+        <CardFooterLine
+          stats={stats}
+          status={worker.archived ? undefined : worker.status}
+          visibility={worker.visibility}
+        />
+        {!worker.archived && (
+          // biome-ignore lint/a11y/useKeyWithClickEvents: parent Link handles keyboard
+          <span
+            className="shrink-0"
+            onClick={(e) => e.preventDefault()}
+          >
+            <ShareWorkerButton workerId={worker.id} workerName={worker.name} variant="icon" />
+          </span>
+        )}
+      </div>
+    </Link>
   );
 }
 
@@ -841,15 +836,15 @@ function CardFooterLine({
   const lastRun = stats?.last_run_at ? formatRelativeTime(stats.last_run_at) : "No runs yet";
 
   return (
-    <div className="mt-auto flex items-center gap-2 text-[11px] text-[var(--ink-soft)]">
+    <>
       <span className="truncate">{lastRun}</span>
       {attention && (
-        <span className="ml-auto flex items-center gap-1.5 shrink-0">
+        <span className="flex items-center gap-1.5 shrink-0">
           <span className={`size-1.5 rounded-full ${attention.cls}`} aria-hidden="true" />
-          <span className="text-[var(--ink-mute)]">{attention.label}</span>
+          <span>{attention.label}</span>
         </span>
       )}
-    </div>
+    </>
   );
 }
 
@@ -859,17 +854,16 @@ function firstLine(value?: string): string {
 
 function WorkerCardSkeleton() {
   return (
-    <Card className={`${CARD_HEIGHT} gap-0 py-0 overflow-hidden`}>
-      <div className="flex items-center justify-between gap-2 rounded-t-[var(--radius-card)] border-b border-[var(--border-default)] bg-[color-mix(in_srgb,var(--foreground)_7%,var(--bg-card))] px-3.5 py-2">
-        <Skeleton className="h-7 w-20 rounded-[var(--radius-squircle)]" />
-        <Skeleton className="size-5 rounded shrink-0" />
+    <div className="c-gcard pointer-events-none">
+      <div className="c-gtop">
+        <Skeleton className="h-5 w-20 rounded-[var(--radius-squircle)]" />
       </div>
-      <div className="flex flex-1 flex-col gap-1.5 p-4">
-        <Skeleton className="h-4 w-3/4" />
-        <Skeleton className="h-3 w-full" />
-        <Skeleton className="h-3 w-2/3" />
-        <Skeleton className="mt-auto h-3 w-24" />
+      <Skeleton className="mt-2 h-4 w-3/4" />
+      <Skeleton className="mt-2 h-3 w-full" />
+      <Skeleton className="h-3 w-2/3 mt-1" />
+      <div className="c-gfoot">
+        <Skeleton className="h-3 w-24" />
       </div>
-    </Card>
+    </div>
   );
 }
