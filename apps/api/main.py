@@ -225,6 +225,7 @@ import git_ops as _git_ops
 # for the many call sites in this module and for backward compatibility.
 from services.git_service import (
     _git_workspace,
+    set_git_workspace_resolver,
     _git_author,
     _git_ops_lock,
     _ensure_git_workspace_ready,
