@@ -525,6 +525,7 @@ from services.worker_access import (
     _granted_asset_ids,
     _granted_worker_ids,
     _get_db_worker,
+    _worker_for_mutation,
     _archived_tracked_worker,
     _get_visible_worker,
     _worker_permissions,
@@ -1165,6 +1166,40 @@ def _is_context_upload_request(request: Request) -> bool:
         and path.startswith("/contexts/")
         and path.endswith("/upload")
     )
+
+
+_WST_ALLOWED_POST_RE = re.compile(r"^/workers/[^/]+/runs$")
+_WST_DENIED_PREFIXES = (
+    "/secrets", "/connections", "/auth", "/workspace/tokens", "/workspace/secrets",
+    "/workspace/settings", "/system", "/settings", "/contexts", "/chat",
+)
+
+
+@app.middleware("http")
+async def workspace_token_scope_middleware(request: Request, call_next):
+    """Workspace API tokens (wst_) are read+run only.
+
+    Reads stay permission-scoped by the synthetic member actor (shared workers
+    only); this gate removes every write surface except firing a run, and
+    blocks credential/config surfaces outright — including reads — so a leaked
+    token can never enumerate secrets, connections, or settings.
+    """
+    bearer = (request.headers.get("authorization") or "").strip()
+    if bearer.lower().startswith("bearer wst_"):
+        path = request.url.path
+        if any(path == pfx or path.startswith(pfx + "/") for pfx in _WST_DENIED_PREFIXES):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "workspace tokens cannot access this resource"},
+            )
+        if request.method.upper() not in {"GET", "HEAD"} and not (
+            request.method.upper() == "POST" and _WST_ALLOWED_POST_RE.match(path)
+        ):
+            return JSONResponse(
+                status_code=403,
+                content={"detail": "workspace tokens are read-and-run only"},
+            )
+    return await call_next(request)
 
 
 @app.middleware("http")
@@ -3346,7 +3381,7 @@ def update_worker(
             status_code=400,
             detail=f"worker_yml name {parsed_worker_id!r} does not match path worker_id {worker_id!r}",
         )
-    if _get_db_worker(worker_id, user_id=auth.user_id, repos=repos) is None:
+    if _worker_for_mutation(worker_id, auth, repos) is None:
         raise HTTPException(status_code=404, detail="Worker not found")
 
     target_dir = WORKERS_DIR / worker_id
@@ -3397,6 +3432,9 @@ def update_worker(
         worker_id,
         user_id=auth.user_id,
         repos=repos,
+        # donation model: an admin editing a workspace-owned worker is not its
+        # owner, so the detail fetch needs the admin-role path.
+        role="admin" if auth.is_admin else None,
     )
 
 
@@ -3521,6 +3559,10 @@ def update_worker_files(
         _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=get_repositories())
+    if not worker:
+        # Donation model: admins edit workspace-shared workers (workspace-actor
+        # owned; the owner-scoped fetch above can no longer see them).
+        worker = _worker_for_mutation(worker_id, auth, get_repositories())
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 

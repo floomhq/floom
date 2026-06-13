@@ -250,6 +250,29 @@ def _get_db_worker(
         return None
 
 
+def _worker_for_mutation(
+    worker_id: str,
+    auth: "AuthContext",
+    repos: Repositories,
+) -> Optional[Dict[str, Any]]:
+    """Resolve a worker the caller may MUTATE (donation model).
+
+    - Owner fetch (unchanged): a member mutates their own private workers.
+    - Admins additionally mutate workspace-shared workers, which are owned by
+      the synthetic workspace actor after share-transfer — no human is ever
+      is_owner of those, so this is the ONLY mutation path for shared workers.
+    Returns None when the caller has no mutation rights (callers 404).
+    """
+    worker = _get_db_worker(worker_id, user_id=auth.user_id, repos=repos)
+    if worker is not None:
+        return worker
+    if auth.is_admin:
+        any_row = repos.workers.get_any(worker_id=worker_id)
+        if any_row and str(any_row.get("visibility") or "private") == "workspace":
+            return any_row
+    return None
+
+
 def _archived_tracked_worker(worker_id: str) -> Optional[Dict[str, Any]]:
     """Return a tracked worker's filesystem record iff it is archived.
 
