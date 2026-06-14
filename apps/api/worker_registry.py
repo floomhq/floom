@@ -42,6 +42,19 @@ def _safe_path(*parts: str) -> Path:
         target.relative_to(base)
     except ValueError:
         raise ValueError(f"Path traversal attempt: {target}")
+    # Defense-in-depth: after the lexical check passes, follow symlinks and
+    # assert the *real* target stays under the *real* base. ``WORKERS_DIR`` is
+    # resolved once at import, so a symlinked deploy root (Railway) collapses
+    # consistently on both sides and never false-positives. realpath of a
+    # not-yet-existing leaf resolves the existing prefix, so creating new worker
+    # dirs is unaffected. This catches a symlink *inside* the base that points
+    # outside it (e.g. ``<base>/evil -> /etc``).
+    real_base = os.path.realpath(str(base))
+    real_target = os.path.realpath(str(target))
+    try:
+        Path(real_target).relative_to(real_base)
+    except ValueError:
+        raise ValueError(f"Path traversal attempt (symlink escape): {target}")
     return target
 
 

@@ -81,3 +81,85 @@ def test_runner_utils_safe_path_symlinked_base(tmp_path, monkeypatch):
         pass
     else:
         raise AssertionError("expected ValueError for '../escape'")
+
+
+def test_worker_registry_symlink_inside_base_escape_blocked(tmp_path, monkeypatch):
+    """Defense-in-depth: a symlink *inside* the workers dir that points outside
+    it must be rejected by the realpath containment assertion, even though the
+    path is lexically clean (no ``..``, not absolute). This is the adversarial
+    PoC: plant ``<WORKERS_DIR>/evil -> /etc`` and try to read ``evil/hostname``.
+    """
+    workers_dir = tmp_path / "workers"
+    workers_dir.mkdir()
+    (workers_dir / "evil").symlink_to("/etc")
+
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
+    import worker_registry
+    importlib.reload(worker_registry)
+    try:
+        try:
+            worker_registry._safe_path("evil/hostname")
+        except ValueError:
+            pass  # expected: realpath resolves to /etc/hostname, outside base
+        else:
+            raise AssertionError(
+                "expected ValueError for symlink-escape 'evil/hostname'"
+            )
+    finally:
+        os.environ.pop("FLOOM_WORKERS_DIR", None)
+        importlib.reload(worker_registry)
+
+
+def test_runner_utils_symlink_inside_base_escape_blocked(tmp_path):
+    """Same realpath escape guard for runner_utils._safe_path(base, *parts)."""
+    import runner_utils
+    importlib.reload(runner_utils)
+    base = tmp_path / "base"
+    base.mkdir()
+    (base / "evil").symlink_to("/etc")
+    try:
+        runner_utils._safe_path(base, "evil", "hostname")
+    except ValueError:
+        pass  # expected
+    else:
+        raise AssertionError("expected ValueError for symlink-escape 'evil/hostname'")
+
+
+def test_worker_registry_symlinked_deploy_root_still_works(tmp_path):
+    """Regression guard for the original P0 the PR fixed: when WORKERS_DIR is
+    reached *through* a symlink (Railway deploy root), a legit worker id must
+    still resolve. The realpath layer must NOT re-break this, because base and
+    target both fully resolve the same symlink prefix.
+    """
+    realbase = tmp_path / "realbase"
+    (realbase / "workers").mkdir(parents=True)
+    symbase = tmp_path / "symbase"
+    symbase.symlink_to(realbase)
+    workers_dir = symbase / "workers"
+    (workers_dir / "outbound-approval-demo").mkdir()
+
+    os.environ["FLOOM_WORKERS_DIR"] = str(workers_dir)
+    import worker_registry
+    importlib.reload(worker_registry)
+    try:
+        resolved = worker_registry._safe_path("outbound-approval-demo")
+        assert resolved.name == "outbound-approval-demo"
+    finally:
+        os.environ.pop("FLOOM_WORKERS_DIR", None)
+        importlib.reload(worker_registry)
+
+
+def test_safe_path_nonexistent_leaf_allowed(tmp_path):
+    """Creating a not-yet-existing worker/run dir must not be blocked by the
+    realpath layer (realpath resolves the existing prefix, leaves the leaf).
+    """
+    import runner_utils
+    importlib.reload(runner_utils)
+    base = tmp_path / "base"
+    base.mkdir()
+    resolved = runner_utils._safe_path(base, "brand-new-run-id")
+    assert resolved.name == "brand-new-run-id"
+    assert not resolved.exists()  # leaf truly does not exist yet
+    # nested non-existent path under a clean base is also fine
+    nested = runner_utils._safe_path(base, "a", "b", "c")
+    assert nested.name == "c"
