@@ -9,9 +9,12 @@ WORKEROS_TRUSTED_PROXIES). Pure functions over the request + env; no app state.
 from __future__ import annotations
 
 import ipaddress
+import logging
 import os
 
 from fastapi import Request
+
+logger = logging.getLogger("floom.api")
 
 try:
     from slowapi.util import get_remote_address as _slowapi_get_remote_address
@@ -43,10 +46,18 @@ def _trusted_proxy_peer(peer: str) -> bool:
         or ""
     )
     entries = [entry.strip() for entry in configured.split(",") if entry.strip()]
+    # #1042 — a "*" wildcard trusted every peer, letting any client spoof
+    # x-forwarded-for / cf-connecting-ip and bypass IP rate limits. Drop it and
+    # require explicit IPs/CIDRs; if only wildcards were configured, fall back
+    # to the localhost-only default rather than trusting everyone.
+    if "*" in entries:
+        logger.warning(
+            "TRUSTED_PROXIES contains '*' which is insecure and is ignored; "
+            "configure explicit IPs/CIDRs instead."
+        )
+        entries = [entry for entry in entries if entry != "*"]
     if not entries:
         return peer in {"testclient", "127.0.0.1", "::1", "localhost"}
-    if "*" in entries:
-        return True
     if peer in entries:
         return True
     try:
