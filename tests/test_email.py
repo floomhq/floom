@@ -5,7 +5,7 @@ from types import SimpleNamespace
 
 import pytest
 
-from apps.api import email
+from apps.api import email_service as email
 
 
 def _message() -> email.TransactionalEmail:

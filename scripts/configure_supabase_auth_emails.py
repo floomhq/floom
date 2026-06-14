@@ -13,7 +13,7 @@ ROOT = Path(__file__).resolve().parents[1]
 if str(ROOT) not in sys.path:
     sys.path.insert(0, str(ROOT))
 
-from apps.api.email import _workeros_email_html
+from apps.api.email_service import _workeros_email_html
 
 
 AUTH_CONFIG_URL = "https://api.supabase.com/v1/projects/{project_ref}/config/auth"

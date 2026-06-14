@@ -21,7 +21,7 @@ from pydantic import BaseModel, EmailStr, Field
 from apps.api._engine import ensure_engine_api_path
 from apps.api.db import members as members_db
 from apps.api.db import workspaces as workspace_repo
-from apps.api.email import build_workspace_invite_email, send_email
+from apps.api.email_service import build_workspace_invite_email, send_email
 
 ensure_engine_api_path()
 

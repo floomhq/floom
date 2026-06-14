@@ -18,7 +18,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
 
-from apps.api import email as email_service
+from apps.api import email_service as email as email_service
 from apps.api._engine import ensure_engine_api_path
 from apps.api.auth.supabase_provider import ACTIVE_WORKSPACE_COOKIE, PAT_HEADER
 from apps.api.config import (
