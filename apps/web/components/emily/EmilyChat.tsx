@@ -201,8 +201,24 @@ function MessageCopyAction({ text }: { text: string }) {
   const [copied, setCopied] = useState(false);
   const copy = useCallback(() => {
     if (!text) return;
-    const write = navigator.clipboard?.writeText?.(text);
-    if (!write) return;
+    const write = navigator.clipboard?.writeText
+      ? navigator.clipboard.writeText(text)
+      : new Promise<void>((resolve, reject) => {
+          const textarea = document.createElement("textarea");
+          textarea.value = text;
+          textarea.setAttribute("readonly", "");
+          textarea.style.position = "fixed";
+          textarea.style.opacity = "0";
+          document.body.appendChild(textarea);
+          textarea.select();
+          const ok = document.execCommand("copy");
+          document.body.removeChild(textarea);
+          if (ok) {
+            resolve();
+          } else {
+            reject(new Error("Copy failed"));
+          }
+        });
     write
       .then(() => {
         setCopied(true);
