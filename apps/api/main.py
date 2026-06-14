@@ -2604,6 +2604,22 @@ def _make_run_summary(row: Any) -> RunSummary:
         "cancelled": RunStatus.FAILED.value,
     }
     normalized_status = status_aliases.get(status_value, status_value or RunStatus.FAILED.value)
+    # #1022: surface the run's stored input (the mandate/request) so the run list
+    # is a queryable log. input_json is already SELECTed by the list queries, so
+    # this adds no extra round trips.
+    run_input: Dict[str, Any] = {}
+    _raw_input_json = d.get("input_json")
+    if _raw_input_json:
+        try:
+            _parsed_input = (
+                json.loads(_raw_input_json)
+                if isinstance(_raw_input_json, str)
+                else _raw_input_json
+            )
+            if isinstance(_parsed_input, dict):
+                run_input = _parsed_input
+        except Exception:
+            run_input = {}
     return RunSummary(
         id=d["id"],
         worker_id=d["worker_id"],
@@ -2616,6 +2632,7 @@ def _make_run_summary(row: Any) -> RunSummary:
         duration_ms=d.get("duration_ms"),
         error=_operator_error_message(d.get("error"), d.get("error_code")),
         error_code=d.get("error_code"),
+        input=run_input,
     )
 
 
