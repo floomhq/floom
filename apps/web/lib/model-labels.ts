@@ -10,18 +10,32 @@ const KNOWN_MODEL_LABELS: Record<string, string> = {
   "gpt-5": "GPT-5",
   "gpt-5-mini": "GPT-5 Mini",
   "gpt-5-nano": "GPT-5 Nano",
+  // CW-03a: GPT-5.x dotted variants — titleCaseToken would split the dot and
+  // produce "GPT 5 5" instead of "GPT-5.5"; enumerate them explicitly.
+  "gpt-5.5": "GPT-5.5",
+  "gpt-5.4": "GPT-5.4",
+  "gpt-5.4-mini": "GPT-5.4 Mini",
+  "gpt-5.1": "GPT-5.1",
+  "gpt-5.1-mini": "GPT-5.1 Mini",
+  "gpt-4o": "GPT-4o",
+  "gpt-4o-mini": "GPT-4o Mini",
+  "gpt-4-turbo": "GPT-4 Turbo",
 };
 
 function titleCaseToken(value: string): string {
+  // CW-03a: split ONLY on hyphens/underscores, never on dots, so version
+  // strings like "5.5" or "4.0" survive intact as a single token.
   return value
-    .split(/[-_./]+/)
+    .replace(/[-_]+/g, " ")
+    .trim()
+    .split(/\s+/)
     .filter(Boolean)
     .map((part) => {
       if (/^gpt$/i.test(part)) return "GPT";
       if (/^claude$/i.test(part)) return "Claude";
       if (/^sonnet$/i.test(part)) return "Sonnet";
       if (/^opus$/i.test(part)) return "Opus";
-      if (/^\d+$/.test(part)) return part;
+      if (/^\d[\d.]*$/.test(part)) return part; // numeric / version token (e.g. "5.5", "4")
       return part.charAt(0).toUpperCase() + part.slice(1);
     })
     .join(" ");
