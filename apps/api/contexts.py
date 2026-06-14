@@ -13,6 +13,7 @@ import os
 import re
 import hashlib
 import shutil
+import threading
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -51,6 +52,7 @@ _scope_override: ContextVar[object | str | None] = ContextVar(
     "workeros_context_scope_override",
     default=_SCOPE_OVERRIDE_UNSET,
 )
+_CONTEXT_METADATA_SAVE_LOCK = threading.Lock()
 
 
 def set_context_scope_resolver(resolver: Optional[Callable[[], Optional[str]]]) -> None:
@@ -336,9 +338,12 @@ def load_context_metadata() -> dict[str, dict[str, Any]]:
 def save_context_metadata(metadata: dict[str, dict[str, Any]]) -> None:
     ensure_contexts_dir()
     metadata_path = current_metadata_path()
-    tmp_path = metadata_path.with_suffix(".tmp")
-    tmp_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
-    os.replace(tmp_path, metadata_path)
+    tmp_path = metadata_path.with_name(
+        f".{metadata_path.name}.tmp.{os.getpid()}.{threading.get_ident()}"
+    )
+    with _CONTEXT_METADATA_SAVE_LOCK:
+        tmp_path.write_text(json.dumps(metadata, indent=2, sort_keys=True) + "\n")
+        os.replace(tmp_path, metadata_path)
 
 
 def context_owner_id(name: str, metadata: dict[str, dict[str, Any]] | None = None) -> str | None:

@@ -3479,6 +3479,29 @@ class ContextTextWriteRequest(BaseModel):
     metadata: Optional[Dict[str, Any]] = None
 
 
+class CandidateFeedbackCreateRequest(BaseModel):
+    run_id: str = Field(min_length=1, max_length=200)
+    candidate_id: str = Field(min_length=1, max_length=200)
+    rank: int
+    feedback_text: str = Field(min_length=1, max_length=10000)
+    outcome: Literal["good", "bad", "miss"]
+    scope: Literal["global", "client"] = "global"
+    reporter: Optional[str] = Field(default=None, max_length=200)
+
+
+class CandidateFeedbackRecord(BaseModel):
+    uuid: str
+    run_id: str
+    candidate_id: str
+    rank: int
+    feedback_text: str
+    outcome: Literal["good", "bad", "miss"]
+    scope: Literal["global", "client"]
+    reporter: str
+    ts: str
+    path: str
+
+
 class ContextFileMoveRequest(BaseModel):
     new_path: str  # #770: destination path within the same context
 
@@ -6678,6 +6701,77 @@ def _write_context_file(
     return item
 
 
+def _record_candidate_feedback_event(
+    name: str,
+    body: CandidateFeedbackCreateRequest,
+    *,
+    auth: AuthContext,
+    repos: Repositories,
+) -> CandidateFeedbackRecord:
+    context_user_id = _context_actor_user_id(auth.user_id)
+    safe_name, metadata = _require_context_for_user(
+        name,
+        user_id=context_user_id,
+        repos=repos,
+    )
+    if not bool((metadata.get(safe_name) or {}).get("writeable", False)):
+        raise HTTPException(status_code=400, detail="Candidate feedback requires a writable context.")
+
+    run_id = body.run_id.strip()
+    candidate_id = body.candidate_id.strip()
+    feedback_text = body.feedback_text.strip()
+    reporter = (body.reporter or auth.username or auth.email or auth.user_id).strip()
+    if not run_id:
+        raise HTTPException(status_code=400, detail="run_id is required.")
+    if not candidate_id:
+        raise HTTPException(status_code=400, detail="candidate_id is required.")
+    if not feedback_text:
+        raise HTTPException(status_code=400, detail="feedback_text is required.")
+    if not reporter:
+        raise HTTPException(status_code=400, detail="reporter is required.")
+
+    now = datetime.now(timezone.utc)
+    ts = now.isoformat().replace("+00:00", "Z")
+    day = now.date().isoformat()
+
+    for _attempt in range(5):
+        event_uuid = str(_uuid_mod.uuid4())
+        rel = f"feedback/raw/{day}/{event_uuid}.json"
+        if not _safe_context_file_or_400(safe_name, rel).exists():
+            break
+    else:
+        raise HTTPException(status_code=409, detail="Could not allocate feedback event path.")
+
+    event = {
+        "uuid": event_uuid,
+        "run_id": run_id,
+        "candidate_id": candidate_id,
+        "rank": body.rank,
+        "feedback_text": feedback_text,
+        "outcome": body.outcome,
+        "scope": body.scope,
+        "reporter": reporter,
+        "ts": ts,
+    }
+    _write_context_file(
+        safe_name,
+        rel,
+        (json.dumps(event, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+        user_id=context_user_id,
+        tags=["candidate-feedback"],
+        file_metadata={"kind": "candidate_feedback", "run_id": run_id},
+    )
+    author_name, author_email = _git_author(auth)
+    _git_commit_context(
+        safe_name,
+        rel,
+        message=f"context {safe_name}: record candidate feedback {event_uuid}",
+        author_name=author_name,
+        author_email=author_email,
+    )
+    return CandidateFeedbackRecord(**event, path=rel)
+
+
 async def _read_context_upload_bytes(upload: UploadFile, remaining_bytes: int) -> bytes:
     data = bytearray()
     while True:
@@ -6971,6 +7065,20 @@ async def put_context_file(
     author_name, author_email = _git_author(auth)
     _git_commit_context(safe_name, rel, message=f"context {safe_name}: update {rel}", author_name=author_name, author_email=author_email)
     return result
+
+
+@app.post(
+    "/contexts/{name}/record-candidate-feedback",
+    response_model=CandidateFeedbackRecord,
+    status_code=201,
+)
+def record_candidate_feedback(
+    name: str,
+    body: CandidateFeedbackCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> CandidateFeedbackRecord:
+    return _record_candidate_feedback_event(name, body, auth=auth, repos=repos)
 
 
 @app.delete("/contexts/{name}/files/{file_path:path}", response_model=ContextDetail)
@@ -18813,6 +18921,20 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
                 "content": {"type": "string"},
             }, ["name", "path", "content"]),
         },
+        {
+            "name": "record_candidate_feedback",
+            "description": "Record one immutable candidate feedback event into a writable brain pack.",
+            "inputSchema": _mcp_json_schema({
+                "name": {"type": "string", "description": "Writable brain pack name."},
+                "run_id": {"type": "string"},
+                "candidate_id": {"type": "string"},
+                "rank": {"type": "integer"},
+                "feedback_text": {"type": "string"},
+                "outcome": {"type": "string", "enum": ["good", "bad", "miss"]},
+                "scope": {"type": "string", "enum": ["global", "client"], "default": "global"},
+                "reporter": {"type": "string"},
+            }, ["name", "run_id", "candidate_id", "rank", "feedback_text", "outcome"]),
+        },
     ]
 
 
@@ -19031,6 +19153,29 @@ def _mcp_call_contexts_write(arguments: Dict[str, Any], auth: AuthContext, repos
     return _mcp_call_result(result, message)
 
 
+def _mcp_call_record_candidate_feedback(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    try:
+        rank = int(arguments.get("rank"))
+    except (TypeError, ValueError):
+        raise ValueError("Tool argument 'rank' must be an integer")
+    payload = CandidateFeedbackCreateRequest(
+        run_id=_mcp_arg(arguments, "run_id"),
+        candidate_id=_mcp_arg(arguments, "candidate_id"),
+        rank=rank,
+        feedback_text=_mcp_arg(arguments, "feedback_text"),
+        outcome=arguments.get("outcome"),
+        scope=arguments.get("scope") or "global",
+        reporter=arguments.get("reporter"),
+    )
+    result = _record_candidate_feedback_event(
+        _mcp_arg(arguments, "name"),
+        payload,
+        auth=auth,
+        repos=repos,
+    )
+    return _mcp_call_result(result, "Candidate feedback recorded.")
+
+
 async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     auth = _workspace_agent_mcp_auth_context()
     repos = get_repositories()
@@ -19078,6 +19223,8 @@ async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, An
             return _mcp_call_contexts_read(arguments, auth)
         if tool_name == "contexts.write":
             return _mcp_call_contexts_write(arguments, auth, repos)
+        if tool_name == "record_candidate_feedback":
+            return _mcp_call_record_candidate_feedback(arguments, auth, repos)
         return _mcp_tool_error(f"Unknown tool: {tool_name or 'unknown'}")
     except ValueError as exc:
         return _mcp_tool_error(str(exc))
@@ -22198,6 +22345,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "contexts.create", "description": "Create a new brain pack context folder.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "writeable": {"type": "boolean", "default": False}, "sensitive": {"type": "boolean", "default": True, "description": "Sensitive contexts (default) are excluded from git versioning. Set false to enable version history and rollback."}}, "required": ["name"]}},
     {"name": "contexts.read", "description": "Read a UTF-8 context file, or return metadata for binary files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
     {"name": "contexts.write", "description": "Create or update a UTF-8 text file inside a context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["name", "path", "content"]}},
+    {"name": "record_candidate_feedback", "description": "Record one immutable candidate feedback JSON event into a writable context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "run_id": {"type": "string"}, "candidate_id": {"type": "string"}, "rank": {"type": "integer"}, "feedback_text": {"type": "string"}, "outcome": {"type": "string", "enum": ["good", "bad", "miss"]}, "scope": {"type": "string", "enum": ["global", "client"], "default": "global"}, "reporter": {"type": "string"}}, "required": ["name", "run_id", "candidate_id", "rank", "feedback_text", "outcome"]}},
     {"name": "contexts.delete", "description": "Delete a brain pack context and all its files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "force": {"type": "boolean", "default": False}}, "required": ["name"]}},
     {"name": "contexts.delete_file", "description": "Delete a specific file from a brain pack context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
     {"name": "contexts.versions", "description": "List saved versions of a brain pack context, newest first.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "limit": {"type": "integer", "default": 50}}, "required": ["name"]}},
@@ -22469,6 +22617,14 @@ async def _mcp_dispatch(
     if name == "contexts.write":
         encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
         data, s = await _api_call("PUT", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request, body={"content": a["content"]})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "record_candidate_feedback":
+        body = {k: a[k] for k in ("run_id", "candidate_id", "rank", "feedback_text", "outcome") if k in a}
+        if "scope" in a:
+            body["scope"] = a["scope"]
+        if "reporter" in a:
+            body["reporter"] = a["reporter"]
+        data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}/record-candidate-feedback", request, body=body)
         return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
     if name == "contexts.delete":
         qs = "?force=true" if a.get("force") else ""
