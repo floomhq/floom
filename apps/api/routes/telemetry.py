@@ -4,6 +4,8 @@ import logging
 from datetime import datetime
 from typing import Any, Literal
 
+import httpcore
+import httpx
 from fastapi import APIRouter, Depends, HTTPException, Query
 from pydantic import BaseModel, Field, field_validator
 
@@ -16,6 +18,22 @@ ensure_engine_api_path()
 from auth import AuthContext, get_auth_context  # noqa: E402
 
 logger = logging.getLogger(__name__)
+
+# Transient connection-drop family. Telemetry ingest fail-softs (returns 200,
+# stored=0) ONLY for these — a Supabase pooled connection terminated mid-flight
+# must not surface as a 500 to the caller. Genuinely-unexpected exceptions
+# (schema/TypeError/KeyError) are NOT swallowed: they are logged at error and
+# re-raised so persistent breakage is visible instead of silently returning 200.
+_CONNECTION_DROP_ERRORS: tuple[type[BaseException], ...] = (
+    httpx.RemoteProtocolError,
+    httpx.ConnectError,
+    httpx.ConnectTimeout,
+    httpx.ReadError,
+    httpcore.RemoteProtocolError,
+    httpcore.ConnectError,
+    httpcore.ConnectTimeout,
+    httpcore.ReadError,
+)
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 
@@ -81,14 +99,16 @@ async def ingest_events(
         )
     except telemetry.TelemetryError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
-    except Exception as exc:
+    except _CONNECTION_DROP_ERRORS as exc:
         # Telemetry is fire-and-forget analytics: a Supabase connection drop
-        # (httpcore.RemoteProtocolError / httpx.ConnectError / etc.) or any
-        # other transient write failure MUST NOT surface as a 500 to the client.
-        # Log a warning so ops can detect persistent store failures, but return
-        # accepted=N / stored=0 so the caller is not blocked.
+        # (httpcore.RemoteProtocolError / httpx.ConnectError / etc.) MUST NOT
+        # surface as a 500 to the client. Log a warning so ops can detect
+        # persistent connectivity loss, but return accepted=N / stored=0 so the
+        # caller is not blocked. Scoped to the connection-drop family ONLY — a
+        # genuine bug (schema/TypeError/KeyError) must NOT be hidden here.
         logger.warning(
-            "telemetry write failed (stored=0, returning success): %s: %s",
+            "telemetry write failed on connection drop (stored=0, returning "
+            "success): %s: %s",
             type(exc).__name__,
             exc,
         )
@@ -97,6 +117,17 @@ async def ingest_events(
             stored=0,
             telemetry_enabled=True,
         )
+    except Exception as exc:
+        # Anything that is NOT a transient connection drop is a real bug
+        # (schema mismatch, TypeError, KeyError, programming error). Surface it:
+        # log at error so persistent breakage is visible, then re-raise so it is
+        # not silently masked as a 200. Fail-soft is reserved for the drop case.
+        logger.error(
+            "telemetry write failed with unexpected error (re-raising): %s: %s",
+            type(exc).__name__,
+            exc,
+        )
+        raise
     return TelemetryIngestResponse(
         accepted=len(payload.events),
         stored=stored,

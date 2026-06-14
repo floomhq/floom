@@ -129,29 +129,70 @@ class _RetryingHTTPTransport(httpx.HTTPTransport):
     only re-handshakes on a time boundary; it cannot prevent a mid-window
     connection drop, so the 500s persisted.
 
-    A dropped connection on an idempotent HTTP request is transparently
-    retryable: httpx did not get a response, so re-issuing the request is safe.
-    We retry once; the second attempt opens a fresh connection. PostgREST writes
-    (insert/update/delete) issue a single HTTP request and are likewise safe to
-    re-send when the connection died before any response was received.
+    Retry safety (data integrity — do NOT broaden):
+    A blind single-retry on *every* method is unsafe. ``RemoteProtocolError``
+    and ``ReadError`` can fire AFTER the server received and committed the
+    request but the response was lost in transit. Re-sending a POST/PATCH/DELETE
+    in that window inserts a DUPLICATE row (PAT mint, workers, invitations,
+    share links, admin_access_log, workspaces). So we retry only when re-sending
+    is provably safe:
+
+      (a) the method is idempotent (``GET``/``HEAD``/``OPTIONS``) — re-sending a
+          read can never create a duplicate; OR
+      (b) the exception is ``ConnectError``/``ConnectTimeout`` — the connection
+          was never established, so the server never received the request and a
+          retry on ANY method cannot double-write.
+
+    ``RemoteProtocolError``/``ReadError`` on a non-idempotent method are NOT
+    retried: the server may have already committed the write, so we let the
+    error propagate rather than risk a duplicate. The original goal (heal a
+    dropped pooled connection) is still met for the read path, which is where
+    the 500s were observed (GET /api/runs/<id>, GET /api/system/overview).
     """
 
-    _RETRYABLE = (
-        httpx.RemoteProtocolError,
+    # Connection never established -> server never saw the request -> retrying
+    # is safe on ANY method (idempotent or not).
+    _CONNECTION_NEVER_ESTABLISHED = (
         httpx.ConnectError,
         httpx.ConnectTimeout,
+    )
+    # Connection dropped mid-flight -> the server MAY have already committed the
+    # write -> only safe to retry on an idempotent method.
+    _MID_FLIGHT_DROP = (
+        httpx.RemoteProtocolError,
         httpx.ReadError,
     )
+    _RETRYABLE = _CONNECTION_NEVER_ESTABLISHED + _MID_FLIGHT_DROP
+
+    _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
 
     def handle_request(self, request: httpx.Request) -> httpx.Response:
         try:
             return super().handle_request(request)
         except self._RETRYABLE as exc:
+            method = request.method.upper()
+            connection_never_established = isinstance(
+                exc, self._CONNECTION_NEVER_ESTABLISHED
+            )
+            idempotent = method in self._IDEMPOTENT_METHODS
+            if not (idempotent or connection_never_established):
+                # Mid-flight drop on a non-idempotent method: the write may have
+                # committed. Do NOT retry — propagate to avoid a duplicate row.
+                logger.warning(
+                    "supabase connection dropped (%s) on %s %s; NOT retrying "
+                    "(non-idempotent method, write may have committed)",
+                    type(exc).__name__,
+                    method,
+                    request.url.path,
+                )
+                raise
             logger.warning(
-                "supabase connection dropped (%s) on %s %s; retrying once",
+                "supabase connection dropped (%s) on %s %s; retrying once (%s)",
                 type(exc).__name__,
-                request.method,
+                method,
                 request.url.path,
+                "idempotent method" if idempotent
+                else "connection never established",
             )
             return super().handle_request(request)
 

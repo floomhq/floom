@@ -1,13 +1,20 @@
 """Regression: the Supabase httpx client must retry once on a dropped
 connection instead of surfacing ``httpx.RemoteProtocolError: Server
-disconnected`` as a bare HTTP 500.
+disconnected`` as a bare HTTP 500 — WITHOUT double-writing on POST/PATCH/DELETE.
 
 Root cause (deployed cloud, 2026-06-14): Supabase silently terminated a
 pooled HTTP/2 connection mid-window; the next ``.execute()`` raised
 RemoteProtocolError, which Starlette turned into a 500. That broke
 run-detail Output (GET /api/runs/<id> -> list_logs) and intermittently
-/auth/tokens/bootstrap, /api/system/overview, etc. The fix retries the
-idempotent request once on a fresh connection.
+/auth/tokens/bootstrap, /api/system/overview, etc.
+
+Data-integrity guard (P1): a blind retry on every method is unsafe.
+``RemoteProtocolError``/``ReadError`` can fire AFTER the server committed a
+write but the response was lost, so retrying a POST/PATCH/DELETE would insert a
+DUPLICATE row. The transport therefore retries only when re-sending is safe:
+  (a) idempotent methods (GET/HEAD/OPTIONS), or
+  (b) ``ConnectError``/``ConnectTimeout`` (connection never established, so the
+      server never received the request) on ANY method.
 """
 
 from __future__ import annotations
@@ -22,8 +29,8 @@ from apps.api.config import (
 )
 
 
-def _make_request() -> httpx.Request:
-    return httpx.Request("GET", "https://example.supabase.co/rest/v1/run_logs")
+def _make_request(method: str = "GET") -> httpx.Request:
+    return httpx.Request(method, "https://example.supabase.co/rest/v1/run_logs")
 
 
 def test_retries_once_on_remote_protocol_error(monkeypatch):
@@ -98,6 +105,83 @@ def test_non_retryable_error_not_retried(monkeypatch):
     with pytest.raises(httpx.HTTPStatusError):
         transport.handle_request(_make_request())
     assert calls["n"] == 1  # not retried
+
+
+# ---------------------------------------------------------------------------
+# P1 data-integrity: mid-flight drops must NOT retry on non-idempotent methods.
+# ---------------------------------------------------------------------------
+
+
+@pytest.mark.parametrize("method", ["POST", "PATCH", "PUT", "DELETE"])
+@pytest.mark.parametrize(
+    "exc_factory",
+    [
+        lambda req: httpx.RemoteProtocolError("Server disconnected", request=req),
+        lambda req: httpx.ReadError("read failed", request=req),
+    ],
+)
+def test_mid_flight_drop_on_write_method_is_not_retried(monkeypatch, method, exc_factory):
+    """A RemoteProtocolError/ReadError on POST/PATCH/PUT/DELETE may fire after the
+    server committed the write. Retrying would double-write, so it must propagate
+    (single attempt, no retry)."""
+    transport = _RetryingHTTPTransport(http2=True)
+    calls = {"n": 0}
+
+    def fake_super_handle(self, request):
+        calls["n"] += 1
+        raise exc_factory(request)
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", fake_super_handle)
+    with pytest.raises((httpx.RemoteProtocolError, httpx.ReadError)):
+        transport.handle_request(_make_request(method))
+    assert calls["n"] == 1  # NOT retried — write may have committed
+
+
+def test_mid_flight_drop_on_get_is_retried(monkeypatch):
+    """The same RemoteProtocolError on a GET IS retried (reads can't double-write).
+    This is the original heal-the-dropped-connection behavior, preserved."""
+    transport = _RetryingHTTPTransport(http2=True)
+    calls = {"n": 0}
+    ok = httpx.Response(200, json=[{"run_id": "r1"}])
+
+    def fake_super_handle(self, request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise httpx.RemoteProtocolError("Server disconnected", request=request)
+        return ok
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", fake_super_handle)
+    resp = transport.handle_request(_make_request("GET"))
+    assert calls["n"] == 2  # retried once
+    assert resp.status_code == 200
+
+
+@pytest.mark.parametrize("method", ["POST", "PATCH", "PUT", "DELETE"])
+@pytest.mark.parametrize(
+    "exc_factory",
+    [
+        lambda req: httpx.ConnectError("conn refused", request=req),
+        lambda req: httpx.ConnectTimeout("timeout", request=req),
+    ],
+)
+def test_connection_never_established_is_retried_on_write_method(monkeypatch, method, exc_factory):
+    """ConnectError/ConnectTimeout mean the connection was never established, so the
+    server never received the request — retrying a POST/PATCH/PUT/DELETE is safe and
+    cannot double-write."""
+    transport = _RetryingHTTPTransport(http2=True)
+    calls = {"n": 0}
+    ok = httpx.Response(201, json={"id": "row-1"})
+
+    def fake_super_handle(self, request):
+        calls["n"] += 1
+        if calls["n"] == 1:
+            raise exc_factory(request)
+        return ok
+
+    monkeypatch.setattr(httpx.HTTPTransport, "handle_request", fake_super_handle)
+    resp = transport.handle_request(_make_request(method))
+    assert calls["n"] == 2  # retried once — safe, server never saw the first attempt
+    assert resp.status_code == 201
 
 
 def test_client_and_options_wired_with_retry_transport():

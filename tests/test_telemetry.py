@@ -4,6 +4,8 @@ import asyncio
 from pathlib import Path
 from types import SimpleNamespace
 
+import httpx
+import pytest
 from fastapi import HTTPException
 
 from auth.context import AuthContext
@@ -126,13 +128,15 @@ def test_telemetry_migration_has_scoped_tables_and_policies():
     assert "raw_ip" not in text.lower()
 
 
-def test_ingest_events_returns_200_on_store_failure(monkeypatch):
+def test_ingest_events_returns_200_on_connection_drop(monkeypatch):
     """Telemetry is fire-and-forget: a Supabase connection drop must not surface
-    as an HTTP 500.  The handler must catch ANY non-TelemetryError exception from
-    record_events and return a success response with stored=0."""
+    as an HTTP 500. The handler fail-softs (stored=0, 200) ONLY for the
+    connection-drop family (httpx/httpcore RemoteProtocolError/ConnectError/etc.)."""
 
     def _explode(**_kwargs):
-        raise RuntimeError("Server disconnected without sending a complete message body")
+        raise httpx.RemoteProtocolError(
+            "Server disconnected without sending a complete message body"
+        )
 
     monkeypatch.setattr(telemetry_routes, "get_active_workspace_id", lambda: "ws-test")
     monkeypatch.setattr(telemetry, "record_events", _explode)
@@ -150,3 +154,25 @@ def test_ingest_events_returns_200_on_store_failure(monkeypatch):
     assert result.accepted == 1
     assert result.stored == 0
     assert result.telemetry_enabled is True
+
+
+def test_ingest_events_propagates_unexpected_error(monkeypatch):
+    """A genuine bug (TypeError/KeyError/schema mismatch) is NOT a connection drop
+    and MUST NOT be masked as a 200. It must propagate so the breakage is visible."""
+
+    def _bug(**_kwargs):
+        raise TypeError("record_events() got an unexpected keyword argument 'foo'")
+
+    monkeypatch.setattr(telemetry_routes, "get_active_workspace_id", lambda: "ws-test")
+    monkeypatch.setattr(telemetry, "record_events", _bug)
+
+    payload = telemetry_routes.TelemetryIngestRequest(
+        events=[telemetry_routes.TelemetryEventIn(event_name="worker.created")]
+    )
+    with pytest.raises(TypeError):
+        asyncio.run(
+            telemetry_routes.ingest_events(
+                payload,
+                AuthContext(user_id="user-1", email="u@example.com", scopes=()),
+            )
+        )
