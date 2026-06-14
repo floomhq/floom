@@ -16,6 +16,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiProxyPath, getActiveWorkspaceId } from "@/lib/api";
+import { capture } from "@/lib/analytics/capture";
 import type { AttachedFile, ChatMessage } from "./emily-chat-types";
 import {
   CONVERSATION_STORAGE_KEY,
@@ -280,6 +281,11 @@ export function useChatStream(): ChatStreamState {
       // We read conversationId from the ref so we can pass it in the body even
       // when the closure over state would be stale.
       const currentConversationId = conversationId;
+      capture("emily_message_sent", {
+        conversation_id: currentConversationId,
+        has_attachments: Boolean(files && files.length > 0),
+        attachment_count: files?.length ?? 0,
+      });
 
       (async () => {
         try {

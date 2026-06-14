@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, CheckCircle2, ExternalLink, Loader2, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
+import { capture } from "@/lib/analytics/capture";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ProviderLogos } from "@/components/connections/ProviderLogos";
@@ -46,6 +47,11 @@ function RedirectInner() {
           (c) => c.app_name?.toLowerCase() === slug && c.status === "active"
         );
         if (active) {
+          capture("connection_added", {
+            app_name: slug,
+            connection_id: active.id,
+            connection_type: "oauth",
+          });
           setPhase("done");
           setTimeout(() => router.replace(returnTo), 1200);
           return;

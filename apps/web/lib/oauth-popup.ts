@@ -12,6 +12,7 @@
  */
 
 import { api } from "@/lib/api";
+import { capture } from "@/lib/analytics/capture";
 
 const POPUP_WIDTH = 600;
 const POPUP_HEIGHT = 700;
@@ -64,14 +65,21 @@ export function openOAuthPopup({
     let timeoutTimer: ReturnType<typeof setTimeout> | null = null;
     let checkClosedTimer: ReturnType<typeof setInterval> | null = null;
 
-    function finish(result: OAuthPopupResult) {
+    function finish(result: OAuthPopupResult, connectionId?: string) {
       if (done) return;
       done = true;
       if (pollTimer) clearInterval(pollTimer);
       if (timeoutTimer) clearTimeout(timeoutTimer);
       if (checkClosedTimer) clearInterval(checkClosedTimer);
       window.removeEventListener("message", onMessage);
-      if (result === "connected") onConnected?.();
+      if (result === "connected") {
+        capture("connection_added", {
+          app_name: appSlug,
+          connection_id: connectionId ?? null,
+          connection_type: "oauth",
+        });
+        onConnected?.();
+      }
       resolve(result);
     }
 
@@ -109,7 +117,7 @@ export function openOAuthPopup({
             c.app_name.toLowerCase() === normalizedSlug && c.status === "active"
         );
         if (active) {
-          finish("connected");
+          finish("connected", active.id);
         }
       } catch {
         // ignore poll errors, keep trying
@@ -134,7 +142,7 @@ export function openOAuthPopup({
                 c.app_name.toLowerCase() === normalizedSlug && c.status === "active"
             );
             if (active) {
-              finish("connected");
+              finish("connected", active.id);
             } else {
               finish("closed");
             }

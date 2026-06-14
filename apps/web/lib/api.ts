@@ -3,6 +3,8 @@
 // fetch() calls are NOT auto-prefixed by basePath, so Cloud sets
 // NEXT_PUBLIC_API_PROXY_BASE="/app/api/proxy". Keeping this an env seam lets the
 // Cloud wrapper consume this file unmodified (no fork).
+import { capture } from "@/lib/analytics/capture";
+
 export const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 const WEB_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
@@ -259,31 +261,59 @@ export const api = {
       }),
     reload: () =>
       fetchJson<import("./types").ReloadResponse>("/workers/reload", { method: "POST" }),
-    run: (id: string, inputs: Record<string, unknown>) =>
-      fetchJson<import("./types").ActionResponse>(`/workers/${id}/runs`, {
+    run: async (id: string, inputs: Record<string, unknown>) => {
+      const result = await fetchJson<import("./types").ActionResponse>(`/workers/${id}/runs`, {
         method: "POST",
         body: JSON.stringify({ inputs, trigger_source: "manual" }),
-      }),
-    create: (worker_yml: string, run_py: string, skill_md?: string) =>
-      fetchJson<import("./types").WorkerDetail>("/workers", {
+      });
+      capture("worker_run_started", {
+        worker_id: id,
+        run_id: result.run_id ?? null,
+        trigger_source: "manual",
+      });
+      return result;
+    },
+    create: async (worker_yml: string, run_py: string, skill_md?: string) => {
+      const worker = await fetchJson<import("./types").WorkerDetail>("/workers", {
         method: "POST",
         body: JSON.stringify({ worker_yml, run_py, ...(skill_md !== undefined ? { skill_md } : {}) }),
-      }),
+      });
+      capture("worker_created", {
+        worker_id: worker.id,
+        source: "manual",
+      });
+      return worker;
+    },
     draftFromPrompt: (prompt: string) =>
       fetchJson<import("./types").DraftFromPromptResponse>("/workers/draft-from-prompt", {
         method: "POST",
         body: JSON.stringify({ prompt }),
       }),
-    draftAndCreate: (params: { prompt?: string; files?: { path: string; content: string }[] }) =>
-      fetchJson<{ worker_id: string }>("/workers/draft-and-create", {
+    draftAndCreate: async (params: { prompt?: string; files?: { path: string; content: string }[] }) => {
+      const result = await fetchJson<{ worker_id: string }>("/workers/draft-and-create", {
         method: "POST",
         body: JSON.stringify(params),
-      }),
-    newFromPrompt: (params: { prompt: string; mode?: "draft" | "create"; parent_worker_id?: string }) =>
-      fetchJson<{ run_id: string; worker_id: string; status: string }>("/workers/new/from-prompt", {
+      });
+      capture("worker_created", {
+        worker_id: result.worker_id,
+        source: "draft_and_create",
+      });
+      return result;
+    },
+    newFromPrompt: async (params: { prompt: string; mode?: "draft" | "create"; parent_worker_id?: string }) => {
+      const result = await fetchJson<{ run_id: string; worker_id: string; status: string }>("/workers/new/from-prompt", {
         method: "POST",
         body: JSON.stringify(params),
-      }),
+      });
+      if (params.mode === "create") {
+        capture("worker_created", {
+          worker_id: result.worker_id,
+          run_id: result.run_id,
+          source: "new_from_prompt",
+        });
+      }
+      return result;
+    },
     createFromBundle: async (zipBlob: Blob): Promise<import("./types").WorkerDetail> => {
       const form = new FormData();
       form.append("bundle", zipBlob, "bundle.zip");
@@ -302,7 +332,12 @@ export const api = {
         }
         throw new Error(err);
       }
-      return res.json() as Promise<import("./types").WorkerDetail>;
+      const worker = await res.json() as import("./types").WorkerDetail;
+      capture("worker_created", {
+        worker_id: worker.id,
+        source: "bundle_import",
+      });
+      return worker;
     },
     update: (id: string, worker_yml: string, run_py: string, skill_md?: string) =>
       fetchJson<import("./types").WorkerDetail>(`/workers/${id}`, {
@@ -743,7 +778,7 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ app_name }),
       }),
-    createMcp: (payload: {
+    createMcp: async (payload: {
       label: string;
       transport?: "streamable_http" | "sse" | "stdio";
       url?: string | null;
@@ -753,11 +788,17 @@ export const api = {
       cwd?: string | null;
       auth_secret?: string | null;
       allowed_tools?: string[];
-    }) =>
-      fetchJson<import("./types").ConnectionItem>("/connections/mcp", {
+    }) => {
+      const connection = await fetchJson<import("./types").ConnectionItem>("/connections/mcp", {
         method: "POST",
         body: JSON.stringify(payload),
-      }),
+      });
+      capture("connection_added", {
+        connection_id: connection.id,
+        connection_type: "mcp",
+      });
+      return connection;
+    },
     byApp: (app_name: string) =>
       fetchJson<import("./types").AppConnectionState>(
         `/connections/by-app/${encodeURIComponent(app_name)}`,
