@@ -79,7 +79,7 @@ def test_list_endpoint_guards_public_link():
     ]
     assert len(list_lines) >= 1, (
         "list_workers: public_link= must use the visibility guard "
-        f"('... == \"public\" else None'), found 0 guarded assignments"
+        "('... == \"public\" else None'), found 0 guarded assignments"
     )
 
 
@@ -105,7 +105,7 @@ def test_no_unguarded_worker_public_link_assignments():
         if "_worker_public_link" in line and "public_link=" in line and _GUARD not in line
     ]
     assert unguarded == [], (
-        f"Found unguarded _worker_public_link assignment(s) in main.py:\n"
+        "Found unguarded _worker_public_link assignment(s) in main.py:\n"
         + "\n".join(unguarded)
     )
 
