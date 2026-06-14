@@ -476,7 +476,8 @@ async def insufficient_disk_space_handler(_request: Request, exc: InsufficientDi
 
 DEFAULT_JSON_BODY_LIMIT_BYTES = 256 * 1024
 FROM_BUNDLE_BODY_LIMIT_BYTES = 5 * 1024 * 1024
-DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024
+DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES = 50 * 1024 * 1024
+DEFAULT_WORKER_FILES_BODY_LIMIT_BYTES = 50 * 1024 * 1024
 # A workspace template bundles every operator worker + knowledge pack, so it is
 # larger than a single worker bundle. Cap it generously but bounded.
 WORKSPACE_IMPORT_BODY_LIMIT_BYTES = 50 * 1024 * 1024
@@ -526,6 +527,14 @@ def _context_upload_limit_bytes() -> int:
 def _context_upload_body_limit_bytes() -> int:
     # Multipart framing adds overhead beyond the uploaded file bytes.
     return _context_upload_limit_bytes() + (1024 * 1024)
+
+
+def _worker_files_body_limit_bytes() -> int:
+    try:
+        configured = int(os.environ.get("WORKEROS_WORKER_FILES_MAX_BYTES", ""))
+    except ValueError:
+        configured = 0
+    return configured if configured > 0 else DEFAULT_WORKER_FILES_BODY_LIMIT_BYTES
 
 
 def _format_limit_mb(size_bytes: int) -> str:
@@ -1356,6 +1365,8 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
         return FROM_BUNDLE_BODY_LIMIT_BYTES
     if path == "/workspace/import":
         return WORKSPACE_IMPORT_BODY_LIMIT_BYTES
+    if method == "PUT" and re.fullmatch(r"/workers/[^/]+/files", path):
+        return _worker_files_body_limit_bytes()
     if path.startswith("/uploads"):
         return None
     # X4: approval-scoped screenshot uploads stream a multipart image body; the
