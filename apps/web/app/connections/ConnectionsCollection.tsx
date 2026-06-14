@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
+import { LoadingState } from "@/components/collection/CollectionStates";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { RunStatusBadge } from "@/components/RunStatus";
 import {
@@ -158,7 +159,7 @@ function EmailPeekPanel({ connectionId }: { connectionId: string }) {
     };
   }, [connectionId]);
 
-  if (loadingPeek) return <div style={pad}>Loading recent emails...</div>;
+  if (loadingPeek) return <LoadingState rows={3} />;
 
   return (
     <div className="c-ltable">
@@ -217,7 +218,7 @@ function ActivityPanel({ connectionId }: { connectionId: string }) {
     };
   }, [connectionId]);
 
-  if (loadingActivity) return <div style={pad}>Loading activity...</div>;
+  if (loadingActivity) return <LoadingState rows={3} />;
 
   return (
     <div className="c-ltable">
