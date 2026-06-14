@@ -92,6 +92,7 @@ class _Sandbox:
         self.files = _Files(self.__class__.host_root)
         self.commands = _Commands(self.files)
         self.killed = False
+        self.set_timeout_calls: list[int] = []
         self.__class__.instances.append(self)
 
     @classmethod
@@ -102,14 +103,21 @@ class _Sandbox:
     def kill(self):
         self.killed = True
 
+    def set_timeout(self, timeout: int):
+        self.set_timeout_calls.append(timeout)
 
-def test_e2b_run_py_gets_declared_secrets_for_concurrent_provider_calls(tmp_path, monkeypatch):
+
+def _install_fake_e2b(monkeypatch, tmp_path) -> None:
     monkeypatch.setenv("E2B_API_KEY", "e2b-test")
     monkeypatch.setitem(sys.modules, "e2b", types.SimpleNamespace(Sandbox=_Sandbox))
     monkeypatch.setattr(e2b_driver, "WORKERS_DIR", tmp_path / "workers")
     _Sandbox.instances = []
     _Sandbox.last_create_kwargs = {}
     _Sandbox.host_root = tmp_path / "sandbox"
+
+
+def test_e2b_run_py_gets_declared_secrets_for_concurrent_provider_calls(tmp_path, monkeypatch):
+    _install_fake_e2b(monkeypatch, tmp_path)
 
     worker_dir = tmp_path / "worker"
     worker_dir.mkdir()
@@ -191,6 +199,62 @@ asyncio.run(main())
     assert kwargs["envs"]["AWS_SECRET_ACCESS_KEY"] == "aws-test-secret"
     assert kwargs["envs"]["WORKEROS_API_URL"]
     assert sandbox.killed is True
+
+    if _Sandbox.host_root:
+        shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
+
+
+def test_e2b_honors_3600_second_worker_timeout_without_900_clamp(tmp_path, monkeypatch):
+    _install_fake_e2b(monkeypatch, tmp_path)
+    assert e2b_driver._install_timeout_for_run(3600) == 3600
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text(
+        """
+import json
+
+with open("result.json", "w", encoding="utf-8") as handle:
+    json.dump({"status": "success", "outputs": {"ok": True}, "artifacts": []}, handle)
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    config = WorkerConfig(
+        id="long-worker",
+        name="Long Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python3 run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        secrets=[],
+        outputs=[],
+    )
+    logs: list[tuple[str, str]] = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="long-worker",
+        run_id="run-long-worker",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+        trace_id="trace-long-worker",
+        timeout_seconds=3600,
+        config=config,
+    )
+
+    assert result.status == "success"
+    assert _Sandbox.last_create_kwargs["timeout"] == 3600
+
+    sandbox = _Sandbox.instances[-1]
+    assert sandbox.set_timeout_calls == [3600]
+    command, kwargs = sandbox.commands.run_calls[-1]
+    assert command.endswith("python3 run.py'")
+    assert kwargs["timeout"] == 3600.0
+    assert any("Capping sandbox lifetime at 3600s" in msg for msg, _level in logs)
 
     if _Sandbox.host_root:
         shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
