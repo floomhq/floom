@@ -26,6 +26,7 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 import run_service  # noqa: E402
+from services import run_authoring  # noqa: E402
 from models import (  # noqa: E402
     WorkerConfig,
     WorkerOutput,
@@ -66,8 +67,12 @@ def test_failed_smoke_disables_worker(monkeypatch):
     # FIX 2: a failed smoke verdict must disable the worker (enabled -> False),
     # never delete it.
     repos = _FakeRepos()
+    # #1073 moved _smoke_and_repair_generated_worker into services.run_authoring,
+    # where smoke_and_gate_generated_worker calls it by bare name. Patch it there
+    # so the gate sees the canned verdict (patching the run_service re-export is a
+    # no-op for the in-module call).
     monkeypatch.setattr(
-        run_service,
+        run_authoring,
         "_smoke_and_repair_generated_worker",
         lambda *a, **k: {"status": "failed", "reason": "list index out of range", "repairs": 1},
     )
@@ -87,7 +92,7 @@ def test_failed_smoke_disables_worker(monkeypatch):
 def test_passed_smoke_leaves_worker_enabled(monkeypatch):
     repos = _FakeRepos()
     monkeypatch.setattr(
-        run_service,
+        run_authoring,
         "_smoke_and_repair_generated_worker",
         lambda *a, **k: {"status": "passed", "reason": "", "repairs": 0},
     )
@@ -106,7 +111,7 @@ def test_passed_smoke_leaves_worker_enabled(monkeypatch):
 def test_skipped_smoke_leaves_worker_enabled(monkeypatch):
     repos = _FakeRepos()
     monkeypatch.setattr(
-        run_service,
+        run_authoring,
         "_smoke_and_repair_generated_worker",
         lambda *a, **k: {"status": "skipped", "reason": "needs a credential"},
     )
@@ -122,8 +127,14 @@ def _make_smoke_env(monkeypatch, tmp_path, config, driver_factory):
     workers_dir = tmp_path / "workers"
     (workers_dir / "gen-test").mkdir(parents=True)
     (workers_dir / "gen-test" / "run.py").write_text("def main():\n    pass\n")
+    # #1073 moved the smoke loop into services.run_authoring, which reads
+    # WORKERS_DIR/ARTIFACTS_DIR from its OWN module globals (imported from
+    # worker_registry/runner_utils), not from run_service. Patch both so the
+    # loop sees the temp dirs regardless of which name it resolves.
     monkeypatch.setattr(run_service, "WORKERS_DIR", workers_dir)
     monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
+    monkeypatch.setattr(run_authoring, "WORKERS_DIR", workers_dir)
+    monkeypatch.setattr(run_authoring, "ARTIFACTS_DIR", tmp_path / "artifacts")
     (tmp_path / "artifacts").mkdir()
 
     monkeypatch.setattr(run_service, "_load_worker_recipe", lambda wid, repos=None: ("u1", config, {"enabled": True}))
@@ -333,6 +344,8 @@ def _track_repair_env(monkeypatch, tmp_path, config, *, user_run_py):
     run_path.write_text(user_run_py)
     monkeypatch.setattr(run_service, "WORKERS_DIR", workers_dir)
     monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
+    monkeypatch.setattr(run_authoring, "WORKERS_DIR", workers_dir)
+    monkeypatch.setattr(run_authoring, "ARTIFACTS_DIR", tmp_path / "artifacts")
     (tmp_path / "artifacts").mkdir()
     monkeypatch.setattr(
         run_service, "_load_worker_recipe", lambda wid, repos=None: ("u1", config, {"enabled": True})

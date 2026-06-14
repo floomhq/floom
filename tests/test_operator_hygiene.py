@@ -21,6 +21,13 @@ if str(API_DIR) not in sys.path:
 
 from test_round8_worker_authz import _load_api  # noqa: E402
 
+# PR #1073 moved the operator-headline constants out of main.py into
+# services.public_view; main re-exports its siblings (_TIMEOUT_HEADLINE,
+# _RUNTIME_HEADLINE, _CODE_HEADLINE, ...) but the re-export list dropped
+# _SANDBOX_HEADLINE. Read it from its real home so the test is robust to the
+# re-export gap; the behavior (_operator_error_message mapping) is unchanged.
+from services.public_view import _SANDBOX_HEADLINE  # noqa: E402
+
 
 @pytest.fixture()
 def api(monkeypatch, tmp_path):
@@ -133,7 +140,7 @@ def test_e2b_deadline_does_not_leak(api):
     assert "context deadline exceeded" not in msg
     assert "process or directory watch" not in msg
     assert "use '0'" not in msg.lower()
-    assert msg == api._SANDBOX_HEADLINE
+    assert msg == _SANDBOX_HEADLINE
     # Without the code, the jargon guard + free-text timeout rule still catch it.
     msg_no_code = api._operator_error_message(E2B_DEADLINE)
     assert "context deadline exceeded" not in msg_no_code

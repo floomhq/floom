@@ -10,34 +10,32 @@ narrower owner-only set on the overview. Fix: the overview must resolve and
 thread the IDENTICAL access user id + role.
 """
 
+import inspect
 import re
-from pathlib import Path
 
-
-def _src() -> str:
-    return (Path(__file__).resolve().parents[1] / "main.py").read_text(encoding="utf-8")
+# PR #1073 ("oss-prep") moved these out of main.py into core/services/routers.
+# Inspect the real functions at their new homes (robust to further file moves)
+# rather than grepping main.py text.
+from routers.overview import system_overview
+from routers.worker_listing import list_workers
+from services.worker_access import _list_operator_workers
 
 
 def test_list_operator_workers_accepts_role():
-    src = _src()
-    sig = src[src.find("def _list_operator_workers"): src.find("def _list_operator_workers") + 400]
+    sig = inspect.getsource(_list_operator_workers)[:400]
     assert "role" in sig, "_list_operator_workers must accept a role parameter"
 
 
 def test_list_workers_resolves_access_id_and_role():
     """Sanity-anchor: GET /workers uses _worker_access_user_id + _worker_repo_role."""
-    src = _src()
-    fn = src[src.find("def list_workers("): src.find("def list_workers(") + 1500]
+    fn = inspect.getsource(list_workers)
     assert "_worker_access_user_id(auth)" in fn
     assert "_worker_repo_role(auth)" in fn
 
 
 def test_overview_uses_same_access_id_and_role_as_workers_page():
     """The overview worker fetch must resolve the access id + role identically."""
-    src = _src()
-    fn_start = src.find("def system_overview(")
-    assert fn_start != -1
-    fn_body = src[fn_start: fn_start + 12000]
+    fn_body = inspect.getsource(system_overview)
     # Must resolve the access-scoped user id and role exactly like /workers.
     assert "_worker_access_user_id(auth)" in fn_body, (
         "overview must resolve the access user id like GET /workers"

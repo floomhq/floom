@@ -30,6 +30,10 @@ def _load_api(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(artifacts_dir))
     monkeypatch.setenv("FLOOM_SECRET", AUTH_HEADER["x-floom-secret"])
     monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    # #1073 dropped the hardcoded floom.dev default for the public API base
+    # (OSS default is now localhost:8000). Pin WORKEROS_API_BASE so the poll
+    # response's api_base is deterministic instead of relying on a default.
+    monkeypatch.setenv("WORKEROS_API_BASE", "https://workers-api.floom.dev")
 
     reset_prefixes = ("auth.", "db.")
     reset_exact = {
