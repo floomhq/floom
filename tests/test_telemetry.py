@@ -124,3 +124,29 @@ def test_telemetry_migration_has_scoped_tables_and_policies():
     assert "enable row level security" in text
     assert "Users manage own telemetry events" in text
     assert "raw_ip" not in text.lower()
+
+
+def test_ingest_events_returns_200_on_store_failure(monkeypatch):
+    """Telemetry is fire-and-forget: a Supabase connection drop must not surface
+    as an HTTP 500.  The handler must catch ANY non-TelemetryError exception from
+    record_events and return a success response with stored=0."""
+
+    def _explode(**_kwargs):
+        raise RuntimeError("Server disconnected without sending a complete message body")
+
+    monkeypatch.setattr(telemetry_routes, "get_active_workspace_id", lambda: "ws-test")
+    monkeypatch.setattr(telemetry, "record_events", _explode)
+
+    payload = telemetry_routes.TelemetryIngestRequest(
+        events=[telemetry_routes.TelemetryEventIn(event_name="worker.created")]
+    )
+    result = asyncio.run(
+        telemetry_routes.ingest_events(
+            payload,
+            AuthContext(user_id="user-1", email="u@example.com", scopes=()),
+        )
+    )
+
+    assert result.accepted == 1
+    assert result.stored == 0
+    assert result.telemetry_enabled is True

@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import logging
 from datetime import datetime
 from typing import Any, Literal
 
@@ -14,6 +15,7 @@ ensure_engine_api_path()
 
 from auth import AuthContext, get_auth_context  # noqa: E402
 
+logger = logging.getLogger(__name__)
 
 router = APIRouter(prefix="/telemetry", tags=["telemetry"])
 
@@ -79,6 +81,22 @@ async def ingest_events(
         )
     except telemetry.TelemetryError as exc:
         raise HTTPException(status_code=400, detail=str(exc)) from exc
+    except Exception as exc:
+        # Telemetry is fire-and-forget analytics: a Supabase connection drop
+        # (httpcore.RemoteProtocolError / httpx.ConnectError / etc.) or any
+        # other transient write failure MUST NOT surface as a 500 to the client.
+        # Log a warning so ops can detect persistent store failures, but return
+        # accepted=N / stored=0 so the caller is not blocked.
+        logger.warning(
+            "telemetry write failed (stored=0, returning success): %s: %s",
+            type(exc).__name__,
+            exc,
+        )
+        return TelemetryIngestResponse(
+            accepted=len(payload.events),
+            stored=0,
+            telemetry_enabled=True,
+        )
     return TelemetryIngestResponse(
         accepted=len(payload.events),
         stored=stored,
