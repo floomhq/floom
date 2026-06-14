@@ -18,10 +18,11 @@ function testInviteAliasRoute(): void {
   assert(s.includes("/join?invite="), "invite route must redirect to join accept page");
 }
 
-function testSettingsMembersAliasRoute(): void {
-  assert(existsSync(resolve(ROOT, "app/settings/members/page.tsx")), "settings members alias must exist");
-  const s = src("app/settings/members/page.tsx");
-  assert(s.includes('redirect("/members")'), "settings members must redirect to members page");
+function testEngineMembersRoute(): void {
+  assert(existsSync(resolve(ROOT, "app/members/page.tsx")), "engine members route must exist");
+  const s = src("app/members/page.tsx");
+  assert(s.includes("api.members.list"), "members page must use the engine workspace members API seam");
+  assert(!existsSync(resolve(ROOT, "app/settings/members/page.tsx")), "settings members alias must remain de-forked");
 }
 
 function testInstallRoute(): void {
@@ -51,7 +52,7 @@ function testMiddlewarePublicInvite(): void {
 // cloud runner (vitest.config.ts) can execute it.
 describe("cloud invite/install routes", () => {
   it("invite route alias", testInviteAliasRoute);
-  it("settings members alias", testSettingsMembersAliasRoute);
+  it("engine members route", testEngineMembersRoute);
   it("install channel route", testInstallRoute);
   it("login install routing", testLoginInstallRoutes);
   it("middleware public invite paths", testMiddlewarePublicInvite);

@@ -3,8 +3,8 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "node scripts/sync-engine-web.mjs && cross-env NEXT_PUBLIC_BASE_PATH=/app NEXT_PUBLIC_API_PROXY_BASE=/app/api/proxy next dev",
-    "build": "node scripts/sync-engine-web.mjs && cross-env NEXT_PUBLIC_BASE_PATH=/app NEXT_PUBLIC_API_PROXY_BASE=/app/api/proxy next build",
+    "dev": "node scripts/sync-engine-web.mjs && cross-env NEXT_PUBLIC_BASE_PATH=/app NEXT_PUBLIC_API_PROXY_BASE=/app/api/proxy NEXT_PUBLIC_WORKEROS_DEPLOY=cloud next dev",
+    "build": "node scripts/sync-engine-web.mjs && cross-env NEXT_PUBLIC_BASE_PATH=/app NEXT_PUBLIC_API_PROXY_BASE=/app/api/proxy NEXT_PUBLIC_WORKEROS_DEPLOY=cloud next build",
     "deploy:prod": "npm run sync && vercel deploy --prod --yes && bash ../ops/smoke-routes.sh",
     "start": "next start",
     "lint": "node scripts/sync-engine-web.mjs && eslint",

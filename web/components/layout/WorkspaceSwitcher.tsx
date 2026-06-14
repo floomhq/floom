@@ -1,9 +1,16 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { Check, ChevronsUpDown, Copy, Download, FolderOpen, Link, Plus, Upload } from "lucide-react";
+import Link from "next/link";
+import { Check, ChevronsUpDown, Copy, Download, Link2, Pencil, Plus, Settings2, Upload, Users } from "lucide-react";
+import { toast } from "sonner";
 
+import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { cn } from "@/lib/utils";
+import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-logo";
+import { resolveWorkspaceName } from "@/lib/workspace/display-name";
+import { getWorkspaceActionCopy, isCloudMode } from "@/lib/workspace/action-copy";
+import type { LocalWorkspace } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -28,91 +35,14 @@ import {
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 
-// Cloud overlay: the WorkspaceSwitcher is a Cloud-only feature (the engine OSS
-// build is single-workspace). It MUST NOT depend on the synced engine
-// lib/api.ts or lib/types.ts — those are regenerated from the engine on every
-// build and do not carry a `workspaces` namespace or `Workspace` type. So this
-// component is fully self-contained: it talks to the same proxy via the env
-// seam (NEXT_PUBLIC_API_PROXY_BASE) the engine api.ts uses, and defines its own
-// Workspace shape. Keeping it decoupled is what lets the engine tree be a clean
-// generated drop-in (no fork).
-interface Workspace {
-  id: string;
-  name: string;
-  owner_user_id: string;
-  created_at: string;
-}
-
-const PROXY_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
-const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
-
-function getActiveWorkspaceId(): string | null {
-  if (typeof window === "undefined") return null;
-  const value = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
-  return value || null;
-}
-
-function workspaceHeaders(workspaceId = getActiveWorkspaceId()): Headers {
-  const headers = new Headers();
-  if (workspaceId) {
-    headers.set("x-workeros-workspace", workspaceId);
-  }
-  return headers;
-}
-
-function setActiveWorkspaceId(workspaceId: string | null) {
-  if (typeof window === "undefined") return;
-  if (!workspaceId) {
-    window.localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
-  } else {
-    window.localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, workspaceId);
-  }
-}
-
-async function proxyJson<T>(path: string, init?: RequestInit): Promise<T> {
-  const headers = workspaceHeaders();
-  for (const [key, value] of new Headers(init?.headers)) {
-    headers.set(key, value);
-  }
-  headers.set("Content-Type", "application/json");
-  const res = await fetch(`${PROXY_BASE}${path}`, {
-    ...init,
-    headers,
-  });
-  if (!res.ok) {
-    let detail = "";
-    try {
-      const body = (await res.json()) as { detail?: string };
-      detail = body.detail || JSON.stringify(body);
-    } catch {
-      detail = res.statusText || `HTTP ${res.status}`;
-    }
-    throw new Error(detail);
-  }
-  return res.json() as Promise<T>;
-}
-
-const workspacesApi = {
-  list: () =>
-    proxyJson<{ workspaces: Workspace[]; active_id: string | null }>("/workspaces"),
-  create: (name: string) =>
-    proxyJson<Workspace>("/workspaces", {
-      method: "POST",
-      body: JSON.stringify({ name }),
-    }),
-  select: (id: string) =>
-    proxyJson<Workspace>(`/workspaces/${encodeURIComponent(id)}/select`, {
-      method: "POST",
-    }),
+type WorkspaceState = {
+  workspaces: LocalWorkspace[];
+  activeId: string;
 };
 
-interface WorkspaceState {
-  workspaces: Workspace[];
-  activeId: string | null;
-}
-
 function shortInitial(name: string): string {
-  const trimmed = name.trim();
+  const display = resolveWorkspaceName(name);
+  const trimmed = display.trim();
   if (!trimmed) return "?";
   return trimmed.slice(0, 2).toUpperCase();
 }
@@ -122,18 +52,24 @@ export function WorkspaceSwitcher() {
   const [error, setError] = useState<string | null>(null);
   const [createOpen, setCreateOpen] = useState(false);
   const [createName, setCreateName] = useState("");
+  const [createCompany, setCreateCompany] = useState("");
+  const [nameTouched, setNameTouched] = useState(false);
   const [creating, setCreating] = useState(false);
+  const [renameOpen, setRenameOpen] = useState(false);
+  const [renameName, setRenameName] = useState("");
+  const [renaming, setRenaming] = useState(false);
   const [switchingTo, setSwitchingTo] = useState<string | null>(null);
   const [exporting, setExporting] = useState(false);
-  const [duplicating, setDuplicating] = useState(false);
   const [importing, setImporting] = useState(false);
-  const [sharing, setSharing] = useState(false);
-  const [shareCopied, setShareCopied] = useState(false);
-  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [duplicating, setDuplicating] = useState(false);
+  const [sharingLink, setSharingLink] = useState(false);
+  const importInputRef = useRef<HTMLInputElement>(null);
+  // #1005: cloud speaks invite copy, OSS speaks template-zip copy.
+  const copy = getWorkspaceActionCopy(isCloudMode());
 
   useEffect(() => {
     let cancelled = false;
-    workspacesApi
+    api.workspace
       .list()
       .then((data) => {
         if (cancelled) return;
@@ -141,10 +77,7 @@ export function WorkspaceSwitcher() {
         const activeId =
           browserActiveId && data.workspaces?.some((workspace) => workspace.id === browserActiveId)
             ? browserActiveId
-            : data.active_id ?? null;
-        if (activeId !== browserActiveId) {
-          setActiveWorkspaceId(activeId);
-        }
+            : data.active_id || "local-default";
         setState({
           workspaces: data.workspaces ?? [],
           activeId,
@@ -160,16 +93,11 @@ export function WorkspaceSwitcher() {
   }, []);
 
   async function handleSwitch(workspaceId: string) {
-    if (state && state.activeId === workspaceId) {
-      return;
-    }
+    if (state && state.activeId === workspaceId) return;
     setSwitchingTo(workspaceId);
     try {
-      await workspacesApi.select(workspaceId);
+      await api.workspace.select(workspaceId);
       setActiveWorkspaceId(workspaceId);
-      // Everything in the dashboard is workspace-scoped, so the simplest
-      // correct UX is a full reload — no chance of stale React state
-      // (workers/runs/connections/secrets) leaking across workspaces.
       window.location.reload();
     } catch (err) {
       setError((err as Error).message || "Failed to switch workspace");
@@ -182,8 +110,8 @@ export function WorkspaceSwitcher() {
     if (!name) return;
     setCreating(true);
     try {
-      const created = await workspacesApi.create(name);
-      await workspacesApi.select(created.id);
+      const created = await api.workspace.create(name);
+      await api.workspace.select(created.id);
       setActiveWorkspaceId(created.id);
       window.location.reload();
     } catch (err) {
@@ -192,133 +120,109 @@ export function WorkspaceSwitcher() {
     }
   }
 
-  async function handleExportWorkspace(workspace: Workspace) {
-    setExporting(true);
-    setError(null);
+  // #791: rename the active workspace.
+  async function handleRename() {
+    const name = renameName.trim();
+    if (!name || !state) return;
+    setRenaming(true);
     try {
-      const res = await fetch(`${PROXY_BASE}/workspace/export`, {
-        headers: workspaceHeaders(workspace.id),
+      const updated = await api.workspace.rename(state.activeId, name);
+      setState({
+        ...state,
+        workspaces: state.workspaces.map((w) =>
+          w.id === state.activeId ? { ...w, name: updated.name } : w
+        ),
       });
-      if (!res.ok) throw new Error(`Export failed (${res.status})`);
-      const blob = await res.blob();
+      setRenameOpen(false);
+    } catch (err) {
+      setError((err as Error).message || "Failed to rename workspace");
+    } finally {
+      setRenaming(false);
+    }
+  }
+
+  async function handleExport() {
+    if (exporting) return;
+    setExporting(true);
+    try {
+      const { blob, filename } = await api.workspace.exportTemplate();
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = `${workspace.name.trim() || "workspace"}-template.zip`;
+      a.download = filename;
       document.body.appendChild(a);
       a.click();
       a.remove();
-      window.setTimeout(() => URL.revokeObjectURL(url), 1_000);
+      URL.revokeObjectURL(url);
+      toast.success(copy.exportToast);
     } catch (err) {
-      setError((err as Error).message || "Failed to export workspace");
+      toast.error((err as Error).message || "Failed to export template");
     } finally {
       setExporting(false);
     }
   }
 
-  async function handleDuplicateWorkspace(workspace: Workspace) {
-    setDuplicating(true);
-    setError(null);
-    try {
-      const exportRes = await fetch(`${PROXY_BASE}/workspace/export`, {
-        headers: workspaceHeaders(workspace.id),
-      });
-      if (!exportRes.ok) throw new Error(`Export failed (${exportRes.status})`);
-      const template = await exportRes.blob();
-      const created = await workspacesApi.create(`Copy of ${workspace.name}`);
-      const form = new FormData();
-      form.append(
-        "bundle",
-        new File([template], "workspace-template.zip", { type: "application/zip" })
-      );
-      const importRes = await fetch(`${PROXY_BASE}/workspace/import`, {
-        method: "POST",
-        headers: workspaceHeaders(created.id),
-        body: form,
-      });
-      if (!importRes.ok) {
-        let detail = "";
-        try {
-          const body = (await importRes.json()) as { detail?: string };
-          detail = body.detail || JSON.stringify(body);
-        } catch {
-          detail = importRes.statusText || `HTTP ${importRes.status}`;
-        }
-        throw new Error(detail);
-      }
-      await workspacesApi.select(created.id);
-      setActiveWorkspaceId(created.id);
-      window.location.reload();
-    } catch (err) {
-      setError((err as Error).message || "Failed to duplicate workspace");
-      setDuplicating(false);
-    }
-  }
-
-  async function handleCreateShareLink(workspace: Workspace) {
-    setSharing(true);
-    setShareCopied(false);
-    setError(null);
-    try {
-      const share = await proxyJson<{ url?: string }>(
-        `/workspaces/${encodeURIComponent(workspace.id)}/share-links`,
-        {
-          method: "POST",
-          body: JSON.stringify({ expires_in_days: 7 }),
-        }
-      );
-      if (!share.url) throw new Error("Share link missing from response");
-      await navigator.clipboard.writeText(share.url);
-      setShareCopied(true);
-      window.setTimeout(() => setShareCopied(false), 3_000);
-    } catch (err) {
-      setError((err as Error).message || "Failed to create share link");
-    } finally {
-      setSharing(false);
-    }
-  }
-
-  async function handleImportFromFile(file: File) {
+  async function handleImportFile(file: File) {
     setImporting(true);
-    setError(null);
     try {
-      const created = await workspacesApi.create(`Imported workspace`);
-      const form = new FormData();
-      form.append(
-        "bundle",
-        new File([file], "workspace-template.zip", { type: "application/zip" })
+      const result = await api.workspace.importTemplate(file);
+      const imported = result.workers_imported.length + result.contexts_imported.length;
+      toast.success(
+        `Imported ${imported} item${imported === 1 ? "" : "s"}${
+          result.skipped.length ? ` · ${result.skipped.length} skipped` : ""
+        }`
       );
-      const importRes = await fetch(`${PROXY_BASE}/workspace/import`, {
-        method: "POST",
-        headers: workspaceHeaders(created.id),
-        body: form,
-      });
-      if (!importRes.ok) {
-        let detail = "";
-        try {
-          const body = (await importRes.json()) as { detail?: string };
-          detail = body.detail || JSON.stringify(body);
-        } catch {
-          detail = importRes.statusText || `HTTP ${importRes.status}`;
-        }
-        throw new Error(detail);
-      }
-      await workspacesApi.select(created.id);
-      setActiveWorkspaceId(created.id);
       window.location.reload();
     } catch (err) {
-      setError((err as Error).message || "Failed to import workspace");
+      toast.error((err as Error).message || "Failed to import template");
+    } finally {
       setImporting(false);
     }
   }
 
-  // Render-state guards: while loading we show a placeholder so the
-  // sidebar doesn't jump when data arrives.
+  async function handleDuplicate() {
+    if (duplicating || !state) return;
+    setDuplicating(true);
+    try {
+      const created = await api.workspace.duplicate(state.activeId);
+      await api.workspace.select(created.id);
+      setActiveWorkspaceId(created.id);
+      toast.success(`Duplicated to “${created.name}”`);
+      window.location.reload();
+    } catch (err) {
+      toast.error((err as Error).message || "Failed to duplicate workspace");
+      setDuplicating(false);
+    }
+  }
+
+  async function handleShareLink() {
+    if (sharingLink) return;
+    setSharingLink(true);
+    try {
+      const { url } = await api.workspace.shareLink();
+      let copied = false;
+      try {
+        await navigator.clipboard.writeText(url);
+        copied = true;
+      } catch {
+        copied = false;
+      }
+      toast.success(
+        copied ? copy.shareCopied : copy.shareReady,
+        { description: copied ? undefined : url }
+      );
+    } catch (err) {
+      toast.error((err as Error).message || copy.shareFailed);
+    } finally {
+      setSharingLink(false);
+    }
+  }
+
   if (!state) {
     return (
-      <div className="px-3 pb-2">
+      <div className="w-full">
         <div
-          className="flex h-10 items-center gap-2 rounded-md border border-line bg-transparent px-2.5 text-sm text-[var(--ink-mute)]"
+          className="flex h-10 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)]"
           aria-label="Loading workspaces"
         >
           <div className="size-6 shrink-0 rounded-md bg-muted" />
@@ -335,36 +239,44 @@ export function WorkspaceSwitcher() {
 
   if (!active) {
     return (
-      <div className="px-3 pb-2 text-xs text-[var(--ink-mute)]">
+      <div className="w-full px-2.5 text-xs text-[var(--ink-mute)]">
         {error ?? "No workspaces yet"}
       </div>
     );
   }
 
   return (
-    <div className="px-3 pb-2">
+    <div className="w-full">
       <DropdownMenu>
+        {/* V4 SPEC §2: workspace identity — mark + name + chevron-on-hover */}
         <DropdownMenuTrigger
           className={cn(
-            "flex h-10 w-full items-center gap-2 rounded-md border border-line bg-transparent px-2.5 text-sm font-medium text-ink transition-colors duration-150",
-            "hover:bg-[color-mix(in_srgb,var(--paper)_62%,transparent)]"
+            "group flex h-10 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm font-semibold text-ink transition-colors duration-150",
+            "hover:bg-[var(--active-nav-bg)] focus-visible:outline-none"
           )}
           aria-label="Switch workspace"
         >
+          {/* Workspace mark: company logo if available, else colored initial */}
           <div className="size-6 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_22%,transparent)] text-[var(--accent)] grid place-items-center text-[10px] font-semibold uppercase tracking-wide">
             {shortInitial(active.name)}
           </div>
-          <span className="flex-1 truncate text-left">{active.name}</span>
-          <ChevronsUpDown className="size-4 opacity-60" />
+          <span className="flex-1 truncate text-left">{resolveWorkspaceName(active.name)}</span>
+          <ChevronsUpDown className="size-4 opacity-0 group-hover:opacity-60 transition-opacity duration-100" />
         </DropdownMenuTrigger>
+        {/* V9 (Federico 2026-06-02): "this can also be cleaner." The popover is
+            split into two clear sections — the workspace LIST (active row
+            carries the checkmark) and the ACTIONS group below a divider — with
+            consistent spacing. The active workspace name is shown only here in
+            the list (the trigger above is the closed-state control), so there's
+            no redundant repetition inside the menu. */}
         <DropdownMenuContent
           align="start"
           side="bottom"
-          className="w-56"
+          className="w-56 border-0 p-1 ![box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.10)] ring-0 outline-none dark:![box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.50)]"
           sideOffset={6}
         >
           <DropdownMenuGroup>
-            <DropdownMenuLabel className="text-[11px] uppercase tracking-wider text-[var(--ink-mute)]">
+            <DropdownMenuLabel className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-[var(--ink-mute)]">
               Workspaces
             </DropdownMenuLabel>
             {state.workspaces.map((w) => {
@@ -373,9 +285,6 @@ export function WorkspaceSwitcher() {
               return (
                 <DropdownMenuItem
                   key={w.id}
-                  // base-ui's Menu.Item exposes onClick, NOT onSelect (that
-                  // was the Radix API). The previous onSelect prop was
-                  // silently dropped, so clicking a workspace did nothing.
                   onClick={() => handleSwitch(w.id)}
                   className="flex items-center gap-2 focus:bg-[var(--active-nav-bg)] focus:text-ink"
                   disabled={isLoading}
@@ -383,80 +292,137 @@ export function WorkspaceSwitcher() {
                   <div className="size-5 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)] grid place-items-center text-[9px] font-semibold uppercase">
                     {shortInitial(w.name)}
                   </div>
-                  <span className="flex-1 truncate">{w.name}</span>
+                  <span className="flex-1 truncate">{resolveWorkspaceName(w.name)}</span>
                   {isActive ? <Check className="size-4 opacity-80" /> : null}
                 </DropdownMenuItem>
               );
             })}
           </DropdownMenuGroup>
-          <DropdownMenuSeparator />
-          <DropdownMenuSub>
-            <DropdownMenuSubTrigger
-              className="flex items-center gap-2 text-[var(--ink-soft)]"
+          <DropdownMenuSeparator className="-mx-1 my-1" />
+          <DropdownMenuGroup>
+            <DropdownMenuItem
+              onClick={() => {
+                setCreateName("");
+                setCreateCompany("");
+                setNameTouched(false);
+                setCreateOpen(true);
+              }}
+              className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
             >
-              <FolderOpen className="size-4" />
-              Workspace actions
-            </DropdownMenuSubTrigger>
-            <DropdownMenuSubContent>
-              <DropdownMenuItem
-                onClick={() => handleDuplicateWorkspace(active)}
-                className="flex items-center gap-2"
-                disabled={duplicating || exporting || sharing || importing}
-              >
-                <Copy className="size-4" />
-                {duplicating ? "Copying…" : "Make a local copy"}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => handleExportWorkspace(active)}
-                className="flex items-center gap-2"
-                disabled={duplicating || exporting || sharing || importing}
-              >
-                <Download className="size-4" />
-                {exporting ? "Downloading…" : "Download copy"}
-              </DropdownMenuItem>
-              <DropdownMenuItem
-                onClick={() => handleCreateShareLink(active)}
-                className="flex items-center gap-2"
-                disabled={duplicating || exporting || sharing || importing}
-              >
-                <Link className="size-4" />
-                {sharing ? "Copying invite link…" : shareCopied ? "Invite link copied" : "Invite someone by link"}
-              </DropdownMenuItem>
-              <DropdownMenuSeparator />
-              <DropdownMenuItem
-                onClick={() => fileInputRef.current?.click()}
-                className="flex items-center gap-2"
-                disabled={duplicating || exporting || sharing || importing}
-              >
-                <Upload className="size-4" />
-                {importing ? "Importing…" : "Import from file…"}
-              </DropdownMenuItem>
-            </DropdownMenuSubContent>
-          </DropdownMenuSub>
-          <DropdownMenuSeparator />
-          <DropdownMenuItem
-            onClick={() => {
-              setCreateName("");
-              setCreateOpen(true);
-            }}
-            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
-          >
-            <Plus className="size-4" />
-            New workspace
-          </DropdownMenuItem>
+              <Plus className="size-4" />
+              New workspace
+            </DropdownMenuItem>
+            {/* #791: rename the active workspace. */}
+            <DropdownMenuItem
+              closeOnClick={false}
+              onClick={() => {
+                setRenameName(
+                  state.workspaces.find((w) => w.id === state.activeId)?.name ?? ""
+                );
+                setRenameOpen(true);
+              }}
+              className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+            >
+              <Pencil className="size-4" />
+              Rename workspace
+            </DropdownMenuItem>
+            {/* G10 (Federico 2026-06-03): Members lives in the workspace cluster,
+                peer to "New workspace". One model both products: on the OS it
+                shows you as Owner; Cloud shows real members. */}
+            <DropdownMenuItem
+              render={<Link href="/members" />}
+              className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+            >
+              <Users className="size-4" />
+              Members
+            </DropdownMenuItem>
+            {/* G1 (Federico 2026-06-03, img #91/#94): the four template actions
+                are collapsed into ONE "Workspace actions" row that reveals them
+                on hover — peer to "New workspace" — instead of a flat list. */}
+            <DropdownMenuSub>
+              <DropdownMenuSubTrigger className="flex items-center gap-2 text-[var(--ink-soft)] data-popup-open:bg-[var(--active-nav-bg)] data-popup-open:text-ink">
+                <Settings2 className="size-4" />
+                Workspace actions
+              </DropdownMenuSubTrigger>
+              {/* M34/M35: clarified labels. Export = download a zip anyone can
+                  import; Share template link = a signed URL to that zip (no
+                  secrets, no connections); Duplicate = live copy in this
+                  instance with agents + instructions, connections & secrets
+                  NOT copied (intentional: they must be reconnected). */}
+              <DropdownMenuSubContent className="w-64 border-0 p-1 ![box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.10)] ring-0 outline-none dark:![box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.50)]">
+                <DropdownMenuItem
+                  closeOnClick={false}
+                  disabled={exporting}
+                  onClick={() => void handleExport()}
+                  className="flex flex-col items-start gap-0 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                >
+                  <div className="flex items-center gap-2">
+                    <Download className="size-4 shrink-0" />
+                    <span>{exporting ? copy.exporting : copy.exportLabel}</span>
+                  </div>
+                  <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
+                    {copy.exportHelp}
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  closeOnClick={false}
+                  disabled={importing}
+                  onClick={() => importInputRef.current?.click()}
+                  className="flex flex-col items-start gap-0 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                >
+                  <div className="flex items-center gap-2">
+                    <Upload className="size-4 shrink-0" />
+                    <span>{importing ? "Importing…" : "Import workspace…"}</span>
+                  </div>
+                  <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
+                    Restore from an exported zip
+                  </span>
+                </DropdownMenuItem>
+                {/* W9b: Duplicate mints a "<name> (copy)" sibling; Share copies a
+                    signed login-free download link (no secret values). */}
+                <DropdownMenuItem
+                  closeOnClick={false}
+                  disabled={duplicating}
+                  onClick={() => void handleDuplicate()}
+                  className="flex flex-col items-start gap-0 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                >
+                  <div className="flex items-center gap-2">
+                    <Copy className="size-4 shrink-0" />
+                    <span>{duplicating ? copy.duplicating : copy.duplicateLabel}</span>
+                  </div>
+                  <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
+                    {copy.duplicateHelp}
+                  </span>
+                </DropdownMenuItem>
+                <DropdownMenuItem
+                  closeOnClick={false}
+                  disabled={sharingLink}
+                  onClick={() => void handleShareLink()}
+                  className="flex flex-col items-start gap-0 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                >
+                  <div className="flex items-center gap-2">
+                    <Link2 className="size-4 shrink-0" />
+                    <span>{sharingLink ? copy.sharing : copy.shareLabel}</span>
+                  </div>
+                  <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
+                    {copy.shareHelp}
+                  </span>
+                </DropdownMenuItem>
+              </DropdownMenuSubContent>
+            </DropdownMenuSub>
+          </DropdownMenuGroup>
         </DropdownMenuContent>
       </DropdownMenu>
 
       <input
-        ref={fileInputRef}
+        ref={importInputRef}
         type="file"
-        accept=".zip"
-        className="sr-only"
-        aria-hidden="true"
-        onChange={(e) => {
-          const file = e.target.files?.[0];
-          if (file) handleImportFromFile(file);
-          e.target.value = "";
+        accept=".zip,application/zip"
+        className="hidden"
+        onChange={(event) => {
+          const file = event.target.files?.[0];
+          if (file) void handleImportFile(file);
+          event.target.value = "";
         }}
       />
 
@@ -465,26 +431,65 @@ export function WorkspaceSwitcher() {
           <DialogHeader>
             <DialogTitle>New workspace</DialogTitle>
             <DialogDescription>
-              Workspaces keep workers, runs, connections, and secrets
-              isolated. You can create as many as you want.
+              Workspaces keep workers, runs, connections, secrets, and brain folders
+              isolated on this local Floom instance.
             </DialogDescription>
           </DialogHeader>
-          <div className="space-y-2 py-2">
-            <Label htmlFor="workspace-name">Name</Label>
-            <Input
-              id="workspace-name"
-              value={createName}
-              onChange={(event) => setCreateName(event.target.value)}
-              placeholder="e.g. Side project"
-              maxLength={80}
-              autoFocus
-              onKeyDown={(event) => {
-                if (event.key === "Enter" && createName.trim() && !creating) {
-                  event.preventDefault();
-                  handleCreate();
-                }
-              }}
-            />
+          <div className="space-y-3 py-2">
+            {/* §5a2: ONE company field — derives a logo + prefills the name. */}
+            <div className="space-y-2">
+              <Label htmlFor="workspace-company">Company</Label>
+              <div className="flex items-center gap-2.5">
+                <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md bg-[var(--bg-2)]">
+                  {companyLogoUrl(createCompany) ? (
+                    // eslint-disable-next-line @next/next/no-img-element
+                    <img
+                      src={companyLogoUrl(createCompany) as string}
+                      alt=""
+                      className="size-5"
+                      onError={(e) => {
+                        (e.currentTarget as HTMLImageElement).style.visibility = "hidden";
+                      }}
+                    />
+                  ) : (
+                    <span className="text-xs text-muted-foreground">
+                      {(createName || createCompany || "?").slice(0, 1).toUpperCase()}
+                    </span>
+                  )}
+                </div>
+                <Input
+                  id="workspace-company"
+                  value={createCompany}
+                  onChange={(event) => {
+                    const v = event.target.value;
+                    setCreateCompany(v);
+                    if (!nameTouched) setCreateName(prefillWorkspaceName(v));
+                  }}
+                  placeholder="e.g. Acme or acme.com"
+                  maxLength={80}
+                  autoFocus
+                />
+              </div>
+            </div>
+            <div className="space-y-2">
+              <Label htmlFor="workspace-name">Workspace name</Label>
+              <Input
+                id="workspace-name"
+                value={createName}
+                onChange={(event) => {
+                  setNameTouched(true);
+                  setCreateName(event.target.value);
+                }}
+                placeholder="e.g. Acme"
+                maxLength={80}
+                onKeyDown={(event) => {
+                  if (event.key === "Enter" && createName.trim() && !creating) {
+                    event.preventDefault();
+                    handleCreate();
+                  }
+                }}
+              />
+            </div>
           </div>
           <DialogFooter>
             <Button
@@ -500,16 +505,44 @@ export function WorkspaceSwitcher() {
               onClick={handleCreate}
               disabled={!createName.trim() || creating}
             >
-              {creating ? "Creating…" : "Create"}
+              {creating ? "Creating..." : "Create"}
             </Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>
-      {error ? (
-        <div className="mt-1 text-[10px] text-red-500" role="alert">
-          {error}
-        </div>
-      ) : null}
+
+      {/* #791: rename the active workspace. */}
+      <Dialog open={renameOpen} onOpenChange={setRenameOpen}>
+        <DialogContent className="sm:max-w-md">
+          <DialogHeader>
+            <DialogTitle>Rename workspace</DialogTitle>
+          </DialogHeader>
+          <div className="space-y-2 py-2">
+            <Label htmlFor="workspace-rename">Name</Label>
+            <Input
+              id="workspace-rename"
+              value={renameName}
+              onChange={(event) => setRenameName(event.target.value)}
+              maxLength={80}
+              autoFocus
+              onKeyDown={(event) => {
+                if (event.key === "Enter" && renameName.trim() && !renaming) {
+                  event.preventDefault();
+                  handleRename();
+                }
+              }}
+            />
+          </div>
+          <DialogFooter>
+            <Button variant="ghost" type="button" onClick={() => setRenameOpen(false)} disabled={renaming}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={handleRename} disabled={!renameName.trim() || renaming}>
+              {renaming ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
     </div>
   );
 }

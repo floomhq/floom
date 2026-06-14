@@ -205,7 +205,7 @@ export function SlackConnect() {
           </div>
 
           {!platformReady && !connected ? (
-            <p className="text-xs text-amber-600 dark:text-amber-400">
+            <p className="text-xs text-[var(--negative)]">
               Slack isn&apos;t fully configured on this workspace yet. The button may error until the
               platform Slack app is enabled.
             </p>

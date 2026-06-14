@@ -89,24 +89,18 @@ export const OVERLAY_FILES = [
   // settings page is fully cloud-compatible (all API calls go through lib/api ->
   // cloud proxy + workspace headers; its WhatsApp QR uses the same +1 650-399-9709
   // number the overlay hardcoded). Engine settings flows through unmodified.
-  "app/settings/members/page.tsx",
   "app/join/page.tsx",
-  "app/members/page.tsx",
-  // app/workers/{page,WorkersClient}.tsx de-forked 2026-06-13: the fork only added
-  // CloudWorkerSummary.visibility + a "Shared" badge, which the engine's
-  // WorkersCollection now has natively (folders + visibility/shared) after the
-  // #1005-1007 cloud-seam hooks. So the fork is redundant — drop it and let the
-  // engine WorkersCollection render directly (matches OSS). Engine workers UI flows through.
+  "app/workers/page.tsx",
+  "app/workers/CloudWorkspaceAdminWorkersView.tsx",
   // app/runs/RunsClient.tsx de-forked 2026-06-13: dead orphan. The engine renamed
   // RunsClient -> RunsCollection; runs/page.tsx (pure engine) renders RunsCollection
   // and nothing imports RunsClient. (trigger_member_email attribution belongs upstream.)
   "app/workers/[id]/share/page.tsx",
   "app/workspace/share/[token]/page.tsx",
   "components/CloudAppChrome.tsx",
+  "components/CloudAccountFooter.tsx",
   "components/VersionHistoryMenu.tsx",
   "components/TelemetryProvider.tsx",
-  "components/layout/WorkspaceSwitcher.tsx",
-  "components/layout/sidebar.tsx",
   // components/ui/dropdown-menu.tsx de-forked 2026-06-13: cosmetic Tailwind drift only
   // (engine uses the current design tokens) — no cloud seam.
   // components/CliCommandPanel.tsx de-forked 2026-06-13: dead code (nothing renders it).
@@ -115,6 +109,7 @@ export const OVERLAY_FILES = [
   "middleware.ts",
   "tests/cloud-invite-install.test.ts",
   "tests/fl-batch-6.test.ts",
+  "tests/login-secrets-render-987-988.dom.test.tsx",
   "lib/server-api.ts",
   // lib/api.ts de-forked 2026-06-12: the engine version consumes the cloud env
   // seams (NEXT_PUBLIC_API_PROXY_BASE / NEXT_PUBLIC_BASE_PATH) directly; the
@@ -243,26 +238,10 @@ function main() {
     }
   }
 
-  // 4) Preserve the engine sidebar's exported parts under a stable companion
-  //    name so the overlay sidebar can compose them. The overlay then
-  //    overwrites the default sidebar.tsx. Without this, the overlay would
-  //    have to import from a file it is about to replace.
-  const engineSidebar = "components/layout/sidebar.tsx";
-  if (existsSync(join(ENGINE_WEB, engineSidebar))) {
-    const companion = "components/layout/sidebar.engine.tsx";
-    copyInto(ENGINE_WEB, engineSidebar, DEST);
-    // rename copy -> .engine.tsx
-    const from = join(DEST, engineSidebar);
-    const to = join(DEST, companion);
-    mkdirSync(dirname(to), { recursive: true });
-    copyFileSync(from, to);
-    copied++;
-    log(`[sync] preserved engine sidebar exports -> ${companion}`);
-  }
-
-  // 4b) Preserve cloud-overridden engine components under stable companion names
+  // 4) Preserve cloud-overridden engine components under stable companion names
   //     so overlay files can compose from them and the drift guard has a reference.
   for (const [src, companion] of [
+    ["app/cli-auth/page.tsx", "app/cli-auth/page.engine.tsx"],
   ]) {
     if (existsSync(join(ENGINE_WEB, src))) {
       const from = join(DEST, src); // already copied in step 2

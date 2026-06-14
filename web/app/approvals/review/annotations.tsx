@@ -132,7 +132,7 @@ export function TextHighlightAnnotator({
           seg.highlighted ? (
             <mark
               key={i}
-              className="rounded-[var(--radius-squircle)] bg-amber-200/70 px-0.5 text-[var(--ink)] dark:bg-amber-500/30"
+              className="rounded-[var(--radius-squircle)] bg-[var(--accent-soft)] px-0.5 text-[var(--ink)]"
             >
               {seg.text}
             </mark>

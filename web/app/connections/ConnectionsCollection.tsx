@@ -54,7 +54,7 @@ function SetupRequiredCallout({ missingBySlug }: { missingBySlug: Map<string, st
   const totalWorkers = new Set(Array.from(missingBySlug.values()).flat()).size;
   return (
     <div
-      className="flex items-start gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+      className="flex items-start gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--accent-soft)] px-4 py-3 text-sm text-[var(--ink)]"
       role="alert"
     >
       <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -122,6 +122,15 @@ function KV({ rows }: { rows: [string, React.ReactNode][] }) {
       ))}
     </div>
   );
+}
+
+function formatLastUsed(connection: ConnectionItem) {
+  if (!connection.last_used_at) return "—";
+  const date = new Date(connection.last_used_at);
+  const when = Number.isNaN(date.getTime())
+    ? connection.last_used_at
+    : date.toLocaleDateString();
+  return connection.last_used_by ? `${when} · ${connection.last_used_by}` : when;
 }
 
 function EmailPeekPanel({ connectionId }: { connectionId: string }) {
@@ -399,6 +408,8 @@ export default function ConnectionsCollection({
                     ["Status", STATUS_PILL[i.statusKey].label],
                     ["Scopes", String(c.scopes?.length ?? 0)],
                     ["Connected", new Date(c.created_at).toLocaleDateString()],
+                    ["Last used", formatLastUsed(c)],
+                    ["Owner", c.owner_id || "—"],
                   ]}
                 />
               ),

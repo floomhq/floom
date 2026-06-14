@@ -5,6 +5,7 @@ import { Ambient } from "@/components/Ambient";
 import { CommandPalette } from "@/components/CommandPalette";
 import { IconSprite } from "@/components/IconSprite";
 import { TelemetryProvider } from "@/components/TelemetryProvider";
+import { CloudAccountFooter } from "@/components/CloudAccountFooter";
 import { EmilyDock } from "@/components/emily/EmilyChat";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Toaster } from "@/components/ui/sonner";
@@ -57,7 +58,7 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
       <>
         <IconSprite />
         <Ambient />
-        <Sidebar />
+        <Sidebar accountFooter={({ onNavigate }) => <CloudAccountFooter onNavigate={onNavigate} />} />
         <main className="relative z-10 flex-1 min-w-0 min-h-screen">{children}</main>
         <CommandPalette />
         <TelemetryProvider />
@@ -70,7 +71,7 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
     <>
       <IconSprite />
       <Ambient />
-      <Sidebar />
+      <Sidebar accountFooter={({ onNavigate }) => <CloudAccountFooter onNavigate={onNavigate} />} />
       <main className="relative z-10 flex-1 min-w-0 h-full overflow-y-auto">
         <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">{children}</div>
       </main>

@@ -36,10 +36,6 @@ const ROOT_FILES = [
 
 const SYNC_DIRS = ["app", "components", "lib", "public", "tests"];
 
-// sidebar.engine.tsx is a synthetic companion the sync creates from the engine
-// sidebar; it is expected to equal the engine sidebar.tsx, checked specially.
-const SYNTHETIC = new Set(["components/layout/sidebar.engine.tsx"]);
-
 function walk(dir, base = dir, acc = []) {
   if (!existsSync(dir)) return acc;
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
@@ -103,18 +99,7 @@ function main() {
       if (read(eng) !== read(synced)) errors.push(`DRIFT (root config): ${f}`);
     }
 
-    // 3) Synthetic companion must equal the engine sidebar.
-    for (const rel of SYNTHETIC) {
-      const synced = join(tmp, rel);
-      const eng = join(ENGINE_WEB, "components/layout/sidebar.tsx");
-      if (!existsSync(synced)) {
-        errors.push(`MISSING synthetic companion: ${rel}`);
-      } else if (read(synced) !== read(eng)) {
-        errors.push(`DRIFT (companion != engine sidebar): ${rel}`);
-      }
-    }
-
-    // 4) Stale-removed engine files must NOT be present in the synced tree.
+    // 3) Stale-removed engine files must NOT be present in the synced tree.
     for (const rel of staleSet) {
       if (existsSync(join(tmp, rel))) {
         errors.push(`STALE FILE PRESENT (should be excluded): ${rel}`);

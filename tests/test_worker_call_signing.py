@@ -26,8 +26,11 @@ def _run_token():
     return import_engine_module("run_token")
 
 
-def test_worker_call_signing_works_without_floom_secret():
+def test_worker_call_signing_works_without_floom_secret(monkeypatch):
     # Cloud strips FLOOM_SECRET; the override must still provide a real secret.
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
+    monkeypatch.delenv("WORKEROS_WORKER_CALL_SECRET", raising=False)
+    monkeypatch.delenv("FLOOM_SECRET", raising=False)
     assert not (os.environ.get("FLOOM_SECRET") or "").strip()
     startup._install_worker_call_signing_key()  # idempotent; ensure applied
     rt = _run_token()
@@ -37,7 +40,10 @@ def test_worker_call_signing_works_without_floom_secret():
     assert key != "dev-secret-not-set", "must not use the public dev fallback"
 
 
-def test_issue_validate_round_trip_without_floom_secret():
+def test_issue_validate_round_trip_without_floom_secret(monkeypatch):
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
+    monkeypatch.delenv("WORKEROS_WORKER_CALL_SECRET", raising=False)
+    monkeypatch.delenv("FLOOM_SECRET", raising=False)
     startup._install_worker_call_signing_key()
     rt = _run_token()
 

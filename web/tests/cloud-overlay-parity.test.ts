@@ -35,12 +35,14 @@ describe("Cloud overlay parity", () => {
 
   it("uses outcome-first workspace action labels", () => {
     const webSwitcher = readWeb("components/layout/WorkspaceSwitcher.tsx");
-    const switcher = readOverlay("components/layout/WorkspaceSwitcher.tsx");
+    const actionCopy = readWeb("lib/workspace/action-copy.ts");
+    const packageJson = readWeb("package.json");
 
-    expect(webSwitcher).toBe(switcher);
-    expect(switcher).not.toContain("Copy setup link");
-    expect(switcher).toContain("Invite someone by link");
-    expect(switcher).toContain("Invite link copied");
+    expect(webSwitcher).toContain("getWorkspaceActionCopy(isCloudMode())");
+    expect(webSwitcher).not.toContain("Copy setup link");
+    expect(actionCopy).toContain("Invite someone by link");
+    expect(actionCopy).toContain("Invite link copied");
+    expect(packageJson).toContain("NEXT_PUBLIC_WORKEROS_DEPLOY=cloud");
   });
 
   it("keeps the cloud /api/me route mirrored between web and overlay", () => {
@@ -52,6 +54,6 @@ describe("Cloud overlay parity", () => {
     expect(webMeHelper).toBe(overlayMeHelper);
     expect(webMe).toBe(overlayMe);
     expect(webMeHelper).toContain("display_name");
-    expect(webMeHelper).toContain("picture");
+    expect(webMeHelper).toContain("engine-shaped user");
   });
 });

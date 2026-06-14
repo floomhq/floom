@@ -1,6 +1,6 @@
 export const metadata = {
-  title: "Privacy - WorkerOS Cloud",
-  description: "How WorkerOS Cloud handles workspace data and telemetry.",
+  title: "Privacy - Floom",
+  description: "How Floom handles workspace data and telemetry.",
 };
 
 export default function PrivacyPage() {
@@ -15,7 +15,7 @@ export default function PrivacyPage() {
 
       <div className="space-y-4 text-sm leading-relaxed">
         <p>
-          WorkerOS Cloud stores workspace data so workers, the workspace agent,
+          Floom stores workspace data so workers, the workspace agent,
           and connected tools can operate across sessions. Data is scoped by
           workspace and authenticated user.
         </p>
@@ -59,7 +59,7 @@ export default function PrivacyPage() {
 
         <h2 className="pt-2 text-base font-medium">Third parties</h2>
         <p>
-          WorkerOS can send data to providers selected for a workspace, including
+          Floom can send data to providers selected for a workspace, including
           model providers, E2B, Composio, OAuth providers such as Google or
           Slack, MCP servers, and transactional email providers when email is
           enabled. Those providers process data under their own terms.

@@ -65,7 +65,7 @@ export function LoginEmailPanel({ next, initialMode = "magic" }: { next: string;
         return;
       }
       if (mode === "signup" && body.status === "confirmation_required") {
-        setStatus("Check your email to confirm your WorkerOS account.");
+        setStatus("Check your email to confirm your Floom account.");
         return;
       }
       setStatus("Check your email for the magic link.");
