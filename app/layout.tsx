@@ -25,9 +25,33 @@ const sourceSerif = Source_Serif_4({
 });
 
 export const metadata: Metadata = {
-  title: "Floom: Hire AI workers for your company",
+  metadataBase: new URL("https://design.floom.dev"),
+  title: "Floom",
   description:
     "Hire AI workers for your company. Describe the job, connect your tools, and Floom runs it on a schedule, a webhook, or with your approval. Drive everything from Claude, Codex, Cursor, or any agent that speaks MCP.",
+  openGraph: {
+    title: "Floom",
+    description:
+      "Hire AI workers for your company. Describe the job, connect your tools, and Floom runs it on a schedule, a webhook, or with your approval.",
+    url: "https://design.floom.dev",
+    siteName: "Floom",
+    images: [
+      {
+        url: "/marketing/og-image-v3.png",
+        width: 1200,
+        height: 630,
+        alt: "Floom - Hire AI workers for your company",
+      },
+    ],
+    type: "website",
+  },
+  twitter: {
+    card: "summary_large_image",
+    title: "Floom",
+    description:
+      "Hire AI workers for your company. Describe the job, connect your tools, and Floom runs it on a schedule, a webhook, or with your approval.",
+    images: ["/marketing/og-image-v3.png"],
+  },
   icons: {
     icon: [
       { url: "/floom-mark.svg", type: "image/svg+xml", media: "(prefers-color-scheme: light)" },
