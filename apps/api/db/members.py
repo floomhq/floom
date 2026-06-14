@@ -159,7 +159,10 @@ def preview_invitation(*, raw_token: str, workspace_id: str | None = None) -> di
         .limit(1)
         .execute()
     ) or {}
-    emails = resolve_member_emails([str(invite.get("invited_by") or "")])
+    # #236: this preview is served UNAUTHENTICATED (GET /api/invites/{token}),
+    # so it must not disclose the inviter's email (PII) to anyone holding the
+    # token. The join page only needs the workspace/role/invited-email; drop
+    # inviter_email entirely (no frontend consumes it).
     return {
         "id": invite.get("id"),
         "workspace_id": invite.get("workspace_id"),
@@ -167,7 +170,6 @@ def preview_invitation(*, raw_token: str, workspace_id: str | None = None) -> di
         "email": invite.get("email"),
         "role": invite.get("role") or "member",
         "inviter_user_id": invite.get("invited_by"),
-        "inviter_email": emails.get(str(invite.get("invited_by") or ""), ""),
         "expires_at": invite.get("expires_at"),
         "expired": expired,
     }
@@ -177,21 +179,39 @@ def accept_invitation(
     *,
     raw_token: str,
     accepting_user_id: str,
+    accepting_user_email: str | None = None,
 ) -> dict[str, Any]:
     """Accept a pending invitation and onboard the member.
 
     Steps:
+    0. Bind to the invited email (#230): the accepting user's verified email
+       MUST match invite.email — possession of the token is not enough.
     1. Validate token (pending, not expired).
     2. Mark invitation accepted.
     3. Upsert workspace_members row (idempotent re-join).
     4. Mint a PAT for the new member scoped to the workspace.
 
     Returns ``{"member": {...}, "pat_token": "<raw>"}`` — caller must surface
-    the PAT to the user exactly once.
+    the PAT to the user exactly once. Raises ``PermissionError`` when the
+    caller's email does not match the invitation (mapped to 403 by the route).
     """
     invite = get_invitation_by_token(raw_token=raw_token)
     if not invite:
         raise ValueError("invitation not found or already used")
+
+    # #230: an invitation is bound to the email it was addressed to. Invite
+    # URLs leak routinely (forwarded mail, link prefetch/preview, proxy/referer
+    # logs, shared inboxes), so token possession alone must NOT admit an
+    # unrelated account — otherwise a leaked admin invite is a cross-tenant
+    # privilege escalation. Require the accepting user's *verified* email to
+    # equal invite.email (case-insensitive), and fail closed when we can't
+    # verify the caller's email (e.g. a non-session auth method with no email).
+    invited_email = str(invite.get("email") or "").strip().lower()
+    caller_email = str(accepting_user_email or "").strip().lower()
+    if not caller_email:
+        raise PermissionError("this invitation must be accepted from the invited account")
+    if not invited_email or caller_email != invited_email:
+        raise PermissionError("this invitation was issued to a different email address")
 
     now = datetime.now(timezone.utc)
     expires_at_str = invite.get("expires_at") or ""

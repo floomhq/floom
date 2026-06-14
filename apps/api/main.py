@@ -138,6 +138,12 @@ _CLOUD_RATE_LIMIT_RULES: list[tuple[tuple[str, ...] | None, _re.Pattern[str], in
     (("POST", "DELETE"), _re.compile(r"^/auth/tokens(?:/.*)?$"), 20, 60.0),
     (("POST", "PATCH", "DELETE"), _re.compile(r"^/api/workspaces(?:/.*)?$"), 60, 60.0),
     (("POST",), _re.compile(r"^/api/novasearch(?:/.*)?$"), 30, 60.0),
+    # #234: /chat is LLM-backed — each call costs Bedrock/LLM spend. Cap the
+    # per-identity burst so an authenticated user can't loop it to run up the
+    # bill (the clean 429 + Retry-After is emitted by the middleware below).
+    # This is the app-layer burst control; the engine's _enforce_chat_quota is
+    # the complementary per-cost quota.
+    (("POST",), _re.compile(r"^(?:/api/v1|/v1|/api)?/chat$"), 20, 60.0),
 ]
 _cloud_rate_lock = _threading.Lock()
 _cloud_rate_buckets: dict[str, list[float]] = {}
@@ -256,6 +262,16 @@ def _is_owner_only_worker_write(method: str, suffix: str) -> bool:
     if method == "POST" and suffix in ("/archive", "/restore"):
         return True
     if method == "POST" and suffix.startswith("/rollback/"):
+        return True
+    # #229: enable/disable and context attach/detach mutate the OWNER's
+    # skill-version manifest, but were missing from the allow-list — so a
+    # non-owner member could toggle or rewrite the contexts of a shared worker
+    # they don't own (cross-user IDOR-write). These are owner/admin-only.
+    if method == "POST" and suffix in ("/pause", "/resume"):
+        return True
+    if method == "POST" and suffix == "/contexts":
+        return True
+    if method in ("POST", "PUT", "PATCH", "DELETE") and suffix.startswith("/contexts/"):
         return True
     return False
 

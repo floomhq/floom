@@ -171,10 +171,13 @@ def test_accept_invitation_expired_raises(monkeypatch):
         "created_at": "2026-01-01",
         "expires_at": past,
         "invited_by": "admin-user",
+        "email": "alice@example.com",
     }
     monkeypatch.setattr(members_db, "get_invitation_by_token", lambda *, raw_token: invite)
     with pytest.raises(ValueError, match="expired"):
-        members_db.accept_invitation(raw_token="wsi_test", accepting_user_id="alice")
+        members_db.accept_invitation(
+            raw_token="wsi_test", accepting_user_id="alice", accepting_user_email="alice@example.com"
+        )
 
 
 def test_accept_invitation_not_found_raises(monkeypatch):
@@ -195,15 +198,91 @@ def test_accept_invitation_success(monkeypatch):
         "created_at": "2026-01-01",
         "expires_at": future,
         "invited_by": "admin-user",
+        "email": "alice@example.com",
     }
     member_row = {"workspace_id": "ws_1", "user_id": "alice", "role": "member", "joined_at": "2026-01-02"}
     client = _make_supabase_client(member_row)
     monkeypatch.setattr(members_db, "get_invitation_by_token", lambda *, raw_token: invite)
     monkeypatch.setattr(members_db, "get_supabase_service_client", lambda: client)
-    result = members_db.accept_invitation(raw_token="wsi_ok", accepting_user_id="alice")
+    result = members_db.accept_invitation(
+        raw_token="wsi_ok", accepting_user_id="alice", accepting_user_email="alice@example.com"
+    )
     assert "pat_token" in result
     assert result["pat_token"].startswith("floom_")
     assert result["member"]["workspace_id"] == "ws_1"
+
+
+def test_accept_invitation_rejects_mismatched_email(monkeypatch):
+    """#230: a token addressed to one email must not be accepted by another."""
+    import apps.api.db.members as members_db
+    future = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    invite = {
+        "id": "inv-admin",
+        "workspace_id": "ws_victim",
+        "role": "admin",
+        "created_at": "2026-01-01",
+        "expires_at": future,
+        "invited_by": "owner-user",
+        "email": "someone-else@example.com",
+    }
+    monkeypatch.setattr(members_db, "get_invitation_by_token", lambda *, raw_token: invite)
+
+    def _boom():
+        raise AssertionError("must not touch Supabase on a rejected invite")
+
+    monkeypatch.setattr(members_db, "get_supabase_service_client", _boom)
+
+    with pytest.raises(PermissionError, match="different email"):
+        members_db.accept_invitation(
+            raw_token="wsi_leaked",
+            accepting_user_id="attacker",
+            accepting_user_email="attacker@evil.com",
+        )
+
+
+def test_accept_invitation_rejects_missing_caller_email(monkeypatch):
+    """#230: fail closed when the caller's email can't be verified."""
+    import apps.api.db.members as members_db
+    future = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    invite = {
+        "id": "inv-x",
+        "workspace_id": "ws_1",
+        "role": "member",
+        "expires_at": future,
+        "email": "alice@example.com",
+    }
+    monkeypatch.setattr(members_db, "get_invitation_by_token", lambda *, raw_token: invite)
+    monkeypatch.setattr(
+        members_db, "get_supabase_service_client",
+        lambda: (_ for _ in ()).throw(AssertionError("no DB on reject")),
+    )
+    with pytest.raises(PermissionError):
+        members_db.accept_invitation(
+            raw_token="wsi_x", accepting_user_id="alice", accepting_user_email=None
+        )
+
+
+def test_accept_invitation_email_match_is_case_insensitive(monkeypatch):
+    """#230: matching is case-insensitive (and trims) so legit accepts still work."""
+    import apps.api.db.members as members_db
+    future = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    invite = {
+        "id": "inv-ci",
+        "workspace_id": "ws_1",
+        "role": "member",
+        "created_at": "2026-01-01",
+        "expires_at": future,
+        "invited_by": "admin-user",
+        "email": "Alice@Example.com",
+    }
+    member_row = {"workspace_id": "ws_1", "user_id": "alice", "role": "member", "joined_at": "2026-01-02"}
+    client = _make_supabase_client(member_row)
+    monkeypatch.setattr(members_db, "get_invitation_by_token", lambda *, raw_token: invite)
+    monkeypatch.setattr(members_db, "get_supabase_service_client", lambda: client)
+    result = members_db.accept_invitation(
+        raw_token="wsi_ci", accepting_user_id="alice", accepting_user_email="  alice@example.com  "
+    )
+    assert result["pat_token"].startswith("floom_")
 
 
 def test_revoke_invitation(monkeypatch):
@@ -265,6 +344,103 @@ def test_change_role(monkeypatch):
     monkeypatch.setattr(members_db, "get_supabase_service_client", lambda: client)
     updated = members_db.change_role(workspace_id="ws_1", user_id="alice", new_role="admin")
     assert updated["role"] == "admin"
+
+
+# ---------------------------------------------------------------------------
+# #236 item 3: unauthenticated invite preview must not leak inviter PII
+# ---------------------------------------------------------------------------
+
+def test_preview_invitation_omits_inviter_email(monkeypatch):
+    import apps.api.db.members as members_db
+    future = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    invite_row = {
+        "id": "inv-1", "workspace_id": "ws_1", "email": "alice@example.com",
+        "role": "admin", "invited_by": "owner-1", "status": "pending",
+        "created_at": "2026-01-01", "expires_at": future,
+    }
+    ws_row = {"id": "ws_1", "name": "Acme", "owner_user_id": "owner-1"}
+
+    class _Chain:
+        def __init__(self, table): self._t = table
+        def select(self, *a, **k): return self
+        def eq(self, *a, **k): return self
+        def limit(self, *a, **k): return self
+        def execute(self):
+            data = (
+                [invite_row] if self._t == "workspace_invitations"
+                else [ws_row] if self._t == "workspaces" else []
+            )
+            return type("R", (), {"data": data})()
+
+    class _Client:
+        def table(self, name): return _Chain(name)
+
+    monkeypatch.setattr(members_db, "get_supabase_service_client", lambda: _Client())
+    # The inviter-email lookup must be gone entirely (no PII resolution).
+    monkeypatch.setattr(
+        members_db, "resolve_member_emails",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("inviter PII lookup must be gone")),
+    )
+
+    preview = members_db.preview_invitation(raw_token="wsi_x")
+    assert preview is not None
+    assert "inviter_email" not in preview          # #236: PII removed
+    assert preview["workspace_name"] == "Acme"     # join page still works
+    assert preview["email"] == "alice@example.com"
+    assert preview["role"] == "admin"
+
+
+# ---------------------------------------------------------------------------
+# #236 item 2: _require_admin must not be a workspace-existence oracle
+# ---------------------------------------------------------------------------
+
+def _patch_ws(monkeypatch, *, get, role):
+    from apps.api.routes import members as members_routes
+    monkeypatch.setattr(members_routes.workspace_repo, "get", get)
+    monkeypatch.setattr(members_routes.workspace_repo, "get_member_role", role)
+    return members_routes
+
+
+def test_require_admin_non_member_gets_404_for_real_and_absent(monkeypatch):
+    from fastapi import HTTPException
+    members_routes = _patch_ws(
+        monkeypatch,
+        get=lambda *, workspace_id: {"id": workspace_id, "owner_user_id": "owner"} if workspace_id == "ws_real" else None,
+        role=lambda *, workspace_id, user_id: None,  # caller is not a member
+    )
+    auth = Mock(user_id="bob")
+    for ws_id in ("ws_real", "ws_absent"):
+        with pytest.raises(HTTPException) as ei:
+            members_routes._require_admin(auth, ws_id)
+        # Identical 404 either way -> no existence oracle.
+        assert ei.value.status_code == 404
+
+
+def test_require_admin_member_non_admin_gets_403(monkeypatch):
+    from fastapi import HTTPException
+    members_routes = _patch_ws(
+        monkeypatch,
+        get=lambda *, workspace_id: {"id": "ws_1", "owner_user_id": "owner"},
+        role=lambda *, workspace_id, user_id: "member",
+    )
+    with pytest.raises(HTTPException) as ei:
+        members_routes._require_admin(Mock(user_id="bob"), "ws_1")
+    assert ei.value.status_code == 403
+
+
+def test_require_admin_owner_and_admin_pass(monkeypatch):
+    members_routes = _patch_ws(
+        monkeypatch,
+        get=lambda *, workspace_id: {"id": "ws_1", "owner_user_id": "bob"},
+        role=lambda *, workspace_id, user_id: None,
+    )
+    assert members_routes._require_admin(Mock(user_id="bob"), "ws_1")["id"] == "ws_1"  # owner
+    _patch_ws(
+        monkeypatch,
+        get=lambda *, workspace_id: {"id": "ws_1", "owner_user_id": "owner"},
+        role=lambda *, workspace_id, user_id: "admin",
+    )
+    assert members_routes._require_admin(Mock(user_id="bob"), "ws_1")["id"] == "ws_1"  # admin
 
 
 # ---------------------------------------------------------------------------

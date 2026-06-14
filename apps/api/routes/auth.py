@@ -683,6 +683,10 @@ def password_login(payload: PasswordLoginRequest):
     return response
 
 
+# #226: shown verbatim to the user, so the dashboard can also key off the 409.
+_ACCOUNT_EXISTS_DETAIL = "An account with this email already exists. Please sign in instead."
+
+
 @router.post("/password-signup")
 def password_signup(payload: PasswordSignupRequest):
     normalized_email = _normalize_email(payload.email)
@@ -698,13 +702,28 @@ def password_signup(payload: PasswordSignupRequest):
             }
         )
     except Exception as exc:
-        logger.warning("auth/password-signup failed: %s", _gotrue_detail(exc))
+        detail_text = _gotrue_detail(exc)
+        logger.warning("auth/password-signup failed: %s", detail_text)
         if getattr(exc, "status", None) == 429:
             raise HTTPException(status_code=429, detail="Too many sign-up attempts — try again later") from exc
+        lowered = (detail_text or "").lower()
+        if "already" in lowered and ("regist" in lowered or "exist" in lowered):
+            raise HTTPException(status_code=409, detail=_ACCOUNT_EXISTS_DETAIL) from exc
         raise HTTPException(status_code=409, detail="Sign-up failed") from exc
 
     session = getattr(auth_response, "session", None)
     user = getattr(auth_response, "user", None) or getattr(session, "user", None)
+
+    # Supabase anti-enumeration (#226): signing up an EXISTING email does not
+    # raise — it returns an *obfuscated* user with empty `identities` and no
+    # session. The old code then (a) wrote a bogus public.users row for that
+    # fake id and (b) told the user "check your email" (confirmation_required),
+    # when no email is sent and the right action is to sign in. Detect it and
+    # return a clear 409 instead — and do NOT upsert the fake user.
+    identities = getattr(user, "identities", None) if user is not None else None
+    if user is not None and session is None and isinstance(identities, list) and len(identities) == 0:
+        raise HTTPException(status_code=409, detail=_ACCOUNT_EXISTS_DETAIL)
+
     if user is not None and getattr(user, "id", None):
         _upsert_user_row(user)
 

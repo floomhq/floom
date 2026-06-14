@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import html
 import json
 import os
 import re
@@ -120,6 +121,17 @@ def _redact_text(raw: Any, *, max_len: int = 240) -> str:
 
 def _stable_uuid(workspace_id: str, table: str, key: str) -> str:
     return str(uuid.uuid5(uuid.NAMESPACE_URL, f"workeros://novasearch/{workspace_id}/{table}/{key}"))
+
+
+def _html_cell(value: Any) -> str:
+    """HTML-escape a candidate/label field before interpolating into the review
+    page (#218). Candidate name/title/company and label reason are attacker-
+    controllable (sourced from CRM/LinkedIn/match payloads), so rendering them
+    raw allowed stored XSS. ``None`` renders as empty, matching the prior ``or ''``.
+    """
+    if value is None:
+        return ""
+    return html.escape(str(value), quote=True)
 
 
 def _candidate_key(item: dict[str, Any]) -> tuple[str, str]:
@@ -988,23 +1000,23 @@ async def novasearch_review(query_id: str) -> HTMLResponse:
         label = by_key.get(key) or {}
         rows.append(
             "<tr>"
-            f"<td>{item.get('rank', '')}</td>"
-            f"<td>{item.get('name') or ''}</td>"
-            f"<td>{item.get('title') or ''}</td>"
-            f"<td>{item.get('company') or ''}</td>"
-            f"<td>{item.get('score') or ''}</td>"
-            f"<td>{label.get('worth_contact')}</td>"
-            f"<td>{label.get('reason') or ''}</td>"
+            f"<td>{_html_cell(item.get('rank'))}</td>"
+            f"<td>{_html_cell(item.get('name'))}</td>"
+            f"<td>{_html_cell(item.get('title'))}</td>"
+            f"<td>{_html_cell(item.get('company'))}</td>"
+            f"<td>{_html_cell(item.get('score'))}</td>"
+            f"<td>{_html_cell(label.get('worth_contact'))}</td>"
+            f"<td>{_html_cell(label.get('reason'))}</td>"
             "</tr>"
         )
-    html = (
+    page = (
         "<!doctype html><html><head><meta charset='utf-8'><title>Candidate review</title></head>"
-        f"<body><h1>{query.get('job_title') or 'Candidate review'}</h1>"
-        f"<p>Query {query_id}</p>"
+        f"<body><h1>{_html_cell(query.get('job_title') or 'Candidate review')}</h1>"
+        f"<p>Query {_html_cell(query_id)}</p>"
         "<table border='1' cellpadding='6'><thead><tr><th>Rank</th><th>Name</th><th>Title</th><th>Company</th><th>Score</th><th>Worth contact</th><th>Reason</th></tr></thead>"
         f"<tbody>{''.join(rows)}</tbody></table></body></html>"
     )
-    return HTMLResponse(html)
+    return HTMLResponse(page)
 
 
 @router.post("/review/{query_id}/label")
