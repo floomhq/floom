@@ -472,13 +472,13 @@ def main():
             timeout=args.timeout,
         )
 
-        print(f"\n=== Stage Refresh Results ===")
+        print("\n=== Stage Refresh Results ===")
         print(f"Updates Applied: {result['fixes_applied']}")
         print(f"AI Calls: {result['ai_calls']}")
         print(f"Skipped: {result['skipped']}")
 
         if result['fixes']:
-            print(f"\nRefresh Updates:")
+            print("\nRefresh Updates:")
             for fix in result['fixes']:
                 find_preview = fix['find'][:40] + ('...' if len(fix['find']) > 40 else '')
                 replace_preview = fix['replace'][:40] + ('...' if len(fix['replace']) > 40 else '')

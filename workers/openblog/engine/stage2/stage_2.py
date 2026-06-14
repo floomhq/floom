@@ -567,7 +567,7 @@ def main():
             logger.info(f"Output saved to {output_file}")
 
         # Print summary
-        print(f"\n=== Stage 2 Complete ===")
+        print("\n=== Stage 2 Complete ===")
         print(f"Headline: {result['article']['Headline']}")
         # Count sections using explicit field names
         section_count = sum(

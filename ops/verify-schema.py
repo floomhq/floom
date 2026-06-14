@@ -168,7 +168,7 @@ def main() -> int:
         print(f"    - {t}")
     print()
     if extra:
-        print(f"  EXTRA in DB (informational, not a failure):")
+        print("  EXTRA in DB (informational, not a failure):")
         for t in extra:
             print(f"    + {t}")
         print()

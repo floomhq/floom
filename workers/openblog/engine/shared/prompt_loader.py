@@ -97,7 +97,7 @@ def load_prompt(
     resolved_path = prompt_path.resolve()
     resolved_root = _ROOT.resolve()
     if not str(resolved_path).startswith(str(resolved_root)):
-        raise ValueError(f"Invalid path: access outside project root not allowed")
+        raise ValueError("Invalid path: access outside project root not allowed")
 
     if not prompt_path.exists():
         raise FileNotFoundError(f"Prompt file not found: {prompt_path}")

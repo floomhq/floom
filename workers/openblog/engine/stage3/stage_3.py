@@ -581,13 +581,13 @@ def main():
         )
 
         # Print summary
-        print(f"\n=== Stage 3 Results ===")
+        print("\n=== Stage 3 Results ===")
         print(f"Fixes Applied: {result['fixes_applied']}")
         print(f"AI Calls: {result['ai_calls']}")
         print(f"Skipped: {result['skipped']}")
 
         if result['fixes']:
-            print(f"\nFixes:")
+            print("\nFixes:")
             for fix in result['fixes']:
                 find_text = fix['find']
                 replace_text = fix['replace']
