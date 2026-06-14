@@ -1692,6 +1692,21 @@ async def generic_error_handler(_request, exc: Exception):
 
 
 
+# Defense-in-depth: strip HTML/XML tags from display-string fields (worker
+# name, worker description, workspace name). These are plain-text labels —
+# angle-bracket markup is never valid content. React JSX already escapes
+# these values when rendering, but removing raw HTML at the storage layer
+# ensures no future render path (markdown header, email, export) can fire
+# stored XSS from a crafted name.
+_HTML_TAG_SANITIZE_RE = re.compile(r"<[^>]*>")
+
+
+def _strip_html_tags(text: str) -> str:
+    """Remove HTML/XML tags from a plain-text display string."""
+    return _HTML_TAG_SANITIZE_RE.sub("", text)
+
+
+_SENSITIVE_ARTIFACT_FILENAMES = frozenset({"transcript.jsonl"})
 
 
 
@@ -2437,13 +2452,13 @@ def update_worker(
     # manifest (skill_versions.manifest_json). Both are also patched into
     # worker.yml on disk below so they survive a registry reload.
     if payload.name is not None:
-        new_name = payload.name.strip()
+        new_name = _strip_html_tags(payload.name.strip())
         if not new_name:
             raise HTTPException(status_code=422, detail="name cannot be empty")
         updates["name"] = new_name
     if payload.description is not None:
         manifest = dict(worker.get("manifest") or {})
-        manifest["description"] = payload.description
+        manifest["description"] = _strip_html_tags(payload.description)
         updates["manifest_json"] = manifest
 
     # capabilities field is declared-not-enforced per T1c flip — just accept it
@@ -4773,7 +4788,7 @@ from routers.worker_create import worker_create_router, create_worker
 app.include_router(worker_create_router)
 
 # System health + metrics routes (/health, /healthz, /metrics, /system/metrics).
-from routers.system_health import system_health_router
+from routers.system_health import system_health_router, prometheus_metrics  # noqa: F401  (re-exported for tests / back-compat)
 app.include_router(system_health_router)
 
 # Worker listing route (GET /workers). list_workers re-exported because the
