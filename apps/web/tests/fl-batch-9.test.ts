@@ -42,14 +42,18 @@ function test561ModelsRunDetailNewFields(): void {
 // ---------------------------------------------------------------------------
 
 function test561MainTranscriptParsing(): void {
-  const s = api("main.py");
-  assert(s.includes("_parse_tool_calls_from_transcript"), "main.py must define _parse_tool_calls_from_transcript");
-  assert(s.includes("ToolCallEntry"), "main.py must import ToolCallEntry");
-  assert(s.includes("ApprovalEntry"), "main.py must import ApprovalEntry");
+  // PR #1073 (oss-prep) moved transcript parsing into services/run_serialize.py
+  // and the RunDetail wiring into routers/runs.py.
+  const serialize = api("services/run_serialize.py");
+  assert(serialize.includes("_parse_tool_calls_from_transcript"), "run_serialize.py must define _parse_tool_calls_from_transcript");
+  assert(serialize.includes("ToolCallEntry"), "run_serialize.py must use ToolCallEntry");
+  const runs = api("routers/runs.py");
+  assert(runs.includes("ApprovalEntry"), "routers/runs.py must import ApprovalEntry");
 }
 
 function test561MainAgentTranscriptSupport(): void {
-  const s = api("main.py");
+  // PR #1073 moved _read_transcript_rows into services/run_serialize.py.
+  const s = api("services/run_serialize.py");
   // _read_transcript_rows must handle agent runners (not just skill)
   assert(s.includes("is_agent"), "_read_transcript_rows must handle agent runner transcripts");
   assert(
@@ -59,7 +63,8 @@ function test561MainAgentTranscriptSupport(): void {
 }
 
 function test561MainGetRunPopulatesFields(): void {
-  const s = api("main.py");
+  // PR #1073 moved the get_run handler into routers/runs.py.
+  const s = api("routers/runs.py");
   assert(s.includes("_tool_calls"), "get_run must compute _tool_calls");
   assert(s.includes("_approval_trail"), "get_run must compute _approval_trail");
   assert(s.includes("_can_replay"), "get_run must compute _can_replay");
@@ -69,7 +74,8 @@ function test561MainGetRunPopulatesFields(): void {
 }
 
 function test561MainApprovalQuery(): void {
-  const s = api("main.py");
+  // PR #1073 moved the get_run handler into routers/runs.py.
+  const s = api("routers/runs.py");
   assert(
     s.includes("repos.approvals.get_by_run_id(run_id=run_id)"),
     "get_run must call repos.approvals.get_by_run_id",
@@ -130,14 +136,16 @@ function test561CostTotalTokens(): void {
     "agent_driver usage row must include total_tokens",
   );
 
-  // Backend: main.py extracts usage from transcript
-  const mainPy = api("main.py");
+  // Backend: PR #1073 moved usage extraction into services/run_serialize.py
+  // and the RunDetail wiring into routers/runs.py.
+  const serialize = api("services/run_serialize.py");
   assert(
-    mainPy.includes("_extract_total_tokens_from_transcript"),
-    "main.py must define _extract_total_tokens_from_transcript",
+    serialize.includes("_extract_total_tokens_from_transcript"),
+    "run_serialize.py must define _extract_total_tokens_from_transcript",
   );
+  const runs = api("routers/runs.py");
   assert(
-    mainPy.includes("total_tokens=_total_tokens"),
+    runs.includes("total_tokens=_total_tokens"),
     "RunDetail constructor must receive total_tokens",
   );
 
@@ -164,14 +172,15 @@ function test561CostTotalTokens(): void {
 // ---------------------------------------------------------------------------
 
 function test565BackendActivityEndpoint(): void {
-  const s = api("main.py");
+  // PR #1073 moved the connections endpoints into routers/connections.py.
+  const s = api("routers/connections.py");
   assert(
     s.includes("/connections/{connection_id}/activity"),
-    "main.py must define GET /connections/{connection_id}/activity endpoint",
+    "connections.py must define GET /connections/{connection_id}/activity endpoint",
   );
   assert(
     s.includes("get_connection_activity"),
-    "main.py must define get_connection_activity handler",
+    "connections.py must define get_connection_activity handler",
   );
   assert(
     s.includes("list_recent_runs"),

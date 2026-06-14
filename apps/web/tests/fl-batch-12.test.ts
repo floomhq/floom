@@ -22,10 +22,10 @@ function api(rel: string) { return readFileSync(resolve(API_ROOT, rel), "utf8");
 // ---------------------------------------------------------------------------
 
 function test545SharePayloadIncludesFiles(): void {
-  const s = api("main.py");
+  const s = api("services/public_worker.py");
   assert(
     s.includes("_public_worker_share_from_worker"),
-    "main.py must define _public_worker_share_from_worker helper",
+    "services/public_worker.py must define _public_worker_share_from_worker helper",
   );
   assert(
     s.includes("_read_worker_files") && s.includes("share_files"),
@@ -38,15 +38,15 @@ function test545SharePayloadIncludesFiles(): void {
 // ---------------------------------------------------------------------------
 
 function test545ImportEndpointExists(): void {
-  const s = api("main.py");
+  const s = api("routers/worker_public.py");
   assert(
     s.includes("/workers/import-from-share"),
-    "main.py must define POST /workers/import-from-share endpoint",
+    "routers/worker_public.py must define POST /workers/import-from-share endpoint",
   );
 }
 
 function test545ImportEndpointUsesRegisterFromFiles(): void {
-  const s = api("main.py");
+  const s = api("routers/worker_public.py");
   assert(
     s.includes("_register_worker_from_files") && s.includes("dedupe_id=True"),
     "import-from-share must call _register_worker_from_files with dedupe_id=True",
@@ -54,7 +54,7 @@ function test545ImportEndpointUsesRegisterFromFiles(): void {
 }
 
 function test545ImportEndpointValidatesWorkerYml(): void {
-  const s = api("main.py");
+  const s = api("routers/worker_public.py");
   assert(
     s.includes("worker.yml") && s.includes("missing worker.yml"),
     "import-from-share must reject shares missing worker.yml",
@@ -62,7 +62,7 @@ function test545ImportEndpointValidatesWorkerYml(): void {
 }
 
 function test545ImportEndpointReturnsWorkerId(): void {
-  const s = api("main.py");
+  const s = api("routers/worker_public.py");
   assert(
     s.includes('"worker_id"') && s.includes('"url"'),
     "import-from-share must return {worker_id, url}",

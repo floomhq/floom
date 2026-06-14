@@ -59,19 +59,21 @@ function test562TopLevelSecretLinkUpdated(): void {
 // ---------------------------------------------------------------------------
 
 function test538MagicLinkIssuer(): void {
-  const s = api("main.py");
+  // PR #1073 (oss-prep) moved magic-link helpers out of main.py into services/auth_ops.py.
+  const s = api("services/auth_ops.py");
   assert(
     s.includes("_issue_magic_link") && s.includes("ttl_seconds"),
-    "main.py must define _issue_magic_link helper with ttl_seconds param",
+    "services/auth_ops.py must define _issue_magic_link helper with ttl_seconds param",
   );
   assert(
     s.includes("_validate_magic_link"),
-    "main.py must define _validate_magic_link helper",
+    "services/auth_ops.py must define _validate_magic_link helper",
   );
 }
 
 function test538MagicLinkUsesHmac(): void {
-  const s = api("main.py");
+  // PR #1073 (oss-prep) moved _issue_magic_link to services/auth_ops.py.
+  const s = api("services/auth_ops.py");
   const issuerIdx = s.indexOf("def _issue_magic_link");
   const snippet = s.slice(issuerIdx, issuerIdx + 800);
   assert(
@@ -81,7 +83,8 @@ function test538MagicLinkUsesHmac(): void {
 }
 
 function test538MagicLinkHasOwnSecret(): void {
-  const s = api("main.py");
+  // PR #1073 (oss-prep) moved _magic_link_secret to services/auth_ops.py.
+  const s = api("services/auth_ops.py");
   assert(
     s.includes("_magic_link_secret"),
     "magic link must use _magic_link_secret(), not _slack_state_secret() directly",
@@ -97,10 +100,11 @@ function test538MagicLinkHasOwnSecret(): void {
 }
 
 function test538MagicLinkEndpointIssue(): void {
-  const s = api("main.py");
+  // PR #1073 (oss-prep) moved auth endpoints out of main.py into routers/auth.py.
+  const s = api("routers/auth.py");
   assert(
     s.includes('"/auth/magic-link"') || s.includes("'/auth/magic-link'"),
-    "main.py must define POST /auth/magic-link endpoint",
+    "routers/auth.py must define POST /auth/magic-link endpoint",
   );
   assert(
     s.includes("expires_in"),
@@ -109,10 +113,11 @@ function test538MagicLinkEndpointIssue(): void {
 }
 
 function test538MagicLinkEndpointConsume(): void {
-  const s = api("main.py");
+  // PR #1073 (oss-prep) moved auth endpoints out of main.py into routers/auth.py.
+  const s = api("routers/auth.py");
   assert(
     s.includes('"/auth/magic/{token}"') || s.includes("'/auth/magic/{token}'"),
-    "main.py must define GET /auth/magic/{token} endpoint",
+    "routers/auth.py must define GET /auth/magic/{token} endpoint",
   );
   assert(
     s.includes("session_repo.create") && s.includes("SESSION_COOKIE"),

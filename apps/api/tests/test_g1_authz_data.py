@@ -40,8 +40,17 @@ def _load_main(monkeypatch, tmp_path, *, secret: str | None = None):
         monkeypatch.delenv("FLOOM_SECRET", raising=False)
     else:
         monkeypatch.setenv("FLOOM_SECRET", secret)
+    # Purge the full first-party app module graph, not just main/db/auth. The
+    # FastAPI routers (routers.*) bind get_auth_context / get_repos / the auth
+    # provider at IMPORT time; if a prior test file reloaded `main` (e.g.
+    # test_g1_auth_lifecycle), the cached routers.* modules keep references to
+    # that file's now-purged auth/db, so requests authenticate against a stale
+    # provider/secret and 401. Reload the whole graph for true isolation.
     for name in list(sys.modules):
-        if name == "main" or name == "db" or name.startswith("db.") or name == "auth" or name.startswith("auth."):
+        if (
+            name in ("main", "db", "auth", "run_token", "routers", "services")
+            or name.startswith(("db.", "auth.", "routers.", "services."))
+        ):
             sys.modules.pop(name, None)
     db = importlib.import_module("db")
     db.init_db()
