@@ -362,7 +362,10 @@ def test_async_create_from_prompt_is_idempotent(booted, monkeypatch):
     conv_id = chat_service.create_conversation("u1", title="Async create")
     created_runs: list[tuple[str, dict]] = []
 
-    monkeypatch.setattr(chat_service, "_ensure_worker_author_registered", lambda user_id: None)
+    # _idempotent_worker_author_run lives in services.chat_throttle and resolves
+    # _ensure_worker_author_registered in that namespace, so patch it there.
+    chat_throttle = sys.modules["services.chat_throttle"]
+    monkeypatch.setattr(chat_throttle, "_ensure_worker_author_registered", lambda user_id: None)
 
     def fake_create_run(worker_id, inputs, trigger_source="manual", **kwargs):
         run_id = f"run_fake_{len(created_runs) + 1}"
