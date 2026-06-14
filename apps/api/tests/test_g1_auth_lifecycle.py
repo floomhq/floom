@@ -42,7 +42,14 @@ def _load_main(monkeypatch, tmp_path, *, secret: str | None = None, extra_env: d
     for key, value in (extra_env or {}).items():
         monkeypatch.setenv(key, value)
     for name in list(sys.modules):
-        if name == "main" or name == "db" or name.startswith("db.") or name == "auth" or name.startswith("auth."):
+        if (
+            name == "main"
+            or name == "run_token"
+            or name == "db"
+            or name.startswith("db.")
+            or name == "auth"
+            or name.startswith("auth.")
+        ):
             sys.modules.pop(name, None)
     db = importlib.import_module("db")
     db.init_db()

@@ -14,6 +14,14 @@ permissions:
 
 env:
   FORCE_JAVASCRIPT_ACTIONS_TO_NODE24: true
+  # The Next.js app lives at apps/web. The Vercel project "workeros" has
+  # rootDirectory=null, so every Vercel CLI command MUST run from apps/web,
+  # NOT the repo root. Running from the repo root makes `vercel pull`
+  # auto-link to the wrong project ("web", prj_nZGpPF...) by repo-name
+  # heuristic, so the deploy lands on the wrong project and
+  # workers.floom.dev never updates. (#1057 root cause, fixed here.)
+  VERCEL_WEB_DIR: apps/web
+  VERCEL_CLI_VERSION: "50.22.1"
 
 jobs:
   deploy-web:
@@ -40,16 +48,115 @@ jobs:
           git config user.email "github-actions[bot]@users.noreply.github.com"
           git commit --allow-empty -m "ci: vercel deploy source for ${GITHUB_SHA}"
 
-      - name: Pull Vercel project settings
-        env:
-          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+      - name: Pin .vercel/project.json to the workeros project
         run: |
-          unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
-          npx --yes vercel@50.22.1 pull --yes --environment=production --token "$VERCEL_TOKEN"
+          set -euo pipefail
+          # Write the explicit project link BEFORE any pull/build so the CLI
+          # always targets "workeros" and never auto-links to "web". Env vars
+          # alone do not guarantee this in a monorepo the CLI doesn't know.
+          mkdir -p "${VERCEL_WEB_DIR}/.vercel"
+          printf '{"projectId":"%s","orgId":"%s"}\n' \
+            "${VERCEL_PROJECT_ID}" "${VERCEL_ORG_ID}" \
+            > "${VERCEL_WEB_DIR}/.vercel/project.json"
+          echo "Pinned project.json:"
+          cat "${VERCEL_WEB_DIR}/.vercel/project.json"
 
-      - name: Deploy production
+      - name: Pull Vercel project settings
+        working-directory: ${{ env.VERCEL_WEB_DIR }}
         env:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
+          set -euo pipefail
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
-          npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN"
+          npx --yes "vercel@${VERCEL_CLI_VERSION}" pull --yes --environment=production --token "$VERCEL_TOKEN"
+          # Guard: fail loudly if pull re-linked us away from workeros.
+          LINKED="$(node -e "process.stdout.write(require('./.vercel/project.json').projectId)")"
+          echo "Linked projectId after pull: $LINKED"
+          if [ "$LINKED" != "$VERCEL_PROJECT_ID" ]; then
+            echo "::error::vercel pull re-linked to the wrong project ($LINKED), expected $VERCEL_PROJECT_ID (workeros)."
+            exit 1
+          fi
+
+      - name: Build production output
+        working-directory: ${{ env.VERCEL_WEB_DIR }}
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
+          npx --yes "vercel@${VERCEL_CLI_VERSION}" build --prod --token "$VERCEL_TOKEN"
+
+      - name: Deploy prebuilt production output
+        working-directory: ${{ env.VERCEL_WEB_DIR }}
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
+          npx --yes "vercel@${VERCEL_CLI_VERSION}" deploy --prebuilt --prod --yes --token "$VERCEL_TOKEN" \
+            | tee deploy-url.txt
+          DEPLOY_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.vercel\.app' deploy-url.txt | tail -1)"
+          if [ -z "$DEPLOY_URL" ]; then
+            echo "::error::could not parse deploy URL from vercel output."
+            exit 1
+          fi
+          echo "DEPLOY_URL=$DEPLOY_URL" >> "$GITHUB_ENV"
+          echo "Deployed: $DEPLOY_URL"
+
+      - name: Re-alias workers.floom.dev to the new deploy
+        env:
+          VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
+        run: |
+          set -euo pipefail
+          # Do NOT rely on Vercel auto-promote: it has silently failed
+          # (sticky alias), leaving workers.floom.dev on a stale deploy.
+          # Always move the alias explicitly via the v2 alias API.
+          DEPLOY_HOST="${DEPLOY_URL#https://}"
+          DEPLOY_ID="$(curl -sS \
+            "https://api.vercel.com/v13/deployments/${DEPLOY_HOST}?teamId=${VERCEL_ORG_ID}" \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            | node -e "let s='';process.stdin.on('data',d=>s+=d).on('end',()=>{const j=JSON.parse(s);process.stdout.write(j.id||j.uid||'')})")"
+          if [ -z "$DEPLOY_ID" ]; then
+            echo "::error::could not resolve deployment id for $DEPLOY_HOST"
+            exit 1
+          fi
+          echo "Aliasing deploy $DEPLOY_ID -> workers.floom.dev"
+          RESP="$(curl -sS -X POST \
+            "https://api.vercel.com/v2/deployments/${DEPLOY_ID}/aliases?teamId=${VERCEL_ORG_ID}" \
+            -H "Authorization: Bearer ${VERCEL_TOKEN}" \
+            -H "Content-Type: application/json" \
+            -d '{"alias":"workers.floom.dev"}')"
+          echo "$RESP"
+          # not_modified means the alias is already on this deploy (fine).
+          # Any other error code is a real failure.
+          if echo "$RESP" | grep -q '"code"'; then
+            if echo "$RESP" | grep -q '"code":"not_modified"'; then
+              echo "Alias already on this deploy."
+            else
+              echo "::error::alias move failed."
+              exit 1
+            fi
+          fi
+
+      - name: Verify workers.floom.dev serves the new deploy
+        run: |
+          set -uo pipefail
+          # The custom domain must return 2xx/3xx, AND the public /privacy page
+          # must be 200 (it is a PUBLIC_PAGE_PREFIX). A 307 -> /login on
+          # /privacy means a stale pre-#1062 build is still being served.
+          ok=0
+          for i in $(seq 1 30); do
+            root="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 https://workers.floom.dev/ || echo 000)"
+            priv="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 https://workers.floom.dev/privacy || echo 000)"
+            echo "attempt $i: / -> $root  /privacy -> $priv"
+            if [[ "$root" =~ ^[23] ]] && [ "$priv" = "200" ]; then
+              echo "workers.floom.dev healthy and serving current build."
+              ok=1
+              break
+            fi
+            sleep 10
+          done
+          if [ "$ok" != "1" ]; then
+            echo "::error::workers.floom.dev did not serve the new build (/privacy never reached 200)."
+            exit 1
+          fi

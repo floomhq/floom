@@ -1,0 +1,285 @@
+name: Cloud engine auto-sync
+
+# Keeps floomhq/workeros-cloud's `engine` submodule in lockstep with engine
+# main. On every push to engine main this bumps the cloud submodule to the new
+# engine SHA, regenerates the cloud `web/` tree, runs strict guards (drift +
+# web build + cloud API import smoke), and — ONLY if all guards pass — commits
+# the bump + regenerated web/ and pushes to cloud main (which triggers the
+# cloud frontend + backend autodeploy). If any guard fails it opens a PR
+# instead of pushing, so a broken engine commit can never auto-ship the cloud.
+#
+# This replaces the manual re-pin treadmill (the proven manual procedure is
+# floomhq/workeros-cloud PR #252 / #253: bump submodule -> sync-engine-web.mjs
+# -> drift guard -> build -> push).
+
+on:
+  push:
+    branches: [main]
+  workflow_dispatch:
+
+# Serialize across overlapping engine-main pushes so two runs can't race the
+# cloud submodule bump / push. A newer push supersedes an in-flight sync.
+concurrency:
+  group: cloud-engine-autosync
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  sync-cloud-submodule:
+    name: Bump cloud engine submodule + guard + push
+    # Self-hosted AX41 runner (org GitHub-hosted Actions are billing-disabled).
+    # Same runner used by engine CI and cloud CI/deploy.
+    runs-on: [self-hosted, linux, x64, workeros-ci]
+    timeout-minutes: 30
+
+    steps:
+      - name: Resolve engine SHA
+        run: |
+          set -euo pipefail
+          echo "ENGINE_SHA=${GITHUB_SHA}" >> "$GITHUB_ENV"
+          echo "Engine main is now ${GITHUB_SHA}"
+
+      # Runtime gh auth: the self-hosted runner is logged in to gh with write
+      # access to floomhq/workeros-cloud and read access to floomhq/workeros.
+      # No stored token secret (same pattern as cloud ci.yml / vercel-deploy.yml).
+      - name: Configure git auth (runner-local gh token)
+        run: |
+          set -euo pipefail
+          TOKEN="$(gh auth token)"
+          if [ -z "${TOKEN:-}" ]; then
+            echo "::error::No gh token on the self-hosted runner."
+            echo "::error::Run 'gh auth login' as the runner user with write access"
+            echo "::error::to floomhq/workeros-cloud and read access to floomhq/workeros."
+            exit 1
+          fi
+          git config --global \
+            url."https://x-access-token:${TOKEN}@github.com/".insteadOf \
+            "https://github.com/"
+          git config --global user.name "Federico De Ponte"
+          git config --global user.email "depontefede@gmail.com"
+          # Mask the token in any accidental log echo.
+          echo "::add-mask::${TOKEN}"
+
+      - name: Checkout cloud repo (+ engine submodule)
+        run: |
+          set -euo pipefail
+          rm -rf cloud
+          git clone --depth 1 https://github.com/floomhq/workeros-cloud.git cloud
+          cd cloud
+          git submodule update --init --depth 1 engine
+          if [ ! -d engine/apps/web ] || [ ! -d engine/apps/api ]; then
+            echo "::error::engine submodule missing apps/web or apps/api after init."
+            exit 1
+          fi
+
+      - name: Bump engine submodule to new engine main
+        working-directory: cloud
+        run: |
+          set -euo pipefail
+          OLD_SHA="$(git -C engine rev-parse HEAD)"
+          echo "OLD_ENGINE_SHA=${OLD_SHA}" >> "$GITHUB_ENV"
+          if [ "${OLD_SHA}" = "${ENGINE_SHA}" ]; then
+            echo "Cloud submodule already at ${ENGINE_SHA}; nothing to sync."
+            echo "ALREADY_SYNCED=1" >> "$GITHUB_ENV"
+            exit 0
+          fi
+          git -C engine fetch --depth 1 origin "${ENGINE_SHA}"
+          git -C engine checkout --quiet "${ENGINE_SHA}"
+          echo "Bumped engine ${OLD_SHA} -> ${ENGINE_SHA}"
+
+      - name: Re-sync cloud web/ from engine
+        if: env.ALREADY_SYNCED != '1'
+        working-directory: cloud/web
+        run: node scripts/sync-engine-web.mjs
+
+      # ---- GUARDS (strict; a failure must NOT auto-push a broken cloud) ----
+
+      - name: Guard 1 — drift guard (web overlay parity)
+        if: env.ALREADY_SYNCED != '1'
+        id: guard_drift
+        working-directory: cloud/web
+        continue-on-error: true
+        run: node scripts/check-engine-sync.mjs
+
+      - name: Guard 2 — web build
+        if: env.ALREADY_SYNCED != '1' && steps.guard_drift.outcome == 'success'
+        id: guard_build
+        working-directory: cloud/web
+        continue-on-error: true
+        env:
+          NEXT_TELEMETRY_DISABLED: "1"
+        run: |
+          set -euo pipefail
+          npm ci
+          npm run build
+
+      - name: Guard 3 — cloud API import smoke
+        if: env.ALREADY_SYNCED != '1' && steps.guard_build.outcome == 'success'
+        id: guard_api
+        working-directory: cloud
+        continue-on-error: true
+        env:
+          WORKEROS_DEPLOY: cloud
+          SUPABASE_URL: https://placeholder.supabase.co
+          SUPABASE_ANON_KEY: placeholder
+          SUPABASE_SERVICE_ROLE_KEY: placeholder
+          # Valid 32-byte url-safe base64 Fernet key (CI only) — same value the
+          # cloud CI uses so the secrets-encryption init at import doesn't raise.
+          WORKEROS_CLOUD_SECRETS_ENCRYPTION_KEY: d29ya2Vyb3MtY2xvdWQtY2ktdGVzdC1rZXktMzJieXQ=
+        run: |
+          set -euo pipefail
+          python3.12 -m venv .ci-venv
+          ./.ci-venv/bin/pip install -q -U pip
+          ./.ci-venv/bin/pip install -q -r apps/api/requirements.txt
+          # Import the cloud + engine API entrypoints and confirm the worker
+          # default-model resolver (#1059) is present and committed.
+          ./.ci-venv/bin/python - <<'PY'
+          import importlib, py_compile, sys
+          sys.path.insert(0, "engine")
+          sys.path.insert(0, ".")
+          m = importlib.import_module("engine.apps.api.models")
+          assert hasattr(m, "default_worker_agent_model"), "default_worker_agent_model missing from engine models"
+          py_compile.compile("apps/api/main.py", doraise=True)
+          py_compile.compile("engine/apps/api/main.py", doraise=True)
+          print("cloud API import smoke OK; default_worker_agent_model present")
+          PY
+
+      - name: Evaluate guards
+        if: env.ALREADY_SYNCED != '1'
+        run: |
+          set -euo pipefail
+          DRIFT='${{ steps.guard_drift.outcome }}'
+          BUILD='${{ steps.guard_build.outcome }}'
+          API='${{ steps.guard_api.outcome }}'
+          echo "guard outcomes: drift=$DRIFT build=$BUILD api=$API"
+          if [ "$DRIFT" = "success" ] && [ "$BUILD" = "success" ] && [ "$API" = "success" ]; then
+            echo "GUARDS_PASSED=1" >> "$GITHUB_ENV"
+          else
+            echo "GUARDS_PASSED=0" >> "$GITHUB_ENV"
+            echo "::warning::One or more guards failed (drift=$DRIFT build=$BUILD api=$API) — will open a PR instead of pushing to cloud main."
+          fi
+
+      # ---- GUARDS PASSED: commit + push to cloud main ----
+
+      - name: Commit + push to cloud main (guards passed)
+        if: env.ALREADY_SYNCED != '1' && env.GUARDS_PASSED == '1'
+        working-directory: cloud
+        run: |
+          set -euo pipefail
+          # Stage the submodule bump AND the regenerated web/ tree together.
+          # `npm run build` (guard 2) + sync-engine-web.mjs rewrite the tracked
+          # web/{app,components,lib,public,tests} + root config from the new
+          # engine, so after the bump the working tree is dirty with those
+          # generated files. Committing them keeps the tracked cloud web/ in
+          # lockstep with the engine (the drift guard already proved zero drift)
+          # AND — critically — leaves a CLEAN working tree so the rebase below
+          # can never die on "cannot rebase: You have unstaged changes" (the
+          # bug that wedged the pipeline: the old code only `git add engine`,
+          # committed the pointer, then rebased with the regenerated web/ still
+          # unstaged -> rebase aborted every attempt and the loop falsely
+          # reported "main advanced").
+          git add -A
+          if git diff --cached --quiet; then
+            echo "No engine/web change to commit (already current)."
+            exit 0
+          fi
+          git commit -m "chore(engine): auto-sync submodule ${OLD_ENGINE_SHA:0:8} -> ${ENGINE_SHA:0:8}
+
+          Automated by floomhq/workeros cloud-engine-autosync on engine push.
+          Guards passed: drift, web build, cloud API import smoke.
+          Includes the regenerated web/ tree (kept in lockstep with engine).
+
+          Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+
+          # Rebase-then-push right before pushing so we never clobber a
+          # concurrent cloud-main push (e.g. Vivek, dashboard autodeploy).
+          # The loop is hardened to be resilient to BOTH failure modes:
+          #   (a) a dirty working tree (defensive — git add -A above should
+          #       leave it clean, but a guard/build side-effect could still
+          #       touch an untracked path) -> stash before each rebase, drop
+          #       after a successful push;
+          #   (b) main genuinely advancing between fetch and push -> retry.
+          pushed=0
+          for attempt in 1 2 3 4 5; do
+            git fetch origin main --quiet
+            # Make sure no half-finished rebase from a prior attempt lingers.
+            git rebase --abort >/dev/null 2>&1 || true
+            # Defensive: park any stray working-tree changes so the rebase
+            # engine never trips on "unstaged changes". Empty stash is a no-op.
+            stashed=0
+            if ! git diff --quiet || ! git diff --cached --quiet; then
+              if git stash push -u -m "autosync-rebase-${attempt}" >/dev/null 2>&1; then
+                stashed=1
+              fi
+            fi
+            if git rebase origin/main; then
+              if git push origin HEAD:main; then
+                echo "Pushed auto-sync to cloud main on attempt $attempt."
+                pushed=1
+                break
+              else
+                echo "push rejected on attempt $attempt (main advanced); retrying..."
+              fi
+            else
+              echo "rebase failed on attempt $attempt; aborting + retrying..."
+              git rebase --abort >/dev/null 2>&1 || true
+            fi
+            # Restore any parked changes for the next attempt (best-effort;
+            # they were build artifacts and will be re-derivable regardless).
+            if [ "$stashed" = "1" ]; then
+              git stash pop >/dev/null 2>&1 || git stash drop >/dev/null 2>&1 || true
+            fi
+            sleep $((attempt * 3))
+          done
+          if [ "$pushed" != "1" ]; then
+            echo "::error::Could not fast-rebase-and-push to cloud main after 5 attempts."
+            exit 1
+          fi
+
+      # ---- GUARDS FAILED: open a PR instead of pushing ----
+
+      - name: Open PR (guards failed — do NOT auto-push)
+        if: env.ALREADY_SYNCED != '1' && env.GUARDS_PASSED == '0'
+        working-directory: cloud
+        run: |
+          set -euo pipefail
+          BRANCH="auto/engine-sync-${ENGINE_SHA:0:8}"
+          git add engine
+          if git diff --cached --quiet; then
+            echo "No submodule change to PR."
+            exit 0
+          fi
+          git commit -m "chore(engine): submodule bump ${OLD_ENGINE_SHA:0:8} -> ${ENGINE_SHA:0:8} (GUARDS FAILED — review)
+
+          Auto-sync guards did NOT all pass:
+            drift=${{ steps.guard_drift.outcome }}
+            build=${{ steps.guard_build.outcome }}
+            api=${{ steps.guard_api.outcome }}
+
+          The cloud web overlay or build likely needs a manual re-fork against
+          the new engine. Do not merge until the guards are green.
+
+          Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+          git push -f origin "HEAD:${BRANCH}"
+          gh pr create \
+            --repo floomhq/workeros-cloud \
+            --base main \
+            --head "${BRANCH}" \
+            --title "chore(engine): submodule bump -> ${ENGINE_SHA:0:8} (guards failed — needs manual re-fork)" \
+            --body "Automated engine submodule bump from \`${OLD_ENGINE_SHA:0:8}\` to \`${ENGINE_SHA:0:8}\` failed the auto-sync guards, so this opens a PR instead of pushing to main.
+
+          Guard outcomes:
+          - drift: \`${{ steps.guard_drift.outcome }}\`
+          - web build: \`${{ steps.guard_build.outcome }}\`
+          - cloud API import smoke: \`${{ steps.guard_api.outcome }}\`
+
+          Most likely the cloud \`web/\` overlay needs a re-fork against the new engine (see the proven manual procedure in cloud PR #252). Fix the overlay, re-run the guards locally, then merge.
+
+          🤖 Generated with [Claude Code](https://claude.com/claude-code)" \
+            || echo "::warning::PR may already exist for ${BRANCH}."
+
+      - name: Cleanup
+        if: always()
+        run: rm -rf cloud

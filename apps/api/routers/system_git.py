@@ -14,6 +14,7 @@ it is a real module-level import. ``github_api``/``git_ops``/``contexts``/
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -35,6 +36,30 @@ from services.git_service import (
 logger = logging.getLogger("floom.api")
 
 system_git_router = APIRouter()
+
+
+def _git_safe_http_detail(exc: BaseException, where: str) -> str:
+    """A-05: redact git stderr (remote URL with embedded PAT, fs paths) from
+    HTTP responses; log full detail server-side, return a user-safe message."""
+    logger.exception("Git endpoint (%s) failed", where)
+    detail = str(exc)
+    low = detail.lower()
+    if "authentication failed" in low or "403" in low or "401" in low or "permission denied" in low:
+        return "GitHub authentication failed — check the token has the 'repo' scope."
+    if "repository not found" in low or "not found" in low or "404" in low:
+        return "GitHub repository not found — check the repo name and access."
+    if "could not resolve host" in low or "failed to connect" in low or "timed out" in low or "timeout" in low:
+        return "Could not reach GitHub — check network connectivity and try again."
+    return "Git operation failed. The error has been logged; please retry or check the workspace's GitHub connection."
+
+
+def _github_api_safe_detail(exc: BaseException) -> str:
+    """A-05: keep GitHub's user-meaningful API message, but never echo a URL/token."""
+    detail = str(exc).strip()
+    if not detail or re.search(r"https?://|x-access-token|ghp_|github_pat_|@github\.com", detail, re.IGNORECASE):
+        logger.exception("GitHub API error (redacted from response)")
+        return "GitHub request failed. The error has been logged; please retry."
+    return f"GitHub error: {detail}"
 
 
 class _GitStatus(BaseModel):
@@ -106,7 +131,7 @@ def connect_github(
         status = getattr(exc, "status", 0)
         if status == 401:
             raise HTTPException(status_code=400, detail="Invalid GitHub token — check it has the 'repo' scope") from exc
-        raise HTTPException(status_code=400, detail=f"GitHub error: {exc}") from exc
+        raise HTTPException(status_code=400, detail=_github_api_safe_detail(exc)) from exc
 
     # Preserve existing repo link if there is one
     existing = _git_cfg_get(auth.user_id) or {}
@@ -202,7 +227,10 @@ def link_git_repo(
             pass  # Remote is empty — fine, we'll just push
         _git_ops.push(workspace)
     except _git_ops.GitOpsError as exc:
-        raise HTTPException(status_code=500, detail=f"Git operation failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500,
+            detail=_git_safe_http_detail(exc, "link"),
+        ) from exc
 
     pushed_at = now_iso()
     _git_cfg_upsert(
@@ -242,7 +270,10 @@ def push_git_workspace(auth: AuthContext = Depends(get_auth_context)) -> _GitSta
     try:
         _git_ops.push(_git_workspace())
     except _git_ops.GitOpsError as exc:
-        raise HTTPException(status_code=500, detail=f"Push failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500,
+            detail=_git_safe_http_detail(exc, "push"),
+        ) from exc
 
     pushed_at = now_iso()
     _git_cfg_upsert(auth.user_id, last_pushed_at=pushed_at)
@@ -309,7 +340,10 @@ def import_git_workspace(
         try:
             _git_ops.clone_or_init(tmp, remote_url)
         except _git_ops.GitOpsError as exc:
-            raise HTTPException(status_code=500, detail=f"Clone failed: {exc}") from exc
+            raise HTTPException(
+                status_code=500,
+                detail=_git_safe_http_detail(exc, "clone"),
+            ) from exc
 
         # Import workers
         workers_dir_in_repo = tmp / "workers"

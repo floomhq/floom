@@ -7,13 +7,26 @@ import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 
-const API_BASE = "/api/proxy";
+const DEFAULT_CLI_AUTH_ENDPOINT_BASE = "/api/proxy/cli-auth";
+const DEFAULT_CLI_CLIENT_NAME = "floom-cli";
+
+export type CliAuthContentProps = {
+  endpointBase?: string;
+  clientName?: string;
+};
+
+function cliAuthEndpoint(endpointBase: string, action: "approve" | "deny") {
+  return `${endpointBase.replace(/\/$/, "")}/${action}`;
+}
 
 export default function CliAuthPage() {
   return <CliAuthContent />;
 }
 
-function CliAuthContent() {
+export function CliAuthContent({
+  endpointBase = DEFAULT_CLI_AUTH_ENDPOINT_BASE,
+  clientName = DEFAULT_CLI_CLIENT_NAME,
+}: CliAuthContentProps = {}) {
   const router = useRouter();
   const [code, setCode] = useState("");
   const [busyAction, setBusyAction] = useState<"approve" | "deny" | null>(null);
@@ -33,7 +46,7 @@ function CliAuthContent() {
     setBusyAction(action);
     setStatusText("");
     try {
-      const response = await fetch(`${API_BASE}/cli-auth/${action}`, {
+      const response = await fetch(cliAuthEndpoint(endpointBase, action), {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
@@ -72,7 +85,7 @@ function CliAuthContent() {
         <p>
           Code: <code className="bg-muted px-1.5 py-0.5 font-mono">{code || "(missing)"}</code>
         </p>
-        <p>Client: floom-cli</p>
+        <p>Client: {clientName}</p>
         <p className="text-xs text-muted-foreground">
           Only approve if this code matches the one shown in your terminal. If it
           does not match, deny — someone may be trying to hijack your login.

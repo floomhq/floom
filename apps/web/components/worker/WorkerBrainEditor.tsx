@@ -1,7 +1,7 @@
 "use client";
 
-import { useState } from "react";
-import { Folder, Plus, X } from "lucide-react";
+import { useId, useState } from "react";
+import { Brain, ChevronDown, Folder, Plus, X } from "lucide-react";
 import type { WorkerContextSpec } from "@/lib/types";
 import {
   contextSpecName,
@@ -17,6 +17,15 @@ interface WorkerBrainEditorProps {
   busy?: boolean;
   /** Emits the next contexts list; parent persists to worker.yml. */
   onChange: (next: WorkerContextSpec[]) => void;
+  /**
+   * Per-worker memory folder name. When set and that folder is NOT yet attached,
+   * the editor surfaces a one-click "Add memory folder" affordance that creates
+   * (if needed) the writeable folder and wires it to this worker's brain — so a
+   * worker is connected to its own memory by default ("Used by 0" → this worker).
+   */
+  memoryFolderName?: string;
+  /** Creates the memory folder if missing and attaches it (read & write). */
+  onAttachMemory?: () => void | Promise<void>;
 }
 
 /**
@@ -30,13 +39,40 @@ export function WorkerBrainEditor({
   editable,
   busy,
   onChange,
+  memoryFolderName,
+  onAttachMemory,
 }: WorkerBrainEditorProps) {
   const [attach, setAttach] = useState("");
+  const [open, setOpen] = useState(false);
+  const listboxId = useId();
   const attachedNames = new Set(contexts.map(contextSpecName));
   const unattached = availablePacks.filter((p) => !attachedNames.has(p.name));
+  const selected = unattached.find((p) => p.name === attach);
+  const memoryAttached = Boolean(memoryFolderName && attachedNames.has(memoryFolderName));
+  const showMemoryCta = Boolean(editable && memoryFolderName && onAttachMemory && !memoryAttached);
 
   return (
     <div>
+      {showMemoryCta && (
+        <button
+          type="button"
+          className="mb-3 flex w-full items-center gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-3)] disabled:opacity-60"
+          disabled={busy}
+          onClick={() => void onAttachMemory?.()}
+        >
+          <span className="c-logo">
+            <Brain size={15} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm text-foreground">Connect a memory folder</span>
+            <span className="block text-xs text-muted-foreground">
+              Give this worker a writeable <span className="font-mono">{memoryFolderName}</span> folder it
+              can read and write across runs.
+            </span>
+          </span>
+          <Plus size={15} className="shrink-0 text-muted-foreground" />
+        </button>
+      )}
       <div className="c-ltable">
         {contexts.map((spec) => {
           const name = contextSpecName(spec);
@@ -93,21 +129,50 @@ export function WorkerBrainEditor({
       </div>
 
       {editable && unattached.length > 0 && (
-        <div style={{ display: "flex", gap: 8, marginTop: 12 }}>
-          <select
-            className="c-srch"
-            aria-label="Attach folder"
-            style={{ maxWidth: 280 }}
-            value={attach}
-            onChange={(e) => setAttach(e.target.value)}
-          >
-            <option value="">Attach a folder…</option>
-            {unattached.map((p) => (
-              <option key={p.name} value={p.name}>
-                {p.name}
-              </option>
-            ))}
-          </select>
+        <div className="mt-3 flex flex-wrap gap-2">
+          <div className="relative min-w-[220px] max-w-[280px] flex-1">
+            <button
+              type="button"
+              aria-haspopup="listbox"
+              aria-expanded={open}
+              aria-controls={listboxId}
+              className="c-srch w-full justify-between text-left"
+              disabled={busy}
+              onClick={() => setOpen((value) => !value)}
+            >
+              <span className={selected ? "text-foreground" : ""}>{selected?.name ?? "Attach a folder..."}</span>
+              <ChevronDown size={14} className="shrink-0" />
+            </button>
+            {open && (
+              <div
+                id={listboxId}
+                role="listbox"
+                aria-label="Attach folder"
+                className="absolute left-0 right-0 top-full z-20 mt-1 max-h-52 overflow-auto rounded-[var(--radius-card)] bg-[var(--bg-card)] p-1 shadow-[var(--shadow-pop)] [border:var(--bd-card)]"
+              >
+                {unattached.map((p) => (
+                  <button
+                    key={p.name}
+                    type="button"
+                    role="option"
+                    aria-selected={p.name === attach}
+                    className={`flex w-full items-center gap-2 rounded-[var(--radius-button)] px-2.5 py-2 text-left text-sm ${
+                      p.name === attach
+                        ? "bg-[var(--bg-2)] text-foreground"
+                        : "text-muted-foreground hover:bg-[var(--bg-2)] hover:text-foreground"
+                    }`}
+                    onClick={() => {
+                      setAttach(p.name);
+                      setOpen(false);
+                    }}
+                  >
+                    <Folder size={14} />
+                    <span className="min-w-0 flex-1 truncate">{p.name}</span>
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
           <button
             type="button"
             className="c-addbtn"

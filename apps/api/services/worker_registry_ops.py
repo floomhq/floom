@@ -20,7 +20,7 @@ import logging
 import re
 import sqlite3
 from pathlib import Path
-from typing import Any, Dict, List, Optional
+from typing import Any, Dict, List, Optional, Tuple
 
 from fastapi import HTTPException
 from pydantic import BaseModel, ValidationError
@@ -473,206 +473,268 @@ def _persist_discovered_workers(
     workers: List[Dict[str, Any]],
     *,
     user_id: str,
-) -> None:
+    raise_on_skip: bool = False,
+) -> Tuple[int, int]:
+    """Persist each discovered worker, isolated so one bad worker cannot poison
+    the rest.
+
+    A single malformed or foreign worker (e.g. a dangling skill_version FK, an
+    invalid manifest enum, or a non-worker backup dir that happens to carry a
+    worker.yml) used to raise out of this loop uncaught — which crashed API
+    startup and triggered a 502 crash-loop. Each worker is now wrapped in its
+    own SQLite SAVEPOINT: on any exception we roll back ONLY that worker's
+    partial writes (so the outer transaction is not poisoned), log a warning,
+    and continue. Returns ``(loaded, skipped)``.
+
+    ``raise_on_skip=True`` re-raises after rolling back the failing worker. The
+    single-worker save/create endpoints pass this so a user who saves exactly
+    one worker still gets a hard error instead of a silent "success" with no
+    row persisted. Bulk reloads + the startup path use the default (False) so
+    one bad worker never blocks the whole set or crashes the process.
+    """
     from db import now_iso
-    from models import WorkerConfig
     now = now_iso()
+    loaded = 0
+    skipped = 0
     for w in workers:
-        manifest = w.get("manifest") or {}
-        config = w.get("config") or {}
-        trigger = config.get("trigger") or {}
-        worker_id = w["id"]
-        skill_version_id = _skill_version_id(worker_id, manifest)
-        config_model = _config_from_manifest_for_worker(manifest, worker_id)
-        if config_model is None and config:
-            try:
-                config_model = WorkerConfig(**config)
-            except Exception:
-                logger.exception("Failed to parse worker config for composio lifecycle: %s", worker_id)
-        existing_composio = _existing_composio_state(conn, worker_id)
-        composio_trigger_id, composio_event = _sync_composio_registration(
-            conn,
+        worker_id = w.get("id", "<unknown>")
+        # Per-worker SAVEPOINT so a failing worker's partial INSERTs roll back
+        # cleanly without aborting the whole transaction (SQLite leaves a failed
+        # statement's transaction open; ROLLBACK TO SAVEPOINT is the safe undo).
+        savepoint = f"persist_worker_{loaded + skipped}"
+        conn.execute(f"SAVEPOINT {savepoint}")
+        try:
+            _persist_one_worker(conn, w, user_id=user_id, now=now)
+        except Exception as exc:
+            conn.execute(f"ROLLBACK TO SAVEPOINT {savepoint}")
+            conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+            skipped += 1
+            logger.warning("Skipping unloadable worker %s: %s", worker_id, exc)
+            if raise_on_skip:
+                raise
+            continue
+        conn.execute(f"RELEASE SAVEPOINT {savepoint}")
+        loaded += 1
+    return loaded, skipped
+
+
+def _persist_one_worker(
+    conn: sqlite3.Connection,
+    w: Dict[str, Any],
+    *,
+    user_id: str,
+    now: str,
+) -> None:
+    from models import WorkerConfig
+    manifest = w.get("manifest") or {}
+    config = w.get("config") or {}
+    trigger = config.get("trigger") or {}
+    worker_id = w["id"]
+    skill_version_id = _skill_version_id(worker_id, manifest)
+    config_model = _config_from_manifest_for_worker(manifest, worker_id)
+    if config_model is None and config:
+        try:
+            config_model = WorkerConfig(**config)
+        except Exception:
+            logger.exception("Failed to parse worker config for composio lifecycle: %s", worker_id)
+    existing_composio = _existing_composio_state(conn, worker_id)
+    composio_trigger_id, composio_event = _sync_composio_registration(
+        conn,
+        worker_id,
+        config_model,
+        existing_composio,
+    )
+    # Build triggers list for multi-trigger storage
+    triggers_list = _extract_triggers_from_manifest(manifest, config)
+    triggers_json_str = json.dumps(triggers_list)
+    # Primary trigger type is the first trigger's type
+    primary_trigger_type = triggers_list[0].get("type") if triggers_list else "manual"
+    # Archived workers are disabled from the scheduler: they never fire cron runs.
+    is_archived = manifest.get("archived") is True
+    enabled_value = 0 if is_archived or manifest.get("paused") is True or manifest.get("enabled") is False else 1
+
+    # Preserve _files if previously embedded — the raw manifest from disk
+    # never contains _files, so a plain upsert would wipe them on every
+    # discover cycle, breaking container-redeploy resilience.
+    sv_name = manifest.get("name") or worker_id.replace("_", "-")
+    sv_version = manifest.get("version") or "0.1.0"
+    existing_sv = conn.execute(
+        "SELECT manifest_json FROM skill_versions WHERE id = ?",
+        (skill_version_id,),
+    ).fetchone()
+    manifest_to_store = manifest
+    if existing_sv:
+        try:
+            existing_manifest = json.loads(existing_sv["manifest_json"] or "{}")
+            if "_files" in existing_manifest and "_files" not in manifest:
+                manifest_to_store = dict(manifest)
+                manifest_to_store["_files"] = existing_manifest["_files"]
+        except Exception:
+            pass
+    conn.execute(
+        """
+        INSERT INTO skill_versions
+            (id, name, version, manifest_json, bundle_path, created_at)
+        VALUES (?, ?, ?, ?, ?, ?)
+        ON CONFLICT(name, version) DO UPDATE SET
+            manifest_json=excluded.manifest_json,
+            bundle_path=excluded.bundle_path
+        """,
+        (
+            skill_version_id,
+            sv_name,
+            sv_version,
+            json.dumps(manifest_to_store),
+            f"workers/{worker_id}",
+            now,
+        ),
+    )
+    # System workers must be workspace-visible so any authenticated user
+    # can run them regardless of which bootstrap user originally persisted
+    # the row (#698). Stock/example demos (PROTECTED_STOCK_WORKER_IDS or
+    # is_example:true) ship with the product and are meant for every member
+    # to run (e.g. outbound-approval-demo). They were persisted 'private' +
+    # fede-owned, so a fresh member hit "worker <id> does not belong to
+    # <uid>" at RunsRepository.create (owner OR 'workspace' only). Seed them
+    # 'workspace' too, without leaking a tenant's real private workers.
+    is_system_worker = bool(manifest.get("system_worker"))
+    is_stock_demo = (
+        worker_id in PROTECTED_STOCK_WORKER_IDS
+        or manifest.get("is_example") is True
+    )
+    worker_visibility = (
+        "workspace" if (is_system_worker or is_stock_demo) else "private"
+    )
+
+    conn.execute(
+        """
+        INSERT INTO workers
+            (id, skill_version_id, name, trigger_type, cron_expr, cron_timezone,
+             next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
+             notify_webhook_url, grants_json, input_values_json, enabled, created_at, owner_id,
+             composio_trigger_id, composio_event, triggers_json, visibility)
+        VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        ON CONFLICT(id) DO UPDATE SET
+            skill_version_id=excluded.skill_version_id,
+            name=excluded.name,
+            trigger_type=excluded.trigger_type,
+            cron_expr=excluded.cron_expr,
+            cron_timezone=excluded.cron_timezone,
+            enabled=excluded.enabled,
+            owner_id=workers.owner_id,
+            composio_trigger_id=excluded.composio_trigger_id,
+            composio_event=excluded.composio_event,
+            triggers_json=excluded.triggers_json,
+            visibility=excluded.visibility
+        """,
+        (
             worker_id,
-            config_model,
-            existing_composio,
-        )
-        # Build triggers list for multi-trigger storage
-        triggers_list = _extract_triggers_from_manifest(manifest, config)
-        triggers_json_str = json.dumps(triggers_list)
-        # Primary trigger type is the first trigger's type
-        primary_trigger_type = triggers_list[0].get("type") if triggers_list else "manual"
-        # Archived workers are disabled from the scheduler: they never fire cron runs.
-        is_archived = manifest.get("archived") is True
-        enabled_value = 0 if is_archived or manifest.get("paused") is True or manifest.get("enabled") is False else 1
+            skill_version_id,
+            w["name"],
+            primary_trigger_type or trigger.get("type") or w.get("trigger_type") or "manual",
+            trigger.get("cron"),
+            trigger.get("timezone"),
+            json.dumps({}),
+            json.dumps({}),
+            enabled_value,
+            now,
+            user_id,
+            composio_trigger_id,
+            composio_event,
+            triggers_json_str,
+            worker_visibility,
+        ),
+    )
 
-        # Preserve _files if previously embedded — the raw manifest from disk
-        # never contains _files, so a plain upsert would wipe them on every
-        # discover cycle, breaking container-redeploy resilience.
-        sv_name = manifest.get("name") or worker_id.replace("_", "-")
-        sv_version = manifest.get("version") or "0.1.0"
-        existing_sv = conn.execute(
-            "SELECT manifest_json FROM skill_versions WHERE id = ?",
-            (skill_version_id,),
-        ).fetchone()
-        manifest_to_store = manifest
-        if existing_sv:
-            try:
-                existing_manifest = json.loads(existing_sv["manifest_json"] or "{}")
-                if "_files" in existing_manifest and "_files" not in manifest:
-                    manifest_to_store = dict(manifest)
-                    manifest_to_store["_files"] = existing_manifest["_files"]
-            except Exception:
-                pass
-        conn.execute(
-            """
-            INSERT INTO skill_versions
-                (id, name, version, manifest_json, bundle_path, created_at)
-            VALUES (?, ?, ?, ?, ?, ?)
-            ON CONFLICT(name, version) DO UPDATE SET
-                manifest_json=excluded.manifest_json,
-                bundle_path=excluded.bundle_path
-            """,
-            (
-                skill_version_id,
-                sv_name,
-                sv_version,
-                json.dumps(manifest_to_store),
-                f"workers/{worker_id}",
-                now,
-            ),
-        )
-        # System workers must be workspace-visible so any authenticated user
-        # can run them regardless of which bootstrap user originally persisted
-        # the row. Without this, a multi-member setup where user A bootstrapped
-        # the DB and user B logs in gets "worker does not belong to B" when
-        # Emily tries to start a worker-author run (#698).
-        is_system_worker = bool(manifest.get("system_worker"))
-        worker_visibility = "workspace" if is_system_worker else "private"
+    # Reconcile the normalized worker_triggers rows so EVERY declared
+    # trigger (not just the primary one) becomes an independently
+    # schedulable / resolvable row. Existing single-trigger workers get
+    # exactly one row, preserving backward-compat. The composio
+    # registration id is stamped on the composio row for event resolution.
+    # Local SQLite writes through the already-open `conn` (a second
+    # connection here would deadlock with `database is locked`); the
+    # non-SQLite mirror happens in the canonical block below.
+    try:
+        from db.sqlite import SqliteWorkerRepository
 
-        conn.execute(
-            """
-            INSERT INTO workers
-                (id, skill_version_id, name, trigger_type, cron_expr, cron_timezone,
-                 next_run_at, last_scheduled_run_at, webhook_secret_hash, notify_email,
-                 notify_webhook_url, grants_json, input_values_json, enabled, created_at, owner_id,
-                 composio_trigger_id, composio_event, triggers_json, visibility)
-            VALUES (?, ?, ?, ?, ?, ?, NULL, NULL, NULL, 0, NULL, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-            ON CONFLICT(id) DO UPDATE SET
-                skill_version_id=excluded.skill_version_id,
-                name=excluded.name,
-                trigger_type=excluded.trigger_type,
-                cron_expr=excluded.cron_expr,
-                cron_timezone=excluded.cron_timezone,
-                enabled=excluded.enabled,
-                owner_id=workers.owner_id,
-                composio_trigger_id=excluded.composio_trigger_id,
-                composio_event=excluded.composio_event,
-                triggers_json=excluded.triggers_json,
-                visibility=excluded.visibility
-            """,
-            (
-                worker_id,
-                skill_version_id,
-                w["name"],
-                primary_trigger_type or trigger.get("type") or w.get("trigger_type") or "manual",
-                trigger.get("cron"),
-                trigger.get("timezone"),
-                json.dumps({}),
-                json.dumps({}),
-                enabled_value,
-                now,
-                user_id,
-                composio_trigger_id,
-                composio_event,
-                triggers_json_str,
-                worker_visibility,
-            ),
+        SqliteWorkerRepository.reconcile_triggers_conn(
+            conn,
+            worker_id=worker_id,
+            triggers=triggers_list,
+            external_trigger_id=composio_trigger_id,
+            enabled=bool(enabled_value),
+        )
+    except Exception:
+        logger.exception(
+            "reconcile_triggers failed for worker %s — multi-trigger rows "
+            "may be stale (scheduler falls back to the worker scalar)",
+            worker_id,
         )
 
-        # Reconcile the normalized worker_triggers rows so EVERY declared
-        # trigger (not just the primary one) becomes an independently
-        # schedulable / resolvable row. Existing single-trigger workers get
-        # exactly one row, preserving backward-compat. The composio
-        # registration id is stamped on the composio row for event resolution.
-        # Local SQLite writes through the already-open `conn` (a second
-        # connection here would deadlock with `database is locked`); the
-        # non-SQLite mirror happens in the canonical block below.
-        try:
-            from db.sqlite import SqliteWorkerRepository
+    # Mirror to the canonical repository so non-local deployments
+    # (e.g. workeros-cloud -> Supabase) actually persist the row.
+    # Local SQLite already writes through `conn` above. Calling the
+    # repository here would open a second SQLite connection while the
+    # first transaction is still active and can fail startup with
+    # `database is locked`.
+    try:
+        from db.factory import get_repositories
+        from db.sqlite import SqliteWorkerRepository
 
-            SqliteWorkerRepository.reconcile_triggers_conn(
-                conn,
+        canonical_workers = get_repositories().workers
+        if not isinstance(canonical_workers, SqliteWorkerRepository):
+            canonical_workers.upsert(
+                user_id=user_id,
                 worker_id=worker_id,
-                triggers=triggers_list,
-                external_trigger_id=composio_trigger_id,
-                enabled=bool(enabled_value),
+                name=w["name"],
+                manifest_json=manifest,
+                bundle_path=f"workers/{worker_id}",
+                skill_version_id=skill_version_id,
+                trigger_type=(
+                    primary_trigger_type
+                    or trigger.get("type")
+                    or w.get("trigger_type")
+                    or "manual"
+                ),
+                cron_expr=trigger.get("cron"),
+                cron_timezone=trigger.get("timezone"),
+                created_at=now,
+                composio_trigger_id=composio_trigger_id,
+                composio_event=composio_event,
+                triggers_json=triggers_list,
+                # Mirror the same visibility the local SQLite row got, so a
+                # cloud (Supabase) deploy seeds system + stock/example demos
+                # as 'workspace' too — otherwise the cloud mirror defaults to
+                # 'private' and members hit "does not belong" on the demo.
+                visibility=worker_visibility,
             )
-        except Exception:
-            logger.exception(
-                "reconcile_triggers failed for worker %s — multi-trigger rows "
-                "may be stale (scheduler falls back to the worker scalar)",
-                worker_id,
-            )
-
-        # Mirror to the canonical repository so non-local deployments
-        # (e.g. workeros-cloud -> Supabase) actually persist the row.
-        # Local SQLite already writes through `conn` above. Calling the
-        # repository here would open a second SQLite connection while the
-        # first transaction is still active and can fail startup with
-        # `database is locked`.
-        try:
-            from db.factory import get_repositories
-            from db.sqlite import SqliteWorkerRepository
-
-            canonical_workers = get_repositories().workers
-            if not isinstance(canonical_workers, SqliteWorkerRepository):
-                canonical_workers.upsert(
-                    user_id=user_id,
-                    worker_id=worker_id,
-                    name=w["name"],
-                    manifest_json=manifest,
-                    bundle_path=f"workers/{worker_id}",
-                    skill_version_id=skill_version_id,
-                    trigger_type=(
-                        primary_trigger_type
-                        or trigger.get("type")
-                        or w.get("trigger_type")
-                        or "manual"
-                    ),
-                    cron_expr=trigger.get("cron"),
-                    cron_timezone=trigger.get("timezone"),
-                    created_at=now,
-                    composio_trigger_id=composio_trigger_id,
-                    composio_event=composio_event,
-                    triggers_json=triggers_list,
-                )
-                # Non-SQLite (cloud) reconcile: SQLite already reconciled via
-                # the open `conn` above. Guarded separately so a cloud repo that
-                # has not yet shipped reconcile_triggers degrades to the legacy
-                # single-trigger behaviour instead of failing the worker upsert.
-                reconcile = getattr(canonical_workers, "reconcile_triggers", None)
-                if callable(reconcile):
-                    try:
-                        reconcile(
-                            worker_id=worker_id,
-                            triggers=triggers_list,
-                            external_trigger_id=composio_trigger_id,
-                            enabled=bool(enabled_value),
-                        )
-                    except Exception:
-                        logger.exception(
-                            "cloud reconcile_triggers failed for worker %s — "
-                            "multi-trigger rows may be stale",
-                            worker_id,
-                        )
-        except Exception:
-            logger.exception(
-                "repos.workers.upsert failed for worker %s (user %s) — "
-                "filesystem bundle written, but DB row may be missing",
-                worker_id,
-                user_id,
-            )
-            raise
+            # Non-SQLite (cloud) reconcile: SQLite already reconciled via
+            # the open `conn` above. Guarded separately so a cloud repo that
+            # has not yet shipped reconcile_triggers degrades to the legacy
+            # single-trigger behaviour instead of failing the worker upsert.
+            reconcile = getattr(canonical_workers, "reconcile_triggers", None)
+            if callable(reconcile):
+                try:
+                    reconcile(
+                        worker_id=worker_id,
+                        triggers=triggers_list,
+                        external_trigger_id=composio_trigger_id,
+                        enabled=bool(enabled_value),
+                    )
+                except Exception:
+                    logger.exception(
+                        "cloud reconcile_triggers failed for worker %s — "
+                        "multi-trigger rows may be stale",
+                        worker_id,
+                    )
+    except Exception:
+        logger.exception(
+            "repos.workers.upsert failed for worker %s (user %s) — "
+            "filesystem bundle written, but DB row may be missing",
+            worker_id,
+            user_id,
+        )
+        raise
 
 
 def _ensure_worker_row_for_rotation(

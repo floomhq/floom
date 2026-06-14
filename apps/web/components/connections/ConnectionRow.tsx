@@ -42,12 +42,12 @@ function ConnectingProgressBar() {
     <div
       aria-hidden="true"
       className="absolute bottom-0 left-0 right-0 h-[2px] overflow-hidden rounded-b-none"
-      style={{ background: "color-mix(in srgb,#9a6a16 12%,transparent)" }}
+      style={{ background: "color-mix(in srgb,var(--accent) 12%,transparent)" }}
     >
       <div
         className="absolute inset-y-0 w-1/3 rounded-[var(--radius-pill)]"
         style={{
-          background: "#b07a1a",
+          background: "var(--accent)",
           animation: "conn-progress 1.6s cubic-bezier(0.4,0,0.2,1) infinite",
         }}
       />
@@ -71,7 +71,7 @@ function StatusPill({ status }: { status: string }) {
   }
   if (status === "initiated") {
     return (
-      <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] [border:var(--bd-pill)] bg-[color-mix(in_srgb,#9a6a16_10%,transparent)] px-2 py-0.5 text-[11px] font-medium text-[#8a5d12]">
+      <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] [border:var(--bd-pill)] bg-[var(--accent-soft)] px-2 py-0.5 text-[11px] font-medium text-[var(--accent)]">
         <svg
           aria-hidden="true"
           className="size-2.5 shrink-0 animate-spin"

@@ -129,7 +129,7 @@ const tests: [string, () => void][] = [
   ["#536 defaultSourceMode picks 'preview' for code files", test536PreviewDefaultsForCodeFiles],
   ["#551 canRun gates on missing_secret status", test551CanRunBlocksOnMissingSecret],
   ["#551 Run button label mentions missing secret", test551RunButtonLabelForMissingSecret],
-  ["#551 RunSection shows amber warning block with /secrets link", test551SecretWarningBlockInRunSection],
+  ["#551 RunSection shows warning block with /secrets link", test551SecretWarningBlockInRunSection],
   ["#551 missing_secret warning is conditional (not always shown)", test551SecretWarningNotShownForHealthyWorker],
 ];
 

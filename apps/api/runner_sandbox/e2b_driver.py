@@ -13,11 +13,13 @@ import shlex
 import shutil
 import tarfile
 import threading
+import time
 from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any, Callable, Dict, Optional
 
 from .base import SandboxDriver
+from .memory_context import ensure_memory_context_pack
 from models import WorkerConfig, WorkerResult
 from contexts import CONTEXTS_DIR, context_dir, context_scope_for_user, normalize_context_mount, use_context_scope
 from runner_utils import ARTIFACTS_DIR
@@ -158,6 +160,81 @@ def _is_e2b_quota_or_rate_limit_error(exc: Exception) -> bool:
         message = str(exc).lower()
         return any(token in message for token in ("billing", "payment", "blocked", "quota"))
     return False
+
+
+def _exception_text(exc: Exception) -> str:
+    parts = [
+        exc.__class__.__name__,
+        str(getattr(exc, "code", "")),
+        str(getattr(exc, "type", "")),
+        str(exc),
+    ]
+    stdout = getattr(exc, "stdout", None)
+    stderr = getattr(exc, "stderr", None)
+    if stdout:
+        parts.append(str(stdout))
+    if stderr:
+        parts.append(str(stderr))
+    return " ".join(part for part in parts if part).strip()
+
+
+def _looks_like_timeout_exception(exc: Exception) -> bool:
+    text = _exception_text(exc).lower()
+    return any(
+        marker in text
+        for marker in (
+            "timeout",
+            "timed out",
+            "deadline exceeded",
+            "context deadline",
+            "took too long",
+        )
+    )
+
+
+def _timeout_elapsed_near_cap(elapsed_seconds: float, timeout_seconds: int) -> bool:
+    try:
+        cap = float(timeout_seconds)
+    except (TypeError, ValueError):
+        cap = 300.0
+    if cap <= 0:
+        return False
+    return elapsed_seconds >= max(1.0, cap * 0.9)
+
+
+def _sandbox_exception_result(
+    exc: Exception,
+    *,
+    elapsed_seconds: float,
+    timeout_seconds: int,
+) -> WorkerResult:
+    detail = str(exc).strip() or exc.__class__.__name__
+    if _looks_like_timeout_exception(exc) and _timeout_elapsed_near_cap(elapsed_seconds, timeout_seconds):
+        return WorkerResult(
+            status="error",
+            error=f"Worker exceeded its {timeout_seconds}s timeout and was stopped.",
+            error_code="timeout",
+            retryable=True,
+        )
+    return WorkerResult(
+        status="error",
+        error=f"E2B sandbox failed before the worker timeout was reached: {detail}",
+        error_code="e2b_sandbox_error",
+        retryable=True,
+    )
+
+
+def _worker_result_failure_fields(result_data: dict[str, Any]) -> tuple[Any, Any]:
+    result_status = result_data.get("status", "success")
+    if result_status not in ("error", "failed"):
+        return result_data.get("error"), result_data.get("error_code")
+    result_error = str(result_data.get("error") or "").strip()
+    result_error_code = str(result_data.get("error_code") or "").strip()
+    if not result_error:
+        result_error = "Worker reported failure without an error message."
+    if not result_error_code:
+        result_error_code = "worker_reported_error"
+    return result_error, result_error_code
 
 
 def _create_sandbox_with_key_fallback(
@@ -512,38 +589,56 @@ def _safe_context_tar_member(member_name: str) -> PurePosixPath:
 
 
 def _extract_context_tar(raw_tar: bytes, target_dir: Path) -> None:
-    tmp_dir = CONTEXTS_DIR / f".{target_dir.name}.tmp.{os.getpid()}.{threading.get_ident()}"
-    if tmp_dir.exists():
-        shutil.rmtree(tmp_dir)
-    tmp_dir.mkdir(parents=True)
-    try:
-        with tarfile.open(fileobj=io.BytesIO(raw_tar), mode="r:*") as archive:
-            for member in archive.getmembers():
-                try:
-                    rel = _safe_context_tar_member(member.name)
-                except ValueError:
-                    continue
-                if member.isdir():
-                    (tmp_dir / rel.as_posix()).mkdir(parents=True, exist_ok=True)
-                    continue
-                if not member.isfile():
-                    continue
-                extracted = archive.extractfile(member)
-                if extracted is None:
-                    continue
-                destination = (tmp_dir / rel.as_posix()).resolve()
-                try:
-                    destination.relative_to(tmp_dir.resolve())
-                except ValueError:
-                    continue
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes(extracted.read())
-        if target_dir.exists():
-            shutil.rmtree(target_dir)
-        os.replace(tmp_dir, target_dir)
-    finally:
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+    """Merge the sandbox's writeback snapshot onto the live context dir.
+
+    #1020: this used to extract to a tmp dir, ``rmtree(target_dir)``, then swap
+    the whole tree in. But the sandbox snapshot is frozen at run START, so any
+    file written to the LIVE store DURING the run — e.g. feedback captured by
+    Emily while a `distill` worker was running — was erased on completion.
+    Feedback was silently lost, breaking the whole loop.
+
+    We now OVERLAY instead of replace: every file in the tar is written over its
+    counterpart in ``target_dir`` (atomically, per file), and files already in
+    ``target_dir`` that are NOT in the tar are left untouched. The worker still
+    fully controls the files it writes; it just can no longer clobber a sibling
+    it never saw. Deletions made inside the sandbox intentionally do NOT
+    propagate — correct for the accumulate-style stores this path serves
+    (feedback, memory). Path-traversal members are skipped as before.
+    """
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_root = target_dir.resolve()
+    with tarfile.open(fileobj=io.BytesIO(raw_tar), mode="r:*") as archive:
+        for member in archive.getmembers():
+            try:
+                rel = _safe_context_tar_member(member.name)
+            except ValueError:
+                continue
+            if member.isdir():
+                (target_dir / rel.as_posix()).mkdir(parents=True, exist_ok=True)
+                continue
+            if not member.isfile():
+                continue
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                continue
+            destination = (target_dir / rel.as_posix()).resolve()
+            try:
+                destination.relative_to(target_root)
+            except ValueError:
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            # Atomic per-file replace: a concurrent reader never sees a
+            # half-written file, and a mid-merge failure leaves the files
+            # written so far (and every untouched sibling) intact.
+            tmp_file = destination.parent / (
+                f".{destination.name}.tmp.{os.getpid()}.{threading.get_ident()}"
+            )
+            try:
+                tmp_file.write_bytes(extracted.read())
+                os.replace(tmp_file, destination)
+            finally:
+                if tmp_file.exists():
+                    tmp_file.unlink()
 
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
@@ -584,6 +679,7 @@ class E2BSandboxDriver(SandboxDriver):
         connection_ids: Optional[Dict[str, str]] = None,
         user_id: str | None = None,
     ) -> WorkerResult:
+        started_monotonic = time.monotonic()
         try:
             return self._run_in_sandbox(
                 worker_id, run_id, inputs, secrets, log_fn, trace_id,
@@ -642,13 +738,14 @@ class E2BSandboxDriver(SandboxDriver):
             logger.exception(
                 "E2B sandbox failed for worker %s run %s: %s", worker_id, run_id, exc
             )
-            log_fn(f"E2B sandbox error: {exc}", "error")
-            return WorkerResult(
-                status="error",
-                error=str(exc),
-                error_code="e2b_sandbox_error",
-                retryable=True,
+            elapsed_seconds = time.monotonic() - started_monotonic
+            result = _sandbox_exception_result(
+                exc,
+                elapsed_seconds=elapsed_seconds,
+                timeout_seconds=timeout_seconds,
             )
+            log_fn(f"E2B sandbox error after {elapsed_seconds:.3f}s: {result.error}", "error")
+            return result
 
     def _run_in_sandbox(
         self,
@@ -933,6 +1030,7 @@ class E2BSandboxDriver(SandboxDriver):
                 _emit_command_output(chunk, "warning", "[e2b] stderr: ", log_fn)
 
             _cmd_envs: dict[str, str] = {
+                **secrets,
                 "FLOOM_RUN_ID": run_id,
                 "FLOOM_TRACE_ID": trace_id,
                 "WORKEROS_API_URL": _sandbox_envs["WORKEROS_API_URL"],
@@ -992,6 +1090,7 @@ class E2BSandboxDriver(SandboxDriver):
 
             outputs = result_data.get("outputs", {})
             result_status = result_data.get("status", "success")
+            result_error, result_error_code = _worker_result_failure_fields(result_data)
             result_artifacts = result_data.get("artifacts", [])
             if not isinstance(result_artifacts, list):
                 result_artifacts = []
@@ -1023,8 +1122,8 @@ class E2BSandboxDriver(SandboxDriver):
                 status=result_status,
                 outputs=outputs,
                 artifacts=artifacts,
-                error=result_data.get("error"),
-                error_code=result_data.get("error_code"),
+                error=result_error,
+                error_code=result_error_code,
                 decision_required=decision_required,
             )
 
@@ -1058,6 +1157,7 @@ class E2BSandboxDriver(SandboxDriver):
             made_dirs.add(contexts_root)
 
         with use_context_scope(context_scope_for_user(user_id)):
+            ensure_memory_context_pack(config=config, user_id=user_id, log_fn=log_fn)
             for raw_context in config.contexts:
                 try:
                     context = normalize_context_mount(raw_context)

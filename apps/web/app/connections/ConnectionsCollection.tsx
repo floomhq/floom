@@ -8,6 +8,7 @@ import { api } from "@/lib/api";
 import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
+import { LoadingState } from "@/components/collection/CollectionStates";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { RunStatusBadge } from "@/components/RunStatus";
 import {
@@ -54,7 +55,7 @@ function SetupRequiredCallout({ missingBySlug }: { missingBySlug: Map<string, st
   const totalWorkers = new Set(Array.from(missingBySlug.values()).flat()).size;
   return (
     <div
-      className="flex items-start gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-amber-50 px-4 py-3 text-sm text-amber-900 dark:bg-amber-950/30 dark:text-amber-200"
+      className="flex items-start gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--accent-soft)] px-4 py-3 text-sm text-[var(--ink)]"
       role="alert"
     >
       <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -124,6 +125,15 @@ function KV({ rows }: { rows: [string, React.ReactNode][] }) {
   );
 }
 
+function formatLastUsed(connection: ConnectionItem) {
+  if (!connection.last_used_at) return "—";
+  const date = new Date(connection.last_used_at);
+  const when = Number.isNaN(date.getTime())
+    ? connection.last_used_at
+    : date.toLocaleDateString();
+  return connection.last_used_by ? `${when} · ${connection.last_used_by}` : when;
+}
+
 function EmailPeekPanel({ connectionId }: { connectionId: string }) {
   const [emailPeek, setEmailPeek] = useState<
     Array<{ subject: string; from_name: string; from_email: string; date: string }>
@@ -149,7 +159,7 @@ function EmailPeekPanel({ connectionId }: { connectionId: string }) {
     };
   }, [connectionId]);
 
-  if (loadingPeek) return <div style={pad}>Loading recent emails...</div>;
+  if (loadingPeek) return <LoadingState rows={3} />;
 
   return (
     <div className="c-ltable">
@@ -208,7 +218,7 @@ function ActivityPanel({ connectionId }: { connectionId: string }) {
     };
   }, [connectionId]);
 
-  if (loadingActivity) return <div style={pad}>Loading activity...</div>;
+  if (loadingActivity) return <LoadingState rows={3} />;
 
   return (
     <div className="c-ltable">
@@ -321,7 +331,7 @@ export default function ConnectionsCollection({
       { value: items.filter((i) => i.statusKey === "reauth").length, label: "reauth" },
       { value: items.filter((i) => i.statusKey === "error").length, label: "error" },
     ],
-    view: { default: "list", grid: true },
+    view: { default: "grid", grid: true },
     columns: {
       template: "1.8fr 110px 1fr 120px 40px",
       headers: ["Connects to", "Type", "Detail", "Status", ""],
@@ -352,8 +362,20 @@ export default function ConnectionsCollection({
     detail: (i) => {
       const actions = (
         <>
+          {i.kind === "connection" && i.connection && (
+            <Link
+              href={`/connections/connect/${encodeURIComponent(i.connection.app_name)}?return_to=${encodeURIComponent("/connections")}`}
+              className="c-addbtn"
+              style={pillBtn}
+            >
+              Reconnect
+            </Link>
+          )}
           <button type="button" className="c-addbtn" style={pillBtn} onClick={() => void test(i)}>
             Test
+          </button>
+          <button type="button" className="c-vpill" style={pillBtn} onClick={() => void remove(i)}>
+            Remove
           </button>
         </>
       );
@@ -387,6 +409,8 @@ export default function ConnectionsCollection({
                     ["Status", STATUS_PILL[i.statusKey].label],
                     ["Scopes", String(c.scopes?.length ?? 0)],
                     ["Connected", new Date(c.created_at).toLocaleDateString()],
+                    ["Last used", formatLastUsed(c)],
+                    ["Owner", c.owner_id || "—"],
                   ]}
                 />
               ),

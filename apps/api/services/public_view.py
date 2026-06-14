@@ -89,6 +89,8 @@ _CODE_HEADLINE = "This worker's code has an error and couldn't run. Edit the wor
 
 _CANCELLED_HEADLINE = "This run was cancelled before it finished."
 
+_SANDBOX_HEADLINE = "The sandbox could not start or stay connected. Try again, then check the E2B configuration if it repeats."
+
 _OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
     # Runtime / agent / sandbox internals (the residual G5 leak class).
     "agent_runtime_error": _RUNTIME_HEADLINE,
@@ -100,7 +102,7 @@ _OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
     "context_mount_failed": _RUNTIME_HEADLINE,
     "mcp_connect_failed": _CONNECTION_HEADLINE,
     # Sandbox / timeout / resource.
-    "e2b_sandbox_error": _TIMEOUT_HEADLINE,
+    "e2b_sandbox_error": _SANDBOX_HEADLINE,
     "timeout": _TIMEOUT_HEADLINE,
     "sandbox_oom": "This worker ran out of memory and was stopped. Try simplifying the input.",
     "token_cap_exceeded": "This worker reached its output limit and was stopped. Try simplifying the task.",
@@ -116,6 +118,8 @@ _OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
     "skill_not_found": _CODE_HEADLINE,
     "worker_not_found": "This worker no longer exists.",
     "worker_disabled": "This worker is paused. Turn it on to run it again.",
+    "worker_deleted": "This worker was deleted while the run was still active.",
+    "file_input_resolution_failed": "This worker needs a valid uploaded file for one of its inputs. Upload the file, then re-run.",
     # Output / result.
     "output_validation_failed": _OUTPUT_HEADLINE,
     "schema_violation": _OUTPUT_HEADLINE,
@@ -125,6 +129,8 @@ _OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
     "cancelled": _CANCELLED_HEADLINE,
     "cancelled_queued": _CANCELLED_HEADLINE,
     "cancelled_before_start": _CANCELLED_HEADLINE,
+    "approval_expired": "This run waited for approval too long and expired. Re-run it to request a fresh approval.",
+    "unknown_error": "This worker failed to run. Check the run logs for details, then edit or re-run the worker.",
 }
 
 _OPERATOR_ERROR_GENERIC = (

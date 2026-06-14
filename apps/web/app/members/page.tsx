@@ -1,7 +1,7 @@
-// V4 SPEC §2: /members is NOT a standalone page. Members live in Settings → Members.
-// This redirect ensures any bookmarks / old links land at the right place.
+// Members page moved into Settings (Federico 2026-06-14).
+// This redirect keeps old bookmarks and any deep-links working.
 import { redirect } from "next/navigation";
 
-export default function MembersRedirect() {
-  redirect("/settings#members");
+export default function MembersRedirectPage() {
+  redirect("/settings?sel=members");
 }

@@ -47,4 +47,44 @@ describe("InlineFileOpen", () => {
     expect(loadText).not.toHaveBeenCalled();
     expect(screen.getByText(/SQLite database/)).toBeTruthy();
   });
+
+  it("shows an upload affordance only when onUpload is provided", () => {
+    const { unmount } = render(<InlineFileOpen files={files} rootLabel="Output" />);
+    expect(screen.queryByRole("button", { name: /Add files/i })).toBeNull();
+    unmount();
+    render(<InlineFileOpen files={files} rootLabel="brain" onUpload={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /Add files/i })).toBeTruthy();
+    expect(screen.getByText(/drag . drop/i)).toBeTruthy();
+  });
+
+  it("offers the dropzone even for an empty folder (so files can be added)", () => {
+    render(<InlineFileOpen files={[]} rootLabel="brain" emptyLabel="This folder is empty." onUpload={vi.fn()} />);
+    expect(screen.getByRole("button", { name: /Add files/i })).toBeTruthy();
+    expect(screen.getByText("This folder is empty.")).toBeTruthy();
+  });
+
+  it("drag-and-drop calls onUpload with the dropped files and current dir prefix", async () => {
+    const onUpload = vi.fn().mockResolvedValue(undefined);
+    render(<InlineFileOpen files={files} rootLabel="brain" onUpload={onUpload} />);
+    const dropped = new File(["hi"], "memo.txt", { type: "text/plain" });
+    // The dropzone is the outer list container; drop onto the file list row's parent.
+    const zone = screen.getByText("chart.png").closest("div[style]")?.parentElement?.parentElement;
+    const target = zone ?? screen.getByText("chart.png");
+    fireEvent.dragOver(target, { dataTransfer: { files: [dropped] } });
+    fireEvent.drop(target, { dataTransfer: { files: [dropped] } });
+    await waitFor(() => expect(onUpload).toHaveBeenCalledTimes(1));
+    const [files0, dirPrefix] = onUpload.mock.calls[0];
+    expect(files0[0].name).toBe("memo.txt");
+    expect(dirPrefix).toBe(""); // root level
+  });
+
+  it("Browse picker routes selected files to onUpload", async () => {
+    const onUpload = vi.fn().mockResolvedValue(undefined);
+    const { container } = render(<InlineFileOpen files={files} rootLabel="brain" onUpload={onUpload} />);
+    const picker = container.querySelector('input[type="file"]') as HTMLInputElement;
+    const picked = new File(["x"], "pick.csv", { type: "text/csv" });
+    fireEvent.change(picker, { target: { files: [picked] } });
+    await waitFor(() => expect(onUpload).toHaveBeenCalledTimes(1));
+    expect(onUpload.mock.calls[0][0][0].name).toBe("pick.csv");
+  });
 });

@@ -121,6 +121,26 @@ describe("middleware auth gate", () => {
     }
   });
 
+  it("keeps the exact legal pages /privacy and /terms public (OW-02)", async () => {
+    const { middleware } = await import("@/middleware");
+    for (const p of ["/privacy", "/terms"]) {
+      const res = await middleware(req(p));
+      expect(res.headers.get("x-middleware-next")).toBe("1");
+    }
+  });
+
+  it("does NOT make /privacy* or /terms* public by prefix (footgun guard)", async () => {
+    // Exact-match only: a future auth-gated route that merely starts with
+    // /privacy or /terms (e.g. /privacy-settings, /terms-admin) must stay behind
+    // the login gate, not silently become public.
+    const { middleware } = await import("@/middleware");
+    for (const p of ["/privacy-settings", "/terms-admin", "/privacyx", "/terms-of-fraud"]) {
+      const res = await middleware(req(p));
+      expect(res.status).toBe(307);
+      expect(res.headers.get("location")).toContain("/login");
+    }
+  });
+
   it("keeps the branded claim short-link /c/:token reachable without login", async () => {
     // /c/:token is rewritten to the API /c/{token} redirect (public hop). It
     // must NOT be auth-gated, or the WhatsApp/Slack claim flow bounces to /login.

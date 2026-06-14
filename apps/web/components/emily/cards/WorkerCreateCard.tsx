@@ -30,7 +30,7 @@ function StepRow({ status, label }: { status: StepStatus; label: string }) {
   return (
     <div className="flex items-center gap-2.5 py-0.5">
       {status === "completed" && <CheckCircle2 className="size-3.5 shrink-0 text-green-600" />}
-      {status === "running" && <Loader2 className="size-3.5 shrink-0 text-[#59AAF8] animate-spin" />}
+      {status === "running" && <Loader2 className="size-3.5 shrink-0 text-[var(--accent)] animate-spin" />}
       {status === "failed" && <XCircle className="size-3.5 shrink-0 text-destructive" />}
       {status === "pending" && <Circle className="size-3.5 shrink-0 text-muted-foreground/40" />}
       <span
@@ -57,7 +57,7 @@ export function WorkerCreateCard({ card }: { card: WorkerCreateCardType }) {
       <div className="flex items-center gap-2.5 px-3.5 py-2.5 [border-bottom:var(--bd-div)]/50">
         <span
           className="size-2 rounded-[var(--radius-pill)] shrink-0"
-          style={{ background: "#59AAF8" }}
+          style={{ background: "var(--accent)" }}
           aria-hidden="true"
         />
         <span className="font-medium flex-1 min-w-0 truncate">{card.workerName}</span>

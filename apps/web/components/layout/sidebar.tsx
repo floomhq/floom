@@ -11,7 +11,9 @@ import { openCommandPalette } from "@/components/CommandPalette";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
 import { api } from "@/lib/api";
+import { capture } from "@/lib/analytics/capture";
 import type { CurrentUser } from "@/lib/types";
+import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -122,7 +124,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
       <Link
         href="/chat?mode=create"
         onClick={() => onNavigate?.()}
-        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] [border:var(--bd-btn)] bg-[var(--bg-2)] px-2.5 text-sm font-medium text-ink hover:bg-[var(--bg-3)] transition-colors duration-150"
+        className="flex h-9 w-full items-center justify-center gap-2 rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-sm font-medium text-white transition-colors duration-150 hover:opacity-90"
       >
         <Plus className="w-4 h-4" />
         <span>New worker</span>
@@ -130,7 +132,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
       <button
         type="button"
         onClick={onSearch}
-        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] [border:var(--bd-input)] bg-[var(--bg-2)] px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[var(--bg-3)] hover:text-ink transition-colors duration-150"
+        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[var(--bg-3)] hover:text-ink transition-colors duration-150"
         aria-label="Open command palette"
       >
         <Search className="w-4 h-4 opacity-70" />
@@ -149,7 +151,23 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
 // page navigations and refreshes.
 const SIDEBAR_COLLAPSE_KEY = "sidebar-collapsed";
 
-export function Sidebar() {
+export type SidebarAccountFooterRenderProps = {
+  onNavigate?: () => void;
+};
+
+export type SidebarProps = {
+  accountFooter?: React.ReactNode | ((props: SidebarAccountFooterRenderProps) => React.ReactNode);
+};
+
+function renderAccountFooter(
+  accountFooter: SidebarProps["accountFooter"],
+  props: SidebarAccountFooterRenderProps = {}
+) {
+  if (typeof accountFooter === "function") return accountFooter(props);
+  return accountFooter ?? <UserProfileFooter onNavigate={props.onNavigate} />;
+}
+
+export function Sidebar({ accountFooter }: SidebarProps = {}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   // collapsed = icon-rail (62px); expanded = full (228px)
@@ -226,26 +244,40 @@ export function Sidebar() {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
 
         {/* ── Nav header: workspace identity + collapse chevron ─────────────── */}
-        <div className={cn("flex items-center [border-bottom:var(--bd-div)]", collapsed ? "justify-center h-14 px-0" : "h-14 px-2 gap-1")}>
+        <div className={cn("flex items-center [border-bottom:var(--bd-div)]", collapsed ? "justify-center h-14 px-0" : "h-14 gap-1.5 px-3")}>
           {collapsed ? (
             /* Icon-rail: just the mark, clicking expands */
-            <button
-              type="button"
-              aria-label="Expand navigation"
-              onClick={toggleCollapse}
-              className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
-            >
+              <button
+                type="button"
+                aria-label="Expand navigation"
+                aria-expanded="false"
+                aria-pressed={collapsed}
+                onClick={toggleCollapse}
+                className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
+              >
               <FloomMark size={22} />
             </button>
           ) : (
             <>
-              <div className="flex-1 min-w-0 py-1">
+              {/* D-04: brand mark anchors the sidebar top. Without it the area
+                  above "New worker" reads as an empty/skeleton spot while the
+                  workspace switcher loads. */}
+              <Link
+                href="/overview"
+                aria-label="Floom home"
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-button)] hover:bg-[var(--active-nav-bg)] transition-colors"
+              >
+                <FloomMark size={22} />
+              </Link>
+              <div className="min-w-0 flex-1">
                 <WorkspaceSwitcher />
               </div>
               {/* Collapse chevron — dim at rest, full opacity on hover */}
               <button
                 type="button"
                 aria-label="Collapse navigation"
+                aria-expanded="true"
+                aria-pressed={collapsed}
                 onClick={toggleCollapse}
                 className="inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] opacity-40 hover:opacity-100 focus-visible:opacity-100 transition-all hover:bg-[var(--active-nav-bg)] hover:text-ink"
                 title="Collapse sidebar"
@@ -260,7 +292,7 @@ export function Sidebar() {
           <>
             <SidebarPrimaryActions />
             <NavLinks pathname={pathname} />
-            <UserProfileFooter />
+            {renderAccountFooter(accountFooter)}
           </>
         )}
 
@@ -312,6 +344,8 @@ export function Sidebar() {
             <button
               type="button"
               aria-label="Expand navigation"
+              aria-expanded="false"
+              aria-pressed={collapsed}
               onClick={toggleCollapse}
               title="Expand sidebar"
               className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink transition-colors mt-1"
@@ -349,7 +383,7 @@ export function Sidebar() {
               <SidebarPrimaryActions onNavigate={() => setOpen(false)} />
               <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
             </div>
-            <UserProfileFooter onNavigate={() => setOpen(false)} />
+            {renderAccountFooter(accountFooter, { onNavigate: () => setOpen(false) })}
           </aside>
         </div>
       )}
@@ -381,6 +415,7 @@ export function UserProfileFooter({
   const router = useRouter();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
   const [user, setUser] = useState<CurrentUser | null>(null);
+  const [workspaceName, setWorkspaceName] = useState("Floom workspace");
 
   useEffect(() => {
     let active = true;
@@ -396,11 +431,26 @@ export function UserProfileFooter({
     };
   }, []);
 
+  useEffect(() => {
+    let active = true;
+    api.workspace
+      .list()
+      .then((data) => {
+        const current = data.workspaces.find((workspace) => workspace.id === data.active_id) ?? data.workspaces[0];
+        if (active && current) setWorkspaceName(resolveWorkspaceName(current.name));
+      })
+      .catch(() => {
+        if (active) setWorkspaceName("Floom workspace");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+
   // Multi-member: prefer username, then email, then display_name
   const primary = (user as (typeof user & { username?: string | null }) | null)?.username
     || user?.email || user?.display_name || "Local user";
-  const userRole = (user as (typeof user & { role?: string }) | null)?.role;
-  const secondary = userRole === "admin" ? "Admin" : userRole === "member" ? "Member" : (user?.email ? "Signed in" : "Floom");
+  const secondary = workspaceName;
   const initials = profileInitials(primary);
 
   async function logout() {
@@ -409,6 +459,7 @@ export function UserProfileFooter({
     } catch {
       // Clearing the cookie is best-effort; navigate regardless.
     }
+    capture("logged_out", { source: "profile_menu" });
     onNavigate?.();
     router.replace("/login");
     router.refresh();

@@ -31,7 +31,7 @@ from contexts import (
     use_context_scope,
 )
 from models import (
-    DEFAULT_WORKER_AGENT_MODEL,
+    default_worker_agent_model,
     WorkerConfig,
     WorkerResult,
 )
@@ -42,6 +42,7 @@ from worker_registry import WORKERS_DIR
 from . import agent_capabilities
 from .agent_capabilities import WORKER_POLICY, MCPConnectionError
 from .base import SandboxDriver
+from .memory_context import memory_context_name, memory_enabled
 
 logger = logging.getLogger("floom.runner_sandbox.agent")
 
@@ -95,18 +96,11 @@ def _safe_path(base: Path, *parts: str) -> Path:
 
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
-    bundle_path = config.runtime.bundle_path if config and config.runtime else None
-    if bundle_path:
-        raw_path = Path(bundle_path)
-        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
-        resolved = target.resolve()
-        allowed_root = WORKERS_DIR.parent.resolve()
-        try:
-            resolved.relative_to(allowed_root)
-        except ValueError:
-            raise ValueError(f"Path traversal attempt: {resolved}")
-        return resolved
-    return _safe_path(WORKERS_DIR, worker_id)
+    # Delegate to the canonical resolver so the var/workers vs engine/workers
+    # bundle_path drift (#1048 follow-up) is handled identically everywhere.
+    from runner_utils import _resolve_worker_bundle_dir
+
+    return _resolve_worker_bundle_dir(WORKERS_DIR, worker_id, config, _safe_path)
 
 
 def _safe_path_under_any(roots: list[Path], path: str, default_root: Path) -> Path:
@@ -439,7 +433,7 @@ class AgentDriver(SandboxDriver):
                     )
 
                 force_finish = corrective_retry_used
-                _agent_model = _llm.agent_model(config.runtime.model or _ws_default_model() or DEFAULT_WORKER_AGENT_MODEL)
+                _agent_model = _llm.agent_model(config.runtime.model or _ws_default_model() or default_worker_agent_model())
                 agent = Agent(
                     name=worker_id,
                     instructions=system_prompt,
@@ -536,6 +530,7 @@ class AgentDriver(SandboxDriver):
                 return WorkerResult(
                     status="failed",
                     error=f"Output schema violation: Missing declared output '{missing_outputs[0]}'",
+                    error_code="schema_violation",
                     artifacts=artifacts,
                 )
             # Persist any edits the run made to writeable:true packs back to the
@@ -846,6 +841,16 @@ class AgentDriver(SandboxDriver):
                 f"{sorted(staged_context_packs)[0]}/<file>')). Consult them as "
                 "reference knowledge for this run."
             )
+        if memory_enabled(config) and staged_context_packs:
+            name = memory_context_name(config)
+            if name in staged_context_packs:
+                prompt_parts.append(
+                    "## Worker memory\n\n"
+                    f"This worker has durable memory in `context/{name}/`. Read it at "
+                    "the start of each run. When the run discovers a durable user "
+                    "preference, correction, or reusable fact, call remember_learning "
+                    "with that learning. Memory is persisted only after a successful run."
+                )
         prompt_parts.append(
             "Use tools to inspect bundle files as needed. "
             "Use web_search for fresh or external facts unless disabled. "
@@ -1034,6 +1039,29 @@ class AgentDriver(SandboxDriver):
                     },
                 },
             },
+        ]
+        if memory_enabled(config):
+            tools.append(
+                {
+                    "type": "function",
+                    "function": {
+                        "name": "remember_learning",
+                        "description": (
+                            "Persist a durable learning, correction, preference, or reusable fact "
+                            "to this worker's memory after the run succeeds."
+                        ),
+                        "parameters": {
+                            "type": "object",
+                            "properties": {
+                                "learning": {"type": "string"},
+                                "source": {"type": "string"},
+                            },
+                            "required": ["learning"],
+                        },
+                    },
+                }
+            )
+        tools.extend([
             {
                 "type": "function",
                 "function": {
@@ -1064,7 +1092,7 @@ class AgentDriver(SandboxDriver):
                     },
                 },
             },
-        ]
+        ])
         tools.extend(agent_capabilities.composio_tool_schemas(config, WORKER_POLICY))
         disabled = self._disabled_tool_names(config)
         if disabled:
@@ -1237,6 +1265,8 @@ class AgentDriver(SandboxDriver):
                     user_id=user_id,
                     run_id=run_id,
                 )
+            if name == "remember_learning":
+                return self._remember_learning(args, context_dir, config)
             if name == "invoke_worker":
                 return self._invoke_worker(args, state_user_id=user_id, config=config, run_id=run_id)
             if name == "request_approval":
@@ -1252,6 +1282,32 @@ class AgentDriver(SandboxDriver):
             return {"ok": False, "error": f"Unknown tool: {name}"}
         except Exception as exc:
             return {"ok": False, "error": str(exc)}
+
+    def _remember_learning(
+        self,
+        args: Dict[str, Any],
+        context_root: Path,
+        config: WorkerConfig,
+    ) -> Dict[str, Any]:
+        if not memory_enabled(config):
+            return {"ok": False, "error": "worker memory is not enabled"}
+        learning = str(args.get("learning") or "").strip()
+        if not learning:
+            return {"ok": False, "error": "learning is required"}
+        source = str(args.get("source") or "").strip()
+        name = memory_context_name(config)
+        pack_dir = _safe_path(context_root, name)
+        pack_dir.mkdir(parents=True, exist_ok=True)
+        path = _safe_path(pack_dir, "learnings.jsonl")
+        record: Dict[str, Any] = {
+            "created_at": datetime.now(timezone.utc).isoformat(),
+            "learning": learning,
+        }
+        if source:
+            record["source"] = source
+        with path.open("a", encoding="utf-8") as handle:
+            handle.write(json.dumps(record, ensure_ascii=False) + "\n")
+        return {"ok": True, "path": f"context/{name}/learnings.jsonl"}
 
     def _resolve_read_path(self, bundle_dir: Path, context_dir: Path, path: str) -> Path:
         """Resolve a file-tool path to the bundle, or the staged context tree.
@@ -1948,4 +2004,3 @@ class AgentDriver(SandboxDriver):
             publish_run_part(run_id, part)
         except Exception:
             logger.debug("Run part emit failed for run %s", run_id, exc_info=True)
-

@@ -52,10 +52,12 @@ from services.auth_ops import (
     _login_locked_out,
     _magic_link_secret,
     _prune_expired_sessions,
+    _consume_magic_link_nonce,
     _record_failed_login,
     _require_multi_member_repos,
     _set_session_cookie,
     _validate_magic_link,
+    _validate_magic_link_full,
     _validate_new_password,
 )
 
@@ -203,11 +205,14 @@ def auth_consume_magic_link(
     repos: Repositories = Depends(get_repos),
 ) -> dict:
     """Consume a magic-link token and create a session (multi-member mode only)."""
-    user_id = _validate_magic_link(token)
+    user_id, nonce, exp = _validate_magic_link_full(token)
     try:
         user_repo, session_repo, _ = _require_multi_member_repos(repos)
     except HTTPException:
         raise HTTPException(status_code=400, detail="Magic links require multi-member auth mode")
+    # F4: enforce one-time use. Claim the nonce before issuing a session so a
+    # replay of the same link cannot mint a second session.
+    _consume_magic_link_nonce(nonce, exp)
     user = user_repo.get(user_id=user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

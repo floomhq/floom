@@ -19,6 +19,7 @@ vi.mock("@/components/GitWorkspacePanel", () => ({ GitWorkspacePanel: () => <div
 vi.mock("@/components/assistant/SlackConnect", () => ({ SlackConnect: () => <div>Slack connect</div> }));
 
 vi.mock("@/lib/api", () => ({
+  API_BASE: "/api/proxy",
   api: {
     me: apiMock.me,
     workspace: {
@@ -130,6 +131,8 @@ describe("Settings Collection (Phase 3)", () => {
 
     render(<SettingsPage />);
 
+    expect(await screen.findByRole("button", { name: "Grid view", pressed: true })).toBeInTheDocument();
+    await user.click(screen.getByRole("button", { name: "List view" }));
     await waitFor(() => expect(screen.getByText("System")).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByText("Workspace defaults")).toBeInTheDocument();
     expect(screen.getByText("Slack, email & WhatsApp")).toBeInTheDocument();
@@ -150,6 +153,7 @@ describe("Settings Collection (Phase 3)", () => {
   });
 
   it("uses the workspace display fallback for UUID names and renders one Settings heading", async () => {
+    const user = userEvent.setup();
     apiMock.workspaceList.mockResolvedValue({
       active_id: "w1",
       workspaces: [
@@ -165,6 +169,7 @@ describe("Settings Collection (Phase 3)", () => {
 
     render(<SettingsPage />);
 
+    await user.click(screen.getByRole("button", { name: "List view" }));
     expect(await screen.findByText("Workspace · My workspace", {}, { timeout: 3000 })).toBeInTheDocument();
     expect(screen.queryByText(/9b1a5065-3ab9-493a-8220-b6c139d9c1b7/i)).not.toBeInTheDocument();
     expect(screen.getAllByText("Settings")).toHaveLength(1);
