@@ -1,5 +1,5 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
 
 // Render the REAL page components (not the generic engine) with mocked data, to
 // prove they mount + render rows without client-side crashes. This is the layer
@@ -24,6 +24,28 @@ const worker = {
   connections: ["github"],
   recent_stats: { last_run_at: "2026-06-08T00:00:00Z", runs_7d: 3 },
   visibility: "workspace",
+};
+const workerDetail = {
+  ...worker,
+  config: {
+    id: "w1",
+    name: "Weekly Update",
+    trigger: { type: "manual" },
+    runtime: {
+      type: "skill",
+      entrypoint: "SKILL.md",
+      runner: "e2b",
+      mode: "agent",
+      model: "bedrock/us.anthropic.claude-sonnet-4-6",
+    },
+    inputs: [],
+    outputs: [],
+    contexts: [],
+    connections: [],
+    secrets: [],
+  },
+  files: [],
+  recent_runs: [],
 };
 const run = {
   id: "r1",
@@ -68,7 +90,12 @@ vi.mock("@/lib/api", () => ({
   api: {
     workers: {
       list: vi.fn().mockResolvedValue([worker]),
-      get: vi.fn().mockResolvedValue({ ...worker, config: { inputs: [], outputs: [], contexts: [] }, files: [], recent_runs: [] }),
+      get: vi.fn().mockResolvedValue(workerDetail),
+      feedback: {
+        list: vi.fn().mockResolvedValue([]),
+        create: vi.fn(),
+        delete: vi.fn(),
+      },
     },
     runs: { list: vi.fn().mockResolvedValue([run]), get: vi.fn().mockResolvedValue(run) },
     connections: { list: vi.fn().mockResolvedValue([connection]), delete: vi.fn(), test: vi.fn() },
@@ -93,6 +120,18 @@ describe("page components render with data (no client crash)", () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
     render(<WorkersCollection initialWorkers={[worker as never]} />);
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
+  });
+
+  it("WorkersCollection Config renders friendly runtime and model labels", async () => {
+    const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
+    render(<WorkersCollection initialWorkers={[worker as never]} />);
+    fireEvent.click(await screen.findByRole("button", { name: /Weekly Update/i }));
+    fireEvent.click(await screen.findByRole("tab", { name: "Config" }));
+    expect(await screen.findByRole("tab", { name: "Tools" })).toBeInTheDocument();
+    fireEvent.click(screen.getByRole("tab", { name: "Triggers" }));
+    expect(await screen.findByText("E2B sandbox · Agent skill")).toBeInTheDocument();
+    expect(screen.getByText("Claude Sonnet 4.6")).toBeInTheDocument();
+    expect(screen.queryByText("bedrock/us.anthropic.claude-sonnet-4-6")).not.toBeInTheDocument();
   });
 
   it("RunsCollection renders the run + Export action", async () => {
@@ -133,6 +172,18 @@ describe("page components render with data (no client crash)", () => {
     const { default: ApprovalsCollection } = await import("@/app/approvals/ApprovalsCollection");
     render(<ApprovalsCollection />);
     expect(await screen.findByText("Reverse Match CRM")).toBeInTheDocument();
+  });
+
+  it("ApprovalsCollection does not show worker content-tag counts when no approvals are pending", async () => {
+    const { api } = await import("@/lib/api");
+    vi.mocked(api.approvals.list).mockResolvedValueOnce([]);
+    vi.mocked(api.workers.list).mockResolvedValueOnce([{ ...worker, tags: ["email"] }] as never);
+
+    const { default: ApprovalsCollection } = await import("@/app/approvals/ApprovalsCollection");
+    render(<ApprovalsCollection />);
+
+    expect(await screen.findByText("No pending approvals")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /email/i })).not.toBeInTheDocument();
   });
 
   it("shows loading skeletons, not empty states, while first collection fetches are pending", async () => {

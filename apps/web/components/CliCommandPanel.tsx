@@ -141,7 +141,7 @@ const API_ENDPOINT_GROUPS: {
 const METHOD_BADGE: Record<ApiMethod, string> = {
   GET: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
   POST: "bg-blue-500/12 text-blue-700 dark:text-blue-300",
-  PATCH: "bg-amber-500/12 text-amber-700 dark:text-amber-300",
+  PATCH: "bg-[var(--accent-soft)] text-[var(--accent)]",
   DELETE: "bg-rose-500/12 text-rose-700 dark:text-rose-300",
 };
 
@@ -622,7 +622,7 @@ function SnippetBox({
   onCopy: () => void;
 }) {
   return (
-    <div className="relative overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] dark:bg-[#1a1a1a]">
+    <div className="relative rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] dark:bg-[#1a1a1a]">
       <button
         type="button"
         onClick={onCopy}
@@ -632,7 +632,7 @@ function SnippetBox({
         {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}
         {copied ? "Copied" : "Copy"}
       </button>
-      <pre className="whitespace-pre-wrap text-xs leading-relaxed font-mono p-3 pr-20 text-foreground dark:text-[#a8e6a3] overflow-auto">
+      <pre className="whitespace-pre text-xs leading-relaxed font-mono p-3 pr-20 text-foreground dark:text-[#a8e6a3] overflow-x-auto [scrollbar-width:none] [&::-webkit-scrollbar]:hidden">
         <code>{text}</code>
       </pre>
     </div>

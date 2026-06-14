@@ -37,6 +37,8 @@ export type { SystemOverviewAttentionItem };
 // computed border width is 0px when the token is none.
 const cardClass =
   "rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
+const listClass =
+  "overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-list)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
 
 const providerNameAliases: Record<string, string> = {
   github: "GitHub",
@@ -100,17 +102,17 @@ function MetricCard({
   const hasSparkline = Boolean(sparkline && sparkline.length > 0);
   const className = cn(
     cardClass,
-    "flex flex-col overflow-hidden",
+    "flex min-h-[152px] flex-col overflow-hidden",
     href && "cursor-pointer transition-colors hover:bg-[var(--bg-2)]",
   );
   const body = (
     <>
       {/* Stat at the top */}
-      <div className="px-4 pt-3">
+      <div className="px-[18px] pt-[18px]">
         {loading ? (
           <Skeleton className="h-7 w-16 rounded-[var(--radius-button)]" />
         ) : (
-          <div className="text-2xl font-semibold text-[var(--text-primary)]">{value}</div>
+          <div className="text-[26px] font-semibold leading-tight text-[var(--text-primary)]">{value}</div>
         )}
         <div className="mt-1 flex items-center gap-1.5">
           {warning ? (
@@ -119,9 +121,9 @@ function MetricCard({
               aria-label="Has failures"
             />
           ) : null}
-          <p className="text-xs text-[var(--text-muted)]">{label}</p>
+          <p className="text-[13px] font-medium text-[var(--text-primary)]">{label}</p>
         </div>
-        <p className="mt-2 flex items-center gap-1 text-xs text-[var(--text-muted)]">
+        <p className="mt-1 flex items-center gap-1 text-[12.5px] text-[var(--text-muted)]">
           {trend !== null && trend !== undefined && trend > 0 ? (
             <ArrowUp className="size-3 opacity-50" aria-hidden="true" />
           ) : null}
@@ -131,7 +133,7 @@ function MetricCard({
         </p>
       </div>
       {/* Full-width sparkline pinned to the bottom, edge-to-edge */}
-      <div className="mt-2 h-10">
+      <div className="mt-auto h-12">
         {loading ? (
           <Skeleton className="h-full w-full rounded-none" />
         ) : hasSparkline ? (
@@ -164,12 +166,12 @@ function statusMeta(status: string) {
     return { label: "Failed", color: "var(--warning)" };
   }
   if (normalized === "queued") {
-    return { label: "Queued", color: "var(--pending)" };
+    return { label: "Queued", color: "var(--text-muted)" };
   }
   if (normalized === "pending_approval") {
     return { label: "Awaiting approval", color: "var(--text-muted)" };
   }
-  return { label: "Running", color: "var(--pending)" };
+  return { label: "Running", color: "var(--info)" };
 }
 
 function useOverview(initialData: SystemOverview | null) {
@@ -281,30 +283,32 @@ function WorkerActivity({
 }) {
   const visibleRuns = runs.slice(0, visibleRows);
   return (
-    <section className={cn(cardClass, "flex flex-col p-4 lg:col-span-2")}>
-      <div className="mb-2 flex items-center justify-between shrink-0">
-        <h2 className="text-sm font-semibold text-[var(--text-primary)]">Worker activity</h2>
-        <Link href="/runs" className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+    <section className="flex min-h-0 flex-col">
+      <div className="mb-3 flex items-center justify-between shrink-0">
+        <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Worker activity</h2>
+        <Link href="/runs" className="text-[12.5px] text-[var(--accent)] hover:underline">
           See all
         </Link>
       </div>
       {loading ? (
-        <div className="space-y-2">
+        <div className={cn(listClass, "space-y-2 p-2")}>
           {Array.from({ length: 6 }).map((_, index) => (
-            <Skeleton key={index} className="h-10 w-full rounded-lg" />
+            <Skeleton key={index} className="h-[52px] w-full rounded-[var(--radius-button)]" />
           ))}
         </div>
       ) : runs.length === 0 ? (
-        <p className="flex flex-1 items-center justify-center py-8 text-center text-sm text-[var(--text-muted)]">No runs yet.</p>
+        <div className={cn(listClass, "flex min-h-[220px] flex-1 items-center justify-center px-6 py-10 text-center text-sm text-[var(--text-muted)]")}>
+          No runs yet.
+        </div>
       ) : (
-        <div className="flex-1 min-h-0 overflow-y-auto [&>*+*]:[border-top:var(--bd-div)]">
+        <div className={cn(listClass, "flex-1 min-h-0 overflow-y-auto [&>*+*]:[border-top:var(--bd-div)]")}>
           {visibleRuns.map((run) => {
             const meta = statusMeta(run.status);
             return (
               <Link
                 key={run.run_id}
                 href={`/runs?sel=${run.run_id}`}
-                className="flex items-center gap-3 px-2 py-1.5 transition-colors hover:bg-[var(--active-nav-bg)]"
+                className="flex min-h-[52px] items-center gap-3 px-[18px] py-2 transition-colors hover:bg-[var(--active-nav-bg)]"
               >
                 <WorkerRowIcon workerId={run.worker_id} workerName={run.worker_name} />
                 <div className="min-w-0 flex-1">
@@ -347,21 +351,21 @@ function ComingUp({
 }) {
   const visibleItems = items.slice(0, Math.max(3, visibleRows - 1));
   return (
-    <section className={cn(cardClass, "flex flex-col p-4")}>
-      <div className="mb-2 flex items-center justify-between shrink-0">
-        <h2 className="text-sm font-semibold text-[var(--text-primary)]">Coming up today</h2>
-        <Link href="/runs" className="text-xs text-[var(--text-muted)] hover:text-[var(--text-primary)]">
+    <section className="flex min-h-0 flex-col">
+      <div className="mb-3 flex items-center justify-between shrink-0">
+        <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Coming up today</h2>
+        <Link href="/runs" className="text-[12.5px] text-[var(--accent)] hover:underline">
           See all
         </Link>
       </div>
       {loading ? (
-        <div className="space-y-2">
+        <div className={cn(listClass, "space-y-2 p-2")}>
           {Array.from({ length: 3 }).map((_, index) => (
-            <Skeleton key={index} className="h-12 w-full rounded-lg" />
+            <Skeleton key={index} className="h-[56px] w-full rounded-[var(--radius-button)]" />
           ))}
         </div>
       ) : items.length === 0 ? (
-        <div className="flex flex-1 min-h-32 flex-col items-center justify-center text-center">
+        <div className={cn(listClass, "flex min-h-[220px] flex-1 flex-col items-center justify-center px-6 py-10 text-center")}>
           <CalendarClock className="mb-3 size-8 text-[var(--text-muted)]" aria-hidden="true" />
           <p className="max-w-48 text-sm font-medium text-[var(--text-primary)]">
             No runs scheduled in the next 24 hours
@@ -374,12 +378,12 @@ function ComingUp({
           </Link>
         </div>
       ) : (
-        <div className="flex-1 min-h-0 overflow-y-auto space-y-2">
+        <div className={cn(listClass, "flex-1 min-h-0 overflow-y-auto [&>*+*]:[border-top:var(--bd-div)]")}>
           {visibleItems.map((item) => (
             <Link
               key={`${item.worker_id}-${item.next_fire_at}`}
               href={`/workers?sel=${item.worker_id}`}
-              className="grid grid-cols-[48px_1fr] gap-3 px-2 py-1.5 transition-colors hover:bg-[var(--active-nav-bg)]"
+              className="grid min-h-[56px] grid-cols-[52px_1fr] gap-3 px-[18px] py-2 transition-colors hover:bg-[var(--active-nav-bg)]"
             >
               <span className="text-sm font-medium text-[var(--text-primary)]">
                 {formatTimeOfDay(item.next_fire_at)}
@@ -540,10 +544,10 @@ export function OverviewDashboard({
   );
 
   return (
-    <div className="flex flex-col flex-1 space-y-3 pb-3 pt-4 lg:min-h-[620px] lg:overflow-hidden">
+    <div className="flex flex-col flex-1 pb-6 pt-1 lg:min-h-[620px] lg:overflow-hidden">
       {/* Hero — compact */}
-      <section>
-        <h1 className="text-xl font-semibold tracking-normal text-[var(--text-primary)]">Work done</h1>
+      <section className="pb-4">
+        <h1 className="text-[23px] font-semibold leading-tight tracking-normal text-[var(--text-primary)]">Work done</h1>
         <p className="mt-1 text-sm text-[var(--text-muted)]">
           {completedThisWeek} {completedThisWeek === 1 ? "run" : "runs"} completed in the last 7 days.
         </p>
@@ -552,24 +556,15 @@ export function OverviewDashboard({
       {/* Metric tiles with sparklines — S45 */}
       {/* Spec §5c: 2×2 grid at <880px, 4-col at xl. Using `sm:` (640px) as the
           first breakpoint keeps the 2×2 layout on all mobile/tablet sizes. */}
-      <div className="grid grid-cols-2 gap-3 xl:grid-cols-4 xl:[&>*]:min-h-[118px]">
+      <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
         {metrics.map((metric) => (
           <MetricCard key={metric.label} {...metric} loading={loading} />
         ))}
       </div>
 
-      <div className="flex items-center gap-2 text-xs text-[var(--text-muted)]">
-        <span className="size-1.5 rounded-[var(--radius-pill)] bg-[var(--success)] motion-safe:animate-pulse" aria-hidden="true" />
-        <span>
-          {data?.stats.running_now ?? 0} running · {data?.stats.queued_now ?? 0} queued ·{" "}
-          {data?.stats.completed_today ?? 0} completed today ·{" "}
-          {data?.stats.scheduled_24h_count ?? data?.scheduled_today?.length ?? 0} scheduled
-        </span>
-      </div>
-
       {/* Activity + Coming up — 2-col; grows to fill remaining viewport height
           so the page doesn't leave a whitespace band at the bottom. */}
-      <div className="grid grid-cols-1 gap-3 lg:grid-cols-3 lg:flex-1 lg:min-h-0">
+      <div className="mt-7 grid grid-cols-1 gap-7 lg:grid-cols-[1.4fr_1fr] lg:flex-1 lg:min-h-0">
         <WorkerActivity runs={data?.recent_runs ?? []} loading={loading} visibleRows={visibleRows} />
         <ComingUp items={data?.scheduled_today ?? []} loading={loading} visibleRows={visibleRows} />
       </div>

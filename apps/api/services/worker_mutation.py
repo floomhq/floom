@@ -219,10 +219,18 @@ def _reload_workers_for_user(user_id: str) -> ReloadResponse:
     workers = discover_workers()
     with get_db() as conn:
         try:
-            _persist_discovered_workers(conn, workers, user_id=user_id)
+            loaded, skipped = _persist_discovered_workers(conn, workers, user_id=user_id)
         except RuntimeError as exc:
+            # A systemic failure (e.g. the whole transaction is broken). Per-worker
+            # failures are isolated inside _persist_discovered_workers and never
+            # reach here — they are skipped + logged.
             raise HTTPException(status_code=502, detail=str(exc)) from exc
-    return ReloadResponse(status="success", workers_loaded=len(workers))
+    if skipped:
+        logger.warning(
+            "Worker reload for %s: %d loaded, %d skipped (unloadable)",
+            user_id, loaded, skipped,
+        )
+    return ReloadResponse(status="success", workers_loaded=loaded)
 
 
 def _patch_worker_contexts_in_yml(worker_yml_path: Path, new_contexts: List[Dict[str, Any]]) -> None:

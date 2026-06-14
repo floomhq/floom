@@ -34,15 +34,21 @@ const standalonePrefixes = ["/approvals/review", "/w", "/s", "/login"];
 // The full-page /chat route renders its own Emily header; no dock needed there.
 const noDockPrefixes = ["/chat"];
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export type AppShellProps = {
+  children: React.ReactNode;
+  noSidebarPaths?: string[];
+};
+
+function pathMatchesPrefixes(pathname: string, prefixes: string[]) {
+  return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
   const pathname = usePathname();
   const isDesktop = useIsDesktop();
-  const standalone = standalonePrefixes.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
-  );
-  const noDock = noDockPrefixes.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
-  );
+  const standalone = pathMatchesPrefixes(pathname, standalonePrefixes)
+    || pathMatchesPrefixes(pathname, noSidebarPaths);
+  const noDock = pathMatchesPrefixes(pathname, noDockPrefixes);
 
   if (standalone) {
     return (
@@ -78,7 +84,7 @@ export function AppShell({ children }: { children: React.ReactNode }) {
       <Sidebar />
       {/* Main content between sidebar and Emily dock — scrolls in its own container */}
       <main className="relative z-10 flex-1 min-w-0 h-full overflow-y-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex h-full min-h-0 flex-col">{children}</div>
+        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex flex-col min-h-full">{children}</div>
       </main>
       {/* Emily dock: fixed-height right rail — scrolls internally, never bleeds to body */}
       {isDesktop ? <EmilyDock /> : <EmilyMobileSheet />}

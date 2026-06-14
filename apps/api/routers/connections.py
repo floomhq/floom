@@ -100,6 +100,7 @@ class ConnectionItem(BaseModel):
     last_check_status: Optional[str] = None
     last_used_at: Optional[str] = None  # #802: most recent run using this connection
     last_used_by: Optional[str] = None  # #802: worker name of that run
+    owner_id: Optional[str] = None
     mcp_label: Optional[str] = None
     mcp_url: Optional[str] = None
     mcp_transport: str = "streamable_http"
@@ -310,6 +311,7 @@ def _public_connection_item(data: Dict[str, Any]) -> ConnectionItem:
     item = dict(data)
     # NEW-7: never surface the raw Composio ``ca_*`` id to clients.
     item.pop("composio_connection_id", None)
+    item["owner_id"] = item.get("owner_id") or item.get("user_id")
     item["kind"] = item.get("kind") or "composio"
     # Single-tenant owner view: show the owner their OWN account identity.
     # display_name carries the real label when present; fall back to

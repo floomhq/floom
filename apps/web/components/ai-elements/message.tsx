@@ -59,7 +59,7 @@ export function MessageActions({ className, ...props }: ComponentProps<"div">) {
     <div
       data-slot="message-actions"
       className={cn(
-        "flex items-center gap-1 opacity-0 transition-opacity duration-150 group-hover/message:opacity-100 group-focus-within/message:opacity-100",
+        "flex items-center gap-1 opacity-100 transition-opacity duration-150",
         className,
       )}
       {...props}

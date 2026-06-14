@@ -17,6 +17,7 @@ import { formatRelative } from "@/lib/formatters";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
+import { LoadingState } from "@/components/collection/CollectionStates";
 import { InlineFileOpen } from "@/components/file-viewer/InlineFileOpen";
 import { traceSteps } from "@/lib/runs/trace";
 import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
@@ -59,7 +60,7 @@ function useRunDetail(id: string): RunDetail | undefined {
 // PNG artifacts render as images (shared InlineFileOpen, rule #5).
 function OutputTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id);
-  if (!d) return <div style={muted}>Loading…</div>;
+  if (!d) return <LoadingState rows={4} />;
   const files = (d.artifacts ?? []).map((a) => ({
     id: a.id,
     name: a.name,
@@ -92,7 +93,7 @@ function OutputTab({ r }: { r: RunSummary }) {
 // structured field), so durations come from the run-level timeline, not faked.
 function TraceTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id);
-  if (!d) return <div style={muted}>Loading…</div>;
+  if (!d) return <LoadingState rows={4} />;
   const steps = traceSteps(d.transcript);
   const logs = d.logs ?? [];
   return (
@@ -136,7 +137,7 @@ function TraceTab({ r }: { r: RunSummary }) {
 // SPEC §4: Inputs — the run's input payload.
 function InputsTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id);
-  if (!d) return <div style={muted}>Loading…</div>;
+  if (!d) return <LoadingState rows={3} />;
   const input = d.input ?? {};
   if (Object.keys(input).length === 0) return <div style={muted}>This run took no inputs.</div>;
   return <pre style={code}>{JSON.stringify(input, null, 2)}</pre>;
@@ -145,7 +146,7 @@ function InputsTab({ r }: { r: RunSummary }) {
 // SPEC §4: Raw — the full run record.
 function RawTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id);
-  if (!d) return <div style={muted}>Loading…</div>;
+  if (!d) return <LoadingState rows={4} />;
   return <pre style={code}>{JSON.stringify(d, null, 2)}</pre>;
 }
 
@@ -254,10 +255,11 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
 
   const config: CollectionConfig<RunSummary> = {
     title: "Run history",
-    subtitle: "Worker executions grouped by day.",
+    subtitle: "Worker executions.",
     items: sorted,
     loading,
     idOf: (r) => r.id,
+    view: { default: "grid", grid: true },
     searchOf: (r) => `${r.worker_name ?? r.worker_id} ${r.id} ${r.trigger_source}`,
     tagsOf: (r) =>
       ({
@@ -286,7 +288,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       { value: sorted.filter((r) => r.status === "failed").length, label: "failed" },
       { value: sorted.filter((r) => r.status === "running").length, label: "running" },
     ],
-    view: { default: "list", grid: true },
     toolbarActions: (
       <DropdownMenu>
         <DropdownMenuTrigger className="c-vpill" style={{ padding: "9px 12px", gap: 5 }}>
@@ -336,7 +337,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       header: {
         // V4 SPEC rule 3: no avatar in detail header for runs.
         leading: undefined,
-        title: r.worker_name ?? r.worker_id,
+        title: `Run · ${r.worker_name ?? r.worker_id}`,
         sub: (
           <span className="c-dh-sub" style={{ margin: 0 }}>
             {formatTrigger(r.trigger_source)} · {formatDuration(r.duration_ms)} ·{" "}
@@ -349,14 +350,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
             <Link href={`/workers?sel=${encodeURIComponent(r.worker_id)}`} className="c-vpill" style={{ padding: "6px 11px" }}>
               ↑ Open worker
             </Link>
-            <button
-              type="button"
-              className="c-vpill"
-              style={{ padding: "6px 11px" }}
-              onClick={() => void replay(r)}
-            >
-              Replay
-            </button>
             {/* TODO(#765): run share link — backend pending; honest stub for now. */}
             <button
               type="button"
@@ -365,6 +358,14 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
               onClick={() => toast("Sharing a run is coming soon (#765).")}
             >
               Share
+            </button>
+            <button
+              type="button"
+              className="c-vpill"
+              style={{ padding: "6px 11px" }}
+              onClick={() => void replay(r)}
+            >
+              Replay
             </button>
           </>
         ),

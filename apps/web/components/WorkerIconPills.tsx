@@ -24,8 +24,8 @@ import { cn } from "@/lib/utils";
 // the operator (2026-05-29): "should be composed like for langdock — understand
 // the logic?" Langdock's template-card icon row is a SINGLE composed unit:
 // connected/overlapping rounded squares butted together so they read as ONE
-// glyph for the workflow, with the FIRST node accented (their orange
-// start/trigger node), the tool/connection logos following, and a +N overflow
+// glyph for the workflow, with the FIRST node accented (the start/trigger
+// node), the tool/connection logos following, and a +N overflow
 // chip at the end.
 //
 // So this is NOT three detached squares with gaps. It is one linked strip:

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { Folder, Lock, Users } from "lucide-react";
@@ -9,6 +9,7 @@ import { formatRelative } from "@/lib/formatters";
 import type { ContextSummary, ContextDetail } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
+import { LoadingState } from "@/components/collection/CollectionStates";
 import { InlineFileOpen } from "@/components/file-viewer/InlineFileOpen";
 import { visibilityLabel } from "@/lib/permissions";
 import { formatBytes, writeKey } from "@/lib/brain/format";
@@ -53,7 +54,7 @@ function useContextDetail(name: string): [ContextDetail | undefined, () => Promi
 // loads inline via readTextFile; .db gets the honest #777 fallback.
 function FilesTab({ folder }: { folder: ContextSummary }) {
   const [d, reload] = useContextDetail(folder.name);
-  if (!d) return <div style={muted}>Loading…</div>;
+  if (!d) return <LoadingState rows={4} />;
   const files = (d.files ?? [])
     .filter((f) => !f.deleted)
     .map((f) => ({
@@ -64,6 +65,9 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
       binary: f.is_binary,
       tags: f.tags, // #780: show file tags as chips
     }));
+  // Drag-and-drop upload is only offered when the operator may write to the
+  // folder (read-only/system packs stay read-only).
+  const canWrite = !folder.read_only && folder.writeable !== false;
   return (
     <InlineFileOpen
       files={files}
@@ -78,23 +82,57 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
         await api.contexts.moveFile(folder.name, file.id, `${dir}${newName}`);
         await reload();
       }}
+      // Drag-and-drop / Browse upload into the brain folder (#issue-6a).
+      onUpload={
+        canWrite
+          ? async (dropped, dirPrefix) => {
+              try {
+                await api.contexts.upload(folder.name, dropped, dirPrefix || undefined);
+                toast.success(
+                  dropped.length === 1 ? "Added 1 file" : `Added ${dropped.length} files`,
+                );
+                await reload();
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : "Could not upload files.");
+              }
+            }
+          : undefined
+      }
     />
   );
+}
+
+/** Derive a backend-safe slug from any human-typed name.
+ * Backend accepts: ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$
+ * "Walk Test Folder" → "walk-test-folder"
+ */
+function slugifyContextName(raw: string): string {
+  return (raw || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")   // spaces/specials → hyphens
+    .toLowerCase()
+    .replace(/^-+|-+$/g, "")             // trim leading/trailing hyphens
+    .slice(0, 63) || "";
 }
 
 function NewFolderForm({ onCreated }: { onCreated: () => void | Promise<void> }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const slug = slugifyContextName(name);
+  const showSlugHint = name.trim() !== "" && name.trim() !== slug;
+
   const submit = async () => {
-    const n = name.trim();
-    if (!n) return;
+    if (!slug) return;
     setBusy(true);
+    setError(null);
     try {
-      await api.contexts.create(n);
-      toast.success(`Created ${n}`);
+      await api.contexts.create(slug);
+      toast.success(`Created "${slug}"`);
       await onCreated();
-    } catch {
-      toast.error("Could not create the folder.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create the folder.");
     } finally {
       setBusy(false);
     }
@@ -107,13 +145,23 @@ function NewFolderForm({ onCreated }: { onCreated: () => void | Promise<void> })
         style={{ maxWidth: "none" }}
         autoFocus
         value={name}
-        onChange={(e) => setName(e.target.value)}
+        onChange={(e) => { setName(e.target.value); setError(null); }}
         onKeyDown={(e) => {
           if (e.key === "Enter") void submit();
         }}
-        placeholder="e.g. Company facts"
+        placeholder="e.g. company-facts or Walk Test Folder"
       />
-      <button type="button" className="c-addbtn" disabled={busy || !name.trim()} onClick={() => void submit()}>
+      {showSlugHint && (
+        <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+          Saved as: <span style={{ fontFamily: "var(--font-mono)", color: "var(--ink)" }}>{slug}</span>
+        </div>
+      )}
+      {error && (
+        <div style={{ fontSize: 12, color: "var(--red, #c0392b)", padding: "6px 10px", background: "var(--bg-2)", borderRadius: 8 }}>
+          {error}
+        </div>
+      )}
+      <button type="button" className="c-addbtn" disabled={busy || !slug} onClick={() => void submit()}>
         {busy ? "Creating…" : "Create folder"}
       </button>
     </div>
@@ -122,7 +170,7 @@ function NewFolderForm({ onCreated }: { onCreated: () => void | Promise<void> })
 
 function UsedByTab({ folder }: { folder: ContextSummary }) {
   const [d] = useContextDetail(folder.name);
-  if (!d) return <div style={muted}>Loading…</div>;
+  if (!d) return <LoadingState rows={3} />;
   const used = d.used_by ?? [];
   return (
     <div className="c-ltable">
@@ -187,17 +235,32 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     </span>
   );
 
+  const categoryTags = useMemo(
+    () =>
+      Array.from(
+        new Set(
+          folders
+            .map((folder) => folder.category?.trim())
+            .filter((category): category is string => Boolean(category)),
+        ),
+      )
+        .sort((a, b) => a.localeCompare(b))
+        .map((category) => ({ value: category, label: category })),
+    [folders],
+  );
+
   const config: CollectionConfig<ContextSummary> = {
     title: "Brain",
     subtitle: "Reusable folders of files your workers can read before they act.",
     items: folders,
     loading,
     idOf: (c) => c.name,
-    searchOf: (c) => `${c.name} ${c.description ?? ""}`,
+    searchOf: (c) => `${c.name} ${c.description ?? ""} ${c.category ?? ""}`,
     tagsOf: (c) =>
       ({
         visibility: [c.visibility === "workspace" ? "shared" : "private"],
         status: [writeKey(c)],
+        content: c.category ? [c.category] : [],
       }) as Partial<Record<TagFamilyKey, string[]>>,
     tags: {
       status: [
@@ -208,12 +271,13 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
         { value: "private", label: "Private" },
         { value: "shared", label: "Shared" },
       ],
+      ...(categoryTags.length > 0 ? { content: categoryTags } : {}),
     },
     counts: [
       { value: folders.length, label: "folders" },
       { value: folders.reduce((n, c) => n + (c.file_count ?? 0), 0), label: "files" },
     ],
-    view: { default: "list", grid: true },
+    view: { default: "grid", grid: true },
     columns: {
       template: "1.8fr 1fr 1fr 40px",
       headers: ["Folder", "Files", "Updated", ""],

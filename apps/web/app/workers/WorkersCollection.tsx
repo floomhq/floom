@@ -10,12 +10,16 @@ import type {
   WorkerDetail,
   WorkerContextSpec,
   WorkerConnectionSpec,
+  WorkerFile,
   VersionSummary,
   RunSummary,
+  TriggerSpec,
 } from "@/lib/types";
 import { formatVersionRows } from "@/lib/workers/versions";
 import { WORKER_DETAIL_TABS, type WorkerDetailTab } from "@/lib/workers/tabs";
 import { formatDuration } from "@/lib/runs/format";
+import { modelLabel } from "@/lib/model-labels";
+import { runtimeSummary } from "@/lib/runtime-labels";
 import {
   Dialog,
   DialogContent,
@@ -30,14 +34,34 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
-import { FileText, Folder, Lock } from "lucide-react";
+import { LoadingState } from "@/components/collection/CollectionStates";
+import { FileText, Lock, MoreHorizontal } from "lucide-react";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import { CodeBlock } from "@/components/file-viewer/code-block";
+import {
+  FilesEditor,
+  TriggersEditor,
+  makeTriggerRow,
+  buildTriggersYaml,
+  replaceTriggerBlock,
+  type TriggerRow,
+} from "@/components/worker-form";
 import { WorkerBrainEditor } from "@/components/worker/WorkerBrainEditor";
 import { WorkerToolsEditor } from "@/components/worker/WorkerToolsEditor";
 import { WorkerFeedbackPanel } from "@/components/worker/WorkerFeedbackPanel";
-import { patchBrainContexts, patchWorkerConnections } from "@/lib/worker-manifest";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
+  patchBrainContexts,
+  patchWorkerConnections,
+  setContextWriteable,
+  toggleContext,
+} from "@/lib/worker-manifest";
 import { can, isViewOnly, canLeaveFeedback, visibilityLabel, FEEDBACK_BACKEND_AVAILABLE } from "@/lib/permissions";
 import {
   isSystemWorker,
@@ -133,7 +157,32 @@ function coerceInputValue(value: string, type?: string): unknown {
 }
 
 function Loading() {
-  return <div style={muted}>Loading…</div>;
+  return <LoadingState rows={4} />;
+}
+
+function friendlyToken(value?: string | null): string {
+  const raw = value?.trim();
+  if (!raw) return "Not set";
+  if (raw === "cron") return "Schedule";
+  if (raw === "composio") return "Connection event";
+  return raw
+    .split(/[-_]+/)
+    .filter(Boolean)
+    .map((part) => part.charAt(0).toUpperCase() + part.slice(1))
+    .join(" ");
+}
+
+function ConfigInfoGrid({ rows }: { rows: Array<[string, React.ReactNode]> }) {
+  return (
+    <div className="grid grid-cols-[minmax(96px,140px)_minmax(0,1fr)] gap-x-4 gap-y-2 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3 text-sm">
+      {rows.map(([key, value]) => (
+        <div key={key} className="contents">
+          <span className="text-[12.5px] text-muted-foreground">{key}</span>
+          <span className="min-w-0 break-words text-foreground">{value}</span>
+        </div>
+      ))}
+    </div>
+  );
 }
 
 // SPEC §4 + rule #4: Overview is OUTPUT-FIRST — latest result/artifacts and an
@@ -187,7 +236,7 @@ function OverviewTab({ w }: { w: WorkerSummary }) {
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       <LatestOutput w={w} d={d} />
       <div>
-        <h4 style={h4}>What it does</h4>
+        <h4 style={h4}>WHAT IT DOES</h4>
         <AboutBody w={w} d={d} />
       </div>
     </div>
@@ -357,85 +406,132 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
   );
 }
 
-function sourceFolder(path: string): string {
-  const parts = path.split("/").filter(Boolean);
-  if (parts.length <= 1) return "Root";
-  return parts.slice(0, -1).join("/");
-}
-
 function sourceFileName(path: string): string {
   return path.split("/").filter(Boolean).pop() || path;
 }
 
-function SourceFileTree({
+type SourceEditorFile = {
+  path: string;
+  content: string;
+  binary?: boolean;
+  language?: string;
+  size?: number;
+};
+
+function sourceEditorFiles(files: WorkerFile[]): SourceEditorFile[] {
+  return files.map((f) => ({
+    path: f.path,
+    content: f.content ?? "",
+    binary: f.binary,
+    language: f.language,
+    size: f.size,
+  }));
+}
+
+function SourceFileTabs({
   files,
   activePath,
   onSelect,
 }: {
-  files: ReturnType<typeof orderedSourceFiles>;
+  files: WorkerFile[];
   activePath: string;
   onSelect: (path: string) => void;
 }) {
-  const groups = new Map<string, typeof files>();
-  for (const file of files) {
-    const folder = sourceFolder(file.path);
-    const list = groups.get(folder) ?? [];
-    list.push(file);
-    groups.set(folder, list);
-  }
-
   return (
-    <div className="max-h-[min(58vh,520px)] overflow-y-auto rounded-[var(--radius-card)] bg-transparent p-0">
-      {Array.from(groups.entries()).map(([folder, group]) => (
-        <div key={folder} className="mb-2 last:mb-0">
-          <div className="flex min-w-0 items-center gap-1.5 px-2 py-1 text-[11px] font-medium uppercase tracking-[0.04em] text-muted-foreground">
-            <Folder className="size-3.5 shrink-0" />
-            <span className="truncate">{folder}</span>
-          </div>
-          <div className="space-y-0.5">
-            {group.map((file) => (
-              <button
-                key={file.path}
-                type="button"
-                className={`flex w-full min-w-0 items-center gap-2 rounded-[var(--radius-button)] px-2 py-1.5 text-left text-xs transition-colors ${
-                  file.path === activePath ? "bg-[var(--bg-2)] text-foreground" : "text-muted-foreground hover:bg-[var(--bg-2)] hover:text-foreground"
-                }`}
-                title={file.path}
-                onClick={() => onSelect(file.path)}
-              >
-                <FileText className="size-3.5 shrink-0" />
-                <span className="min-w-0 flex-1 truncate font-mono">{sourceFileName(file.path)}</span>
-              </button>
-            ))}
-          </div>
-        </div>
+    <div className="c-dtabs c-source-file-tabs -mx-1 mb-3 px-1" role="tablist" aria-label="Source files">
+      {files.map((file) => (
+        <button
+          key={file.path}
+          type="button"
+          role="tab"
+          aria-selected={file.path === activePath}
+          className={`c-dtab ${file.path === activePath ? "on" : ""}`}
+          title={file.path}
+          onClick={() => onSelect(file.path)}
+        >
+          <FileText className="size-3.5 shrink-0" />
+          <span className="font-mono text-xs">{sourceFileName(file.path)}</span>
+        </button>
       ))}
     </div>
   );
 }
 
 function SourceTab({ w }: { w: WorkerSummary }) {
-  const [d] = useWorkerDetail(w.id);
+  const [d, applyDetail] = useWorkerDetail(w.id);
   const [active, setActive] = useState<string | null>(null);
+  const [editOpen, setEditOpen] = useState(false);
+  const [draftFiles, setDraftFiles] = useState<SourceEditorFile[]>([]);
+  const [draftPath, setDraftPath] = useState<string>("worker.yml");
+  const [saving, setSaving] = useState(false);
   if (!d) return <Loading />;
   const ordered = orderedSourceFiles(d.files ?? []);
   if (ordered.length === 0) return <div style={muted}>No source files.</div>;
   const file = ordered.find((f) => f.path === active) ?? ordered[0];
+  const editable = can("edit", d);
+
+  function openEditor() {
+    setDraftFiles(sourceEditorFiles(ordered));
+    setDraftPath(file.path);
+    setEditOpen(true);
+  }
+
+  async function saveFiles() {
+    if (!d || saving) return;
+    setSaving(true);
+    try {
+      const updated = await api.workers.updateFiles(
+        d.id,
+        draftFiles.map((f) => ({ path: f.path, content: f.content ?? "" })),
+      );
+      applyDetail(updated);
+      setActive(draftPath);
+      setEditOpen(false);
+      toast.success("Source updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update source files.");
+    } finally {
+      setSaving(false);
+    }
+  }
+
   return (
-    <div className="grid min-w-0 gap-4 lg:grid-cols-[minmax(180px,240px)_minmax(0,1fr)]">
-      <SourceFileTree files={ordered} activePath={file.path} onSelect={setActive} />
+    <>
       <div className="min-w-0">
-        <div className="mb-2 flex min-w-0 items-center justify-between gap-3">
-          <div className="min-w-0 truncate font-mono text-xs text-muted-foreground" title={file.path}>
-            {file.path}
-          </div>
-          <span className="shrink-0 text-[11px] text-muted-foreground">
-            {ordered.length} {ordered.length === 1 ? "file" : "files"}
-          </span>
+        <div className="mb-2 flex min-w-0 items-center gap-3">
+          <SourceFileTabs files={ordered} activePath={file.path} onSelect={setActive} />
+          {editable && (
+            <button type="button" className="c-vpill mb-3 shrink-0" style={pillBtn} onClick={openEditor}>
+              Edit
+            </button>
+          )}
         </div>
         <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} surface="flat" />
       </div>
-    </div>
+      <Dialog open={editOpen} onOpenChange={setEditOpen}>
+        <DialogContent className="max-h-[90vh] max-w-6xl overflow-y-auto">
+          <DialogHeader>
+            <DialogTitle>Edit source</DialogTitle>
+            <DialogDescription>Update this worker&apos;s source files.</DialogDescription>
+          </DialogHeader>
+          <FilesEditor
+            mode="edit"
+            files={draftFiles}
+            selectedPath={draftPath}
+            onChange={setDraftFiles}
+            onSelectedPathChange={setDraftPath}
+          />
+          <DialogFooter>
+            <Button type="button" variant="secondary" onClick={() => setEditOpen(false)}>
+              Cancel
+            </Button>
+            <Button type="button" onClick={() => void saveFiles()} disabled={saving}>
+              {saving ? "Saving..." : "Save"}
+            </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -443,11 +539,18 @@ function BrainTab({ w }: { w: WorkerSummary }) {
   const [d, applyDetail] = useWorkerDetail(w.id);
   const [packs, setPacks] = useState<{ name: string }[]>([]);
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
+  const refreshPacks = useCallback(() => {
     api.contexts.list().then(setPacks).catch(() => {});
   }, []);
+  useEffect(() => {
+    refreshPacks();
+  }, [refreshPacks]);
   if (!d) return <Loading />;
   const editable = can("edit", d);
+  const contexts = d.config?.contexts ?? [];
+  // Per-worker memory folder convention: "<worker-id>-memory". Connecting it
+  // gives the worker a writeable folder it owns by default (issue 6b).
+  const memoryFolderName = `${w.id}-memory`;
   const save = async (next: WorkerContextSpec[]) => {
     setBusy(true);
     try {
@@ -459,13 +562,37 @@ function BrainTab({ w }: { w: WorkerSummary }) {
       setBusy(false);
     }
   };
+  const attachMemory = async () => {
+    setBusy(true);
+    try {
+      // Create the writeable memory folder if it does not exist yet (idempotent:
+      // a 409/duplicate just means it is already there).
+      if (!packs.some((p) => p.name === memoryFolderName)) {
+        try {
+          await api.contexts.create(memoryFolderName, true);
+        } catch {
+          // Folder may already exist (created by a prior run); continue to attach.
+        }
+        refreshPacks();
+      }
+      const attached = setContextWriteable(toggleContext(contexts, memoryFolderName), memoryFolderName, true);
+      applyDetail(await persistYml(d, patchBrainContexts(workerYml(d), attached)));
+      toast.success("Memory folder connected");
+    } catch {
+      toast.error("Could not connect the memory folder.");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <WorkerBrainEditor
-      contexts={d.config?.contexts ?? []}
+      contexts={contexts}
       availablePacks={packs}
       editable={editable}
       busy={busy}
       onChange={(next) => void save(next)}
+      memoryFolderName={memoryFolderName}
+      onAttachMemory={attachMemory}
     />
   );
 }
@@ -496,47 +623,154 @@ function ToolsTab({ w }: { w: WorkerSummary }) {
   );
 }
 
+/** Read the worker's current triggers (multi-trigger spec first, single fallback). */
+function currentTriggerRows(d: WorkerDetail): TriggerRow[] {
+  const specs: TriggerSpec[] =
+    d.triggers_spec && d.triggers_spec.length > 0
+      ? d.triggers_spec
+      : d.config?.trigger
+        ? [d.config.trigger as TriggerSpec]
+        : [];
+  return specs.map((s) => makeTriggerRow(s));
+}
+
+// W-02: Triggers are EDITABLE — read the current trigger(s) from worker.yml and
+// let the owner change the schedule / webhook / app-event / manual via the same
+// TriggersEditor used in the create flow. Persists through the worker.yml PUT
+// (replaceTriggerBlock → updateFiles), the path Tools/Brain already use.
+function TriggersTab({ w }: { w: WorkerSummary }) {
+  const [d, applyDetail] = useWorkerDetail(w.id);
+  const [rows, setRows] = useState<TriggerRow[] | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Initialize editor rows from the loaded detail (once it arrives).
+  useEffect(() => {
+    if (d && rows === null) setRows(currentTriggerRows(d));
+  }, [d, rows]);
+
+  if (!d || rows === null) return <Loading />;
+  const editable = can("edit", d);
+  const baseline = JSON.stringify(currentTriggerRows(d).map(stripRowId));
+  const dirty = JSON.stringify(rows.map(stripRowId)) !== baseline;
+
+  // Read-only view: list the configured trigger(s) without editing chrome.
+  if (!editable) {
+    return (
+      <div className="flex flex-col gap-4">
+        <ConfigInfoGrid
+          rows={[
+            ["Trigger", friendlyToken(d.config?.trigger?.type ?? w.trigger_type)],
+            ...(d.config?.trigger?.cron
+              ? [["Schedule", d.config.trigger.cron] as [string, React.ReactNode]]
+              : []),
+            ...(d.config?.trigger?.timezone
+              ? [["Timezone", d.config.trigger.timezone] as [string, React.ReactNode]]
+              : []),
+            ...(d.webhook_url
+              ? [["Webhook", <span key="webhook" className="font-mono text-xs">{d.webhook_url}</span>] as [string, React.ReactNode]]
+              : []),
+          ]}
+        />
+      </div>
+    );
+  }
+
+  const save = async () => {
+    if (saving || !dirty) return;
+    setSaving(true);
+    try {
+      const yaml = replaceTriggerBlock(workerYml(d), buildTriggersYaml(rows));
+      const updated = await persistYml(d, yaml);
+      applyDetail(updated);
+      setRows(currentTriggerRows(updated));
+      toast.success("Triggers updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update triggers.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <TriggersEditor
+      rows={rows}
+      onChange={setRows}
+      webhookUrl={d.webhook_url}
+      dirty={dirty}
+      saving={saving}
+      onSave={() => void save()}
+      onDiscard={() => setRows(currentTriggerRows(d))}
+    />
+  );
+}
+
+/** Compare trigger rows ignoring the random client-only `id`. */
+function stripRowId(row: TriggerRow): Omit<TriggerRow, "id"> {
+  const { id: _id, ...rest } = row;
+  void _id;
+  return rest;
+}
+
 // SPEC §4 Config: Tools · Brain attach · Triggers · Limits in one tab.
 // ("paused" = enabled:false — there is no paused status; pause/resume is #788;
 // spend cap is #793; PATCH name/desc is #785; brain attach/detach is #790 —
 // today these route through the full worker-YAML PUT.)
 function ConfigTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
+  const [activeTab, setActiveTab] = useState<"Tools" | "Brain" | "Triggers">("Tools");
   if (!d) return <Loading />;
+  const runtime = d.config?.runtime;
+  const modelId = runtime?.model ?? d.config?.model;
+  const runtimeRows: Array<[string, React.ReactNode]> = [
+    [
+      "Runtime",
+      runtimeSummary({
+        runner: runtime?.runner ?? d.runner ?? w.runner,
+        runtime: runtime?.type ?? w.runtime,
+      }),
+    ],
+  ];
+  if (runtime?.mode) runtimeRows.push(["Mode", friendlyToken(runtime.mode)]);
+  if (runtime?.entrypoint) {
+    runtimeRows.push(["Entrypoint", <span key="entrypoint" className="font-mono text-xs">{runtime.entrypoint}</span>]);
+  }
+  if (modelId) runtimeRows.push(["Model", modelLabel(modelId)]);
+  const tabs = ["Tools", "Brain", "Triggers"] as const;
   return (
-    <div style={{ display: "flex", flexDirection: "column", gap: 22 }}>
-      <section>
-        <h4 style={h4}>Tools</h4>
-        <ToolsTab w={w} />
-      </section>
-      <section>
-        <h4 style={h4}>Brain</h4>
-        <BrainTab w={w} />
-      </section>
-      <section>
-        <h4 style={h4}>Triggers</h4>
-        <div style={kv}>
-          <span style={kvK}>Trigger</span>
-          <span>{w.trigger_type}</span>
-          {d.webhook_url && (
-            <>
-              <span style={kvK}>Webhook</span>
-              <span style={{ fontFamily: "var(--font-mono)" }}>{d.webhook_url}</span>
-            </>
-          )}
-          <span style={kvK}>Status</span>
-          {/* TODO(#788): pause/resume toggle — "paused" is enabled:false today. */}
-          <span>{d.enabled === false ? "Paused" : "Enabled"}</span>
-        </div>
-      </section>
-      <section>
-        <h4 style={h4}>Limits</h4>
-        <div style={kv}>
-          <span style={kvK}>Runtime</span>
-          <span>{w.runner}</span>
+    <div className="flex flex-col gap-5">
+      <div className="c-dtabs px-0 pt-0" role="tablist" aria-label="Config sections">
+        {tabs.map((tab) => (
+          <button
+            key={tab}
+            type="button"
+            role="tab"
+            aria-selected={activeTab === tab}
+            className={`c-dtab ${activeTab === tab ? "on" : ""}`}
+            onClick={() => setActiveTab(tab)}
+          >
+            {tab}
+          </button>
+        ))}
+      </div>
+      {activeTab === "Tools" && <ToolsTab w={w} />}
+      {activeTab === "Brain" && <BrainTab w={w} />}
+      {activeTab === "Triggers" && (
+        <div className="flex flex-col gap-5">
+          {/* W-02: editable trigger control (schedule / webhook / app-event / manual). */}
+          <TriggersTab w={w} />
+          <ConfigInfoGrid
+            rows={[
+              [
+                "Status",
+                // TODO(#788): pause/resume toggle — "paused" is enabled:false today.
+                <span key="status" className="c-vpill">{d.enabled === false ? "Paused" : "Enabled"}</span>,
+              ],
+            ]}
+          />
+          <ConfigInfoGrid rows={runtimeRows} />
           {/* TODO(#793): monthly spend cap field. */}
         </div>
-      </section>
+      )}
       {FEEDBACK_BACKEND_AVAILABLE && (
         <section>
           <h4 style={h4}>Feedback</h4>
@@ -649,9 +883,14 @@ function WorkerDetailActions({
         </button>
       )}
       {(canManage || can("edit", w)) && (
-        <button type="button" className="c-vpill" style={pillBtn} onClick={() => setEditOpen(true)}>
-          Edit
-        </button>
+        <DropdownMenu>
+          <DropdownMenuTrigger className="c-vpill" style={pillBtn} aria-label="More worker actions">
+            <MoreHorizontal className="size-3.5" />
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end" className="w-36 p-1">
+            <DropdownMenuItem onClick={() => setEditOpen(true)}>Edit</DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
       )}
 
       <Dialog open={runOpen} onOpenChange={setRunOpen}>
@@ -686,7 +925,7 @@ function WorkerDetailActions({
               )}
             </div>
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setRunOpen(false)}>
+              <Button type="button" variant="secondary" onClick={() => setRunOpen(false)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={running}>
@@ -728,7 +967,7 @@ function WorkerDetailActions({
               </div>
             )}
             <DialogFooter>
-              <Button type="button" variant="outline" onClick={() => setEditOpen(false)}>
+              <Button type="button" variant="secondary" onClick={() => setEditOpen(false)}>
                 Cancel
               </Button>
               <Button type="submit" disabled={!d || saving}>
@@ -742,16 +981,37 @@ function WorkerDetailActions({
   );
 }
 
+/**
+ * A host-injected top-level view (#1006). managed-deployment passes its
+ * cross-tenant "workspace-admin" view here so it can compose the engine
+ * `WorkersCollection` instead of forking the whole 869-line component. The
+ * host decides visibility (e.g. only pass it when `api.me().is_admin`); the
+ * engine stays generic and renders the switcher only when views are supplied.
+ */
+export type WorkersExtraView = {
+  /** Stable key, also the active-view id. */
+  key: string;
+  /** Label shown in the top-of-collection view switcher. */
+  label: string;
+  /** Rendered in place of the workers Collection when this view is active. */
+  render: () => React.ReactNode;
+};
+
+const WORKERS_VIEW_KEY = "workers";
+
 export default function WorkersCollection({
   initialWorkers,
+  extraViews = [],
 }: {
   initialWorkers: WorkerSummary[];
+  extraViews?: WorkersExtraView[];
 }) {
   const router = useRouter();
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(initialWorkers.length === 0);
   const [canManageWorkers, setCanManageWorkers] = useState(false);
+  const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
 
   useEffect(() => {
     let alive = true;
@@ -800,6 +1060,7 @@ export default function WorkersCollection({
     items: sortWorkersByRecentActivity(visible),
     loading,
     idOf: (w) => w.id,
+    searchPlaceholder: "Search workers or tags…",
     searchOf: (w) => `${w.name} ${displayBrandCopy(w.description)} ${(w.tags ?? []).join(" ")}`,
     tagsOf: (w) =>
       workerTags(w, { starred: favorites.has(w.id), now }) as Partial<Record<TagFamilyKey, string[]>>,
@@ -838,7 +1099,7 @@ export default function WorkersCollection({
       // Lock icon: inline after title at baseline (small + muted), never as leading.
       leading: undefined,
       primary: w.visibility === "private"
-        ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" /></span>
+        ? <span className="inline-flex items-center gap-1.5">{w.name}<Lock className="size-3 shrink-0 text-[var(--muted-foreground)]" /></span>
         : w.name,
       secondary: displayBrandCopy(w.description),
       cols: [
@@ -852,7 +1113,7 @@ export default function WorkersCollection({
       // V4 SPEC rule 3: no avatar monogram. Lock is small+muted inline after name.
       leading: undefined,
       name: w.visibility === "private"
-        ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" /></span>
+        ? <span className="inline-flex min-w-0 items-center gap-1.5"><span className="truncate">{w.name}</span><Lock className="size-3 shrink-0 text-[var(--muted-foreground)]" /></span>
         : w.name,
       description: displayBrandCopy(w.description),
       status: workerStatusPill(w),
@@ -875,7 +1136,7 @@ export default function WorkersCollection({
           // V4 SPEC rule 3: no avatar monogram in detail header. Lock inline after title.
           leading: undefined,
           title: w.visibility === "private"
-            ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3.5 text-[var(--muted-foreground)] translate-y-px" /></span>
+            ? <span className="inline-flex items-center gap-1.5">{w.name}<Lock className="size-3.5 shrink-0 text-[var(--muted-foreground)]" /></span>
             : w.name,
           actions,
           sub: (
@@ -896,7 +1157,12 @@ export default function WorkersCollection({
         // guards what actually renders (no drift between constant and component).
         tabs: WORKER_DETAIL_TABS.map((key) => {
           const Tab = WORKER_TAB_COMPONENT[key];
-          return { key, label: key, render: () => <Tab w={w} /> };
+          return {
+            key,
+            label: key,
+            count: key === "History" ? w.recent_stats?.runs_7d ?? (w.last_run ? 1 : undefined) : undefined,
+            render: () => <Tab w={w} />,
+          };
         }),
       };
     },
@@ -907,7 +1173,44 @@ export default function WorkersCollection({
     },
   };
 
-  return <Collection config={config} />;
+  // OSS path: no host views -> render the Collection exactly as before.
+  if (extraViews.length === 0) {
+    return <Collection config={config} />;
+  }
+
+  // Host path (cloud): a top-level switcher between the workers Collection and
+  // each injected view. Reuses the app's tab styling (c-dtabs / c-dtab).
+  const activeExtra = extraViews.find((v) => v.key === activeView);
+  return (
+    <div className="flex h-full min-h-0 flex-col">
+      <div className="c-dtabs px-4 pt-3" role="tablist" aria-label="Workers views">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeView === WORKERS_VIEW_KEY}
+          className={`c-dtab ${activeView === WORKERS_VIEW_KEY ? "on" : ""}`}
+          onClick={() => setActiveView(WORKERS_VIEW_KEY)}
+        >
+          Workers
+        </button>
+        {extraViews.map((v) => (
+          <button
+            type="button"
+            role="tab"
+            key={v.key}
+            aria-selected={activeView === v.key}
+            className={`c-dtab ${activeView === v.key ? "on" : ""}`}
+            onClick={() => setActiveView(v.key)}
+          >
+            {v.label}
+          </button>
+        ))}
+      </div>
+      <div className="min-h-0 flex-1">
+        {activeExtra ? activeExtra.render() : <Collection config={config} />}
+      </div>
+    </div>
+  );
 }
 
 const muted: React.CSSProperties = { color: "var(--muted-foreground)" };
@@ -918,6 +1221,4 @@ const h4: React.CSSProperties = {
   color: "var(--muted-foreground)",
   margin: "0 0 9px",
 };
-const kv: React.CSSProperties = { display: "grid", gridTemplateColumns: "140px 1fr", gap: "9px 16px" };
-const kvK: React.CSSProperties = { color: "var(--muted-foreground)", fontSize: 12.5 };
 const pillBtn: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5 };

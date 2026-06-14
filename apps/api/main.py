@@ -152,6 +152,7 @@ from models import (
     WorkerCreateRequest,
     WorkerVisibilityUpdate,
     SecretWarning,
+    CandidateFeedbackCreateRequest,
     ContextWorkerRef,
     ContextSummary,
     ContextFileItem,
@@ -204,6 +205,7 @@ from models import (
     WorkspaceStats,
     UnsafeMCPUrlError,
     UnsafeOutboundUrlError,
+    WorkerNotRunnableError,
     assert_safe_outbound_mcp_url,
     assert_safe_outbound_url,
     composio_app_for_tool_slug,
@@ -370,6 +372,7 @@ from core.config import (
     DEFAULT_JSON_BODY_LIMIT_BYTES,
     FROM_BUNDLE_BODY_LIMIT_BYTES,
     DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES,
+    WORKER_FILES_BODY_LIMIT_BYTES,
     WORKSPACE_IMPORT_BODY_LIMIT_BYTES,
     DEFAULT_CHAT_MESSAGE_MAX_CHARS,
     DEFAULT_RATE_LIMIT,
@@ -478,8 +481,10 @@ from services.auth_ops import (
     _require_multi_member_repos,
     _seed_bootstrap_secrets,
     _session_cookie_secure,
+    _consume_magic_link_nonce,
     _set_session_cookie,
     _validate_magic_link,
+    _validate_magic_link_full,
     _validate_new_password,
 )
 from services.worker_codegen import (
@@ -773,8 +778,20 @@ def _expire_stale_approvals() -> int:
                     (now_iso_str, r["id"]),
                 )
                 conn.execute(
-                    "UPDATE runs SET status = ? WHERE id = ? AND status = ?",
-                    (RunStatus.FAILED.value, r["run_id"], RunStatus.PENDING_APPROVAL.value),
+                    """
+                    UPDATE runs
+                    SET status = ?,
+                        error = COALESCE(NULLIF(error, ''), ?),
+                        error_code = COALESCE(NULLIF(error_code, ''), ?)
+                    WHERE id = ? AND status = ?
+                    """,
+                    (
+                        RunStatus.FAILED.value,
+                        "Approval expired before a decision was recorded.",
+                        "approval_expired",
+                        r["run_id"],
+                        RunStatus.PENDING_APPROVAL.value,
+                    ),
                 )
                 expired += 1
         for r in rows:
@@ -873,7 +890,24 @@ async def lifespan(app: FastAPI):
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
     if deploy == "local":
         bootstrap_user_id = _bootstrap_user_id()
-        _reload_workers_for_user(bootstrap_user_id)
+        # Worker reload MUST be non-fatal on startup. A single malformed or
+        # foreign worker (dangling FK, invalid manifest, non-worker backup dir
+        # with a worker.yml) used to raise here and crash the process with
+        # "Application startup failed. Exiting." — and since the autodeploy
+        # restarts every ~60s, that became a guaranteed crash-loop / outage.
+        # Per-worker isolation inside _persist_discovered_workers already skips
+        # individual bad workers; this guard catches any remaining systemic
+        # failure so the service still comes up in degraded mode (the HTTP
+        # /workers/reload endpoint keeps its RuntimeError -> 502 contract).
+        try:
+            _reload_workers_for_user(bootstrap_user_id)
+        except Exception as _reload_exc:
+            logger.error(
+                "Startup worker reload failed (non-fatal, starting in degraded "
+                "mode — workers may be missing until /workers/reload succeeds): %s",
+                _reload_exc,
+                exc_info=True,
+            )
         fail_interrupted_runs_on_startup(user_id=bootstrap_user_id)
         reap_abandoned_pending_approval_runs()
         re_enqueue_queued_runs_on_startup()
@@ -1129,6 +1163,10 @@ def _rate_limit_for_path(path: str) -> tuple[int, float]:
     return DEFAULT_RATE_LIMIT
 
 
+# #1024: PUT /workers/{id}/files — atomic file replace, may carry bundled data.
+_WORKER_FILES_PATH_RE = re.compile(r"^/workers/[^/]+/files$")
+
+
 def _body_limit_for_request(request: Request) -> Optional[int]:
     method = request.method.upper()
     if method not in {"POST", "PUT", "PATCH"}:
@@ -1138,6 +1176,9 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
         return FROM_BUNDLE_BODY_LIMIT_BYTES
     if path == "/workspace/import":
         return WORKSPACE_IMPORT_BODY_LIMIT_BYTES
+    # #1024: worker file deploys bundle datasets; exempt from the 256 KB JSON cap.
+    if _WORKER_FILES_PATH_RE.match(path):
+        return WORKER_FILES_BODY_LIMIT_BYTES
     if path.startswith("/uploads"):
         return None
     # X4: approval-scoped screenshot uploads stream a multipart image body; the
@@ -2563,6 +2604,12 @@ def update_worker(
 
 
 
+# Stable module-level alias for the PATCH (instance-settings) update handler.
+# The plain name ``update_worker`` is reassigned later by the PUT full-rewrite
+# handler, so in-process callers wanting PATCH semantics use this alias.
+update_worker_instance = update_worker
+
+
 # Worker star/contexts/pause/resume/delete routes -> routers/worker_lifecycle.py
 
 
@@ -3001,7 +3048,8 @@ def persist_worker_run_py(worker_id: str, run_py: str, *, user_id: str | None) -
     if not this_worker_list:
         raise RuntimeError(f"worker {worker_id!r} not found after repair persist")
     with get_db() as conn:
-        _persist_discovered_workers(conn, this_worker_list, user_id=user_id)
+        # Single-worker save: surface a persist failure (don't silently skip).
+        _persist_discovered_workers(conn, this_worker_list, user_id=user_id, raise_on_skip=True)
 
     try:
         _embed_files_in_skill_version(worker_id, target_dir)
@@ -3423,9 +3471,16 @@ def update_worker(
 
     invalidate_worker_cache()
     workers = discover_workers()
+    # Single-worker update: only persist the target worker with strict error
+    # propagation (raise_on_skip=True) so a composio-disable failure during
+    # the update rolls back the persist and returns 502 to the caller.
+    # Passing all discovered workers with the default (raise_on_skip=False)
+    # swallowed the RuntimeError from _sync_composio_registration, which
+    # caused the update to return 200 instead of 502 (#1070 regression).
+    this_worker_list = [w for w in workers if w["id"] == worker_id]
     with get_db() as conn:
         try:
-            _persist_discovered_workers(conn, workers, user_id=auth.user_id)
+            _persist_discovered_workers(conn, this_worker_list, user_id=auth.user_id, raise_on_skip=True)
         except RuntimeError as exc:
             if old_worker_yml is not None:
                 worker_yml_path.write_text(old_worker_yml, encoding='utf-8')
@@ -3681,9 +3736,15 @@ def update_worker_files(
             raise HTTPException(status_code=500, detail=f"Worker {worker_id!r} not found after update")
         with get_db() as conn:
             try:
-                _persist_discovered_workers(conn, this_worker_list, user_id=auth.user_id)
-            except RuntimeError as exc:
-                # Roll back: restore backups
+                # Single-worker save: surface a persist failure (don't silently
+                # skip) so the file-restore rollback below runs.
+                _persist_discovered_workers(
+                    conn, this_worker_list, user_id=auth.user_id, raise_on_skip=True
+                )
+            except Exception as exc:
+                # Roll back: restore backups. Catch any persist failure
+                # (IntegrityError, ValidationError, RuntimeError) so a bad save
+                # never leaves the worker files half-written.
                 for orig, bak in reversed(backed_up):
                     try:
                         if orig.exists():
@@ -3858,6 +3919,45 @@ def create_worker_run(
             status_code=402,
             detail={"error_code": "spend_cap_exceeded", "message": str(exc)},
         ) from exc
+    except WorkerNotRunnableError as exc:
+        # Genuine cross-tenant ownership denial raised by RunsRepo.create. Caught
+        # explicitly (it subclasses ValueError) so the 403 is robust rather than
+        # relying on the substring match below. Keep the raw "does not belong"
+        # detail server-side; clients get a safe, operator-facing message.
+        logger.warning("create_run denied for worker %s: %s", worker_id, exc, exc_info=exc)
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to run this worker.",
+        ) from exc
+    except ValueError as exc:
+        # Un-mask known run-create ValueErrors at the source instead of letting
+        # them bubble to the global ValueError handler, which collapses every
+        # cause into a useless 400 "Invalid request" (that exact masking hid the
+        # "worker does not belong" + path-traversal failures on the demo worker).
+        # We surface a SPECIFIC, operator-actionable message but keep raw
+        # filesystem paths server-side (the global handler's #920 concern). The
+        # cross-tenant "does not belong" case is already a typed
+        # WorkerNotRunnableError handled above.
+        msg = str(exc)
+        logger.warning("create_run rejected for worker %s: %s", worker_id, msg, exc_info=exc)
+        if "does not belong" in msg:
+            # Authorization failure: the worker exists but this user cannot run
+            # it (private + non-owner). 403, not a generic 400.
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to run this worker.",
+            ) from exc
+        if "Path traversal" in msg:
+            # Server-side misconfiguration (e.g. FLOOM_WORKERS_DIR drift): the
+            # worker's source dir can't be resolved. Don't leak the path.
+            raise HTTPException(
+                status_code=500,
+                detail="Worker source could not be resolved on the server.",
+            ) from exc
+        if "owner not found" in msg or "is disabled" in msg:
+            raise HTTPException(status_code=409, detail=msg) from exc
+        # Unknown ValueError: keep it generic but still 400 with the safe copy.
+        raise HTTPException(status_code=400, detail="Could not start this run.") from exc
     bound_by = auth.user_id or "anonymous"
     try:
         resolved_inputs = _resolve_file_input_references(
@@ -3868,6 +3968,7 @@ def create_worker_run(
             run_id,
             RunStatus.FAILED.value,
             error=str(exc.detail),
+            error_code="file_input_resolution_failed",
             user_id=auth.user_id,
             repos=repos,
         )
@@ -3877,6 +3978,7 @@ def create_worker_run(
             run_id,
             RunStatus.FAILED.value,
             error=str(exc),
+            error_code="file_input_resolution_failed",
             user_id=auth.user_id,
             repos=repos,
         )
@@ -4650,7 +4752,11 @@ app.include_router(asset_access_router)
 
 # Context (knowledge-pack / brain) route group. list_contexts is re-exported
 # because the /search and workspace-agent MCP routes call it directly.
-from routers.contexts import contexts_router, list_contexts
+from routers.contexts import (
+    contexts_router,
+    list_contexts,
+    _record_candidate_feedback_event,
+)
 app.include_router(contexts_router)
 
 # Workspace route group (instructions/base-persona docs, members, settings,
@@ -4663,7 +4769,7 @@ from routers.auth import auth_router
 app.include_router(auth_router)
 
 # Worker creation routes (POST /workers, POST /workers/from-bundle).
-from routers.worker_create import worker_create_router
+from routers.worker_create import worker_create_router, create_worker
 app.include_router(worker_create_router)
 
 # System health + metrics routes (/health, /healthz, /metrics, /system/metrics).
@@ -4784,6 +4890,8 @@ from channels.whatsapp import (
     _send_whatsapp_typing_indicator,
     _parse_whatsapp_inbound,
     _handle_whatsapp_message,
+    WhatsAppBindingStore,
+    set_whatsapp_binding_store,
 )
 app.include_router(whatsapp_router)
 
@@ -4987,6 +5095,13 @@ def _mcp_error(request_id: Any, code: int, message: str) -> Dict[str, Any]:
         "id": request_id,
         "error": {"code": code, "message": message},
     }
+
+
+def _mcp_internal_error(request_id: Any, exc: BaseException, where: str) -> Dict[str, Any]:
+    """M-04: log full detail server-side; return a generic message so SQLSTATE
+    codes / bound values / internals don't leak to external MCP clients."""
+    logger.exception("MCP remote (%s) unhandled exception", where)
+    return _mcp_error(request_id, -32603, "Internal server error")
 
 
 def _mcp_tool_error(message: str) -> Dict[str, Any]:
@@ -5201,6 +5316,20 @@ def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
                 "content": {"type": "string"},
             }, ["name", "path", "content"]),
         },
+        {
+            "name": "record_candidate_feedback",
+            "description": "Record one immutable candidate feedback JSON event into a writable brain pack.",
+            "inputSchema": _mcp_json_schema({
+                "name": {"type": "string"},
+                "run_id": {"type": "string"},
+                "candidate_id": {"type": "string"},
+                "rank": {"type": "integer"},
+                "feedback_text": {"type": "string"},
+                "outcome": {"type": "string", "enum": ["good", "bad", "miss"]},
+                "scope": {"type": "string", "enum": ["global", "client"], "default": "global"},
+                "reporter": {"type": "string"},
+            }, ["name", "run_id", "candidate_id", "rank", "feedback_text", "outcome"]),
+        },
     ]
 
 
@@ -5209,6 +5338,20 @@ def _mcp_arg(arguments: Dict[str, Any], name: str) -> str:
     if not value:
         raise ValueError(f"Tool argument '{name}' is required")
     return value
+
+
+def _internal_asgi_request() -> Request:
+    """Minimal in-process Request for direct calls into route fns that require a
+    ``request`` positional. host=asgi makes the worker-write workspace check
+    short-circuit (these come from already-authenticated internal dispatchers)."""
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/",
+        "query_string": b"",
+        "headers": [(b"host", b"asgi")],
+    }
+    return Request(scope)
 
 
 async def _mcp_call_workspace_agent(arguments: Dict[str, Any]) -> Dict[str, Any]:
@@ -5253,7 +5396,7 @@ def _mcp_call_workers_create(arguments: Dict[str, Any], auth: AuthContext, repos
         run_py=_mcp_arg(arguments, "run_py"),
         skill_md=arguments.get("skill_md"),
     )
-    data = create_worker(payload, auth=auth, repos=repos)
+    data = create_worker(payload, _internal_asgi_request(), auth=auth, repos=repos)
     return _mcp_call_result(data, "Worker created.")
 
 
@@ -5261,7 +5404,11 @@ def _mcp_call_workers_update(arguments: Dict[str, Any], auth: AuthContext, repos
     worker_id = _mcp_arg(arguments, "id")
     update_args = {k: v for k, v in arguments.items() if k != "id"}
     payload = WorkerUpdateRequest(**update_args)
-    data = update_worker(worker_id, payload, auth=auth, repos=repos)
+    # update_worker (module name) is shadowed by the PUT full-rewrite handler;
+    # MCP "workers.update" wants PATCH instance-settings semantics -> use the alias.
+    data = update_worker_instance(
+        worker_id, payload, _internal_asgi_request(), auth=auth, repos=repos
+    )
     return _mcp_call_result(data, "Worker updated.")
 
 
@@ -5419,6 +5566,23 @@ def _mcp_call_contexts_write(arguments: Dict[str, Any], auth: AuthContext, repos
     return _mcp_call_result(result, message)
 
 
+def _mcp_call_record_candidate_feedback(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    try:
+        payload = CandidateFeedbackCreateRequest(
+            run_id=_mcp_arg(arguments, "run_id"),
+            candidate_id=_mcp_arg(arguments, "candidate_id"),
+            rank=int(_mcp_arg(arguments, "rank")),
+            feedback_text=_mcp_arg(arguments, "feedback_text"),
+            outcome=_mcp_arg(arguments, "outcome"),
+            scope=str(arguments.get("scope") or "global"),
+            reporter=arguments.get("reporter"),
+        )
+    except (TypeError, ValueError, ValidationError) as exc:
+        raise ValueError(str(exc)) from exc
+    data = _record_candidate_feedback_event(_mcp_arg(arguments, "name"), payload, auth=auth, repos=repos)
+    return _mcp_call_result(data, "Candidate feedback recorded.")
+
+
 async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, Any]) -> Dict[str, Any]:
     auth = _workspace_agent_mcp_auth_context()
     repos = get_repositories()
@@ -5466,6 +5630,8 @@ async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, An
             return _mcp_call_contexts_read(arguments, auth)
         if tool_name == "contexts.write":
             return _mcp_call_contexts_write(arguments, auth, repos)
+        if tool_name == "record_candidate_feedback":
+            return _mcp_call_record_candidate_feedback(arguments, auth, repos)
         return _mcp_tool_error(f"Unknown tool: {tool_name or 'unknown'}")
     except ValueError as exc:
         return _mcp_tool_error(str(exc))
@@ -5533,7 +5699,7 @@ async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Option
     try:
         return _mcp_result(request_id, await _call_workeros_remote_mcp_tool(tool_name, arguments))
     except Exception as exc:
-        return _mcp_error(request_id, -32603, f"Workeros MCP tool call failed: {exc}")
+        return _mcp_internal_error(request_id, exc, f"tools/call:{tool_name or 'unknown'}")
 
 
 async def _workspace_agent_mcp_post(request: Request) -> Response:
@@ -5543,7 +5709,11 @@ async def _workspace_agent_mcp_post(request: Request) -> Response:
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
     if not static_tokens and deploy != "cloud":
         raise HTTPException(status_code=503, detail="No Workeros MCP/API token is configured")
-    if _verify_workspace_agent_mcp_auth(request):
+    # M-05: on CLOUD the static token must NOT short-circuit to the global
+    # bootstrap admin context (no workspace binding => cross-tenant admin to any
+    # holder of the single cloud-wide secret). Force cloud callers down the
+    # per-tenant PAT path. Static token stays valid only on OSS/local.
+    if deploy != "cloud" and _verify_workspace_agent_mcp_auth(request):
         _workspace_agent_mcp_auth_context()
     else:
         cloud_ctx = await _workspace_agent_mcp_cloud_auth_context(request)
@@ -5565,7 +5735,7 @@ async def _workspace_agent_mcp_post(request: Request) -> Response:
             try:
                 response = await _handle_workspace_agent_mcp_message(item)
             except Exception as exc:
-                response = _mcp_error(item.get("id"), -32603, f"Internal error: {exc}")
+                response = _mcp_internal_error(item.get("id"), exc, "batch-item")
             if response is not None:
                 responses.append(response)
         if not responses:
@@ -5577,7 +5747,7 @@ async def _workspace_agent_mcp_post(request: Request) -> Response:
     try:
         response = await _handle_workspace_agent_mcp_message(payload)
     except Exception as exc:
-        response = _mcp_error(payload.get("id"), -32603, f"Internal error: {exc}")
+        response = _mcp_internal_error(payload.get("id"), exc, "single")
     if response is None:
         return Response(status_code=204)
     return JSONResponse(response)
@@ -5998,6 +6168,9 @@ _API_CALL_AUTH_HEADERS = frozenset({
     "authorization",
     "cookie",
     "x-workeros-workspace",
+    # M-03: forward x-floom-user so the re-authenticated in-process sub-request
+    # can resolve the acting user under WORKEROS_ENABLE_USER_HEADER_SCOPE.
+    "x-floom-user",
 })
 
 
@@ -6065,6 +6238,7 @@ _MCP_DEFAULT_TOOLS: List[dict] = [
     {"name": "contexts.create", "description": "Create a new brain pack context folder.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "writeable": {"type": "boolean", "default": False}, "sensitive": {"type": "boolean", "default": True, "description": "Sensitive contexts (default) are excluded from git versioning. Set false to enable version history and rollback."}}, "required": ["name"]}},
     {"name": "contexts.read", "description": "Read a UTF-8 context file, or return metadata for binary files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
     {"name": "contexts.write", "description": "Create or update a UTF-8 text file inside a context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}, "content": {"type": "string"}}, "required": ["name", "path", "content"]}},
+    {"name": "record_candidate_feedback", "description": "Record one immutable candidate feedback JSON event into a writable context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "run_id": {"type": "string"}, "candidate_id": {"type": "string"}, "rank": {"type": "integer"}, "feedback_text": {"type": "string"}, "outcome": {"type": "string", "enum": ["good", "bad", "miss"]}, "scope": {"type": "string", "enum": ["global", "client"], "default": "global"}, "reporter": {"type": "string"}}, "required": ["name", "run_id", "candidate_id", "rank", "feedback_text", "outcome"]}},
     {"name": "contexts.delete", "description": "Delete a brain pack context and all its files.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "force": {"type": "boolean", "default": False}}, "required": ["name"]}},
     {"name": "contexts.delete_file", "description": "Delete a specific file from a brain pack context.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "path": {"type": "string"}}, "required": ["name", "path"]}},
     {"name": "contexts.versions", "description": "List saved versions of a brain pack context, newest first.", "inputSchema": {"type": "object", "properties": {"name": {"type": "string"}, "limit": {"type": "integer", "default": 50}}, "required": ["name"]}},
@@ -6336,6 +6510,14 @@ async def _mcp_dispatch(
     if name == "contexts.write":
         encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
         data, s = await _api_call("PUT", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request, body={"content": a["content"]})
+        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+    if name == "record_candidate_feedback":
+        body = {k: a[k] for k in ("run_id", "candidate_id", "rank", "feedback_text", "outcome") if k in a}
+        if "scope" in a:
+            body["scope"] = a["scope"]
+        if "reporter" in a:
+            body["reporter"] = a["reporter"]
+        data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}/record-candidate-feedback", request, body=body)
         return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
     if name == "contexts.delete":
         qs = "?force=true" if a.get("force") else ""

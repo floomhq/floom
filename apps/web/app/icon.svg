@@ -1,14 +1,11 @@
 <svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 100 100" role="img" aria-label="Floom">
-  <!--
-    Floom favicon: the mark fills black in light mode, white in dark mode.
-    Using CSS prefers-color-scheme inside the SVG for light/dark switching.
-  -->
+  <!-- Floom favicon: dark mark for light UI, light mark for dark UI. -->
   <style>
     rect.bg { fill: #16171A; }
-    path.mark { fill: #FAFAF7; }
-    @media (prefers-color-scheme: light) {
-      rect.bg { fill: #16171A; }
-      path.mark { fill: #FAFAF7; }
+    path.mark { fill: #FFFFFF; }
+    @media (prefers-color-scheme: dark) {
+      rect.bg { fill: #FFFFFF; }
+      path.mark { fill: #16171A; }
     }
   </style>
   <rect class="bg" width="100" height="100" rx="22"/>

@@ -188,7 +188,7 @@ def test_stock_name_post_forks_to_user_owned_copy(monkeypatch, tmp_path):
     created = client.post(
         "/workers",
         headers=_headers(),
-        json=_worker_payload("csv_enricher", title="Customized Gmail Cleaner", is_example=True),
+        json=_worker_payload("csv_enricher", title="Customized CSV Enricher", is_example=True),
     )
 
     assert created.status_code == 200, created.text
@@ -211,7 +211,7 @@ def test_stock_name_put_is_blocked(monkeypatch, tmp_path):
     updated = client.put(
         "/workers/csv_enricher",
         headers=_headers(),
-        json=_worker_payload("csv_enricher", title="Customized Gmail Cleaner", is_example=True),
+        json=_worker_payload("csv_enricher", title="Customized CSV Enricher", is_example=True),
     )
 
     assert updated.status_code == 403, updated.text
@@ -227,12 +227,12 @@ def test_stock_name_put_remains_blocked_after_existing_copy(monkeypatch, tmp_pat
     created = client.post(
         "/workers",
         headers=_headers(),
-        json=_worker_payload("csv_enricher", title="First Gmail Cleaner"),
+        json=_worker_payload("csv_enricher", title="First CSV Enricher"),
     )
     blocked = client.put(
         "/workers/csv_enricher",
         headers=_headers(),
-        json=_worker_payload("csv_enricher", title="Second Gmail Cleaner"),
+        json=_worker_payload("csv_enricher", title="Second CSV Enricher"),
     )
 
     assert created.status_code == 200, created.text

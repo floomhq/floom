@@ -5,9 +5,8 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ApprovalRow, WorkerSummary } from "@/lib/types";
-import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
+import type { CollectionConfig, TagFamilyKey, TagOption } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
-import { contentTagOptions } from "@/lib/workers/derive";
 import {
   ApprovalActionItems,
   approvalActionLine,
@@ -32,6 +31,31 @@ const KV_STYLE: React.CSSProperties = {
   gridTemplateColumns: "140px 1fr",
   gap: "9px 16px",
 };
+
+const CURATED_CONTENT_TAGS = ["email", "crm", "github", "report", "analytics", "slack"] as const;
+const CURATED_CONTENT_TAG_SET = new Set<string>(CURATED_CONTENT_TAGS);
+
+function approvalContentTags(a: ApprovalRow, workerTags: Record<string, string[]>): string[] {
+  const tags = workerTags[a.worker_id] ?? [];
+  return tags.filter((t) => CURATED_CONTENT_TAG_SET.has(t));
+}
+
+function approvalContentTagOptions(
+  items: ApprovalRow[],
+  workerTags: Record<string, string[]>,
+): TagOption[] {
+  const counts = new Map<string, number>();
+  for (const item of items) {
+    for (const tag of new Set(approvalContentTags(item, workerTags))) {
+      counts.set(tag, (counts.get(tag) ?? 0) + 1);
+    }
+  }
+  return CURATED_CONTENT_TAGS.filter((tag) => counts.has(tag)).map((tag) => ({
+    value: tag,
+    label: tag,
+    count: counts.get(tag) ?? 0,
+  }));
+}
 
 export default function ApprovalsCollection() {
   const [items, setItems] = useState<ApprovalRow[]>([]);
@@ -78,9 +102,6 @@ export default function ApprovalsCollection() {
     }
   };
 
-  // Curated status groups only — no raw per-worker tags (avoids one-off noise).
-  const CURATED_CONTENT_TAGS = ["email", "crm", "github", "report", "analytics", "slack"];
-
   const config: CollectionConfig<ApprovalRow> = {
     title: "Approvals",
     subtitle: "Workers waiting for your decision before executing.",
@@ -90,12 +111,11 @@ export default function ApprovalsCollection() {
     idOf: (a) => a.id,
     searchOf: (a) => `${a.worker_name ?? ""} ${a.label ?? ""}`,
     tagsOf: (a) => {
-      const allTags = workerTags[a.worker_id] ?? [];
-      const curated = allTags.filter((t) => CURATED_CONTENT_TAGS.includes(t));
+      const curated = approvalContentTags(a, workerTags);
       return (curated.length > 0 ? { content: curated } : {}) as Partial<Record<TagFamilyKey, string[]>>;
     },
     tags: {
-      content: contentTagOptions(workers).filter((t) => CURATED_CONTENT_TAGS.includes(t.value)),
+      content: approvalContentTagOptions(items, workerTags),
     },
     counts: [{ value: items.length, label: "pending" }],
     view: { default: "list", grid: true },

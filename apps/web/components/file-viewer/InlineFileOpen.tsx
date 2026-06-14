@@ -1,7 +1,7 @@
 "use client";
 
-import { useEffect, useState } from "react";
-import { ArrowLeft, Download, Folder as FolderIcon } from "lucide-react";
+import { useEffect, useRef, useState } from "react";
+import { ArrowLeft, Download, Folder as FolderIcon, Upload } from "lucide-react";
 import { isImageFile } from "@/lib/runs/trace";
 import { SqliteTableView } from "@/components/file-viewer/SqliteTableView";
 import type { SqliteView } from "@/lib/types";
@@ -37,6 +37,7 @@ export function InlineFileOpen({
   loadText,
   onRename,
   loadSqlite,
+  onUpload,
 }: {
   files: InlineFile[];
   rootLabel: string;
@@ -47,6 +48,12 @@ export function InlineFileOpen({
   onRename?: (file: InlineFile, newName: string) => Promise<void>;
   /** #777: load a .db file's tables/rows for the inline SQLite viewer. */
   loadSqlite?: (file: InlineFile, table?: string) => Promise<SqliteView>;
+  /**
+   * When provided, the list view becomes a drag-and-drop dropzone (and exposes
+   * a Browse button). `dirPrefix` is the current navigated subfolder ("" = root)
+   * so dropped files land where the operator is looking. Omitted → read-only.
+   */
+  onUpload?: (files: File[], dirPrefix: string) => Promise<void>;
 }) {
   const [openId, setOpenId] = useState<string | null>(null);
   const [text, setText] = useState<string | null>(null);
@@ -55,7 +62,20 @@ export function InlineFileOpen({
   const [renameValue, setRenameValue] = useState("");
   const [renameBusy, setRenameBusy] = useState(false);
   const [dir, setDir] = useState(""); // #783: current folder prefix ("" = root)
+  const [dragOver, setDragOver] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const fileInputRef = useRef<HTMLInputElement | null>(null);
   const open = files.find((f) => f.id === openId) ?? null;
+
+  const doUpload = async (dropped: File[]) => {
+    if (!onUpload || dropped.length === 0) return;
+    setUploading(true);
+    try {
+      await onUpload(dropped, dir);
+    } finally {
+      setUploading(false);
+    }
+  };
 
   const baseName = (path: string) => (path.includes("/") ? path.slice(path.lastIndexOf("/") + 1) : path);
   const submitRename = async (file: InlineFile) => {
@@ -89,7 +109,7 @@ export function InlineFileOpen({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [openId]);
 
-  if (files.length === 0) {
+  if (files.length === 0 && !onUpload) {
     return <div style={{ color: "var(--muted-foreground)", padding: 14 }}>{emptyLabel}</div>;
   }
 
@@ -176,7 +196,72 @@ export function InlineFileOpen({
   const crumbs = dir ? dir.replace(/\/$/, "").split("/") : [];
 
   return (
-    <div>
+    <div
+      onDragOver={
+        onUpload
+          ? (e) => {
+              e.preventDefault();
+              if (!dragOver) setDragOver(true);
+            }
+          : undefined
+      }
+      onDragLeave={
+        onUpload
+          ? (e) => {
+              // Only clear when the pointer actually leaves the dropzone (not a child).
+              if (e.currentTarget === e.target) setDragOver(false);
+            }
+          : undefined
+      }
+      onDrop={
+        onUpload
+          ? (e) => {
+              e.preventDefault();
+              setDragOver(false);
+              const dropped = Array.from(e.dataTransfer.files);
+              void doUpload(dropped);
+            }
+          : undefined
+      }
+      style={
+        onUpload
+          ? {
+              position: "relative",
+              borderRadius: "var(--radius-card)",
+              outline: dragOver ? "2px dashed var(--ink-soft)" : "2px dashed transparent",
+              outlineOffset: 4,
+              transition: "outline-color .12s ease",
+            }
+          : undefined
+      }
+    >
+      {/* Upload affordance — drag files anywhere onto the list, or Browse. */}
+      {onUpload && (
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 10 }}>
+          <input
+            ref={fileInputRef}
+            type="file"
+            multiple
+            style={{ display: "none" }}
+            onChange={(e) => {
+              const picked = Array.from(e.target.files ?? []);
+              void doUpload(picked);
+              e.target.value = "";
+            }}
+          />
+          <button
+            type="button"
+            className="c-addbtn"
+            disabled={uploading}
+            onClick={() => fileInputRef.current?.click()}
+          >
+            <Upload size={14} /> {uploading ? "Uploading…" : "Add files"}
+          </button>
+          <span style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
+            or drag &amp; drop here
+          </span>
+        </div>
+      )}
       {/* Breadcrumb for nested folders. */}
       {dir && (
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 8, fontSize: 12.5 }}>
@@ -197,6 +282,9 @@ export function InlineFileOpen({
           ))}
         </div>
       )}
+      {files.length === 0 ? (
+        <div style={{ color: "var(--muted-foreground)", padding: 14 }}>{emptyLabel}</div>
+      ) : null}
       <div className="c-ltable">
       {folders.map((name) => (
         <button
