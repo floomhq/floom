@@ -425,7 +425,7 @@ function SourceFileTabs({
   onSelect: (path: string) => void;
 }) {
   return (
-    <div className="c-dtabs -mx-1 mb-3 px-1" role="tablist" aria-label="Source files">
+    <div className="c-dtabs c-source-file-tabs -mx-1 mb-3 px-1" role="tablist" aria-label="Source files">
       {files.map((file) => (
         <button
           key={file.path}
