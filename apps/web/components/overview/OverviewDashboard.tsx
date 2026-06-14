@@ -32,9 +32,7 @@ import { BrandLogo } from "@/components/connections/BrandLogo";
 
 export type { SystemOverviewAttentionItem };
 
-// Spec rule 2: flat-by-token — all borders from CSS variables, never hardcoded.
-// --bd-card is `none` per design tokens; use the full border shorthand so the
-// computed border width is 0px when the token is none.
+// Metric/list panels separate with surface fill and spacing, not visual borders.
 const cardClass =
   "rounded-[var(--radius-ui)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
 const listClass =
