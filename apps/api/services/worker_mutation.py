@@ -181,6 +181,12 @@ def _validate_worker_file_path(path: str) -> None:
     """Raise HTTPException if the path is invalid or contains traversal sequences."""
     if not path or not path.strip():
         raise HTTPException(status_code=400, detail="file path must not be empty")
+    # #1052 — reject percent-encoded path separators (%2f, %5c). They were
+    # accepted as literal filenames here while contexts.write rejected the
+    # decoded form, an inconsistency between the two validators.
+    lowered = path.lower()
+    if "%2f" in lowered or "%5c" in lowered:
+        raise HTTPException(status_code=400, detail=f"file path contains invalid segment: {path!r}")
     parts = Path(path).parts
     for part in parts:
         if part in ("", ".."):
