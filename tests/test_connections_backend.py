@@ -384,6 +384,10 @@ class TestConnectionsListProjection:
 class TestConnectionCallbackAndComposio503:
     def test_callback_accepts_connected_account_id_alias_and_persists_status(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
+        # #1073 dropped the hardcoded floom.dev default for the callback redirect
+        # base (OSS default is now localhost). Pin WORKERS_FRONTEND_URL so the
+        # redirect target is deterministic instead of asserting on a default.
+        monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
         client = TestClient(main.app, raise_server_exceptions=True)
         conn = _seed_connection(client, app_name="gmail")
 

@@ -40,6 +40,10 @@ LEAK_MARKERS = ("/opt/", "ghp_", "x-access-token", "@github.com", "https://", "s
 
 @pytest.fixture
 def main_mod(monkeypatch, tmp_path):
+    """PR #1073 (oss-prep) moved `_git_safe_http_detail` / `_github_api_safe_detail`
+    and the git/github endpoint call-sites out of main.py into
+    `routers/system_git.py`. This fixture exposes the same surface the tests pin:
+    the two safe helpers and `_git_ops` (for `GitOpsError`)."""
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
@@ -47,10 +51,14 @@ def main_mod(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(tmp_path / "engine" / "workers"))
     (tmp_path / "engine" / "workers").mkdir(parents=True)
     for name in list(sys.modules):
-        if name in ("main", "db", "contexts", "git_ops", "github_api") or name.startswith("db."):
+        if (
+            name in ("main", "db", "contexts", "git_ops", "github_api", "routers.system_git")
+            or name.startswith("db.")
+        ):
             sys.modules.pop(name, None)
-    main = importlib.import_module("main")
-    return main
+    system_git = importlib.import_module("routers.system_git")
+    system_git._git_ops = importlib.import_module("git_ops")
+    return system_git
 
 
 def test_git_safe_detail_strips_paths_and_tokens(main_mod):
@@ -110,7 +118,13 @@ def test_github_api_safe_detail_redacts_url_token(main_mod):
 
 def test_git_endpoints_route_through_safe_helper(main_mod):
     """Reverting any git endpoint back to f-string {exc} must fail this."""
-    src = Path(__file__).resolve().parents[1].joinpath("main.py").read_text(encoding="utf-8")
+    # PR #1073 moved the git/github endpoint call-sites from main.py into
+    # routers/system_git.py — verify the same intent at the new location.
+    src = (
+        Path(__file__).resolve().parents[1]
+        .joinpath("routers", "system_git.py")
+        .read_text(encoding="utf-8")
+    )
     for banned in (
         'detail=f"Git operation failed: {exc}"',
         'detail=f"Push failed: {exc}"',

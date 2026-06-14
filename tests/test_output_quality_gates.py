@@ -5,6 +5,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 
 import run_service  # noqa: E402
+import services.run_outputs as run_outputs_module  # noqa: E402
 import runner_sandbox.agent_driver as agent_module  # noqa: E402
 from models import WorkerConfig, WorkerOutput, WorkerRuntime, WorkerTrigger  # noqa: E402
 from runner_sandbox.agent_driver import AgentDriver  # noqa: E402
@@ -104,6 +105,9 @@ def test_empty_file_output_fails(tmp_path, monkeypatch):
 def test_file_output_content_is_materialized_before_validation(tmp_path, monkeypatch):
     run_id = "run_materialize"
     monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
+    # _materialize_declared_file_outputs lives in services.run_outputs and reads
+    # ARTIFACTS_DIR from that module's namespace; patch it there too.
+    monkeypatch.setattr(run_outputs_module, "ARTIFACTS_DIR", tmp_path / "artifacts")
     config = _config([
         WorkerOutput(
             name="update",
@@ -129,6 +133,7 @@ def test_file_output_content_is_materialized_before_validation(tmp_path, monkeyp
 def test_json_file_output_content_is_materialized(tmp_path, monkeypatch):
     run_id = "run_materialize_json"
     monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
+    monkeypatch.setattr(run_outputs_module, "ARTIFACTS_DIR", tmp_path / "artifacts")
     config = _config([
         WorkerOutput(
             name="report",
