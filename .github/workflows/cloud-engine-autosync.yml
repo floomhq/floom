@@ -168,35 +168,75 @@ jobs:
         working-directory: cloud
         run: |
           set -euo pipefail
-          git add engine
+          # Stage the submodule bump AND the regenerated web/ tree together.
+          # `npm run build` (guard 2) + sync-engine-web.mjs rewrite the tracked
+          # web/{app,components,lib,public,tests} + root config from the new
+          # engine, so after the bump the working tree is dirty with those
+          # generated files. Committing them keeps the tracked cloud web/ in
+          # lockstep with the engine (the drift guard already proved zero drift)
+          # AND — critically — leaves a CLEAN working tree so the rebase below
+          # can never die on "cannot rebase: You have unstaged changes" (the
+          # bug that wedged the pipeline: the old code only `git add engine`,
+          # committed the pointer, then rebased with the regenerated web/ still
+          # unstaged -> rebase aborted every attempt and the loop falsely
+          # reported "main advanced").
+          git add -A
           if git diff --cached --quiet; then
-            echo "No submodule change to commit (already current)."
+            echo "No engine/web change to commit (already current)."
             exit 0
           fi
           git commit -m "chore(engine): auto-sync submodule ${OLD_ENGINE_SHA:0:8} -> ${ENGINE_SHA:0:8}
 
           Automated by floomhq/workeros cloud-engine-autosync on engine push.
           Guards passed: drift, web build, cloud API import smoke.
+          Includes the regenerated web/ tree (kept in lockstep with engine).
 
           Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
-          # Pull-rebase right before push so we never clobber a concurrent
-          # cloud-main push (e.g. Vivek). Retry the rebase+push a few times in
-          # case main advances between fetch and push.
+
+          # Rebase-then-push right before pushing so we never clobber a
+          # concurrent cloud-main push (e.g. Vivek, dashboard autodeploy).
+          # The loop is hardened to be resilient to BOTH failure modes:
+          #   (a) a dirty working tree (defensive — git add -A above should
+          #       leave it clean, but a guard/build side-effect could still
+          #       touch an untracked path) -> stash before each rebase, drop
+          #       after a successful push;
+          #   (b) main genuinely advancing between fetch and push -> retry.
+          pushed=0
           for attempt in 1 2 3 4 5; do
             git fetch origin main --quiet
+            # Make sure no half-finished rebase from a prior attempt lingers.
+            git rebase --abort >/dev/null 2>&1 || true
+            # Defensive: park any stray working-tree changes so the rebase
+            # engine never trips on "unstaged changes". Empty stash is a no-op.
+            stashed=0
+            if ! git diff --quiet || ! git diff --cached --quiet; then
+              if git stash push -u -m "autosync-rebase-${attempt}" >/dev/null 2>&1; then
+                stashed=1
+              fi
+            fi
             if git rebase origin/main; then
               if git push origin HEAD:main; then
                 echo "Pushed auto-sync to cloud main on attempt $attempt."
-                exit 0
+                pushed=1
+                break
+              else
+                echo "push rejected on attempt $attempt (main advanced); retrying..."
               fi
             else
-              git rebase --abort || true
+              echo "rebase failed on attempt $attempt; aborting + retrying..."
+              git rebase --abort >/dev/null 2>&1 || true
             fi
-            echo "push attempt $attempt failed (main advanced); retrying..."
+            # Restore any parked changes for the next attempt (best-effort;
+            # they were build artifacts and will be re-derivable regardless).
+            if [ "$stashed" = "1" ]; then
+              git stash pop >/dev/null 2>&1 || git stash drop >/dev/null 2>&1 || true
+            fi
             sleep $((attempt * 3))
           done
-          echo "::error::Could not fast-rebase-and-push to cloud main after 5 attempts."
-          exit 1
+          if [ "$pushed" != "1" ]; then
+            echo "::error::Could not fast-rebase-and-push to cloud main after 5 attempts."
+            exit 1
+          fi
 
       # ---- GUARDS FAILED: open a PR instead of pushing ----
 
