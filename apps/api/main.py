@@ -137,6 +137,12 @@ _CLOUD_RATE_LIMIT_RULES: list[tuple[tuple[str, ...] | None, _re.Pattern[str], in
     (("POST", "DELETE"), _re.compile(r"^/auth/tokens(?:/.*)?$"), 20, 60.0),
     (("POST", "PATCH", "DELETE"), _re.compile(r"^/api/workspaces(?:/.*)?$"), 60, 60.0),
     (("POST",), _re.compile(r"^/api/novasearch(?:/.*)?$"), 30, 60.0),
+    # #234: /chat is LLM-backed — each call costs Bedrock/LLM spend. Cap the
+    # per-identity burst so an authenticated user can't loop it to run up the
+    # bill (the clean 429 + Retry-After is emitted by the middleware below).
+    # This is the app-layer burst control; the engine's _enforce_chat_quota is
+    # the complementary per-cost quota.
+    (("POST",), _re.compile(r"^(?:/api/v1|/v1|/api)?/chat$"), 20, 60.0),
 ]
 _cloud_rate_lock = _threading.Lock()
 _cloud_rate_buckets: dict[str, list[float]] = {}
