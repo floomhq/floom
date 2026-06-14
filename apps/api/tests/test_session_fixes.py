@@ -11,10 +11,15 @@ Run from repo root:
 """
 from __future__ import annotations
 
+import sys
 from pathlib import Path
 
-MAIN_PY = Path(__file__).resolve().parents[1] / "main.py"
-MAIN_SRC = MAIN_PY.read_text(encoding="utf-8")
+sys.path.insert(0, str(Path(__file__).resolve().parent))
+from _api_source import api_source
+
+# Backend-wide source corpus: invariants that used to live in main.py may now
+# live in core/ or routers/ after modularization; check the whole backend.
+MAIN_SRC = api_source()
 MODELS_PY = Path(__file__).resolve().parents[1] / "models.py"
 MODELS_SRC = MODELS_PY.read_text(encoding="utf-8")
 
@@ -115,9 +120,12 @@ def test_590_run_visible_checks_db_ownership():
 def _public_stock_ids_block() -> str:
     """Extract the PUBLIC_STOCK_WORKER_IDS frozenset contents from main.py."""
     lines = MAIN_SRC.splitlines()
+    # Modular refactor: the frozenset is DEFINED in core/config.py (not main.py);
+    # api_source() spans the whole backend, so anchor on the definition line
+    # (`PUBLIC_STOCK_WORKER_IDS = frozenset(`) rather than the first usage.
     start = next(
         (i for i, l in enumerate(lines)
-         if "PUBLIC_STOCK_WORKER_IDS" in l and "=" in l and "not in" not in l),
+         if l.lstrip().startswith("PUBLIC_STOCK_WORKER_IDS") and "=" in l and "frozenset" in l),
         None,
     )
     if start is None:
@@ -136,7 +144,7 @@ def _public_stock_ids_block() -> str:
 def test_590_demo_workers_are_public():
     """Genuine demo workers remain in PUBLIC_STOCK_WORKER_IDS.
 
-    #872 later removed tenant/private workers such as kugelaudio from the public
+    #872 later removed tenant/private account-reading workers from the public
     stock bypass, so this legacy regression now locks the current safe demo set.
     """
     block = _public_stock_ids_block()

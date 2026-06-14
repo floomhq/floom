@@ -43,9 +43,12 @@ def test_health_does_not_require_scheduler_in_cloud_mode(monkeypatch):
 
 def test_claim_draft_slot_removes_expired_empty_bucket(monkeypatch):
     main = _fresh_main(monkeypatch)
-    main._draft_rate_store.clear()
-    main._draft_rate_store["anon"] = collections.deque([100.0])
-    monkeypatch.setattr(main.time, "monotonic", lambda: 100.0 + main._DRAFT_RATE_WINDOW_SECONDS + 1.0)
+    # The draft rate limiter moved from main into services.worker_codegen; patch
+    # its clock + window there (main re-exports the same store/_claim_draft_slot).
+    import services.worker_codegen as codegen
+    codegen._draft_rate_store.clear()
+    codegen._draft_rate_store["anon"] = collections.deque([100.0])
+    monkeypatch.setattr(codegen.time, "monotonic", lambda: 100.0 + codegen._DRAFT_RATE_WINDOW_SECONDS + 1.0)
 
     class Request:
         headers = {}

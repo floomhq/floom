@@ -73,6 +73,8 @@ def load_main(monkeypatch, tmp_path):
         "scheduler",
     ]:
         sys.modules.pop(name, None)
+    for name in [n for n in list(sys.modules) if n.startswith("routers")]:
+        sys.modules.pop(name, None)
 
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,

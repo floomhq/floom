@@ -31,14 +31,15 @@ def booted(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DRAFT_RATE_HOUR", "100")
     monkeypatch.setenv("WORKEROS_RUN_CREATE_RATE_LIMIT", "100")
 
-    for name in [
-        "main", "db", "db._legacy_sqlite", "db.sqlite", "db.factory",
-        "db.dependency", "db.interface", "models", "files", "worker_registry",
-        "runner_utils", "run_service", "webhook_service", "composio_client",
-        "scheduler", "auth", "auth.context", "auth.dependency", "auth.factory",
-        "auth.interface", "auth.local", "contexts", "chat_service",
-    ]:
-        sys.modules.pop(name, None)
+    for name in list(sys.modules):
+        if name in (
+            "main", "db", "db._legacy_sqlite", "db.sqlite", "db.factory",
+            "db.dependency", "db.interface", "models", "files", "worker_registry",
+            "runner_utils", "run_service", "webhook_service", "composio_client",
+            "scheduler", "auth", "auth.context", "auth.dependency", "auth.factory",
+            "auth.interface", "auth.local", "contexts", "chat_service",
+        ) or name.startswith("routers"):
+            sys.modules.pop(name, None)
 
     db = importlib.import_module("db")
     db.init_db()
@@ -361,7 +362,10 @@ def test_async_create_from_prompt_is_idempotent(booted, monkeypatch):
     conv_id = chat_service.create_conversation("u1", title="Async create")
     created_runs: list[tuple[str, dict]] = []
 
-    monkeypatch.setattr(chat_service, "_ensure_worker_author_registered", lambda user_id: None)
+    # _idempotent_worker_author_run lives in services.chat_throttle and resolves
+    # _ensure_worker_author_registered in that namespace, so patch it there.
+    chat_throttle = sys.modules["services.chat_throttle"]
+    monkeypatch.setattr(chat_throttle, "_ensure_worker_author_registered", lambda user_id: None)
 
     def fake_create_run(worker_id, inputs, trigger_source="manual", **kwargs):
         run_id = f"run_fake_{len(created_runs) + 1}"
@@ -659,8 +663,11 @@ def test_chat_sse_endpoint_preserves_contract_order(booted, monkeypatch):
 
 def test_public_run_sse_enriches_artifact_and_terminal_events(booted, monkeypatch):
     main = booted["main"]
+    # _run_event_metadata moved to services.public_view alongside _public_sse_event,
+    # which calls it directly; patch it at its new home so the injection takes effect.
+    import services.public_view as _public_view
     monkeypatch.setattr(
-        main,
+        _public_view,
         "_run_event_metadata",
         lambda run_id: {
             "worker_id": "csv_enricher",

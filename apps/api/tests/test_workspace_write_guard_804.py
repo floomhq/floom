@@ -1,7 +1,7 @@
 """#804: server-side member read-only guard on PUT /workspace and PUT /workspace/base.
 
 Members must be blocked by the SERVER (403), not merely hidden in the UI — this is
-the security fix Federico flagged to land before any member-facing assistant UI.
+the security fix the operator flagged to land before any member-facing assistant UI.
 
 Two layers of proof:
   1. Unit — the guard helper `_require_workspace_write` directly: admin/owner allowed,
@@ -92,6 +92,8 @@ def app_main(monkeypatch, tmp_path):
         "auth.interface", "auth.local", "contexts", "chat_service",
     ]:
         sys.modules.pop(name, None)
+    for _rn in [x for x in list(sys.modules) if x.startswith('routers')]:
+        sys.modules.pop(_rn, None)
 
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None, stop_scheduler=lambda: None,

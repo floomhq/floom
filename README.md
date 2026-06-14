@@ -194,10 +194,12 @@ workeros run <id> --inputs-file inputs.json
 
 A few of the workers shipped in [`workers/`](workers/) — browse the directory for the full set:
 
-- **weekly_update** — Turns raw notes into a polished weekly update (AI, requires approval)
 - **csv_enricher** — Enriches CSV rows using custom instructions (AI)
 - **research_brief** — Generates markdown research briefs on any topic (AI, requires approval)
-- **search_console_insights** — Pulls Google Search Console data and summarises performance
+- **github-digest** — Summarises recent activity on a GitHub repo
+- **outbound-approval-demo** — Two-run human-in-the-loop approval pattern demo
+- **openblog** / **opendraft** — Bundled upstream content-generation engine demos
+- **gmail-summarize-latest**, **gmail-smart-replies** — Gmail automation templates (connect your own account)
 
 ---
 
@@ -276,3 +278,19 @@ All endpoints require the `x-floom-secret` header (set `FLOOM_SECRET` in `.env`)
 | `/composio-events` | POST | Signed Composio webhook receiver |
 | `/healthz` | GET | Health check |
 | `/system/overview` | GET | Overview stats, attention items, setup-incomplete alerts |
+
+---
+
+## Contributing
+
+Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup,
+the repo layout, and PR guidelines.
+
+## Security
+
+To report a vulnerability, please follow [SECURITY.md](SECURITY.md) and report it
+privately rather than opening a public issue.
+
+## License
+
+[MIT](LICENSE) © Workeros contributors

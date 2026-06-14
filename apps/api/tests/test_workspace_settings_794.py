@@ -29,6 +29,8 @@ def app_main(monkeypatch, tmp_path):
                  "db.interface", "models", "worker_registry", "run_service", "scheduler",
                  "auth", "auth.context", "auth.dependency", "main"]:
         sys.modules.pop(name, None)
+        for _rn in [n for n in list(sys.modules) if n.startswith(("routers", "services", "core"))]:
+            sys.modules.pop(_rn, None)
     sys.modules["scheduler"] = types.SimpleNamespace(start_scheduler=lambda: None, stop_scheduler=lambda: None)
     db = importlib.import_module("db")
     db.init_db()
@@ -51,16 +53,21 @@ def _as_role(main, **ctx):
     main.app.dependency_overrides[get_auth_context] = lambda: AuthContext(**ctx)
 
 
+def _settings_without_readonly(payload: dict) -> dict:
+    # #797 added a read-only `current_month_spend_usd` mirror to the settings
+    # map; this #794 round-trip only asserts the stored key/value pairs.
+    return {k: v for k, v in payload.items() if k != "current_month_spend_usd"}
+
+
 def test_admin_round_trip(app_main, client):
     _as_role(app_main, user_id="alice", role="admin")
-    assert client.get("/workspace/settings").json() == {"current_month_spend_usd": "0.0000"}
+    assert _settings_without_readonly(client.get("/workspace/settings").json()) == {}
 
     assert client.put("/workspace/settings/approval_default", json={"value": "required"}).status_code == 204
     assert client.put("/workspace/settings/auto_pause", json={"value": "true"}).status_code == 204
-    assert client.get("/workspace/settings").json() == {
+    assert _settings_without_readonly(client.get("/workspace/settings").json()) == {
         "approval_default": "required",
         "auto_pause": "true",
-        "current_month_spend_usd": "0.0000",
     }
     # Upsert overwrites.
     assert client.put("/workspace/settings/auto_pause", json={"value": "false"}).status_code == 204

@@ -26,16 +26,28 @@ if str(API_DIR) not in sys.path:
 
 
 def _mk_workers_db(path: Path) -> None:
-    c = sqlite3.connect(path)
-    c.execute(
-        "CREATE TABLE workers (id TEXT, name TEXT, trigger_type TEXT, enabled INTEGER, "
-        "owner_id TEXT, visibility TEXT, workspace_id TEXT, skill_version_id TEXT)"
-    )
-    c.execute("CREATE TABLE skill_versions (id TEXT, manifest_json TEXT)")
-    c.execute("CREATE TABLE users (id TEXT, role TEXT)")
-    c.execute("CREATE TABLE composio_connections (id TEXT, user_id TEXT, app_name TEXT)")
-    c.commit()
-    c.close()
+    """Build the REAL schema (via init_db), then the tests seed rows into it.
+
+    Previously this hand-rolled minimal `workers` / `composio_connections` tables.
+    Because migrations use `CREATE TABLE IF NOT EXISTS`, those partial tables
+    survived and a later `CREATE INDEX` migration (composio_connections.status)
+    failed, breaking init_db for the whole module. Building the canonical schema
+    keeps the seed INSERTs, the migrations, and the visibility logic in agreement.
+    """
+    import os
+    import importlib
+
+    prev = {k: os.environ.get(k) for k in ("WORKEROS_DB", "FLOOM_DB")}
+    os.environ["WORKEROS_DB"] = str(path)
+    os.environ["FLOOM_DB"] = str(path)
+    try:
+        for name in list(sys.modules):
+            if name == "db" or name.startswith("db."):
+                sys.modules.pop(name, None)
+        importlib.import_module("db").init_db()
+    finally:
+        for k, v in prev.items():
+            os.environ.pop(k, None) if v is None else os.environ.__setitem__(k, v)
 
 
 # ---------------------------------------------------------------------------
@@ -47,9 +59,10 @@ def test_claim_on_setup_transfers_workers_and_connections(tmp_path, monkeypatch)
     _mk_workers_db(db)
     c = sqlite3.connect(db)
     c.executescript(
-        "INSERT INTO workers (id, owner_id, name, visibility) VALUES "
-        "  ('w1','boot','W1','private'),('w2','boot','W2','private');"
-        "INSERT INTO composio_connections (id, user_id, app_name) VALUES ('c1','boot','gmail');"
+        "INSERT INTO workers (id, owner_id, name, visibility, skill_version_id, created_at) VALUES "
+        "  ('w1','boot','W1','private','sv1','2026-01-01'),('w2','boot','W2','private','sv2','2026-01-01');"
+        "INSERT INTO composio_connections (id, user_id, app_name, composio_connection_id, created_at, updated_at) "
+        "VALUES ('c1','boot','gmail','cc1','2026-01-01','2026-01-01');"
     )
     c.commit(); c.close()
     monkeypatch.setenv("WORKEROS_DB", str(db))
@@ -109,7 +122,7 @@ def test_claim_on_setup_noop_in_cloud(tmp_path, monkeypatch):
     db = tmp_path / "claim4.db"
     _mk_workers_db(db)
     c = sqlite3.connect(db)
-    c.execute("INSERT INTO workers (id, owner_id) VALUES ('w1','boot')")
+    c.execute("INSERT INTO workers (id, owner_id, name, skill_version_id, created_at) VALUES ('w1','boot','W1','sv1','2026-01-01')")
     c.commit(); c.close()
     monkeypatch.setenv("WORKEROS_DB", str(db))
     monkeypatch.setenv("FLOOM_DB", str(db))
@@ -132,12 +145,21 @@ def _seed_visibility_db(path: Path) -> None:
     _mk_workers_db(path)
     c = sqlite3.connect(path)
     c.executescript(
-        "INSERT INTO users (id, role) VALUES ('admin-1','admin'),('member-1','member');"
-        "INSERT INTO workers (id, name, owner_id, visibility, workspace_id) VALUES "
-        "  ('w-admin','A','admin-1','private','local-default'),"
-        "  ('w-member','M','member-1','private','local-default'),"
-        "  ('w-seed','S','ghost','private','local-default'),"
-        "  ('w-shared','Sh','ghost','workspace','local-default');"
+        "INSERT INTO users (id, role, username, password_hash, created_at, updated_at) VALUES "
+        "  ('admin-1','admin','admin-1','x','2026-01-01','2026-01-01'),"
+        "  ('member-1','member','member-1','x','2026-01-01','2026-01-01');"
+        # Active workspace membership: the real visibility query only surfaces a
+        # workspace-visible worker to a user who is an ACTIVE member of its
+        # workspace (matches _worker_can_view). The old hand-built schema had no
+        # workspace_members table so this check was skipped.
+        "INSERT INTO workspace_members (workspace_id, user_id, role, status, created_at, updated_at) VALUES "
+        "  ('local-default','admin-1','admin','active','2026-01-01','2026-01-01'),"
+        "  ('local-default','member-1','member','active','2026-01-01','2026-01-01');"
+        "INSERT INTO workers (id, name, owner_id, visibility, workspace_id, skill_version_id, created_at) VALUES "
+        "  ('w-admin','A','admin-1','private','local-default','sv-a','2026-01-01'),"
+        "  ('w-member','M','member-1','private','local-default','sv-m','2026-01-01'),"
+        "  ('w-seed','S','ghost','private','local-default','sv-s','2026-01-01'),"
+        "  ('w-shared','Sh','ghost','workspace','local-default','sv-sh','2026-01-01');"
     )
     c.commit(); c.close()
 

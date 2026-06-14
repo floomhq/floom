@@ -1,58 +1,8 @@
-# Workers Smoke Matrix
+# Example worker inputs
 
-The stock-worker inventory lives in `docs/workers/MANIFEST.md`.
+`inputs/` holds sample `example_input` payloads for the bundled demo workers
+(`workers/`). They are used by tests and as copy-paste starting points when you
+run a worker from the API or UI.
 
-The daily smoke runner is `scripts/prod_smoke_matrix.py`.
-
-Run it with a live API and `FLOOM_SECRET`:
-
-```bash
-python scripts/prod_smoke_matrix.py \
-  --api https://workers-api.floom.dev \
-  --secret "$FLOOM_SECRET"
-```
-
-Run a subset during investigation:
-
-```bash
-python scripts/prod_smoke_matrix.py \
-  --api https://workers-api.floom.dev \
-  --secret "$FLOOM_SECRET" \
-  --workers research_brief,weekly_update
-```
-
-By default it writes a dated report to:
-
-`docs/workers/SMOKE-RESULTS-YYYY-MM-DD.md`
-
-The report includes:
-
-- the active stock-worker smoke matrix,
-- the system metrics snapshot used for the run-failure-rate audit,
-- open alert incidents,
-- the top 7-day failure streams,
-- a "Regressions" section (#614): workers that passed in the most recent
-  prior `SMOKE-RESULTS-*.md` and fail now.
-
-Exit codes: `0` all pass, `1` failures (no regressions), `2` regressions —
-a worker that passed last report fails now. Alert on `2` first; it means
-something that worked yesterday broke.
-
-The `opendraft` row uses a start-and-cancel smoke instead of waiting for the full authoring run.
-
-## self-hosted server Cron
-
-The tracked cron wrapper is `scripts/workeros-prod-smoke-cron.sh`. It reads
-`FLOOM_SECRET` from the environment or `${WORKEROS_REPO_DIR}/.deploy-secret`,
-runs the API matrix, writes `/var/log/workeros-smoke/api-smoke-*.log`, and exits
-non-zero when any active worker fails.
-
-Install on self-hosted server root crontab:
-
-```cron
-15 6 * * 1 WORKEROS_REPO_DIR=/root/workeros /root/workeros/scripts/workeros-prod-smoke-cron.sh
-```
-
-Keep this API matrix separate from the OpenBrowser UI sweep cron. The UI sweep
-proves browser paths; this API matrix proves active stock workers with fixture
-inputs and creates the dated `SMOKE-RESULTS-YYYY-MM-DD.md` report.
+Each file is named after its worker id, e.g. `inputs/research_brief.json` is a
+valid input for the `research_brief` demo worker.

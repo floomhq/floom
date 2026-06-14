@@ -491,7 +491,7 @@ def _sandbox_api_url() -> str:
         value = (os.environ.get(name) or "").strip()
         if value:
             return value.rstrip("/")
-    return "https://workers-api.floom.dev"
+    return "http://localhost:8000"
 
 
 def _normalize_sandbox_relative_path(raw_path: str) -> str:
@@ -967,10 +967,9 @@ class E2BSandboxDriver(SandboxDriver):
             # Node:   package.json     -> `npm install --omit=dev --no-audit --no-fund`
             #         (uses package-lock.json when present for reproducibility).
             #
-            # Federico 2026-05-28 hit the Node gap shipping the Kugelaudio
-            # bug-intake worker (Node, needs google-auth-library). E2B can
-            # run any language; we just had no install hook for non-Python
-            # bundles.
+            # We hit this Node gap shipping a Node worker that needed
+            # google-auth-library: E2B can run any language; we just had no
+            # install hook for non-Python bundles.
             req_path = worker_dir / "requirements.txt"
             if req_path.exists() and req_path.read_text().strip():
                 log_fn("[e2b] Installing requirements.txt...", "info")

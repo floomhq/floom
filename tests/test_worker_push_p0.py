@@ -113,12 +113,15 @@ def _worker_payload(name: str, *, title: str = "Worker Push Probe", is_example: 
 def test_atomic_create_rolls_back_dir_and_db_when_detail_build_fails(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
-    original_build_detail = main._build_worker_detail
+    # _create_worker_from_parsed_payload moved to services.worker_create and calls
+    # _build_worker_detail via its own module global, so patch it there (not on main).
+    import services.worker_create as worker_create
+    original_build_detail = worker_create._build_worker_detail
 
     def fail_detail(*args, **kwargs):
         raise RuntimeError("forced detail failure")
 
-    monkeypatch.setattr(main, "_build_worker_detail", fail_detail)
+    monkeypatch.setattr(worker_create, "_build_worker_detail", fail_detail)
     response = client.post(
         "/workers",
         headers=_headers(),
@@ -131,7 +134,7 @@ def test_atomic_create_rolls_back_dir_and_db_when_detail_build_fails(monkeypatch
     assert not list(workers_dir.parent.glob(".atomic-rollback-probe.*"))
     assert main.get_repositories().workers.get_any(worker_id="atomic-rollback-probe") is None
 
-    monkeypatch.setattr(main, "_build_worker_detail", original_build_detail)
+    monkeypatch.setattr(worker_create, "_build_worker_detail", original_build_detail)
     retry = client.post(
         "/workers",
         headers=_headers(),

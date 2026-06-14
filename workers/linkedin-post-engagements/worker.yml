@@ -2,6 +2,7 @@ schema_version: "0.3"
 archived: true
 archive_reason: "Paused — the LinkedIn data provider's quota is used up for now. Resumes automatically on 2026-06-25, or sooner once the data source is topped up."
 name: linkedin-post-engagements
+is_example: true
 title: LinkedIn Post Engagements
 description: Pull recent LinkedIn posts from a profile and their public likers via Apify.
 long_description: |
@@ -9,7 +10,7 @@ long_description: |
 
   Outputs a single engagements.json artifact with per-post metadata, the engagers list per post, and a unique-engagers index showing total engagements per person and which posts they engaged with. A summary.md is also written with top posts by engagement count.
 
-  This worker tracks the CURRENT public engagement snapshot. Each scheduled run is a fresh fetch of the latest 20 posts + their likers; cross-run merging is not done in the sandbox (the original ~/.agents/skills/linkedin-post-engagements/data/engagements.json on Federico's Mac handles longitudinal tracking).
+  This worker tracks the CURRENT public engagement snapshot. Each scheduled run is a fresh fetch of the latest 20 posts + their likers; cross-run merging is not done in the sandbox (longitudinal tracking across runs is left to the caller, e.g. by persisting each run's engagements.json artifact).
 use_cases:
 - See who liked your recent posts each Tuesday and Friday morning.
 - Build a list of repeat engagers to prioritize outreach.
@@ -42,7 +43,7 @@ exec:
     kind: scalar
     type: url
     required: true
-    default: https://www.linkedin.com/in/fedeponte/
+    default: https://www.linkedin.com/in/USERNAME/
     label: LinkedIn profile URL
     placeholder: https://www.linkedin.com/in/USERNAME/
   - name: posts_limit

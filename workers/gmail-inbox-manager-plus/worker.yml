@@ -1,10 +1,10 @@
 schema_version: '0.3'
-is_example: false
+is_example: true
 name: gmail-inbox-manager-plus
 title: Gmail Inbox Manager+ (drafts replies)
-description: Daily Gmail cleaner that applies inbox rules, archives low-value messages, labels matching mail, drafts replies in Federico's voice, and writes a markdown digest.
+description: Daily Gmail cleaner that applies inbox rules, archives low-value messages, labels matching mail, drafts replies in the operator's voice, and writes a markdown digest.
 long_description: |
-  Fetches unread and recent Gmail messages, applies local rule definitions, performs safe batch label updates through the Workeros Composio proxy, drafts replies (as Gmail drafts, never sent) for messages that warrant one using Federico's brain context, and writes a daily inbox digest. Drafting uses Gemini and activates when GEMINI_API_KEY (or OPENAI_API_KEY) is available as a worker secret; without a key, sorting still runs and drafting is skipped.
+  Fetches unread and recent Gmail messages, applies local rule definitions, performs safe batch label updates through the Workeros Composio proxy, drafts replies (as Gmail drafts, never sent) for messages that warrant one using the operator's brain context, and writes a daily inbox digest. Drafting uses Gemini and activates when GEMINI_API_KEY (or OPENAI_API_KEY) is available as a worker secret; without a key, sorting still runs and drafting is skipped.
 
   Modes:
   - test (default): read-only. No archiving, marking read, labels, Gmail drafts, or state writes. Shows the digest plus proposed reply drafts inline for review.
@@ -22,7 +22,7 @@ how_it_works: |
   Gmail unread/recent search
     -> match optional inbox rules (archive / mark read / label)
     -> classify remaining as important vs FYI
-    -> draft replies in Federico's voice (Gemini); in live mode save Gmail drafts (never send)
+    -> draft replies in the operator's voice (Gemini); in live mode save Gmail drafts (never send)
 folder: Operations/Inbox
 tags:
 - gmail
@@ -94,5 +94,5 @@ connections:
   - GMAIL_BATCH_MODIFY_MESSAGES
   - GMAIL_CREATE_EMAIL_DRAFT
 contexts:
-- name: federico-ops
+- name: operator-ops
   writeable: false

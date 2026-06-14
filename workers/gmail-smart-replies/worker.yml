@@ -1,11 +1,11 @@
 schema_version: '0.3'
-is_example: false
+is_example: true
 name: gmail-smart-replies
 title: Gmail Smart Replies
-description: Reads recent unread human emails and drafts on-brand replies as Gmail drafts in Federico's voice. Never sends.
+description: Reads recent unread human emails and drafts on-brand replies as Gmail drafts in the operator's voice. Never sends.
 long_description: |
   Fetches recent unread emails, skips automated/no-reply mail, and for each real
-  human email that warrants a response, drafts a reply in Federico's voice using
+  human email that warrants a response, drafts a reply in the operator's voice using
   his brain context. Replies are saved as Gmail DRAFTS for review; the worker
   never sends. Triage/cleaning stays in the separate gmail-inbox-manager worker;
   this worker is the draft-reply layer on top.
@@ -17,7 +17,7 @@ how_it_works: |
   Gmail unread search
     -> skip automated / no-reply senders
     -> for each human email, decide if a reply is warranted
-    -> draft a reply in Federico's voice (platform model)
+    -> draft a reply in the operator's voice (platform model)
     -> save as a Gmail draft (never send)
     -> write a markdown summary of what was drafted
 folder: Operations/Inbox
@@ -88,5 +88,5 @@ connections:
   - GMAIL_FETCH_EMAILS
   - GMAIL_CREATE_EMAIL_DRAFT
 contexts:
-- name: federico-ops
+- name: operator-ops
   writeable: false

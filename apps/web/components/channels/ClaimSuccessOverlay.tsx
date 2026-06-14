@@ -25,7 +25,7 @@ const COPY: Record<ClaimChannel, { title: string; line: string }> = {
 /**
  * Full-screen success confirmation shown after a channel claim is consumed.
  *
- * Federico feedback 2026-06-11: a successful link should feel like a real
+ * the operator feedback 2026-06-11: a successful link should feel like a real
  * milestone (full-screen), not a small inline toast. Warm matte, Geist,
  * ChatGPT-simplicity bar: one accent (success/sage), real iconography, no
  * gradients or colored-left-borders, no emoji-as-icon.

@@ -25,7 +25,13 @@ API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
-CHAT_SRC = (API_DIR / "chat_service.py").read_text(encoding="utf-8")
+# chat_service.py was decomposed into services/chat_*.py modules (tool impls,
+# worker authoring, etc.); these structural source-property checks span the whole
+# chat service surface, so read chat_service.py plus its extracted submodules.
+CHAT_SRC = (API_DIR / "chat_service.py").read_text(encoding="utf-8") + "".join(
+    p.read_text(encoding="utf-8")
+    for p in sorted((API_DIR / "services").glob("chat_*.py"))
+)
 
 
 # ---------------------------------------------------------------------------

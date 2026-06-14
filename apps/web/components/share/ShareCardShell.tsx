@@ -1,6 +1,6 @@
 // Shared v6 share-card primitives. Every standalone share surface (worker,
 // brain file/pack, approval) uses ONE card with the SAME fixed body height and
-// the same Floom nav — Federico's HARD rule. No emoji; the brand mark is a
+// the same Floom nav — the operator's HARD rule. No emoji; the brand mark is a
 // real SVG, never a text-in-circle.
 import Link from "next/link";
 import type { ReactNode } from "react";

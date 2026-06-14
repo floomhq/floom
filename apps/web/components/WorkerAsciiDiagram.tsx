@@ -24,7 +24,7 @@ import { cn } from "@/lib/utils";
 // WorkerAsciiDiagram — a polished box-drawing flow diagram of a worker's
 // pipeline, rendered on the worker detail About view.
 //
-// Federico (2026-05-29): "draw ascii for each worker, powered by these logos,
+// the operator (2026-05-29): "draw ascii for each worker, powered by these logos,
 // on the description view — polished ascii where the lines are NOT dashed and
 // fit our design system… basically a layer around ascii." Then (FIX 1):
 // "no truncated text" + "show the type icons IN the visual".
@@ -58,8 +58,8 @@ import { cn } from "@/lib/utils";
 // workers still render a clean diagram (trigger → worker → result).
 // ---------------------------------------------------------------------------
 
-// M3 (Federico 2026-06-02 mobile audit): de-date the flow diagram by ROUNDING
-// every inner node box. Federico's design rule forbids fully-square boxes. The
+// M3 (the operator 2026-06-02 mobile audit): de-date the flow diagram by ROUNDING
+// every inner node box. the operator's design rule forbids fully-square boxes. The
 // rounded box-drawing corners (╭ ╮ ╰ ╯) are single monospace cells with the
 // EXACT same advance width as the square corners (┌ ┐ └ ┘), so the character
 // grid, connectors, and the `ch`-positioned glyph overlay stay pixel-aligned —
@@ -168,7 +168,7 @@ function triggerWord(triggerType?: string): string {
 
 // Inner content width for a side column: the longest label + the icon slot,
 // clamped to [MIN_INNER, MAX_INNER]. Sizing to content is what kills the
-// truncation Federico flagged.
+// truncation the operator flagged.
 function columnInner(labels: string[]): number {
   const longest = labels.reduce((m, l) => Math.max(m, l.length), 0);
   return Math.min(MAX_INNER, Math.max(MIN_INNER, longest + ICON_SLOT + 1));
@@ -548,7 +548,7 @@ export function WorkerAsciiDiagram({
         </div>
 
         {/* Logo "engine" strip — the worker's connection brand marks layered
-            beneath the ASCII as the hybrid identity layer Federico asked for.
+            beneath the ASCII as the hybrid identity layer the operator asked for.
             Real BrandLogo SVGs (same vocabulary as WorkerIconPills). Hidden
             when the worker declares no connections. */}
         {conns.length > 0 && (

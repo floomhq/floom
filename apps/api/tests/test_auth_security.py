@@ -57,6 +57,8 @@ def _reset_modules():
         "auth.multi_member",
     ]:
         sys.modules.pop(name, None)
+    for _rn in [x for x in list(sys.modules) if x.startswith("routers")]:
+        sys.modules.pop(_rn, None)
 
 
 def _isolated_empty_db(monkeypatch, tmp_path):
