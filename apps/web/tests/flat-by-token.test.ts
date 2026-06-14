@@ -7,10 +7,9 @@ const overviewSrc = readFileSync(
   "utf8"
 );
 
-// APP-UI-V4-SPEC rule #2: "Flat by token, never by component." All collection
-// surface borders come from the --bd-* CSS variables; a hardcoded
-// `border: 1px solid` on a collection surface is a review-blocker (this exact
-// bug shipped twice during design). These assertions are the regression guard.
+// Design-system foundation: boxes/cards/menus/inputs/list rows use background
+// surfaces, spacing, and shadows for separation. Visual border utilities and
+// circular radii are blocked by the style guard and these source assertions.
 
 const css = readFileSync(resolve(__dirname, "../app/globals.css"), "utf8");
 
@@ -32,82 +31,68 @@ function rule(selector: string): string {
   return m[1];
 }
 
-describe("v4 border tokens are declared (§1)", () => {
-  for (const token of [
-    "--bd-card:",
-    "--bd-pill:",
-    "--bd-input:",
-    "--bd-list:",
-    "--bd-div:",
-    "--bd-btn:",
-  ]) {
-    it(`declares ${token}`, () => {
-      expect(css.includes(token)).toBe(true);
-    });
-  }
+describe("design-system foundation tokens are declared", () => {
+  it("declares one concrete radius token", () => {
+    expect(/--radius-ui:\s*3px/.test(css)).toBe(true);
+    expect(css).not.toContain("--radius-pill:");
+    expect(css).not.toContain("--r-pill:");
+  });
 
-  it("--bd-card / --bd-list / --bd-btn are none", () => {
+  it("keeps divider token separate from surface borders", () => {
+    expect(css.includes("--bd-div:")).toBe(true);
     expect(/--bd-card:\s*none/.test(css)).toBe(true);
+    expect(/--bd-input:\s*none/.test(css)).toBe(true);
     expect(/--bd-list:\s*none/.test(css)).toBe(true);
-    expect(/--bd-btn:\s*none/.test(css)).toBe(true);
   });
 });
 
 describe("collection surfaces are flat by token (rule #2)", () => {
-  it(".c-gcard has no hardcoded border and no resting shadow, min-height 148", () => {
+  it(".c-gcard has no visual border and no resting shadow, min-height 148", () => {
     const r = rule(".c-gcard");
-    expect(r).toContain("border:var(--bd-card)");
-    expect(/border:\s*1px solid/.test(r)).toBe(false);
+    expect(r).not.toMatch(/\bborder:/);
     expect(r).toContain("box-shadow:none");
     expect(r).toContain("min-height:148px");
+    expect(r).toContain("border-radius:var(--radius-ui)");
   });
 
   it(".c-gcard hover is a bg lift, not a border", () => {
     const r = rule(".c-gcard:hover");
     expect(r).toContain("background:var(--bg-2)");
-    expect(r.includes("border-color")).toBe(false);
+    expect(r).not.toContain("border");
   });
 
   it(".c-ltable has no outer container border or shadow (§3)", () => {
     const r = rule(".c-ltable");
-    expect(r).toContain("border:var(--bd-list)");
-    expect(/border:\s*1px solid/.test(r)).toBe(false);
+    expect(r).not.toMatch(/\bborder:/);
     expect(r).toContain("box-shadow:none");
   });
 
-  it(".c-lrow / .c-lhead dividers come from --bd-div", () => {
-    expect(rule(".c-lrow")).toContain("border-bottom:var(--bd-div)");
-    expect(rule(".c-lhead")).toContain("border-bottom:var(--bd-div)");
+  it(".c-lrow / .c-lhead use fill and spacing, not borders", () => {
+    expect(rule(".c-lrow")).not.toContain("border");
+    expect(rule(".c-lhead")).not.toContain("border");
   });
 
-  // Phase 1 additions: close the blind spots flagged in the migration plan.
-  // These four classes had hardcoded `border: 1px solid var(--line)` pre-v4.
-
-  it(".c-srch uses --bd-input token and bg-2 fill (no hardcoded border)", () => {
+  it(".c-srch uses bg-2 fill and no border", () => {
     const r = rule(".c-srch");
-    expect(r).toContain("border:var(--bd-input)");
-    expect(/border:\s*1px solid/.test(r)).toBe(false);
+    expect(r).not.toMatch(/\bborder:/);
     expect(r).toContain("background:var(--bg-2)");
   });
 
-  it(".c-vtog uses --bd-input token and bg-2 fill (no hardcoded border)", () => {
+  it(".c-vtog uses bg-2 fill and no border", () => {
     const r = rule(".c-vtog");
-    expect(r).toContain("border:var(--bd-input)");
-    expect(/border:\s*1px solid/.test(r)).toBe(false);
+    expect(r).not.toMatch(/\bborder:/);
     expect(r).toContain("background:var(--bg-2)");
   });
 
-  it(".c-tag uses --bd-pill token and bg-2 fill (no hardcoded border)", () => {
+  it(".c-tag uses bg-2 fill and no border", () => {
     const r = rule(".c-tag");
-    expect(r).toContain("border:var(--bd-pill)");
-    expect(/border:\s*1px solid/.test(r)).toBe(false);
+    expect(r).not.toMatch(/\bborder:/);
     expect(r).toContain("background:var(--bg-2)");
   });
 
-  it(".c-vpill uses --bd-pill token and bg-2 fill (no hardcoded border)", () => {
+  it(".c-vpill uses bg-2 fill and no border", () => {
     const r = rule(".c-vpill");
-    expect(r).toContain("border:var(--bd-pill)");
-    expect(/border:\s*1px solid/.test(r)).toBe(false);
+    expect(r).not.toMatch(/\bborder:/);
     expect(r).toContain("background:var(--bg-2)");
   });
 });
@@ -117,10 +102,11 @@ describe("collection surfaces are flat by token (rule #2)", () => {
 // the primitives ship className strings (Tailwind), not static rulesets.
 
 describe("Phase 2 — Button primitive (v4 flat, APP-UI-V4-SPEC §1)", () => {
-  it("uses [border:var(--bd-btn)] token, not a hardcoded border class", () => {
-    expect(button).toContain("[border:var(--bd-btn)]");
-    // No `border border-` shorthand that would override the token
+  it("uses no visual border utility and keeps one radius token", () => {
+    expect(button).not.toContain("[border:var(--bd-btn)]");
+    expect(button).toContain("rounded-[var(--radius-ui)]");
     expect(/\bborder\s+border-(?!transparent|ring|destructive)/.test(button)).toBe(false);
+    expect(button).not.toContain("rounded-full");
   });
 
   it("has no resting shadow on any variant (shadow-none or absent shadow-btn in base)", () => {
@@ -151,8 +137,9 @@ describe("Phase 2 — Button primitive (v4 flat, APP-UI-V4-SPEC §1)", () => {
 });
 
 describe("Phase 2 — Card primitive (v4 flat, APP-UI-V4-SPEC §1)", () => {
-  it("uses [border:var(--bd-card)] token, not border-[var(--card-border)]", () => {
-    expect(card).toContain("[border:var(--bd-card)]");
+  it("uses no visual border utility and keeps one radius token", () => {
+    expect(card).not.toContain("[border:var(--bd-card)]");
+    expect(card).toContain("rounded-[var(--radius-ui)]");
     expect(card).not.toContain("border border-[var(--card-border)]");
     expect(card).not.toContain("border border-[var(--card-border)");
   });
@@ -178,8 +165,8 @@ describe("Phase 2 — Card primitive (v4 flat, APP-UI-V4-SPEC §1)", () => {
 });
 
 describe("Phase 2 — Input primitive (v4 flat, APP-UI-V4-SPEC §1)", () => {
-  it("uses [border:var(--bd-input)] token, not border border-input", () => {
-    expect(input).toContain("[border:var(--bd-input)]");
+  it("uses no visual border utility", () => {
+    expect(input).not.toContain("[border:var(--bd-input)]");
     expect(input).not.toContain("border border-input");
   });
 
@@ -192,15 +179,16 @@ describe("Phase 2 — Input primitive (v4 flat, APP-UI-V4-SPEC §1)", () => {
     expect(stripped.includes("bg-transparent")).toBe(false);
   });
 
-  it("uses --radius-input, not --radius-button", () => {
-    expect(input).toContain("rounded-[var(--radius-input)]");
+  it("uses --radius-ui, not per-component radius aliases", () => {
+    expect(input).toContain("rounded-[var(--radius-ui)]");
+    expect(input).not.toContain("rounded-[var(--radius-input)]");
     expect(input).not.toContain("rounded-[var(--radius-button)]");
   });
 });
 
 describe("Phase 2 — Select trigger (v4 flat, APP-UI-V4-SPEC §1)", () => {
-  it("uses [border:var(--bd-input)] token, not border border-line-strong", () => {
-    expect(select).toContain("[border:var(--bd-input)]");
+  it("uses no visual border utility", () => {
+    expect(select).not.toContain("[border:var(--bd-input)]");
     expect(select).not.toContain("border border-line-strong");
   });
 
@@ -214,14 +202,15 @@ describe("Phase 2 — Select trigger (v4 flat, APP-UI-V4-SPEC §1)", () => {
     expect(select).not.toContain("shadow-sm");
   });
 
-  it("uses --radius-input for trigger radius", () => {
-    expect(select).toContain("rounded-[var(--radius-input)]");
+  it("uses --radius-ui for trigger radius", () => {
+    expect(select).toContain("rounded-[var(--radius-ui)]");
+    expect(select).not.toContain("rounded-[var(--radius-input)]");
   });
 });
 
 describe("Phase 2 — Textarea primitive (v4 flat, APP-UI-V4-SPEC §1)", () => {
-  it("uses [border:var(--bd-input)] token, not border border-input", () => {
-    expect(textarea).toContain("[border:var(--bd-input)]");
+  it("uses no visual border utility", () => {
+    expect(textarea).not.toContain("[border:var(--bd-input)]");
     expect(textarea).not.toContain("border border-input");
   });
 
@@ -231,15 +220,11 @@ describe("Phase 2 — Textarea primitive (v4 flat, APP-UI-V4-SPEC §1)", () => {
   });
 });
 
-// P5: OverviewDashboard metric tiles must use --bd-card token (spec rule #2).
-// The tiles must not have a hardcoded `border border-[var(--border-default)]`.
-describe("P5 — OverviewDashboard metric tiles are flat by token (spec rule #2)", () => {
-  it("cardClass uses --bd-card token, not border-[var(--border-default)]", () => {
-    // The metric tile cardClass const must use the full border shorthand token
-    // so `--bd-card:none` computes to 0px border width.
-    expect(overviewSrc).toContain("[border:var(--bd-card)]");
-    // Must NOT hardcode border-[var(--border-default)]
+describe("P5 — OverviewDashboard metric tiles use bg surfaces", () => {
+  it("cardClass has no card border token or hardcoded border-default", () => {
+    expect(overviewSrc).not.toContain("[border:var(--bd-card)]");
     expect(overviewSrc).not.toContain("border border-[var(--border-default)]");
+    expect(overviewSrc).toContain("bg-[var(--bg-card)]");
   });
 
   it("metric tile hover uses bg lift, not border-strong", () => {
