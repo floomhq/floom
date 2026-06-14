@@ -25,6 +25,8 @@ describe("ShareModal grants (#767/#768)", () => {
         open
         onOpenChange={() => {}}
         title="My worker"
+        visibility="private"
+        onSetVisibility={vi.fn()}
         getShareLink={vi.fn().mockResolvedValue("u")}
         grantAsset={{ type: "worker", id: "alpha" }}
       />
@@ -44,7 +46,16 @@ describe("ShareModal grants (#767/#768)", () => {
   });
 
   it("keeps the invite disabled when no grantAsset is supplied", () => {
-    render(<ShareModal open onOpenChange={() => {}} title="run" getShareLink={vi.fn().mockResolvedValue("u")} />);
+    render(
+      <ShareModal
+        open
+        onOpenChange={() => {}}
+        title="run"
+        visibility="private"
+        onSetVisibility={vi.fn()}
+        getShareLink={vi.fn().mockResolvedValue("u")}
+      />
+    );
     expect((screen.getByPlaceholderText("Invite people by email") as HTMLInputElement).disabled).toBe(true);
   });
 });
