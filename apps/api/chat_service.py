@@ -1916,96 +1916,22 @@ def _workspace_tools(user_id: str, settings: Optional[Dict[str, bool]] = None) -
 # ---------------------------------------------------------------------------
 
 def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
-    from db import get_db as _get_db
+    # #1027: route through the repository Protocol (was a direct get_db() read)
+    # so non-SQLite backends (cloud Supabase) supply their own implementation.
+    # The visibility logic now lives in WorkerRepository.list_for_agent; stock
+    # ids are passed in (caller owns the PUBLIC/PROTECTED sets) to keep the repo
+    # free of a db<-main import cycle.
+    from db import get_repositories
+    from main import PUBLIC_STOCK_WORKER_IDS, PROTECTED_STOCK_WORKER_IDS
+
     visibility_user_id = _effective_worker_visibility_user_id(user_id)
     include_all_users = bool(args.get("include_all_users"))
-    result = []
-    with _get_db() as conn:
-        # Default to "the user's workers" for Emily's "what workers do I have?"
-        # path. Admin-wide listing is explicit so the default never exposes
-        # another user's private workers in a personal inventory answer.
-        try:
-            role_row = conn.execute("SELECT role FROM users WHERE id = ?", (visibility_user_id,)).fetchone()
-            is_admin = bool(role_row) and str(role_row["role"]).lower() == "admin"
-        except Exception:
-            # No users table (single-user OSS without multi-member) -> not admin;
-            # the member path below (own + workspace-shared) is the safe default.
-            is_admin = False
-        base_select = (
-            "SELECT w.id, w.name, w.trigger_type, w.enabled, w.owner_id, sv.manifest_json "
-            "FROM workers w "
-            "LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id "
-        )
-        if is_admin and include_all_users:
-            rows = conn.execute(base_select + "ORDER BY w.name").fetchall()
-        else:
-            # Mirror _worker_can_view exactly: a member sees their own workers,
-            # stock/public workers (always accessible regardless of ownership),
-            # plus workspace-visible workers they are an active member of.
-            # The workspace_members table may be absent in single-user OSS
-            # (no multi-member); check for its existence before using it.
-            from main import PUBLIC_STOCK_WORKER_IDS, PROTECTED_STOCK_WORKER_IDS
-            all_stock_ids = list(PUBLIC_STOCK_WORKER_IDS | PROTECTED_STOCK_WORKER_IDS)
-            try:
-                has_members_table = bool(conn.execute(
-                    "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_members' LIMIT 1"
-                ).fetchone())
-            except Exception:
-                has_members_table = False
-
-            if has_members_table:
-                # Show own workers and workspace-visible workers where the user
-                # is an active workspace member — matching _worker_can_view.
-                rows = conn.execute(
-                    base_select
-                    + "LEFT JOIN workspace_members wm "
-                    + "  ON wm.workspace_id = COALESCE(w.workspace_id, 'local-default') "
-                    + "  AND wm.user_id = ? AND wm.status = 'active' "
-                    + "WHERE w.owner_id = ? "
-                    + "OR (COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
-                    + "    AND wm.user_id IS NOT NULL) "
-                    + "ORDER BY w.name",
-                    (visibility_user_id, visibility_user_id),
-                ).fetchall()
-                # Also include stock/public workers not already captured above
-                # (e.g. stock worker owned by another user in a workspace the
-                # member doesn't belong to — stock workers are always runnable
-                # by everyone, matching _worker_can_view's stock-first check).
-                if all_stock_ids:
-                    seen_ids = {r["id"] for r in rows}
-                    missing_stock = [sid for sid in all_stock_ids if sid not in seen_ids]
-                    if missing_stock:
-                        placeholders = ",".join("?" * len(missing_stock))
-                        stock_rows = conn.execute(
-                            base_select
-                            + f"WHERE w.id IN ({placeholders}) ORDER BY w.name",
-                            missing_stock,
-                        ).fetchall()
-                        rows = list(rows) + stock_rows
-            else:
-                # Single-user OSS: no workspace_members table.
-                # In single-user mode everyone is effectively in every workspace,
-                # so workspace-visible workers are accessible to all users —
-                # matching _worker_can_view's _shared_filesystem_fallback_allowed
-                # path. Show own + workspace-visible + stock workers.
-                if all_stock_ids:
-                    placeholders = ",".join("?" * len(all_stock_ids))
-                    rows = conn.execute(
-                        base_select
-                        + f"WHERE w.owner_id = ? "
-                        + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
-                        + f"OR w.id IN ({placeholders}) "
-                        + "ORDER BY w.name",
-                        [visibility_user_id] + all_stock_ids,
-                    ).fetchall()
-                else:
-                    rows = conn.execute(
-                        base_select
-                        + "WHERE w.owner_id = ? "
-                        + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
-                        + "ORDER BY w.name",
-                        (visibility_user_id,),
-                    ).fetchall()
+    all_stock_ids = list(PUBLIC_STOCK_WORKER_IDS | PROTECTED_STOCK_WORKER_IDS)
+    rows = get_repositories().workers.list_for_agent(
+        user_id=visibility_user_id,
+        include_all_users=include_all_users,
+        stock_worker_ids=all_stock_ids,
+    )
     # #841 RCA: every row was returned, so "what workers do I have?" dumped
     # system and example workers into the chat card with no distinction. The
     # flags were already computed but never used to filter. Hidden rows are
@@ -2013,17 +1939,18 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
     # can mention they exist without listing them.
     include_system = bool(args.get("include_system"))
     hidden_system = 0
+    result = []
     for row in rows:
         try:
-            manifest = json.loads(row["manifest_json"] or "{}") if row["manifest_json"] else {}
+            manifest = json.loads(row.get("manifest_json") or "{}") if row.get("manifest_json") else {}
         except Exception:
             manifest = {}
         entry = {
             "id": row["id"],
             "name": row["name"],
             "title": manifest.get("title") or row["name"],
-            "trigger": row["trigger_type"] or "manual",
-            "enabled": bool(row["enabled"]),
+            "trigger": row.get("trigger_type") or "manual",
+            "enabled": bool(row.get("enabled")),
             "system_worker": manifest.get("system_worker", False),
             "is_example": manifest.get("is_example", False),
         }
@@ -2331,30 +2258,34 @@ def _resolve_runnable_worker(conn: Any, raw_ref: str, user_id: str) -> Dict[str,
 
 
 def _tool_workers_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
-    from db import get_db as _get_db
+    # #1027: route through the repository Protocol (was a direct get_db() read).
+    # The can-view gate + fetch now live in WorkerRepository.get_for_agent; the
+    # cross-module bits (canonical id, stock ids, fs-fallback) are resolved here
+    # and passed in so the repo stays free of a db<-main import cycle.
+    from db import get_repositories
+    from main import (
+        _canonical_worker_id,
+        PUBLIC_STOCK_WORKER_IDS,
+        PROTECTED_STOCK_WORKER_IDS,
+        _shared_filesystem_fallback_allowed,
+    )
+
     worker_id = str(args.get("id") or "")
     if not worker_id:
         return {"ok": False, "error": "id is required"}
-    from main import _canonical_worker_id
     worker_id = _canonical_worker_id(worker_id)
-    with _get_db() as conn:
-        # Security: enforce ownership/visibility before fetching full details.
-        if not _worker_can_view(conn, worker_id, user_id):
-            return {"ok": False, "error": f"Worker not found: {worker_id}"}
-        row = conn.execute(
-            """
-            SELECT w.id, w.name, w.trigger_type, w.enabled, w.cron_expr,
-                   sv.manifest_json
-            FROM workers w
-            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
-            WHERE w.id = ?
-            """,
-            (worker_id,),
-        ).fetchone()
+    visibility_user_id = _effective_worker_visibility_user_id(user_id)
+    all_stock_ids = list(PUBLIC_STOCK_WORKER_IDS | PROTECTED_STOCK_WORKER_IDS)
+    row = get_repositories().workers.get_for_agent(
+        user_id=visibility_user_id,
+        worker_id=worker_id,
+        stock_worker_ids=all_stock_ids,
+        allow_fs_fallback=_shared_filesystem_fallback_allowed(),
+    )
     if not row:
         return {"ok": False, "error": f"Worker not found: {worker_id}"}
     try:
-        manifest = json.loads(row["manifest_json"] or "{}") if row["manifest_json"] else {}
+        manifest = json.loads(row.get("manifest_json") or "{}") if row.get("manifest_json") else {}
     except Exception:
         manifest = {}
     return {
@@ -2362,9 +2293,9 @@ def _tool_workers_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
         "worker": {
             "id": row["id"],
             "name": row["name"],
-            "trigger": row["trigger_type"] or "manual",
-            "cron": row["cron_expr"],
-            "enabled": bool(row["enabled"]),
+            "trigger": row.get("trigger_type") or "manual",
+            "cron": row.get("cron_expr"),
+            "enabled": bool(row.get("enabled")),
             "manifest": manifest,
         },
     }
