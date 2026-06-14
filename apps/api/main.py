@@ -219,6 +219,16 @@ def _is_owner_only_worker_write(method: str, suffix: str) -> bool:
         return True
     if method == "POST" and suffix.startswith("/rollback/"):
         return True
+    # #229: enable/disable and context attach/detach mutate the OWNER's
+    # skill-version manifest, but were missing from the allow-list — so a
+    # non-owner member could toggle or rewrite the contexts of a shared worker
+    # they don't own (cross-user IDOR-write). These are owner/admin-only.
+    if method == "POST" and suffix in ("/pause", "/resume"):
+        return True
+    if method == "POST" and suffix == "/contexts":
+        return True
+    if method in ("POST", "PUT", "PATCH", "DELETE") and suffix.startswith("/contexts/"):
+        return True
     return False
 
 
