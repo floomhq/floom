@@ -36,7 +36,9 @@ describe("#616 Settings Developer section", () => {
     const s = src("app/settings/page.tsx");
     const developerSectionIdx = s.indexOf("function DeveloperSection()");
     expect(developerSectionIdx).toBeGreaterThanOrEqual(0);
-    expect(s.slice(developerSectionIdx, developerSectionIdx + 1600)).toContain("<GitWorkspacePanel />");
+    // Window covers the whole DeveloperSection body (now includes the API tab
+    // ahead of the Git tab, so the Git panel sits further down than before).
+    expect(s.slice(developerSectionIdx, developerSectionIdx + 4000)).toContain("<GitWorkspacePanel />");
   });
 
   it("keeps GitWorkspacePanel wired to the /system/git API wrappers", () => {
