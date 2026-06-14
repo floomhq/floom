@@ -48,7 +48,12 @@ import {
   DropdownMenuItem,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
-import { patchBrainContexts, patchWorkerConnections } from "@/lib/worker-manifest";
+import {
+  patchBrainContexts,
+  patchWorkerConnections,
+  setContextWriteable,
+  toggleContext,
+} from "@/lib/worker-manifest";
 import { can, isViewOnly, canLeaveFeedback, visibilityLabel, FEEDBACK_BACKEND_AVAILABLE } from "@/lib/permissions";
 import {
   isSystemWorker,
@@ -526,11 +531,18 @@ function BrainTab({ w }: { w: WorkerSummary }) {
   const [d, applyDetail] = useWorkerDetail(w.id);
   const [packs, setPacks] = useState<{ name: string }[]>([]);
   const [busy, setBusy] = useState(false);
-  useEffect(() => {
+  const refreshPacks = useCallback(() => {
     api.contexts.list().then(setPacks).catch(() => {});
   }, []);
+  useEffect(() => {
+    refreshPacks();
+  }, [refreshPacks]);
   if (!d) return <Loading />;
   const editable = can("edit", d);
+  const contexts = d.config?.contexts ?? [];
+  // Per-worker memory folder convention: "<worker-id>-memory". Connecting it
+  // gives the worker a writeable folder it owns by default (issue 6b).
+  const memoryFolderName = `${w.id}-memory`;
   const save = async (next: WorkerContextSpec[]) => {
     setBusy(true);
     try {
@@ -542,13 +554,37 @@ function BrainTab({ w }: { w: WorkerSummary }) {
       setBusy(false);
     }
   };
+  const attachMemory = async () => {
+    setBusy(true);
+    try {
+      // Create the writeable memory folder if it does not exist yet (idempotent:
+      // a 409/duplicate just means it is already there).
+      if (!packs.some((p) => p.name === memoryFolderName)) {
+        try {
+          await api.contexts.create(memoryFolderName, true);
+        } catch {
+          // Folder may already exist (created by a prior run); continue to attach.
+        }
+        refreshPacks();
+      }
+      const attached = setContextWriteable(toggleContext(contexts, memoryFolderName), memoryFolderName, true);
+      applyDetail(await persistYml(d, patchBrainContexts(workerYml(d), attached)));
+      toast.success("Memory folder connected");
+    } catch {
+      toast.error("Could not connect the memory folder.");
+    } finally {
+      setBusy(false);
+    }
+  };
   return (
     <WorkerBrainEditor
-      contexts={d.config?.contexts ?? []}
+      contexts={contexts}
       availablePacks={packs}
       editable={editable}
       busy={busy}
       onChange={(next) => void save(next)}
+      memoryFolderName={memoryFolderName}
+      onAttachMemory={attachMemory}
     />
   );
 }
