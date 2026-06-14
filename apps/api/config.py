@@ -1,15 +1,19 @@
 from __future__ import annotations
 
+import logging
 import os
 import threading
 import time
 from dataclasses import dataclass
 from functools import lru_cache
 
+import httpx
 from supabase import Client, create_client
 from supabase.lib.client_options import SyncClientOptions
 
 from apps.api._cloud_env import load_cloud_env_file
+
+logger = logging.getLogger(__name__)
 
 load_cloud_env_file()
 
@@ -105,11 +109,74 @@ def get_cloud_settings() -> CloudSettings:
     )
 
 
+class _RetryingHTTPTransport(httpx.HTTPTransport):
+    """httpx transport that retries idempotently on a dropped connection.
+
+    Root cause (the bug this fixes): the Supabase HTTP/2 service connection is
+    pooled and reused across requests, but Supabase (its edge / pooler / LB)
+    silently terminates an individual pooled connection at any time — not only
+    after a clean ~5 min idle window. When the next request lands on that dead
+    socket, httpx raises ``httpx.RemoteProtocolError("Server disconnected")``.
+    Starlette's error middleware turns that into a bare HTTP 500.
+
+    Observed symptoms before this fix (deployed cloud, 2026-06-14):
+      - ``GET /api/runs/<id>`` 500 -> run-detail Output stuck in skeleton
+        (SupabaseRunRepository.list_logs .execute()).
+      - ``POST /auth/tokens/bootstrap`` 500.
+      - "Queue drain: DB poll failed: Server disconnected".
+
+    The previous mitigation (4-minute client TTL in get_supabase_service_client)
+    only re-handshakes on a time boundary; it cannot prevent a mid-window
+    connection drop, so the 500s persisted.
+
+    A dropped connection on an idempotent HTTP request is transparently
+    retryable: httpx did not get a response, so re-issuing the request is safe.
+    We retry once; the second attempt opens a fresh connection. PostgREST writes
+    (insert/update/delete) issue a single HTTP request and are likewise safe to
+    re-send when the connection died before any response was received.
+    """
+
+    _RETRYABLE = (
+        httpx.RemoteProtocolError,
+        httpx.ConnectError,
+        httpx.ConnectTimeout,
+        httpx.ReadError,
+    )
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        try:
+            return super().handle_request(request)
+        except self._RETRYABLE as exc:
+            logger.warning(
+                "supabase connection dropped (%s) on %s %s; retrying once",
+                type(exc).__name__,
+                request.method,
+                request.url.path,
+            )
+            return super().handle_request(request)
+
+
+def _new_retrying_httpx_client() -> httpx.Client:
+    """Build the httpx client supabase-py uses for postgrest/auth/storage.
+
+    Mirrors postgrest's own defaults (http2=True, follow_redirects=True) so the
+    connection behavior is unchanged except that a dropped connection is now
+    retried once instead of surfacing as a 500.
+    """
+    return httpx.Client(
+        transport=_RetryingHTTPTransport(http2=True),
+        http2=True,
+        follow_redirects=True,
+        timeout=httpx.Timeout(30.0),
+    )
+
+
 def _client_options() -> SyncClientOptions:
     return SyncClientOptions(
         auto_refresh_token=False,
         persist_session=False,
         headers={"X-Client-Info": "workeros-cloud-api"},
+        httpx_client=_new_retrying_httpx_client(),
     )
 
 
