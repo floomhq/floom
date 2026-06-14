@@ -1078,6 +1078,16 @@ class WorkerEntrypoint(BaseModel):
         return value
 
 
+def _ceiling_from_env(env_key: str, default: int) -> int:
+    raw = os.environ.get(env_key)
+    if raw:
+        try:
+            return max(1, int(raw))
+        except ValueError:
+            pass
+    return default
+
+
 class WorkerLimits(BaseModel):
     max_tool_iterations: int = Field(default=12, ge=1)
     max_output_tokens: int = Field(default=1000000, ge=1)
@@ -1087,6 +1097,35 @@ class WorkerLimits(BaseModel):
     # dispatch: a run is refused (failed, error_code=spend_cap_exceeded) when
     # the worker's month-to-date cost has already reached the cap.
     max_monthly_cost_usd: Optional[float] = Field(default=None, ge=0)
+
+    # #1067 — author-supplied limits were stored verbatim with no operator
+    # ceiling, so a worker could set an ~11-day timeout and a ~1B-token budget
+    # (billed to the operator, holding an e2b sandbox open). Clamp each to an
+    # operator maximum (env-overridable). Ceilings sit at/above the defaults, so
+    # ordinary workers are unaffected; only abusive values are capped.
+    @field_validator("timeout_seconds", mode="after")
+    @classmethod
+    def _clamp_timeout_seconds(cls, v: int) -> int:
+        return min(v, _ceiling_from_env("FLOOM_MAX_TIMEOUT_SECONDS", 3600))
+
+    @field_validator("max_output_tokens", mode="after")
+    @classmethod
+    def _clamp_max_output_tokens(cls, v: int) -> int:
+        return min(v, _ceiling_from_env("FLOOM_MAX_OUTPUT_TOKENS", 1_000_000))
+
+    @field_validator("max_total_tokens", mode="after")
+    @classmethod
+    def _clamp_max_total_tokens(cls, v: int) -> int:
+        return min(v, _ceiling_from_env("FLOOM_MAX_TOTAL_TOKENS", 2_000_000))
+
+    @field_validator("max_monthly_cost_usd", mode="after")
+    @classmethod
+    def _clamp_max_monthly_cost(cls, v: Optional[float]) -> Optional[float]:
+        # None stays unlimited (deployment policy may add a global cap); a
+        # provided value is clamped to the operator ceiling.
+        if v is None:
+            return None
+        return min(v, float(_ceiling_from_env("FLOOM_MAX_MONTHLY_COST_USD", 100_000)))
 
 
 _SCRIPT_ENTRY_SUFFIXES: tuple[str, ...] = (".py", ".sh", ".js")

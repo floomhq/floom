@@ -10,6 +10,7 @@ handlers. The router is purged in lockstep with main by the worker test fixtures
 
 from __future__ import annotations
 
+import re
 import uuid as _uuid_mod
 from typing import Any, Dict, List, Optional
 
@@ -31,10 +32,14 @@ from models import (
     assert_safe_outbound_url,
 )
 from services.public_view import _redact_public_log_message
-from services.worker_access import _get_visible_worker
+from services.worker_access import _active_local_workspace_id, _get_visible_worker
 from services.worker_serialize import _get_stats_batch, _get_timeseries_batch
 
 worker_telemetry_router = APIRouter()
+
+# #1068 — conservative email syntactic check (not full RFC 5322), enough to
+# reject garbage / header-injection in alert recipients.
+_EMAIL_RE = re.compile(r"^[^@\s,;:<>\"]+@[^@\s,;:<>\"]+\.[^@\s,;:<>\"]+$")
 
 @worker_telemetry_router.get("/workers/{worker_id}/runs/timeseries", response_model=List[TimeseriesDay])
 def get_worker_timeseries(
@@ -237,6 +242,43 @@ def create_worker_alert(
             status_code=400,
             detail="At least one of url (webhook) or email_to (email recipients) is required.",
         )
+    # #1068 — email_to could target arbitrary external recipients (spam/phishing
+    # off the platform's mail reputation). Validate syntax always, and restrict
+    # to workspace-member addresses when the membership directory is populated
+    # (the open-signup cloud case); fall back to syntax-only when no member
+    # emails are known (local single-user with no email on file).
+    if body.email_to:
+        for addr in body.email_to:
+            if not isinstance(addr, str) or not _EMAIL_RE.match(addr.strip()):
+                raise HTTPException(
+                    status_code=400,
+                    detail=f"Invalid alert email recipient: {addr!r}",
+                )
+        member_emails: set[str] = set()
+        members_repo = getattr(repos, "members", None)
+        if members_repo is not None:
+            try:
+                workspace_id = _active_local_workspace_id(auth)
+                member_emails = {
+                    (m.get("email") or "").strip().lower()
+                    for m in members_repo.list(workspace_id=workspace_id)
+                    if m.get("email")
+                }
+            except Exception:
+                member_emails = set()
+        if member_emails:
+            not_members = [
+                addr for addr in body.email_to
+                if addr.strip().lower() not in member_emails
+            ]
+            if not_members:
+                raise HTTPException(
+                    status_code=400,
+                    detail=(
+                        "Alert email recipients must be workspace members: "
+                        f"{not_members}"
+                    ),
+                )
     # SSRF guard at store time: a webhook URL pointing at an internal /
     # loopback / link-local / metadata target is rejected on save (400), so a
     # bad URL never lands in the DB to be POSTed to later. The webhook delivery
