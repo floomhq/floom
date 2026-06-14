@@ -25,7 +25,6 @@ old OSS-shaped client into pointing at /auth/cli-exchange.
 from __future__ import annotations
 
 import logging
-import random
 import secrets
 import time
 from typing import Any
@@ -62,9 +61,12 @@ def _new_device_code() -> str:
 
 def _new_user_code() -> str:
     # 8-char dash-segmented Crockford-style for the dashboard input.
+    # SECURITY (F5): use the CSPRNG (`secrets`) — NOT `random` (Mersenne-Twister
+    # is predictable and unfit for a security token the user types to approve a
+    # CLI session). Mirrors the engine's `secrets`-based generator.
     alphabet = "ABCDEFGHJKMNPQRSTUVWXYZ23456789"
-    chunk = "".join(random.choice(alphabet) for _ in range(4))
-    chunk2 = "".join(random.choice(alphabet) for _ in range(4))
+    chunk = "".join(secrets.choice(alphabet) for _ in range(4))
+    chunk2 = "".join(secrets.choice(alphabet) for _ in range(4))
     return f"{chunk}-{chunk2}"
 
 

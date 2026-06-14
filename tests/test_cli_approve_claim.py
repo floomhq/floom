@@ -21,11 +21,16 @@ from fastapi.testclient import TestClient
 import apps.api.routes.auth as auth_routes
 
 
-def _make_session_cookie(user_id: str, refresh_token: str = "rt-test") -> str:
+def _make_session_cookie(
+    user_id: str, refresh_token: str = "rt-test", access_token: str = "at"
+) -> str:
     payload = {
-        "access_token": "at",
+        "access_token": access_token,
         "refresh_token": refresh_token,
         "expires_at": 9999999999,
+        # NOTE: post-F2 this `user_id` field is IGNORED by the server (it derives
+        # identity from the verified access_token instead). Kept here only to
+        # mirror the real cookie shape.
         "user_id": user_id,
     }
     return base64.urlsafe_b64encode(json.dumps(payload).encode()).decode().rstrip("=")
@@ -75,6 +80,21 @@ def _client(rows: dict[str, dict], monkeypatch) -> tuple[TestClient, _FakeCliAut
     chain.table.return_value.update.return_value.eq.return_value.execute.return_value = None
     import apps.api.config as config_module
     monkeypatch.setattr(config_module, "new_supabase_service_client", lambda: chain)
+
+    # F2: _session_user now cryptographically verifies the cookie's access_token
+    # and derives user_id from the verified `sub`. Mock that verification: a
+    # token of the form "valid:<uuid>" verifies to sub=<uuid>; anything else
+    # (e.g. a forged/tampered token) raises 401, exactly like a real bad JWT.
+    import apps.api.auth.supabase_provider as provider_module
+
+    def _fake_verify_jwt(token: str, supabase_url: str) -> dict:
+        if isinstance(token, str) and token.startswith("valid:"):
+            return {"sub": token.split(":", 1)[1], "email": "u@test.dev"}
+        from fastapi import HTTPException
+
+        raise HTTPException(status_code=401, detail="unauthorized")
+
+    monkeypatch.setattr(provider_module, "_verify_jwt", _fake_verify_jwt)
     return TestClient(app), fake, chain
 
 
@@ -88,7 +108,7 @@ def test_cli_approve_claims_oss_placeholder_device(monkeypatch):
         }
     }
     client, fake, chain = _client(rows, monkeypatch)
-    cookie = _make_session_cookie("supabase-user-uuid")
+    cookie = _make_session_cookie("supabase-user-uuid", access_token="valid:supabase-user-uuid")
     response = client.post(
         "/auth/cli-approve",
         json={"user_code": "ABCD-EFGH"},
@@ -113,7 +133,7 @@ def test_cli_approve_rejects_when_device_belongs_to_other_user(monkeypatch):
         }
     }
     client, _fake, _chain = _client(rows, monkeypatch)
-    cookie = _make_session_cookie("supabase-user-uuid")
+    cookie = _make_session_cookie("supabase-user-uuid", access_token="valid:supabase-user-uuid")
     response = client.post(
         "/auth/cli-approve",
         json={"user_code": "ABCD-EFGH"},
@@ -133,7 +153,7 @@ def test_cli_approve_works_when_device_already_belongs_to_caller(monkeypatch):
         }
     }
     client, fake, chain = _client(rows, monkeypatch)
-    cookie = _make_session_cookie("supabase-user-uuid")
+    cookie = _make_session_cookie("supabase-user-uuid", access_token="valid:supabase-user-uuid")
     response = client.post(
         "/auth/cli-approve",
         json={"user_code": "ABCD-EFGH"},
@@ -154,3 +174,124 @@ def test_cli_bootstrap_returns_supabase_config(monkeypatch):
     assert body["supabase_url"] == "https://test.supabase.co"
     assert body["supabase_anon_key"] == "anon-test"
     assert body["api_base"] == "https://workeros-api.test"
+
+
+# ---------------------------------------------------------------------------
+# Security regression tests (red-team P0).
+# ---------------------------------------------------------------------------
+
+
+def test_f2_forged_cookie_cli_approve_is_rejected(monkeypatch):
+    """F2 (account-takeover): forging a cookie with a VICTIM user_id + a junk
+    (unsigned) access_token must NOT approve the victim's device. The server now
+    verifies the access_token cryptographically, so a forged cookie → 401 and
+    the device stays pending with NO attacker secret written."""
+    rows = {
+        "device-1": {
+            "device_code": "device-1",
+            "user_id": "federico",  # victim's pending device (claimable)
+            "user_code": "ABCD-EFGH",
+            "status": "pending",
+        }
+    }
+    client, fake, chain = _client(rows, monkeypatch)
+    # Attacker hand-rolls a cookie: victim's user_id + attacker refresh_token,
+    # but cannot produce a valid (signed) access_token — uses a forged blob.
+    cookie = _make_session_cookie(
+        "victim-user-uuid", refresh_token="attacker-rt", access_token="forged-not-a-jwt"
+    )
+    response = client.post(
+        "/auth/cli-approve",
+        json={"user_code": "ABCD-EFGH"},
+        cookies={"workeros_cloud_session": cookie},
+    )
+    assert response.status_code == 401, response.text
+    # Device untouched: still pending, no secret stamped.
+    assert fake.rows["device-1"]["status"] == "pending"
+    assert fake.rows["device-1"].get("secret") is None
+    chain.table.assert_not_called()
+
+
+def test_f1_forged_cookie_cli_deny_is_rejected(monkeypatch):
+    """F1 (DoS): forged cookie cli-deny must be rejected (401); device stays
+    pending so it cannot be used to deny arbitrary pending devices."""
+    rows = {
+        "device-1": {
+            "device_code": "device-1",
+            "user_id": "federico",
+            "user_code": "ABCD-EFGH",
+            "status": "pending",
+        }
+    }
+    client, fake, _chain = _client(rows, monkeypatch)
+    cookie = _make_session_cookie("anyone", access_token="forged-not-a-jwt")
+    response = client.post(
+        "/auth/cli-deny",
+        json={"user_code": "ABCD-EFGH"},
+        cookies={"workeros_cloud_session": cookie},
+    )
+    assert response.status_code == 401, response.text
+    assert fake.rows["device-1"]["status"] == "pending"
+
+
+def test_f1_missing_cookie_cli_deny_is_rejected(monkeypatch):
+    """No cookie at all → 401 (unauthenticated DoS attempt blocked)."""
+    rows = {
+        "device-1": {
+            "device_code": "device-1",
+            "user_id": "federico",
+            "user_code": "ABCD-EFGH",
+            "status": "pending",
+        }
+    }
+    client, fake, _chain = _client(rows, monkeypatch)
+    response = client.post("/auth/cli-deny", json={"user_code": "ABCD-EFGH"})
+    assert response.status_code == 401
+    assert fake.rows["device-1"]["status"] == "pending"
+
+
+def test_legit_cli_deny_still_works(monkeypatch):
+    """Legit verified session denies a pending device normally."""
+    rows = {
+        "device-1": {
+            "device_code": "device-1",
+            "user_id": "federico",
+            "user_code": "ABCD-EFGH",
+            "status": "pending",
+        }
+    }
+    client, fake, _chain = _client(rows, monkeypatch)
+    cookie = _make_session_cookie("real-uuid", access_token="valid:real-uuid")
+    response = client.post(
+        "/auth/cli-deny",
+        json={"user_code": "ABCD-EFGH"},
+        cookies={"workeros_cloud_session": cookie},
+    )
+    assert response.status_code == 200, response.text
+    assert fake.rows["device-1"]["status"] == "denied"
+
+
+def test_f3_claim_write_failure_returns_clean_4xx_not_500(monkeypatch):
+    """F3: if the claim write raises (e.g. an FK/DB error), the handler returns
+    a clean 4xx — never a 500 that leaks an internal error."""
+    rows = {
+        "device-1": {
+            "device_code": "device-1",
+            "user_id": "federico",
+            "user_code": "ABCD-EFGH",
+            "status": "pending",
+        }
+    }
+    client, _fake, chain = _client(rows, monkeypatch)
+    # Make the service-role claim write blow up like a DB FK violation.
+    chain.table.return_value.update.return_value.eq.return_value.execute.side_effect = (
+        RuntimeError("insert or update on table violates foreign key constraint")
+    )
+    cookie = _make_session_cookie("ghost-uuid", access_token="valid:ghost-uuid")
+    response = client.post(
+        "/auth/cli-approve",
+        json={"user_code": "ABCD-EFGH"},
+        cookies={"workeros_cloud_session": cookie},
+    )
+    assert response.status_code == 400, response.text
+    assert response.json()["detail"] == "Could not approve device"

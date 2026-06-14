@@ -896,19 +896,38 @@ def cli_bootstrap():
 
 
 def _session_user(request: Request) -> tuple[str, str]:
-    """Return (user_id, refresh_token) from the cloud session cookie.
+    """Return (verified_user_id, refresh_token) from the cloud session cookie.
 
-    Used by /auth/cli-approve and /auth/cli-deny. The cookie is HttpOnly,
-    Secure, and set by /auth/callback after successful Supabase auth so
-    presence == authenticated user.
+    SECURITY (F1/F2): the session cookie is an unsigned base64-JSON blob, so a
+    raw ``user_id`` field in it is attacker-controllable. This handler MUST NOT
+    trust that field. Instead it cryptographically verifies the cookie's
+    Supabase ``access_token`` against the project's JWKS (the same local
+    verification path /api/* uses) and derives the user_id from the VERIFIED
+    ``sub`` claim. A forged or tampered cookie fails verification → 401.
+
+    The ``refresh_token`` is returned as-is (it is only meaningful as the device
+    secret AFTER the user_id has been pinned to the verified token holder), so an
+    attacker can no longer pair a victim's user_id with their own refresh_token.
+
+    Used by /auth/cli-approve and /auth/cli-deny.
     """
     session = _decode_session_cookie(request.cookies.get(_SESSION_COOKIE_NAME))
     if not session:
         raise HTTPException(status_code=401, detail="Not signed in")
-    user_id = str(session.get("user_id") or "").strip()
+    access_token = str(session.get("access_token") or "").strip()
     refresh_token = str(session.get("refresh_token") or "").strip()
-    if not user_id or not refresh_token:
+    if not access_token or not refresh_token:
         raise HTTPException(status_code=401, detail="Session cookie missing fields")
+
+    # Verify the access_token server-side and derive the identity from the
+    # signed `sub` claim — never from the cookie's raw `user_id` field.
+    from apps.api.auth.supabase_provider import _verify_jwt
+
+    settings = get_cloud_settings()
+    claims = _verify_jwt(access_token, settings.supabase_url)  # raises 401 on tamper/expiry
+    user_id = str(claims.get("sub") or "").strip()
+    if not user_id:
+        raise HTTPException(status_code=401, detail="Not signed in")
     return user_id, refresh_token
 
 
@@ -968,12 +987,28 @@ def cli_approve(payload: CliApproveRequest, request: Request):
     # Persist the claim. The engine's repo `update()` doesn't accept user_id;
     # rewrite the row via a service-role client when we need to claim it from
     # the OSS placeholder.
-    if str(record.get("user_id") or "") != user_id:
-        from apps.api.config import new_supabase_service_client
-        new_supabase_service_client().table("cli_auth_devices").update(
-            {"user_id": user_id}
-        ).eq("device_code", record["device_code"]).execute()
-    repos.cli_auth.update(device_code=record["device_code"], **update_fields)
+    #
+    # SECURITY (F3): `user_id` is now derived from a verified JWT `sub`, so it
+    # always references a real Supabase auth user — the forged-UUID FK-violation
+    # path is closed at the root. Defensively, any residual DB/FK error on the
+    # claim write is surfaced as a clean 4xx (not a 500) so a malformed claim can
+    # never leak an internal error.
+    try:
+        if str(record.get("user_id") or "") != user_id:
+            from apps.api.config import new_supabase_service_client
+            new_supabase_service_client().table("cli_auth_devices").update(
+                {"user_id": user_id}
+            ).eq("device_code", record["device_code"]).execute()
+        repos.cli_auth.update(device_code=record["device_code"], **update_fields)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.warning(
+            "auth/cli-approve claim write failed for user_code=%s: %s",
+            payload.user_code,
+            _gotrue_detail(exc),
+        )
+        raise HTTPException(status_code=400, detail="Could not approve device") from exc
     return {"ok": True, "client_name": record.get("client_name") or "workeros-cli"}
 
 
@@ -1066,9 +1101,12 @@ def cloud_consume_magic_link(token: str) -> RedirectResponse:
 
     engine_main = import_engine_module("main")
 
-    # Step 1 — validate HMAC token; raises 400 on bad/expired
+    # Step 1 — validate HMAC token; raises 400 on bad/expired. Then enforce
+    # one-time use (F4): claim the token's nonce so a replay of the same link is
+    # rejected here too, not just in the engine route.
     try:
-        user_id: str = engine_main._validate_magic_link(token)
+        user_id, _nonce, _exp = engine_main._validate_magic_link_full(token)
+        engine_main._consume_magic_link_nonce(_nonce, _exp)
     except HTTPException:
         raise
     except Exception as exc:

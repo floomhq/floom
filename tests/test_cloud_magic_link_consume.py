@@ -58,18 +58,35 @@ def _make_svc_client(*, email=_FAKE_EMAIL, action_link=_FAKE_ACTION_LINK, get_us
     return svc
 
 
-def _app(monkeypatch, *, validate_user_id=_FAKE_USER_ID, validate_raises=None, svc_client=None):
+def _app(
+    monkeypatch,
+    *,
+    validate_user_id=_FAKE_USER_ID,
+    validate_raises=None,
+    svc_client=None,
+    consume_raises=None,
+):
     """Create a minimal FastAPI app with the auth router and patched dependencies."""
     if svc_client is None:
         svc_client = _make_svc_client()
 
-    # Patch the engine's _validate_magic_link. We must patch at the _engine module
-    # level (not as a context manager) so the mock stays active when requests are made.
+    # Patch the engine's magic-link helpers. We must patch at the _engine module
+    # level (not as a context manager) so the mock stays active when requests are
+    # made. The cloud route now calls _validate_magic_link_full (returns
+    # (user_id, nonce, exp)) then _consume_magic_link_nonce (F4 one-time use).
     fake_engine = MagicMock()
     if validate_raises:
-        fake_engine._validate_magic_link.side_effect = validate_raises
+        fake_engine._validate_magic_link_full.side_effect = validate_raises
     else:
-        fake_engine._validate_magic_link.return_value = validate_user_id
+        fake_engine._validate_magic_link_full.return_value = (
+            validate_user_id,
+            "nonce-xyz",
+            9999999999,
+        )
+    if consume_raises:
+        fake_engine._consume_magic_link_nonce.side_effect = consume_raises
+    else:
+        fake_engine._consume_magic_link_nonce.return_value = None
 
     import apps.api._engine as _engine_mod
     monkeypatch.setattr(_engine_mod, "import_engine_module", lambda _name: fake_engine)
@@ -78,7 +95,7 @@ def _app(monkeypatch, *, validate_user_id=_FAKE_USER_ID, validate_raises=None, s
 
     app = FastAPI()
     app.include_router(auth_module.router)
-    return TestClient(app, follow_redirects=False)
+    return TestClient(app, follow_redirects=False), fake_engine
 
 
 # ---------------------------------------------------------------------------
@@ -87,7 +104,7 @@ def _app(monkeypatch, *, validate_user_id=_FAKE_USER_ID, validate_raises=None, s
 
 def test_valid_token_redirects_to_supabase_action_link(monkeypatch):
     """Happy path: valid HMAC token → 307 redirect to Supabase action_link."""
-    client = _app(monkeypatch)
+    client, _engine = _app(monkeypatch)
     response = client.get("/auth/magic/valid.token")
     assert response.status_code == 307
     assert response.headers["location"] == _FAKE_ACTION_LINK
@@ -95,7 +112,7 @@ def test_valid_token_redirects_to_supabase_action_link(monkeypatch):
 
 def test_invalid_token_returns_400(monkeypatch):
     """Engine raises 400 for bad/expired HMAC token → propagated to caller."""
-    client = _app(monkeypatch, validate_raises=HTTPException(status_code=400, detail="Invalid magic link"))
+    client, _engine = _app(monkeypatch, validate_raises=HTTPException(status_code=400, detail="Invalid magic link"))
     response = client.get("/auth/magic/bad.token")
     assert response.status_code == 400
     assert "Invalid magic link" in response.json()["detail"]
@@ -104,7 +121,7 @@ def test_invalid_token_returns_400(monkeypatch):
 def test_user_not_found_in_supabase_returns_404(monkeypatch):
     """Token is valid but Supabase Admin returns no user → 404."""
     svc = _make_svc_client(get_user_raises=Exception("user not found"))
-    client = _app(monkeypatch, svc_client=svc)
+    client, _engine = _app(monkeypatch, svc_client=svc)
     response = client.get("/auth/magic/valid.token")
     assert response.status_code == 404
     assert response.json()["detail"] == "User not found"
@@ -114,7 +131,7 @@ def test_user_with_no_email_returns_404(monkeypatch):
     """Supabase returns a user with no email field → 404 (can't generate link)."""
     svc = MagicMock()
     svc.auth.admin.get_user_by_id.return_value = SimpleNamespace(user=SimpleNamespace(id=_FAKE_USER_ID, email=None))
-    client = _app(monkeypatch, svc_client=svc)
+    client, _engine = _app(monkeypatch, svc_client=svc)
     response = client.get("/auth/magic/valid.token")
     assert response.status_code == 404
 
@@ -122,7 +139,7 @@ def test_user_with_no_email_returns_404(monkeypatch):
 def test_generate_link_failure_returns_502(monkeypatch):
     """Supabase generate_link raises → 502 (upstream failure, not our bug)."""
     svc = _make_svc_client(generate_link_raises=Exception("supabase unavailable"))
-    client = _app(monkeypatch, svc_client=svc)
+    client, _engine = _app(monkeypatch, svc_client=svc)
     response = client.get("/auth/magic/valid.token")
     assert response.status_code == 502
     assert "Failed to create session" in response.json()["detail"]
@@ -131,7 +148,7 @@ def test_generate_link_failure_returns_502(monkeypatch):
 def test_generate_link_empty_action_link_returns_502(monkeypatch):
     """generate_link returns empty action_link → 502 (upstream contract violation)."""
     svc = _make_svc_client(action_link="")
-    client = _app(monkeypatch, svc_client=svc)
+    client, _engine = _app(monkeypatch, svc_client=svc)
     response = client.get("/auth/magic/valid.token")
     assert response.status_code == 502
 
@@ -140,7 +157,7 @@ def test_redirect_uses_supabase_url_not_frontend_url(monkeypatch):
     """Redirect destination is the Supabase action_link, not the frontend URL."""
     custom_link = "https://abc.supabase.co/auth/v1/verify?token=tok&type=magiclink&redirect_to=https%3A%2F%2Fworkeros.floom.dev%2Fapp"
     svc = _make_svc_client(action_link=custom_link)
-    client = _app(monkeypatch, svc_client=svc)
+    client, _engine = _app(monkeypatch, svc_client=svc)
     response = client.get("/auth/magic/some.token")
     assert response.status_code == 307
     assert response.headers["location"] == custom_link
@@ -150,7 +167,7 @@ def test_redirect_uses_supabase_url_not_frontend_url(monkeypatch):
 def test_generate_link_called_with_correct_params(monkeypatch):
     """generate_link must be called with type=magiclink, user email, and frontend_url as redirect_to."""
     svc = _make_svc_client()
-    client = _app(monkeypatch, svc_client=svc)
+    client, _engine = _app(monkeypatch, svc_client=svc)
     client.get("/auth/magic/valid.token")
 
     svc.auth.admin.generate_link.assert_called_once_with(
@@ -165,6 +182,27 @@ def test_generate_link_called_with_correct_params(monkeypatch):
 def test_no_email_is_sent_to_user(monkeypatch):
     """sign_in_with_otp must NOT be called — no email delivery in this flow."""
     svc = _make_svc_client()
-    client = _app(monkeypatch, svc_client=svc)
+    client, _engine = _app(monkeypatch, svc_client=svc)
     client.get("/auth/magic/valid.token")
     svc.auth.sign_in_with_otp.assert_not_called()
+
+
+def test_f4_consume_is_invoked_on_valid_token(monkeypatch):
+    """F4: the cloud route MUST claim the token's nonce (one-time use) before
+    minting a session URL."""
+    client, engine = _app(monkeypatch)
+    response = client.get("/auth/magic/valid.token")
+    assert response.status_code == 307
+    engine._consume_magic_link_nonce.assert_called_once_with("nonce-xyz", 9999999999)
+
+
+def test_f4_replayed_token_is_rejected(monkeypatch):
+    """F4: a magic link replayed after first use → the nonce store raises 400
+    'already used', which the route surfaces as 400 (no second session)."""
+    client, _engine = _app(
+        monkeypatch,
+        consume_raises=HTTPException(status_code=400, detail="Magic link already used"),
+    )
+    response = client.get("/auth/magic/valid.token")
+    assert response.status_code == 400
+    assert "already used" in response.json()["detail"]
