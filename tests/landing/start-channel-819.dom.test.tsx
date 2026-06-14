@@ -21,20 +21,19 @@ describe("pre-auth /start/<channel> pages (#819)", () => {
     render(await StartChannelPage({ params: Promise.resolve({ channel: "slack" }) }));
     expect(screen.getByText("Floom in Slack")).toBeTruthy();
     const cta = screen.getByText("Add to Slack").closest("a")!;
-    expect(cta.getAttribute("href")).toBe("/login?install=slack");
-    // Within the page content the only /login reference is the final bind
-    // CTA — the steps are public. (The shared nav chrome has its own CTA.)
+    expect(cta.getAttribute("href")).toBe("https://workeros-api.floom.dev/slack/install/start");
+    // Channel install is public; the shared nav chrome has its own sign-in CTA.
     const main = document.querySelector("main")!;
     const anchors = Array.from(main.querySelectorAll("a")).filter((a) =>
       (a.getAttribute("href") ?? "").startsWith("/login"),
     );
-    expect(anchors).toHaveLength(1);
+    expect(anchors).toHaveLength(0);
   });
 
   it("whatsapp: pre-auth flow with deferred bind", async () => {
     render(await StartChannelPage({ params: Promise.resolve({ channel: "whatsapp" }) }));
     fireEvent.click(screen.getByText("WhatsApp QR"));
-    expect(screen.getByText("Open pairing flow").closest("a")!.getAttribute("href")).toBe("/login?install=whatsapp");
+    expect(screen.getByText("Message Emily").closest("a")!.getAttribute("href")).toBe("https://wa.me/16503999709");
     expect(screen.getByText("Connect WhatsApp")).toBeTruthy();
   });
 

@@ -108,10 +108,14 @@ function Mirror({ text, matches }: { text: string; matches: Match[] }) {
 }
 
 export function V3Composer({
+  heading,
   placeholder = "Every Monday, summarise last week's pipeline in #sales…",
+  compact = false,
   fillSignal,
 }: {
+  heading?: string;
   placeholder?: string;
+  compact?: boolean;
   /** parent-driven fill: { text, n } where n changes per click */
   fillSignal?: { text: string; n: number } | null;
 }) {
@@ -142,16 +146,21 @@ export function V3Composer({
       }}
       animate={{ scale: focused ? 1.01 : 1 }}
       transition={{ type: "spring", stiffness: 150, damping: 24 }}
-      className="mx-auto w-full max-w-[640px] rounded-[20px] bg-secondary p-5 text-left"
+      className={`mx-auto w-full rounded-[20px] bg-secondary text-left ${compact ? "max-w-[440px] p-3.5" : "max-w-[640px] p-5"}`}
       style={{
         boxShadow: focused ? "0 0 0 1.5px var(--v3-accent)" : "none",
         transition: "box-shadow 180ms cubic-bezier(0.22,1,0.36,1)",
       }}
     >
+      {heading ? (
+        <div className="mb-2 px-1 text-[13px] font-semibold tracking-[-0.01em] text-foreground">
+          {heading}
+        </div>
+      ) : null}
       <div className="relative">
         <div
           aria-hidden
-          className="pointer-events-none absolute inset-0 whitespace-pre-wrap break-words px-1 pb-6 pt-1 text-left text-[15.5px] leading-relaxed text-foreground"
+          className={`pointer-events-none absolute inset-0 whitespace-pre-wrap break-words px-1 text-left leading-relaxed text-foreground ${compact ? "pb-2 pt-0 text-[14px]" : "pb-6 pt-1 text-[15.5px]"}`}
         >
           <Mirror text={value} matches={matches} />
         </div>
@@ -165,18 +174,22 @@ export function V3Composer({
             }
           }}
           placeholder={placeholder}
-          rows={2}
-          className="relative w-full resize-none bg-transparent px-1 pb-6 pt-1 text-left text-[15.5px] leading-relaxed placeholder:text-muted-foreground"
-          style={{ color: "transparent", caretColor: "var(--text-primary)", WebkitTextFillColor: "transparent" }}
+          rows={compact ? 1 : 2}
+          className={`relative w-full resize-none bg-transparent px-1 text-left leading-relaxed placeholder:text-muted-foreground ${compact ? "pb-2 pt-0 text-[14px]" : "pb-6 pt-1 text-[15.5px]"}`}
+          style={
+            value
+              ? { color: "transparent", caretColor: "var(--text-primary)", WebkitTextFillColor: "transparent" }
+              : { caretColor: "var(--text-primary)" }
+          }
           aria-label="Describe the job"
         />
       </div>
-      <div className="flex items-center justify-end pt-1">
+      <div className={`flex items-center justify-end ${compact ? "pt-0" : "pt-1"}`}>
         <motion.button
           type="submit"
           whileHover={{ y: -1 }}
           whileTap={{ scale: 0.98 }}
-          className="flex items-center gap-2 rounded-[12px] px-5 py-2.5 text-[14px] font-medium text-white"
+          className={`flex items-center gap-2 rounded-[12px] font-medium text-white ${compact ? "px-4 py-2 text-[13px]" : "px-5 py-2.5 text-[14px]"}`}
           style={{ background: "var(--v3-accent)" }}
         >
           Hire

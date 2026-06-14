@@ -44,7 +44,6 @@ function Mark({ size = 22 }: { size?: number }) {
 const NAV = [
   ["Product", "/product"],
   ["Templates", "/templates"],
-  ["Integrations", "/integrations"],
   ["Docs", "/docs"],
 ] as const;
 
@@ -116,7 +115,7 @@ export function V3Shell({
             {/* #821: session-aware — Dashboard when a session exists. */}
             <Link
               href={authed ? "/app/overview" : "/login"}
-              className="rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground"
+              className="ml-1 rounded-[10px] bg-foreground px-3 py-1.5 font-medium text-background transition-opacity hover:opacity-85"
             >
               {authed ? "Open app →" : "Sign in"}
             </Link>

@@ -14,6 +14,8 @@ import { ChannelActions } from "../ChannelActions";
 import "../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
+const WORKEROS_API_BASE = (process.env.NEXT_PUBLIC_WORKEROS_API_BASE ?? "https://workeros-api.floom.dev").replace(/\/$/, "");
+const SLACK_INSTALL_URL = `${WORKEROS_API_BASE}/slack/install/start`;
 
 const TOC = [
   ["quickstart", "Quickstart"],
@@ -167,7 +169,7 @@ export function V3DocsBody() {
                   <div className="text-[13px] font-medium">Slack</div>
                   <div className="text-[12px] text-muted-foreground">Workspace install. Workers post drafts and approval buttons in your channels.</div>
                 </div>
-                <Link href="/login?install=slack" className="rounded-[8px] bg-secondary px-2.5 py-1 text-[12px] font-medium hover:bg-[var(--bg-3)]">Install</Link>
+                <Link href={SLACK_INSTALL_URL} className="rounded-[8px] bg-secondary px-2.5 py-1 text-[12px] font-medium hover:bg-[var(--bg-3)]">Install</Link>
               </div>
               <div className="flex items-center gap-3 py-3.5">
                 <span className="[&_svg]:h-4 [&_svg]:w-4"><WhatsAppLogo /></span>

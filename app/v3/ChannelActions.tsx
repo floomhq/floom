@@ -1,8 +1,10 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import { useState } from "react";
 import Link from "next/link";
-import { Check, Copy, MessageCircle, Slack, Terminal, X } from "lucide-react";
+import { Check, Copy, ExternalLink, Slack, Terminal, X } from "lucide-react";
+import { QRCodeSVG } from "qrcode.react";
+import { WhatsAppLogo } from "@/components/landing-icons";
 
 type Channel = "slack" | "whatsapp" | "mcp";
 type Modal = Exclude<Channel, "slack"> | null;
@@ -16,29 +18,9 @@ const MCP_CONFIG = `{
   }
 }`;
 
-function QrMark() {
-  const cells = useMemo(
-    () =>
-      Array.from({ length: 49 }, (_, i) => {
-        const x = i % 7;
-        const y = Math.floor(i / 7);
-        const finder =
-          (x < 2 && y < 2) ||
-          (x > 4 && y < 2) ||
-          (x < 2 && y > 4);
-        const data = [10, 12, 17, 19, 23, 25, 30, 33, 37, 40, 45].includes(i);
-        return finder || data;
-      }),
-    [],
-  );
-  return (
-    <div aria-hidden className="grid h-36 w-36 grid-cols-7 gap-1 rounded-[18px] bg-card p-4">
-      {cells.map((on, i) => (
-        <span key={i} className={`rounded-[3px] ${on ? "bg-foreground" : "bg-secondary"}`} />
-      ))}
-    </div>
-  );
-}
+const WORKEROS_API_BASE = (process.env.NEXT_PUBLIC_WORKEROS_API_BASE ?? "https://workeros-api.floom.dev").replace(/\/$/, "");
+const SLACK_INSTALL_URL = `${WORKEROS_API_BASE}/slack/install/start`;
+const WHATSAPP_CHAT_URL = "https://wa.me/16503999709";
 
 function ModalShell({
   title,
@@ -98,7 +80,7 @@ export function ChannelActions({ compact = false, only }: { compact?: boolean; o
       <span className={`inline-flex flex-wrap items-center justify-center gap-2 ${compact ? "" : "mt-4"}`}>
         {showSlack ? (
           <Link
-            href="/login?install=slack"
+            href={SLACK_INSTALL_URL}
             className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-secondary px-3.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]"
           >
             <Slack className="h-3.5 w-3.5" />
@@ -111,7 +93,9 @@ export function ChannelActions({ compact = false, only }: { compact?: boolean; o
             onClick={() => setModal("whatsapp")}
             className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-secondary px-3.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]"
           >
-            <MessageCircle className="h-3.5 w-3.5" />
+            <span className="flex h-3.5 w-3.5 items-center justify-center [&_svg]:h-3.5 [&_svg]:w-3.5">
+              <WhatsAppLogo />
+            </span>
             WhatsApp QR
           </button>
         ) : null}
@@ -130,17 +114,31 @@ export function ChannelActions({ compact = false, only }: { compact?: boolean; o
       {modal === "whatsapp" ? (
         <ModalShell title="Connect WhatsApp" onClose={() => setModal(null)}>
           <div className="mt-5 flex flex-col items-center gap-4">
-            <QrMark />
+            <div className="rounded-[18px] bg-card p-4">
+              <QRCodeSVG
+                value={WHATSAPP_CHAT_URL}
+                size={144}
+                marginSize={1}
+                bgColor="transparent"
+                fgColor="currentColor"
+                level="M"
+                className="text-foreground"
+                data-testid="whatsapp-qr"
+              />
+            </div>
             <p className="max-w-[300px] text-center text-[13px] leading-relaxed text-muted-foreground">
-              Scan to start the WhatsApp pairing flow. Sign in appears only when the number is ready to bind to your workspace.
+              Scan to message Emily on WhatsApp. No dashboard sign-in needed.
             </p>
-            <Link
-              href="/login?install=whatsapp"
-              className="inline-flex h-10 items-center rounded-[10px] px-4 text-[13px] font-medium text-white"
+            <a
+              href={WHATSAPP_CHAT_URL}
+              target="_blank"
+              rel="noopener noreferrer"
+              className="inline-flex h-10 items-center gap-2 rounded-[10px] px-4 text-[13px] font-medium text-white"
               style={{ background: "var(--v3-accent)" }}
             >
-              Open pairing flow
-            </Link>
+              Message Emily
+              <ExternalLink className="h-3.5 w-3.5" />
+            </a>
           </div>
         </ModalShell>
       ) : null}
