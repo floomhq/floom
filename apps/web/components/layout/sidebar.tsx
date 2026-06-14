@@ -244,7 +244,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
         <div className="pointer-events-none absolute inset-x-0 top-0 h-px bg-card/70 dark:bg-card/[0.055]" aria-hidden="true" />
 
         {/* ── Nav header: workspace identity + collapse chevron ─────────────── */}
-        <div className={cn("flex items-center [border-bottom:var(--bd-div)]", collapsed ? "justify-center h-14 px-0" : "h-14 gap-1 px-3")}>
+        <div className={cn("flex items-center [border-bottom:var(--bd-div)]", collapsed ? "justify-center h-14 px-0" : "h-14 gap-1.5 px-3")}>
           {collapsed ? (
             /* Icon-rail: just the mark, clicking expands */
               <button
@@ -259,6 +259,16 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
             </button>
           ) : (
             <>
+              {/* D-04: brand mark anchors the sidebar top. Without it the area
+                  above "New worker" reads as an empty/skeleton spot while the
+                  workspace switcher loads. */}
+              <Link
+                href="/overview"
+                aria-label="Floom home"
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-button)] hover:bg-[var(--active-nav-bg)] transition-colors"
+              >
+                <FloomMark size={22} />
+              </Link>
               <div className="min-w-0 flex-1">
                 <WorkspaceSwitcher />
               </div>
