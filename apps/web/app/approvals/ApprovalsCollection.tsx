@@ -255,8 +255,7 @@ const h4: React.CSSProperties = {
   margin: "0 0 9px",
 };
 const outbox: React.CSSProperties = {
-  border: "var(--bd-card)",
-  borderRadius: "var(--radius-card)",
+  borderRadius: "var(--radius-ui)",
   background: "var(--bg-2)",
   padding: 14,
   color: "var(--ink-soft)",

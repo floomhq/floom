@@ -20,7 +20,7 @@ export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
   return (
     <span
       className={cn(
-        "relative shrink-0 inline-flex items-center justify-center rounded-full bg-[var(--emily-mark)]",
+        "relative shrink-0 inline-flex items-center justify-center rounded-[var(--radius-ui)] bg-[var(--emily-mark)]",
         sz,
       )}
       aria-label="Emily, Chief of Staff"

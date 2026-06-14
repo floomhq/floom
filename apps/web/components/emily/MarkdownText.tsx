@@ -40,7 +40,7 @@ export function MarkdownText({
             const isBlock = codeClass?.startsWith("language-");
             if (isBlock) {
               return (
-                <code className={cn("block rounded-md bg-muted px-3 py-2 text-[11px] font-mono leading-relaxed overflow-x-auto my-1.5", codeClass)}>
+                <code className={cn("block rounded-[var(--radius-ui)] bg-muted px-3 py-2 text-[11px] font-mono leading-relaxed overflow-x-auto my-1.5", codeClass)}>
                   {children}
                 </code>
               );

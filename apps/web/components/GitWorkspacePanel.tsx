@@ -42,9 +42,9 @@ function PATForm({ onConnected }: { onConnected: (username: string) => void }) {
       {/* Step 1 — generate a scoped token. The link pre-selects the exact
           scope (repo) and pre-fills a name, so the user lands on GitHub's
           token page with everything chosen and only has to click Generate. */}
-      <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/40 px-4 py-3.5 space-y-2.5">
+      <div className="rounded-[var(--radius-ui)] bg-muted/40 px-4 py-3.5 space-y-2.5">
         <div className="flex items-start gap-2.5">
-          <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-foreground/10 text-[11px] font-semibold text-foreground">1</span>
+          <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-[var(--radius-ui)] bg-foreground/10 text-[11px] font-semibold text-foreground">1</span>
           <div className="space-y-1.5">
             <p className="text-sm font-medium text-foreground">Create a token on GitHub</p>
             <p className="text-xs text-muted-foreground">
@@ -56,7 +56,7 @@ function PATForm({ onConnected }: { onConnected: (username: string) => void }) {
               href="https://github.com/settings/tokens/new?scopes=repo&description=Floom+Workspace"
               target="_blank"
               rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+              className="inline-flex items-center gap-1.5 rounded-[var(--radius-ui)] bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
             >
               Open GitHub token page <ExternalLink className="size-3" />
             </a>
@@ -67,7 +67,7 @@ function PATForm({ onConnected }: { onConnected: (username: string) => void }) {
       {/* Step 2 — paste it back. */}
       <div className="space-y-2">
         <div className="flex items-center gap-2.5">
-          <span className="grid size-5 shrink-0 place-items-center rounded-full bg-foreground/10 text-[11px] font-semibold text-foreground">2</span>
+          <span className="grid size-5 shrink-0 place-items-center rounded-[var(--radius-ui)] bg-foreground/10 text-[11px] font-semibold text-foreground">2</span>
           <p className="text-sm font-medium text-foreground">Paste the token here</p>
         </div>
         <div className="flex gap-2 pl-[30px]">
@@ -180,14 +180,14 @@ function RepoSelector({
           <Loader2 className="size-4 animate-spin" /> Loading repos…
         </div>
       ) : (
-        <div className="[&>*+*]:[border-top:var(--bd-div)] rounded-[var(--radius-card)] [border:var(--bd-card)] overflow-hidden">
+        <div className="[&>*+*]:[border-top:var(--bd-div)] rounded-[var(--radius-ui)] overflow-hidden">
           {repos.map((r) => (
             <div key={r.full_name} className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">
                 <div className="flex items-center gap-2">
                   <GitBranch className="size-3.5 shrink-0 text-muted-foreground" />
                   <span className="text-sm font-medium truncate">{r.full_name}</span>
-                  <span className="text-[10px] text-muted-foreground [border:var(--bd-card)] rounded px-1 py-0.5 shrink-0">
+                  <span className="text-[10px] text-muted-foreground rounded px-1 py-0.5 shrink-0">
                     {r.private ? "private" : "public"}
                   </span>
                 </div>
@@ -284,10 +284,10 @@ function ConnectedView({
 
   return (
     <div className="space-y-4">
-      <div className="flex items-start justify-between gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/30 px-4 py-3">
+      <div className="flex items-start justify-between gap-3 rounded-[var(--radius-ui)] bg-muted/30 px-4 py-3">
         <div className="space-y-1 min-w-0">
           <div className="flex items-center gap-2">
-            <span className="size-2 rounded-[var(--radius-pill)] bg-green-500 shrink-0" />
+            <span className="size-2 rounded-[var(--radius-ui)] bg-green-500 shrink-0" />
             <a
               href={status.repo_url ?? "#"}
               target="_blank"
@@ -353,8 +353,8 @@ function MemberView({ status }: { status: GitWorkspaceStatus | null }) {
   }
   return (
     <div className="space-y-3">
-      <div className="flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/30 px-4 py-3">
-        <span className="size-2 rounded-[var(--radius-pill)] bg-green-500 shrink-0" />
+      <div className="flex items-center gap-2 rounded-[var(--radius-ui)] bg-muted/30 px-4 py-3">
+        <span className="size-2 rounded-[var(--radius-ui)] bg-green-500 shrink-0" />
         <div className="min-w-0">
           <a
             href={status.repo_url ?? "#"}
@@ -431,7 +431,7 @@ export function GitWorkspacePanel() {
           <GitBranch className="size-4 text-muted-foreground" />
           <h2 className="text-sm font-medium">GitHub workspace</h2>
           {status?.connected && (
-            <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
+            <span className="inline-flex items-center gap-1 rounded-[var(--radius-ui)] bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
               <Check className="size-2.5" /> Connected
             </span>
           )}
@@ -447,7 +447,7 @@ export function GitWorkspacePanel() {
         <GitBranch className="size-4 text-muted-foreground" />
         <h2 className="text-sm font-medium">GitHub workspace</h2>
         {step === "connected" && (
-          <span className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
+          <span className="inline-flex items-center gap-1 rounded-[var(--radius-ui)] bg-green-500/10 px-2 py-0.5 text-[10px] font-medium text-green-700 dark:text-green-400">
             <Check className="size-2.5" /> Connected
           </span>
         )}

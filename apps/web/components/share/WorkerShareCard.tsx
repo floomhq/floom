@@ -135,7 +135,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
         >
           {/* FRONT */}
           <div
-            className="absolute inset-0 flex flex-col overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]"
+            className="absolute inset-0 flex flex-col overflow-hidden rounded-[var(--radius-ui)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]"
             style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
           >
             <div className="min-h-0 flex-1 overflow-y-auto">
@@ -146,7 +146,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
                   <div className="mb-1 flex flex-wrap items-center gap-2">
                     <h1 className="text-lg font-semibold tracking-tight">{worker.name}</h1>
                     {worker.is_example && (
-                      <span className="inline-flex items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">
+                      <span className="inline-flex items-center rounded-[var(--radius-ui)] bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">
                         Example
                       </span>
                     )}
@@ -170,7 +170,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
                   <ul className="flex flex-col gap-1.5">
                     {worker.use_cases.map((uc) => (
                       <li key={uc} className="flex gap-2.5 text-sm leading-relaxed">
-                        <span className="mt-2 size-1 shrink-0 rounded-[var(--radius-pill)] bg-[var(--ink-soft)]" aria-hidden />
+                        <span className="mt-2 size-1 shrink-0 rounded-[var(--radius-ui)] bg-[var(--ink-soft)]" aria-hidden />
                         <span>{uc}</span>
                       </li>
                     ))}
@@ -186,7 +186,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
                     {tools.map((slug) => (
                       <span
                         key={slug}
-                        className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--card-glass)] px-2.5 py-1 text-xs"
+                        className="inline-flex items-center gap-1.5 rounded-[var(--radius-ui)] bg-[var(--card-glass)] px-2.5 py-1 text-xs"
                       >
                         <BrandLogo icon={slug} className="size-3.5" />
                         <span className="capitalize">{slug.replace(/-/g, " ")}</span>
@@ -205,7 +205,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
                   <GenericOutput
                     type={exampleType(worker)}
                     value={worker.example_output}
-                    className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] p-3"
+                    className="rounded-[var(--radius-ui)] bg-[var(--bg-app)] p-3"
                   />
                 </div>
               )}
@@ -222,7 +222,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
                 <button
                   type="button"
                   onClick={() => setFlipped(true)}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--card-glass)] px-3.5 text-[13px] font-medium hover:bg-[var(--bg-2)]"
+                  className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-ui)] bg-[var(--card-glass)] px-3.5 text-[13px] font-medium hover:bg-[var(--bg-2)]"
                 >
                   <FileText className="size-3.5" />
                   See files
@@ -232,14 +232,14 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
                     type="button"
                     onClick={() => void handleImport()}
                     disabled={importing || importedId != null}
-                    className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] hover:opacity-90 disabled:opacity-60"
+                    className="inline-flex h-9 items-center rounded-[var(--radius-ui)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] hover:opacity-90 disabled:opacity-60"
                   >
                     {ctaLabel}
                   </button>
                 ) : (
                   <Link
                     href={ctaHref ?? "/login"}
-                    className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
+                    className="inline-flex h-9 items-center rounded-[var(--radius-ui)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
                   >
                     {ctaLabel}
                   </Link>
@@ -250,7 +250,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
 
           {/* BACK */}
           <div
-            className="absolute inset-0 flex flex-col overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]"
+            className="absolute inset-0 flex flex-col overflow-hidden rounded-[var(--radius-ui)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]"
             style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
           >
             {/* Back header */}
@@ -260,7 +260,7 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
                   type="button"
                   onClick={() => setFlipped(false)}
                   aria-label="Back to overview"
-                  className="inline-flex size-7 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] hover:bg-[var(--bg-2)]"
+                  className="inline-flex size-7 items-center justify-center rounded-[var(--radius-ui)] hover:bg-[var(--bg-2)]"
                 >
                   <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
                     <polyline points="15 18 9 12 15 6" />
@@ -273,14 +273,14 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
                   type="button"
                   onClick={() => void handleImport()}
                   disabled={importing || importedId != null}
-                  className="inline-flex h-7 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-xs font-medium text-[var(--primary-text)] hover:opacity-90 disabled:opacity-60"
+                  className="inline-flex h-7 items-center rounded-[var(--radius-ui)] bg-[var(--primary)] px-3 text-xs font-medium text-[var(--primary-text)] hover:opacity-90 disabled:opacity-60"
                 >
                   {ctaLabel}
                 </button>
               ) : (
                 <Link
                   href={ctaHref ?? "/login"}
-                  className="inline-flex h-7 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-xs font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
+                  className="inline-flex h-7 items-center rounded-[var(--radius-ui)] bg-[var(--primary)] px-3 text-xs font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
                 >
                   {ctaLabel}
                 </Link>

@@ -46,9 +46,9 @@ export default function StartPage() {
           <Link
             key={title}
             href={href}
-            className="flex items-center gap-4 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-4 transition-colors hover:bg-[var(--bg-2)]"
+            className="flex items-center gap-4 rounded-[var(--radius-ui)] bg-[var(--bg-card)] p-4 transition-colors hover:bg-[var(--bg-2)]"
           >
-            <div className="grid size-10 shrink-0 place-items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] text-[var(--ink-soft)]">
+            <div className="grid size-10 shrink-0 place-items-center rounded-[var(--radius-ui)] bg-[var(--bg-2)] text-[var(--ink-soft)]">
               <Icon className="size-5" />
             </div>
             <div className="min-w-0">

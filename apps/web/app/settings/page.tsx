@@ -141,7 +141,7 @@ function PersonalAccessTokensPanel() {
           <CheckCircle2 className="size-4" />
           <AlertTitle>Token created</AlertTitle>
           <AlertDescription>
-            <div className="mt-2 flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs">
+            <div className="mt-2 flex items-center gap-2 rounded-[var(--radius-ui)] bg-muted px-3 py-2 font-mono text-xs">
               <span className="flex-1 break-all">{createdToken}</span>
               <button
                 type="button"
@@ -173,7 +173,7 @@ function PersonalAccessTokensPanel() {
       {tokens.length > 0 ? (
         <div className="space-y-1">
           {tokens.map((t) => (
-            <div key={t.id} className="flex items-center gap-3 rounded-lg [border:var(--bd-card)] px-3 py-2 text-sm">
+            <div key={t.id} className="flex items-center gap-3 rounded-[var(--radius-ui)] px-3 py-2 text-sm">
               <div className="flex-1 min-w-0">
                 <span className="font-medium">{t.name}</span>
                 {t.last_used_at && (
@@ -279,7 +279,7 @@ export function WorkspaceTokensPanel() {
               <CheckCircle2 className="size-4" />
               <AlertTitle>Workspace token created</AlertTitle>
               <AlertDescription>
-                <div className="mt-2 flex items-center gap-2 rounded-md bg-muted px-3 py-2 font-mono text-xs">
+                <div className="mt-2 flex items-center gap-2 rounded-[var(--radius-ui)] bg-muted px-3 py-2 font-mono text-xs">
                   <span className="flex-1 break-all">{createdToken}</span>
                   <button
                     type="button"
@@ -312,7 +312,7 @@ export function WorkspaceTokensPanel() {
           {tokens.length > 0 ? (
             <div className="space-y-1">
               {tokens.map((t) => (
-                <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm">
+                <div key={t.id} className="flex items-center gap-3 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-3 py-2 text-sm">
                   <div className="flex-1 min-w-0">
                     <span className="font-medium">{t.name}</span>
                     <span className="ml-2 text-xs text-muted-foreground">
@@ -793,7 +793,7 @@ function iconForSection(key: SectionKey): SettingsIconType {
 
 function SettingsIcon({ icon: Icon }: { icon: SettingsIconType }) {
   return (
-    <span className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] text-[var(--ink-soft)]">
+    <span className="grid size-8 shrink-0 place-items-center rounded-[var(--radius-ui)] bg-[var(--bg-2)] text-[var(--ink-soft)]">
       <Icon className="size-4" />
     </span>
   );
@@ -858,7 +858,7 @@ function SystemSection({
             <Skeleton className="h-12 w-full" />
           ) : (
             <>
-              <div className="flex items-center justify-between rounded-[var(--radius-card)] bg-muted p-3">
+              <div className="flex items-center justify-between rounded-[var(--radius-ui)] bg-muted p-3">
                 <span className="text-sm">Configured</span>
                 <span className="text-sm font-medium">
                   {platformConfig.set_count}/{platformConfig.required_count}
@@ -911,7 +911,7 @@ function SystemInfoRow({
   mono?: boolean;
 }) {
   return (
-    <div className="flex min-w-0 items-start justify-between gap-4 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-3">
+    <div className="flex min-w-0 items-start justify-between gap-4 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-3 py-3">
       <span className="text-muted-foreground">{label}</span>
       <span className={`min-w-0 break-words text-right font-medium ${mono ? "font-mono" : ""}`}>{value}</span>
     </div>
@@ -963,7 +963,7 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
           Copy
         </Button>
       </div>
-      <pre className="overflow-auto rounded-[var(--radius-button)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]">
+      <pre className="overflow-auto rounded-[var(--radius-ui)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]">
         {value}
       </pre>
     </div>
@@ -988,7 +988,7 @@ function DeveloperSection() {
             personal access token in the <code className="font-mono">x-floom-secret</code> header.
           </p>
         </div>
-        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5">
+        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-3 py-2.5">
           <div className="min-w-0">
             <p className="text-xs text-muted-foreground">Base URL</p>
             <code className="break-all font-mono text-xs text-foreground">{API_BASE}</code>
@@ -1685,7 +1685,7 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
                 </div>
                 <Badge variant="outline" className="text-xs">Read-only</Badge>
               </div>
-              <pre className="max-h-[36rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
+              <pre className="max-h-[36rem] overflow-auto whitespace-pre-wrap break-words rounded-[var(--radius-ui)] bg-muted/40 p-4 font-mono text-xs leading-relaxed text-foreground">
                 {agent.system_prompt}
               </pre>
             </>
@@ -1721,7 +1721,7 @@ function RoleBadge({ role }: { role: WorkspaceRole }) {
   return (
     <span
       className={cn(
-        "inline-flex items-center gap-1 rounded-[var(--radius-pill)] px-2 py-0.5 text-xs font-medium",
+        "inline-flex items-center gap-1 rounded-[var(--radius-ui)] px-2 py-0.5 text-xs font-medium",
         role === "owner"
           ? "bg-[color-mix(in_srgb,var(--accent)_16%,transparent)] text-[var(--accent)]"
           : "bg-[var(--bg-2)] text-[var(--ink-soft)]",
@@ -1856,7 +1856,7 @@ function MembersSettingsPanel() {
       {!canManage ? <ReadOnlyNotice message="Member management controls are hidden because this account is not Owner or Admin." /> : null}
 
       {canManage ? (
-        <form onSubmit={handleInvite} className="flex flex-col gap-2 rounded-[var(--radius-card)] bg-[var(--bg-2)] p-4 sm:flex-row sm:items-center">
+        <form onSubmit={handleInvite} className="flex flex-col gap-2 rounded-[var(--radius-ui)] bg-[var(--bg-2)] p-4 sm:flex-row sm:items-center">
           <div className="flex flex-1 items-center gap-2">
             <UserPlus className="size-4 shrink-0 text-[var(--ink-mute)]" />
             <Input
@@ -1869,14 +1869,14 @@ function MembersSettingsPanel() {
               maxLength={254}
             />
           </div>
-          <div className="inline-flex rounded-[var(--radius-button)] bg-[var(--bg-card)] p-0.5">
+          <div className="inline-flex rounded-[var(--radius-ui)] bg-[var(--bg-card)] p-0.5">
             {(["member", "admin"] as const).map((role) => (
               <button
                 key={role}
                 type="button"
                 className={cn(
                   "h-8 px-3 text-sm",
-                  inviteRole === role ? "rounded-[var(--radius-button)] bg-[var(--bg-2)] text-foreground" : "text-muted-foreground",
+                  inviteRole === role ? "rounded-[var(--radius-ui)] bg-[var(--bg-2)] text-foreground" : "text-muted-foreground",
                 )}
                 onClick={() => setInviteRole(role)}
               >
@@ -1903,7 +1903,7 @@ function MembersSettingsPanel() {
           const canTransfer = isOwner && m.role !== "owner" && m.status === "active";
           return (
             <div key={m.user_id} className="flex flex-wrap items-center gap-3 [border-bottom:var(--bd-div)] py-3 last:[border-bottom:0]">
-              <div className="grid size-9 shrink-0 place-items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] text-[11px] font-medium text-foreground">
+              <div className="grid size-9 shrink-0 place-items-center rounded-[var(--radius-ui)] bg-[var(--bg-2)] text-[11px] font-medium text-foreground">
                 {memberInitial(m, currentUser, isMe)}
               </div>
               <div className="min-w-0 flex-1">
@@ -1916,7 +1916,7 @@ function MembersSettingsPanel() {
                 ) : null}
               </div>
               {m.status === "invited" ? (
-                <span className="rounded-[var(--radius-pill)] bg-[var(--bg-2)] px-2 py-0.5 text-[11px] text-[var(--ink-mute)]">
+                <span className="rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-2 py-0.5 text-[11px] text-[var(--ink-mute)]">
                   Invited
                 </span>
               ) : null}
@@ -2055,7 +2055,7 @@ function WhatsAppQR() {
         shapeRendering="crispEdges"
         aria-label="WhatsApp QR code"
         role="img"
-        className="rounded-[var(--radius-button)] [border:var(--bd-card)]"
+        className="rounded-[var(--radius-ui)]"
       >
         <rect width="29" height="29" fill="white" />
         <path fill="black" d={WA_QR_PATH} />
@@ -2117,7 +2117,7 @@ function SlackBindingStatus() {
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] bg-muted/40 px-3 py-2">
+    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-ui)] bg-muted/40 px-3 py-2">
       <div className="min-w-0">
         <p className="text-xs font-medium text-foreground truncate">
           {binding.profile_name
@@ -2184,7 +2184,7 @@ function WhatsAppBindingStatus() {
   }
 
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] bg-muted/40 px-3 py-2">
+    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-ui)] bg-muted/40 px-3 py-2">
       <div className="min-w-0">
         <p className="text-xs font-medium text-foreground truncate">
           {binding.profile_name

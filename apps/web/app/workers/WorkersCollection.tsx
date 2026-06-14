@@ -174,7 +174,7 @@ function friendlyToken(value?: string | null): string {
 
 function ConfigInfoGrid({ rows }: { rows: Array<[string, React.ReactNode]> }) {
   return (
-    <div className="grid grid-cols-[minmax(96px,140px)_minmax(0,1fr)] gap-x-4 gap-y-2 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3 text-sm">
+    <div className="grid grid-cols-[minmax(96px,140px)_minmax(0,1fr)] gap-x-4 gap-y-2 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-4 py-3 text-sm">
       {rows.map(([key, value]) => (
         <div key={key} className="contents">
           <span className="text-[12.5px] text-muted-foreground">{key}</span>
@@ -506,7 +506,7 @@ function SourceTab({ w }: { w: WorkerSummary }) {
             </button>
           )}
         </div>
-        <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} surface="flat" />
+        <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} surface="code" />
       </div>
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-h-[90vh] max-w-6xl overflow-y-auto">
@@ -902,7 +902,7 @@ function WorkerDetailActions({
             </DialogHeader>
             <div className="space-y-3">
               {inputs.length === 0 ? (
-                <p className="rounded-[var(--radius-card)] bg-[var(--bg-2)] p-3 text-sm text-muted-foreground">
+                <p className="rounded-[var(--radius-ui)] bg-[var(--bg-2)] p-3 text-sm text-muted-foreground">
                   This worker has no required inputs.
                 </p>
               ) : (

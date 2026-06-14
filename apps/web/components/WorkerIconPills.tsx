@@ -48,7 +48,7 @@ import { cn } from "@/lib/utils";
 //
 // The cells overlap (-ml-px) and each carries a ring so the seams read as a
 // connected unit, not gaps. Real brand SVGs only. No emoji, no text-in-circle,
-// no dashed borders. Design-system radius via --radius-squircle. Premium in
+// no dashed borders. Design-system radius via --radius-ui. Premium in
 // light AND dark.
 // ---------------------------------------------------------------------------
 
@@ -128,12 +128,12 @@ function Cell({
     <span
       title={title}
       className={cn(
-        "relative inline-flex shrink-0 items-center justify-center [border:var(--bd-card)]",
+        "relative inline-flex shrink-0 items-center justify-center",
         first ? "z-20" : "-ml-px z-10",
-        "bg-[var(--bg-2)] text-[var(--ink-soft)] [border:var(--bd-card)]",
+        "bg-[var(--bg-2)] text-[var(--ink-soft)]",
         SIZE[size].box,
       )}
-      style={{ borderRadius: "var(--radius-squircle)" }}
+      style={{ borderRadius: "var(--radius-ui)" }}
     >
       {children}
     </span>
@@ -279,10 +279,10 @@ export function WorkerIconPills({
           <span
             title={`+${overflow} more`}
             className={cn(
-              "relative -ml-px z-0 inline-flex shrink-0 items-center justify-center px-1 text-[9px] font-medium leading-none [border:var(--bd-card)] [border:var(--bd-card)] bg-[var(--bg-2)] text-[var(--ink-mute)]",
+              "relative -ml-px z-0 inline-flex shrink-0 items-center justify-center px-1 text-[9px] font-medium leading-none bg-[var(--bg-2)] text-[var(--ink-mute)]",
               SIZE[size].overflow,
             )}
-            style={{ borderRadius: "var(--radius-squircle)" }}
+            style={{ borderRadius: "var(--radius-ui)" }}
             aria-label={`${overflow} more`}
           >
             +{overflow}

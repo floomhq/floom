@@ -120,7 +120,7 @@ export default function ConnectAppPage() {
             )}
 
             {alreadyConnected && (
-              <div className="mt-6 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--positive)_8%,transparent)] p-4">
+              <div className="mt-6 rounded-[var(--radius-ui)] bg-[color-mix(in_srgb,var(--positive)_8%,transparent)] p-4">
                 <div className="flex items-start gap-2">
                   <CheckCircle2 className="mt-0.5 size-4 shrink-0 text-[var(--positive)]" />
                   <div className="text-sm">

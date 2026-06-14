@@ -114,7 +114,7 @@ function FileTagChips({ file, compact = false }: { file: ContextFileItem; compac
       {tags.map((tag) => (
         <span
           key={`tag:${tag}`}
-          className="inline-flex max-w-full items-center rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--bg-app)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+          className="inline-flex max-w-full items-center rounded-[var(--radius-ui)] bg-[var(--bg-app)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
           title={`Tag: ${tag}`}
         >
           <span className="truncate">{tag}</span>
@@ -123,7 +123,7 @@ function FileTagChips({ file, compact = false }: { file: ContextFileItem; compac
       {metadata.map(([key, value]) => (
         <span
           key={`meta:${key}`}
-          className="inline-flex max-w-full items-center gap-1 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--bg-app)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
+          className="inline-flex max-w-full items-center gap-1 rounded-[var(--radius-ui)] bg-[var(--bg-app)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground"
           title={`${key}: ${value}`}
         >
           <span className="truncate">{key}</span>
@@ -338,7 +338,7 @@ function ResizableDivider({
       onPointerMove={handlePointerMove}
       onPointerUp={endDrag}
       onPointerCancel={endDrag}
-      className="relative z-20 hidden lg:block w-px shrink-0 cursor-col-resize bg-[var(--border-default)] transition-colors hover:bg-[var(--primary)]/40 before:absolute before:inset-y-0 before:-left-1.5 before:-right-1.5 before:content-['']"
+      className="relative z-20 hidden lg:block w-px shrink-0 cursor-col-resize bg-[var(--bg-3)] transition-colors hover:bg-[var(--primary)]/40 before:absolute before:inset-y-0 before:-left-1.5 before:-right-1.5 before:content-['']"
     />
   );
 }
@@ -792,7 +792,7 @@ function ContextsPage() {
 
       {/* New brain-pack inline form */}
       {showNewContext && (
-        <div className="shrink-0 flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] px-3 py-2">
+        <div className="shrink-0 flex items-center gap-2 rounded-[var(--radius-ui)] bg-[var(--bg-card)] px-3 py-2">
           <Input
             autoFocus
             value={newContextName}
@@ -814,7 +814,7 @@ function ContextsPage() {
       {/* Progressive miller-column panes inside ONE unified container. Desktop:
           side-by-side panes separated by internal dividers (not floating cards),
           compressing as a file opens. Mobile: a single drill-in column. */}
-      <div className="flex flex-col lg:flex-row flex-1 min-h-0 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] overflow-hidden">
+      <div className="flex flex-col lg:flex-row flex-1 min-h-0 rounded-[var(--radius-ui)] bg-[var(--bg-card)] overflow-hidden">
         {/* ---- Packs pane (resizable on desktop, drag the divider to its
             right). Full-width on mobile drill-in. ---------------------------- */}
         <section
@@ -864,7 +864,7 @@ function ContextsPage() {
                   <button
                     type="button"
                     onClick={() => setShowNewContext(true)}
-                    className="w-full rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 py-4 text-left hover:bg-muted/40 transition-colors"
+                    className="w-full rounded-[var(--radius-ui)] px-3 py-4 text-left hover:bg-muted/40 transition-colors"
                   >
                     <span className="flex items-center gap-2 text-sm font-medium">
                       <Plus className="size-4" />
@@ -931,14 +931,14 @@ function ContextsPage() {
               </Button>
             </div>
             {dragActive && (
-              <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
+              <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
                 Drop files to create a folder
               </div>
             )}
           </section>
         ) : !detail ? (
           <section className="flex-1 overflow-hidden flex items-center justify-center">
-            <Skeleton className="h-10 w-48 rounded-[var(--radius-button)]" />
+            <Skeleton className="h-10 w-48 rounded-[var(--radius-ui)]" />
           </section>
         ) : !fileOpen ? (
           /* DEFAULT: 70% pack-detail with the file/folder tree + metadata.
@@ -1025,7 +1025,7 @@ function ContextsPage() {
                 }}
               />
               {dragActive && !readOnly && (
-                <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
+                <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
                   Drop files to add them{folderPath.length ? ` to ${folderPath.join("/")}` : ""}
                 </div>
               )}
@@ -1062,27 +1062,27 @@ function BrainSkeleton() {
       {/* Page header */}
       <div className="flex items-start justify-between gap-4 shrink-0">
         <div className="space-y-2">
-          <Skeleton className="h-7 w-28 rounded-[var(--radius-button)]" />
-          <Skeleton className="h-4 w-80 rounded-[var(--radius-button)]" />
+          <Skeleton className="h-7 w-28 rounded-[var(--radius-ui)]" />
+          <Skeleton className="h-4 w-80 rounded-[var(--radius-ui)]" />
         </div>
-        <Skeleton className="h-8 w-28 rounded-[var(--radius-button)]" />
+        <Skeleton className="h-8 w-28 rounded-[var(--radius-ui)]" />
       </div>
 
       {/* Two-pane container */}
-      <div className="flex flex-col lg:flex-row flex-1 min-h-0 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] overflow-hidden">
+      <div className="flex flex-col lg:flex-row flex-1 min-h-0 rounded-[var(--radius-ui)] bg-[var(--bg-card)] overflow-hidden">
         {/* Folders rail */}
         <section className="flex flex-col w-full lg:w-[300px] shrink-0 [border-bottom:var(--bd-div)] lg:[border-bottom:0] lg:[border-right:var(--bd-div)]">
           <div className="flex min-h-[82px] shrink-0 flex-col justify-center gap-2 [border-bottom:var(--bd-div)] p-3">
-            <Skeleton className="h-3 w-20 rounded-[var(--radius-button)]" />
-            <Skeleton className="h-7 w-full rounded-[var(--radius-button)]" />
+            <Skeleton className="h-3 w-20 rounded-[var(--radius-ui)]" />
+            <Skeleton className="h-7 w-full rounded-[var(--radius-ui)]" />
           </div>
           <div className="flex-1 [&>*+*]:[border-top:var(--bd-div)]">
             {Array.from({ length: 6 }).map((_, i) => (
               <div key={i} className="flex items-start gap-2.5 px-3 py-3">
-                <Skeleton className="mt-0.5 size-3 shrink-0 rounded-[var(--radius-pill)]" />
+                <Skeleton className="mt-0.5 size-3 shrink-0 rounded-[var(--radius-ui)]" />
                 <div className="min-w-0 flex-1 space-y-1.5">
-                  <Skeleton className="h-4 w-32 rounded-[var(--radius-button)]" />
-                  <Skeleton className="h-3 w-40 rounded-[var(--radius-button)]" />
+                  <Skeleton className="h-4 w-32 rounded-[var(--radius-ui)]" />
+                  <Skeleton className="h-3 w-40 rounded-[var(--radius-ui)]" />
                 </div>
               </div>
             ))}
@@ -1093,29 +1093,29 @@ function BrainSkeleton() {
         <section className="flex-1 flex flex-col min-w-0">
           {/* Metadata header */}
           <div className="min-h-[82px] shrink-0 [border-bottom:var(--bd-div)] px-5 py-4 space-y-3">
-            <Skeleton className="h-5 w-44 rounded-[var(--radius-button)]" />
-            <Skeleton className="h-4 w-72 rounded-[var(--radius-button)]" />
+            <Skeleton className="h-5 w-44 rounded-[var(--radius-ui)]" />
+            <Skeleton className="h-4 w-72 rounded-[var(--radius-ui)]" />
             <div className="flex flex-wrap items-center gap-3">
-              <Skeleton className="h-8 w-20 rounded-[var(--radius-button)]" />
-              <Skeleton className="h-8 w-28 rounded-[var(--radius-button)]" />
-              <Skeleton className="h-8 w-20 rounded-[var(--radius-button)]" />
+              <Skeleton className="h-8 w-20 rounded-[var(--radius-ui)]" />
+              <Skeleton className="h-8 w-28 rounded-[var(--radius-ui)]" />
+              <Skeleton className="h-8 w-20 rounded-[var(--radius-ui)]" />
             </div>
           </div>
           {/* Files toolbar */}
           <div className="flex items-center justify-between px-5 py-2.5 [border-bottom:var(--bd-div)] shrink-0">
-            <Skeleton className="h-3 w-12 rounded-[var(--radius-button)]" />
+            <Skeleton className="h-3 w-12 rounded-[var(--radius-ui)]" />
             <div className="flex items-center gap-2">
-              <Skeleton className="h-7 w-28 rounded-[var(--radius-button)]" />
-              <Skeleton className="h-7 w-20 rounded-[var(--radius-button)]" />
+              <Skeleton className="h-7 w-28 rounded-[var(--radius-ui)]" />
+              <Skeleton className="h-7 w-20 rounded-[var(--radius-ui)]" />
             </div>
           </div>
           {/* File list */}
           <div className="flex-1 p-3 space-y-1.5">
             {Array.from({ length: 7 }).map((_, i) => (
               <div key={i} className="flex items-center gap-3 px-2 py-2.5">
-                <Skeleton className="size-4 shrink-0 rounded-[var(--radius-button)]" />
-                <Skeleton className="h-4 w-48 rounded-[var(--radius-button)]" />
-                <Skeleton className="ml-auto h-3 w-14 rounded-[var(--radius-button)]" />
+                <Skeleton className="size-4 shrink-0 rounded-[var(--radius-ui)]" />
+                <Skeleton className="h-4 w-48 rounded-[var(--radius-ui)]" />
+                <Skeleton className="ml-auto h-3 w-14 rounded-[var(--radius-ui)]" />
               </div>
             ))}
           </div>
@@ -1144,7 +1144,7 @@ function SecretWarningBanner({
   return (
     <div
       role="alert"
-      className="mx-3 mt-3 flex items-start gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] px-4 py-3 text-sm"
+      className="mx-3 mt-3 flex items-start gap-3 rounded-[var(--radius-ui)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] px-4 py-3 text-sm"
     >
       <AlertTriangle className="size-4 shrink-0 text-[var(--negative)] mt-0.5" />
       <div className="min-w-0 flex-1 space-y-1.5">
@@ -1173,7 +1173,7 @@ function SecretWarningBanner({
       <button
         type="button"
         onClick={onDismiss}
-        className="p-1 rounded-[var(--radius-button)] hover:bg-muted shrink-0"
+        className="p-1 rounded-[var(--radius-ui)] hover:bg-muted shrink-0"
         aria-label="Dismiss warning"
       >
         <X className="size-3.5 text-muted-foreground" />
@@ -1227,7 +1227,7 @@ function PackRow({
           <span className="truncate text-sm font-medium">{ctx.name}</span>
           {!compact && ctx.read_only && (
             <span
-              className="inline-flex items-center gap-0.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0"
+              className="inline-flex items-center gap-0.5 rounded-[var(--radius-ui)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0"
               title="Read-only system folder"
             >
               <Lock className="size-2.5" />
@@ -1252,14 +1252,14 @@ function PackRow({
       </span>
       {!compact && (
         <div className="flex items-center gap-0.5 opacity-0 group-hover:opacity-100 transition-opacity mt-0.5">
-          <button type="button" onClick={copyLink} className="p-1 rounded-[var(--radius-button)] hover:bg-muted" title="Copy link to this folder">
+          <button type="button" onClick={copyLink} className="p-1 rounded-[var(--radius-ui)] hover:bg-muted" title="Copy link to this folder">
             {copied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5 text-muted-foreground" />}
           </button>
           {!ctx.read_only && (
             <button
               type="button"
               onClick={(e) => { e.stopPropagation(); onDelete(); }}
-              className="p-1 rounded-[var(--radius-button)] hover:bg-muted"
+              className="p-1 rounded-[var(--radius-ui)] hover:bg-muted"
               title={`Delete ${ctx.name}`}
             >
               <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
@@ -1339,7 +1339,7 @@ function PackDetailPane({
             <button
               type="button"
               onClick={onBackMobile}
-              className="lg:hidden p-1 -ml-1 rounded-[var(--radius-button)] hover:bg-muted text-muted-foreground"
+              className="lg:hidden p-1 -ml-1 rounded-[var(--radius-ui)] hover:bg-muted text-muted-foreground"
               title="Back to folders"
             >
               <ChevronLeft className="size-4" />
@@ -1347,7 +1347,7 @@ function PackDetailPane({
             <span className="truncate">{detail.name}</span>
             {readOnly && (
               <span
-                className="inline-flex items-center gap-0.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0"
+                className="inline-flex items-center gap-0.5 rounded-[var(--radius-ui)] px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground shrink-0"
                 title="Read-only system folder"
               >
                 <Lock className="size-2.5" />
@@ -1367,7 +1367,7 @@ function PackDetailPane({
                   await api.contexts.setSensitive(detail.name, next);
                   onVisibilityChange({ ...detail, sensitive: next });
                 }}
-                className={`p-1 rounded-[var(--radius-button)] transition-colors shrink-0 ${
+                className={`p-1 rounded-[var(--radius-ui)] transition-colors shrink-0 ${
                   (detail.sensitive ?? true)
                     ? "text-[var(--negative)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] hover:bg-[color-mix(in_srgb,var(--negative)_14%,transparent)]"
                     : "text-muted-foreground hover:bg-muted"
@@ -1394,7 +1394,7 @@ function PackDetailPane({
             <button
               type="button"
               onClick={copyPackLink}
-              className="p-1 rounded-[var(--radius-button)] hover:bg-muted text-muted-foreground transition-colors shrink-0"
+              className="p-1 rounded-[var(--radius-ui)] hover:bg-muted text-muted-foreground transition-colors shrink-0"
               title="Share this folder"
             >
               {packLinkCopied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5" />}
@@ -1413,11 +1413,11 @@ function PackDetailPane({
         )}
 
         <div className="flex flex-wrap items-center gap-3 mt-3">
-          <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3 py-1.5">
+          <div className="flex items-center gap-1.5 rounded-[var(--radius-ui)] bg-[var(--bg-app)] px-3 py-1.5">
             <span className="text-xs text-muted-foreground">Files</span>
             <span className="text-xs font-medium">{detail.file_count}</span>
           </div>
-          <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3 py-1.5 min-w-0">
+          <div className="flex items-center gap-1.5 rounded-[var(--radius-ui)] bg-[var(--bg-app)] px-3 py-1.5 min-w-0">
             <span className="text-xs text-muted-foreground shrink-0">Used by</span>
             {(detail.used_by ?? []).length === 0 ? (
               <span className="text-xs text-muted-foreground italic">none yet</span>
@@ -1434,7 +1434,7 @@ function PackDetailPane({
               </span>
             )}
           </div>
-          <div className="flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3 py-1.5">
+          <div className="flex items-center gap-1.5 rounded-[var(--radius-ui)] bg-[var(--bg-app)] px-3 py-1.5">
             <span className="text-xs text-muted-foreground">Size</span>
             <span className="text-xs font-medium">{formatBytes(detail.total_size_bytes)}</span>
           </div>
@@ -1466,7 +1466,7 @@ function PackDetailPane({
       {/* Miller columns: one column per folder level, horizontally scrollable */}
       {detail.files.length === 0 ? (
         <div className="flex-1 flex items-center justify-center p-6">
-          <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] p-6 text-center">
+          <div className="rounded-[var(--radius-ui)] p-6 text-center">
             {readOnly ? (
               <p className="text-sm text-muted-foreground">This system folder has no files.</p>
             ) : (
@@ -1507,7 +1507,7 @@ function PackDetailPane({
           miller columns) so a drop anywhere over a writable pack uploads.
           pointer-events-none lets the underlying drag events keep firing. */}
       {dragActive && !readOnly && (
-        <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
+        <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
           Drop files to add them{folderPath.length ? ` to ${folderPath.join("/")}` : ""}
         </div>
       )}
@@ -1545,7 +1545,7 @@ function FolderColumns({
         <button
           type="button"
           onClick={onBackMobile}
-          className="lg:hidden p-1 -ml-1 rounded-[var(--radius-button)] hover:bg-muted text-muted-foreground"
+          className="lg:hidden p-1 -ml-1 rounded-[var(--radius-ui)] hover:bg-muted text-muted-foreground"
           title="Back to folders"
         >
           <ChevronLeft className="size-4" />
@@ -1670,7 +1670,7 @@ function FolderColumn({
                   <button
                     type="button"
                     onClick={() => onDeleteFile(entry.file.path)}
-                    className="p-1 rounded-[var(--radius-button)] hover:bg-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
+                    className="p-1 rounded-[var(--radius-ui)] hover:bg-muted opacity-0 group-hover:opacity-100 transition-opacity shrink-0"
                     title="Delete file"
                   >
                     <Trash2 className="size-3.5 text-muted-foreground hover:text-destructive" />
@@ -1754,7 +1754,7 @@ function FilePane({
             <button
               type="button"
               onClick={onBackMobile}
-              className="lg:hidden p-1 -ml-1 rounded-[var(--radius-button)] hover:bg-muted text-muted-foreground shrink-0"
+              className="lg:hidden p-1 -ml-1 rounded-[var(--radius-ui)] hover:bg-muted text-muted-foreground shrink-0"
               title="Back to files"
             >
               <ChevronLeft className="size-4" />
@@ -1806,14 +1806,14 @@ function FilePane({
           <button
             type="button"
             onClick={copyFileLink}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-ui)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             title="Share this file"
           >
             {fileLinkCopied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5" />}
           </button>
           <a
             href={fileUrl}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-ui)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
             title="Download"
           >
             <Download className="size-3.5" />
@@ -1828,7 +1828,7 @@ function FilePane({
       <div className="flex-1 overflow-auto min-h-0">
         {loadingText ? (
           <div className="p-4 space-y-2">
-            {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-4 w-full rounded-[var(--radius-button)]" />)}
+            {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-4 w-full rounded-[var(--radius-ui)]" />)}
           </div>
         ) : editing ? (
           <Textarea
@@ -1865,7 +1865,7 @@ function FileContent({
     return (
       <div className="p-4 space-y-3 text-sm">
         <p className="text-muted-foreground">File is too large to preview inline ({formatBytes(file.size)}).</p>
-        <a href={fileUrl} className="inline-flex items-center gap-2 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 py-1.5 text-sm hover:bg-muted">
+        <a href={fileUrl} className="inline-flex items-center gap-2 rounded-[var(--radius-ui)] px-3 py-1.5 text-sm hover:bg-muted">
           <Download className="size-4" />
           Download
         </a>
@@ -1946,7 +1946,7 @@ function FileContent({
         {(src) => (
           <div className="flex items-center justify-center p-6 min-h-[300px] bg-muted/20">
             {/* eslint-disable-next-line @next/next/no-img-element */}
-            <img src={src} alt={file.path} className="max-h-[600px] max-w-full object-contain rounded-[var(--radius-button)]" />
+            <img src={src} alt={file.path} className="max-h-[600px] max-w-full object-contain rounded-[var(--radius-ui)]" />
           </div>
         )}
       </ContextFileObjectUrl>
@@ -1962,7 +1962,7 @@ function FileContent({
       <ContextFileObjectUrl packName={packName} file={file}>
         {(src) => (
           <div className="flex h-full min-h-[420px] items-center justify-center bg-muted/20 p-6">
-            <video src={src} controls className="max-h-[650px] max-w-full rounded-[var(--radius-button)] [border:var(--bd-card)] bg-black">
+            <video src={src} controls className="max-h-[650px] max-w-full rounded-[var(--radius-ui)] bg-black">
               <a href={fileUrl}>Download video</a>
             </video>
           </div>
@@ -1974,7 +1974,7 @@ function FileContent({
   return (
     <div className="p-4 space-y-3 text-sm">
       <p className="text-muted-foreground">{fileDisplayType(file)} file · {formatBytes(file.size)}</p>
-      <a href={fileUrl} className="inline-flex items-center gap-2 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 py-1.5 text-sm hover:bg-muted">
+      <a href={fileUrl} className="inline-flex items-center gap-2 rounded-[var(--radius-ui)] px-3 py-1.5 text-sm hover:bg-muted">
         <Download className="size-4" />
         Download
       </a>
@@ -2028,7 +2028,7 @@ function CodeViewToolbar({ text }: { text: string }) {
       <button
         type="button"
         onClick={copy}
-        className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+        className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-ui)] px-2 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
       >
         {copied ? <Check className="size-3.5 text-[var(--success)]" /> : <Copy className="size-3.5" />}
         {copied ? "Copied" : "Copy"}
@@ -2126,7 +2126,7 @@ function ContextFileObjectUrl({
   if (!src) {
     return (
       <div className="p-4 space-y-2">
-        {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-4 w-full rounded-[var(--radius-button)]" />)}
+        {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-4 w-full rounded-[var(--radius-ui)]" />)}
       </div>
     );
   }
@@ -2222,7 +2222,7 @@ function PdfPreview({
         <span>{pageCount ? `Page 1 of ${pageCount}` : "Rendering PDF preview"}</span>
         <a
           href={fileUrl}
-          className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-2.5 text-xs hover:bg-muted"
+          className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-ui)] px-2.5 text-xs hover:bg-muted"
         >
           <Download className="size-3.5" />
           Download
@@ -2231,12 +2231,12 @@ function PdfPreview({
       <div className="flex-1 overflow-auto p-6">
         {loading && (
           <div className="space-y-2">
-            {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-4 w-full rounded-[var(--radius-button)]" />)}
+            {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-4 w-full rounded-[var(--radius-ui)]" />)}
           </div>
         )}
         <canvas
           ref={canvasRef}
-          className={`mx-auto max-w-full rounded-[var(--radius-button)] bg-white shadow-[var(--shadow-sm)] ${loading ? "invisible" : ""}`}
+          className={`mx-auto max-w-full rounded-[var(--radius-ui)] bg-white shadow-[var(--shadow-sm)] ${loading ? "invisible" : ""}`}
         />
       </div>
     </div>
@@ -2288,7 +2288,7 @@ function SpreadsheetPreview({ packName, file }: { packName: string; file: Contex
   if (loading) {
     return (
       <div className="p-4 space-y-2">
-        {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-4 w-full rounded-[var(--radius-button)]" />)}
+        {[1, 2, 3, 4].map((i) => <Skeleton key={i} className="h-4 w-full rounded-[var(--radius-ui)]" />)}
       </div>
     );
   }
@@ -2320,7 +2320,7 @@ function PreviewUnavailable({
 }) {
   return (
     <div className="flex h-full min-h-[260px] items-center justify-center p-6">
-      <div className="max-w-lg rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-5 text-sm shadow-sm">
+      <div className="max-w-lg rounded-[var(--radius-ui)] bg-[var(--bg-card)] p-5 text-sm shadow-sm">
         <p className="font-medium text-foreground">{title}</p>
         <p className="mt-2 leading-6 text-muted-foreground">{detail}</p>
         <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -2330,7 +2330,7 @@ function PreviewUnavailable({
           </Button>
           <a
             href={fileUrl}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 text-sm hover:bg-muted"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-ui)] px-3 text-sm hover:bg-muted"
           >
             <Download className="size-3.5" />
             Download
@@ -2475,7 +2475,7 @@ function TablePreview({ rows }: { rows: string[][] }) {
           {visibleRows.map((row, rowIndex) => (
             <tr key={rowIndex} className={rowIndex === 0 ? "bg-muted/60 font-medium" : "odd:bg-muted/20"}>
               {Array.from({ length: colCount }).map((_, colIndex) => (
-                <td key={colIndex} className="max-w-[260px] [border:var(--bd-card)] px-2.5 py-1.5 align-top">
+                <td key={colIndex} className="max-w-[260px] px-2.5 py-1.5 align-top">
                   <span className="block truncate" title={row[colIndex] ?? ""}>
                     {row[colIndex] ?? ""}
                   </span>

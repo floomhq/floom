@@ -140,7 +140,7 @@ function RedirectInner() {
 
             {phase === "api_key" ? (
               <>
-                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted">
+                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-ui)] bg-muted">
                   <ShieldCheck className="size-5 text-muted-foreground" />
                 </div>
                 <h1 className="mt-4 text-xl font-semibold">Add a secret for {providerName}</h1>
@@ -160,7 +160,7 @@ function RedirectInner() {
 
             ) : phase === "error" ? (
               <>
-                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted">
+                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-ui)] bg-muted">
                   <ShieldCheck className="size-5 text-muted-foreground" />
                 </div>
                 <h1 className="mt-4 text-xl font-semibold">Authorization could not start</h1>
@@ -175,7 +175,7 @@ function RedirectInner() {
 
             ) : phase === "done" ? (
               <>
-                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-green-50">
+                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-ui)] bg-green-50">
                   <CheckCircle2 className="size-5 text-green-600" />
                 </div>
                 <h1 className="mt-4 text-xl font-semibold">Connected!</h1>
@@ -186,7 +186,7 @@ function RedirectInner() {
 
             ) : phase === "waiting_click" ? (
               <>
-                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted">
+                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-ui)] bg-muted">
                   <ExternalLink className="size-5 text-muted-foreground" />
                 </div>
                 <h1 className="mt-4 text-xl font-semibold">Finish authorization in Composio</h1>
@@ -206,7 +206,7 @@ function RedirectInner() {
 
             ) : phase === "waiting" ? (
               <>
-                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted">
+                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-ui)] bg-muted">
                   <Loader2 className="size-5 animate-spin text-muted-foreground" />
                 </div>
                 <h1 className="mt-4 text-xl font-semibold">Verifying connection…</h1>
@@ -220,7 +220,7 @@ function RedirectInner() {
 
             ) : phase === "ready" ? (
               <>
-                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted">
+                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-ui)] bg-muted">
                   <ExternalLink className="size-5 text-muted-foreground" />
                 </div>
                 <h1 className="mt-4 text-xl font-semibold">Authorize {providerName}</h1>
@@ -250,7 +250,7 @@ function RedirectInner() {
             ) : (
               /* preparing */
               <>
-                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted">
+                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-ui)] bg-muted">
                   <Loader2 className="size-5 animate-spin text-muted-foreground" />
                 </div>
                 <h1 className="mt-4 text-xl font-semibold">Preparing authorization…</h1>

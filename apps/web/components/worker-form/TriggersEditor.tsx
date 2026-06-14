@@ -165,7 +165,7 @@ function TriggerRowSummary({ row, onEdit, onRemove }: TriggerRowSummaryProps) {
   const summary = triggerSummaryLine(row);
 
   return (
-    <div className="flex items-center gap-3 py-2.5 px-3 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card hover:bg-muted/30 transition-colors group">
+    <div className="flex items-center gap-3 py-2.5 px-3 rounded-[var(--radius-ui)] bg-card hover:bg-muted/30 transition-colors group">
       <Icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
       <div className="flex-1 min-w-0 flex items-center gap-2 overflow-hidden">
         <span className="text-xs font-medium text-foreground shrink-0">{meta.label}</span>
@@ -225,7 +225,7 @@ function TriggerRowEditor({
   const activeMeta = TRIGGER_TYPES.find((t) => t.value === row.type) ?? TRIGGER_TYPES[0];
 
   return (
-    <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card p-4 space-y-4">
+    <div className="rounded-[var(--radius-ui)] bg-card p-4 space-y-4">
       {/* header: kind label + collapse + remove */}
       <div className="flex items-center justify-between gap-2">
         <span className="text-xs font-medium text-muted-foreground">Edit trigger</span>
@@ -253,7 +253,7 @@ function TriggerRowEditor({
       </div>
 
       <div className="space-y-2">
-        <div className="inline-flex items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card p-0.5">
+        <div className="inline-flex items-center rounded-[var(--radius-ui)] bg-card p-0.5">
           {TRIGGER_TYPES.map((t) => {
             const Icon = t.icon;
             const active = row.type === t.value;
@@ -289,7 +289,7 @@ function TriggerRowEditor({
             <Input
               value={row.cronTimezone}
               onChange={(e) => onChange({ ...row, cronTimezone: e.target.value })}
-              className="[border:var(--bd-card)] font-mono text-sm"
+              className=" font-mono text-sm"
               placeholder="Europe/Berlin"
             />
           </div>
@@ -310,7 +310,7 @@ function TriggerRowEditor({
         <div className="space-y-2">
           <Label className="text-xs text-muted-foreground">Webhook URL</Label>
           <div className="flex items-center gap-2">
-            <code className="flex-1 text-xs font-mono bg-muted [border:var(--bd-card)] rounded px-2 py-1.5 break-all">
+            <code className="flex-1 text-xs font-mono bg-muted rounded px-2 py-1.5 break-all">
               {webhookUrl}
             </code>
             <button
@@ -322,26 +322,26 @@ function TriggerRowEditor({
                   () => toast.error("Failed to copy"),
                 );
               }}
-              className="shrink-0 p-1.5 rounded [border:var(--bd-card)] bg-card hover:bg-muted transition-colors"
+              className="shrink-0 p-1.5 rounded bg-card hover:bg-muted transition-colors"
             >
               <Copy className="w-3.5 h-3.5 text-muted-foreground" />
             </button>
           </div>
           {/* S29e: was bg-[#1a1a1a] text-[#a8e6a3] (always dark) — unreadable
               in light mode. Now theme-aware terminal block. */}
-          <pre className="text-xs font-mono bg-[var(--bg-2)] dark:bg-[#1a1a1a] text-foreground dark:text-[#a8e6a3] [border:var(--bd-card)] rounded p-2 overflow-x-auto whitespace-pre-wrap">
+          <pre className="text-xs font-mono bg-[var(--bg-2)] dark:bg-[#1a1a1a] text-foreground dark:text-[#a8e6a3] rounded p-2 overflow-x-auto whitespace-pre-wrap">
             {`curl -X POST '${webhookUrl}' \\\n  -H 'Content-Type: application/json' \\\n  -d '{"key": "value"}'`}
           </pre>
         </div>
       )}
 
       {row.type === "webhook" && !webhookUrl && (
-        <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 p-3 space-y-2">
+        <div className="rounded-[var(--radius-ui)] bg-muted/30 p-3 space-y-2">
           <p className="text-xs text-muted-foreground font-medium">Webhook URL</p>
           <p className="text-xs text-muted-foreground">
             Your webhook URL will be shown after the worker is created. It includes a unique token for authentication.
           </p>
-          <div className="rounded [border:var(--bd-card)] bg-card p-2 font-mono text-xs text-muted-foreground">
+          <div className="rounded bg-card p-2 font-mono text-xs text-muted-foreground">
             {`${getPublicApiBase()}/webhooks/<worker-id>?token=...`}
           </div>
         </div>
@@ -427,7 +427,7 @@ export function TriggersEditor({
       <button
         type="button"
         onClick={addRow}
-        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-[var(--radius-button)] [border:var(--bd-card)] text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
+        className="inline-flex items-center gap-1.5 h-8 px-2.5 rounded-[var(--radius-ui)] text-xs font-medium text-muted-foreground hover:text-foreground hover:bg-muted/50 transition-colors"
       >
         <Plus className="w-3.5 h-3.5" />
         Add trigger
@@ -435,7 +435,7 @@ export function TriggersEditor({
 
       {/* Trigger list */}
       {rows.length === 0 ? (
-        <div className="space-y-2 rounded-[var(--radius-button)] [border:var(--bd-card)] p-8 text-center">
+        <div className="space-y-2 rounded-[var(--radius-ui)] p-8 text-center">
           <p className="text-sm text-muted-foreground">This worker has no triggers.</p>
           <p className="text-xs text-muted-foreground">Add one to schedule it or connect an event.</p>
         </div>

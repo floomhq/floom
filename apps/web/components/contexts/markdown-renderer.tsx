@@ -6,7 +6,7 @@ import { sanitizeHref } from "@/lib/safe-url";
 // the link-sanitization behavior (#1045) can be unit-tested in isolation.
 export function MarkdownRenderer({ content }: { content: string }) {
   return (
-    <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:bg-muted prose-pre:[border:var(--bd-card)] prose-pre:rounded-[var(--radius-button)] prose-pre:text-foreground prose-pre:[&_code]:text-foreground prose-code:bg-muted prose-code:text-foreground prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:font-mono prose-blockquote:[border-left:var(--bd-div)] prose-blockquote:not-italic prose-headings:font-semibold prose-headings:tracking-tight">
+    <div className="prose prose-sm dark:prose-invert max-w-none prose-pre:bg-muted prose-pre: prose-pre:rounded-[var(--radius-ui)] prose-pre:text-foreground prose-pre:[&_code]:text-foreground prose-code:bg-muted prose-code:text-foreground prose-code:px-1 prose-code:py-0.5 prose-code:rounded prose-code:text-xs prose-code:font-mono prose-blockquote:[border-left:var(--bd-div)] prose-blockquote:not-italic prose-headings:font-semibold prose-headings:tracking-tight">
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
         components={{

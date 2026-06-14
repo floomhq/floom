@@ -190,7 +190,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
         aria-haspopup="dialog"
         onClick={() => setOpen((o) => !o)}
         className={cn(
-          "relative inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-button)] transition-colors duration-150",
+          "relative inline-flex h-8 w-8 items-center justify-center rounded-[var(--radius-ui)] transition-colors duration-150",
           count > 0
             ? "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-[var(--ink)]"
             : "text-[var(--ink-faint)] hover:bg-[var(--active-nav-bg)] hover:text-[var(--ink-soft)]",
@@ -200,7 +200,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
         {count > 0 && (
           <span
             aria-hidden="true"
-            className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--warning)] px-1 text-[10px] font-semibold leading-none text-white"
+            className="absolute -right-0.5 -top-0.5 flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--warning)] px-1 text-[10px] font-semibold leading-none text-white"
           >
             {count}
           </span>
@@ -212,7 +212,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
           ref={panelRef}
           role="dialog"
           aria-label="Worker notifications"
-          className="absolute right-0 top-full z-50 mt-2 w-[380px] rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--paper)] shadow-[var(--shadow-pop)] outline-none"
+          className="absolute right-0 top-full z-50 mt-2 w-[380px] rounded-[var(--radius-ui)] bg-[var(--paper)] shadow-[var(--shadow-pop)] outline-none"
         >
           <div className="[border-bottom:var(--bd-div)] px-4 py-3">
             <p className="text-sm font-semibold text-[var(--ink)]">
@@ -254,7 +254,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                             <Link
                               href={`/workers?sel=${encodeURIComponent(item.worker_id)}`}
                               onClick={() => setOpen(false)}
-                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                              className="inline-flex h-6 items-center rounded-[var(--radius-ui)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                             >
                               View worker
                             </Link>
@@ -262,7 +262,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                           <Link
                             href={`/runs?worker=${item.worker_id}&status=failed`}
                             onClick={() => setOpen(false)}
-                            className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                            className="inline-flex h-6 items-center rounded-[var(--radius-ui)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                           >
                             View logs
                           </Link>
@@ -271,7 +271,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                               type="button"
                               onClick={() => retry(item.worker_id!)}
                               disabled={busy === `retry:${item.worker_id}`}
-                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors disabled:opacity-40"
+                              className="inline-flex h-6 items-center rounded-[var(--radius-ui)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors disabled:opacity-40"
                             >
                               Retry
                             </button>
@@ -281,7 +281,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                               type="button"
                               onClick={() => disable(item.worker_id!)}
                               disabled={busy === `disable:${item.worker_id}`}
-                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors disabled:opacity-40"
+                              className="inline-flex h-6 items-center rounded-[var(--radius-ui)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors disabled:opacity-40"
                             >
                               Disable
                             </button>
@@ -319,7 +319,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                           <Link
                             href="/connections"
                             onClick={() => setOpen(false)}
-                            className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                            className="inline-flex h-6 items-center rounded-[var(--radius-ui)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                           >
                             Reconnect all
                           </Link>
@@ -350,7 +350,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                                 key={item.worker_id}
                                 href="/connections"
                                 onClick={() => setOpen(false)}
-                                className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                                className="inline-flex h-6 items-center rounded-[var(--radius-ui)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                               >
                                 Add connection
                               </Link>
@@ -359,7 +359,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                                 key={item.worker_id}
                                 href="/connections/secrets"
                                 onClick={() => setOpen(false)}
-                                className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                                className="inline-flex h-6 items-center rounded-[var(--radius-ui)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                               >
                                 Add secret
                               </Link>
@@ -389,7 +389,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                           <Link
                             href="/approvals"
                             onClick={() => setOpen(false)}
-                            className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                            className="inline-flex h-6 items-center rounded-[var(--radius-ui)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                           >
                             Review approvals
                           </Link>

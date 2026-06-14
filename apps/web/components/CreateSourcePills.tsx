@@ -66,7 +66,7 @@ export function CreateSourcePills({ onPick }: { onPick: (source: string) => void
             key={`folder:${f.name}`}
             type="button"
             onClick={() => onPick(f.name)}
-            className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--bg-2)] py-1 pl-2 pr-2.5 text-xs text-foreground transition-colors hover:bg-muted"
+            className="inline-flex items-center gap-1.5 rounded-[var(--radius-ui)] bg-[var(--bg-2)] py-1 pl-2 pr-2.5 text-xs text-foreground transition-colors hover:bg-muted"
             title={`Use the ${f.name} brain folder`}
           >
             <Brain className="size-3.5 shrink-0 text-muted-foreground" />
@@ -78,7 +78,7 @@ export function CreateSourcePills({ onPick }: { onPick: (source: string) => void
             key={`suggest:${s}`}
             type="button"
             onClick={() => onPick(s)}
-            className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 py-1 pl-2 pr-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
+            className="inline-flex items-center gap-1.5 rounded-[var(--radius-ui)] bg-muted/40 py-1 pl-2 pr-2.5 text-xs text-muted-foreground transition-colors hover:bg-muted hover:text-foreground"
             title={`Add ${s} as a source`}
           >
             <FileText className="size-3.5 shrink-0" />

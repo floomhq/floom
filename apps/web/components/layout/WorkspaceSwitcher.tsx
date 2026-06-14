@@ -222,10 +222,10 @@ export function WorkspaceSwitcher() {
     return (
       <div className="w-full">
         <div
-          className="flex h-10 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)]"
+          className="flex h-10 w-full items-center gap-2 rounded-[var(--radius-ui)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)]"
           aria-label="Loading workspaces"
         >
-          <div className="size-6 shrink-0 rounded-md bg-muted" />
+          <div className="size-6 shrink-0 rounded-[var(--radius-ui)] bg-muted" />
           <div className="h-3 w-20 rounded bg-muted" />
         </div>
       </div>
@@ -251,13 +251,13 @@ export function WorkspaceSwitcher() {
         {/* V4 SPEC §2: workspace identity — mark + name + chevron-on-hover */}
         <DropdownMenuTrigger
           className={cn(
-            "group flex h-10 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm font-semibold text-ink transition-colors duration-150",
+            "group flex h-10 w-full items-center gap-2 rounded-[var(--radius-ui)] bg-transparent px-2.5 text-sm font-semibold text-ink transition-colors duration-150",
             "hover:bg-[var(--active-nav-bg)] focus-visible:outline-none"
           )}
           aria-label="Switch workspace"
         >
           {/* Workspace mark: company logo if available, else colored initial */}
-          <div className="size-6 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_22%,transparent)] text-[var(--accent)] grid place-items-center text-[10px] font-semibold uppercase tracking-wide">
+          <div className="size-6 shrink-0 rounded-[var(--radius-ui)] bg-[color-mix(in_srgb,var(--accent)_22%,transparent)] text-[var(--accent)] grid place-items-center text-[10px] font-semibold uppercase tracking-wide">
             {shortInitial(active.name)}
           </div>
           <span className="flex-1 truncate text-left">{resolveWorkspaceName(active.name)}</span>
@@ -289,7 +289,7 @@ export function WorkspaceSwitcher() {
                   className="flex items-center gap-2 focus:bg-[var(--active-nav-bg)] focus:text-ink"
                   disabled={isLoading}
                 >
-                  <div className="size-5 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)] grid place-items-center text-[9px] font-semibold uppercase">
+                  <div className="size-5 shrink-0 rounded-[var(--radius-ui)] bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)] grid place-items-center text-[9px] font-semibold uppercase">
                     {shortInitial(w.name)}
                   </div>
                   <span className="flex-1 truncate">{resolveWorkspaceName(w.name)}</span>
@@ -440,7 +440,7 @@ export function WorkspaceSwitcher() {
             <div className="space-y-2">
               <Label htmlFor="workspace-company">Company</Label>
               <div className="flex items-center gap-2.5">
-                <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-md bg-[var(--bg-2)]">
+                <div className="grid size-9 shrink-0 place-items-center overflow-hidden rounded-[var(--radius-ui)] bg-[var(--bg-2)]">
                   {companyLogoUrl(createCompany) ? (
                     // eslint-disable-next-line @next/next/no-img-element
                     <img

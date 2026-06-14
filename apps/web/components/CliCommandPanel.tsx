@@ -308,7 +308,7 @@ export function CliCommandPanel() {
           </p>
         </div>
         {storedSecret ? (
-          <div className="flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2">
+          <div className="flex items-center gap-2 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-3 py-2">
             <code className="flex-1 truncate font-mono text-xs">
               {revealed ? storedSecret : maskSecret(storedSecret)}
             </code>
@@ -429,7 +429,7 @@ export function CliCommandPanel() {
                     type="button"
                     onClick={() => setMcpTarget(t.value)}
                     className={
-                      `inline-flex h-8 items-center rounded-[var(--radius-button)] [border:var(--bd-pill)] px-3 text-xs font-medium transition-colors ` +
+                      `inline-flex h-8 items-center rounded-[var(--radius-ui)] px-3 text-xs font-medium transition-colors ` +
                       (mcpTarget === t.value
                         ? "bg-[var(--foreground)] text-[var(--background)]"
                         : "bg-[var(--bg-2)] text-muted-foreground hover:text-foreground hover:bg-muted")
@@ -457,7 +457,7 @@ export function CliCommandPanel() {
               Call the HTTP API directly with your token. It is a full read+write API —
               create workers, start runs, approve, rotate secrets, and more.
             </p>
-            <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2.5 space-y-1.5 text-sm">
+            <div className="rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-3 py-2.5 space-y-1.5 text-sm">
               <div className="flex flex-wrap items-center gap-x-2 gap-y-1">
                 <span className="w-20 shrink-0 text-muted-foreground">Base URL</span>
                 <code className="font-mono text-xs text-foreground">{API_BASE}</code>
@@ -515,13 +515,13 @@ function RefList({
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder={filterPlaceholder}
-          className="h-8 w-44 rounded-[var(--radius-input)] [border:var(--bd-input)] bg-[var(--bg-2)] px-2.5 text-xs outline-none placeholder:text-muted-foreground"
+          className="h-8 w-44 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-2.5 text-xs outline-none placeholder:text-muted-foreground"
         />
       </div>
       {filtered.length === 0 ? (
         <p className="px-1 py-3 text-xs text-muted-foreground">No matches.</p>
       ) : (
-        <div className="[&>*+*]:[border-top:var(--bd-div)] rounded-[var(--radius-card)] [border:var(--bd-card)] overflow-hidden">
+        <div className="[&>*+*]:[border-top:var(--bd-div)] rounded-[var(--radius-ui)] overflow-hidden">
           {filtered.map((item) => (
             <div key={item.name} className="px-3 py-2.5">
               <code className="text-xs font-medium text-foreground">{item.name}</code>
@@ -569,7 +569,7 @@ function ApiEndpointList() {
           value={query}
           onChange={(e) => setQuery(e.target.value)}
           placeholder="Filter endpoints..."
-          className="h-8 w-44 rounded-[var(--radius-input)] [border:var(--bd-input)] bg-[var(--bg-2)] px-2.5 text-xs outline-none placeholder:text-muted-foreground"
+          className="h-8 w-44 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-2.5 text-xs outline-none placeholder:text-muted-foreground"
         />
       </div>
       {groups.length === 0 ? (
@@ -579,7 +579,7 @@ function ApiEndpointList() {
           {groups.map((group) => (
             <div key={group.group} className="space-y-1.5">
               <p className="text-xs font-medium text-muted-foreground">{group.group}</p>
-              <div className="[&>*+*]:[border-top:var(--bd-div)] rounded-[var(--radius-card)] [border:var(--bd-card)] overflow-hidden">
+              <div className="[&>*+*]:[border-top:var(--bd-div)] rounded-[var(--radius-ui)] overflow-hidden">
                 {group.endpoints.map((endpoint) => (
                   <div
                     key={`${endpoint.method} ${endpoint.path}`}
@@ -587,7 +587,7 @@ function ApiEndpointList() {
                   >
                     <span
                       className={
-                        `mt-0.5 inline-flex shrink-0 items-center justify-center rounded-[var(--radius-button)] px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none tracking-wide ` +
+                        `mt-0.5 inline-flex shrink-0 items-center justify-center rounded-[var(--radius-ui)] px-1.5 py-0.5 font-mono text-[10px] font-semibold leading-none tracking-wide ` +
                         METHOD_BADGE[endpoint.method]
                       }
                     >
@@ -622,11 +622,11 @@ function SnippetBox({
   onCopy: () => void;
 }) {
   return (
-    <div className="relative rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] dark:bg-[#1a1a1a]">
+    <div className="relative rounded-[var(--radius-ui)] bg-[var(--bg-2)] dark:bg-[#1a1a1a]">
       <button
         type="button"
         onClick={onCopy}
-        className="absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        className="absolute right-2 top-2 z-10 inline-flex h-7 items-center gap-1 rounded-[var(--radius-ui)] bg-card px-2 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         aria-label={copied ? "Copied" : "Copy snippet"}
       >
         {copied ? <Check className="h-3.5 w-3.5" /> : <Copy className="h-3.5 w-3.5" />}

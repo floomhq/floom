@@ -93,7 +93,7 @@ export function FileInputUpload({ name, value, fileName, accepts, maxSizeMb, onU
     <div className="space-y-2">
       <button
         type="button"
-        className={`relative w-full rounded-[var(--radius-button)] [border:var(--bd-input)] p-4 text-left transition-colors ${
+        className={`relative w-full rounded-[var(--radius-ui)] p-4 text-left transition-colors ${
           dragging ? "bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]" : "hover:bg-muted/40"
         }`}
         onClick={() => inputRef.current?.click()}
@@ -117,7 +117,7 @@ export function FileInputUpload({ name, value, fileName, accepts, maxSizeMb, onU
           onChange={(event) => pickFile(event.target.files?.[0])}
         />
         <div className="flex items-center gap-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-button)] bg-muted text-muted-foreground">
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-ui)] bg-muted text-muted-foreground">
             {value ? <FileText className="h-4 w-4" /> : <UploadCloud className="h-4 w-4" />}
           </div>
           <div className="min-w-0 flex-1">
@@ -136,8 +136,8 @@ export function FileInputUpload({ name, value, fileName, accepts, maxSizeMb, onU
           </div>
         </div>
         {uploading && (
-          <div className="mt-3 h-1.5 overflow-hidden rounded-[var(--radius-pill)] bg-[var(--bg-2)]">
-            <div className="h-full rounded-[var(--radius-pill)] bg-[var(--accent)] transition-all" style={{ width: `${progress}%` }} />
+          <div className="mt-3 h-1.5 overflow-hidden rounded-[var(--radius-ui)] bg-[var(--bg-2)]">
+            <div className="h-full rounded-[var(--radius-ui)] bg-[var(--accent)] transition-all" style={{ width: `${progress}%` }} />
           </div>
         )}
       </button>

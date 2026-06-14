@@ -52,11 +52,11 @@ export function WorkerCreateCard({ card }: { card: WorkerCreateCardType }) {
   const isFailed = card.step === "failed";
 
   return (
-    <div className="rounded-lg [border:var(--bd-card)] bg-card/60 overflow-hidden text-sm">
+    <div className="rounded-[var(--radius-ui)] bg-card/60 overflow-hidden text-sm">
       {/* Header */}
       <div className="flex items-center gap-2.5 px-3.5 py-2.5 [border-bottom:var(--bd-div)]/50">
         <span
-          className="size-2 rounded-[var(--radius-pill)] shrink-0"
+          className="size-2 rounded-[var(--radius-ui)] shrink-0"
           style={{ background: "var(--accent)" }}
           aria-hidden="true"
         />
@@ -82,7 +82,7 @@ export function WorkerCreateCard({ card }: { card: WorkerCreateCardType }) {
             <a
               key={action.id}
               href={action.href}
-              className="inline-flex h-7 items-center gap-1.5 rounded-md [border:var(--bd-card)] bg-background px-2.5 text-xs font-normal text-foreground hover:bg-accent transition-colors"
+              className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-ui)] bg-background px-2.5 text-xs font-normal text-foreground hover:bg-[var(--active-nav-bg)] transition-colors"
             >
               {action.id === "run_worker" && <Play className="size-3" />}
               {action.id === "open_worker" && <ExternalLink className="size-3" />}

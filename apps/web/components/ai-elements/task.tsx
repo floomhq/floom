@@ -17,7 +17,7 @@ export function Task({
   className?: string;
 }) {
   return (
-    <div className={cn("flex items-start gap-2 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card p-2", className)}>
+    <div className={cn("flex items-start gap-2 rounded-[var(--radius-ui)] bg-card p-2", className)}>
       {status === "completed" ? (
         <CheckCircle2 className="mt-0.5 size-4 text-success" />
       ) : status === "failed" ? (

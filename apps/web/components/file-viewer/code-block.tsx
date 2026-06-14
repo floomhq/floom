@@ -59,13 +59,15 @@ export function CodeBlock({
   text: string;
   filePath: string;
   language?: string;
-  surface?: "muted" | "flat";
+  surface?: "muted" | "flat" | "code";
 }) {
   const [highlighted, setHighlighted] = useState<string | null>(null);
   const lang = language && language !== "plaintext" ? language : detectLanguage(filePath);
   const surfaceClass =
     surface === "flat"
       ? "bg-transparent dark:bg-transparent"
+      : surface === "code"
+        ? "bg-[var(--code-panel-bg)] dark:bg-[var(--code-panel-bg)]"
       : "bg-[var(--bg-2)] dark:bg-[var(--bg-2)]";
 
   useEffect(() => {
@@ -101,7 +103,7 @@ export function CodeBlock({
 
   return (
     <div className="p-0">
-      <pre className={`max-w-full overflow-auto rounded-[var(--radius-button)] p-3 font-mono text-xs leading-6 text-foreground ${surfaceClass}`}>
+      <pre className={`max-w-full overflow-auto rounded-[var(--radius-ui)] p-3 font-mono text-xs leading-6 text-foreground ${surfaceClass}`}>
         {highlighted ? (
           <code
             className={`hljs language-${lang}`}

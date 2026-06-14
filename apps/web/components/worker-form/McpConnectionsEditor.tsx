@@ -38,7 +38,7 @@ export function McpConnectionsEditor({
       </div>
 
       {mcpConnections.length === 0 ? (
-        <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card p-3 text-sm text-muted-foreground">
+        <div className="rounded-[var(--radius-ui)] bg-card p-3 text-sm text-muted-foreground">
           <p>No MCP servers saved.</p>
           <Link href="/connections" className="mt-2 inline-flex">
             <Button type="button" size="sm" variant="outline">
@@ -47,7 +47,7 @@ export function McpConnectionsEditor({
           </Link>
         </div>
       ) : (
-        <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card overflow-hidden">
+        <div className="rounded-[var(--radius-ui)] bg-card overflow-hidden">
           {mcpConnections.map((connection) => {
             const checked = selectedLabels.has(connection.mcp_label);
             return (
@@ -61,7 +61,7 @@ export function McpConnectionsEditor({
                   onChange={() => toggle(connection)}
                   className="mt-1 size-4 accent-[var(--accent)]"
                 />
-                <span className="flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)]">
+                <span className="flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--paper)]">
                   <Plug className="size-4 text-muted-foreground" />
                 </span>
                 <span className="min-w-0">

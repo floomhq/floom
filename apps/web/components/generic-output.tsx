@@ -47,7 +47,7 @@ const markdownComponents = {
     inline ? (
       <code className="bg-muted px-1 py-0.5 rounded text-xs font-mono">{children}</code>
     ) : (
-      <pre className="bg-muted p-3 rounded-[var(--radius-button)] overflow-auto text-xs font-mono mb-3 whitespace-pre-wrap">
+      <pre className="bg-muted p-3 rounded-[var(--radius-ui)] overflow-auto text-xs font-mono mb-3 whitespace-pre-wrap">
         <code>{children}</code>
       </pre>
     ),
@@ -66,7 +66,7 @@ const markdownComponents = {
     </a>
   ),
   table: ({ children }: MarkdownChildProps) => (
-    <div className="overflow-x-auto rounded-[var(--radius-button)] [border:var(--bd-card)] my-3">
+    <div className="overflow-x-auto rounded-[var(--radius-ui)] my-3">
       <table className="w-full border-collapse text-sm">{children}</table>
     </div>
   ),
@@ -81,7 +81,7 @@ function CsvTable({ value }: { value: string }) {
   if (rows.length === 0) return <p className="text-sm text-muted-foreground">Empty CSV</p>;
   const [header, ...body] = rows;
   return (
-    <div className="overflow-auto rounded-[var(--radius-button)] [border:var(--bd-card)]">
+    <div className="overflow-auto rounded-[var(--radius-ui)]">
       <Table>
         <TableHeader>
           <TableRow>
@@ -117,7 +117,7 @@ function JsonView({ value }: { value: unknown }) {
     formatted = String(value);
   }
   return (
-    <pre className="text-xs bg-muted p-3 rounded-[var(--radius-button)] overflow-auto font-mono leading-relaxed whitespace-pre-wrap">
+    <pre className="text-xs bg-muted p-3 rounded-[var(--radius-ui)] overflow-auto font-mono leading-relaxed whitespace-pre-wrap">
       {formatted}
     </pre>
   );
@@ -170,7 +170,7 @@ export function GenericOutput({
   }
   if (type === "file") {
     return (
-      <div className={`bg-muted p-3 rounded-[var(--radius-button)] text-sm text-muted-foreground ${className ?? ""}`}>
+      <div className={`bg-muted p-3 rounded-[var(--radius-ui)] text-sm text-muted-foreground ${className ?? ""}`}>
         <span className="font-mono text-xs">{String(value)}</span>
       </div>
     );
@@ -178,7 +178,7 @@ export function GenericOutput({
   // Default: plain text.
   const clean = stripCitationTokens(String(value));
   return (
-    <div className={`bg-muted p-3 rounded-[var(--radius-button)] text-sm whitespace-pre-wrap font-mono leading-relaxed ${className ?? ""}`}>
+    <div className={`bg-muted p-3 rounded-[var(--radius-ui)] text-sm whitespace-pre-wrap font-mono leading-relaxed ${className ?? ""}`}>
       {clean}
     </div>
   );

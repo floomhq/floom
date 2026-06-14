@@ -81,7 +81,7 @@ function RecentChats({
         <div
           role="menu"
           onMouseLeave={() => setOpen(false)}
-          className="absolute right-0 top-full z-30 mt-1 max-h-72 w-64 overflow-auto rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-1 shadow-[var(--shadow-pop)]"
+          className="absolute right-0 top-full z-30 mt-1 max-h-72 w-64 overflow-auto rounded-[var(--radius-ui)] bg-[var(--bg-card)] p-1 shadow-[var(--shadow-pop)]"
         >
           {items === null && <div className="px-2 py-3 text-xs text-muted-foreground">Loading…</div>}
           {items?.length === 0 && (
@@ -97,7 +97,7 @@ function RecentChats({
                 onLoadConversation(c.id);
               }}
               className={cn(
-                "flex w-full items-center gap-2 rounded-[var(--radius-button)] px-2 py-1.5 text-left text-xs hover:bg-[var(--bg-2)]",
+                "flex w-full items-center gap-2 rounded-[var(--radius-ui)] px-2 py-1.5 text-left text-xs hover:bg-[var(--bg-2)]",
                 c.id === activeConversationId && "bg-[var(--bg-2)]"
               )}
             >
@@ -179,7 +179,7 @@ function TypingIndicator() {
         {[0, 1, 2].map((i) => (
           <div
             key={i}
-            className="size-1.5 rounded-[var(--radius-pill)] bg-muted-foreground/40 animate-bounce"
+            className="size-2 rounded-[var(--radius-ui)] bg-muted-foreground/40 animate-bounce"
             style={{ animationDelay: `${i * 150}ms` }}
           />
         ))}
@@ -242,7 +242,7 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
       <Message from="user">
         <div className="flex max-w-[85%] flex-col items-end gap-1.5">
           {msg.text && (
-            <MessageContent className="rounded-[var(--radius-card)] bg-muted/60 px-3.5 py-2.5 text-foreground">
+            <MessageContent className="rounded-[var(--radius-ui)] bg-muted/60 px-3.5 py-2.5 text-foreground">
               <MessageResponse className="whitespace-pre-wrap">
                 <p>{msg.text}</p>
               </MessageResponse>
@@ -329,7 +329,7 @@ function EmptyState({
               key={s}
               type="button"
               onClick={() => onSuggest(s)}
-              className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              className="rounded-[var(--radius-ui)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
             >
               {s}
             </button>
@@ -607,7 +607,7 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
             ))}
             {error && !errorAlreadyVisible && (
               /* Quiet inline system note — muted, no alarming red. SPEC §9: "calm, not alarmed". */
-              <div className="flex items-start gap-2 rounded-lg bg-[var(--bg-2)] px-3 py-2.5 text-xs text-[var(--ink-soft)]">
+              <div className="flex items-start gap-2 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-3 py-2.5 text-xs text-[var(--ink-soft)]">
                 <AlertTriangle className="mt-0.5 size-3 shrink-0 opacity-60" />
                 <p className="leading-relaxed break-words min-w-0">{error}</p>
               </div>
@@ -617,19 +617,7 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
           </div>
         )}
 
-        {/* Scroll-to-bottom button — visible when user has scrolled up and
-            Emily is still typing. Matches ChatGPT / Claude UX. */}
-        {showScrollButton && (
-          <button
-            type="button"
-            onClick={() => scrollToBottom(true)}
-            aria-label="Scroll to bottom"
-            className="sticky bottom-4 left-1/2 -translate-x-1/2 flex items-center gap-1.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-background px-3 py-1.5 text-xs text-muted-foreground shadow-md hover:text-foreground hover:shadow-lg transition-all"
-          >
-            <ChevronDown className="size-3.5" />
-            Scroll to bottom
-          </button>
-        )}
+        {showScrollButton && <span className="sr-only">New Emily messages are available.</span>}
       </div>
 
       {/* Input — error intentionally NOT repeated here; it already shows as an
@@ -716,7 +704,7 @@ export function EmilyDock({ className }: { className?: string }) {
             <p className="text-sm font-semibold leading-none truncate">Emily</p>
             {/* Green presence dot */}
             <span
-              className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500"
+              className="size-2 shrink-0 rounded-[var(--radius-ui)] bg-green-500"
               aria-label="Online"
             />
           </div>
@@ -740,7 +728,7 @@ export function EmilyDock({ className }: { className?: string }) {
             }
           }}>
             <DropdownMenuTrigger
-              className="inline-flex size-7 items-center justify-center rounded-[var(--radius-button)] text-muted-foreground hover:bg-[var(--active-nav-bg)] hover:text-foreground transition-colors"
+              className="inline-flex size-7 items-center justify-center rounded-[var(--radius-ui)] text-muted-foreground hover:bg-[var(--active-nav-bg)] hover:text-foreground transition-colors"
               title="More"
               aria-label="More options"
             >
@@ -827,7 +815,7 @@ export function EmilyMobileSheet() {
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Open Emily"
-          className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-[var(--radius-pill)] bg-background shadow-lg [border:var(--bd-card)]"
+          className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-[var(--radius-ui)] bg-background shadow-lg"
         >
           <EmilyAvatar size="sm" />
         </button>
@@ -840,12 +828,12 @@ export function EmilyMobileSheet() {
             className="absolute inset-0 bg-black/40"
             onClick={() => setOpen(false)}
           />
-          <div className="relative flex h-[85vh] flex-col rounded-t-2xl [border-top:var(--bd-div)] bg-background">
+          <div className="relative flex h-[85vh] flex-col rounded-t-[var(--radius-ui)] [border-top:var(--bd-div)] bg-background">
             <div className="flex h-14 shrink-0 items-center gap-2 [border-bottom:var(--bd-div)] px-3">
               <EmilyAvatar size="sm" />
               <div className="flex-1 min-w-0 flex items-center gap-1.5">
                 <p className="text-sm font-semibold leading-none truncate">Emily</p>
-                <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
+                <span className="size-2 shrink-0 rounded-[var(--radius-ui)] bg-green-500" aria-label="Online" />
               </div>
               <Button
                 size="sm"
@@ -884,7 +872,7 @@ export function EmilyChatPage({
         <EmilyAvatar size="sm" />
         <div className="flex-1 min-w-0 flex items-center gap-1.5">
           <p className="text-sm font-semibold leading-none">Emily</p>
-          <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
+          <span className="size-2 shrink-0 rounded-[var(--radius-ui)] bg-green-500" aria-label="Online" />
         </div>
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">

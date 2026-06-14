@@ -55,7 +55,7 @@ function SetupRequiredCallout({ missingBySlug }: { missingBySlug: Map<string, st
   const totalWorkers = new Set(Array.from(missingBySlug.values()).flat()).size;
   return (
     <div
-      className="flex items-start gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--accent-soft)] px-4 py-3 text-sm text-[var(--ink)]"
+      className="flex items-start gap-3 rounded-[var(--radius-ui)] bg-[var(--accent-soft)] px-4 py-3 text-sm text-[var(--ink)]"
       role="alert"
     >
       <AlertTriangle className="mt-0.5 size-4 shrink-0" />
@@ -567,7 +567,7 @@ export default function ConnectionsCollection({
                 key={href}
                 href={href}
                 className="c-lrow"
-                style={{ gridTemplateColumns: "1fr auto", textDecoration: "none", border: "var(--bd-list)", borderRadius: "var(--radius-card)", padding: "12px 14px" }}
+                style={{ gridTemplateColumns: "1fr auto", textDecoration: "none", borderRadius: "var(--radius-ui)", padding: "12px 14px" }}
               >
                 <div className="c-lprimary">
                   <div className="c-lp-tx">
@@ -600,8 +600,7 @@ export default function ConnectionsCollection({
 const pad: React.CSSProperties = { color: "var(--muted-foreground)", padding: "8px 2px" };
 const pillBtn: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5 };
 const codeBlock: React.CSSProperties = {
-  border: "var(--bd-card)",
-  borderRadius: "var(--radius-card)",
+  borderRadius: "var(--radius-ui)",
   background: "var(--bg-2)",
   color: "var(--ink-soft)",
   padding: 13,

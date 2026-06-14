@@ -92,7 +92,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
             onClick={onNavigate}
             title={item.hint}
             className={cn(
-              "flex h-9 items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
+              "flex h-9 items-center gap-2.5 rounded-[var(--radius-ui)] px-2.5 text-sm font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
               active
                 ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)] [&_svg]:text-[var(--active-nav-text)] [&_svg]:opacity-100"
                 : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
@@ -101,7 +101,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
             <item.icon className="w-4 h-4" />
             {item.label}
             {showBadge && (
-              <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] px-1 text-[10px] font-semibold leading-none text-[var(--primary-text)]">
+              <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--primary)] px-1 text-[10px] font-semibold leading-none text-[var(--primary-text)]">
                 {pendingCount}
               </span>
             )}
@@ -118,13 +118,13 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
     openCommandPalette();
   };
   return (
-    <div className="px-3 pb-3 space-y-1.5">
+    <div className="px-3 pb-3 pt-3 space-y-1.5">
       {/* #902 (wireframe newbtn): creating a worker = a conversation with
           Emily — full-page chat in create mode, not a form. */}
       <Link
         href="/chat?mode=create"
         onClick={() => onNavigate?.()}
-        className="flex h-9 w-full items-center justify-center gap-2 rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-sm font-medium text-white transition-colors duration-150 hover:opacity-90"
+        className="flex h-9 w-full items-center justify-center gap-2 rounded-[var(--radius-ui)] bg-[var(--primary)] px-3 text-sm font-medium text-white transition-colors duration-150 hover:opacity-90"
       >
         <Plus className="w-4 h-4" />
         <span>New worker</span>
@@ -132,14 +132,14 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
       <button
         type="button"
         onClick={onSearch}
-        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[var(--bg-3)] hover:text-ink transition-colors duration-150"
+        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-ui)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[var(--bg-3)] hover:text-ink transition-colors duration-150"
         aria-label="Open command palette"
       >
         <Search className="w-4 h-4 opacity-70" />
         <span>Search...</span>
         <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] tracking-widest text-[var(--ink-faint)]">
-          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-3)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</kbd>
-          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-3)] px-1 py-0.5 font-mono">K</kbd>
+          <kbd className="rounded-[var(--radius-ui)] bg-[var(--bg-3)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</kbd>
+          <kbd className="rounded-[var(--radius-ui)] bg-[var(--bg-3)] px-1 py-0.5 font-mono">K</kbd>
         </span>
       </button>
     </div>
@@ -217,7 +217,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
             type="button"
             aria-label="Open command palette"
             onClick={openCommandPalette}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--radius-ui)] text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
           >
             <Search className="w-5 h-5" />
           </button>
@@ -226,7 +226,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
             type="button"
             aria-label="Open navigation"
             onClick={() => setOpen(true)}
-            className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
+            className="inline-flex h-11 w-11 items-center justify-center rounded-[var(--radius-ui)] text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
           >
             <Menu className="w-5 h-5" />
           </button>
@@ -253,22 +253,12 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                 aria-expanded="false"
                 aria-pressed={collapsed}
                 onClick={toggleCollapse}
-                className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
+                className="inline-flex size-9 items-center justify-center rounded-[var(--radius-ui)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
               >
               <FloomMark size={22} />
             </button>
           ) : (
             <>
-              {/* D-04: brand mark anchors the sidebar top. Without it the area
-                  above "New worker" reads as an empty/skeleton spot while the
-                  workspace switcher loads. */}
-              <Link
-                href="/overview"
-                aria-label="Floom home"
-                className="inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-button)] hover:bg-[var(--active-nav-bg)] transition-colors"
-              >
-                <FloomMark size={22} />
-              </Link>
               <div className="min-w-0 flex-1">
                 <WorkspaceSwitcher />
               </div>
@@ -279,7 +269,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                 aria-expanded="true"
                 aria-pressed={collapsed}
                 onClick={toggleCollapse}
-                className="inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] opacity-40 hover:opacity-100 focus-visible:opacity-100 transition-all hover:bg-[var(--active-nav-bg)] hover:text-ink"
+                className="inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-ui)] text-[var(--ink-soft)] opacity-40 hover:opacity-100 focus-visible:opacity-100 transition-all hover:bg-[var(--active-nav-bg)] hover:text-ink"
                 title="Collapse sidebar"
               >
                 <ChevronLeft className="w-4 h-4" />
@@ -311,7 +301,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                   href={item.href}
                   title={item.label}
                   className={cn(
-                    "relative inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150",
+                    "relative inline-flex size-9 items-center justify-center rounded-[var(--radius-ui)] transition-[background,color] duration-150",
                     active
                       ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)]"
                       : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
@@ -319,7 +309,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                 >
                   <item.icon className="w-4 h-4" />
                   {showBadge && (
-                    <span className="absolute -top-0.5 -right-0.5 size-3.5 rounded-[var(--radius-pill)] bg-[var(--primary)] flex items-center justify-center text-[8px] font-bold text-[var(--primary-text)]">
+                    <span className="absolute -top-0.5 -right-0.5 size-3.5 rounded-[var(--radius-ui)] bg-[var(--primary)] flex items-center justify-center text-[8px] font-bold text-[var(--primary-text)]">
                       {pendingCount > 9 ? "9+" : pendingCount}
                     </span>
                   )}
@@ -332,7 +322,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
               href="/settings"
               title="Settings"
               className={cn(
-                "inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150",
+                "inline-flex size-9 items-center justify-center rounded-[var(--radius-ui)] transition-[background,color] duration-150",
                 pathname === "/settings" || pathname.startsWith("/settings/")
                   ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)]"
                   : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
@@ -348,7 +338,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
               aria-pressed={collapsed}
               onClick={toggleCollapse}
               title="Expand sidebar"
-              className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink transition-colors mt-1"
+              className="inline-flex size-9 items-center justify-center rounded-[var(--radius-ui)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink transition-colors mt-1"
             >
               <ChevronRight className="w-4 h-4" />
             </button>
@@ -374,7 +364,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                 type="button"
                 aria-label="Close navigation"
                 onClick={() => setOpen(false)}
-                className="ml-1 inline-flex h-11 w-11 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
+                className="ml-1 inline-flex h-11 w-11 items-center justify-center rounded-[var(--radius-ui)] text-[var(--ink-soft)] hover:bg-[var(--bg-2)] hover:text-ink"
               >
                 <X className="w-5 h-5" />
               </button>
@@ -471,7 +461,7 @@ export function UserProfileFooter({
       <DropdownMenu>
         <DropdownMenuTrigger
           className={cn(
-            "flex items-center gap-2 min-w-0 flex-1 rounded-[var(--radius-button)] px-1 py-0.5 -mx-1 transition-[background,color] duration-150 ease-[var(--ease)]",
+            "flex items-center gap-2 min-w-0 flex-1 rounded-[var(--radius-ui)] px-1 py-0.5 -mx-1 transition-[background,color] duration-150 ease-[var(--ease)]",
             "hover:bg-[var(--active-nav-bg)] focus:outline-none"
           )}
           aria-label="Profile menu"
@@ -481,11 +471,11 @@ export function UserProfileFooter({
             <img
               src={avatarUrl}
               alt="Profile avatar"
-              className="size-7 shrink-0 rounded-[var(--radius-button)] object-cover"
+              className="size-7 shrink-0 rounded-[var(--radius-ui)] object-cover"
               referrerPolicy="no-referrer"
             />
           ) : (
-            <div className="size-7 shrink-0 rounded-[var(--radius-button)] bg-muted text-foreground grid place-items-center text-[11px] font-medium">
+            <div className="size-7 shrink-0 rounded-[var(--radius-ui)] bg-muted text-foreground grid place-items-center text-[11px] font-medium">
               {initials}
             </div>
           )}
