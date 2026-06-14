@@ -2654,6 +2654,29 @@ class SqliteSecretRepository:
                 secrets[name] = value
         return secrets
 
+    # #1071 — workspace-scoped secrets, repo-agnostic seam. The route no longer
+    # imports the SQLite-specific workspace_actor_id; the repo owns the scoping.
+    # SQLite stores workspace secrets under the synthetic workspace actor (so
+    # existing rows keep working); a non-SQLite repo (Supabase) can use the real
+    # actor_id + workspace_id instead.
+    def list_workspace_secrets(self, *, workspace_id: str) -> list[dict[str, Any]]:
+        return self.list(user_id=workspace_actor_id(workspace_id))
+
+    def get_workspace_secret(self, *, workspace_id: str, name: str) -> dict[str, Any] | None:
+        return self.get(user_id=workspace_actor_id(workspace_id), name=name)
+
+    def set_workspace_secret(
+        self, *, workspace_id: str, actor_id: str, name: str, value: str, status: str = "set"
+    ) -> dict[str, Any]:
+        # actor_id is the real authenticated admin (for audit / non-SQLite repos);
+        # SQLite scopes the row under the synthetic workspace actor.
+        return self.set(
+            user_id=workspace_actor_id(workspace_id), name=name, value=value, status=status
+        )
+
+    def delete_workspace_secret(self, *, workspace_id: str, name: str) -> bool:
+        return self.delete(user_id=workspace_actor_id(workspace_id), name=name)
+
 
 class SqliteCliAuthRepository:
     def create_device(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
