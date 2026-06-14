@@ -92,8 +92,11 @@ export const OVERLAY_FILES = [
   "app/settings/members/page.tsx",
   "app/join/page.tsx",
   "app/members/page.tsx",
-  "app/workers/page.tsx",
-  "app/workers/WorkersClient.tsx",
+  // app/workers/{page,WorkersClient}.tsx de-forked 2026-06-13: the fork only added
+  // CloudWorkerSummary.visibility + a "Shared" badge, which the engine's
+  // WorkersCollection now has natively (folders + visibility/shared) after the
+  // #1005-1007 cloud-seam hooks. So the fork is redundant — drop it and let the
+  // engine WorkersCollection render directly (matches OSS). Engine workers UI flows through.
   // app/runs/RunsClient.tsx de-forked 2026-06-13: dead orphan. The engine renamed
   // RunsClient -> RunsCollection; runs/page.tsx (pure engine) renders RunsCollection
   // and nothing imports RunsClient. (trigger_member_email attribution belongs upstream.)
@@ -260,7 +263,6 @@ function main() {
   // 4b) Preserve cloud-overridden engine components under stable companion names
   //     so overlay files can compose from them and the drift guard has a reference.
   for (const [src, companion] of [
-    ["app/workers/WorkersClient.tsx", "app/workers/WorkersClient.engine.tsx"],
   ]) {
     if (existsSync(join(ENGINE_WEB, src))) {
       const from = join(DEST, src); // already copied in step 2

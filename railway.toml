@@ -4,6 +4,6 @@ dockerfile = "Dockerfile"
 [deploy]
 startCommand = "sh -c 'exec uvicorn apps.api.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1'"
 healthcheckPath = "/healthz"
-healthcheckTimeout = 60
+healthcheckTimeout = 300
 restartPolicyType = "on_failure"
 restartPolicyMaxRetries = 3

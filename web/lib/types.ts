@@ -102,6 +102,10 @@ export interface WorkerRuntime {
   type: string;
   entrypoint: string;
   runner: string;
+  command?: string | null;
+  mode?: "agent" | "pure-script" | string;
+  model?: string | null;
+  limits?: Record<string, unknown> | null;
 }
 
 export interface WorkerMcpConnection {
@@ -142,6 +146,7 @@ export interface WorkerConfig {
   id: string;
   name: string;
   description?: string;
+  model?: string | null;
   trigger: WorkerTrigger;
   runtime: WorkerRuntime;
   inputs: WorkerInput[];

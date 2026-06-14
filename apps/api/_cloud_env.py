@@ -18,10 +18,16 @@ _LOCAL_ENV_CANDIDATES = [
 
 @lru_cache(maxsize=1)
 def load_cloud_env_file() -> None:
-    if _CLOUD_ENV_PATH.is_file():
-        load_dotenv(_CLOUD_ENV_PATH, override=False)
-        return
-    for candidate in _LOCAL_ENV_CANDIDATES:
-        if candidate.is_file():
-            load_dotenv(candidate, override=False)
-            return
+    # Check each candidate, tolerating OSError. Notably, the container runs as a
+    # non-root user (uid 10001), so stat-ing _CLOUD_ENV_PATH under /root/ raises
+    # PermissionError (EACCES) — and Path.is_file() RE-RAISES permission errors
+    # (it only swallows not-found). This runs at import time, so an unhandled
+    # error crashes startup. On Railway all secrets come from real env vars, so a
+    # missing/unreadable env file is fine — skip it and continue.
+    for candidate in (_CLOUD_ENV_PATH, *_LOCAL_ENV_CANDIDATES):
+        try:
+            if candidate.is_file():
+                load_dotenv(candidate, override=False)
+                return
+        except OSError:
+            continue

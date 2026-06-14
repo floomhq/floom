@@ -47,7 +47,7 @@ export function TagBar({ families, active, onToggle, onClear }: TagBarProps) {
                 aria-pressed={on}
                 onClick={() => onToggle(family, opt.value)}
               >
-                {opt.label}
+                {opt.label.toLowerCase()}
                 {opt.count != null && <span className="ct">{opt.count}</span>}
               </button>
             );

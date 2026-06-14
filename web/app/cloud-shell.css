@@ -1,6 +1,12 @@
+/* Mirror the engine's <body> (flex h-screen overflow-hidden flex-col md:flex-row).
+   Must be a DEFINITE height (100vh), not min-height:100% — EmilyDock uses h-full
+   (height:100%) which can't resolve against a parent that only has min-height, so
+   with min-height the dock collapsed to a sliver and the input floated near the
+   top. The app body scrolls inside <main> (overflow-y-auto), matching the engine. */
 .cloud-app-shell {
   display: flex;
-  min-height: 100%;
+  height: 100vh;
+  overflow: hidden;
   flex-direction: column;
 }
 

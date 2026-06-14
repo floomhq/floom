@@ -1,0 +1,33 @@
+.git
+node_modules
+**/node_modules
+.next
+**/.next
+web/.next
+data
+apps/api/data
+var
+test-results
+.venv
+venv
+**/__pycache__
+*.pyc
+*.log
+.env
+.env.local
+.vercel
+engine/.git
+supabase/.branches
+supabase/.temp
+# Backend image is Python-only (apps/ + engine/). The Next.js frontend in web/
+# is never imported by the API; excluding it shrinks the build context massively
+# and drops stray/garbage files (e.g. a botched-deploy artifact with an invalid
+# name) that were breaking the Docker build context.
+web
+# Stray local artifacts that must never enter the build context.
+response.json
+response_body.txt
+response_stats.json
+*.err.log
+tests/e2e/report
+.railway

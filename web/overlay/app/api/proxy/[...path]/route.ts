@@ -116,6 +116,14 @@ async function handler(
     method: req.method,
     headers: forwardHeaders,
     body: body ? body : undefined,
+    // Do NOT follow redirects server-side. The OAuth flow (/auth/login -> Supabase
+    // -> Google) is a chain of 3xx redirects that the BROWSER must navigate so the
+    // user lands on accounts.google.com. With the default "follow", fetch chases
+    // the whole chain here and returns Google's sign-in HTML with status 200, which
+    // the browser then renders AT this proxy path — Google's relative links (e.g.
+    // /v3/signin/identifier) resolve against our host and 404. "manual" passes the
+    // 307 + Location straight back so the browser does the navigation.
+    redirect: "manual",
   };
   if (isUpload && body) {
     fetchOptions.duplex = "half";

@@ -469,7 +469,6 @@ export function WorkerAsciiDiagram({
 
   return (
     <section className={cn("space-y-3", className)}>
-      <h2 className="text-base font-semibold text-foreground">Flow</h2>
       {/* MOBILE-375: the diagram grid (`inline-block`) is intrinsically wider
           than a 375 viewport. `max-w-full` pins the framed card to its parent
           width so the wide grid scrolls horizontally INSIDE the card

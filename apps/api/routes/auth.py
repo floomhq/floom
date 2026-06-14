@@ -170,10 +170,31 @@ def _callback_url(
         params["device_code"] = device_code
     if user_code:
         params["user_code"] = user_code.strip().upper()
-    return f"{settings.api_base}/auth/callback?{urlencode(params)}"
+    # Browser-facing OAuth return URL. When the frontend is on a different
+    # registrable domain than the API (e.g. a *.vercel.app frontend + a Railway
+    # backend), the callback must come back THROUGH the frontend's same-origin
+    # /api/proxy so the session cookie lands on the frontend host (host-only).
+    # WORKEROS_OAUTH_CALLBACK_BASE overrides api_base for exactly this; it does
+    # NOT change api_base (the CLI + webhooks still need the real backend host).
+    callback_base = (
+        (os.environ.get("WORKEROS_OAUTH_CALLBACK_BASE") or "").strip().rstrip("/")
+        or settings.api_base
+    )
+    return f"{callback_base}/auth/callback?{urlencode(params)}"
 
 
 def _cookie_domain() -> str | None:
+    # Explicit override. WORKEROS_COOKIE_DOMAIN=none (or empty) forces a
+    # HOST-ONLY cookie — required when the frontend is on a public-suffix host
+    # such as *.vercel.app, where a Domain= cookie is rejected and the auth flow
+    # is instead made same-origin via /api/proxy. A concrete value (".foo.com")
+    # pins the cookie to that registrable domain (the multi-subdomain setup).
+    override = os.environ.get("WORKEROS_COOKIE_DOMAIN")
+    if override is not None:
+        normalized = override.strip()
+        if normalized.lower() in {"", "none", "host-only", "host_only"}:
+            return None
+        return normalized
     settings = get_cloud_settings()
     hostname = urlparse(settings.frontend_url).hostname or urlparse(settings.api_base).hostname
     if not hostname or hostname in {"localhost", "127.0.0.1"}:

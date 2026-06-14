@@ -10,16 +10,17 @@ WORKDIR /opt/workeros-cloud
 # non-runtime content out of the image — workeros#936).
 COPY . .
 
-# Initialize the engine/ submodule. Railway clones the repo from GitHub but
-# does not recurse into submodules.
+# Initialize the engine/ submodule when a GIT_TOKEN build arg is provided
+# (GitHub-clone deploys, which don't recurse into submodules). On `railway up`
+# GIT_TOKEN is unset and engine/ is shipped via the COPY above, so this step
+# is a no-op.
 #
-# workeros#936: prefer a BuildKit secret mount (`--mount=type=secret,id=git_token`)
-# so the token never persists in an image layer. The ARG remains as a fallback
-# for builders that can't pass secret mounts; set the GIT_TOKEN build variable
-# only when secret mounts are unavailable.
+# NOTE: Railway's builder does NOT support `--mount=type=secret` (only
+# `--mount=type=cache`); using it fails build validation immediately. So the
+# token is read from the ARG only. Keep GIT_TOKEN out of the image by leaving
+# it unset on Railway (engine/ comes from COPY).
 ARG GIT_TOKEN
-RUN --mount=type=secret,id=git_token \
-    TOKEN="$( [ -f /run/secrets/git_token ] && cat /run/secrets/git_token || printf '%s' "$GIT_TOKEN" )"; \
+RUN TOKEN="$(printf '%s' "$GIT_TOKEN")"; \
     if [ -n "$TOKEN" ]; then \
       git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/" && \
       git submodule update --init --recursive; \

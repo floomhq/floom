@@ -321,7 +321,7 @@ export default function ConnectionsCollection({
       { value: items.filter((i) => i.statusKey === "reauth").length, label: "reauth" },
       { value: items.filter((i) => i.statusKey === "error").length, label: "error" },
     ],
-    view: { default: "list", grid: true },
+    view: { default: "grid", grid: true },
     columns: {
       template: "1.8fr 110px 1fr 120px 40px",
       headers: ["Connects to", "Type", "Detail", "Status", ""],
@@ -352,8 +352,20 @@ export default function ConnectionsCollection({
     detail: (i) => {
       const actions = (
         <>
+          {i.kind === "connection" && i.connection && (
+            <Link
+              href={`/connections/connect/${encodeURIComponent(i.connection.app_name)}?return_to=${encodeURIComponent("/connections")}`}
+              className="c-addbtn"
+              style={pillBtn}
+            >
+              Reconnect
+            </Link>
+          )}
           <button type="button" className="c-addbtn" style={pillBtn} onClick={() => void test(i)}>
             Test
+          </button>
+          <button type="button" className="c-vpill" style={pillBtn} onClick={() => void remove(i)}>
+            Remove
           </button>
         </>
       );

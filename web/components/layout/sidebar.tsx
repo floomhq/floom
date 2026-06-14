@@ -7,6 +7,13 @@ import { Menu, X, Search, Settings, LogOut, Plus } from "lucide-react";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { CurrentUser } from "@/lib/types";
 // Compose the engine's brand mark + nav + primary actions from the SYNCED
 // engine sidebar (Phase 1 seam: those parts are exported there). This keeps
@@ -237,43 +244,42 @@ function UserProfileFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
   }
 
   return (
-    <div className="flex items-center gap-2 border-t border-[var(--border-soft)] px-3 py-3">
-      <div className="flex items-center gap-2 min-w-0 flex-1">
-        <div className="size-7 shrink-0 rounded-full bg-muted text-foreground border border-[var(--border-soft)] grid place-items-center text-[11px] font-medium">
-          {initial}
-        </div>
-        <div className="min-w-0 leading-tight">
-          <p className="text-xs font-medium text-foreground truncate">
-            {primary}
-          </p>
-          <p className="text-[10px] text-muted-foreground truncate">
-            {secondary}
-          </p>
-        </div>
-      </div>
-      <Link
-        href="/settings"
-        onClick={onNavigate}
-        aria-label="Settings"
-        title="Settings"
-        className={cn(
-          "inline-flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150 ease-[var(--ease)]",
-          settingsActive
-            ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)]"
-            : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
-        )}
-      >
-        <Settings className="size-4" />
-      </Link>
-      <button
-        type="button"
-        onClick={logout}
-        aria-label="Sign out"
-        title="Sign out"
-        className="inline-flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] transition-[background,color] duration-150 ease-[var(--ease)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
-      >
-        <LogOut className="size-4" />
-      </button>
+    <div className="flex items-center gap-2 [border-top:var(--bd-div)] px-3 py-3">
+      {/* Profile chip — clicking opens a dropdown with Settings + Sign out,
+          matching the engine UserProfileFooter (M37). The ONLY cloud seams are
+          the Supabase email/initial and the logout target (cloud proxy path) +
+          post-logout bounce to /app/login. */}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className="flex items-center gap-2 min-w-0 flex-1 rounded-[var(--radius-button)] px-1 py-0.5 -mx-1 transition-[background,color] duration-150 ease-[var(--ease)] hover:bg-[var(--active-nav-bg)] focus:outline-none"
+          aria-label="Profile menu"
+        >
+          <div className="size-7 shrink-0 rounded-[var(--radius-button)] bg-muted text-foreground grid place-items-center text-[11px] font-medium">
+            {initial}
+          </div>
+          <div className="min-w-0 leading-tight text-left">
+            <p className="text-xs font-medium text-foreground truncate">{primary}</p>
+            <p className="text-[10px] text-muted-foreground truncate">{secondary}</p>
+          </div>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-48 p-1">
+          <DropdownMenuItem
+            render={<Link href="/settings" onClick={onNavigate} />}
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <Settings className={cn("size-4", settingsActive && "text-[var(--active-nav-text)]")} />
+            Settings
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => void logout()}
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <LogOut className="size-4" />
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
       <ThemeModeButton />
     </div>
   );
