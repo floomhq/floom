@@ -156,7 +156,7 @@ export function RunDetailSplitPane({
       </div>
 
       {streamUnavailable && isActive && (
-        <div className="flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-amber-50/60 px-4 py-3 dark:bg-amber-950/20">
+        <div className="flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] px-4 py-3">
           <div className="min-w-0">
             <p className="text-sm font-medium text-[var(--ink)]">Run status connection lost</p>
             <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
@@ -829,7 +829,7 @@ function ApprovalView({ approval }: { approval: ApprovalEntry | null }) {
       ? "text-emerald-600"
       : approval.status === "rejected"
       ? "text-destructive"
-      : "text-amber-600";
+      : "text-[var(--ink-soft)]";
   return (
     <div className="space-y-4 max-w-lg">
       <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] p-4 space-y-3">
