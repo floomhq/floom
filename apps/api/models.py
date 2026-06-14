@@ -780,6 +780,94 @@ class WorkerContextMount(BaseModel):
 WorkerContextMountSpec = Union[str, WorkerContextMount]
 
 
+class WorkerMemoryConfig(BaseModel):
+    enabled: bool = False
+    context: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_memory_config(cls, value: Any) -> Any:
+        if value is None:
+            return {}
+        if isinstance(value, bool):
+            return {"enabled": value}
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"enabled", "enable", "true", "yes", "on", "1"}:
+                return {"enabled": True}
+            if normalized in {"disabled", "disable", "false", "no", "off", "0"}:
+                return {"enabled": False}
+            return {"enabled": True, "context": value}
+        if isinstance(value, dict):
+            raw = dict(value)
+            if "context" not in raw:
+                for alias in ("name", "pack", "pack_name", "context_name"):
+                    if raw.get(alias):
+                        raw["context"] = raw[alias]
+                        break
+            return raw
+        return value
+
+    @field_validator("context")
+    @classmethod
+    def validate_context(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        stripped = value.strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", stripped):
+            raise ValueError(
+                "memory.context must be 1-64 letters, digits, dots, underscores, or hyphens"
+            )
+        return stripped
+
+
+def default_worker_memory_context_name(worker_id: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", str(worker_id or "worker")).strip(".-_")
+    slug = slug or "worker"
+    return f"memory-{slug}"[:64].rstrip(".-_") or "memory-worker"
+
+
+def memory_context_mount_for_worker(worker_id: str, memory: WorkerMemoryConfig) -> Optional[dict[str, Any]]:
+    if not memory.enabled:
+        return None
+    return {
+        "name": memory.context or default_worker_memory_context_name(worker_id),
+        "writeable": True,
+        "source": "local",
+    }
+
+
+def _normalize_memory_contexts(
+    worker_id: str,
+    memory: WorkerMemoryConfig,
+    contexts: List[WorkerContextMountSpec],
+) -> List[WorkerContextMountSpec]:
+    memory_mount = memory_context_mount_for_worker(worker_id, memory)
+    if memory_mount is None:
+        return contexts
+
+    normalized_contexts = list(contexts or [])
+    memory_name = memory_mount["name"]
+    for idx, raw_context in enumerate(normalized_contexts):
+        try:
+            context = raw_context.model_dump() if hasattr(raw_context, "model_dump") else raw_context
+            normalized = WorkerContextMount(**context) if isinstance(context, dict) else WorkerContextMount(name=str(context))
+        except Exception:
+            continue
+        if normalized.name != memory_name:
+            continue
+        if normalized.source == "local":
+            normalized_contexts[idx] = {
+                "name": memory_name,
+                "writeable": True,
+                "source": "local",
+            }
+        return normalized_contexts
+
+    normalized_contexts.append(memory_mount)
+    return normalized_contexts
+
+
 class WorkerRuntime(BaseModel):
     type: str
     entrypoint: str = "run.py"
@@ -829,6 +917,7 @@ class WorkerConfig(BaseModel):
     secrets: List[str] = []
     connections: List[WorkerConnectionSpec] = []  # Strings are deprecated legacy Composio app slugs.
     contexts: List[WorkerContextMountSpec] = []
+    memory: WorkerMemoryConfig = Field(default_factory=WorkerMemoryConfig)
     outputs: List[WorkerOutput] = []
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
@@ -849,6 +938,7 @@ class WorkerConfig(BaseModel):
                 )
         if self.trigger.type == "composio" and not self.trigger.composio:
             raise ValueError("composio-triggered workers must declare trigger.composio")
+        self.contexts = _normalize_memory_contexts(self.id, self.memory, self.contexts)
         return self
 
 
@@ -1184,6 +1274,7 @@ class WorkerContract(BaseModel):
     triggers: Optional[List[WorkerContractTrigger]] = None
     connections: List[WorkerConnectionSpec] = Field(default_factory=list)
     contexts: List[WorkerContextMountSpec] = Field(default_factory=list)
+    memory: WorkerMemoryConfig = Field(default_factory=WorkerMemoryConfig)
     csv_required_columns: Optional[List[str]] = None
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
     calls: List[str] = Field(default_factory=list)  # worker IDs this worker is allowed to invoke
@@ -1495,6 +1586,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
             _model_data(context)
             for context in (contract.contexts or contract.exec.contexts or [])
         ],
+        memory=contract.memory,
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
         approvals=contract.approvals,
@@ -1617,6 +1709,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
         ),
         connections=[_model_data(connection) for connection in config.connections],
         contexts=[_model_data(context) for context in config.contexts],
+        memory=config.memory,
         csv_required_columns=config.csv_required_columns,
     )
 

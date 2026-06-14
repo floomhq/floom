@@ -51,6 +51,7 @@ from models import (
     declared_composio_connection_scopes,
     declared_composio_connections,
 )
+from .memory_context import ensure_memory_context_pack
 
 logger = logging.getLogger("floom.runner_sandbox.capabilities")
 
@@ -386,6 +387,7 @@ def stage_context_packs(
 
     staged: List[str] = []
     with use_context_scope(context_scope_for_user(user_id)):
+        ensure_memory_context_pack(config=config, user_id=user_id, log_fn=log_fn)
         for raw_context in config.contexts:
             try:
                 context = normalize_context_mount(raw_context)
