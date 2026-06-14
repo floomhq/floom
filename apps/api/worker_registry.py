@@ -91,6 +91,14 @@ def discover_workers(use_cache: bool = False) -> List[Dict[str, Any]]:
     for folder in sorted(WORKERS_DIR.iterdir()):
         if not folder.is_dir():
             continue
+        # Skip dot-prefixed dirs (e.g. ".novasearch-v4-backup-...", ".git",
+        # "*.bak<pid>" rollback artifacts). These are never real workers. A
+        # foreign backup that happens to carry a worker.yml used to be ingested
+        # as a worker and then crash startup on a dangling FK when persisted.
+        # Dot-prefixed worker ids are also already hidden from the public API.
+        if folder.name.startswith("."):
+            logger.debug("Skipping non-worker dir (dot-prefixed): %s", folder.name)
+            continue
         config_path = folder / "worker.yml"
         if not config_path.is_file():
             continue
