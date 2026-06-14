@@ -9,6 +9,7 @@ import { formatRelative } from "@/lib/formatters";
 import type { ContextSummary, ContextDetail } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
+import { LoadingState } from "@/components/collection/CollectionStates";
 import { InlineFileOpen } from "@/components/file-viewer/InlineFileOpen";
 import { visibilityLabel } from "@/lib/permissions";
 import { formatBytes, writeKey } from "@/lib/brain/format";
@@ -53,7 +54,7 @@ function useContextDetail(name: string): [ContextDetail | undefined, () => Promi
 // loads inline via readTextFile; .db gets the honest #777 fallback.
 function FilesTab({ folder }: { folder: ContextSummary }) {
   const [d, reload] = useContextDetail(folder.name);
-  if (!d) return <div style={muted}>Loading…</div>;
+  if (!d) return <LoadingState rows={4} />;
   const files = (d.files ?? [])
     .filter((f) => !f.deleted)
     .map((f) => ({
@@ -122,7 +123,7 @@ function NewFolderForm({ onCreated }: { onCreated: () => void | Promise<void> })
 
 function UsedByTab({ folder }: { folder: ContextSummary }) {
   const [d] = useContextDetail(folder.name);
-  if (!d) return <div style={muted}>Loading…</div>;
+  if (!d) return <LoadingState rows={3} />;
   const used = d.used_by ?? [];
   return (
     <div className="c-ltable">

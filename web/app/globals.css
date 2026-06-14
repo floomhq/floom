@@ -378,43 +378,17 @@ html.dark ::selection {
   color: var(--ink);
 }
 
-/* Global chrome: quiet, thin scrollbars across chat rails, detail panes, source
-   lists, popovers, and code blocks. Tracks stay transparent; thumbs reveal on
-   hover/active where the platform allows it. */
+/* Global chrome: keep every scroll container scrollable, but hide visible
+   scrollbar rails/thumbs across chat, panes, popovers, and code blocks. */
 * {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-}
-
-*:hover,
-*:focus-within {
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-*::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-*::-webkit-scrollbar-thumb {
-  min-height: 44px;
-  border-radius: var(--radius-button);
-  background-color: transparent;
-}
-
-*:hover::-webkit-scrollbar-thumb,
-*:focus-within::-webkit-scrollbar-thumb,
-*::-webkit-scrollbar-thumb:active {
-  background-color: var(--scrollbar-thumb);
-}
-
-*::-webkit-scrollbar-thumb:hover,
-*::-webkit-scrollbar-thumb:active {
-  background-color: var(--scrollbar-thumb-hover);
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 @layer base {
@@ -425,7 +399,7 @@ html.dark ::selection {
   html {
     @apply font-sans;
     min-height: 100%;
-    scrollbar-gutter: stable;
+    scrollbar-gutter: auto;
     background: var(--bg);
     overflow-x: hidden;
   }

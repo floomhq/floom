@@ -372,11 +372,6 @@ function sectionFromCandidate(value: string | null): SectionKey | null {
 }
 
 export default function SettingsPage() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  if (!mounted) {
-    return <div className="p-6 text-sm text-muted-foreground">Loading settings...</div>;
-  }
   return <SettingsContent />;
 }
 
@@ -385,15 +380,9 @@ function SettingsContent() {
     typeof window !== "undefined" ? window.location.search : ""
   );
   const searchParams = useMemo(() => new URLSearchParams(search), [search]);
-  const initialSection = (() => {
-    const fromHash =
-      typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : null;
-    const fromQuery = searchParams.get("sel") || searchParams.get("tab");
-    return sectionFromCandidate(fromQuery || fromHash);
-  })();
   const [collectionState, setCollectionState] = useState<CollectionState>(() => ({
     ...emptyState("grid"),
-    sel: initialSection,
+    sel: null,
   }));
 
   const [info, setInfo] = useState<SystemInfo | null>(null);
@@ -509,7 +498,7 @@ function SettingsContent() {
     const channel = searchParams.get("from_install");
     if (!channel) return;
     setFromInstallChannel(channel);
-    const tabMap: Record<string, SectionKey> = { slack: "channels", cli: "developer" };
+    const tabMap: Record<string, SectionKey> = { slack: "channels", cli: "channels" };
     const dest = tabMap[channel];
     if (dest) setCollectionState((prev) => ({ ...prev, sel: dest, tab: null }));
     const params = new URLSearchParams(searchParams.toString());
@@ -536,6 +525,7 @@ function SettingsContent() {
       }
       setSearch(window.location.search);
     }
+    syncFromLocation();
     window.addEventListener("hashchange", syncFromLocation);
     window.addEventListener("popstate", syncFromLocation);
     return () => {
@@ -2153,12 +2143,12 @@ function WhatsAppBindingStatus() {
 function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
   const [qrOpen, setQrOpen] = useState(false);
   return (
-    <div className="space-y-4">
+    <div>
       <Tabs defaultValue="slack">
-        <TabsList>
+        <TabsList className="mb-4">
           <TabsTrigger value="slack">Slack</TabsTrigger>
-          <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
+          <TabsTrigger value="agent-install">Agent install</TabsTrigger>
         </TabsList>
         <TabsContent value="slack" className="space-y-4">
           <div className="c-ltable">
@@ -2179,17 +2169,6 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
             <SlackBindingStatus />
           </div>
         </TabsContent>
-        <TabsContent value="email" className="space-y-4">
-          <div className="c-ltable">
-            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
-              <div className="c-lp-tx">
-                <div className="nm">Email</div>
-                <div className="sub">Email channel setup is not connected for this workspace yet.</div>
-              </div>
-              <span className="c-vpill">Not connected</span>
-            </div>
-          </div>
-        </TabsContent>
         <TabsContent value="whatsapp" className="space-y-4">
           <div className="c-ltable">
             <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
@@ -2207,6 +2186,18 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
             <p className="text-xs font-medium text-muted-foreground">Your link status</p>
             <WhatsAppBindingStatus />
           </div>
+        </TabsContent>
+        <TabsContent value="agent-install" className="space-y-5">
+          <CopyCodeCard
+            title="Agent install"
+            description="Copy this into Claude Desktop, Cursor, VS Code, Windsurf, Cline, or any MCP client."
+            value={MCP_INSTALL_SNIPPET}
+          />
+          <CopyCodeCard
+            title="CLI install"
+            description="Install the CLI, authenticate, and run a worker from your terminal."
+            value={CLI_INSTALL_SNIPPET}
+          />
         </TabsContent>
       </Tabs>
       <Dialog open={qrOpen} onOpenChange={setQrOpen}>

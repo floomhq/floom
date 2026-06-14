@@ -17,6 +17,7 @@ import { formatRelative } from "@/lib/formatters";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
+import { LoadingState } from "@/components/collection/CollectionStates";
 import { InlineFileOpen } from "@/components/file-viewer/InlineFileOpen";
 import { traceSteps } from "@/lib/runs/trace";
 import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
@@ -59,7 +60,7 @@ function useRunDetail(id: string): RunDetail | undefined {
 // PNG artifacts render as images (shared InlineFileOpen, rule #5).
 function OutputTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id);
-  if (!d) return <div style={muted}>Loading…</div>;
+  if (!d) return <LoadingState rows={4} />;
   const files = (d.artifacts ?? []).map((a) => ({
     id: a.id,
     name: a.name,
@@ -92,7 +93,7 @@ function OutputTab({ r }: { r: RunSummary }) {
 // structured field), so durations come from the run-level timeline, not faked.
 function TraceTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id);
-  if (!d) return <div style={muted}>Loading…</div>;
+  if (!d) return <LoadingState rows={4} />;
   const steps = traceSteps(d.transcript);
   const logs = d.logs ?? [];
   return (
@@ -136,7 +137,7 @@ function TraceTab({ r }: { r: RunSummary }) {
 // SPEC §4: Inputs — the run's input payload.
 function InputsTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id);
-  if (!d) return <div style={muted}>Loading…</div>;
+  if (!d) return <LoadingState rows={3} />;
   const input = d.input ?? {};
   if (Object.keys(input).length === 0) return <div style={muted}>This run took no inputs.</div>;
   return <pre style={code}>{JSON.stringify(input, null, 2)}</pre>;
@@ -145,7 +146,7 @@ function InputsTab({ r }: { r: RunSummary }) {
 // SPEC §4: Raw — the full run record.
 function RawTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id);
-  if (!d) return <div style={muted}>Loading…</div>;
+  if (!d) return <LoadingState rows={4} />;
   return <pre style={code}>{JSON.stringify(d, null, 2)}</pre>;
 }
 

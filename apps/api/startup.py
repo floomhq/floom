@@ -387,6 +387,53 @@ def apply_cloud_slack_overrides() -> None:
             setattr(engine_slack, name, fn)
 
 
+def _override_run_executor_workspace_context() -> None:
+    """Re-establish the active workspace inside the run-executor thread.
+
+    The drain loop dispatches every run via a fresh thread, which does NOT
+    inherit the per-request workspace ContextVar (and the run is dequeued later,
+    after that request is gone). Without it the Supabase repos fall back to the
+    default scope and the engine resolves contexts/git to the wrong (empty)
+    workspace tree (runs "can't find workers"/contexts). We register the engine's
+    run-execution context provider (floomhq/workeros#1026): given a run_id, look
+    up its workspace_id (stamped on the row at create time) and return
+    active_workspace(...). The engine enters it around execution — the single
+    chokepoint for manual + scheduled + webhook + MCP + retry runs.
+    """
+    import contextlib
+
+    from apps.api._engine import import_engine_module
+    from apps.api.auth.workspace_context import active_workspace
+    from apps.api.config import get_supabase_service_client
+
+    run_service = import_engine_module("run_service")
+
+    def _run_workspace_id(run_id: str) -> "str | None":
+        try:
+            resp = (
+                get_supabase_service_client()
+                .table("runs")
+                .select("workspace_id")
+                .eq("id", run_id)
+                .limit(1)
+                .execute()
+            )
+            rows = getattr(resp, "data", None) or []
+            if rows:
+                return rows[0].get("workspace_id")
+        except Exception:
+            logger.warning("run %s workspace_id lookup failed (executor scope)", run_id, exc_info=True)
+        return None
+
+    def _cloud_run_execution_context(run_id: str):
+        workspace_id = _run_workspace_id(run_id)
+        if workspace_id:
+            return active_workspace(workspace_id, "admin")
+        return contextlib.nullcontext()
+
+    run_service.set_run_execution_context_provider(_cloud_run_execution_context)
+
+
 def _bootstrap_contexts_storage() -> None:
     """Ensure the Supabase Storage 'contexts' bucket exists and patch the engine's
     context_dir() to lazy-hydrate from Storage when a context is missing on disk.
@@ -1024,6 +1071,7 @@ def register_cloud_components() -> None:
     _bootstrap_git_bundles_storage()
     _override_create_run_for_members()
     _override_worker_author_platform_secret()
+    _override_run_executor_workspace_context()
     # Run the real init_db() once so the engine's local SQLite DB has the
     # full schema. Several engine endpoints (draft_and_create_worker,
     # _persist_discovered_workers, etc.) bypass the Supabase repos and call

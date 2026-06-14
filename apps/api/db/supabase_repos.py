@@ -583,6 +583,65 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             for row in rows
         ]
 
+    def list_for_agent(
+        self,
+        *,
+        user_id: str,
+        include_all_users: bool = False,
+        stock_worker_ids: Iterable[str] = (),
+    ) -> list[dict[str, Any]]:
+        """Cloud impl of WorkerRepository.list_for_agent (engine #1027).
+
+        Workers are workspace-scoped in Supabase, so list() already returns the
+        right visible set — stock_worker_ids (an OSS filesystem concept) do not
+        apply. Mirror the engine's intent: the default (not include_all_users)
+        is the member view even for admins, so a personal "what workers do I
+        have?" never leaks another member's private workers. Reshape to the
+        engine tool's row shape; manifest_json MUST be a JSON string (the tool
+        json.loads it).
+        """
+        role = "admin" if (include_all_users and get_active_member_role() == "admin") else "member"
+        records = self.list(user_id=user_id, role=role)
+        rows: list[dict[str, Any]] = []
+        for rec in records:
+            manifest = rec.get("manifest") if isinstance(rec.get("manifest"), dict) else {}
+            rows.append(
+                {
+                    "id": rec.get("id"),
+                    "name": rec.get("name"),
+                    "trigger_type": rec.get("trigger_type"),
+                    "enabled": bool(rec.get("enabled", True)),
+                    "manifest_json": json.dumps(manifest),
+                }
+            )
+        return rows
+
+    def get_for_agent(
+        self,
+        *,
+        user_id: str,
+        worker_id: str,
+        stock_worker_ids: Iterable[str] = (),
+        allow_fs_fallback: bool = False,
+    ) -> dict[str, Any] | None:
+        """Cloud impl of WorkerRepository.get_for_agent (engine #1027).
+
+        Delegate to get(), which already enforces workspace-scoped visibility;
+        reshape to the engine tool's row shape (manifest_json as a JSON string).
+        """
+        rec = self.get(user_id=user_id, worker_id=worker_id, role=get_active_member_role())
+        if not rec:
+            return None
+        manifest = rec.get("manifest") if isinstance(rec.get("manifest"), dict) else {}
+        return {
+            "id": rec.get("id"),
+            "name": rec.get("name"),
+            "trigger_type": rec.get("trigger_type"),
+            "enabled": bool(rec.get("enabled", True)),
+            "cron_expr": rec.get("cron_expr"),
+            "manifest_json": json.dumps(manifest),
+        }
+
     def get(self, *, user_id: str, worker_id: str, role: str | None = None) -> dict[str, Any] | None:
         # Fast path: reuse the raw rows already fetched by list() in this request.
         recipe_cache = _recipe_cache.get()
@@ -1933,6 +1992,51 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             failed_ids.append(run_id)
         return failed_ids
 
+    def fail_all_pending_approval(
+        self,
+        *,
+        error: str,
+        error_code: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fail ALL runs stuck in 'pending_approval' (system-wide startup sweep).
+
+        Mirrors SqliteRunRepository.fail_all_pending_approval: a pending_approval
+        row at boot has a dead in-process polling loop with no live executor to
+        resume it, so fail them all immediately. Process-wide reaper (like
+        fail_stale_running) — deliberately NOT scoped by workspace/user. Kept so
+        the RunRepository Protocol contract holds for a cloud-startup recovery
+        sweep (was missing -> AttributeError if ever called).
+        """
+        svc = get_supabase_service_client()
+        rows = _response_rows(
+            svc.table("runs").select("id,started_at,created_at").eq("status", "pending_approval").execute()
+        )
+        if not rows:
+            return []
+        completed_at_str = datetime.now(timezone.utc).isoformat()
+        completed_dt = datetime.fromisoformat(completed_at_str)
+        failed: list[dict[str, Any]] = []
+        for row in rows:
+            run_id = str(row.get("id") or "")
+            if not run_id:
+                continue
+            updates: dict[str, Any] = {
+                "status": RunStatus.FAILED.value,
+                "error": error,
+                "error_code": error_code,
+                "completed_at": completed_at_str,
+            }
+            started_at = row.get("started_at") or row.get("created_at")
+            if started_at:
+                try:
+                    started_dt = datetime.fromisoformat(str(started_at))
+                    updates["duration_ms"] = int((completed_dt - started_dt).total_seconds() * 1000)
+                except Exception:
+                    pass
+            svc.table("runs").update(updates).eq("id", run_id).execute()
+            failed.append({**row, **updates})
+        return failed
+
     def fail_stale_running(
         self,
         *,
@@ -2720,13 +2824,21 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         decided_at: str,
         edited_output_json: str | None = None,
         follow_up_run_id: str | None = None,
+        annotations_json: str | None = None,
+        reason: str | None = None,
     ) -> dict[str, Any] | None:
+        # annotations_json + reason were missing here while the engine's
+        # /approvals approve route passes them -> TypeError on every HITL
+        # approve carrying annotations. Accept + persist (annotations_json
+        # column added in migration 0034).
         self._client.table(self._TABLE).update(
             {
                 "status": "approved",
                 "decided_at": decided_at,
                 "edited_output_json": edited_output_json,
                 "follow_up_run_id": follow_up_run_id,
+                "annotations_json": annotations_json,
+                "reason": reason,
             }
         ).eq("run_id", run_id).eq("owner_id", owner_id).eq("status", "pending").execute()
         return self.get_by_run_id(run_id=run_id)
@@ -2738,12 +2850,14 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         run_id: str,
         decided_at: str,
         reason: str | None = None,
+        annotations_json: str | None = None,
     ) -> dict[str, Any] | None:
         self._client.table(self._TABLE).update(
             {
                 "status": "rejected",
                 "decided_at": decided_at,
                 "reason": reason,
+                "annotations_json": annotations_json,
             }
         ).eq("run_id", run_id).eq("owner_id", owner_id).eq("status", "pending").execute()
         return self.get_by_run_id(run_id=run_id)
