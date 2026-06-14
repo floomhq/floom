@@ -1,42 +1,36 @@
+import { Radar } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
  * EmilyAvatar — the Floom Emily identity mark.
  *
- * The Emily mark: a blue circle with a white "E" and a white 4-point sparkle
- * at the upper right. The color is tokenized as --emily-mark so every Emily
- * surface carries the same identity in light and dark mode.
+ * Floom-blue accent circle with a Lucide Radar icon (white stroke).
+ * Radar evokes active scanning/discovery — fitting for Emily as the NovaSearch
+ * recruiting agent. Stays clean and symmetric at small (24px) sizes where
+ * Telescope became muddy. The blue (#3E6FE0 light / #5B8DEF dark) is the Floom
+ * accent, tokenized via --emily-mark.
+ *
+ * No letter monogram, no sparkle.
  */
 export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
   const isSmall = size === "sm";
   const sz = isSmall ? "size-6" : "size-8";
-  const textSize = isSmall ? "text-[11px]" : "text-sm";
-  const star = isSmall ? "h-2 w-2" : "h-2.5 w-2.5";
+  // Icon size: 14px inside 24px circle (sm) / 18px inside 32px circle (md)
+  const iconSize = isSmall ? 14 : 18;
   return (
     <span
-      className={cn("relative shrink-0 inline-flex items-center justify-center", sz)}
+      className={cn(
+        "relative shrink-0 inline-flex items-center justify-center rounded-full bg-[var(--emily-mark)]",
+        sz,
+      )}
       aria-label="Emily, Chief of Staff"
     >
-      <span
-        className={cn(
-          "relative inline-flex items-center justify-center rounded-full bg-[var(--emily-mark)] font-semibold leading-none text-white",
-          sz,
-          textSize,
-        )}
+      <Radar
+        size={iconSize}
+        strokeWidth={2}
+        className="text-white"
         aria-hidden="true"
-      >
-        E
-        <svg
-          viewBox="0 0 24 24"
-          fill="currentColor"
-          className={cn("absolute text-white", star)}
-          style={{ top: isSmall ? "2px" : "3px", right: isSmall ? "2px" : "3px" }}
-          aria-hidden="true"
-        >
-          {/* 4-point sparkle */}
-          <path d="M12 0c0 6.627-5.373 12-12 12 6.627 0 12 5.373 12 12 0-6.627 5.373-12 12-12-6.627 0-12-5.373-12-12z" />
-        </svg>
-      </span>
+      />
     </span>
   );
 }
