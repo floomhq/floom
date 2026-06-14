@@ -477,6 +477,12 @@ async def insufficient_disk_space_handler(_request: Request, exc: InsufficientDi
 DEFAULT_JSON_BODY_LIMIT_BYTES = 256 * 1024
 FROM_BUNDLE_BODY_LIMIT_BYTES = 5 * 1024 * 1024
 DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024
+# #1024: PUT /workers/{id}/files replaces ALL worker files atomically, so a
+# worker that bundles a data file (candidate pools, datasets) must re-send it on
+# every deploy. The 256 KB JSON default 413'd those before the body was read,
+# surfacing as a broken pipe at the edge. Cap generously (matches context
+# uploads) so data-bundled workers deploy.
+WORKER_FILES_BODY_LIMIT_BYTES = 25 * 1024 * 1024
 # A workspace template bundles every operator worker + knowledge pack, so it is
 # larger than a single worker bundle. Cap it generously but bounded.
 WORKSPACE_IMPORT_BODY_LIMIT_BYTES = 50 * 1024 * 1024
@@ -1356,6 +1362,9 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
         return FROM_BUNDLE_BODY_LIMIT_BYTES
     if path == "/workspace/import":
         return WORKSPACE_IMPORT_BODY_LIMIT_BYTES
+    # #1024: worker file deploys bundle datasets; exempt from the 256 KB JSON cap.
+    if _WORKER_FILES_PATH_RE.match(path):
+        return WORKER_FILES_BODY_LIMIT_BYTES
     if path.startswith("/uploads"):
         return None
     # X4: approval-scoped screenshot uploads stream a multipart image body; the
@@ -1393,6 +1402,8 @@ def _is_context_upload_request(request: Request) -> bool:
 
 
 _WST_ALLOWED_POST_RE = re.compile(r"^/workers/[^/]+/runs$")
+# #1024: PUT /workers/{id}/files — atomic file replace, may carry bundled data.
+_WORKER_FILES_PATH_RE = re.compile(r"^/workers/[^/]+/files$")
 _WST_DENIED_PREFIXES = (
     "/secrets", "/connections", "/auth", "/workspace/tokens", "/workspace/secrets",
     "/workspace/settings", "/system", "/settings", "/contexts", "/chat",
