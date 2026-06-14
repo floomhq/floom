@@ -6,6 +6,13 @@ import { useEffect, useState } from "react";
 import { LogOut, Settings } from "lucide-react";
 
 import { ThemeModeButton } from "@/components/ThemeModeButton";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuItem,
+  DropdownMenuSeparator,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
 import type { CurrentUser } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
@@ -92,38 +99,44 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
 
   return (
     <div className="flex items-center gap-2 [border-top:var(--bd-div)] px-3 py-3">
-      <div className="flex min-w-0 flex-1 items-center gap-2">
-        <div className="grid size-7 shrink-0 place-items-center rounded-full border border-[var(--border-soft)] bg-muted text-[11px] font-medium text-foreground">
-          {initial}
-        </div>
-        <div className="min-w-0 leading-tight">
-          <p className="truncate text-xs font-medium text-foreground">{primary}</p>
-          <p className="truncate text-[10px] text-muted-foreground">{secondary}</p>
-        </div>
-      </div>
-      <Link
-        href="/settings"
-        onClick={onNavigate}
-        aria-label="Settings"
-        title="Settings"
-        className={cn(
-          "inline-flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150 ease-[var(--ease)]",
-          settingsActive
-            ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)]"
-            : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
-        )}
-      >
-        <Settings className="size-4" />
-      </Link>
-      <button
-        type="button"
-        onClick={logout}
-        aria-label="Sign out"
-        title="Sign out"
-        className="inline-flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] transition-[background,color] duration-150 ease-[var(--ease)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
-      >
-        <LogOut className="size-4" />
-      </button>
+      {/* Profile chip — clicking the avatar opens a dropdown with Settings +
+          Sign out, so logout is reachable without a standalone footer button
+          (parity with the engine UserProfileFooter, M37). */}
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className={cn(
+            "flex min-w-0 flex-1 items-center gap-2 rounded-[var(--radius-button)] px-1 py-0.5 -mx-1 transition-[background,color] duration-150 ease-[var(--ease)]",
+            "hover:bg-[var(--active-nav-bg)] focus:outline-none"
+          )}
+          aria-label="Profile menu"
+        >
+          <div className="grid size-7 shrink-0 place-items-center rounded-full border border-[var(--border-soft)] bg-muted text-[11px] font-medium text-foreground">
+            {initial}
+          </div>
+          <div className="min-w-0 leading-tight text-left">
+            <p className="truncate text-xs font-medium text-foreground">{primary}</p>
+            <p className="truncate text-[10px] text-muted-foreground">{secondary}</p>
+          </div>
+        </DropdownMenuTrigger>
+        <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-48 p-1">
+          <DropdownMenuItem
+            render={<Link href="/settings" onClick={onNavigate} />}
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <Settings className={cn("size-4", settingsActive && "text-[var(--active-nav-text)]")} />
+            Settings
+          </DropdownMenuItem>
+          <DropdownMenuSeparator />
+          <DropdownMenuItem
+            onClick={() => void logout()}
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <LogOut className="size-4" />
+            Sign out
+          </DropdownMenuItem>
+        </DropdownMenuContent>
+      </DropdownMenu>
+
       <ThemeModeButton />
     </div>
   );
