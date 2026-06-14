@@ -246,12 +246,14 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
         <div className={cn("flex items-center [border-bottom:var(--bd-div)]", collapsed ? "justify-center h-14 px-0" : "h-14 gap-1 px-3")}>
           {collapsed ? (
             /* Icon-rail: just the mark, clicking expands */
-            <button
-              type="button"
-              aria-label="Expand navigation"
-              onClick={toggleCollapse}
-              className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
-            >
+              <button
+                type="button"
+                aria-label="Expand navigation"
+                aria-expanded="false"
+                aria-pressed={collapsed}
+                onClick={toggleCollapse}
+                className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
+              >
               <FloomMark size={22} />
             </button>
           ) : (
@@ -263,6 +265,8 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
               <button
                 type="button"
                 aria-label="Collapse navigation"
+                aria-expanded="true"
+                aria-pressed={collapsed}
                 onClick={toggleCollapse}
                 className="inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] opacity-40 hover:opacity-100 focus-visible:opacity-100 transition-all hover:bg-[var(--active-nav-bg)] hover:text-ink"
                 title="Collapse sidebar"
@@ -329,6 +333,8 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
             <button
               type="button"
               aria-label="Expand navigation"
+              aria-expanded="false"
+              aria-pressed={collapsed}
               onClick={toggleCollapse}
               title="Expand sidebar"
               className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink transition-colors mt-1"

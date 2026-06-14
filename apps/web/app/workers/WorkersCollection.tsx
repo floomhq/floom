@@ -33,6 +33,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { Button } from "@/components/ui/button";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
+import { LoadingState } from "@/components/collection/CollectionStates";
 import { FileText, Lock, MoreHorizontal } from "lucide-react";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
@@ -143,7 +144,7 @@ function coerceInputValue(value: string, type?: string): unknown {
 }
 
 function Loading() {
-  return <div style={muted}>Loading…</div>;
+  return <LoadingState rows={4} />;
 }
 
 function friendlyToken(value?: string | null): string {

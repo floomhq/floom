@@ -47,6 +47,7 @@ export default defineConfig({
           name: "dom",
           environment: "jsdom",
           globals: true,
+          maxWorkers: 1,
           setupFiles: ["tests/setup-dom.ts"],
           include: ["tests/**/*.dom.test.tsx"],
         },
