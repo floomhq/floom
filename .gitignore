@@ -40,6 +40,7 @@ WORKPLAN-*.md
 CODEX_BRIEF.md
 .codex-last-message.md
 .codex-stdout.log
+.codex-logs/
 
 # Secrets
 .deploy-secret

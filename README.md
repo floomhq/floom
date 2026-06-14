@@ -1,5 +1,8 @@
 # Workeros
 
+[![CI](https://github.com/floomhq/workeros/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/floomhq/workeros/actions/workflows/ci.yml)
+[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+
 The open-source, self-hosted runtime for AI workers. Sandboxed by default.
 
 > Create a worker. Give it tools. Let it run. See everything.
