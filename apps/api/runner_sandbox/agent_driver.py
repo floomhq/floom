@@ -530,6 +530,7 @@ class AgentDriver(SandboxDriver):
                 return WorkerResult(
                     status="failed",
                     error=f"Output schema violation: Missing declared output '{missing_outputs[0]}'",
+                    error_code="schema_violation",
                     artifacts=artifacts,
                 )
             # Persist any edits the run made to writeable:true packs back to the
