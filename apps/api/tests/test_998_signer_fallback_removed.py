@@ -62,7 +62,7 @@ def test_main_share_token_signers_raise_503_without_secret(monkeypatch, tmp_path
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.delenv("FLOOM_SECRET", raising=False)
     for name in list(sys.modules):
-        if name in ("main", "models", "worker_registry", "chat_service") or name.startswith(("routers", "services", "core", "db", "auth", "contexts")):
+        if name in ("main", "models", "worker_registry", "run_service", "chat_service") or name.startswith(("routers", "services", "core", "db", "auth", "contexts")):
             sys.modules.pop(name, None)
     import types as _types
 
