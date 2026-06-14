@@ -142,10 +142,18 @@ def test_non_catalog_private_worker_still_blocks_cross_tenant(repo_bundle):
 
 
 def test_persist_seeds_stock_demos_as_workspace_visibility():
-    """Source guard: _persist_discovered_workers must seed stock/example demos
-    (PROTECTED_STOCK_WORKER_IDS or is_example:true) as visibility='workspace'."""
-    src = (Path(__file__).parents[2] / "main.py").read_text(encoding="utf-8")
-    fn_start = src.find("def _persist_discovered_workers")
+    """Source guard: the worker-persist path must seed stock/example demos
+    (PROTECTED_STOCK_WORKER_IDS or is_example:true) as visibility='workspace'.
+
+    PR #1073 (oss-prep) moved the persist logic out of main.py into
+    services/worker_registry_ops.py and split the per-worker visibility
+    computation into the `_persist_one_worker` helper (the SAVEPOINT wrapper
+    `_persist_discovered_workers` just loops over it). The visibility markers
+    now live in `_persist_one_worker`, so inspect that function there."""
+    src = (
+        Path(__file__).parents[2] / "services" / "worker_registry_ops.py"
+    ).read_text(encoding="utf-8")
+    fn_start = src.find("def _persist_one_worker")
     assert fn_start != -1
     fn_body = src[fn_start: fn_start + 6000]
     assert "is_stock_demo" in fn_body, "Must compute a stock/example demo flag"

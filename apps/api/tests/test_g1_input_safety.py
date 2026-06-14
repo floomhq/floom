@@ -44,14 +44,16 @@ def _load_main(monkeypatch, tmp_path, *, secret: str | None = SECRET, env: dict 
         monkeypatch.setenv("FLOOM_SECRET", secret)
     for key, value in (env or {}).items():
         monkeypatch.setenv(key, value)
+    # Purge the full first-party app module graph, not just main/db/auth. The
+    # FastAPI routers (routers.*) bind get_auth_context / get_repos / the auth
+    # provider at IMPORT time; if a prior test file reloaded `main` (e.g.
+    # test_g1_auth_lifecycle), the cached routers.* modules keep references to
+    # that file's now-purged auth/db, so requests authenticate against a stale
+    # provider/secret and 401. Reload the whole graph for true isolation.
     for name in list(sys.modules):
         if (
-            name == "main"
-            or name == "db"
-            or name.startswith("db.")
-            or name == "auth"
-            or name.startswith("auth.")
-            or name == "worker_registry"
+            name in ("main", "db", "auth", "run_token", "worker_registry", "run_service", "routers", "services")
+            or name.startswith(("db.", "auth.", "routers.", "services."))
         ):
             sys.modules.pop(name, None)
     db = importlib.import_module("db")
@@ -80,14 +82,18 @@ def _zip_bytes(files: dict[str, bytes]) -> bytes:
 
 class TestCandidateOutputPath:
     def _run_service(self, monkeypatch, tmp_path):
-        import run_service
-        from services import run_outputs
+        import importlib
 
-        # _candidate_output_path / _safe_artifact_path live in services.run_outputs
-        # and resolve ARTIFACTS_DIR in that module's namespace; patch it there.
-        monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
+        # _candidate_output_path / _safe_artifact_path were moved to
+        # services.run_outputs by PR #1073 and resolve ARTIFACTS_DIR from THAT
+        # module's namespace; run_service merely re-exports them. Across test
+        # files, a prior _load_main() purge can leave a stale run_service whose
+        # re-exports point at an already-purged services.run_outputs. Import the
+        # owning module directly and patch ARTIFACTS_DIR there, then return it so
+        # the helpers run against a live, patched module.
+        run_outputs = importlib.import_module("services.run_outputs")
         monkeypatch.setattr(run_outputs, "ARTIFACTS_DIR", tmp_path / "artifacts")
-        return run_service
+        return run_outputs
 
     def test_absolute_declared_path_rejected(self, monkeypatch, tmp_path):
         rs = self._run_service(monkeypatch, tmp_path)

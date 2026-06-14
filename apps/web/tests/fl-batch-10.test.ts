@@ -86,7 +86,8 @@ function test551SchedulerSkipsRunOnMissingConnections(): void {
 // ---------------------------------------------------------------------------
 
 function test556OverviewSetupIncompleteItems(): void {
-  const s = api("main.py");
+  // #1073: system_overview moved out of main.py into routers/overview.py.
+  const s = api("routers/overview.py");
   assert(
     s.includes("setup_incomplete"),
     "system_overview must add setup_incomplete attention items",
@@ -98,7 +99,7 @@ function test556OverviewSetupIncompleteItems(): void {
 }
 
 function test556OverviewComputesMissingForAllWorkers(): void {
-  const s = api("main.py");
+  const s = api("routers/overview.py");
   assert(
     s.includes("_ov_available_secrets") && s.includes("_ov_available_conns"),
     "system_overview must compute available secrets and connections for attention items",
