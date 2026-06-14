@@ -12853,9 +12853,16 @@ def update_worker(
 
     invalidate_worker_cache()
     workers = discover_workers()
+    # Single-worker update: only persist the target worker with strict error
+    # propagation (raise_on_skip=True) so a composio-disable failure during
+    # the update rolls back the persist and returns 502 to the caller.
+    # Passing all discovered workers with the default (raise_on_skip=False)
+    # swallowed the RuntimeError from _sync_composio_registration, which
+    # caused the update to return 200 instead of 502 (#1070 regression).
+    this_worker_list = [w for w in workers if w["id"] == worker_id]
     with get_db() as conn:
         try:
-            _persist_discovered_workers(conn, workers, user_id=auth.user_id)
+            _persist_discovered_workers(conn, this_worker_list, user_id=auth.user_id, raise_on_skip=True)
         except RuntimeError as exc:
             if old_worker_yml is not None:
                 worker_yml_path.write_text(old_worker_yml, encoding='utf-8')
