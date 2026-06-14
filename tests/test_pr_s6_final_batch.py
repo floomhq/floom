@@ -244,7 +244,7 @@ trigger:
 
     def _apply_patch(self, yml_path: Path, new_type: str, new_cron: str, new_tz: str):
         """Simulate the N6 disk-write logic from update_worker() PATCH handler."""
-        trigger_lines = [f"trigger:", f"  type: {new_type}"]
+        trigger_lines = ["trigger:", f"  type: {new_type}"]
         if new_type == "schedule":
             trigger_lines.append(f'  cron: "{new_cron}"')
             trigger_lines.append(f'  timezone: "{new_tz}"')

@@ -974,7 +974,7 @@ async def _maybe_handle_approval_reply(
         if "not awaiting approval" in str(detail).lower() or "already decided" in str(detail).lower():
             return f"That approval is no longer pending (already resolved: {worker_name} — {label})."
         if "not found" in str(detail).lower():
-            return f"That approval is no longer pending."
+            return "That approval is no longer pending."
         logger.exception(
             "WhatsApp approval reply: %s failed for run %s user %s",
             decision,
