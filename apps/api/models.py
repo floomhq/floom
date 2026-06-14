@@ -55,6 +55,16 @@ class UnsafeOutboundUrlError(ValueError):
 UnsafeMCPUrlError = UnsafeOutboundUrlError
 
 
+class WorkerNotRunnableError(ValueError):
+    """Raised by a RunsRepo.create when the caller may not run the target worker
+    (a genuine cross-tenant ownership denial — the worker is neither owned by the
+    caller, workspace-shared, nor a curated catalog/stock worker).
+
+    Subclasses ValueError so the generic ValueError handler still treats it
+    safely if uncaught, but the run endpoint catches it explicitly to return a
+    clear 403 instead of the opaque 400 'Invalid request'."""
+
+
 def _allow_private_mcp_urls() -> bool:
     """Self-hoster escape hatch: WORKEROS_ALLOW_PRIVATE_MCP_URLS=1 bypasses the
     SSRF deny-list. Default OFF (secure)."""
