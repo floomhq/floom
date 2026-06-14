@@ -11,6 +11,7 @@ import { openCommandPalette } from "@/components/CommandPalette";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
 import { api } from "@/lib/api";
+import { capture } from "@/lib/analytics/capture";
 import type { CurrentUser } from "@/lib/types";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import {
@@ -448,6 +449,7 @@ export function UserProfileFooter({
     } catch {
       // Clearing the cookie is best-effort; navigate regardless.
     }
+    capture("logged_out", { source: "profile_menu" });
     onNavigate?.();
     router.replace("/login");
     router.refresh();
