@@ -1665,6 +1665,7 @@ class RunSummary(BaseModel):
     worker_name: Optional[str] = None
     status: RunStatus
     trigger_source: str
+    inputs: Dict[str, Any] = Field(default_factory=dict)
     created_at: Optional[str] = None
     started_at: Optional[str] = None
     completed_at: Optional[str] = None
@@ -1740,6 +1741,7 @@ class RunDetail(BaseModel):
     trigger_source: str
     runner: str
     input: Dict[str, Any] = Field(default_factory=dict)
+    inputs: Dict[str, Any] = Field(default_factory=dict)
     output: Dict[str, Any] = Field(default_factory=dict)
     outputs: Dict[str, Any] = Field(default_factory=dict)
     output_schema: List["OutputField"] = Field(default_factory=list)

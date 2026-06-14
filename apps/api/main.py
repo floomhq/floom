@@ -2604,7 +2604,31 @@ def _get_last_run_for_worker(
     return dict(row) if row else None
 
 
-def _make_run_summary(row: Any) -> RunSummary:
+def _run_input_from_row(row: Any) -> Dict[str, Any]:
+    d = row_to_dict(row)
+    raw_input_json = d.get("input_json")
+    if not raw_input_json:
+        return {}
+    try:
+        parsed = json.loads(raw_input_json) if isinstance(raw_input_json, str) else raw_input_json
+    except Exception:
+        return {}
+    return parsed if isinstance(parsed, dict) else {}
+
+
+def _run_has_sensitive_artifacts(
+    *,
+    user_id: str,
+    run_id: str,
+    repos: Repositories,
+) -> bool:
+    try:
+        return any(_is_sensitive_artifact_row(r) for r in repos.runs.list_artifacts(user_id=user_id, run_id=run_id))
+    except Exception:
+        return False
+
+
+def _make_run_summary(row: Any, *, redact_inputs: bool = False) -> RunSummary:
     d = row_to_dict(row)
     status_value = str(d.get("status") or "").lower()
     status_aliases = {
@@ -2621,6 +2645,7 @@ def _make_run_summary(row: Any) -> RunSummary:
         worker_name=d.get("worker_name"),
         status=RunStatus(normalized_status),
         trigger_source=d["trigger_source"],
+        inputs={} if redact_inputs else _run_input_from_row(d),
         created_at=d.get("created_at"),
         started_at=d.get("started_at"),
         completed_at=d.get("completed_at"),
@@ -13178,7 +13203,17 @@ def list_runs(
         include_system=include_system,
     )
     response.headers["X-Total-Count"] = str(visible_total)
-    return [_make_run_summary(r) for r in visible_rows]
+    return [
+        _make_run_summary(
+            r,
+            redact_inputs=_run_has_sensitive_artifacts(
+                user_id=auth.user_id,
+                run_id=str(row_to_dict(r).get("id") or ""),
+                repos=repos,
+            ),
+        )
+        for r in visible_rows
+    ]
 
 
 @app.get("/runs/export.csv")
@@ -14595,15 +14630,8 @@ def get_run(
         queue_position = pos if pos > 0 else None
 
     # #561: parse the run's actual input from the stored JSON.
-    run_input: Dict[str, Any] = {}
     _raw_input_json = run.get("input_json")
-    if _raw_input_json:
-        try:
-            run_input = json.loads(_raw_input_json) if isinstance(_raw_input_json, str) else _raw_input_json
-            if not isinstance(run_input, dict):
-                run_input = {}
-        except Exception:
-            run_input = {}
+    run_input = _run_input_from_row({"input_json": _raw_input_json})
     if _has_sensitive_run_artifacts:
         run_input = {}
 
@@ -14644,6 +14672,7 @@ def get_run(
         trigger_source=run["trigger_source"],
         runner=run["runner"],
         input=run_input,
+        inputs=run_input,
         output=run["output"],
         outputs=run["output"],
         output_schema=output_schema,
