@@ -1,7 +1,7 @@
 "use client";
 
 import { useId, useState } from "react";
-import { ChevronDown, Folder, Plus, X } from "lucide-react";
+import { Brain, ChevronDown, Folder, Plus, X } from "lucide-react";
 import type { WorkerContextSpec } from "@/lib/types";
 import {
   contextSpecName,
@@ -17,6 +17,15 @@ interface WorkerBrainEditorProps {
   busy?: boolean;
   /** Emits the next contexts list; parent persists to worker.yml. */
   onChange: (next: WorkerContextSpec[]) => void;
+  /**
+   * Per-worker memory folder name. When set and that folder is NOT yet attached,
+   * the editor surfaces a one-click "Add memory folder" affordance that creates
+   * (if needed) the writeable folder and wires it to this worker's brain — so a
+   * worker is connected to its own memory by default ("Used by 0" → this worker).
+   */
+  memoryFolderName?: string;
+  /** Creates the memory folder if missing and attaches it (read & write). */
+  onAttachMemory?: () => void | Promise<void>;
 }
 
 /**
@@ -30,6 +39,8 @@ export function WorkerBrainEditor({
   editable,
   busy,
   onChange,
+  memoryFolderName,
+  onAttachMemory,
 }: WorkerBrainEditorProps) {
   const [attach, setAttach] = useState("");
   const [open, setOpen] = useState(false);
@@ -37,9 +48,31 @@ export function WorkerBrainEditor({
   const attachedNames = new Set(contexts.map(contextSpecName));
   const unattached = availablePacks.filter((p) => !attachedNames.has(p.name));
   const selected = unattached.find((p) => p.name === attach);
+  const memoryAttached = Boolean(memoryFolderName && attachedNames.has(memoryFolderName));
+  const showMemoryCta = Boolean(editable && memoryFolderName && onAttachMemory && !memoryAttached);
 
   return (
     <div>
+      {showMemoryCta && (
+        <button
+          type="button"
+          className="mb-3 flex w-full items-center gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-3)] disabled:opacity-60"
+          disabled={busy}
+          onClick={() => void onAttachMemory?.()}
+        >
+          <span className="c-logo">
+            <Brain size={15} />
+          </span>
+          <span className="min-w-0 flex-1">
+            <span className="block text-sm text-foreground">Connect a memory folder</span>
+            <span className="block text-xs text-muted-foreground">
+              Give this worker a writeable <span className="font-mono">{memoryFolderName}</span> folder it
+              can read and write across runs.
+            </span>
+          </span>
+          <Plus size={15} className="shrink-0 text-muted-foreground" />
+        </button>
+      )}
       <div className="c-ltable">
         {contexts.map((spec) => {
           const name = contextSpecName(spec);

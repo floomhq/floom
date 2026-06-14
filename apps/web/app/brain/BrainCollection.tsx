@@ -65,6 +65,9 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
       binary: f.is_binary,
       tags: f.tags, // #780: show file tags as chips
     }));
+  // Drag-and-drop upload is only offered when the operator may write to the
+  // folder (read-only/system packs stay read-only).
+  const canWrite = !folder.read_only && folder.writeable !== false;
   return (
     <InlineFileOpen
       files={files}
@@ -79,6 +82,22 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
         await api.contexts.moveFile(folder.name, file.id, `${dir}${newName}`);
         await reload();
       }}
+      // Drag-and-drop / Browse upload into the brain folder (#issue-6a).
+      onUpload={
+        canWrite
+          ? async (dropped, dirPrefix) => {
+              try {
+                await api.contexts.upload(folder.name, dropped, dirPrefix || undefined);
+                toast.success(
+                  dropped.length === 1 ? "Added 1 file" : `Added ${dropped.length} files`,
+                );
+                await reload();
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : "Could not upload files.");
+              }
+            }
+          : undefined
+      }
     />
   );
 }

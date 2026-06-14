@@ -34,6 +34,54 @@ describe("WorkerBrainEditor", () => {
     expect(screen.queryByRole("button", { name: "Read & write" })).not.toBeInTheDocument();
     expect(screen.getByText("Read only")).toBeInTheDocument();
   });
+
+  it("offers a Connect memory folder CTA when the worker's memory folder is not attached", async () => {
+    const user = userEvent.setup();
+    const onAttachMemory = vi.fn();
+    render(
+      <WorkerBrainEditor
+        contexts={[]}
+        availablePacks={[]}
+        editable
+        onChange={vi.fn()}
+        memoryFolderName="my-worker-memory"
+        onAttachMemory={onAttachMemory}
+      />,
+    );
+    const cta = screen.getByRole("button", { name: /Connect a memory folder/i });
+    expect(cta).toBeInTheDocument();
+    expect(screen.getByText("my-worker-memory")).toBeInTheDocument();
+    await user.click(cta);
+    expect(onAttachMemory).toHaveBeenCalledTimes(1);
+  });
+
+  it("hides the memory CTA once the memory folder is already attached", () => {
+    render(
+      <WorkerBrainEditor
+        contexts={["my-worker-memory"]}
+        availablePacks={[{ name: "my-worker-memory" }]}
+        editable
+        onChange={vi.fn()}
+        memoryFolderName="my-worker-memory"
+        onAttachMemory={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /Connect a memory folder/i })).not.toBeInTheDocument();
+  });
+
+  it("hides the memory CTA in read-only mode", () => {
+    render(
+      <WorkerBrainEditor
+        contexts={[]}
+        availablePacks={[]}
+        editable={false}
+        onChange={vi.fn()}
+        memoryFolderName="my-worker-memory"
+        onAttachMemory={vi.fn()}
+      />,
+    );
+    expect(screen.queryByRole("button", { name: /Connect a memory folder/i })).not.toBeInTheDocument();
+  });
 });
 
 describe("WorkerToolsEditor", () => {
