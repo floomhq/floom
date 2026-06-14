@@ -502,6 +502,180 @@ class SqliteWorkerRepository:
                 ).fetchone()
         return _worker_record_from_row(row) if row else None
 
+    def list_for_agent(
+        self,
+        *,
+        user_id: str,
+        include_all_users: bool = False,
+        stock_worker_ids: Iterable[str] = (),
+    ) -> list[dict[str, Any]]:
+        """Workers visible to the workspace agent (Emily) — see WorkerRepository.
+
+        #1027: moved verbatim from chat_service._tool_workers_list_all so the
+        tool routes through the repo Protocol. *user_id* must already be the
+        effective visibility user id; stock ids are passed in to avoid a
+        db<-main import cycle.
+        """
+        all_stock_ids = [s for s in dict.fromkeys(stock_worker_ids) if s]
+        base_select = (
+            "SELECT w.id, w.name, w.trigger_type, w.enabled, w.owner_id, sv.manifest_json "
+            "FROM workers w "
+            "LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id "
+        )
+        with get_db() as conn:
+            try:
+                role_row = conn.execute(
+                    "SELECT role FROM users WHERE id = ?", (user_id,)
+                ).fetchone()
+                is_admin = bool(role_row) and str(role_row["role"]).lower() == "admin"
+            except Exception:
+                is_admin = False
+            if is_admin and include_all_users:
+                rows = conn.execute(base_select + "ORDER BY w.name").fetchall()
+            else:
+                try:
+                    has_members_table = bool(conn.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_members' LIMIT 1"
+                    ).fetchone())
+                except Exception:
+                    has_members_table = False
+
+                if has_members_table:
+                    rows = conn.execute(
+                        base_select
+                        + "LEFT JOIN workspace_members wm "
+                        + "  ON wm.workspace_id = COALESCE(w.workspace_id, 'local-default') "
+                        + "  AND wm.user_id = ? AND wm.status = 'active' "
+                        + "WHERE w.owner_id = ? "
+                        + "OR (COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                        + "    AND wm.user_id IS NOT NULL) "
+                        + "ORDER BY w.name",
+                        (user_id, user_id),
+                    ).fetchall()
+                    if all_stock_ids:
+                        seen_ids = {r["id"] for r in rows}
+                        missing_stock = [sid for sid in all_stock_ids if sid not in seen_ids]
+                        if missing_stock:
+                            placeholders = ",".join("?" * len(missing_stock))
+                            stock_rows = conn.execute(
+                                base_select
+                                + f"WHERE w.id IN ({placeholders}) ORDER BY w.name",
+                                missing_stock,
+                            ).fetchall()
+                            rows = list(rows) + stock_rows
+                else:
+                    if all_stock_ids:
+                        placeholders = ",".join("?" * len(all_stock_ids))
+                        rows = conn.execute(
+                            base_select
+                            + "WHERE w.owner_id = ? "
+                            + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                            + f"OR w.id IN ({placeholders}) "
+                            + "ORDER BY w.name",
+                            [user_id] + all_stock_ids,
+                        ).fetchall()
+                    else:
+                        rows = conn.execute(
+                            base_select
+                            + "WHERE w.owner_id = ? "
+                            + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                            + "ORDER BY w.name",
+                            (user_id,),
+                        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "trigger_type": r["trigger_type"],
+                "enabled": bool(r["enabled"]),
+                "manifest_json": r["manifest_json"],
+            }
+            for r in rows
+        ]
+
+    def get_for_agent(
+        self,
+        *,
+        user_id: str,
+        worker_id: str,
+        stock_worker_ids: Iterable[str] = (),
+        allow_fs_fallback: bool = False,
+    ) -> dict[str, Any] | None:
+        """Single agent-visible worker, gated by can-view — see WorkerRepository.
+
+        #1027: moved verbatim from chat_service._tool_workers_get +
+        _worker_can_view. *user_id* must already be the effective visibility user
+        id; stock ids + allow_fs_fallback are passed in to avoid a db<-main
+        import cycle.
+        """
+        import sqlite3 as _sqlite3
+
+        stock_ids = set(stock_worker_ids)
+
+        def _can_view(conn: Any) -> bool:
+            # Stock/public workers are always accessible regardless of DB state.
+            if worker_id in stock_ids:
+                return True
+            try:
+                row = conn.execute(
+                    "SELECT owner_id, workspace_id, visibility FROM workers WHERE id = ? LIMIT 1",
+                    (worker_id,),
+                ).fetchone()
+            except _sqlite3.OperationalError:
+                # DB not initialised / workers table absent — let the run path decide.
+                return True
+            if row is None:
+                # No DB row — unregistered filesystem worker or unknown.
+                return bool(allow_fs_fallback)
+            if row["owner_id"] == user_id:
+                return True
+            # Admins may view every worker (mirrors role-aware /workers + list_all).
+            try:
+                role_row = conn.execute(
+                    "SELECT role FROM users WHERE id = ? LIMIT 1", (user_id,)
+                ).fetchone()
+                if role_row and str(role_row["role"]).lower() == "admin":
+                    return True
+            except Exception:
+                pass
+            visibility = (row["visibility"] or "private").lower()
+            if visibility not in ("workspace", "shared"):
+                return False
+            workspace_id = row["workspace_id"] or "local-default"
+            try:
+                member_row = conn.execute(
+                    "SELECT 1 FROM workspace_members "
+                    "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
+                    (workspace_id, user_id),
+                ).fetchone()
+            except Exception:
+                return False
+            return member_row is not None
+
+        with get_db() as conn:
+            if not _can_view(conn):
+                return None
+            row = conn.execute(
+                """
+                SELECT w.id, w.name, w.trigger_type, w.enabled, w.cron_expr,
+                       sv.manifest_json
+                FROM workers w
+                LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
+                WHERE w.id = ?
+                """,
+                (worker_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "trigger_type": row["trigger_type"],
+            "enabled": bool(row["enabled"]),
+            "cron_expr": row["cron_expr"],
+            "manifest_json": row["manifest_json"],
+        }
+
     def get_any(self, *, worker_id: str) -> dict[str, Any] | None:
         with get_db() as conn:
             row = conn.execute(
