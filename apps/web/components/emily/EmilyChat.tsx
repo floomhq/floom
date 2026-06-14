@@ -254,7 +254,10 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
               ))}
             </div>
           )}
-          <MessageActions className="justify-end pr-1">
+          {/* C-03: copy on a SENT message is hover-only (like most chat UIs).
+              Revealed on hover/focus of the message row; focus-within keeps it
+              keyboard-accessible (tab to the button via focus-visible). */}
+          <MessageActions className="justify-end pr-1 opacity-0 focus-within:opacity-100 group-hover/message:opacity-100">
             <MessageCopyAction text={msg.text ?? ""} />
           </MessageActions>
         </div>
