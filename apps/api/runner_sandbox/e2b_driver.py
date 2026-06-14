@@ -33,6 +33,11 @@ MAX_E2B_SANDBOX_LIFETIME_SECONDS = 3600
 # unbounded multi-MB output bloats the DB row and the run-detail response.
 # Reject above this with a clear error instead of silently ingesting it.
 MAX_RESULT_JSON_BYTES = 5 * 1024 * 1024  # 5 MiB
+# #1041 — bound writeback-tar extraction so a sandboxed worker cannot OOM the
+# API host with an arbitrarily large context file. Each member is read fully
+# into memory (extracted.read()), so cap both per-member and total bytes.
+MAX_CONTEXT_TAR_MEMBER_BYTES = 100 * 1024 * 1024  # 100 MiB per member
+MAX_CONTEXT_TAR_TOTAL_BYTES = 250 * 1024 * 1024  # 250 MiB total per extraction
 _OOM_EXIT_CODES = {137, -9}
 _OOM_MARKERS = (
     "code 137",
@@ -607,6 +612,7 @@ def _extract_context_tar(raw_tar: bytes, target_dir: Path) -> None:
     """
     target_dir.mkdir(parents=True, exist_ok=True)
     target_root = target_dir.resolve()
+    extracted_total = 0
     with tarfile.open(fileobj=io.BytesIO(raw_tar), mode="r:*") as archive:
         for member in archive.getmembers():
             try:
@@ -618,6 +624,26 @@ def _extract_context_tar(raw_tar: bytes, target_dir: Path) -> None:
                 continue
             if not member.isfile():
                 continue
+            # #1041 — enforce size caps from tar metadata BEFORE reading the
+            # member into memory; skip (don't raise) so the rest of the
+            # writeback still lands, matching the path-traversal skip above.
+            if member.size > MAX_CONTEXT_TAR_MEMBER_BYTES:
+                logger.warning(
+                    "[context-tar] skipping oversized member %r: %d bytes > %d cap",
+                    member.name,
+                    member.size,
+                    MAX_CONTEXT_TAR_MEMBER_BYTES,
+                )
+                continue
+            if extracted_total + member.size > MAX_CONTEXT_TAR_TOTAL_BYTES:
+                logger.warning(
+                    "[context-tar] total extraction cap %d reached; skipping "
+                    "remaining members starting at %r",
+                    MAX_CONTEXT_TAR_TOTAL_BYTES,
+                    member.name,
+                )
+                break
+            extracted_total += member.size
             extracted = archive.extractfile(member)
             if extracted is None:
                 continue

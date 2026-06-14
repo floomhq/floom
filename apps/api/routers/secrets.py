@@ -17,6 +17,7 @@ alongside ``main``.
 from __future__ import annotations
 
 import logging
+import re
 from typing import Annotated, Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException
@@ -71,6 +72,38 @@ class SecretTestResult(BaseModel):
 
 SecretName = Annotated[str, PathParam(min_length=1, max_length=64, pattern=r"^[A-Z][A-Z0-9_]*$")]
 
+# #1068 — secret names that would shadow the runner's own environment when
+# surfaced into the run env. The HTTP route enforces the name pattern via
+# PathParam, but MCP secrets.set calls upsert_secret() directly (bypassing that),
+# so the name is re-validated and these names are blocked in the handler.
+_SENSITIVE_ENV_SECRET_NAMES: frozenset[str] = frozenset(
+    {
+        "PATH",
+        "HOME",
+        "USER",
+        "SHELL",
+        "IFS",
+        "PWD",
+        "TMPDIR",
+        "LD_PRELOAD",
+        "LD_LIBRARY_PATH",
+        "LD_AUDIT",
+        "LD_DEBUG",
+        "DYLD_INSERT_LIBRARIES",
+        "DYLD_LIBRARY_PATH",
+        "PYTHONPATH",
+        "PYTHONHOME",
+        "PYTHONSTARTUP",
+        "NODE_OPTIONS",
+        "NODE_PATH",
+        "BASH_ENV",
+        "ENV",
+        "PERL5LIB",
+        "RUBYLIB",
+        "GIT_SSH_COMMAND",
+    }
+)
+
 
 @secrets_router.post("/secrets/{name}", response_model=SecretTestResult)
 def upsert_secret(
@@ -83,6 +116,22 @@ def upsert_secret(
 
     Platform infrastructure secrets are managed outside the user-secrets API.
     """
+    # #1068 — MCP secrets.set calls this handler directly, bypassing the
+    # PathParam name validation. Re-validate so an empty/malformed key returns a
+    # clean 422 (was an unhandled 500) and env-shadowing names are rejected.
+    if not name or not re.fullmatch(r"[A-Z][A-Z0-9_]{0,63}", name):
+        raise HTTPException(
+            status_code=422,
+            detail="Secret name must match [A-Z][A-Z0-9_]* and be 1-64 characters.",
+        )
+    if name in _SENSITIVE_ENV_SECRET_NAMES:
+        raise HTTPException(
+            status_code=422,
+            detail=(
+                f"{name!r} is a reserved environment variable name and cannot be "
+                "used as a secret (it would shadow the runner's own environment)."
+            ),
+        )
     if name in PLATFORM_SECRETS:
         raise HTTPException(
             status_code=400,
