@@ -133,11 +133,12 @@ def test_e2b_deadline_does_not_leak(api):
     assert "context deadline exceeded" not in msg
     assert "process or directory watch" not in msg
     assert "use '0'" not in msg.lower()
-    assert msg == api._TIMEOUT_HEADLINE
+    assert msg == api._SANDBOX_HEADLINE
     # Without the code, the jargon guard + free-text timeout rule still catch it.
     msg_no_code = api._operator_error_message(E2B_DEADLINE)
     assert "context deadline exceeded" not in msg_no_code
     assert "process or directory watch" not in msg_no_code
+    assert msg_no_code == api._TIMEOUT_HEADLINE
 
 
 def test_unknown_error_code_gets_generic_headline(api):
@@ -248,8 +249,8 @@ def test_worker_code_crash_not_shown_as_timeout(api):
 
 
 def test_real_timeout_still_maps_to_timeout(api):
-    # Regression: a genuine timeout (no worker-code traceback) stays a timeout.
-    msg = api._operator_error_message(E2B_DEADLINE, "e2b_sandbox_error")
+    # The runner now classifies near-cap worker timeouts as error_code=timeout.
+    msg = api._operator_error_message(E2B_DEADLINE, "timeout")
     assert msg == api._TIMEOUT_HEADLINE
 
 

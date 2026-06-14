@@ -81,6 +81,12 @@ import contextlib
 
 logger = logging.getLogger("floom.run_service")
 
+UNKNOWN_RUN_ERROR_CODE = "unknown_error"
+UNKNOWN_RUN_ERROR_MESSAGE = (
+    "Run failed before the engine captured a specific failure reason. "
+    "Check the run logs and retry."
+)
+
 
 # #1026: the drain loop executes each queued run in a fresh thread, which does
 # NOT carry the contextvars set by the request that enqueued it (and the run is
@@ -2144,6 +2150,30 @@ def update_run_status(
     run_row = repos_obj.runs.get(user_id=owner_id, run_id=run_id)
     worker_id = str((run_row or {}).get("worker_id") or "")
     previous_error = (run_row or {}).get("error")
+    previous_error_code = (run_row or {}).get("error_code")
+    if status == RunStatus.FAILED.value:
+        normalized_error = str(error).strip() if error is not None else ""
+        normalized_error_code = str(error_code).strip() if error_code is not None else ""
+        if not normalized_error:
+            normalized_error = str(previous_error).strip() if previous_error else ""
+        if not normalized_error_code:
+            normalized_error_code = str(previous_error_code).strip() if previous_error_code else ""
+        if not normalized_error:
+            normalized_error = UNKNOWN_RUN_ERROR_MESSAGE
+            logger.error(
+                "Run %s reached failed status without an error message; applying fallback",
+                run_id,
+                stack_info=True,
+            )
+        if not normalized_error_code:
+            normalized_error_code = UNKNOWN_RUN_ERROR_CODE
+            logger.error(
+                "Run %s reached failed status without an error_code; applying fallback",
+                run_id,
+                stack_info=True,
+            )
+        error = normalized_error
+        error_code = normalized_error_code
     repos_obj.runs.update_status(
         user_id=owner_id,
         run_id=run_id,
