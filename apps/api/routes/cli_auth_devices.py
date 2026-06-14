@@ -69,6 +69,12 @@ def _new_user_code() -> str:
 
 
 def _client_ip(request: Request) -> str | None:
+    cf_ip = (request.headers.get("cf-connecting-ip") or "").strip()
+    if cf_ip:
+        return cf_ip
+    real_ip = (request.headers.get("x-real-ip") or "").strip()
+    if real_ip:
+        return real_ip
     if request.client is None:
         return None
     return request.client.host
@@ -93,6 +99,14 @@ def create_cli_device(payload: _CliAuthDeviceCreateRequest, request: Request) ->
     now_ts = time.time()
     expires_at = now_ts + _CLI_AUTH_EXPIRES_SECONDS
     repos.cli_auth.prune_expired(now_ts=now_ts)
+    created_ip = _client_ip(request) or "unknown"
+    pending_count = repos.cli_auth.count_pending(created_ip=created_ip, now_ts=now_ts)
+    if pending_count >= _CLI_AUTH_MAX_DEVICES_PENDING:
+        raise HTTPException(
+            status_code=429,
+            detail="Too many pending CLI auth devices for this client.",
+            headers={"Retry-After": str(_CLI_AUTH_POLL_INTERVAL_SECONDS)},
+        )
 
     device_code = _new_device_code()
     user_code = _new_user_code()
@@ -111,7 +125,7 @@ def create_cli_device(payload: _CliAuthDeviceCreateRequest, request: Request) ->
             secret=None,
             client_name=payload.client_name,
             scopes=list(payload.scopes or []),
-            created_ip=_client_ip(request),
+            created_ip=created_ip,
             created_at=now_ts,
             expires_at=expires_at,
         )

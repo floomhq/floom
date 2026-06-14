@@ -4,12 +4,7 @@
  * when a member triggered the run.
  */
 import { test, expect } from "@playwright/test";
-
-const BASE = "https://workeros.floom.dev";
-const API = "https://workeros-api.floom.dev/api";
-const MEMBER_TOKEN = "floom_8fgFHrn0ELVejnT6mMkUP6ynQRgjYrSKgN7JTNosuyFeXihNOIjgRA";
-const WORKSPACE_ID = "ws_8bdb2e8127db4f";
-const SHARED_WORKER_ID = "clone-test-worker";
+import { API, BASE, MEMBER_TOKEN, SHARED_WORKER_ID, WORKSPACE_ID } from "./api.helpers";
 const MEMBER_EMAIL = "gohigh3242@gmail.com";
 
 test.describe("Runs list — member attribution", () => {

@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import os
+import hashlib as _hashlib
 import sys
+import threading as _threading
 import time as _time
 from contextlib import asynccontextmanager
 from typing import Any
@@ -127,6 +129,76 @@ import re as _re
 # engine app is mounted at each (see app.mount calls below), so guarding only
 # /api/workers left bare /workers/{id} as an isolation bypass.
 _RE_WORKER_PATH = _re.compile(r"^(?:/api/v1|/v1|/api)?/workers/([^/]+)(/.*)?$")
+
+_CLOUD_RATE_LIMIT_RULES: list[tuple[tuple[str, ...] | None, _re.Pattern[str], int, float]] = [
+    (None, _re.compile(r"^/auth/(?:password-login|password-signup|login|fragment-session|cli-exchange|cli-approve|cli-deny)$"), 5, 60.0),
+    (("POST",), _re.compile(r"^/api/cli-auth/devices$"), 5, 60.0),
+    (("POST", "DELETE"), _re.compile(r"^/auth/tokens(?:/.*)?$"), 20, 60.0),
+    (("POST", "PATCH", "DELETE"), _re.compile(r"^/api/workspaces(?:/.*)?$"), 60, 60.0),
+    (("POST",), _re.compile(r"^/api/novasearch(?:/.*)?$"), 30, 60.0),
+]
+_cloud_rate_lock = _threading.Lock()
+_cloud_rate_buckets: dict[str, list[float]] = {}
+
+
+def _cloud_client_ip(request: Request) -> str:
+    cf_ip = (request.headers.get("cf-connecting-ip") or "").strip()
+    if cf_ip:
+        return cf_ip
+    real_ip = (request.headers.get("x-real-ip") or "").strip()
+    if real_ip:
+        return real_ip
+    return request.client.host if request.client else "unknown"
+
+
+def _cloud_rate_identity(request: Request) -> str:
+    pat = (request.headers.get("x-floom-token") or "").strip()
+    if pat:
+        return "x-floom-token:" + _hashlib.sha256(pat.encode()).hexdigest()
+    authorization = (request.headers.get("authorization") or "").strip()
+    parts = authorization.split(" ", 1)
+    if len(parts) == 2 and parts[0].lower() == "bearer" and parts[1].strip():
+        return "bearer:" + _hashlib.sha256(parts[1].strip().encode()).hexdigest()
+    return f"ip:{_cloud_client_ip(request)}"
+
+
+def _cloud_rate_limit_for_request(request: Request) -> tuple[int, float] | None:
+    method = request.method.upper()
+    path = request.url.path.rstrip("/") or "/"
+    for methods, pattern, limit, window in _CLOUD_RATE_LIMIT_RULES:
+        if methods is not None and method not in methods:
+            continue
+        if pattern.fullmatch(path):
+            return limit, window
+    return None
+
+
+@app.middleware("http")
+async def cloud_rate_limit_middleware(request: Request, call_next):
+    config = _cloud_rate_limit_for_request(request)
+    if config is None:
+        return await call_next(request)
+    limit, window = config
+    if limit <= 0:
+        return await call_next(request)
+
+    now = _time.monotonic()
+    key = f"{_cloud_rate_identity(request)}:{request.method.upper()}:{request.url.path.rstrip('/') or '/'}"
+    with _cloud_rate_lock:
+        bucket = [ts for ts in _cloud_rate_buckets.get(key, []) if ts > now - window]
+        if len(bucket) >= limit:
+            retry_after = max(1, int((bucket[0] + window) - now))
+            from fastapi.responses import JSONResponse as _JSONResponse
+
+            return _JSONResponse(
+                status_code=429,
+                content={"detail": "Rate limit exceeded"},
+                headers={"Retry-After": str(retry_after)},
+            )
+        bucket.append(now)
+        _cloud_rate_buckets[key] = bucket
+
+    return await call_next(request)
 
 
 def _is_owner_only_worker_write(method: str, suffix: str) -> bool:
@@ -394,8 +466,36 @@ def _cloud_persist_worker_files(worker_id: str, files: dict, repos: Any) -> None
     raw_mj = sv_rows[0].get("manifest_json") if sv_rows else {}
     manifest_json = raw_mj if isinstance(raw_mj, dict) else (_json.loads(raw_mj) if isinstance(raw_mj, str) else {})
     manifest_json.pop("_files", None)
-    manifest_json["_files"] = files
+    manifest_json["_files"] = _sanitize_cloud_worker_files(files)
     svc.table("skill_versions").update({"manifest_json": manifest_json}).eq("id", sv_id).execute()
+
+
+def _validate_cloud_worker_file_path(path: str) -> str:
+    path = path.strip()
+    if not path:
+        raise HTTPException(status_code=400, detail="file path must not be empty")
+    candidate = _Path(path)
+    if candidate.is_absolute() or "\\" in path:
+        raise HTTPException(status_code=400, detail=f"file path must be relative: {path!r}")
+    parts = candidate.parts
+    if any(part in ("", ".", "..") or part.startswith(".") for part in parts):
+        raise HTTPException(status_code=400, detail=f"file path contains invalid segment: {path!r}")
+    normalized = candidate.as_posix()
+    if normalized.startswith("../") or "/../" in normalized:
+        raise HTTPException(status_code=400, detail=f"file path contains traversal: {path!r}")
+    return normalized
+
+
+def _sanitize_cloud_worker_files(files: dict) -> dict[str, str]:
+    sanitized: dict[str, str] = {}
+    for raw_path, raw_content in files.items():
+        safe_path = _validate_cloud_worker_file_path(str(raw_path))
+        if safe_path in sanitized:
+            raise HTTPException(status_code=400, detail=f"duplicate file path: {safe_path!r}")
+        if not isinstance(raw_content, str):
+            raise HTTPException(status_code=400, detail=f"file content must be text: {safe_path!r}")
+        sanitized[safe_path] = raw_content
+    return sanitized
 
 
 def _read_worker_files_from_disk(worker_id: str) -> dict:
@@ -539,7 +639,9 @@ async def cloud_update_worker_files(worker_id: str, request: Request) -> Any:
     files_list = body.get("files") or []
     if not files_list:
         raise HTTPException(status_code=400, detail="files list must not be empty")
-    files = {f["path"]: f["content"] for f in files_list if "path" in f and "content" in f}
+    files = _sanitize_cloud_worker_files(
+        {f["path"]: f["content"] for f in files_list if "path" in f and "content" in f}
+    )
 
     try:
         import yaml as _yaml
@@ -558,9 +660,8 @@ async def cloud_update_worker_files(worker_id: str, request: Request) -> Any:
     )
     payload = engine_main.WorkerFilesUpdateRequest(
         files=[
-            engine_main.WorkerFilePatch(path=f["path"], content=f["content"])
-            for f in files_list
-            if "path" in f and "content" in f
+            engine_main.WorkerFilePatch(path=path, content=content)
+            for path, content in files.items()
         ]
     )
 

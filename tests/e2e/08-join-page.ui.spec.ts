@@ -4,11 +4,7 @@
  * Uses the API project's request fixture to create a fresh invite.
  */
 import { test, expect, chromium } from "@playwright/test";
-
-const BASE = "https://workeros.floom.dev";
-const API = "https://workeros-api.floom.dev/api";
-const ADMIN_TOKEN = "floom_oJlwTHF6nRHV3Sd0u2rYz9vslSVRCA2HFZB65lIbJqE";
-const WORKSPACE_ID = "ws_8bdb2e8127db4f";
+import { API, BASE, ADMIN_TOKEN, WORKSPACE_ID } from "./api.helpers";
 
 test.describe("Join page (/app/join)", () => {
   test("join page has no sidebar (clean layout)", async ({ browser }) => {

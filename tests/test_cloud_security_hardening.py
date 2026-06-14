@@ -161,3 +161,89 @@ def test_cloud_worker_author_platform_key_survives_secret_store_disconnect(monke
             user_id="user-1",
             repos=_Repos(),
         )
+
+
+def test_cloud_worker_file_paths_reject_traversal_before_persistence(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+
+    with pytest.raises(main.HTTPException) as excinfo:
+        main._sanitize_cloud_worker_files({"../pwn.py": "x"})
+
+    assert excinfo.value.status_code == 400
+    assert "invalid segment" in str(excinfo.value.detail) or "traversal" in str(excinfo.value.detail)
+
+
+def test_cloud_worker_file_paths_reject_hidden_and_absolute_paths(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+
+    for bad_path in ("/tmp/pwn.py", ".env", "nested/.secret"):
+        with pytest.raises(main.HTTPException) as excinfo:
+            main._sanitize_cloud_worker_files({bad_path: "x"})
+        assert excinfo.value.status_code == 400
+
+
+def test_cloud_worker_file_paths_allow_normal_nested_source(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+
+    assert main._sanitize_cloud_worker_files({"worker.yml": "name: ok", "lib/util.py": "x"}) == {
+        "worker.yml": "name: ok",
+        "lib/util.py": "x",
+    }
+
+
+def test_cloud_rate_limits_auth_routes_by_trusted_edge_ip(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    statuses = [
+        client.post(
+            "/auth/password-login",
+            json={},
+            headers={"cf-connecting-ip": "203.0.113.40"},
+        ).status_code
+        for _ in range(6)
+    ]
+
+    assert statuses[:5] == [422, 422, 422, 422, 422]
+    assert statuses[5] == 429
+
+
+def test_cloud_rate_limit_ignores_raw_x_forwarded_for(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    statuses = [
+        client.post(
+            "/auth/password-login",
+            json={},
+            headers={
+                "cf-connecting-ip": "203.0.113.41",
+                "x-forwarded-for": f"198.51.100.{idx}",
+            },
+        ).status_code
+        for idx in range(6)
+    ]
+
+    assert statuses[5] == 429
+
+
+def test_cloud_rate_limits_by_bearer_token_before_ip(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    first_ip_statuses = [
+        client.post(
+            "/auth/cli-exchange",
+            json={},
+            headers={"authorization": "Bearer floom_same_token", "cf-connecting-ip": f"203.0.113.{50 + idx}"},
+        ).status_code
+        for idx in range(6)
+    ]
+    second_token_status = client.post(
+        "/auth/cli-exchange",
+        json={},
+        headers={"authorization": "Bearer floom_other_token", "cf-connecting-ip": "203.0.113.50"},
+    ).status_code
+
+    assert first_ip_statuses[5] == 429
+    assert second_token_status == 422

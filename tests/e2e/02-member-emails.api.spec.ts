@@ -4,7 +4,7 @@
  * - email should be a valid email address, not empty
  */
 import { test, expect } from "@playwright/test";
-import { API, adminHeaders, WORKSPACE_ID } from "./api.helpers";
+import { API, adminHeaders, memberHeaders, WORKSPACE_ID } from "./api.helpers";
 
 test.describe("Member email resolution", () => {
   test("members list includes email for owner", async ({ request }) => {
@@ -35,10 +35,7 @@ test.describe("Member email resolution", () => {
 
   test("member cannot access members list (admin only)", async ({ request }) => {
     const res = await request.get(`${API}/workspaces/${WORKSPACE_ID}/members`, {
-      headers: {
-        "x-floom-token": "floom_J3G55Cd0GMnDQ66CQ9MlpM7W4jrEn84pbSxEi32LCaI",
-        "x-workeros-workspace": WORKSPACE_ID,
-      },
+      headers: memberHeaders(),
     });
     expect(res.status()).toBe(403);
   });

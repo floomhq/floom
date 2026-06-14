@@ -40,8 +40,6 @@ const cloudExclude = [
   // overlay/middleware.ts (Supabase session) replaces the engine auth gate;
   // cloud coverage: tests/verify-session-935.test.ts
   "tests/middleware.test.ts",
-  // overlay proxy authenticates via Supabase Bearer, not FLOOM_API_SECRET
-  "tests/proxy-route.test.ts",
   // overlay app/settings/page.tsx is a cloud fork that has NOT yet ported the
   // engine's Git tab / behaviour toggles / model defaults — known drift,
   // tracked in the g2 PR notes.

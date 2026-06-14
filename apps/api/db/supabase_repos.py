@@ -109,7 +109,8 @@ def _materialize_worker_files(worker_id: str, files: dict[str, str]) -> None:
     try:
         worker_dir.mkdir(parents=True, exist_ok=True)
         for fname, content in files.items():
-            fpath = worker_dir / fname
+            safe_name = _validate_worker_file_path(str(fname))
+            fpath = worker_dir / safe_name
             fpath.parent.mkdir(parents=True, exist_ok=True)
             fpath.write_text(content, encoding="utf-8")
         _repo_logger.debug("Materialized %d file(s) for worker %s to %s", len(files), worker_id, worker_dir)
@@ -131,6 +132,34 @@ def _json_load(value: Any, default: Any) -> Any:
             return default
         return loaded if isinstance(loaded, type(default)) else default
     return default
+
+
+def _validate_worker_file_path(path: str) -> str:
+    path = path.strip()
+    if not path:
+        raise ValueError("worker file path must not be empty")
+    candidate = Path(path)
+    if candidate.is_absolute() or "\\" in path:
+        raise ValueError(f"worker file path must be relative: {path!r}")
+    parts = candidate.parts
+    if any(part in ("", ".", "..") or part.startswith(".") for part in parts):
+        raise ValueError(f"worker file path contains an invalid segment: {path!r}")
+    normalized = candidate.as_posix()
+    if normalized.startswith("../") or "/../" in normalized:
+        raise ValueError(f"worker file path contains traversal: {path!r}")
+    return normalized
+
+
+def _sanitize_worker_files(files: Mapping[str, Any]) -> dict[str, str]:
+    sanitized: dict[str, str] = {}
+    for raw_path, raw_content in files.items():
+        safe_path = _validate_worker_file_path(str(raw_path))
+        if safe_path in sanitized:
+            raise ValueError(f"duplicate worker file path: {safe_path!r}")
+        if not isinstance(raw_content, str):
+            raise ValueError(f"worker file content must be text: {safe_path!r}")
+        sanitized[safe_path] = raw_content
+    return sanitized
 
 
 def _json_storage_value(value: Any, default: Any) -> Any:
@@ -486,13 +515,11 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         builder = _scope_by_workspace(builder, user_id=user_id)
 
         # Visibility filter: applies only inside a workspace-scoped request.
-        # Admins (owner + promoted members) see all workers in the workspace.
-        # Regular members see their own private workers + all shared workers.
+        # The read surface is can_view-scoped: own private workers plus shared
+        # workers. Workspace admin inventory lives on /api/workspaces/{id}/workers.
         workspace_id_ctx = get_active_workspace_id()
         if workspace_id_ctx and user_id:
-            role = get_active_member_role()
-            if role != "admin":
-                builder = builder.or_(f"user_id.eq.{user_id},visibility.eq.shared")
+            builder = builder.or_(f"user_id.eq.{user_id},visibility.eq.shared")
 
         if worker_id is not None:
             builder = builder.eq("id", worker_id)
@@ -1119,7 +1146,7 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         # parse_worker_manifest so the config parser never sees it.
         embedded_files = manifest_json.pop("_files", None)
         if embedded_files and isinstance(embedded_files, dict):
-            _materialize_worker_files(str(worker["id"]), embedded_files)
+            _materialize_worker_files(str(worker["id"]), _sanitize_worker_files(embedded_files))
 
         config = _config_from_manifest(
             worker_id=str(worker["id"]),
@@ -2450,6 +2477,17 @@ class SupabaseCliAuthRepository(_BaseSupabaseRepository):
             raise RuntimeError(f"failed to create cli auth device {device_code}")
         return item
 
+    def count_pending(self, *, created_ip: str, now_ts: float) -> int:
+        response = (
+            self._client.table("cli_auth_devices")
+            .select("device_code", count="exact")
+            .eq("created_ip", created_ip)
+            .eq("status", "pending")
+            .gt("expires_at", now_ts)
+            .execute()
+        )
+        return int(getattr(response, "count", 0) or 0)
+
     def verify_device(self, code: str) -> dict[str, Any] | None:
         response = (
             self._client.table("cli_auth_devices")
@@ -2843,7 +2881,7 @@ class SupabaseAssetAccessRepository:
             .select(f"id,{owner_col},workspace_id,visibility")
             .eq("id", asset_id)
         )
-        if asset_type in {"brain_pack", "assistant"}:
+        if asset_type in {"worker", "brain_pack", "assistant"}:
             effective_workspace_id = self._workspace_id(workspace_id)
             if effective_workspace_id:
                 builder = builder.eq("workspace_id", effective_workspace_id)
@@ -2881,7 +2919,7 @@ class SupabaseAssetAccessRepository:
             "can_edit": is_owner or (shared and is_admin),
             "can_delete": is_owner or (shared and is_admin),
             "can_run": can_view,
-            "can_share": is_owner or is_admin,
+            "can_share": is_owner or (can_view and is_admin),
         }
 
     def ensure_brain_pack(

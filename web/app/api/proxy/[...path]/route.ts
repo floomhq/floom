@@ -11,6 +11,7 @@ const API_BASE =
   "https://workeros-api.floom.dev";
 
 const SESSION_COOKIE = "workeros_cloud_session";
+const PROXY_PREFIX = "/api/proxy";
 
 function normalizeCookieValue(value: string): string {
   const trimmed = value.trim();
@@ -37,6 +38,38 @@ async function getAccessToken(): Promise<string | null> {
   } catch {
     return null;
   }
+}
+
+function safeProxyLocation(location: string | null, req: NextRequest): string | null {
+  if (!location) return null;
+  let parsed: URL;
+  let apiBase: URL;
+  try {
+    apiBase = new URL(API_BASE);
+    parsed = new URL(location, apiBase);
+  } catch {
+    return null;
+  }
+
+  if (parsed.protocol !== "http:" && parsed.protocol !== "https:") {
+    return null;
+  }
+
+  if (parsed.origin === req.nextUrl.origin) {
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  }
+
+  if (parsed.origin !== apiBase.origin) {
+    return null;
+  }
+
+  let upstreamPath = parsed.pathname;
+  if (upstreamPath === "/api") {
+    upstreamPath = "/";
+  } else if (upstreamPath.startsWith("/api/")) {
+    upstreamPath = upstreamPath.slice(4);
+  }
+  return `${PROXY_PREFIX}${upstreamPath}${parsed.search}${parsed.hash}`;
 }
 
 async function handler(
@@ -148,10 +181,9 @@ async function handler(
       ? cacheControl
       : "private, no-store, max-age=0",
   );
-  // Forward Location so backend-initiated redirects (e.g. /auth/login →
-  // Google OAuth 307) actually reach the browser through the proxy.
   const location = upstream.headers.get("location");
-  if (location) responseHeaders.set("location", location);
+  const safeLocation = safeProxyLocation(location, req);
+  if (safeLocation) responseHeaders.set("location", safeLocation);
   // Forward Set-Cookie so backend-initiated cookie writes (e.g. /auth/logout
   // clearing workeros_cloud_session on .floom.dev) actually reach the browser.
   // Vercel's route runtime does not consistently expose the Node/undici

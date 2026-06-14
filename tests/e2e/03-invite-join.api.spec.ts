@@ -5,7 +5,7 @@
  * - After accept, workspace_id should match the invited workspace
  */
 import { test, expect } from "@playwright/test";
-import { API, WEB, adminHeaders, WORKSPACE_ID } from "./api.helpers";
+import { API, WEB, JOIN_MEMBER_TOKEN, adminHeaders, WORKSPACE_ID } from "./api.helpers";
 
 test.describe("Invite URL and join flow", () => {
   test("invite URL points to /app/join not /app/members", async ({ request }) => {
@@ -59,7 +59,7 @@ test.describe("Invite URL and join flow", () => {
     // Accept it (this will re-join the workspace — idempotent)
     const acceptRes = await request.post(`${API}/workspaces/accept-invite`, {
       headers: {
-        "x-floom-token": "floom_J3G55Cd0GMnDQ66CQ9MlpM7W4jrEn84pbSxEi32LCaI",
+        "x-floom-token": JOIN_MEMBER_TOKEN,
         "Content-Type": "application/json",
       },
       data: { token },

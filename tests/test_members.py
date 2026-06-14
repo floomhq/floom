@@ -402,8 +402,8 @@ def test_worker_rows_applies_visibility_filter_for_member(monkeypatch):
     ctx.set_active_member_role(None)
 
 
-def test_worker_rows_no_visibility_filter_for_admin(monkeypatch):
-    """Admin gets no visibility filter — sees all workspace workers."""
+def test_worker_rows_keeps_can_view_filter_for_admin(monkeypatch):
+    """Admin inventory is separate; worker read APIs stay can_view-scoped."""
     import apps.api.db.supabase_repos as repos_mod
     import apps.api.auth.workspace_context as ctx
 
@@ -426,10 +426,55 @@ def test_worker_rows_no_visibility_filter_for_admin(monkeypatch):
     repo = repos_mod.SupabaseWorkerRepository(client=client)
     repo._worker_rows(user_id="admin-user")
 
-    chain.or_.assert_not_called()
+    chain.or_.assert_called_once()
+    filter_arg = chain.or_.call_args[0][0]
+    assert "user_id.eq.admin-user" in filter_arg
+    assert "visibility.eq.shared" in filter_arg
 
     ctx.set_active_workspace_id(None)
     ctx.set_active_member_role(None)
+
+
+def test_asset_access_worker_lookup_is_workspace_scoped(monkeypatch):
+    """Permission lookup cannot resolve a worker outside the active workspace."""
+    import apps.api.db.supabase_repos as repos_mod
+    import apps.api.auth.workspace_context as ctx
+
+    ctx.set_active_workspace_id("ws_current")
+    ctx.set_active_member_role("member")
+
+    client = _make_supabase_client(
+        {
+            "id": "private-other-workspace",
+            "user_id": "other-user",
+            "workspace_id": "ws_other",
+            "visibility": "private",
+        }
+    )
+    monkeypatch.setattr(repos_mod, "get_supabase_service_client", lambda: client)
+
+    repo = repos_mod.SupabaseAssetAccessRepository()
+    repo._asset_row(asset_type="worker", asset_id="private-other-workspace", workspace_id="ws_current")
+
+    chain = client.table.return_value
+    assert call("workspace_id", "ws_current") in chain.eq.call_args_list
+
+    ctx.set_active_workspace_id(None)
+    ctx.set_active_member_role(None)
+
+
+def test_asset_access_private_cross_owner_admin_cannot_share_without_view():
+    from apps.api.db.supabase_repos import SupabaseAssetAccessRepository
+
+    perms = SupabaseAssetAccessRepository._compute(
+        owner_id="member-user",
+        visibility="private",
+        role="admin",
+        user_id="admin-user",
+    )
+
+    assert perms["can_view"] is False
+    assert perms["can_share"] is False
 
 
 # ---------------------------------------------------------------------------

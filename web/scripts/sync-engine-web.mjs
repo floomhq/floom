@@ -101,6 +101,7 @@ export const OVERLAY_FILES = [
   "components/CloudAccountFooter.tsx",
   "components/VersionHistoryMenu.tsx",
   "components/TelemetryProvider.tsx",
+  "components/worker-form/FilesEditor.tsx",
   // components/ui/dropdown-menu.tsx de-forked 2026-06-13: cosmetic Tailwind drift only
   // (engine uses the current design tokens) — no cloud seam.
   // components/CliCommandPanel.tsx de-forked 2026-06-13: dead code (nothing renders it).
@@ -123,6 +124,8 @@ export const OVERLAY_FILES = [
   "tests/verify-session-935.test.ts",
   "tests/me-cache-941.test.ts",
   "tests/csrf-origin-947.test.ts",
+  "tests/proxy-route.test.ts",
+  "tests/files-editor-markdown-sanitize-190.dom.test.tsx",
 ];
 
 const CLOUD_TAILWIND_SOURCE_MARKER = "/* workeros-cloud generated Tailwind sources */";

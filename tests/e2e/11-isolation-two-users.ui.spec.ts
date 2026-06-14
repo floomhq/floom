@@ -10,12 +10,7 @@
  */
 import { test, expect, chromium, Browser } from "@playwright/test";
 import path from "path";
-
-const BASE = "https://workeros.floom.dev";
-const API = "https://workeros-api.floom.dev/api";
-const ADMIN_TOKEN = "floom_oJlwTHF6nRHV3Sd0u2rYz9vslSVRCA2HFZB65lIbJqE";
-const MEMBER_TOKEN = "floom_8fgFHrn0ELVejnT6mMkUP6ynQRgjYrSKgN7JTNosuyFeXihNOIjgRA";
-const WORKSPACE_ID = "ws_8bdb2e8127db4f";
+import { API, BASE, ADMIN_TOKEN, MEMBER_TOKEN, WORKSPACE_ID } from "./api.helpers";
 const MEMBER_STATE = path.join(__dirname, ".auth/member.json");
 
 // Helper — open a second browser context as member

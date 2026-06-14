@@ -31,6 +31,7 @@ class _FakeTable:
         self.table_name = None
         self.filters: list[tuple[str, str]] = []
         self.in_filters: list[tuple[str, set[str]]] = []
+        self.or_filters: list[str] = []
         self.limit_value = None
         self.selected = None
 
@@ -46,6 +47,10 @@ class _FakeTable:
         self.in_filters.append((key, set(values)))
         return self
 
+    def or_(self, value):
+        self.or_filters.append(value)
+        return self
+
     def limit(self, value):
         self.limit_value = value
         return self
@@ -59,6 +64,18 @@ class _FakeTable:
             rows = [row for row in rows if row.get(key) == value]
         for key, values in self.in_filters:
             rows = [row for row in rows if row.get(key) in values]
+        for value in self.or_filters:
+            clauses = [clause.split(".", 2) for clause in value.split(",")]
+            rows = [
+                row
+                for row in rows
+                if any(
+                    len(clause) == 3
+                    and clause[1] == "eq"
+                    and str(row.get(clause[0])) == clause[2]
+                    for clause in clauses
+                )
+            ]
         if self.limit_value is not None:
             rows = rows[: self.limit_value]
         return _FakeResponse(rows)

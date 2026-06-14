@@ -28,6 +28,15 @@ class _FakeCliAuth:
         self.created.append(row)
         return row
 
+    def count_pending(self, *, created_ip: str, now_ts: float):
+        return sum(
+            1
+            for row in self.created
+            if row.get("created_ip") == created_ip
+            and row.get("status") == "pending"
+            and float(row.get("expires_at") or 0.0) > now_ts
+        )
+
 
 def _client(monkeypatch) -> tuple[TestClient, _FakeCliAuth]:
     app = FastAPI()
@@ -88,3 +97,39 @@ def test_create_device_rejects_empty_client_name(monkeypatch):
     client, _ = _client(monkeypatch)
     response = client.post("/api/cli-auth/devices", json={"client_name": ""})
     assert response.status_code == 422
+
+
+def test_create_device_caps_pending_devices_per_edge_ip(monkeypatch):
+    monkeypatch.setattr(cli_devices, "_CLI_AUTH_MAX_DEVICES_PENDING", 1)
+    client, fake = _client(monkeypatch)
+
+    first = client.post(
+        "/api/cli-auth/devices",
+        json={"client_name": "floom-cli"},
+        headers={"cf-connecting-ip": "203.0.113.10"},
+    )
+    second = client.post(
+        "/api/cli-auth/devices",
+        json={"client_name": "floom-cli"},
+        headers={"cf-connecting-ip": "203.0.113.10"},
+    )
+
+    assert first.status_code == 200
+    assert second.status_code == 429
+    assert second.headers["retry-after"] == str(cli_devices._CLI_AUTH_POLL_INTERVAL_SECONDS)
+    assert len(fake.created) == 1
+
+
+def test_client_ip_ignores_raw_x_forwarded_for_when_edge_header_present(monkeypatch):
+    client, fake = _client(monkeypatch)
+    response = client.post(
+        "/api/cli-auth/devices",
+        json={"client_name": "floom-cli"},
+        headers={
+            "cf-connecting-ip": "203.0.113.20",
+            "x-forwarded-for": "198.51.100.99",
+        },
+    )
+
+    assert response.status_code == 200
+    assert fake.created[0]["created_ip"] == "203.0.113.20"
