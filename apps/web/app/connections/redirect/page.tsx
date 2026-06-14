@@ -48,9 +48,12 @@ function RedirectInner() {
         );
         if (active) {
           capture("connection_added", {
-            app_name: slug,
+            app: slug,
             connection_id: active.id,
             connection_type: "oauth",
+          });
+          capture("channel_installed", {
+            channel: slug,
           });
           setPhase("done");
           setTimeout(() => router.replace(returnTo), 1200);
@@ -59,6 +62,11 @@ function RedirectInner() {
       } catch { /* ignore */ }
       if (Date.now() < deadline) {
         pollRef.current = setTimeout(tick, 3000);
+      } else {
+        capture("channel_install_failed", {
+          channel: slug,
+          error_type: "timeout",
+        });
       }
     };
     pollRef.current = setTimeout(tick, 2000);
@@ -98,6 +106,10 @@ function RedirectInner() {
       } catch (caught) {
         if (cancelled) return;
         const message = caught instanceof Error ? caught.message : "Failed to start authorization.";
+        capture("channel_install_failed", {
+          channel: slug,
+          error_type: message.startsWith("api_key_only:") ? "api_key_only" : "api_error",
+        });
         if (message.startsWith("api_key_only:")) {
           setPhase("api_key");
           setError(`${providerName} uses an API key instead of OAuth.`);

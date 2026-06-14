@@ -14,6 +14,7 @@ import { CollectionList } from "./CollectionList";
 import { CollectionGrid } from "./CollectionGrid";
 import { DetailPane } from "./DetailSplit";
 import { EmptyState, LoadingState, ErrorState } from "./CollectionStates";
+import { capture } from "@/lib/analytics/capture";
 
 export interface CollectionViewProps<T> {
   config: CollectionConfig<T>;
@@ -52,8 +53,24 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
     [onChange, state],
   );
 
-  const setView = (view: ViewMode) => patch({ view });
-  const setQuery = (q: string) => patch({ q });
+  const setView = (view: ViewMode) => {
+    if (view !== state.view) {
+      capture("view_toggled", {
+        collection: config.title,
+        view,
+      });
+    }
+    patch({ view });
+  };
+  const setQuery = (q: string) => {
+    if (!state.q && q) {
+      capture("collection_filter_changed", {
+        collection: config.title,
+        filter: "search",
+      });
+    }
+    patch({ q });
+  };
   const open = (id: string) => {
     setListCollapsed(false);
     setCreating(false);
@@ -70,9 +87,20 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
     const tags = { ...state.tags };
     if (next.length) tags[family] = next;
     else delete tags[family];
+    capture("collection_filter_changed", {
+      collection: config.title,
+      filter: family,
+      selected_count: next.length,
+    });
     patch({ tags });
   };
-  const clearTags = () => patch({ tags: {} });
+  const clearTags = () => {
+    capture("collection_filter_changed", {
+      collection: config.title,
+      filter: "clear",
+    });
+    patch({ tags: {} });
+  };
 
   const isOpen = selected != null;
 
