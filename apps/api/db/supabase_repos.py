@@ -32,6 +32,36 @@ _repo_logger = logging.getLogger("workeros.cloud.supabase_repos")
 
 _SYSTEM_RUN_WORKER_IDS = frozenset({"worker-author"})
 
+# Curated catalog of ship-with-product stock/example workers that EVERY tenant
+# may run. On cloud these rows are seeded under DIFFERENT demo users in DIFFERENT
+# workspaces, so the workspace-scoped ownership pre-check in RunsRepo.create
+# would reject a fresh tenant with "worker does not belong" (surfaced as a 404
+# "Worker not found" / 400 "Invalid request"). Resolved lazily from the engine's
+# main.PUBLIC_STOCK_WORKER_IDS with a DEFERRED import: importing engine `main` at
+# module load is heavy/circular, so import it the first time the value is needed
+# and cache the result (mirrors the deferred imports in
+# _ensure_system_run_worker_row / discover_workers).
+_PUBLIC_STOCK_WORKER_IDS_CACHE: frozenset[str] | None = None
+
+
+def _public_stock_worker_ids() -> frozenset[str]:
+    global _PUBLIC_STOCK_WORKER_IDS_CACHE
+    if _PUBLIC_STOCK_WORKER_IDS_CACHE is None:
+        try:
+            from main import PUBLIC_STOCK_WORKER_IDS  # noqa: PLC0415
+
+            _PUBLIC_STOCK_WORKER_IDS_CACHE = frozenset(PUBLIC_STOCK_WORKER_IDS)
+        except Exception:
+            # Fail closed: if the catalog can't be resolved, no extra worker
+            # becomes runnable-by-all (owner/workspace rules still apply).
+            _repo_logger.warning(
+                "Could not import PUBLIC_STOCK_WORKER_IDS from engine main; "
+                "catalog run carve-out disabled this process.",
+                exc_info=True,
+            )
+            _PUBLIC_STOCK_WORKER_IDS_CACHE = frozenset()
+    return _PUBLIC_STOCK_WORKER_IDS_CACHE
+
 
 def _ensure_system_run_worker_row(client: Client, *, worker_id: str, user_id: str) -> None:
     existing = (
@@ -1687,12 +1717,32 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         # run on a worker in a workspace they aren't currently viewing.
         if worker_id in _SYSTEM_RUN_WORKER_IDS:
             _ensure_system_run_worker_row(self._client, worker_id=worker_id, user_id=user_id)
+        elif worker_id in _public_stock_worker_ids():
+            # Runnable-by-attribution carve-out: curated catalog/stock workers
+            # ship with the product and may be run by ANY tenant. Their rows are
+            # seeded under other demo users/workspaces, so the workspace-scoped
+            # pre-check below would reject a fresh tenant. Skip the ownership
+            # pre-check; the run row is still stamped with the CALLER's workspace
+            # + user_id (via _resolve_workspace_id_for_write / the insert below),
+            # so tenant isolation holds — only this curated set is widened.
+            pass
         else:
             worker_builder = self._client.table("workers").select("id").eq("id", worker_id)
             worker_builder = _scope_by_workspace(worker_builder, user_id=user_id)
             worker = worker_builder.limit(1).execute()
             if _first_row(worker) is None:
-                raise ValueError(f"worker {worker_id} does not belong to {user_id}")
+                # Genuine cross-tenant ownership denial. Raise the typed error the
+                # run endpoint catches for a clear 403 (instead of the opaque 400
+                # "Invalid request" the global ValueError handler emits). Falls
+                # back to ValueError if the engine pin predates the type.
+                try:
+                    from models import WorkerNotRunnableError  # noqa: PLC0415
+
+                    raise WorkerNotRunnableError(
+                        f"worker {worker_id} does not belong to {user_id}"
+                    )
+                except ImportError:
+                    raise ValueError(f"worker {worker_id} does not belong to {user_id}")
         run_id = fields["run_id"]
         # Stamp workspace_id on the run row. For scheduler/webhook triggers
         # the contextvar is unset, so we fall back to the worker's
