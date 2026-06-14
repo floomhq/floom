@@ -7,6 +7,7 @@
  */
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { apiAll } from "./_apisrc";
 
 const ROOT = resolve(__dirname, "..");
 const API_ROOT = resolve(__dirname, "../../api");
@@ -59,7 +60,7 @@ function test562TopLevelSecretLinkUpdated(): void {
 // ---------------------------------------------------------------------------
 
 function test538MagicLinkIssuer(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(
     s.includes("_issue_magic_link") && s.includes("ttl_seconds"),
     "main.py must define _issue_magic_link helper with ttl_seconds param",
@@ -71,7 +72,7 @@ function test538MagicLinkIssuer(): void {
 }
 
 function test538MagicLinkUsesHmac(): void {
-  const s = api("main.py");
+  const s = apiAll();
   const issuerIdx = s.indexOf("def _issue_magic_link");
   const snippet = s.slice(issuerIdx, issuerIdx + 800);
   assert(
@@ -81,7 +82,7 @@ function test538MagicLinkUsesHmac(): void {
 }
 
 function test538MagicLinkHasOwnSecret(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(
     s.includes("_magic_link_secret"),
     "magic link must use _magic_link_secret(), not _slack_state_secret() directly",
@@ -97,7 +98,7 @@ function test538MagicLinkHasOwnSecret(): void {
 }
 
 function test538MagicLinkEndpointIssue(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(
     s.includes('"/auth/magic-link"') || s.includes("'/auth/magic-link'"),
     "main.py must define POST /auth/magic-link endpoint",
@@ -109,7 +110,7 @@ function test538MagicLinkEndpointIssue(): void {
 }
 
 function test538MagicLinkEndpointConsume(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(
     s.includes('"/auth/magic/{token}"') || s.includes("'/auth/magic/{token}'"),
     "main.py must define GET /auth/magic/{token} endpoint",
@@ -186,7 +187,7 @@ function test538ApiTsMagicLinkMethods(): void {
 }
 
 function test538MagicLinkMiddlewareExempt(): void {
-  const s = api("main.py");
+  const s = apiAll();
   // The consume endpoint is unauthenticated by definition — user has no session yet.
   // It must be in the auth middleware exempt list or the link is dead on arrival.
   assert(

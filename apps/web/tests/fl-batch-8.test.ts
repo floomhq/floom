@@ -6,6 +6,7 @@
  */
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { apiAll } from "./_apisrc";
 
 const ROOT = resolve(__dirname, "..");
 const API_ROOT = resolve(__dirname, "../../api");
@@ -47,13 +48,13 @@ function test556ModelsMissingSecretsOnDetail(): void {
 // ---------------------------------------------------------------------------
 
 function test556MainHelperFunction(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(s.includes("_available_connection_slugs_for_user"),
     "main.py must define _available_connection_slugs_for_user helper");
 }
 
 function test556MainComputesMissingInList(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(s.includes("_missing_secrets") && s.includes("_missing_connections"),
     "Worker list endpoint must compute _missing_secrets and _missing_connections per worker");
   assert(s.includes("missing_secrets=_missing_secrets"),
@@ -63,7 +64,7 @@ function test556MainComputesMissingInList(): void {
 }
 
 function test556MainComputesMissingInDetail(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(s.includes("_det_missing_secrets") && s.includes("_det_missing_connections"),
     "Worker detail builder must compute _det_missing_secrets and _det_missing_connections");
   assert(s.includes("missing_secrets=_det_missing_secrets"),

@@ -6,23 +6,22 @@
  */
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { apiAll } from "./_apisrc";
 
 const ROOT = resolve(__dirname, "..");
-const API_ROOT = resolve(__dirname, "../../api");
 
 function assert(condition: boolean, msg: string): void {
   if (!condition) throw new Error(`FAIL: ${msg}`);
 }
 
 function src(rel: string) { return readFileSync(resolve(ROOT, rel), "utf8"); }
-function api(rel: string) { return readFileSync(resolve(API_ROOT, rel), "utf8"); }
 
 // ---------------------------------------------------------------------------
 // #508 — Backend: _fetch_email_peek helper
 // ---------------------------------------------------------------------------
 
 function test508BackendFetchEmailPeekHelper(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(s.includes("_fetch_email_peek"), "main.py must define _fetch_email_peek helper");
   assert(
     s.includes("GMAIL_FETCH_EMAILS"),
@@ -39,7 +38,7 @@ function test508BackendFetchEmailPeekHelper(): void {
 }
 
 function test508BackendPeekEndpoint(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(
     s.includes("/connections/{connection_id}/peek"),
     "main.py must define GET /connections/{connection_id}/peek endpoint",
@@ -55,7 +54,7 @@ function test508BackendPeekEndpoint(): void {
 }
 
 function test508BackendPeekOnlyForActiveGmail(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(
     s.includes("toolkit_slug != \"gmail\"") || s.includes("toolkit_slug == \"gmail\""),
     "_fetch_email_peek must be gmail-specific",
@@ -67,7 +66,7 @@ function test508BackendPeekOnlyForActiveGmail(): void {
 }
 
 function test508BackendDefensiveResponseParsing(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(
     s.includes("response_data") && s.includes("response_dict"),
     "_fetch_email_peek must handle multiple Composio response shapes",

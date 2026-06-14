@@ -7,6 +7,7 @@
  */
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { apiAll } from "./_apisrc";
 
 const ROOT = resolve(__dirname, "..");
 const API_ROOT = resolve(__dirname, "../../api");
@@ -42,14 +43,14 @@ function test561ModelsRunDetailNewFields(): void {
 // ---------------------------------------------------------------------------
 
 function test561MainTranscriptParsing(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(s.includes("_parse_tool_calls_from_transcript"), "main.py must define _parse_tool_calls_from_transcript");
   assert(s.includes("ToolCallEntry"), "main.py must import ToolCallEntry");
   assert(s.includes("ApprovalEntry"), "main.py must import ApprovalEntry");
 }
 
 function test561MainAgentTranscriptSupport(): void {
-  const s = api("main.py");
+  const s = apiAll();
   // _read_transcript_rows must handle agent runners (not just skill)
   assert(s.includes("is_agent"), "_read_transcript_rows must handle agent runner transcripts");
   assert(
@@ -59,7 +60,7 @@ function test561MainAgentTranscriptSupport(): void {
 }
 
 function test561MainGetRunPopulatesFields(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(s.includes("_tool_calls"), "get_run must compute _tool_calls");
   assert(s.includes("_approval_trail"), "get_run must compute _approval_trail");
   assert(s.includes("_can_replay"), "get_run must compute _can_replay");
@@ -69,7 +70,7 @@ function test561MainGetRunPopulatesFields(): void {
 }
 
 function test561MainApprovalQuery(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(
     s.includes("repos.approvals.get_by_run_id(run_id=run_id)"),
     "get_run must call repos.approvals.get_by_run_id",
@@ -131,7 +132,7 @@ function test561CostTotalTokens(): void {
   );
 
   // Backend: main.py extracts usage from transcript
-  const mainPy = api("main.py");
+  const mainPy = apiAll();
   assert(
     mainPy.includes("_extract_total_tokens_from_transcript"),
     "main.py must define _extract_total_tokens_from_transcript",
@@ -164,7 +165,7 @@ function test561CostTotalTokens(): void {
 // ---------------------------------------------------------------------------
 
 function test565BackendActivityEndpoint(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(
     s.includes("/connections/{connection_id}/activity"),
     "main.py must define GET /connections/{connection_id}/activity endpoint",

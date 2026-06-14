@@ -7,6 +7,7 @@
  */
 import { readFileSync } from "fs";
 import { resolve } from "path";
+import { apiAll } from "./_apisrc";
 
 const ROOT = resolve(__dirname, "..");
 const API_ROOT = resolve(__dirname, "../../api");
@@ -23,7 +24,7 @@ function api(rel: string) { return readFileSync(resolve(API_ROOT, rel), "utf8");
 // ---------------------------------------------------------------------------
 
 function test551ConnectionsGateInCreateRun(): void {
-  const s = api("main.py");
+  const s = apiAll();
   assert(
     s.includes("_run_available_conn_slugs") && s.includes("_run_missing_conns"),
     "POST /workers/{id}/runs must check for missing connections",
@@ -86,9 +87,8 @@ function test551SchedulerSkipsRunOnMissingConnections(): void {
 // ---------------------------------------------------------------------------
 
 function test556OverviewSetupIncompleteItems(): void {
-  // #1073 refactor extracted system_overview out of main.py into
-  // routers/overview.py; grep the symbols where they now live.
-  const s = api("routers/overview.py");
+  // #1073 refactor split system_overview out of main.py; grep the whole api tree.
+  const s = apiAll();
   assert(
     s.includes("setup_incomplete"),
     "system_overview must add setup_incomplete attention items",
@@ -100,8 +100,8 @@ function test556OverviewSetupIncompleteItems(): void {
 }
 
 function test556OverviewComputesMissingForAllWorkers(): void {
-  // #1073 refactor: overview helpers moved main.py -> routers/overview.py.
-  const s = api("routers/overview.py");
+  // #1073 refactor: overview helpers moved out of main.py; grep the whole api tree.
+  const s = apiAll();
   assert(
     s.includes("_ov_available_secrets") && s.includes("_ov_available_conns"),
     "system_overview must compute available secrets and connections for attention items",
