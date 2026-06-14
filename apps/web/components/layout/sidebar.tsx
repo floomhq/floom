@@ -150,7 +150,23 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
 // page navigations and refreshes.
 const SIDEBAR_COLLAPSE_KEY = "sidebar-collapsed";
 
-export function Sidebar() {
+export type SidebarAccountFooterRenderProps = {
+  onNavigate?: () => void;
+};
+
+export type SidebarProps = {
+  accountFooter?: React.ReactNode | ((props: SidebarAccountFooterRenderProps) => React.ReactNode);
+};
+
+function renderAccountFooter(
+  accountFooter: SidebarProps["accountFooter"],
+  props: SidebarAccountFooterRenderProps = {}
+) {
+  if (typeof accountFooter === "function") return accountFooter(props);
+  return accountFooter ?? <UserProfileFooter onNavigate={props.onNavigate} />;
+}
+
+export function Sidebar({ accountFooter }: SidebarProps = {}) {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
   // collapsed = icon-rail (62px); expanded = full (228px)
@@ -261,7 +277,7 @@ export function Sidebar() {
           <>
             <SidebarPrimaryActions />
             <NavLinks pathname={pathname} />
-            <UserProfileFooter />
+            {renderAccountFooter(accountFooter)}
           </>
         )}
 
@@ -350,7 +366,7 @@ export function Sidebar() {
               <SidebarPrimaryActions onNavigate={() => setOpen(false)} />
               <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
             </div>
-            <UserProfileFooter onNavigate={() => setOpen(false)} />
+            {renderAccountFooter(accountFooter, { onNavigate: () => setOpen(false) })}
           </aside>
         </div>
       )}
