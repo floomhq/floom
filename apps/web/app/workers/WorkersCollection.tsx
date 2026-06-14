@@ -975,7 +975,7 @@ export default function WorkersCollection({
       // Lock icon: inline after title at baseline (small + muted), never as leading.
       leading: undefined,
       primary: w.visibility === "private"
-        ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" /></span>
+        ? <span className="inline-flex items-center gap-1.5">{w.name}<Lock className="size-3 shrink-0 text-[var(--muted-foreground)]" /></span>
         : w.name,
       secondary: displayBrandCopy(w.description),
       cols: [
@@ -989,7 +989,7 @@ export default function WorkersCollection({
       // V4 SPEC rule 3: no avatar monogram. Lock is small+muted inline after name.
       leading: undefined,
       name: w.visibility === "private"
-        ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3 text-[var(--muted-foreground)] translate-y-px" /></span>
+        ? <span className="inline-flex min-w-0 items-center gap-1.5"><span className="truncate">{w.name}</span><Lock className="size-3 shrink-0 text-[var(--muted-foreground)]" /></span>
         : w.name,
       description: displayBrandCopy(w.description),
       status: workerStatusPill(w),
@@ -1012,7 +1012,7 @@ export default function WorkersCollection({
           // V4 SPEC rule 3: no avatar monogram in detail header. Lock inline after title.
           leading: undefined,
           title: w.visibility === "private"
-            ? <span className="inline-flex items-baseline gap-1.5">{w.name}<Lock className="size-3.5 text-[var(--muted-foreground)] translate-y-px" /></span>
+            ? <span className="inline-flex items-center gap-1.5">{w.name}<Lock className="size-3.5 shrink-0 text-[var(--muted-foreground)]" /></span>
             : w.name,
           actions,
           sub: (
