@@ -4,3 +4,6 @@ email-validator==2.3.0
 psycopg[binary]==3.2.9
 resend==2.30.1
 supabase==2.31.0
+
+# CI: pin to fix collection error on self-hosted runner (0.23.3 Package.obj bug; option added 0.24.0)
+pytest-asyncio==0.24.0
