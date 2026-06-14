@@ -27,6 +27,7 @@ from models import (
     TimeseriesDay,
     WorkerConfig,
     WorkerContract,
+    WorkerNotRunnableError,
     parse_worker_manifest,
     worker_contract_to_worker_config,
 )
@@ -36,6 +37,27 @@ from ._legacy_sqlite import _row_dict, get_db, now_iso
 
 _SECRET_PREFIX = "__WORKEROS_SECRET__"
 _FLOOM_USER_ID = "federico"
+
+# Curated catalog of ship-with-product stock/example workers that EVERY
+# authenticated user may run (attributed to their own scope). Resolved lazily
+# from the engine's main.PUBLIC_STOCK_WORKER_IDS via a DEFERRED import: importing
+# `main` at module load is heavy/circular (main imports db), so we import it the
+# first time the value is needed and cache the result.
+_PUBLIC_STOCK_WORKER_IDS_CACHE: frozenset[str] | None = None
+
+
+def _public_stock_worker_ids() -> frozenset[str]:
+    global _PUBLIC_STOCK_WORKER_IDS_CACHE
+    if _PUBLIC_STOCK_WORKER_IDS_CACHE is None:
+        try:
+            from main import PUBLIC_STOCK_WORKER_IDS  # noqa: PLC0415
+
+            _PUBLIC_STOCK_WORKER_IDS_CACHE = frozenset(PUBLIC_STOCK_WORKER_IDS)
+        except Exception:
+            # Fail closed: if the catalog can't be resolved, no extra worker
+            # becomes runnable-by-all (owner/workspace rules still apply).
+            _PUBLIC_STOCK_WORKER_IDS_CACHE = frozenset()
+    return _PUBLIC_STOCK_WORKER_IDS_CACHE
 
 # Per-request batch caches — same pattern as supabase_repos.py in the cloud.
 # Populated before per-worker loops; consumed by get_last_run() / get_recipe().
@@ -1646,12 +1668,32 @@ class SqliteRunRepository:
             # Non-workspace private workers can only be run by their owner.
             # When a non-owner runs a workspace worker, attribute the run to the
             # worker's owner so existing owner-scoped run queries keep working.
+            #
+            # Runnable-by-attribution carve-out: curated catalog/stock workers
+            # (PUBLIC_STOCK_WORKER_IDS) ship with the product and may be run by
+            # ANY authenticated user. They are seed-owned and `private`, so the
+            # owner/visibility checks below would reject a fresh tenant with
+            # "Worker not found"/"Invalid request". Attribute the run to the
+            # CALLER's scope so the catalog worker runs without leaking another
+            # tenant's authored worker (only this curated set is widened).
             if worker["owner_id"] == user_id:
                 effective_user_id = user_id
             elif worker["visibility"] == "workspace":
                 effective_user_id = worker["owner_id"]
+            elif worker_id in _public_stock_worker_ids():
+                # Curated catalog worker: attribute the run to the worker's owner
+                # (same as the workspace path) so the owner-scoped run JOIN
+                # (w.owner_id) resolves and get()/list() keep working.
+                effective_user_id = worker["owner_id"]
             else:
-                raise ValueError(f"worker {worker_id} does not belong to {user_id}")
+                # Genuine cross-tenant ownership denial. Raise a typed error the
+                # run endpoint catches for a clear 403, instead of the opaque 400
+                # "Invalid request" the global ValueError handler emits. The
+                # message keeps the "does not belong" marker for back-compat with
+                # the endpoint's substring fallback and existing tests.
+                raise WorkerNotRunnableError(
+                    f"worker {worker_id} does not belong to {user_id}"
+                )
             conn.execute(
                 """
                 INSERT INTO runs
