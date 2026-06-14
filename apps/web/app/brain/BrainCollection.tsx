@@ -102,19 +102,37 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
   );
 }
 
+/** Derive a backend-safe slug from any human-typed name.
+ * Backend accepts: ^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$
+ * "Walk Test Folder" → "walk-test-folder"
+ */
+function slugifyContextName(raw: string): string {
+  return (raw || "")
+    .trim()
+    .replace(/[^a-zA-Z0-9._-]+/g, "-")   // spaces/specials → hyphens
+    .toLowerCase()
+    .replace(/^-+|-+$/g, "")             // trim leading/trailing hyphens
+    .slice(0, 63) || "";
+}
+
 function NewFolderForm({ onCreated }: { onCreated: () => void | Promise<void> }) {
   const [name, setName] = useState("");
   const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  const slug = slugifyContextName(name);
+  const showSlugHint = name.trim() !== "" && name.trim() !== slug;
+
   const submit = async () => {
-    const n = name.trim();
-    if (!n) return;
+    if (!slug) return;
     setBusy(true);
+    setError(null);
     try {
-      await api.contexts.create(n);
-      toast.success(`Created ${n}`);
+      await api.contexts.create(slug);
+      toast.success(`Created "${slug}"`);
       await onCreated();
-    } catch {
-      toast.error("Could not create the folder.");
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create the folder.");
     } finally {
       setBusy(false);
     }
@@ -127,13 +145,23 @@ function NewFolderForm({ onCreated }: { onCreated: () => void | Promise<void> })
         style={{ maxWidth: "none" }}
         autoFocus
         value={name}
-        onChange={(e) => setName(e.target.value)}
+        onChange={(e) => { setName(e.target.value); setError(null); }}
         onKeyDown={(e) => {
           if (e.key === "Enter") void submit();
         }}
-        placeholder="e.g. Company facts"
+        placeholder="e.g. company-facts or Walk Test Folder"
       />
-      <button type="button" className="c-addbtn" disabled={busy || !name.trim()} onClick={() => void submit()}>
+      {showSlugHint && (
+        <div style={{ fontSize: 11.5, color: "var(--ink-soft)" }}>
+          Saved as: <span style={{ fontFamily: "var(--font-mono)", color: "var(--ink)" }}>{slug}</span>
+        </div>
+      )}
+      {error && (
+        <div style={{ fontSize: 12, color: "var(--red, #c0392b)", padding: "6px 10px", background: "var(--bg-2)", borderRadius: 8 }}>
+          {error}
+        </div>
+      )}
+      <button type="button" className="c-addbtn" disabled={busy || !slug} onClick={() => void submit()}>
         {busy ? "Creating…" : "Create folder"}
       </button>
     </div>
