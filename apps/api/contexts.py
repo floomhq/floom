@@ -12,6 +12,7 @@ import mimetypes
 import os
 import re
 import hashlib
+import shutil
 from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
@@ -574,6 +575,48 @@ def iter_context_files(root: Path) -> Iterable[Path]:
     )
 
 
+def merge_context_tree(
+    source_dir: Path,
+    target_dir: Path,
+    writeback_paths: list[str] | None = None,
+) -> None:
+    """Persist a staged context tree into the canonical context directory.
+
+    ``writeback_paths is None`` preserves the legacy whole-pack behavior.
+    A list value limits writes/deletes to those declared relative paths.
+    """
+    if writeback_paths is None:
+        if target_dir.exists():
+            shutil.rmtree(target_dir)
+        os.replace(source_dir, target_dir)
+        return
+
+    target_dir.mkdir(parents=True, exist_ok=True)
+    for raw_rel in writeback_paths:
+        rel = normalize_context_file_path(raw_rel)
+        source = (source_dir / rel).resolve()
+        destination = (target_dir / rel).resolve()
+        try:
+            source.relative_to(source_dir.resolve())
+            destination.relative_to(target_dir.resolve())
+        except ValueError as exc:
+            raise ValueError(f"Path traversal attempt: {rel}") from exc
+
+        if destination.exists():
+            if destination.is_dir():
+                shutil.rmtree(destination)
+            else:
+                destination.unlink()
+
+        if not source.exists():
+            continue
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        if source.is_dir():
+            shutil.copytree(source, destination, symlinks=False)
+        elif source.is_file() and not source.is_symlink():
+            destination.write_bytes(source.read_bytes())
+
+
 _EXT_DISPLAY_TYPE: dict[str, str] = {
     ".md": "Markdown",
     ".mdx": "Markdown",
@@ -660,16 +703,34 @@ def context_updated_at(root: Path) -> str | None:
 
 def normalize_context_mount(raw: Any) -> dict[str, Any]:
     if isinstance(raw, str):
-        return {"name": validate_context_name(raw), "writeable": False, "source": "local"}
+        return {
+            "name": validate_context_name(raw),
+            "writeable": False,
+            "source": "local",
+            "writeback_paths": None,
+        }
     if isinstance(raw, dict):
         name = validate_context_name(str(raw.get("name") or ""))
         source = str(raw.get("source") or "local").strip()
         if source != "local" and not source.startswith("git+"):
             raise ValueError("context source must be 'local' or start with 'git+'")
+        writeback_paths = None
+        if "writeback_paths" in raw and raw.get("writeback_paths") is not None:
+            raw_paths = raw.get("writeback_paths")
+            if not isinstance(raw_paths, list):
+                raise ValueError("context writeback_paths must be a list of file or folder paths")
+            writeback_paths = []
+            seen: set[str] = set()
+            for raw_path in raw_paths:
+                rel = normalize_context_file_path(str(raw_path or ""))
+                if rel not in seen:
+                    seen.add(rel)
+                    writeback_paths.append(rel)
         return {
             "name": name,
             "writeable": bool(raw.get("writeable", raw.get("writable", False))),
             "source": source,
+            "writeback_paths": writeback_paths,
         }
     if hasattr(raw, "model_dump"):
         return normalize_context_mount(raw.model_dump())

@@ -26,7 +26,7 @@ from typing import Any, Callable, Dict, Optional
 from contexts import (
     context_dir,
     context_scope_for_user,
-    iter_context_files,
+    merge_context_tree,
     normalize_context_mount,
     use_context_scope,
 )
@@ -799,23 +799,16 @@ class AgentDriver(SandboxDriver):
                     continue
 
                 try:
-                    dest_root = context_dir(name)
-                    dest_root.mkdir(parents=True, exist_ok=True)
-                    # Mirror the staged tree onto the pack: write current staged
-                    # files (covers edits + new files) then prune pack files the
-                    # run deleted, so the persisted state matches the sandbox.
-                    staged_rels: set[str] = set()
-                    for fpath in iter_context_files(staged_pack):
-                        rel = fpath.relative_to(staged_pack).as_posix()
-                        staged_rels.add(rel)
-                        target = _safe_path(dest_root, rel)
-                        target.parent.mkdir(parents=True, exist_ok=True)
-                        target.write_bytes(fpath.read_bytes())
-                    for existing in iter_context_files(dest_root):
-                        rel = existing.relative_to(dest_root).as_posix()
-                        if rel not in staged_rels:
-                            existing.unlink(missing_ok=True)
-                    log_fn(f"[agent] Persisted writeable context {name!r}", "info")
+                    writeback_paths = context.get("writeback_paths")
+                    merge_context_tree(staged_pack, context_dir(name), writeback_paths)
+                    if writeback_paths is None:
+                        log_fn(f"[agent] Persisted writeable context {name!r}", "info")
+                    else:
+                        log_fn(
+                            f"[agent] Persisted writeable context {name!r} "
+                            f"paths: {', '.join(writeback_paths) or '(none)'}",
+                            "info",
+                        )
                 except Exception as exc:
                     log_fn(f"[agent] Failed to persist writeable context {name!r}: {exc}", "warning")
 

@@ -20,7 +20,14 @@ from typing import Any, Callable, Dict, Optional
 from .base import SandboxDriver
 from .memory_context import ensure_memory_context_pack
 from models import WorkerConfig, WorkerResult
-from contexts import CONTEXTS_DIR, context_dir, context_scope_for_user, normalize_context_mount, use_context_scope
+from contexts import (
+    CONTEXTS_DIR,
+    context_dir,
+    context_scope_for_user,
+    merge_context_tree,
+    normalize_context_mount,
+    use_context_scope,
+)
 from runner_utils import ARTIFACTS_DIR
 from worker_registry import WORKERS_DIR
 
@@ -512,7 +519,11 @@ def _safe_context_tar_member(member_name: str) -> PurePosixPath:
     return path
 
 
-def _extract_context_tar(raw_tar: bytes, target_dir: Path) -> None:
+def _extract_context_tar(
+    raw_tar: bytes,
+    target_dir: Path,
+    writeback_paths: list[str] | None = None,
+) -> None:
     tmp_dir = CONTEXTS_DIR / f".{target_dir.name}.tmp.{os.getpid()}.{threading.get_ident()}"
     if tmp_dir.exists():
         shutil.rmtree(tmp_dir)
@@ -539,9 +550,7 @@ def _extract_context_tar(raw_tar: bytes, target_dir: Path) -> None:
                     continue
                 destination.parent.mkdir(parents=True, exist_ok=True)
                 destination.write_bytes(extracted.read())
-        if target_dir.exists():
-            shutil.rmtree(target_dir)
-        os.replace(tmp_dir, target_dir)
+        merge_context_tree(tmp_dir, target_dir, writeback_paths)
     finally:
         if tmp_dir.exists():
             shutil.rmtree(tmp_dir, ignore_errors=True)
@@ -1165,8 +1174,16 @@ class E2BSandboxDriver(SandboxDriver):
                     continue
                 try:
                     raw_tar = sandbox.files.read(tar_path, format="bytes", request_timeout=120)
-                    _extract_context_tar(bytes(raw_tar), context_dir(name))
-                    log_fn(f"[e2b] Persisted writeable context {name!r}", "info")
+                    writeback_paths = context.get("writeback_paths")
+                    _extract_context_tar(bytes(raw_tar), context_dir(name), writeback_paths)
+                    if writeback_paths is None:
+                        log_fn(f"[e2b] Persisted writeable context {name!r}", "info")
+                    else:
+                        log_fn(
+                            f"[e2b] Persisted writeable context {name!r} "
+                            f"paths: {', '.join(writeback_paths) or '(none)'}",
+                            "info",
+                        )
                 except Exception as exc:
                     log_fn(f"[e2b] Failed to persist writeable context {name!r}: {exc}", "warning")
 

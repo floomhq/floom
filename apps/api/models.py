@@ -757,6 +757,7 @@ class WorkerContextMount(BaseModel):
     name: str
     writeable: bool = False
     source: str = "local"
+    writeback_paths: Optional[List[str]] = None
 
     @field_validator("name")
     @classmethod
@@ -775,6 +776,23 @@ class WorkerContextMount(BaseModel):
         if stripped != "local" and not stripped.startswith("git+"):
             raise ValueError("context source must be 'local' or start with 'git+'")
         return stripped
+
+    @field_validator("writeback_paths")
+    @classmethod
+    def validate_writeback_paths(cls, value: Optional[List[str]]) -> Optional[List[str]]:
+        if value is None:
+            return None
+        normalized: List[str] = []
+        seen: set[str] = set()
+        for raw_path in value:
+            text = str(raw_path or "").replace("\\", "/").strip("/")
+            path = "/".join(part for part in text.split("/") if part)
+            if not path or any(part in {"", ".", ".."} for part in path.split("/")):
+                raise ValueError("context writeback_paths entries must be relative file or folder paths")
+            if path not in seen:
+                seen.add(path)
+                normalized.append(path)
+        return normalized
 
 
 WorkerContextMountSpec = Union[str, WorkerContextMount]
