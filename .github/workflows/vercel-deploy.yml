@@ -52,4 +52,27 @@ jobs:
           VERCEL_TOKEN: ${{ secrets.VERCEL_TOKEN }}
         run: |
           unset GITHUB_ACTIONS GITHUB_SHA GITHUB_REF GITHUB_REPOSITORY GITHUB_ACTOR GITHUB_EVENT_NAME GITHUB_HEAD_REF GITHUB_BASE_REF
-          npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN"
+          # workers.floom.dev is a plain production domain on this project, so
+          # Vercel auto-promotes this prod deploy to it once it reaches READY.
+          npx --yes vercel@50.22.1 deploy --prod --yes --token "$VERCEL_TOKEN" \
+            | tee deploy-url.txt
+          DEPLOY_URL="$(grep -Eo 'https://[a-zA-Z0-9.-]+\.vercel\.app' deploy-url.txt | tail -1)"
+          echo "DEPLOY_URL=$DEPLOY_URL" >> "$GITHUB_ENV"
+          echo "Deployed: $DEPLOY_URL"
+
+      - name: Verify workers.floom.dev serves the deploy
+        run: |
+          set -uo pipefail
+          # Catch the historical "sticky alias" gap where a deploy is READY but the
+          # custom domain didn't move. Poll the apex until it returns 2xx/3xx.
+          for i in $(seq 1 30); do
+            code="$(curl -sS -o /dev/null -w '%{http_code}' --max-time 20 https://workers.floom.dev/ || echo 000)"
+            echo "attempt $i: workers.floom.dev/ -> $code"
+            if [[ "$code" =~ ^[23] ]]; then
+              echo "workers.floom.dev healthy."
+              exit 0
+            fi
+            sleep 10
+          done
+          echo "::error::workers.floom.dev did not return 2xx/3xx after deploy."
+          exit 1
