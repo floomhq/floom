@@ -711,13 +711,21 @@ async def cloud_update_worker_files(worker_id: str, request: Request) -> Any:
         {f["path"]: f["content"] for f in files_list if "path" in f and "content" in f}
     )
 
-    try:
-        import yaml as _yaml
-        manifest = _yaml.safe_load(files.get("worker.yml", ""))
-        if not isinstance(manifest, dict):
-            raise ValueError("worker.yml did not parse to a dict")
-    except Exception as exc:
-        raise HTTPException(status_code=400, detail=f"Invalid worker.yml: {exc}") from exc
+    # #272: only validate worker.yml when this edit actually includes it.
+    # A partial edit (e.g. only run.py) must NOT be rejected for a "missing"
+    # worker.yml — the engine's update_worker_files preserves existing files
+    # on disk. Previously safe_load("") -> None -> "did not parse to a dict"
+    # 400'd every partial edit and the change silently never applied.
+    if "worker.yml" in files:
+        try:
+            import yaml as _yaml
+            manifest = _yaml.safe_load(files["worker.yml"])
+            if not isinstance(manifest, dict):
+                raise ValueError("worker.yml did not parse to a dict")
+        except HTTPException:
+            raise
+        except Exception as exc:
+            raise HTTPException(status_code=400, detail=f"Invalid worker.yml: {exc}") from exc
 
     repos = engine_main.get_repositories()
     from auth.context import AuthContext as _AuthContext
@@ -745,8 +753,13 @@ async def cloud_update_worker_files(worker_id: str, request: Request) -> Any:
         engine_main.update_worker_files, worker_id, payload, request, engine_auth, repos
     )
 
-    # Persist file contents to Supabase — source of truth in cloud.
-    _cloud_persist_worker_files(worker_id, files, repos)
+    # Persist file contents to Supabase — source of truth in cloud. #272: use
+    # the FULL post-edit file set (the engine preserved the existing files on
+    # disk), so a partial edit doesn't overwrite _files with only the submitted
+    # subset and drop the rest.
+    from apps.api.db.supabase_repos import _read_worker_files_from_disk
+    full_files = _read_worker_files_from_disk(worker_id) or files
+    _cloud_persist_worker_files(worker_id, full_files, repos)
     return result
 
 
