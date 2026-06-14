@@ -9673,6 +9673,14 @@ def update_worker(
     return detail
 
 
+# Stable module-level alias for the PATCH (instance-settings) update handler.
+# The plain name ``update_worker`` is reassigned later in this module by the PUT
+# full-rewrite handler (WorkerCreateRequest-based), so any in-process caller that
+# wants the PATCH semantics (MCP "workers.update": trigger/cron/input_values)
+# must reference this alias instead.
+update_worker_instance = update_worker
+
+
 def _set_worker_enabled(
     worker_id: str,
     *,
@@ -18803,6 +18811,18 @@ def _mcp_error(request_id: Any, code: int, message: str) -> Dict[str, Any]:
     }
 
 
+def _mcp_internal_error(request_id: Any, exc: BaseException, where: str) -> Dict[str, Any]:
+    """M-04: mirror the #836 hardening for the /api/mcp remote MCP proxy.
+
+    An unexpected exception used to be serialized verbatim into the JSON-RPC
+    error message (``... failed: {exc}``), leaking SQLSTATE codes, bound query
+    values, column types, and ``float infinity`` internals to external MCP
+    clients. Log the detail server-side; return a generic message to the client.
+    """
+    logger.exception("MCP remote (%s) unhandled exception", where)
+    return _mcp_error(request_id, -32603, "Internal server error")
+
+
 def _mcp_tool_error(message: str) -> Dict[str, Any]:
     return {
         "content": [{"type": "text", "text": message}],
@@ -19039,6 +19059,25 @@ def _mcp_arg(arguments: Dict[str, Any], name: str) -> str:
     return value
 
 
+def _internal_asgi_request() -> Request:
+    """Build a minimal in-process Request for direct (non-HTTP) calls into
+    route functions that require a ``request`` positional (worker write paths).
+
+    The host is set to ``asgi`` so ``_require_worker_write_workspace_context``
+    short-circuits — these calls originate from already-authenticated internal
+    dispatchers (the MCP tool layer), not untrusted HTTP clients, exactly like
+    the in-process ``_api_call`` proxy path.
+    """
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/",
+        "query_string": b"",
+        "headers": [(b"host", b"asgi")],
+    }
+    return Request(scope)
+
+
 async def _mcp_call_workspace_agent(arguments: Dict[str, Any]) -> Dict[str, Any]:
     message = str(arguments.get("message") or "").strip()
     if not message:
@@ -19081,7 +19120,7 @@ def _mcp_call_workers_create(arguments: Dict[str, Any], auth: AuthContext, repos
         run_py=_mcp_arg(arguments, "run_py"),
         skill_md=arguments.get("skill_md"),
     )
-    data = create_worker(payload, auth=auth, repos=repos)
+    data = create_worker(payload, _internal_asgi_request(), auth=auth, repos=repos)
     return _mcp_call_result(data, "Worker created.")
 
 
@@ -19089,7 +19128,13 @@ def _mcp_call_workers_update(arguments: Dict[str, Any], auth: AuthContext, repos
     worker_id = _mcp_arg(arguments, "id")
     update_args = {k: v for k, v in arguments.items() if k != "id"}
     payload = WorkerUpdateRequest(**update_args)
-    data = update_worker(worker_id, payload, auth=auth, repos=repos)
+    # NOTE: ``update_worker`` (the module name) is shadowed by the PUT
+    # full-rewrite handler that expects WorkerCreateRequest.worker_yml. The
+    # MCP "workers.update" contract is instance-settings (trigger/cron/inputs),
+    # which is the PATCH handler — bound here as ``update_worker_instance``.
+    data = update_worker_instance(
+        worker_id, payload, _internal_asgi_request(), auth=auth, repos=repos
+    )
     return _mcp_call_result(data, "Worker updated.")
 
 
@@ -19380,7 +19425,7 @@ async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Option
     try:
         return _mcp_result(request_id, await _call_workeros_remote_mcp_tool(tool_name, arguments))
     except Exception as exc:
-        return _mcp_error(request_id, -32603, f"Workeros MCP tool call failed: {exc}")
+        return _mcp_internal_error(request_id, exc, f"tools/call:{tool_name or 'unknown'}")
 
 
 async def _workspace_agent_mcp_post(request: Request) -> Response:
@@ -19390,7 +19435,14 @@ async def _workspace_agent_mcp_post(request: Request) -> Response:
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
     if not static_tokens and deploy != "cloud":
         raise HTTPException(status_code=503, detail="No Workeros MCP/API token is configured")
-    if _verify_workspace_agent_mcp_auth(request):
+    # M-05: on CLOUD the static WORKSPACE_AGENT_MCP_TOKEN must NOT short-circuit
+    # to the global bootstrap ("federico") admin context — that token carries no
+    # workspace binding, so accepting it here granted cross-tenant admin to any
+    # caller holding the single cloud-wide secret. Cloud callers (Langdock/Emily,
+    # Claude Code, Cursor) MUST authenticate with a per-tenant PAT, which the
+    # cloud auth path below scopes to the owning workspace. The static token
+    # remains valid only on OSS/local single-tenant deployments.
+    if deploy != "cloud" and _verify_workspace_agent_mcp_auth(request):
         _workspace_agent_mcp_auth_context()
     else:
         cloud_ctx = await _workspace_agent_mcp_cloud_auth_context(request)
@@ -19412,7 +19464,7 @@ async def _workspace_agent_mcp_post(request: Request) -> Response:
             try:
                 response = await _handle_workspace_agent_mcp_message(item)
             except Exception as exc:
-                response = _mcp_error(item.get("id"), -32603, f"Internal error: {exc}")
+                response = _mcp_internal_error(item.get("id"), exc, "batch-item")
             if response is not None:
                 responses.append(response)
         if not responses:
@@ -19424,7 +19476,7 @@ async def _workspace_agent_mcp_post(request: Request) -> Response:
     try:
         response = await _handle_workspace_agent_mcp_message(payload)
     except Exception as exc:
-        response = _mcp_error(payload.get("id"), -32603, f"Internal error: {exc}")
+        response = _mcp_internal_error(payload.get("id"), exc, "single")
     if response is None:
         return Response(status_code=204)
     return JSONResponse(response)
@@ -22381,6 +22433,12 @@ _API_CALL_AUTH_HEADERS = frozenset({
     "authorization",
     "cookie",
     "x-workeros-workspace",
+    # M-03: under WORKEROS_ENABLE_USER_HEADER_SCOPE=1 the shared-secret/member
+    # auth providers resolve the acting user from x-floom-user and FAIL CLOSED
+    # when it is absent. The in-process proxy re-runs auth on every sub-request,
+    # so it must forward x-floom-user too — otherwise every proxied MCP tool call
+    # 401s with "x-floom-user header required".
+    "x-floom-user",
 })
 
 
