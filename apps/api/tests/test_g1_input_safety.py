@@ -81,8 +81,12 @@ def _zip_bytes(files: dict[str, bytes]) -> bytes:
 class TestCandidateOutputPath:
     def _run_service(self, monkeypatch, tmp_path):
         import run_service
+        from services import run_outputs
 
+        # _candidate_output_path / _safe_artifact_path live in services.run_outputs
+        # and resolve ARTIFACTS_DIR in that module's namespace; patch it there.
         monkeypatch.setattr(run_service, "ARTIFACTS_DIR", tmp_path / "artifacts")
+        monkeypatch.setattr(run_outputs, "ARTIFACTS_DIR", tmp_path / "artifacts")
         return run_service
 
     def test_absolute_declared_path_rejected(self, monkeypatch, tmp_path):
