@@ -276,7 +276,7 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
       <p className="text-xs text-muted-foreground">
         Auto-mapped <span className="font-medium">{autoMappedCount} of {requiredColumns.length}</span> columns
         {autoMappedCount < requiredColumns.length && (
-          <span className="text-amber-600"> ({requiredColumns.length - autoMappedCount} need manual selection)</span>
+          <span className="text-[var(--ink-soft)]"> ({requiredColumns.length - autoMappedCount} need manual selection)</span>
         )}
       </p>
 
@@ -307,7 +307,7 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
                 {mapping[col] ? (
                   <CheckCircle2 className="w-3.5 h-3.5 text-emerald-500 shrink-0" />
                 ) : (
-                  <AlertCircle className="w-3.5 h-3.5 text-amber-400 shrink-0" />
+                  <AlertCircle className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
                 )}
               </div>
             </div>

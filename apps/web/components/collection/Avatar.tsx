@@ -1,5 +1,5 @@
 /** Seeded avatar (initials + deterministic hue) for items without a brand logo. */
-const PALETTE = ["#3E7BD0", "#8a6d1f", "#246b45", "#a33223", "#5a4fb0", "#0f7a86", "#9a5a1c"];
+const PALETTE = ["#3E6FE0", "#4B5563", "#2563EB", "#64748B", "#5B8DEF", "#0F766E", "#334155"];
 
 function seedColor(s: string): string {
   let h = 0;

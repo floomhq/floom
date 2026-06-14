@@ -5,10 +5,10 @@
   -->
   <style>
     rect.bg { fill: #16171A; }
-    path.mark { fill: #FAFAF7; }
+    path.mark { fill: #FFFFFF; }
     @media (prefers-color-scheme: light) {
       rect.bg { fill: #16171A; }
-      path.mark { fill: #FAFAF7; }
+      path.mark { fill: #FFFFFF; }
     }
   </style>
   <rect class="bg" width="100" height="100" rx="22"/>

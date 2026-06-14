@@ -1145,9 +1145,9 @@ function SecretWarningBanner({
   return (
     <div
       role="alert"
-      className="mx-3 mt-3 flex items-start gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-amber-500/10 px-4 py-3 text-sm"
+      className="mx-3 mt-3 flex items-start gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] px-4 py-3 text-sm"
     >
-      <AlertTriangle className="size-4 shrink-0 text-amber-500 mt-0.5" />
+      <AlertTriangle className="size-4 shrink-0 text-[var(--negative)] mt-0.5" />
       <div className="min-w-0 flex-1 space-y-1.5">
         <p className="font-medium text-[var(--ink)]">
           This file looks like it contains a live API key or secret.
@@ -1370,7 +1370,7 @@ function PackDetailPane({
                 }}
                 className={`p-1 rounded-[var(--radius-button)] transition-colors shrink-0 ${
                   (detail.sensitive ?? true)
-                    ? "text-amber-500 hover:text-amber-600 bg-amber-50 hover:bg-amber-100"
+                    ? "text-[var(--negative)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] hover:bg-[color-mix(in_srgb,var(--negative)_14%,transparent)]"
                     : "text-muted-foreground hover:bg-muted"
                 }`}
               >
@@ -1652,7 +1652,7 @@ function FolderColumn({
                       <span className="block truncate text-sm font-mono">{entry.name}</span>
                       {entry.file.has_secret_warning && (
                         <AlertTriangle
-                          className="size-3.5 shrink-0 text-amber-500"
+                          className="size-3.5 shrink-0 text-[var(--negative)]"
                           aria-label="Possible secret detected"
                         />
                       )}
