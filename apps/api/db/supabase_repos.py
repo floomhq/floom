@@ -321,6 +321,7 @@ def _worker_record_from_rows(
         "enabled": bool(worker_row.get("enabled", True)),
         "created_at": worker_row.get("created_at"),
         "owner_id": worker_row.get("user_id"),
+        "workspace_id": worker_row.get("workspace_id"),
         "composio_trigger_id": worker_row.get("composio_trigger_id"),
         "composio_event": worker_row.get("composio_event"),
         "visibility": worker_row.get("visibility") or "private",
@@ -2656,11 +2657,15 @@ class SupabaseCliAuthRepository(_BaseSupabaseRepository):
         return self._normalize_row(row) if row else None
 
     def consume(self, code: str) -> dict[str, Any] | None:
-        record = self.get_by_device_code(code)
-        if record is None:
-            return None
-        self.delete(device_code=code)
-        return record
+        response = (
+            self._client.table("cli_auth_devices")
+            .delete()
+            .eq("device_code", code)
+            .eq("status", "approved")
+            .execute()
+        )
+        row = _first_row(response)
+        return self._normalize_row(row) if row else None
 
     def list(self, *, user_id: str) -> list[dict[str, Any]]:
         response = (
@@ -2726,6 +2731,42 @@ class SupabaseCliAuthRepository(_BaseSupabaseRepository):
                 device_code,
             ).execute()
         return self.get_by_device_code(device_code)
+
+    def approve_pending(
+        self,
+        *,
+        device_code: str,
+        user_id: str,
+        secret: str,
+        approved_at: float,
+    ) -> dict[str, Any] | None:
+        payload = {
+            "user_id": user_id,
+            "status": "approved",
+            "secret": secret,
+            "approved_at": approved_at,
+        }
+        response = (
+            self._client.table("cli_auth_devices")
+            .update(payload)
+            .eq("device_code", device_code)
+            .eq("status", "pending")
+            .or_(f"user_id.is.null,user_id.eq.{user_id}")
+            .execute()
+        )
+        row = _first_row(response)
+        return self._normalize_row(row) if row else None
+
+    def deny_pending(self, *, device_code: str) -> dict[str, Any] | None:
+        response = (
+            self._client.table("cli_auth_devices")
+            .update({"status": "denied", "secret": None})
+            .eq("device_code", device_code)
+            .eq("status", "pending")
+            .execute()
+        )
+        row = _first_row(response)
+        return self._normalize_row(row) if row else None
 
     def delete(self, *, device_code: str) -> bool:
         response = (

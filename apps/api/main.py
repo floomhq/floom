@@ -130,6 +130,7 @@ import re as _re
 # engine app is mounted at each (see app.mount calls below), so guarding only
 # /api/workers left bare /workers/{id} as an isolation bypass.
 _RE_WORKER_PATH = _re.compile(r"^(?:/api/v1|/v1|/api)?/workers/([^/]+)(/.*)?$")
+_CLOUD_CLONE_TOKEN_RE = _re.compile(r"^wct_[A-Za-z0-9_-]{32,}$")
 
 _CLOUD_RATE_LIMIT_RULES: list[tuple[tuple[str, ...] | None, _re.Pattern[str], int, float]] = [
     (None, _re.compile(r"^/auth/(?:password-login|password-signup|login|fragment-session|cli-exchange|cli-approve|cli-deny)$"), 5, 60.0),
@@ -140,6 +141,43 @@ _CLOUD_RATE_LIMIT_RULES: list[tuple[tuple[str, ...] | None, _re.Pattern[str], in
 ]
 _cloud_rate_lock = _threading.Lock()
 _cloud_rate_buckets: dict[str, list[float]] = {}
+
+
+def _is_valid_cloud_clone_token(token: str) -> bool:
+    return bool(_CLOUD_CLONE_TOKEN_RE.fullmatch((token or "").strip()))
+
+
+def _audit_public_clone_link_use(*, source: dict[str, Any], actor_user_id: str) -> None:
+    source_worker_id = str(source.get("id") or "")
+    source_owner_id = str(source.get("owner_id") or source.get("user_id") or "")
+    source_workspace_id = str(source.get("workspace_id") or "")
+    if (
+        not source_worker_id
+        or not source_owner_id
+        or not source_workspace_id
+        or source_owner_id == str(actor_user_id)
+    ):
+        return
+    try:
+        from apps.api.config import get_supabase_service_client
+
+        get_supabase_service_client().table("admin_access_log").insert(
+            {
+                "workspace_id": source_workspace_id,
+                "admin_user_id": str(actor_user_id),
+                "target_user_id": source_owner_id,
+                "resource_type": "worker_clone_link",
+                "resource_id": source_worker_id,
+            }
+        ).execute()
+    except Exception:
+        import logging as _logging
+
+        _logging.getLogger("workeros.cloud").warning(
+            "Failed to write worker_clone_link audit row for %s",
+            source_worker_id,
+            exc_info=True,
+        )
 
 
 def _cloud_client_ip(request: Request) -> str:
@@ -1094,6 +1132,9 @@ async def cloud_clone_worker(token: str, request: Request) -> Any:
     except Exception:
         raise HTTPException(status_code=401, detail="Authentication failed")
 
+    if not _is_valid_cloud_clone_token(token):
+        raise HTTPException(status_code=404, detail="clone token not found")
+
     token_hash = _hashlib.sha256(token.encode()).hexdigest()
     repos = engine_main.get_repositories()
     source = repos.workers.get_by_clone_token(token_hash=token_hash)
@@ -1131,6 +1172,8 @@ async def cloud_clone_worker(token: str, request: Request) -> Any:
 
     if not files or "worker.yml" not in files:
         raise HTTPException(status_code=422, detail="source worker has no files to clone")
+
+    _audit_public_clone_link_use(source=source, actor_user_id=str(auth.user_id))
 
     DraftFile = engine_main.DraftFile
     draft_files = [DraftFile(path=name, content=content) for name, content in files.items()]

@@ -7,6 +7,7 @@ import logging
 import os
 import re
 import secrets
+import threading
 import time
 from functools import lru_cache
 from types import SimpleNamespace
@@ -52,6 +53,10 @@ _SESSION_COOKIE_NAME = "workeros_cloud_session"
 _OAUTH_VERIFIER_COOKIE_NAME = "workeros_cloud_pkce_verifier"
 _OAUTH_COOKIE_MAX_AGE = 600
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
+_CLI_APPROVE_DENY_RATE_LIMIT = 5
+_CLI_APPROVE_DENY_RATE_WINDOW_SECONDS = 60.0
+_cli_approve_deny_rate_lock = threading.Lock()
+_cli_approve_deny_rate_buckets: dict[str, list[float]] = {}
 
 
 class CliExchangeRequest(BaseModel):
@@ -146,6 +151,41 @@ def _normalize_email(value: str | None) -> str:
     if not normalized or not _EMAIL_RE.match(normalized):
         raise HTTPException(status_code=400, detail="valid email is required")
     return normalized
+
+
+def _trusted_client_ip(request: Request) -> str:
+    cf_ip = (request.headers.get("cf-connecting-ip") or "").strip()
+    if cf_ip:
+        return cf_ip
+    real_ip = (request.headers.get("x-real-ip") or "").strip()
+    if real_ip:
+        return real_ip
+    return request.client.host if request.client else "unknown"
+
+
+def _enforce_cli_approve_deny_rate_limit(*, request: Request, user_code: str) -> None:
+    normalized_code = (user_code or "").strip().upper()
+    ip = _trusted_client_ip(request)
+    key = f"{ip}:{normalized_code}"
+    now = time.monotonic()
+    with _cli_approve_deny_rate_lock:
+        bucket = [
+            ts
+            for ts in _cli_approve_deny_rate_buckets.get(key, [])
+            if ts > now - _CLI_APPROVE_DENY_RATE_WINDOW_SECONDS
+        ]
+        if len(bucket) >= _CLI_APPROVE_DENY_RATE_LIMIT:
+            retry_after = max(
+                1,
+                int((bucket[0] + _CLI_APPROVE_DENY_RATE_WINDOW_SECONDS) - now),
+            )
+            raise HTTPException(
+                status_code=429,
+                detail="Too many CLI auth approval attempts",
+                headers={"Retry-After": str(retry_after)},
+            )
+        bucket.append(now)
+        _cli_approve_deny_rate_buckets[key] = bucket
 
 
 def _frontend_redirect(next_path: str) -> str:
@@ -969,6 +1009,7 @@ def cli_approve(payload: CliApproveRequest, request: Request):
     /auth/cli-exchange poll.
     """
     user_id, refresh_token = _session_user(request)
+    _enforce_cli_approve_deny_rate_limit(request=request, user_code=payload.user_code)
     repos = get_repositories()
     now_ts = time.time()
     repos.cli_auth.prune_expired(now_ts=now_ts)
@@ -979,27 +1020,16 @@ def cli_approve(payload: CliApproveRequest, request: Request):
         raise HTTPException(status_code=404, detail="User code not found")
     if str(record.get("status") or "").lower() != "pending":
         raise HTTPException(status_code=409, detail="Device code is no longer pending")
-    update_fields: dict[str, Any] = {
-        "status": "approved",
-        "secret": refresh_token,
-        "approved_at": now_ts,
-    }
-    # Persist the claim. The engine's repo `update()` doesn't accept user_id;
-    # rewrite the row via a service-role client when we need to claim it from
-    # the OSS placeholder.
-    #
-    # SECURITY (F3): `user_id` is now derived from a verified JWT `sub`, so it
-    # always references a real Supabase auth user — the forged-UUID FK-violation
-    # path is closed at the root. Defensively, any residual DB/FK error on the
-    # claim write is surfaced as a clean 4xx (not a 500) so a malformed claim can
-    # never leak an internal error.
+    # SECURITY: claim and approve in one conditional repository write. The
+    # write is guarded by status='pending' so two browser sessions racing the
+    # same user_code cannot both stamp a refresh_token; the loser gets 409.
     try:
-        if str(record.get("user_id") or "") != user_id:
-            from apps.api.config import new_supabase_service_client
-            new_supabase_service_client().table("cli_auth_devices").update(
-                {"user_id": user_id}
-            ).eq("device_code", record["device_code"]).execute()
-        repos.cli_auth.update(device_code=record["device_code"], **update_fields)
+        approved = repos.cli_auth.approve_pending(
+            device_code=record["device_code"],
+            user_id=user_id,
+            secret=refresh_token,
+            approved_at=now_ts,
+        )
     except HTTPException:
         raise
     except Exception as exc:
@@ -1009,12 +1039,15 @@ def cli_approve(payload: CliApproveRequest, request: Request):
             _gotrue_detail(exc),
         )
         raise HTTPException(status_code=400, detail="Could not approve device") from exc
+    if approved is None:
+        raise HTTPException(status_code=409, detail="Device code is no longer pending")
     return {"ok": True, "client_name": record.get("client_name") or "workeros-cli"}
 
 
 @router.post("/cli-deny")
 def cli_deny(payload: CliDenyRequest, request: Request):
     user_id, _refresh = _session_user(request)
+    _enforce_cli_approve_deny_rate_limit(request=request, user_code=payload.user_code)
     repos = get_repositories()
     now_ts = time.time()
     repos.cli_auth.prune_expired(now_ts=now_ts)
@@ -1025,11 +1058,9 @@ def cli_deny(payload: CliDenyRequest, request: Request):
         raise HTTPException(status_code=404, detail="User code not found")
     if str(record.get("status") or "").lower() != "pending":
         raise HTTPException(status_code=409, detail="Device code is no longer pending")
-    repos.cli_auth.update(
-        device_code=record["device_code"],
-        status="denied",
-        secret=None,
-    )
+    denied = repos.cli_auth.deny_pending(device_code=record["device_code"])
+    if denied is None:
+        raise HTTPException(status_code=409, detail="Device code is no longer pending")
     return {"ok": True, "client_name": record.get("client_name") or "workeros-cli"}
 
 

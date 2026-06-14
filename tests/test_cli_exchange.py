@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import threading
 from types import SimpleNamespace
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import apps.api.routes.auth as auth_routes
+from apps.api.db.supabase_repos import SupabaseCliAuthRepository
 
 
 class _FakeCliAuth:
@@ -94,3 +96,91 @@ def test_cli_exchange_rejects_expired_code(monkeypatch):
 
     assert response.status_code == 403
     assert response.json()["detail"] == "Device code expired"
+
+
+class _RaceResponse:
+    def __init__(self, data):
+        self.data = data
+
+
+class _RaceCliAuthTable:
+    def __init__(self, rows: dict[str, dict], *, select_barrier: threading.Barrier | None = None):
+        self.rows = rows
+        self.select_barrier = select_barrier
+        self.filters: list[tuple[str, object]] = []
+        self.operation = "select"
+
+    def select(self, *_args, **_kwargs):
+        self.operation = "select"
+        return self
+
+    def delete(self):
+        self.operation = "delete"
+        return self
+
+    def eq(self, key, value):
+        self.filters.append((key, value))
+        return self
+
+    def limit(self, *_args):
+        return self
+
+    def execute(self):
+        matches = [
+            dict(row)
+            for row in self.rows.values()
+            if all(row.get(key) == value for key, value in self.filters)
+        ]
+        if self.operation == "select" and self.select_barrier is not None:
+            self.select_barrier.wait(timeout=5)
+        if self.operation != "delete":
+            return _RaceResponse(matches)
+        deleted = []
+        for row in matches:
+            device_code = row["device_code"]
+            if device_code in self.rows:
+                deleted.append(dict(self.rows.pop(device_code)))
+        return _RaceResponse(deleted)
+
+
+class _RaceCliAuthClient:
+    def __init__(self, rows: dict[str, dict]):
+        self.rows = rows
+        self.select_barrier = threading.Barrier(2)
+
+    def table(self, name):
+        assert name == "cli_auth_devices"
+        return _RaceCliAuthTable(self.rows, select_barrier=self.select_barrier)
+
+
+def test_supabase_cli_auth_consume_is_atomic_single_use():
+    rows = {
+        "device-1": {
+            "device_code": "device-1",
+            "user_id": "user-123",
+            "user_code": "ABCD-EFGH",
+            "status": "approved",
+            "secret": "refresh-123",
+            "client_name": "workeros-cli",
+            "scopes_json": [],
+            "created_at": 1000.0,
+            "expires_at": 9999999999.0,
+            "approved_at": 1001.0,
+        }
+    }
+    repo = SupabaseCliAuthRepository(client=_RaceCliAuthClient(rows))
+    results = []
+
+    def consume():
+        row = repo.consume("device-1")
+        results.append(None if row is None else row["secret"])
+
+    first = threading.Thread(target=consume)
+    second = threading.Thread(target=consume)
+    first.start()
+    second.start()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert sorted(results, key=lambda value: value or "") == [None, "refresh-123"]
+    assert rows == {}

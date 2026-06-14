@@ -11,6 +11,7 @@ from __future__ import annotations
 
 import base64
 import json
+import threading
 from types import SimpleNamespace
 from typing import Any
 from unittest.mock import MagicMock
@@ -40,6 +41,7 @@ class _FakeCliAuth:
     def __init__(self, rows: dict[str, dict[str, Any]]):
         self.rows = rows
         self.updates: list[tuple[str, dict]] = []
+        self._lock = threading.Lock()
 
     def prune_expired(self, now_ts: float):
         return []
@@ -55,8 +57,52 @@ class _FakeCliAuth:
         self.rows[device_code].update(fields)
         return self.rows[device_code]
 
+    def approve_pending(
+        self,
+        *,
+        device_code: str,
+        user_id: str,
+        secret: str,
+        approved_at: float,
+    ):
+        with self._lock:
+            row = self.rows.get(device_code)
+            if not row or str(row.get("status") or "").lower() != "pending":
+                return None
+            row.update(
+                {
+                    "user_id": user_id,
+                    "status": "approved",
+                    "secret": secret,
+                    "approved_at": approved_at,
+                }
+            )
+            self.updates.append(
+                (
+                    device_code,
+                    {
+                        "user_id": user_id,
+                        "status": "approved",
+                        "secret": secret,
+                        "approved_at": approved_at,
+                    },
+                )
+            )
+            return dict(row)
+
+    def deny_pending(self, *, device_code: str):
+        with self._lock:
+            row = self.rows.get(device_code)
+            if not row or str(row.get("status") or "").lower() != "pending":
+                return None
+            row.update({"status": "denied", "secret": None})
+            self.updates.append((device_code, {"status": "denied", "secret": None}))
+            return dict(row)
+
 
 def _client(rows: dict[str, dict], monkeypatch) -> tuple[TestClient, _FakeCliAuth, MagicMock]:
+    if hasattr(auth_routes, "_cli_approve_deny_rate_buckets"):
+        auth_routes._cli_approve_deny_rate_buckets.clear()
     app = FastAPI()
     app.include_router(auth_routes.router)
     fake = _FakeCliAuth(rows)
@@ -119,8 +165,8 @@ def test_cli_approve_claims_oss_placeholder_device(monkeypatch):
     # Status got flipped to approved with the user's refresh_token as secret.
     assert fake.rows["device-1"]["status"] == "approved"
     assert fake.rows["device-1"]["secret"] == "rt-test"
-    # The service-role client was used to rewrite user_id (claim).
-    chain.table.assert_called_once_with("cli_auth_devices")
+    assert fake.rows["device-1"]["user_id"] == "supabase-user-uuid"
+    chain.table.assert_not_called()
 
 
 def test_cli_approve_rejects_when_device_belongs_to_other_user(monkeypatch):
@@ -163,6 +209,117 @@ def test_cli_approve_works_when_device_already_belongs_to_caller(monkeypatch):
     # No re-claim required, so the service client isn't called.
     chain.table.assert_not_called()
     assert fake.rows["device-1"]["status"] == "approved"
+
+
+def test_cli_approve_pending_claim_is_atomic_under_race(monkeypatch):
+    class _RaceCliAuth(_FakeCliAuth):
+        def __init__(self, rows):
+            super().__init__(rows)
+            self.barrier = threading.Barrier(2)
+
+        def verify_device(self, code: str):
+            row = super().verify_device(code)
+            if row is None:
+                return None
+            snapshot = dict(row)
+            self.barrier.wait(timeout=5)
+            return snapshot
+
+    rows = {
+        "device-1": {
+            "device_code": "device-1",
+            "user_id": None,
+            "user_code": "ABCD-EFGH",
+            "status": "pending",
+        }
+    }
+    app = FastAPI()
+    app.include_router(auth_routes.router)
+    fake = _RaceCliAuth(rows)
+    monkeypatch.setattr(
+        auth_routes,
+        "get_repositories",
+        lambda: SimpleNamespace(cli_auth=fake),
+    )
+    monkeypatch.setattr(
+        auth_routes,
+        "get_cloud_settings",
+        lambda: SimpleNamespace(
+            cli_code_ttl_seconds=300,
+            supabase_url="https://test.supabase.co",
+            supabase_anon_key="anon-test",
+            api_base="https://workeros-api.test",
+        ),
+    )
+    import apps.api.auth.supabase_provider as provider_module
+
+    monkeypatch.setattr(
+        provider_module,
+        "_verify_jwt",
+        lambda token, _url: {"sub": token.split(":", 1)[1]},
+    )
+    chain = MagicMock()
+    chain.table.return_value.update.return_value.eq.return_value.execute.return_value = None
+    import apps.api.config as config_module
+
+    monkeypatch.setattr(config_module, "new_supabase_service_client", lambda: chain)
+    if hasattr(auth_routes, "_cli_approve_deny_rate_buckets"):
+        auth_routes._cli_approve_deny_rate_buckets.clear()
+    client = TestClient(app)
+
+    statuses: list[int] = []
+
+    def approve(refresh_token: str):
+        cookie = _make_session_cookie(
+            "supabase-user-uuid",
+            refresh_token=refresh_token,
+            access_token="valid:supabase-user-uuid",
+        )
+        response = client.post(
+            "/auth/cli-approve",
+            json={"user_code": "ABCD-EFGH"},
+            cookies={"workeros_cloud_session": cookie},
+        )
+        statuses.append(response.status_code)
+
+    first = threading.Thread(target=approve, args=("rt-first",))
+    second = threading.Thread(target=approve, args=("rt-second",))
+    first.start()
+    second.start()
+    first.join(timeout=5)
+    second.join(timeout=5)
+
+    assert sorted(statuses) == [200, 409]
+    assert fake.rows["device-1"]["status"] == "approved"
+    assert fake.rows["device-1"]["secret"] in {"rt-first", "rt-second"}
+    assert len([update for update in fake.updates if update[1].get("status") == "approved"]) == 1
+
+
+def test_cli_approve_rate_limits_user_code_guessing(monkeypatch):
+    rows = {
+        "device-1": {
+            "device_code": "device-1",
+            "user_id": "other-user",
+            "user_code": "ABCD-EFGH",
+            "status": "pending",
+        }
+    }
+    client, fake, _chain = _client(rows, monkeypatch)
+    cookie = _make_session_cookie("real-uuid", access_token="valid:real-uuid")
+
+    statuses = [
+        client.post(
+            "/auth/cli-approve",
+            json={"user_code": "ABCD-EFGH"},
+            cookies={"workeros_cloud_session": cookie},
+            headers={"cf-connecting-ip": "203.0.113.88"},
+        ).status_code
+        for _ in range(6)
+    ]
+
+    assert statuses[:5] == [404, 404, 404, 404, 404]
+    assert statuses[5] == 429
+    assert fake.rows["device-1"]["status"] == "pending"
 
 
 def test_cli_bootstrap_returns_supabase_config(monkeypatch):
@@ -271,6 +428,33 @@ def test_legit_cli_deny_still_works(monkeypatch):
     assert fake.rows["device-1"]["status"] == "denied"
 
 
+def test_cli_deny_rate_limits_user_code_guessing(monkeypatch):
+    rows = {
+        "device-1": {
+            "device_code": "device-1",
+            "user_id": "other-user",
+            "user_code": "ABCD-EFGH",
+            "status": "pending",
+        }
+    }
+    client, fake, _chain = _client(rows, monkeypatch)
+    cookie = _make_session_cookie("real-uuid", access_token="valid:real-uuid")
+
+    statuses = [
+        client.post(
+            "/auth/cli-deny",
+            json={"user_code": "ABCD-EFGH"},
+            cookies={"workeros_cloud_session": cookie},
+            headers={"cf-connecting-ip": "203.0.113.89"},
+        ).status_code
+        for _ in range(6)
+    ]
+
+    assert statuses[:5] == [404, 404, 404, 404, 404]
+    assert statuses[5] == 429
+    assert fake.rows["device-1"]["status"] == "pending"
+
+
 def test_f3_claim_write_failure_returns_clean_4xx_not_500(monkeypatch):
     """F3: if the claim write raises (e.g. an FK/DB error), the handler returns
     a clean 4xx — never a 500 that leaks an internal error."""
@@ -282,11 +466,12 @@ def test_f3_claim_write_failure_returns_clean_4xx_not_500(monkeypatch):
             "status": "pending",
         }
     }
-    client, _fake, chain = _client(rows, monkeypatch)
-    # Make the service-role claim write blow up like a DB FK violation.
-    chain.table.return_value.update.return_value.eq.return_value.execute.side_effect = (
-        RuntimeError("insert or update on table violates foreign key constraint")
-    )
+    client, fake, _chain = _client(rows, monkeypatch)
+    # Make the atomic claim write blow up like a DB FK violation.
+    def fail_claim(**_kwargs):
+        raise RuntimeError("insert or update on table violates foreign key constraint")
+
+    fake.approve_pending = fail_claim
     cookie = _make_session_cookie("ghost-uuid", access_token="valid:ghost-uuid")
     response = client.post(
         "/auth/cli-approve",
