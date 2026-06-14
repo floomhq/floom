@@ -16,6 +16,10 @@ import type { WorkerFile } from "@/lib/types";
 import { humanizeCron } from "@/lib/humanize-cron";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CodeBlock } from "@/components/file-viewer/code-block";
+// CLOUD OVERLAY DELTA (security #190): sanitize markdown link hrefs to block
+// javascript:/data: XSS in user-authored worker source previews. This is the
+// ONLY divergence from engine/apps/web FilesEditor — keep it minimal so the
+// overlay tracks the engine. Upstream candidate: floomhq/workeros.
 import { sanitizeHref } from "@/lib/safe-url";
 
 // ---------------------------------------------------------------------------
@@ -139,7 +143,7 @@ const YC = {
   key:     "hsl(210 80% 55%)",   // blue — keys
   colon:   "hsl(220 10% 55%)",   // muted — : separator
   string:  "hsl(142 55% 42%)",   // green — quoted strings
-  number:  "hsl(25  90% 55%)",   // orange — numbers
+  number:  "hsl(200 70% 48%)",   // cyan-blue — numbers
   bool:    "hsl(270 55% 62%)",   // purple — true/false/null
   comment: "hsl(220 10% 58%)",   // grey — comments
   dash:    "hsl(220 10% 55%)",   // muted — list dash
@@ -189,15 +193,76 @@ function highlightYaml(code: string): string {
 // acceptable for rarely-edited Python/shell helper files).
 const _hlCache = new Map<string, string>();
 
-function makeHighlighter(language: string) {
-  if (language === "yaml") return highlightYaml;
-  return (code: string): string => {
+// Hook variant for the editable <Editor>. react-simple-code-editor calls
+// `highlight(value)` on every keystroke and expects a synchronous return; the
+// async hljs path returns escaped plain text on first paint
+// and never re-renders when the real highlight resolves, so .py files showed
+// no colour and (combined with the now-fixed white-space bug) looked broken.
+// This hook resolves the async highlight ONCE per (language, code) and forces a
+// re-render via state when it lands. YAML stays fully synchronous.
+function useEditorHighlighter(code: string, language: string) {
+  const [, setTick] = useState(0);
+  useEffect(() => {
+    if (language === "yaml") return;
     const key = `${language}:${code}`;
-    if (_hlCache.has(key)) return _hlCache.get(key)!;
-    const plain = esc(code);
-    void highlightCode(code, language).then((html) => { _hlCache.set(key, html); });
-    return plain;
+    if (_hlCache.has(key)) return;
+    let alive = true;
+    void highlightCode(code, language).then((html) => {
+      _hlCache.set(key, html);
+      if (alive) setTick((t) => t + 1);
+    });
+    return () => {
+      alive = false;
+    };
+  }, [code, language]);
+
+  if (language === "yaml") return highlightYaml;
+  return (value: string): string => {
+    const key = `${language}:${value}`;
+    return _hlCache.get(key) ?? esc(value);
   };
+}
+
+// Editable code pane for the worker Source dialog. Extracted into its own
+// component so `useEditorHighlighter` runs unconditionally (rules-of-hooks).
+// The `.fe-codeeditor` class forces white-space:pre + horizontal scroll on the
+// library's inner <pre>/<textarea> (which it styles inline as pre-wrap), fixing
+// the one-character-per-line collapse inside the narrow dialog column.
+function CodeEditorPane({
+  path,
+  content,
+  language,
+  onChange,
+}: {
+  path: string;
+  content: string;
+  language: string;
+  onChange: (code: string) => void;
+}) {
+  const highlight = useEditorHighlighter(content, language);
+  return (
+    <Editor
+      className="fe-codeeditor"
+      value={content}
+      onValueChange={onChange}
+      highlight={highlight}
+      padding={12}
+      tabSize={2}
+      insertSpaces
+      style={{
+        fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
+        fontSize: 13,
+        minHeight: 640,
+        background: "transparent",
+        color: "var(--foreground)",
+        outline: "none",
+        lineHeight: "1.75",
+      }}
+      preClassName="fe-codeeditor-pre"
+      textareaClassName="focus:outline-none fe-codeeditor-textarea"
+      data-file-path={path}
+    />
+  );
 }
 
 // ---------------------------------------------------------------------------
@@ -474,6 +539,7 @@ function RenderedFilePreview({
   if (detected === "markdown") {
     return (
       <div className="prose prose-sm dark:prose-invert max-w-none text-foreground bg-muted/30 p-4 overflow-auto max-h-[640px] prose-pre:bg-muted prose-pre:text-foreground prose-code:text-foreground">
+        {/* CLOUD OVERLAY DELTA (security #190): sanitize link hrefs. */}
         <ReactMarkdown
           remarkPlugins={[remarkGfm]}
           components={{
@@ -905,24 +971,12 @@ function FilesEditorEdit({
                       className="rounded-b-[var(--radius-card)] overflow-hidden bg-[var(--bg-2)] dark:bg-[#1a1a1a]"
                       style={{ minHeight: 640 }}
                     >
-                      <Editor
+                      <CodeEditorPane
                         key={selectedFile.path}
-                        value={selectedFile.content}
-                        onValueChange={(code) => setContent(selectedFile.path, code)}
-                        highlight={makeHighlighter(selectedFile.language || detectLanguage(selectedFile.path))}
-                        padding={12}
-                        tabSize={2}
-                        insertSpaces
-                        style={{
-                          fontFamily: "ui-monospace, SFMono-Regular, Menlo, monospace",
-                          fontSize: 13,
-                          minHeight: 640,
-                          background: "transparent",
-                          color: "var(--foreground)",
-                          outline: "none",
-                          lineHeight: "1.75",
-                        }}
-                        textareaClassName="focus:outline-none"
+                        path={selectedFile.path}
+                        content={selectedFile.content}
+                        language={selectedFile.language || detectLanguage(selectedFile.path)}
+                        onChange={(code) => setContent(selectedFile.path, code)}
                       />
                     </div>
                   </>

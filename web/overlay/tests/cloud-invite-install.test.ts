@@ -19,9 +19,16 @@ function testInviteAliasRoute(): void {
 }
 
 function testEngineMembersRoute(): void {
-  assert(existsSync(resolve(ROOT, "app/members/page.tsx")), "engine members route must exist");
-  const s = src("app/members/page.tsx");
-  assert(s.includes("api.members.list"), "members page must use the engine workspace members API seam");
+  // Engine #1047 moved Members into Settings: /members is now a redirect to
+  // /settings?sel=members, and the workspace-members API seam (api.members.list)
+  // lives in app/settings/page.tsx. The redirect must survive so old
+  // bookmarks/deep-links keep working.
+  assert(existsSync(resolve(ROOT, "app/members/page.tsx")), "members redirect route must exist");
+  const redirect = src("app/members/page.tsx");
+  assert(redirect.includes("/settings?sel=members"), "members route must redirect to settings members panel");
+  assert(existsSync(resolve(ROOT, "app/settings/page.tsx")), "settings route must exist");
+  const settings = src("app/settings/page.tsx");
+  assert(settings.includes("api.members.list"), "settings page must use the engine workspace members API seam");
   assert(!existsSync(resolve(ROOT, "app/settings/members/page.tsx")), "settings members alias must remain de-forked");
 }
 
