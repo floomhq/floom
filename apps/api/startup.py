@@ -47,6 +47,7 @@ from apps.api.db.supabase_repos import (
     SupabaseSecretRepository,
     SupabaseWorkerRepository,
 )
+from apps.api.db.supabase_members_repo import SupabaseWorkspaceMemberRepository
 
 ensure_engine_api_path()
 
@@ -154,6 +155,10 @@ def _cloud_repositories() -> Repositories:
         asset_access=SupabaseAssetAccessRepository(),
         mcp_tools=SupabaseMcpToolRepository(),
         feedback=SupabaseFeedbackRepository(),
+        # FW-02: wire engine-shaped membership so the dashboard's
+        # `/workspace/members` surface stops returning HTTP 501. The
+        # control-plane membership (routes/members.py) is unaffected.
+        members=SupabaseWorkspaceMemberRepository(),
     )
 
 

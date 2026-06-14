@@ -34,6 +34,10 @@ const nextConfig: NextConfig = {
       { source: "/docs", destination: "/v3/docs" },
       { source: "/about", destination: "/v3/about" },
       // NOTE: /templates is NOT rewritten — app/(marketing)/templates already owns that route
+      // FW-03: the integrations page lives at /integrations (app/(home)/integrations).
+      // v3 surfaces use bare paths, so a v3-namespaced /v3/integrations URL 404s.
+      // Map it to the real route so it resolves like /v3/product does.
+      { source: "/v3/integrations", destination: "/integrations" },
       { source: "/app", destination: cloudAppDestination("/") },
       { source: "/app/:path*", destination: cloudAppDestination("/:path*") },
       ...APP_ROUTES.flatMap((route) => [
