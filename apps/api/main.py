@@ -23318,8 +23318,13 @@ def _issue_magic_link(*, user_id: str, ttl_seconds: int = 900) -> str:
     return f"{encoded}.{signature}"
 
 
-def _validate_magic_link(token: str) -> str:
-    """Validate a magic-link token and return the user_id. Raises HTTPException on failure."""
+def _validate_magic_link_full(token: str) -> tuple[str, str, int]:
+    """Validate a magic-link token. Return (user_id, nonce, exp).
+
+    Verifies the HMAC signature and expiry only — does NOT mark the token as
+    consumed. Callers that actually log a user in MUST follow this with
+    ``_consume_magic_link_nonce`` to enforce one-time use (F4).
+    """
     try:
         encoded, signature = token.split(".", 1)
     except ValueError as exc:
@@ -23331,12 +23336,61 @@ def _validate_magic_link(token: str) -> str:
         payload = json.loads(_b64url_decode(encoded).decode("utf-8"))
     except Exception as exc:
         raise HTTPException(status_code=400, detail="Invalid magic link") from exc
-    if int(payload.get("exp") or 0) < int(time.time()):
+    exp = int(payload.get("exp") or 0)
+    if exp < int(time.time()):
         raise HTTPException(status_code=400, detail="Magic link expired")
     user_id = str(payload.get("user_id") or "")
     if not user_id:
         raise HTTPException(status_code=400, detail="Invalid magic link")
+    nonce = str(payload.get("nonce") or "")
+    if not nonce:
+        # Legacy tokens (pre-F4) without a nonce cannot be made one-time; reject
+        # rather than silently allow unbounded reuse.
+        raise HTTPException(status_code=400, detail="Invalid magic link")
+    return user_id, nonce, exp
+
+
+def _validate_magic_link(token: str) -> str:
+    """Validate a magic-link token and return the user_id. Raises HTTPException on failure.
+
+    NOTE: validation only — does not consume. See ``_consume_magic_link_nonce``.
+    """
+    user_id, _nonce, _exp = _validate_magic_link_full(token)
     return user_id
+
+
+def _consume_magic_link_nonce(nonce: str, exp: int) -> None:
+    """Atomically mark a magic-link nonce as consumed; reject reuse (F4).
+
+    A stateless HMAC token is replayable for its full TTL unless we record that
+    it has been used. This persists the nonce in a small SQLite table and relies
+    on the PRIMARY KEY to make the claim atomic: the first consumer inserts the
+    row and proceeds; any later consumer hits the uniqueness constraint and is
+    rejected with 400. Rows are pruned once their token's own ``exp`` has passed
+    (a replay after exp is already blocked by the exp check in validation).
+    """
+    now = int(time.time())
+    with get_db() as conn:
+        conn.execute(
+            """
+            CREATE TABLE IF NOT EXISTS consumed_magic_link_nonces (
+                nonce TEXT PRIMARY KEY,
+                exp INTEGER NOT NULL,
+                consumed_at INTEGER NOT NULL
+            )
+            """
+        )
+        conn.execute(
+            "DELETE FROM consumed_magic_link_nonces WHERE exp <= ?",
+            (now,),
+        )
+        cur = conn.execute(
+            "INSERT OR IGNORE INTO consumed_magic_link_nonces (nonce, exp, consumed_at) VALUES (?, ?, ?)",
+            (nonce, int(exp), now),
+        )
+        if cur.rowcount == 0:
+            # Row already existed → token was already consumed.
+            raise HTTPException(status_code=400, detail="Magic link already used")
 
 
 @app.post("/auth/magic-link")
@@ -23365,11 +23419,14 @@ def auth_consume_magic_link(
     repos: Repositories = Depends(get_repos),
 ) -> dict:
     """Consume a magic-link token and create a session (multi-member mode only)."""
-    user_id = _validate_magic_link(token)
+    user_id, nonce, exp = _validate_magic_link_full(token)
     try:
         user_repo, session_repo, _ = _require_multi_member_repos(repos)
     except HTTPException:
         raise HTTPException(status_code=400, detail="Magic links require multi-member auth mode")
+    # F4: enforce one-time use. Claim the nonce before issuing a session so a
+    # replay of the same link cannot mint a second session.
+    _consume_magic_link_nonce(nonce, exp)
     user = user_repo.get(user_id=user_id)
     if not user:
         raise HTTPException(status_code=404, detail="User not found")

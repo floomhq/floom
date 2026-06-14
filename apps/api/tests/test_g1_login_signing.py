@@ -88,6 +88,52 @@ def test_magic_link_issuance_works_with_configured_secret(monkeypatch, tmp_path)
 
 
 # ---------------------------------------------------------------------------
+# F4 — magic links are one-time use (no replay for the full TTL)
+# ---------------------------------------------------------------------------
+
+def test_magic_link_is_single_use(monkeypatch, tmp_path):
+    """A valid, unexpired magic link must be consumable exactly once. A second
+    GET with the same token (replay) is rejected even though the HMAC + exp are
+    still valid, because the token's nonce has been marked consumed."""
+    main = _load_main(
+        monkeypatch, tmp_path, env={"WORKEROS_MAGIC_LINK_SECRET": "g1-magic-secret"}
+    )
+    with _client(main) as client:
+        _login_session(client)
+        resp = client.post("/auth/magic-link")
+        assert resp.status_code == 200, resp.text
+        token = resp.json()["url"].rsplit("/auth/magic/", 1)[1]
+
+        first = client.get(f"/auth/magic/{token}")
+        assert first.status_code == 200, first.text
+
+        # Replay the exact same (still-unexpired, still-signature-valid) link.
+        second = client.get(f"/auth/magic/{token}")
+        assert second.status_code == 400, second.text
+        assert "already used" in second.json()["detail"].lower()
+
+
+def test_legacy_magic_link_without_nonce_is_rejected(monkeypatch, tmp_path):
+    """A token forged/issued without a nonce cannot be made one-time, so it is
+    rejected rather than allowed unbounded reuse."""
+    main = _load_main(
+        monkeypatch, tmp_path, env={"WORKEROS_MAGIC_LINK_SECRET": "g1-magic-secret"}
+    )
+    # Hand-craft a validly-signed token that omits the nonce.
+    payload = {"user_id": "alice", "exp": int(time.time()) + 900}
+    encoded = main._b64url_encode(
+        json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8")
+    )
+    sig = hmac_mod.new(
+        main._magic_link_secret().encode("utf-8"), encoded.encode("ascii"), hashlib.sha256
+    ).hexdigest()
+    token = f"{encoded}.{sig}"
+    with pytest.raises(HTTPException) as exc:
+        main._validate_magic_link_full(token)
+    assert exc.value.status_code == 400
+
+
+# ---------------------------------------------------------------------------
 # #930 — upload signing key fallback is not a public constant
 # ---------------------------------------------------------------------------
 
