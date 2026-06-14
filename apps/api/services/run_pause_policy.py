@@ -16,7 +16,6 @@ from typing import Optional
 
 from db.factory import Repositories
 from models import RunStatus
-from worker_registry import WORKERS_DIR
 
 logger = logging.getLogger("floom.run_service")
 
@@ -48,6 +47,11 @@ def _persist_worker_paused_flag(
         )
     else:
         repos.workers.update(user_id=user_id, worker_id=worker_id, enabled=False)
+
+    # Resolve WORKERS_DIR at call time: tests reload worker_registry (fresh
+    # FLOOM_WORKERS_DIR) without reloading this module, so an import-time binding
+    # would write the paused flag to a stale workers dir.
+    from worker_registry import WORKERS_DIR
 
     worker_yml = WORKERS_DIR / worker_id / "worker.yml"
     if not worker_yml.exists():
