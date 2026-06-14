@@ -414,7 +414,7 @@ def _sandbox_api_url() -> str:
         value = (os.environ.get(name) or "").strip()
         if value:
             return value.rstrip("/")
-    return "https://workers-api.floom.dev"
+    return "http://localhost:8000"
 
 
 def _normalize_sandbox_relative_path(raw_path: str) -> str:

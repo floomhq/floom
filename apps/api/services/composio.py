@@ -52,7 +52,7 @@ def _composio_webhook_url() -> str:
         os.environ.get("COMPOSIO_WEBHOOK_URL")
         or os.environ.get("WORKERS_API_URL")
         or os.environ.get("FLOOM_API_BASE")
-        or "https://workers-api.floom.dev"
+        or "http://localhost:8000"
     )
     base = base.rstrip("/")
     if base.endswith("/composio-events"):
