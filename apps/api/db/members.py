@@ -230,14 +230,23 @@ def accept_invitation(
     client = get_supabase_service_client()
     now_iso = now.isoformat()
 
-    # Mark accepted.
-    client.table("workspace_invitations").update(
-        {
-            "status": "accepted",
-            "accepted_at": now_iso,
-            "accepted_by_user_id": accepting_user_id,
-        }
-    ).eq("id", invite["id"]).execute()
+    # #281: claim the invite atomically (pending -> accepted). Only the request
+    # that actually flips it mints a PAT, so concurrent accepts of the same
+    # token can't double-mint tokens / double-fire side effects.
+    claim = (
+        client.table("workspace_invitations")
+        .update(
+            {
+                "status": "accepted",
+                "accepted_at": now_iso,
+                "accepted_by_user_id": accepting_user_id,
+            }
+        )
+        .eq("id", invite["id"])
+        .eq("status", "pending")
+        .execute()
+    )
+    claimed = bool(getattr(claim, "data", None))
 
     workspace_id = str(invite["workspace_id"])
     role = str(invite.get("role") or "member")
@@ -266,6 +275,12 @@ def accept_invitation(
         .limit(1)
         .execute()
     )
+
+    # #281: only the request that won the pending->accepted claim mints a PAT.
+    # A concurrent duplicate accept (lost claim) returns the idempotent member
+    # row without a second token.
+    if not claimed:
+        return {"member": member or {}, "pat_token": None}
 
     # Mint a PAT scoped to the workspace.
     raw_pat, pat_hash = _pat_token()

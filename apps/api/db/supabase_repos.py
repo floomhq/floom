@@ -2601,7 +2601,7 @@ class SupabaseSecretRepository(_BaseSupabaseRepository):
         row = _first_row(response)
         return self._decrypt_row(dict(row)) if row is not None else None
 
-    def set(self, *, user_id: str, name: str, value: str, status: str = "set") -> dict[str, Any]:
+    def set(self, *, user_id: str, name: str, value: str, status: str = "set", _retry: bool = True) -> dict[str, Any]:
         now = datetime.now(timezone.utc).isoformat()
         workspace_id = _resolve_workspace_id_for_write(user_id=user_id)
 
@@ -2614,19 +2614,32 @@ class SupabaseSecretRepository(_BaseSupabaseRepository):
         if existing is None:
             # New secret — store in Vault
             from uuid import UUID
-            vault_id = vault_store_secret(self._client, value, vault_name)
-            self._client.table("secrets").insert(
-                {
-                    "user_id": user_id,
-                    "workspace_id": workspace_id,
-                    "name": name,
-                    "value": None,
-                    "vault_secret_id": str(vault_id),
-                    "status": status,
-                    "created_at": now,
-                    "updated_at": now,
-                }
-            ).execute()
+            try:
+                vault_id = vault_store_secret(self._client, value, vault_name)
+                self._client.table("secrets").insert(
+                    {
+                        "user_id": user_id,
+                        "workspace_id": workspace_id,
+                        "name": name,
+                        "value": None,
+                        "vault_secret_id": str(vault_id),
+                        "status": status,
+                        "created_at": now,
+                        "updated_at": now,
+                    }
+                ).execute()
+            except Exception:
+                # #281: a concurrent first-write of the same new secret collides
+                # on the secrets PK (workspace_id,name) / vault UNIQUE(name).
+                # The collision correctly prevents duplication, but surfaced as a
+                # bare 500. If the row now exists, retry ONCE as an idempotent
+                # update (last-write-wins); otherwise it's a real error -> raise.
+                if _retry:
+                    refetch = self._client.table("secrets").select("vault_secret_id")
+                    refetch = _scope_by_workspace(refetch, user_id=user_id)
+                    if _first_row(refetch.eq("name", name).limit(1).execute()) is not None:
+                        return self.set(user_id=user_id, name=name, value=value, status=status, _retry=False)
+                raise
         else:
             existing_vault_id = existing.get("vault_secret_id")
             if existing_vault_id:
