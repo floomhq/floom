@@ -178,6 +178,64 @@ class RunRepository(Protocol):
         offset: int = 0,
     ) -> tuple[list[RowDict], int]: ...
 
+    def overview_status_rollup(
+        self,
+        *,
+        user_id: str,
+        since: str,
+        window_7d: str,
+        today_start: str,
+    ) -> list[RowDict]: ...
+
+    def overview_sparkline_buckets(
+        self,
+        *,
+        user_id: str,
+        since: str,
+        until: str,
+        bucket_seconds: int,
+    ) -> list[RowDict]: ...
+
+    def overview_current_counts(
+        self,
+        *,
+        user_id: str,
+        statuses: list[str],
+    ) -> dict[str, int]: ...
+
+    def overview_top_completed_by_worker(
+        self,
+        *,
+        user_id: str,
+        since: str,
+        limit: int,
+    ) -> list[RowDict]: ...
+
+    def overview_recent_visible_runs(
+        self,
+        *,
+        user_id: str,
+        worker_ids: list[str],
+        limit: int,
+    ) -> list[RowDict]: ...
+
+    def overview_latest_failures_by_worker(
+        self,
+        *,
+        user_id: str,
+        worker_ids: list[str],
+        since: str,
+        limit: int,
+    ) -> list[RowDict]: ...
+
+    def overview_terminal_runs(
+        self,
+        *,
+        user_id: str,
+        worker_ids: list[str],
+        since: str,
+    ) -> list[RowDict]: ...
+
     def get(self, *, user_id: str, run_id: str) -> RowDict | None: ...
 
     def get_any(self, *, run_id: str) -> RowDict | None: ...

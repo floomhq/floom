@@ -13,12 +13,14 @@ from __future__ import annotations
 
 import collections
 import json
+import logging
 import os
 import re
+import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, Response
 from pydantic import BaseModel, Field
 
 from auth import AuthContext, get_auth_context
@@ -45,6 +47,7 @@ from services.worker_access import (
 )
 
 overview_router = APIRouter()
+logger = logging.getLogger("floom.api")
 
 
 class OverviewStats(BaseModel):
@@ -272,9 +275,11 @@ def _overview_worker_paused(worker: Dict[str, Any], trigger: Optional[Dict[str, 
 
 @overview_router.get("/system/overview", response_model=OverviewResponse)
 def system_overview(
+    response: Response,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> OverviewResponse:
+    started = time.perf_counter()
     now = datetime.now(timezone.utc)
     window_24h = now - timedelta(hours=24)
     window_7d = now - timedelta(days=7)
@@ -282,92 +287,11 @@ def system_overview(
     today_start = now.replace(hour=0, minute=0, second=0, microsecond=0)
     next_24h = now + timedelta(hours=24)
 
-    runs_24h_rows, _ = repos.runs.list(
-        user_id=auth.user_id,
-        since=window_24h.isoformat(),
-        limit=100000,
-        offset=0,
-    )
-    sparkline = [0] * 24
-    for row in runs_24h_rows:
-        created_at = _parse_iso8601(row["created_at"])
-        if created_at is None or created_at < window_24h or created_at > now:
-            continue
-        bucket = int((created_at - window_24h).total_seconds() // 3600)
-        if bucket < 0:
-            continue
-        if bucket > 23:
-            bucket = 23
-        sparkline[bucket] += 1
-    runs_24h = int(sum(sparkline))
-
-    runs_14d_rows, _runs_total_14d = repos.runs.list(
-        user_id=auth.user_id,
-        since=window_14d.isoformat(),
-        limit=100000,
-        offset=0,
-    )
-    _runs_7d_rows: List[Dict[str, Any]] = []
-    previous_7d_rows: List[Dict[str, Any]] = []
-    today_rows: List[Dict[str, Any]] = []
-    for row in runs_14d_rows:
-        created_at = _parse_iso8601(row.get("created_at"))
-        if created_at is None:
-            continue
-        if created_at >= window_7d:
-            _runs_7d_rows.append(row)
-            if created_at >= today_start:
-                today_rows.append(row)
-        elif created_at >= window_14d:
-            previous_7d_rows.append(row)
-
     def _is_completed(row: Dict[str, Any]) -> bool:
         return str(row.get("status") or "").lower() in {"completed", "approved", "success", "succeeded"}
 
     def _is_failed(row: Dict[str, Any]) -> bool:
         return str(row.get("status") or "").lower() in {"failed", "error", "cancelled", "rejected", "timeout"}
-
-    completed_7d = sum(1 for row in _runs_7d_rows if _is_completed(row))
-    completed_previous_7d = sum(1 for row in previous_7d_rows if _is_completed(row))
-    completed_today = sum(1 for row in today_rows if _is_completed(row))
-    failed_today = sum(1 for row in today_rows if _is_failed(row))
-
-    current_rows, _ = repos.runs.list(
-        user_id=auth.user_id,
-        statuses=[RunStatus.QUEUED.value, RunStatus.RUNNING.value],
-        limit=100000,
-        offset=0,
-    )
-    queued_now = sum(1 for row in current_rows if str(row.get("status") or "").lower() == RunStatus.QUEUED.value)
-    running_now = sum(1 for row in current_rows if str(row.get("status") or "").lower() == RunStatus.RUNNING.value)
-
-    runs_7d_sparkline: List[OverviewSparklineBucket] = []
-    bucket_count = 28
-    bucket_seconds = int((now - window_7d).total_seconds() / bucket_count)
-    bucket_totals = [0] * bucket_count
-    bucket_failures = [0] * bucket_count
-    for row in _runs_7d_rows:
-        created_at = _parse_iso8601(row.get("created_at"))
-        if created_at is None or created_at < window_7d or created_at > now:
-            continue
-        bucket = int((created_at - window_7d).total_seconds() // bucket_seconds)
-        if bucket < 0:
-            continue
-        if bucket >= bucket_count:
-            bucket = bucket_count - 1
-        bucket_totals[bucket] += 1
-        if _is_failed(row):
-            bucket_failures[bucket] += 1
-    for index in range(bucket_count):
-        bucket_start = window_7d + timedelta(seconds=bucket_seconds * index)
-        runs_7d_sparkline.append(
-            OverviewSparklineBucket(
-                label=bucket_start.strftime("%a %H:%M"),
-                started_at=bucket_start.isoformat(),
-                total=bucket_totals[index],
-                failed=bucket_failures[index],
-            )
-        )
 
     # 1.5.4: use the SAME operator-visible filter as the default GET /workers
     # view so the overview 'Workers active' count matches the /workers list
@@ -429,24 +353,101 @@ def system_overview(
         and not _is_example_worker(row)
     }
 
-    outcome_counts: Dict[str, int] = collections.Counter(
-        row["worker_id"]
-        for row in _runs_7d_rows
-        if row.get("worker_id")
-        and str(row.get("status") or "").lower() in {"completed", "approved", "success"}
+    status_rollup = repos.runs.overview_status_rollup(
+        user_id=auth.user_id,
+        since=window_14d.isoformat(),
+        window_7d=window_7d.isoformat(),
+        today_start=today_start.isoformat(),
     )
+    runs_today = sum(int(row.get("count_today") or 0) for row in status_rollup)
+
+    completed_7d = 0
+    completed_previous_7d = 0
+    completed_today = 0
+    failed_today = 0
+    completed_or_failed_7d = 0
+    for row in status_rollup:
+        worker_id = row.get("worker_id")
+        if worker_id not in _active_real_worker_ids:
+            continue
+        status_row = {"status": row.get("status")}
+        count_7d = int(row.get("count_7d") or 0)
+        count_previous_7d = int(row.get("count_previous_7d") or 0)
+        count_today = int(row.get("count_today") or 0)
+        if _is_completed(status_row):
+            completed_7d += count_7d
+            completed_previous_7d += count_previous_7d
+            completed_today += count_today
+            completed_or_failed_7d += count_7d
+        elif _is_failed(status_row):
+            failed_today += count_today
+            completed_or_failed_7d += count_7d
+
+    sparkline = [0] * 24
+    for row in repos.runs.overview_sparkline_buckets(
+        user_id=auth.user_id,
+        since=window_24h.isoformat(),
+        until=now.isoformat(),
+        bucket_seconds=3600,
+    ):
+        bucket = int(row.get("bucket") or 0)
+        if bucket < 0:
+            continue
+        if bucket > 23:
+            bucket = 23
+        sparkline[bucket] += int(row.get("total") or 0)
+    runs_24h = int(sum(sparkline))
+
+    runs_7d_sparkline: List[OverviewSparklineBucket] = []
+    bucket_count = 28
+    bucket_seconds = int((now - window_7d).total_seconds() / bucket_count)
+    bucket_totals = [0] * bucket_count
+    bucket_failures = [0] * bucket_count
+    for row in repos.runs.overview_sparkline_buckets(
+        user_id=auth.user_id,
+        since=window_7d.isoformat(),
+        until=now.isoformat(),
+        bucket_seconds=bucket_seconds,
+    ):
+        bucket = int(row.get("bucket") or 0)
+        if bucket < 0:
+            continue
+        if bucket >= bucket_count:
+            bucket = bucket_count - 1
+        total = int(row.get("total") or 0)
+        bucket_totals[bucket] += total
+        if _is_failed({"status": row.get("status")}):
+            bucket_failures[bucket] += total
+    for index in range(bucket_count):
+        bucket_start = window_7d + timedelta(seconds=bucket_seconds * index)
+        runs_7d_sparkline.append(
+            OverviewSparklineBucket(
+                label=bucket_start.strftime("%a %H:%M"),
+                started_at=bucket_start.isoformat(),
+                total=bucket_totals[index],
+                failed=bucket_failures[index],
+            )
+        )
+
+    current_counts = repos.runs.overview_current_counts(
+        user_id=auth.user_id,
+        statuses=[RunStatus.QUEUED.value, RunStatus.RUNNING.value],
+    )
+    queued_now = int(current_counts.get(RunStatus.QUEUED.value, 0))
+    running_now = int(current_counts.get(RunStatus.RUNNING.value, 0))
+
     outcomes = [
         OverviewOutcomeItem(
-            worker_id=worker_id,
-            worker_name=worker_names.get(worker_id, worker_id),
-            label=_overview_outcome_label(worker_names.get(worker_id, worker_id)),
-            count=int(count),
+            worker_id=str(row["worker_id"]),
+            worker_name=worker_names.get(str(row["worker_id"]), str(row["worker_id"])),
+            label=_overview_outcome_label(worker_names.get(str(row["worker_id"]), str(row["worker_id"]))),
+            count=int(row["count"] or 0),
         )
-        for worker_id, count in sorted(
-            outcome_counts.items(),
-            key=lambda item: item[1],
-            reverse=True,
-        )[:3]
+        for row in repos.runs.overview_top_completed_by_worker(
+            user_id=auth.user_id,
+            since=window_7d.isoformat(),
+            limit=3,
+        )
     ]
 
     connections = repos.connections.list(user_id=auth.user_id)
@@ -466,7 +467,11 @@ def system_overview(
     # 404 wall. They are not actionable operator activity, so exclude them here.
     # We over-fetch then filter to keep up to 10 visible rows. The run rows are
     # NOT deleted — this is a serving filter, not a data wipe (no-wipe guardrail).
-    recent_rows, _ = repos.runs.list(user_id=auth.user_id, limit=100, offset=0)
+    recent_rows = repos.runs.overview_recent_visible_runs(
+        user_id=auth.user_id,
+        worker_ids=sorted(_visible_worker_ids),
+        limit=10,
+    )
     recent_runs = [
         OverviewRunItem(
             run_id=row["id"],
@@ -478,8 +483,7 @@ def system_overview(
             trigger_source=row.get("trigger_source") or "manual",
         )
         for row in recent_rows
-        if row.get("worker_id") in _visible_worker_ids
-    ][:10]
+    ]
 
     scheduled_today: List[OverviewScheduledItem] = []
     try:
@@ -511,27 +515,16 @@ def system_overview(
     scheduled_today = sorted(scheduled_today, key=lambda item: item.next_fire_at)
 
     attention_items: List[OverviewAttentionItem] = []
-    failure_runs, _ = repos.runs.list(
-        user_id=auth.user_id,
-        statuses=[RunStatus.FAILED.value],
-        since=window_24h.isoformat(),
-        limit=100000,
-        offset=0,
-    )
     # Orphaned-run fix (2026-06-04): failure clusters link to /workers/{id}, which
     # 404s for deleted/hidden workers (slack-listener, whatsapp-listener, …). A
-    # deleted worker's failures are not actionable "attention" — drop runs whose
-    # worker is no longer API-visible so the cluster + its link cannot 404.
-    failure_runs = [
-        row for row in failure_runs
-        if row.get("worker_id") in _visible_worker_ids
-    ]
-    visible_terminal_runs = [
-        row for row in runs_14d_rows
-        if str(row.get("status") or "").lower()
-        in {"completed", "approved", "success", "succeeded", "failed", "error", "cancelled", "rejected", "timeout"}
-        and row.get("worker_id") in _visible_worker_ids
-    ]
+    # deleted worker's failures are not actionable "attention" — query only runs
+    # whose worker is API-visible so the cluster + its link cannot 404.
+    visible_worker_ids = sorted(_visible_worker_ids)
+    visible_terminal_runs = repos.runs.overview_terminal_runs(
+        user_id=auth.user_id,
+        worker_ids=visible_worker_ids,
+        since=window_14d.isoformat(),
+    )
     attention_items.extend(
         _overview_consecutive_failure_items(
             runs=visible_terminal_runs,
@@ -544,25 +537,19 @@ def system_overview(
         for item in attention_items
         if item.type == "consecutive_failures" and item.worker_id
     }
-    failure_counts: Dict[str, int] = collections.Counter(row["worker_id"] for row in failure_runs if row.get("worker_id"))
-    latest_failure_by_worker: Dict[str, Dict[str, Any]] = {}
-    for row in failure_runs:
-        worker_id = row.get("worker_id")
+    latest_failure_rows = repos.runs.overview_latest_failures_by_worker(
+        user_id=auth.user_id,
+        worker_ids=visible_worker_ids,
+        since=window_24h.isoformat(),
+        limit=3,
+    )
+    for latest_failure in latest_failure_rows:
+        worker_id = latest_failure.get("worker_id")
         if not worker_id:
             continue
-        row_time = _parse_iso8601(row.get("started_at") or row.get("completed_at") or row.get("created_at"))
-        current = latest_failure_by_worker.get(worker_id)
-        current_time = _parse_iso8601((current or {}).get("started_at") or (current or {}).get("completed_at") or (current or {}).get("created_at"))
-        if current is None or (row_time is not None and (current_time is None or row_time > current_time)):
-            latest_failure_by_worker[worker_id] = row
-    for worker_id, failure_count in sorted(
-        failure_counts.items(),
-        key=lambda item: item[1],
-        reverse=True,
-    )[:3]:
+        failure_count = int(latest_failure.get("failure_count") or 0)
         if worker_id in _consecutive_failure_worker_ids:
             continue
-        latest_failure = latest_failure_by_worker.get(worker_id) or {}
         last_failed_at = latest_failure.get("started_at") or latest_failure.get("completed_at") or latest_failure.get("created_at")
         cause = _overview_failure_cause(latest_failure)
         attention_items.append(
@@ -703,15 +690,8 @@ def system_overview(
     # system, and stock-worker runs so the number a partner sees reflects their
     # live workers, not legacy/test churn. The 24h/7d run COUNTS and sparklines
     # are intentionally left unscoped (they are activity volume, not quality).
-    _success_scope_rows = [
-        row for row in _runs_7d_rows if row.get("worker_id") in _active_real_worker_ids
-    ]
-    _scoped_completed_7d = sum(1 for row in _success_scope_rows if _is_completed(row))
-    completed_or_failed_7d = sum(
-        1 for row in _success_scope_rows if _is_completed(row) or _is_failed(row)
-    )
     success_rate_7d = (
-        _scoped_completed_7d / completed_or_failed_7d if completed_or_failed_7d else None
+        completed_7d / completed_or_failed_7d if completed_or_failed_7d else None
     )
 
     # IA-fix 2026-06-02: the FLAGSHIP outcome tiles (work_shipped_7d /
@@ -726,19 +706,7 @@ def system_overview(
     # still surface in needs_attention (failure clusters / disabled workers
     # above), so the operator can see and fix them. runs_today / runs_24h stay
     # unscoped — those are raw activity volume, not user-outcome quality.
-    _today_real_rows = [
-        row for row in today_rows if row.get("worker_id") in _active_real_worker_ids
-    ]
-    completed_7d = sum(1 for row in _success_scope_rows if _is_completed(row))
-    completed_previous_7d = sum(
-        1
-        for row in previous_7d_rows
-        if _is_completed(row) and row.get("worker_id") in _active_real_worker_ids
-    )
-    completed_today = sum(1 for row in _today_real_rows if _is_completed(row))
-    failed_today = sum(1 for row in _today_real_rows if _is_failed(row))
-
-    return OverviewResponse(
+    payload = OverviewResponse(
         stats=OverviewStats(
             runs_24h=runs_24h,
             runs_24h_sparkline=sparkline,
@@ -751,7 +719,7 @@ def system_overview(
             connections_total=connections_total,
             work_shipped_7d=completed_7d,
             work_shipped_previous_7d=completed_previous_7d,
-            runs_today=len(today_rows),
+            runs_today=runs_today,
             completed_today=completed_today,
             failed_today=failed_today,
             running_now=running_now,
@@ -764,3 +732,17 @@ def system_overview(
         scheduled_today=scheduled_today[:5],
         needs_attention=attention_items,
     )
+    duration_ms = (time.perf_counter() - started) * 1000
+    response.headers["Server-Timing"] = f"overview;dur={duration_ms:.1f}"
+    logger.info(
+        "overview aggregation user_id=%s runs_24h=%s workers=%s recent_runs=%s "
+        "scheduled=%s needs_attention=%s duration_ms=%.1f",
+        auth.user_id,
+        runs_24h,
+        len(workers),
+        len(recent_runs),
+        len(scheduled_today),
+        len(attention_items),
+        duration_ms,
+    )
+    return payload
