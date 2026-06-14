@@ -53,7 +53,7 @@ function test556MainHelperFunction(): void {
 }
 
 function test556MainComputesMissingInList(): void {
-  const s = api("main.py");
+  const s = api("routers/worker_listing.py");
   assert(s.includes("_missing_secrets") && s.includes("_missing_connections"),
     "Worker list endpoint must compute _missing_secrets and _missing_connections per worker");
   assert(s.includes("missing_secrets=_missing_secrets"),
@@ -63,7 +63,7 @@ function test556MainComputesMissingInList(): void {
 }
 
 function test556MainComputesMissingInDetail(): void {
-  const s = api("main.py");
+  const s = api("services/worker_serialize.py");
   assert(s.includes("_det_missing_secrets") && s.includes("_det_missing_connections"),
     "Worker detail builder must compute _det_missing_secrets and _det_missing_connections");
   assert(s.includes("missing_secrets=_det_missing_secrets"),
