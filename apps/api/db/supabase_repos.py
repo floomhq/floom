@@ -1905,6 +1905,11 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             payload["output_json"] = _json_storage_value(fields["output_json"], {})
         if "cancel_requested" in fields:
             payload["cancel_requested"] = bool(fields["cancel_requested"])
+        # #271: same invariant as update_status — an errored run is failed, not
+        # completed, and must not carry leaked (smoke) output as its result.
+        if payload.get("status") == RunStatus.COMPLETED.value and str(fields.get("error") or "").strip():
+            payload["status"] = RunStatus.FAILED.value
+            payload["output_json"] = {}
         if payload:
             builder = self._client.table("runs").update(payload).eq("id", run_id)
             builder = _scope_by_workspace(builder, user_id=user_id)
@@ -1933,6 +1938,15 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         run = self.get(user_id=user_id, run_id=run_id)
         if run is None:
             raise ValueError(f"run {run_id} not found for {user_id}")
+        # #271: a run carrying a non-empty error is a FAILURE — never persist it
+        # as "completed". The engine's smoke/gate finalization could mark a
+        # runner error as completed AND leak smoke-test output into output_json
+        # (failures masquerading as successes). Enforce the invariant at the
+        # persistence boundary: coerce completed+error -> failed and drop the
+        # (smoke/partial) output so a failed run never carries a fake result.
+        if (error or "").strip() and status == RunStatus.COMPLETED.value:
+            status = RunStatus.FAILED.value
+            output_json = {}
         updates: dict[str, Any] = {"status": status}
         if output_json is not None:
             updates["output_json"] = output_json
