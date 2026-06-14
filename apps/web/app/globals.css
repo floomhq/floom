@@ -115,7 +115,7 @@
   --primary-text: #FFFFFF;
   --warning: #E5533D;
   --success: #2F8F5B;
-  --pending: #C98A1A;
+  --pending: #6B7280;
   --info: #3E6FE0; /* "running"/in-progress accent (SPEC §4) */
   /* v4 cool radii (final.html: --r-card:16px, --r-btn:10px) */
   --radius-card: 16px;
@@ -147,7 +147,7 @@
      CRITICAL (Codex trap): primary Buttons use --primary, NOT --accent —
      so a cool --accent swap does NOT turn buttons blue. See button.tsx fix. */
   --accent: #3E6FE0;
-  --emily-mark: #173B29;
+  --emily-mark: #3E6FE0;
   --sel: #EEF3FE;
   --accent-soft: var(--sel);
   --accent-line: rgba(62,111,224,.3);
@@ -266,7 +266,7 @@ html.dark {
      --accent-soft stays as color-mix for selection/nav tints.
      --solid = accent (blue fills) in dark; --primary = near-white ink. */
   --accent: #5B8DEF;
-  --emily-mark: #173B29;
+  --emily-mark: #5B8DEF;
   --sel: rgba(91,141,239,.16);
   --info: #5B8DEF; /* in dark, "running" shares the blue hue */
   --accent-soft: color-mix(in srgb, var(--accent) 18%, transparent);

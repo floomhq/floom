@@ -3,10 +3,9 @@ import { cn } from "@/lib/utils";
 /**
  * EmilyAvatar — the Floom Emily identity mark.
  *
- * The Search Assistant Emily mark (Federico 2026-06-13): a dark-green circle with a
- * white "E" and a white 4-point sparkle at the upper right. The green is
- * tokenized as --emily-mark so every Emily surface carries the same identity in
- * light and dark mode.
+ * The Emily mark: a blue circle with a white "E" and a white 4-point sparkle
+ * at the upper right. The color is tokenized as --emily-mark so every Emily
+ * surface carries the same identity in light and dark mode.
  */
 export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
   const isSmall = size === "sm";
