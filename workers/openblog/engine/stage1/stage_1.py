@@ -57,7 +57,7 @@ async def run_stage_1(input_data: Stage1Input) -> Stage1Output:
     Returns:
         Stage1Output with complete context for downstream stages
     """
-    logger.info(f"Stage 1: Set Context")
+    logger.info("Stage 1: Set Context")
     logger.info(f"  Keywords: {input_data.keywords}")
     logger.info(f"  Company URL: {input_data.company_url}")
     logger.info(f"  Language: {input_data.language}")

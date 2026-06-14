@@ -103,7 +103,7 @@ def _print_article_analysis(article_analysis: List[Dict[str, Any]]) -> None:
         # Closing
         closing = article.get('closing_verbatim', '')
         if closing:
-            print(f"\n📝 CLOSING:")
+            print("\n📝 CLOSING:")
             print(f"   \"{closing[:500]}{'...' if len(closing) > 500 else ''}\"")
 
         # Subheadings
@@ -121,7 +121,7 @@ def _print_article_analysis(article_analysis: List[Dict[str, Any]]) -> None:
                 print(f"   • \"{phrase}\"")
 
         # Stats
-        print(f"\n📊 METRICS:")
+        print("\n📊 METRICS:")
         print(f"   • Word count: ~{article.get('word_count_estimate', 'N/A')}")
         print(f"   • Avg sentence length: {article.get('avg_sentence_length', 'N/A')} words")
         print(f"   • Uses lists: {article.get('uses_lists', 'N/A')}")
@@ -143,13 +143,13 @@ def _print_enhanced_persona(persona: VoicePersona, result: Dict[str, Any]) -> No
     print("✨ ENHANCED VOICE PERSONA")
     print("=" * 80)
 
-    print(f"\n👤 ICP PROFILE:")
+    print("\n👤 ICP PROFILE:")
     print(f"   {persona.icp_profile or 'Not specified'}")
 
-    print(f"\n🎯 VOICE STYLE:")
+    print("\n🎯 VOICE STYLE:")
     print(f"   {persona.voice_style or 'Not specified'}")
 
-    print(f"\n📐 LANGUAGE STYLE:")
+    print("\n📐 LANGUAGE STYLE:")
     ls = persona.language_style
     print(f"   • Formality: {ls.formality}")
     print(f"   • Complexity: {ls.complexity}")
@@ -218,7 +218,7 @@ def _print_enhanced_persona(persona: VoicePersona, result: Dict[str, Any]) -> No
         print(f"   {', '.join(persona.banned_words)}")
 
     # Additional observations
-    print(f"\n📊 CONTENT PATTERNS:")
+    print("\n📊 CONTENT PATTERNS:")
     if persona.paragraph_length:
         print(f"   • Paragraph length: {persona.paragraph_length}")
     if persona.uses_questions is not None:

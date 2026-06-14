@@ -4718,7 +4718,7 @@ def run_probe_matrix(args: argparse.Namespace, repo: Path, secret: str, out_dir:
 
 def write_probe_markdown(transcript: dict[str, Any], path: Path) -> None:
     lines = [
-        f"# Workeros Kimi Audit Probe Results",
+        "# Workeros Kimi Audit Probe Results",
         "",
         f"- Generated: `{transcript['generated_at']}`",
         f"- API: `{transcript['api_base']}`",

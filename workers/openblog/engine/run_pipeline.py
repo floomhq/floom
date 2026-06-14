@@ -156,7 +156,7 @@ async def process_single_article(
         # -----------------------------------------
         # Stage 2: Blog Gen + Image Gen
         # -----------------------------------------
-        logger.info(f"    [Stage 2] Generating article...")
+        logger.info("    [Stage 2] Generating article...")
 
         # Extract visual_identity from company_context
         company_ctx = context.company_context.model_dump()
@@ -184,7 +184,7 @@ async def process_single_article(
         # -----------------------------------------
         # Stage 3: Quality Check
         # -----------------------------------------
-        logger.info(f"    [Stage 3] Quality check...")
+        logger.info("    [Stage 3] Quality check...")
 
         # Build voice context from Stage 1 for brand-aligned quality fixes
         voice_context = None
@@ -226,7 +226,7 @@ async def process_single_article(
         # -----------------------------------------
         # Stage 4: URL Verification
         # -----------------------------------------
-        logger.info(f"    [Stage 4] URL verification...")
+        logger.info("    [Stage 4] URL verification...")
 
         stage4_input = Stage4Input(
             article=article_dict,
@@ -249,7 +249,7 @@ async def process_single_article(
         # -----------------------------------------
         # Stage 5: Internal Links
         # -----------------------------------------
-        logger.info(f"    [Stage 5] Internal links...")
+        logger.info("    [Stage 5] Internal links...")
 
         # Build batch siblings (other articles in this batch)
         batch_siblings = [
@@ -293,7 +293,7 @@ async def process_single_article(
         # Export (if output_dir provided)
         # -----------------------------------------
         if output_dir:
-            logger.info(f"    [Export] Exporting article...")
+            logger.info("    [Export] Exporting article...")
 
             # Render HTML
             html_content = HTMLRenderer.render(

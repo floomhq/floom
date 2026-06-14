@@ -268,7 +268,7 @@ def main() -> None:
             # export: 3
             # pause/unpause: 6
         )
-        print(f"\033[92mAll CRUD regression tests PASSED\033[0m")
+        print("\033[92mAll CRUD regression tests PASSED\033[0m")
         sys.exit(0)
 
 
