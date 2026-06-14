@@ -868,3 +868,19 @@ html.dark .grain {
   .c-split .c-detailcol { position:relative; inset:auto; width:100%; min-height:0; border-left:0; box-shadow:none; }
   .c-split .c-listcol { display:none; }
 }
+
+/* worker-form FilesEditor (react-simple-code-editor) — the library hard-codes
+   white-space:pre-wrap + word-break:keep-all as INLINE styles on its inner
+   <pre> and <textarea>. Inside the narrow Edit-source dialog column that
+   collapses code to one character per line. Force real code semantics
+   (white-space:pre + horizontal scroll) by overriding the inline styles via a
+   class — only !important wins over the library's inline rules. */
+.fe-codeeditor { overflow: auto !important; }
+.fe-codeeditor pre,
+.fe-codeeditor textarea,
+.fe-codeeditor-pre,
+.fe-codeeditor-textarea {
+  white-space: pre !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
+}
