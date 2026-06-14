@@ -13,6 +13,7 @@ import type {
   WorkerFile,
   VersionSummary,
   RunSummary,
+  TriggerSpec,
 } from "@/lib/types";
 import { formatVersionRows } from "@/lib/workers/versions";
 import { WORKER_DETAIL_TABS, type WorkerDetailTab } from "@/lib/workers/tabs";
@@ -38,7 +39,14 @@ import { FileText, Lock, MoreHorizontal } from "lucide-react";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import { CodeBlock } from "@/components/file-viewer/code-block";
-import { FilesEditor } from "@/components/worker-form";
+import {
+  FilesEditor,
+  TriggersEditor,
+  makeTriggerRow,
+  buildTriggersYaml,
+  replaceTriggerBlock,
+  type TriggerRow,
+} from "@/components/worker-form";
 import { WorkerBrainEditor } from "@/components/worker/WorkerBrainEditor";
 import { WorkerToolsEditor } from "@/components/worker/WorkerToolsEditor";
 import { WorkerFeedbackPanel } from "@/components/worker/WorkerFeedbackPanel";
@@ -579,6 +587,94 @@ function ToolsTab({ w }: { w: WorkerSummary }) {
   );
 }
 
+/** Read the worker's current triggers (multi-trigger spec first, single fallback). */
+function currentTriggerRows(d: WorkerDetail): TriggerRow[] {
+  const specs: TriggerSpec[] =
+    d.triggers_spec && d.triggers_spec.length > 0
+      ? d.triggers_spec
+      : d.config?.trigger
+        ? [d.config.trigger as TriggerSpec]
+        : [];
+  return specs.map((s) => makeTriggerRow(s));
+}
+
+// W-02: Triggers are EDITABLE — read the current trigger(s) from worker.yml and
+// let the owner change the schedule / webhook / app-event / manual via the same
+// TriggersEditor used in the create flow. Persists through the worker.yml PUT
+// (replaceTriggerBlock → updateFiles), the path Tools/Brain already use.
+function TriggersTab({ w }: { w: WorkerSummary }) {
+  const [d, applyDetail] = useWorkerDetail(w.id);
+  const [rows, setRows] = useState<TriggerRow[] | null>(null);
+  const [saving, setSaving] = useState(false);
+
+  // Initialize editor rows from the loaded detail (once it arrives).
+  useEffect(() => {
+    if (d && rows === null) setRows(currentTriggerRows(d));
+  }, [d, rows]);
+
+  if (!d || rows === null) return <Loading />;
+  const editable = can("edit", d);
+  const baseline = JSON.stringify(currentTriggerRows(d).map(stripRowId));
+  const dirty = JSON.stringify(rows.map(stripRowId)) !== baseline;
+
+  // Read-only view: list the configured trigger(s) without editing chrome.
+  if (!editable) {
+    return (
+      <div className="flex flex-col gap-4">
+        <ConfigInfoGrid
+          rows={[
+            ["Trigger", friendlyToken(d.config?.trigger?.type ?? w.trigger_type)],
+            ...(d.config?.trigger?.cron
+              ? [["Schedule", d.config.trigger.cron] as [string, React.ReactNode]]
+              : []),
+            ...(d.config?.trigger?.timezone
+              ? [["Timezone", d.config.trigger.timezone] as [string, React.ReactNode]]
+              : []),
+            ...(d.webhook_url
+              ? [["Webhook", <span key="webhook" className="font-mono text-xs">{d.webhook_url}</span>] as [string, React.ReactNode]]
+              : []),
+          ]}
+        />
+      </div>
+    );
+  }
+
+  const save = async () => {
+    if (saving || !dirty) return;
+    setSaving(true);
+    try {
+      const yaml = replaceTriggerBlock(workerYml(d), buildTriggersYaml(rows));
+      const updated = await persistYml(d, yaml);
+      applyDetail(updated);
+      setRows(currentTriggerRows(updated));
+      toast.success("Triggers updated");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not update triggers.");
+    } finally {
+      setSaving(false);
+    }
+  };
+
+  return (
+    <TriggersEditor
+      rows={rows}
+      onChange={setRows}
+      webhookUrl={d.webhook_url}
+      dirty={dirty}
+      saving={saving}
+      onSave={() => void save()}
+      onDiscard={() => setRows(currentTriggerRows(d))}
+    />
+  );
+}
+
+/** Compare trigger rows ignoring the random client-only `id`. */
+function stripRowId(row: TriggerRow): Omit<TriggerRow, "id"> {
+  const { id: _id, ...rest } = row;
+  void _id;
+  return rest;
+}
+
 // SPEC §4 Config: Tools · Brain attach · Triggers · Limits in one tab.
 // ("paused" = enabled:false — there is no paused status; pause/resume is #788;
 // spend cap is #793; PATCH name/desc is #785; brain attach/detach is #790 —
@@ -623,19 +719,11 @@ function ConfigTab({ w }: { w: WorkerSummary }) {
       {activeTab === "Tools" && <ToolsTab w={w} />}
       {activeTab === "Brain" && <BrainTab w={w} />}
       {activeTab === "Triggers" && (
-        <div className="flex flex-col gap-4">
+        <div className="flex flex-col gap-5">
+          {/* W-02: editable trigger control (schedule / webhook / app-event / manual). */}
+          <TriggersTab w={w} />
           <ConfigInfoGrid
             rows={[
-              ["Trigger", friendlyToken(d.config?.trigger?.type ?? w.trigger_type)],
-              ...(d.config?.trigger?.cron
-                ? [["Schedule", d.config.trigger.cron] as [string, React.ReactNode]]
-                : []),
-              ...(d.config?.trigger?.timezone
-                ? [["Timezone", d.config.trigger.timezone] as [string, React.ReactNode]]
-                : []),
-              ...(d.webhook_url
-                ? [["Webhook", <span key="webhook" className="font-mono text-xs">{d.webhook_url}</span>] as [string, React.ReactNode]]
-                : []),
               [
                 "Status",
                 // TODO(#788): pause/resume toggle — "paused" is enabled:false today.
