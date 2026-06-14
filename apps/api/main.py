@@ -20664,6 +20664,46 @@ def _load_secrets_from_enc(user_id: str, repos: Repositories, pat: str, repo_ful
         return 0
 
 
+def _git_safe_http_detail(exc: BaseException, where: str) -> str:
+    """A-05: mirror the #836 / `_mcp_internal_error` hardening for git endpoints.
+
+    Raw `GitOpsError` messages are built from `git` stderr, which routinely
+    echoes the remote URL (e.g. ``fatal: unable to access
+    'https://x-access-token:<PAT>@github.com/...'``) AND server filesystem
+    paths. Serializing ``{exc}`` into the HTTP response therefore leaked the
+    workspace's GitHub token and internal fs layout to any caller.
+
+    Log the full detail server-side; return a generic, user-safe message that
+    keeps the user-meaningful classification (auth failed / repo not found /
+    network) without leaking the token, the remote URL, or fs paths.
+    """
+    logger.exception("Git endpoint (%s) failed", where)
+    detail = str(exc)
+    low = detail.lower()
+    if "authentication failed" in low or "403" in low or "401" in low or "permission denied" in low:
+        return "GitHub authentication failed — check the token has the 'repo' scope."
+    if "repository not found" in low or "not found" in low or "404" in low:
+        return "GitHub repository not found — check the repo name and access."
+    if "could not resolve host" in low or "failed to connect" in low or "timed out" in low or "timeout" in low:
+        return "Could not reach GitHub — check network connectivity and try again."
+    return "Git operation failed. The error has been logged; please retry or check the workspace's GitHub connection."
+
+
+def _github_api_safe_detail(exc: BaseException) -> str:
+    """A-05: keep GitHub's user-meaningful API message, never leak a URL/token.
+
+    `GitHubAPIError` carries GitHub's own JSON `message` field (e.g. "Bad
+    credentials", "Not Found"), which is safe and useful. Out of caution,
+    if the message ever contains a URL or token-like marker, log it and fall
+    back to a generic message instead of echoing internals to the caller.
+    """
+    detail = str(exc).strip()
+    if not detail or re.search(r"https?://|x-access-token|ghp_|github_pat_|@github\.com", detail, re.IGNORECASE):
+        logger.exception("GitHub API error (redacted from response)")
+        return "GitHub request failed. The error has been logged; please retry."
+    return f"GitHub error: {detail}"
+
+
 @app.get("/system/git", response_model=_GitStatus)
 def get_git_status(auth: AuthContext = Depends(get_auth_context)) -> _GitStatus:
     """Return current GitHub connection + linked repo status."""
@@ -20698,7 +20738,7 @@ def connect_github(
         status = getattr(exc, "status", 0)
         if status == 401:
             raise HTTPException(status_code=400, detail="Invalid GitHub token — check it has the 'repo' scope") from exc
-        raise HTTPException(status_code=400, detail=f"GitHub error: {exc}") from exc
+        raise HTTPException(status_code=400, detail=_github_api_safe_detail(exc)) from exc
 
     # Preserve existing repo link if there is one
     existing = _git_cfg_get(auth.user_id) or {}
@@ -20786,7 +20826,10 @@ def link_git_repo(
             pass  # Remote is empty — fine, we'll just push
         _git_ops.push(workspace)
     except _git_ops.GitOpsError as exc:
-        raise HTTPException(status_code=500, detail=f"Git operation failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500,
+            detail=_git_safe_http_detail(exc, "link"),
+        ) from exc
 
     pushed_at = now_iso()
     _git_cfg_upsert(
@@ -20822,7 +20865,10 @@ def push_git_workspace(auth: AuthContext = Depends(get_auth_context)) -> _GitSta
     try:
         _git_ops.push(_git_workspace())
     except _git_ops.GitOpsError as exc:
-        raise HTTPException(status_code=500, detail=f"Push failed: {exc}") from exc
+        raise HTTPException(
+            status_code=500,
+            detail=_git_safe_http_detail(exc, "push"),
+        ) from exc
 
     pushed_at = now_iso()
     _git_cfg_upsert(auth.user_id, last_pushed_at=pushed_at)
@@ -20883,7 +20929,10 @@ def import_git_workspace(
         try:
             _git_ops.clone_or_init(tmp, remote_url)
         except _git_ops.GitOpsError as exc:
-            raise HTTPException(status_code=500, detail=f"Clone failed: {exc}") from exc
+            raise HTTPException(
+                status_code=500,
+                detail=_git_safe_http_detail(exc, "clone"),
+            ) from exc
 
         # Import workers
         workers_dir_in_repo = tmp / "workers"

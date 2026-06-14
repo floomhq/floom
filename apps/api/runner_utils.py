@@ -39,6 +39,27 @@ logger = logging.getLogger("floom.runner_utils")
 WORKERS_DIR = Path(os.environ.get("FLOOM_WORKERS_DIR", "../../workers")).resolve()
 ARTIFACTS_DIR = Path(os.environ.get("FLOOM_ARTIFACTS_DIR", "../../data/artifacts")).resolve()
 
+
+def _extra_worker_roots() -> list[Path]:
+    """Additional legitimate worker-source roots beyond FLOOM_WORKERS_DIR.
+
+    Cloud historically materialized a class of seeded/example worker bundles
+    under ``/opt/workeros-cloud/var/workers`` (the ``var/workers`` dir the
+    #1048 audit flagged) and stored their absolute path in
+    ``skill_versions.bundle_path``. Those bundles live ONLY there, not under
+    the deployed ``engine/workers`` tree, so a scheduled run must be allowed to
+    resolve a stored absolute bundle_path under one of these explicitly-listed
+    roots. Set ``FLOOM_EXTRA_WORKERS_DIRS`` to a colon-separated list to permit
+    them; absent the env, behaviour is identical to before (single root).
+    """
+    raw = os.environ.get("FLOOM_EXTRA_WORKERS_DIRS", "")
+    roots: list[Path] = []
+    for part in raw.split(os.pathsep):
+        part = part.strip()
+        if part:
+            roots.append(Path(part).resolve())
+    return roots
+
 DEFAULT_TIMEOUT_SECONDS = int(os.environ.get("FLOOM_RUN_TIMEOUT", "300"))
 
 def _safe_path(base: Path, *parts: str) -> Path:
@@ -77,18 +98,75 @@ def _safe_path(base: Path, *parts: str) -> Path:
 
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
+    return _resolve_worker_bundle_dir(WORKERS_DIR, worker_id, config, _safe_path)
+
+
+def _resolve_worker_bundle_dir(
+    workers_dir: Path,
+    worker_id: str,
+    config: Optional["WorkerConfig"],
+    safe_path: Callable[..., Path],
+) -> Path:
+    """Resolve a worker's bundle dir under the *configured* WORKERS_DIR.
+
+    Fixes the ``var/workers`` vs ``engine/workers`` drift (#1048 follow-up):
+    a worker's ``runtime.bundle_path`` can be a STALE ABSOLUTE path baked at
+    registration time from an older ``FLOOM_WORKERS_DIR`` (e.g.
+    ``/opt/workeros-cloud/var/workers/job-digest``). At run time
+    ``FLOOM_WORKERS_DIR`` points at ``.../engine/workers``, so the stale
+    absolute path resolves outside the current root and the traversal guard
+    rejected a legitimate scheduled run.
+
+    Resolution order, traversal guard intact throughout:
+      1. If a relative bundle_path is stored, join it under ``WORKERS_DIR.parent``
+         (the historical contract) and accept it only if it stays under the
+         allowed root.
+      2. Otherwise (or if an absolute bundle_path escapes the current root —
+         the drift case), resolve the worker by its basename under the
+         *current* ``WORKERS_DIR`` via ``safe_path`` (which still rejects
+         ``..`` and symlink escapes).
+    """
     bundle_path = config.runtime.bundle_path if config and config.runtime else None
+    allowed_root = workers_dir.parent.resolve()
     if bundle_path:
         raw_path = Path(bundle_path)
-        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
-        resolved = target.resolve()
-        allowed_root = WORKERS_DIR.parent.resolve()
+        if not raw_path.is_absolute():
+            resolved = workers_dir.parent.joinpath(raw_path).resolve()
+            try:
+                resolved.relative_to(allowed_root)
+            except ValueError:
+                # Relative path escaped the root (genuine traversal): reject.
+                raise ValueError(f"Path traversal attempt: {resolved}")
+            return resolved
+        # Absolute bundle_path. Accept it if it lives under the current allowed
+        # root OR under an explicitly-allowed extra worker root (e.g. cloud's
+        # var/workers) AND the directory actually exists. Otherwise treat it as
+        # registration-time drift and fall back to basename resolution under the
+        # configured dir. The traversal guard is preserved throughout: only
+        # explicitly-listed roots are ever honoured.
+        resolved = raw_path.resolve()
         try:
             resolved.relative_to(allowed_root)
+            return resolved
         except ValueError:
-            raise ValueError(f"Path traversal attempt: {resolved}")
-        return resolved
-    return _safe_path(WORKERS_DIR, worker_id)
+            pass
+        for extra in _extra_worker_roots():
+            try:
+                resolved.relative_to(extra)
+            except ValueError:
+                continue
+            if resolved.is_dir():
+                return resolved
+        logger.warning(
+            "worker %s bundle_path %s is outside WORKERS_DIR %s and all extra "
+            "worker roots (registration-time drift); resolving by basename "
+            "under configured dir",
+            worker_id,
+            bundle_path,
+            workers_dir,
+        )
+        return safe_path(workers_dir, Path(bundle_path).name)
+    return safe_path(workers_dir, worker_id)
 
 
 def _resolve_connections(

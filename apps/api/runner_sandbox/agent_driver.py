@@ -96,18 +96,11 @@ def _safe_path(base: Path, *parts: str) -> Path:
 
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
-    bundle_path = config.runtime.bundle_path if config and config.runtime else None
-    if bundle_path:
-        raw_path = Path(bundle_path)
-        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
-        resolved = target.resolve()
-        allowed_root = WORKERS_DIR.parent.resolve()
-        try:
-            resolved.relative_to(allowed_root)
-        except ValueError:
-            raise ValueError(f"Path traversal attempt: {resolved}")
-        return resolved
-    return _safe_path(WORKERS_DIR, worker_id)
+    # Delegate to the canonical resolver so the var/workers vs engine/workers
+    # bundle_path drift (#1048 follow-up) is handled identically everywhere.
+    from runner_utils import _resolve_worker_bundle_dir
+
+    return _resolve_worker_bundle_dir(WORKERS_DIR, worker_id, config, _safe_path)
 
 
 def _safe_path_under_any(roots: list[Path], path: str, default_root: Path) -> Path:
