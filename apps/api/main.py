@@ -4436,11 +4436,20 @@ def _persist_discovered_workers(
         )
         # System workers must be workspace-visible so any authenticated user
         # can run them regardless of which bootstrap user originally persisted
-        # the row. Without this, a multi-member setup where user A bootstrapped
-        # the DB and user B logs in gets "worker does not belong to B" when
-        # Emily tries to start a worker-author run (#698).
+        # the row (#698). Stock/example demos (PROTECTED_STOCK_WORKER_IDS or
+        # is_example:true) ship with the product and are meant for every member
+        # to run (e.g. outbound-approval-demo). They were persisted 'private' +
+        # fede-owned, so a fresh member hit "worker <id> does not belong to
+        # <uid>" at RunsRepository.create (owner OR 'workspace' only). Seed them
+        # 'workspace' too, without leaking a tenant's real private workers.
         is_system_worker = bool(manifest.get("system_worker"))
-        worker_visibility = "workspace" if is_system_worker else "private"
+        is_stock_demo = (
+            worker_id in PROTECTED_STOCK_WORKER_IDS
+            or manifest.get("is_example") is True
+        )
+        worker_visibility = (
+            "workspace" if (is_system_worker or is_stock_demo) else "private"
+        )
 
         conn.execute(
             """
@@ -4538,6 +4547,11 @@ def _persist_discovered_workers(
                     composio_trigger_id=composio_trigger_id,
                     composio_event=composio_event,
                     triggers_json=triggers_list,
+                    # Mirror the same visibility the local SQLite row got, so a
+                    # cloud (Supabase) deploy seeds system + stock/example demos
+                    # as 'workspace' too — otherwise the cloud mirror defaults to
+                    # 'private' and members hit "does not belong" on the demo.
+                    visibility=worker_visibility,
                 )
                 # Non-SQLite (cloud) reconcile: SQLite already reconciled via
                 # the open `conn` above. Guarded separately so a cloud repo that
@@ -4889,14 +4903,24 @@ def _list_operator_workers(
     user_id: str,
     repos: Repositories,
     use_cache: bool = True,
+    role: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Workers shown in the operator's default view.
 
     Same filter as the default GET /workers view: visible (non-hidden) workers,
     minus system_worker:true and archived. Shared by /workers and the overview
     'Workers active' count so the two numbers cannot drift (1.5.4).
+
+    ``role`` MUST be threaded through identically to GET /workers
+    (``_worker_repo_role(auth)``); otherwise an admin member sees the full
+    workspace-visible set on /workers but a smaller owner-only set on the
+    overview, and the two counts diverge (the 78-vs-104 scoping bug). The
+    ``user_id`` passed here must likewise be the access-resolved id
+    (``_worker_access_user_id(auth)``), not the raw caller id.
     """
-    workers = _list_visible_workers(user_id=user_id, repos=repos, use_cache=use_cache)
+    workers = _list_visible_workers(
+        user_id=user_id, repos=repos, use_cache=use_cache, role=role
+    )
     workers = [
         w for w in workers
         if not (w.get("manifest") or {}).get("system_worker", False)
@@ -13084,6 +13108,33 @@ def create_worker_run(
             status_code=402,
             detail={"error_code": "spend_cap_exceeded", "message": str(exc)},
         ) from exc
+    except ValueError as exc:
+        # Un-mask known run-create ValueErrors at the source instead of letting
+        # them bubble to the global ValueError handler, which collapses every
+        # cause into a useless 400 "Invalid request" (that exact masking hid the
+        # "worker does not belong" + path-traversal failures on the demo worker).
+        # We surface a SPECIFIC, operator-actionable message but keep raw
+        # filesystem paths server-side (the global handler's #920 concern).
+        msg = str(exc)
+        logger.warning("create_run rejected for worker %s: %s", worker_id, msg, exc_info=exc)
+        if "does not belong" in msg:
+            # Authorization failure: the worker exists but this user cannot run
+            # it (private + non-owner). 403, not a generic 400.
+            raise HTTPException(
+                status_code=403,
+                detail="You do not have permission to run this worker.",
+            ) from exc
+        if "Path traversal" in msg:
+            # Server-side misconfiguration (e.g. FLOOM_WORKERS_DIR drift): the
+            # worker's source dir can't be resolved. Don't leak the path.
+            raise HTTPException(
+                status_code=500,
+                detail="Worker source could not be resolved on the server.",
+            ) from exc
+        if "owner not found" in msg or "is disabled" in msg:
+            raise HTTPException(status_code=409, detail=msg) from exc
+        # Unknown ValueError: keep it generic but still 400 with the safe copy.
+        raise HTTPException(status_code=400, detail="Could not start this run.") from exc
     bound_by = auth.user_id or "anonymous"
     try:
         resolved_inputs = _resolve_file_input_references(
@@ -19657,14 +19708,29 @@ def system_overview(
     # carries `enabled`) for each operator-visible worker, falling back to the
     # filesystem record for stock workers that have no DB row yet, so the
     # enabled/paused logic stays correct and the total equals /workers.
+    #
+    # SCOPING (78-vs-104 bug): GET /workers resolves the access user-id +
+    # role via _worker_access_user_id / _worker_repo_role. The overview MUST use
+    # the identical resolution, otherwise an admin member sees the full
+    # workspace set on /workers but a narrower owner-only set here and the two
+    # counts diverge. Resolve them once and thread them through BOTH the DB
+    # denominator and _list_operator_workers.
+    _overview_worker_user_id = _worker_access_user_id(auth)
+    _overview_worker_role = _worker_repo_role(auth)
     _db_workers_by_id = {
         row["id"]: row
-        for row in repos.workers.list(user_id=auth.user_id)
+        for row in repos.workers.list(
+            user_id=_overview_worker_user_id, role=_overview_worker_role
+        )
         if row.get("id")
     }
     workers = [
         _db_workers_by_id.get(w["id"], w)
-        for w in _list_operator_workers(user_id=auth.user_id, repos=repos)
+        for w in _list_operator_workers(
+            user_id=_overview_worker_user_id,
+            repos=repos,
+            role=_overview_worker_role,
+        )
         if w.get("id")
     ]
     active_workers_count = sum(1 for row in workers if not _overview_worker_paused(row))

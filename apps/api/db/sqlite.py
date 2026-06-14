@@ -293,6 +293,56 @@ def _skill_version_id(worker_id: str, manifest: dict[str, Any]) -> str:
     return f"sv_{worker_id}_{version}"
 
 
+def _backfill_legacy_manifest(
+    manifest_raw: dict[str, Any],
+    *,
+    worker_id: str,
+    trigger_type: str | None,
+    cron_expr: str | None,
+    cron_timezone: str | None,
+) -> dict[str, Any]:
+    """Migration-on-read: heal legacy WorkerConfig manifests missing required
+    fields so they parse instead of raising a ValidationError (which the API
+    masked as a generic ``400 Invalid request``).
+
+    Stored manifests written by older engine versions can lack ``id``,
+    ``trigger`` and/or ``runtime``. The DB row carries authoritative fallbacks
+    (the ``id``, ``trigger_type``, ``cron_*`` columns), so we reconstruct the
+    minimum shape rather than crashing on the worker. Only applied to legacy
+    (non-0.3) manifests; 0.3 ``WorkerContract`` manifests have a different
+    required shape and are left untouched.
+    """
+    if not isinstance(manifest_raw, dict):
+        return manifest_raw
+    if manifest_raw.get("schema_version") == "0.3":
+        return manifest_raw
+
+    healed = dict(manifest_raw)
+    # id: fall back to the row id, then name.
+    if not healed.get("id"):
+        healed["id"] = worker_id or healed.get("name") or "worker"
+    # name: WorkerConfig also requires a name; default to id.
+    if not healed.get("name"):
+        healed["name"] = healed.get("id") or worker_id or "worker"
+    # trigger: rebuild from the row's trigger_type/cron columns (or default manual).
+    trigger = healed.get("trigger")
+    if not isinstance(trigger, dict) or not trigger.get("type"):
+        trigger = trigger if isinstance(trigger, dict) else {}
+        trigger.setdefault("type", trigger_type or "manual")
+        if cron_expr and not trigger.get("cron"):
+            trigger["cron"] = cron_expr
+        if cron_timezone and not trigger.get("timezone"):
+            trigger["timezone"] = cron_timezone
+        healed["trigger"] = trigger
+    # runtime: WorkerRuntime only hard-requires `type`; everything else defaults.
+    runtime = healed.get("runtime")
+    if not isinstance(runtime, dict) or not runtime.get("type"):
+        runtime = runtime if isinstance(runtime, dict) else {}
+        runtime.setdefault("type", "python")
+        healed["runtime"] = runtime
+    return healed
+
+
 def _config_from_manifest(
     *,
     worker_id: str,
@@ -303,6 +353,13 @@ def _config_from_manifest(
     bundle_path: str | None,
 ) -> Optional[WorkerConfig]:
     manifest_raw = json.loads(manifest_json or "{}")
+    manifest_raw = _backfill_legacy_manifest(
+        manifest_raw,
+        worker_id=worker_id,
+        trigger_type=trigger_type,
+        cron_expr=cron_expr,
+        cron_timezone=cron_timezone,
+    )
     parsed = parse_worker_manifest(manifest_raw)
     if isinstance(parsed, WorkerContract):
         config = worker_contract_to_worker_config(parsed, worker_id)
