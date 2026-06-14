@@ -335,6 +335,11 @@ def _bytea_bytes(value: Any) -> bytes | None:
     return None
 
 
+def _bytea_hex(value: Any) -> str | None:
+    raw = _bytea_bytes(value)
+    return raw.hex() if raw is not None else None
+
+
 # ---------------------------------------------------------------------------
 # Workspace scoping
 # ---------------------------------------------------------------------------
@@ -1150,7 +1155,7 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             {"webhook_secret_hash": _bytea_literal(secret_hash)}
         ).eq("id", worker_id).execute()
 
-    def get_webhook_secret_hash(self, *, worker_id: str) -> bytes | None:
+    def get_webhook_secret_hash(self, *, worker_id: str) -> str | None:
         worker_response = (
             self._client.table("workers")
             .select("webhook_secret_hash")
@@ -1159,7 +1164,7 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             .execute()
         )
         worker = _first_row(worker_response)
-        return _bytea_bytes(worker.get("webhook_secret_hash")) if worker else None
+        return _bytea_hex(worker.get("webhook_secret_hash")) if worker else None
 
     def delete_webhook_secret(self, *, worker_id: str) -> bool:
         existed = self.get_webhook_secret_hash(worker_id=worker_id) is not None

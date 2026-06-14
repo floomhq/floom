@@ -1,11 +1,7 @@
 from __future__ import annotations
 
-import hashlib
-import hmac
 import logging
 import os
-import secrets
-from datetime import datetime, timezone
 from typing import Optional
 from urllib.parse import quote
 
@@ -14,56 +10,18 @@ from apps.api._engine import ensure_engine_api_path, import_engine_module
 ensure_engine_api_path()
 
 from db.factory import Repositories, get_repositories  # noqa: E402
-from webhook_service import derive_webhook_token as _engine_derive_webhook_token  # noqa: E402
+from webhook_service import current_webhook_token as _engine_current_webhook_token  # noqa: E402
+from webhook_service import delete_webhook_secret as _engine_delete_webhook_secret  # noqa: E402
+from webhook_service import generate_webhook_secret as _engine_generate_webhook_secret  # noqa: E402
+from webhook_service import get_webhook_secret_hash as _engine_get_webhook_secret_hash  # noqa: E402
+from webhook_service import verify_webhook_token as _engine_verify_webhook_token  # noqa: E402
 
 
 logger = logging.getLogger("workeros.cloud.webhooks")
-_WEBHOOK_TOKEN_HASH_KEY = b"workeros-cloud-webhook-token:v1"
 
 
 def _repos(repos: Repositories | None = None) -> Repositories:
     return repos or get_repositories()
-
-
-def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
-
-
-def hash_webhook_token(token: str) -> bytes:
-    normalized = (token or "").strip()
-    if not normalized:
-        raise ValueError("webhook token is required")
-    return hmac.digest(
-        _WEBHOOK_TOKEN_HASH_KEY,
-        normalized.encode(),
-        hashlib.sha256,
-    )
-
-
-def _webhook_token_key(
-    worker_id: str,
-    repos: Repositories | None = None,
-    *,
-    create: bool = False,
-) -> str | None:
-    """Stable string token-key for a worker, matching the engine's model.
-
-    The engine derives the webhook URL token as
-    ``derive_webhook_token(worker_id, token_key)`` where ``token_key`` is the
-    worker's stored webhook secret hash AS A STRING (sqlite returns ``str``).
-    The cloud repo stores it as ``bytea`` and returns ``bytes``, so normalise to
-    a stable hex string here. When ``create`` is set, backfill a secret so the
-    URL is always available (mirrors the engine's ``get_or_create_token_key``).
-    """
-    stored = _repos(repos).workers.get_webhook_secret_hash(worker_id=worker_id)
-    if stored is None:
-        if not create:
-            return None
-        generate_webhook_secret(worker_id, repos=repos)
-        stored = _repos(repos).workers.get_webhook_secret_hash(worker_id=worker_id)
-        if stored is None:
-            return None
-    return stored.hex() if isinstance(stored, (bytes, bytearray)) else str(stored)
 
 
 def build_webhook_url(
@@ -91,9 +49,7 @@ def build_webhook_url(
         or "https://api.workeros.floom.dev"
     ).rstrip("/")
     if token is None:
-        key = _webhook_token_key(worker_id, repos, create=True)
-        if key:
-            token = _engine_derive_webhook_token(worker_id, key)
+        token = _engine_current_webhook_token(worker_id, repos=_repos(repos))
     url = f"{api_base}/api/webhooks/{worker_id}"
     if token:
         return f"{url}?token={quote(token, safe='')}"
@@ -105,16 +61,7 @@ def generate_webhook_secret(
     *,
     repos: Repositories | None = None,
 ) -> str:
-    raw_token = secrets.token_urlsafe(32)
-    timestamp = _now_iso()
-    _repos(repos).workers.upsert_webhook_secret_hash(
-        worker_id=worker_id,
-        secret_hash=hash_webhook_token(raw_token),
-        created_at=timestamp,
-        rotated_at=timestamp,
-    )
-    logger.info("Cloud webhook token rotated for worker %s", worker_id)
-    return raw_token
+    return _engine_generate_webhook_secret(worker_id, repos=_repos(repos))
 
 
 def verify_webhook_token(
@@ -123,24 +70,15 @@ def verify_webhook_token(
     *,
     repos: Repositories | None = None,
 ) -> bool:
-    """Aligned with the engine's deterministic model: accept the token iff it
-    matches the worker's CURRENT derived token (rotation invalidates old ones).
-
-    Does not backfill — a worker with no webhook secret rejects all tokens.
-    """
-    key = _webhook_token_key(worker_id, repos, create=False)
-    if not key:
-        return False
-    expected = _engine_derive_webhook_token(worker_id, key)
-    return hmac.compare_digest((token or "").strip(), expected)
+    return _engine_verify_webhook_token(worker_id, token, repos=_repos(repos))
 
 
 def get_webhook_secret_hash(
     worker_id: str,
     *,
     repos: Repositories | None = None,
-) -> bytes | None:
-    return _repos(repos).workers.get_webhook_secret_hash(worker_id=worker_id)
+) -> str | None:
+    return _engine_get_webhook_secret_hash(worker_id, repos=_repos(repos))
 
 
 def delete_webhook_secret(
@@ -148,7 +86,7 @@ def delete_webhook_secret(
     *,
     repos: Repositories | None = None,
 ) -> bool:
-    return _repos(repos).workers.delete_webhook_secret(worker_id=worker_id)
+    return _engine_delete_webhook_secret(worker_id, repos=_repos(repos))
 
 
 def apply_engine_overrides() -> None:
