@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import collections
 from datetime import datetime, timedelta, timezone
+import os
 import time
 from typing import Dict, List
 
@@ -39,8 +40,15 @@ _METRICS_DB_CONNECTION_ERRORS_TOTAL = 0
 
 @system_health_router.get("/healthz")
 def healthz():
-    """Liveness probe — exempt from x-floom-secret."""
-    return {"status": "ok"}
+    """Liveness probe — exempt from x-floom-secret.
+
+    `instance` (env WORKEROS_INSTANCE) labels WHICH deployment answered, so a
+    dev mirror is never mistaken for prod when verifying "on the cloud". It is
+    a SEPARATE label from WORKEROS_DEPLOY (which drives deploy-mode logic);
+    defaults to "unknown" when unset.
+    """
+    instance = (os.environ.get("WORKEROS_INSTANCE") or "unknown").strip() or "unknown"
+    return {"status": "ok", "instance": instance}
 
 
 @system_health_router.get("/health")
