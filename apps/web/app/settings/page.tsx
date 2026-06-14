@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { api } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 import type {
   CurrentUser,
   LocalWorkspaceListResponse,
@@ -691,7 +691,12 @@ function SettingsContent() {
   }
 
   return (
-    <div className="space-y-6">
+    // Full-height flex column so the CollectionView (and its nav/content
+    // divider) stretches to the bottom of the scroll container instead of
+    // ending at the content's natural height (the divider stopped ~80px short).
+    // Banners keep their natural height; the CollectionView wrapper below takes
+    // the remaining space (mirrors the Workers collection page shell).
+    <div className="flex min-h-full flex-1 flex-col gap-6">
       {claimSuccess && (
         <ClaimSuccessOverlay
           channel={claimSuccess}
@@ -749,11 +754,13 @@ function SettingsContent() {
         </Alert>
       )}
 
-      <CollectionView
-        config={config}
-        state={collectionState}
-        onChange={handleCollectionChange}
-      />
+      <div className="min-h-0 flex-1">
+        <CollectionView
+          config={config}
+          state={collectionState}
+          onChange={handleCollectionChange}
+        />
+      </div>
     </div>
   );
 }
@@ -921,6 +928,20 @@ const CLI_INSTALL_SNIPPET = `npm i -g @floomhq/workeros
 workeros login
 workeros run <worker>`;
 
+// API base comes from the same env seam lib/api uses (NEXT_PUBLIC_API_PROXY_BASE
+// → "/api/proxy" on OSS, "/app/api/proxy" on cloud) so the snippet is never a
+// hardcoded host. The token header (x-floom-secret) matches the CLI/MCP curl
+// examples in CliCommandPanel; create the token in the Tokens tab.
+const API_CALL_SNIPPET = `# List your workers
+curl -sS ${API_BASE}/workers?shape=list \\
+  -H "x-floom-secret: <your-token>"
+
+# Run a worker
+curl -sS -X POST ${API_BASE}/workers/<worker>/runs \\
+  -H "x-floom-secret: <your-token>" \\
+  -H "content-type: application/json" \\
+  -d '{"inputs": {}}'`;
+
 function CopyCodeCard({ title, description, value }: { title: string; description: string; value: string }) {
   async function copy() {
     try {
@@ -951,13 +972,61 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
 
 function DeveloperSection() {
   return (
-    <Tabs defaultValue="mcp">
+    <Tabs defaultValue="api">
       <TabsList>
+        <TabsTrigger value="api">API</TabsTrigger>
         <TabsTrigger value="mcp">MCP</TabsTrigger>
         <TabsTrigger value="cli">CLI</TabsTrigger>
         <TabsTrigger value="tokens">Tokens</TabsTrigger>
         <TabsTrigger value="git">Git</TabsTrigger>
       </TabsList>
+      <TabsContent value="api" className="space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-sm font-medium">REST API</h2>
+          <p className="text-xs text-muted-foreground">
+            Call your workspace over HTTP. Authenticate every request with a
+            personal access token in the <code className="font-mono">x-floom-secret</code> header.
+          </p>
+        </div>
+        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5">
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">Base URL</p>
+            <code className="break-all font-mono text-xs text-foreground">{API_BASE}</code>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={() => {
+              navigator.clipboard
+                .writeText(API_BASE)
+                .then(() => toast.success("Copied base URL"))
+                .catch(() => toast.error("Could not copy"));
+            }}
+          >
+            <Copy className="size-3.5" />
+            Copy
+          </Button>
+        </div>
+        <CopyCodeCard
+          title="Call the API"
+          description="Replace <your-token> with a personal access token from the Tokens tab."
+          value={API_CALL_SNIPPET}
+        />
+        <p className="text-xs text-muted-foreground">
+          Need a token? Open the{" "}
+          <span className="font-medium text-foreground">Tokens</span> tab.{" "}
+          <a
+            href="https://github.com/floomhq/workeros#api"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+          >
+            API docs
+          </a>
+        </p>
+      </TabsContent>
       <TabsContent value="mcp" className="space-y-4">
         <CopyCodeCard
           title="Agent install"

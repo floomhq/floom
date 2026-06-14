@@ -10,7 +10,7 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
   usePathname: () => "/settings",
 }));
-vi.mock("@/lib/api", () => ({ api: { workspace: { getSettings, setSetting } } }));
+vi.mock("@/lib/api", () => ({ API_BASE: "/api/proxy", api: { workspace: { getSettings, setSetting } } }));
 
 beforeEach(() => {
   vi.clearAllMocks();
