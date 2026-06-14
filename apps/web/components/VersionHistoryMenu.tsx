@@ -24,7 +24,7 @@ function commitMessageBadge(message: string) {
       className={cn(
         "inline-flex max-w-[140px] items-center truncate rounded-[var(--radius-pill)] [border:var(--bd-pill)] px-1.5 py-0.5 text-[10px] font-medium",
         isRollback
-          ? "bg-amber-500/10 text-amber-700 dark:text-amber-400 group-focus/dropdown-menu-item:bg-amber-400/30"
+          ? "bg-[var(--bg-2)] text-[var(--ink-soft)] group-focus/dropdown-menu-item:bg-[var(--bg-3)]"
           : isAi
             ? "bg-violet-500/10 text-violet-700 dark:text-violet-400 group-focus/dropdown-menu-item:bg-violet-400/30"
             : "bg-muted text-muted-foreground group-focus/dropdown-menu-item:bg-white/20"

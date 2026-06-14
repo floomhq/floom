@@ -138,7 +138,7 @@ const YC = {
   key:     "hsl(210 80% 55%)",   // blue — keys
   colon:   "hsl(220 10% 55%)",   // muted — : separator
   string:  "hsl(142 55% 42%)",   // green — quoted strings
-  number:  "hsl(25  90% 55%)",   // orange — numbers
+  number:  "hsl(200 70% 48%)",   // cyan-blue — numbers
   bool:    "hsl(270 55% 62%)",   // purple — true/false/null
   comment: "hsl(220 10% 58%)",   // grey — comments
   dash:    "hsl(220 10% 55%)",   // muted — list dash

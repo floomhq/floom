@@ -145,7 +145,7 @@ export function PromptInput({
           className="h-7 w-7 p-0 shrink-0"
           onClick={onSubmit}
           disabled={!canSend}
-          style={{ background: canSend ? "#59AAF8" : undefined, color: canSend ? "white" : undefined }}
+          style={{ background: canSend ? "var(--accent)" : undefined, color: canSend ? "white" : undefined }}
           type="button"
           aria-label="Send message"
         >
