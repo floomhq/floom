@@ -174,6 +174,18 @@ describe("page components render with data (no client crash)", () => {
     expect(await screen.findByText("Reverse Match CRM")).toBeInTheDocument();
   });
 
+  it("ApprovalsCollection does not show worker content-tag counts when no approvals are pending", async () => {
+    const { api } = await import("@/lib/api");
+    vi.mocked(api.approvals.list).mockResolvedValueOnce([]);
+    vi.mocked(api.workers.list).mockResolvedValueOnce([{ ...worker, tags: ["email"] }] as never);
+
+    const { default: ApprovalsCollection } = await import("@/app/approvals/ApprovalsCollection");
+    render(<ApprovalsCollection />);
+
+    expect(await screen.findByText("No pending approvals")).toBeInTheDocument();
+    expect(screen.queryByRole("button", { name: /email/i })).not.toBeInTheDocument();
+  });
+
   it("shows loading skeletons, not empty states, while first collection fetches are pending", async () => {
     const { api } = await import("@/lib/api");
 
