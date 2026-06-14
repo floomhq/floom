@@ -159,6 +159,7 @@ from models import (
     WorkspaceStats,
     UnsafeMCPUrlError,
     UnsafeOutboundUrlError,
+    WorkerNotRunnableError,
     assert_safe_outbound_mcp_url,
     assert_safe_outbound_url,
     composio_app_for_tool_slug,
@@ -13216,6 +13217,16 @@ def create_worker_run(
         raise HTTPException(
             status_code=402,
             detail={"error_code": "spend_cap_exceeded", "message": str(exc)},
+        ) from exc
+    except WorkerNotRunnableError as exc:
+        # Genuine cross-tenant ownership denial raised by RunsRepo.create. Caught
+        # explicitly (it subclasses ValueError) so the 403 is robust rather than
+        # relying on the substring match below. Keep the raw "does not belong"
+        # detail server-side; clients get a safe, operator-facing message.
+        logger.warning("create_run denied for worker %s: %s", worker_id, exc, exc_info=exc)
+        raise HTTPException(
+            status_code=403,
+            detail="You do not have permission to run this worker.",
         ) from exc
     except ValueError as exc:
         # Un-mask known run-create ValueErrors at the source instead of letting

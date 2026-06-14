@@ -65,7 +65,9 @@ def test_private_worker_not_runnable_by_non_owner(repo_bundle):
         bundle_path="workers/private-real-worker",
         visibility="private",
     )
-    with pytest.raises(ValueError) as exc:
+    from models import WorkerNotRunnableError
+
+    with pytest.raises(WorkerNotRunnableError) as exc:
         repos.runs.create(
             user_id="fresh-member",
             run_id="run-private-1",
@@ -74,7 +76,69 @@ def test_private_worker_not_runnable_by_non_owner(repo_bundle):
             trigger_source="manual",
             runner="e2b",
         )
+    # Subclasses ValueError (kept for back-compat) and still carries the
+    # "does not belong" marker the run endpoint's fallback matches on.
+    assert isinstance(exc.value, ValueError)
     assert "does not belong" in str(exc.value)
+
+
+def test_catalog_stock_worker_runnable_by_fresh_tenant_even_when_private(repo_bundle):
+    """Runnable-by-attribution carve-out: a curated PUBLIC_STOCK_WORKER_IDS
+    catalog worker is runnable by any user even if its persisted row is
+    seed-owned + visibility='private'. The run is attributed to the worker's
+    owner (same as the workspace path) so the owner-scoped run JOIN resolves."""
+    import main
+
+    repos, _db, _manifest = repo_bundle
+    stock_id = sorted(main.PUBLIC_STOCK_WORKER_IDS)[0]
+    repos.workers.upsert(
+        user_id="seed-owner",
+        worker_id=stock_id,
+        name="Stock Catalog Worker",
+        manifest_json=_ws_manifest(stock_id, "Stock Catalog Worker"),
+        bundle_path=f"workers/{stock_id}",
+        visibility="private",
+    )
+    created = repos.runs.create(
+        user_id="fresh-tenant",
+        run_id="run-catalog-1",
+        worker_id=stock_id,
+        input_json={},
+        trigger_source="manual",
+        runner="e2b",
+    )
+    assert created is not None
+    assert created["id"] == "run-catalog-1"
+    # Attributed to the worker owner (the shared catalog row), like a workspace
+    # worker — so owner-scoped run queries keep working.
+    runs_owner, total_owner = repos.runs.list(user_id="seed-owner")
+    assert total_owner == 1
+    assert runs_owner[0]["id"] == "run-catalog-1"
+
+
+def test_non_catalog_private_worker_still_blocks_cross_tenant(repo_bundle):
+    """Isolation guard (U-02): a non-catalog private worker authored by another
+    tenant is NOT runnable, even though the catalog carve-out exists."""
+    from models import WorkerNotRunnableError
+
+    repos, _db, _manifest = repo_bundle
+    repos.workers.upsert(
+        user_id="tenant-b",
+        worker_id="tenant-b-private",
+        name="Tenant B Private",
+        manifest_json=_ws_manifest("tenant-b-private", "Tenant B Private"),
+        bundle_path="workers/tenant-b-private",
+        visibility="private",
+    )
+    with pytest.raises(WorkerNotRunnableError):
+        repos.runs.create(
+            user_id="tenant-a",
+            run_id="run-xtenant-1",
+            worker_id="tenant-b-private",
+            input_json={},
+            trigger_source="manual",
+            runner="e2b",
+        )
 
 
 def test_persist_seeds_stock_demos_as_workspace_visibility():
