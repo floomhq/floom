@@ -426,7 +426,7 @@ def test_pin_uses_validated_public_ip_not_rebound_internal(monkeypatch):
         return _FakeSock()
 
     req = __import__("urllib.request", fromlist=["Request"]).Request(
-        f"http://pinned.example.com/hook", data=b"{}", method="POST"
+        "http://pinned.example.com/hook", data=b"{}", method="POST"
     )
 
     with patch("models.socket.getaddrinfo", return_value=_addrinfo(public_ip)):

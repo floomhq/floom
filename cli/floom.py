@@ -305,7 +305,7 @@ def worker_cmd(action: str, worker_id: str):
     click.echo(f"  {target}/SKILL.md")
     click.echo(f"  {target}/run.py")
     click.echo(f"  {target}/requirements.txt")
-    click.echo(f"\nRun 'floom reload' to register the new worker.")
+    click.echo("\nRun 'floom reload' to register the new worker.")
 
 
 # ---------------------------------------------------------------------------

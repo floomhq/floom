@@ -2542,7 +2542,7 @@ def update_worker(
         if worker_yml_path.exists():
             try:
                 existing_yml = worker_yml_path.read_text(encoding='utf-8')
-                trigger_lines = [f"trigger:", f"  type: {effective_type}"]
+                trigger_lines = ["trigger:", f"  type: {effective_type}"]
                 if effective_type == "schedule":
                     cron_val = effective_cron or "0 9 * * *"
                     tz_val = effective_tz or "UTC"
