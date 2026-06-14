@@ -1,7 +1,0 @@
-{
-  "job_brief": "Senior Java Backend Engineer for Berlin FinTech client, 6-12 month AUG contract, Spring Boot and Kafka required, EUR 700-850/day.",
-  "required_modules": "Spring Boot, Kafka",
-  "min_score": 0.65,
-  "top_n": 5,
-  "note": "crm_csv is a file upload — provide CSV with columns: name,email,current_company,current_title,headline,last_active_iso,skills,notes"
-}

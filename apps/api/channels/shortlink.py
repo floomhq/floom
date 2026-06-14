@@ -31,7 +31,7 @@ def _frontend_base_url() -> str:
     return (
         os.environ.get("WORKERS_FRONTEND_URL")
         or os.environ.get("WORKEROS_PUBLIC_URL")
-        or "https://workers.floom.dev"
+        or "http://localhost:3000"
     ).rstrip("/")
 
 

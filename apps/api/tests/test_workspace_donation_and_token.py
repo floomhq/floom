@@ -77,7 +77,10 @@ def client_and_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_USER_ID", "admin-boss")
     monkeypatch.delenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", raising=False)
     for name in list(sys.modules):
-        if name in ("main", "db", "models", "worker_registry", "run_service", "chat_service", "contexts") or name.startswith(("channels", "auth", "db.")):
+        # Modular refactor: routers/services/core hold response_model classes and
+        # helpers bound to `models`; purge them in lockstep so a reloaded `models`
+        # doesn't leave a stale router validating against old model classes.
+        if name in ("main", "db", "models", "worker_registry", "run_service", "chat_service", "contexts") or name.startswith(("channels", "auth", "db.", "routers", "services", "core")):
             sys.modules.pop(name, None)
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None, stop_scheduler=lambda: None

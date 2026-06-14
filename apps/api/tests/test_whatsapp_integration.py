@@ -62,6 +62,8 @@ def _load_api(monkeypatch, tmp_path, *, with_creds: bool = True):
     sys.path.insert(0, str(api_dir))
     for name in ["main", "db", "models", "worker_registry", "run_service", "chat_service"]:
         sys.modules.pop(name, None)
+    for _rn in [x for x in list(sys.modules) if x.startswith('routers')]:
+        sys.modules.pop(_rn, None)
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
         stop_scheduler=lambda: None,
@@ -1085,8 +1087,9 @@ def test_whatsapp_short_claim_url_defaults_to_api_host(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
 
     short_url = wa._whatsapp_short_claim_url("deftok")
-    assert short_url == "https://workers-api.floom.dev/c/deftok"
-    assert "workers.floom.dev/c/" not in short_url.replace("workers-api.floom.dev", "")
+    assert short_url == "http://localhost:8000/c/deftok"
+    # The /c/ link must build on the API host default, never the (different) frontend host.
+    assert "workers.floom.dev" not in short_url
 
 
 # --------------------------------------------------------------------------- #

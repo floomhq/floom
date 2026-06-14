@@ -52,7 +52,7 @@ export function FloomMark({ size = 28 }: { size?: number }) {
 // `hint` is surfaced as a native title tooltip on hover — the flat single-row
 // nav has no room for a permanent subtitle without a redesign, so the
 // employee-model microcopy ("Workers run on triggers") lives in the tooltip
-// instead (Federico 2026-06-02).
+// instead (the operator 2026-06-02).
 type NavItem = {
   href: string;
   label: string;
@@ -396,7 +396,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
 // docs/architecture/supabase-cloud-wiring-brief.md) will swap this for the
 // signed-in Supabase user's email + avatar.
 //
-// V8 (Federico 2026-06-02): "have settings next to name, as the gear icon, not
+// V8 (the operator 2026-06-02): "have settings next to name, as the gear icon, not
 // its own row." Settings is now a small gear-icon button inline on the name
 // row instead of a separate full-width SidebarSettingsLink. Theme toggle stays
 // on the right.

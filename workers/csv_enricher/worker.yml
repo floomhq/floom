@@ -12,16 +12,16 @@ use_cases:
 example_input:
   csv_file: |
     name,company,title,location
-    Anna Keller,NovaSearch,Senior Recruiter,Berlin
-    Ben Ortiz,Workeros,Developer Experience Lead,Remote
+    Jordan Lee,Acme Inc,Senior Recruiter,Remote
+    Sam Rivera,Globex,Developer Experience Lead,Remote
   instruction: Add columns for persona, likely priority, and one concise outreach angle.
 example_output: |
   ## Enriched CSV preview
 
   ```csv
   name,company,title,location,persona,priority,outreach_angle
-  Anna Keller,NovaSearch,Senior Recruiter,Berlin,Recruiting operator,High,Ask about reducing manual candidate writeup work
-  Ben Ortiz,Workeros,Developer Experience Lead,Remote,Developer tooling buyer,Medium,Lead with sandboxed worker reliability and audit trails
+  Jordan Lee,Acme Inc,Senior Recruiter,Remote,Recruiting operator,High,Ask about reducing manual candidate writeup work
+  Sam Rivera,Globex,Developer Experience Lead,Remote,Developer tooling buyer,Medium,Lead with sandboxed worker reliability and audit trails
   ```
 how_it_works: |
   CSV rows

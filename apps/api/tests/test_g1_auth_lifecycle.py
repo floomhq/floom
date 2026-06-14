@@ -215,10 +215,13 @@ def test_cli_token_for_legacy_install_without_users_still_works(monkeypatch, tmp
 # ---------------------------------------------------------------------------
 
 def test_run_token_rejected_when_user_disabled(monkeypatch, tmp_path):
+    # #972/#992: worker-call tokens are fail-closed — they must be signed with a
+    # real secret. Provide the dedicated worker-call secret so the token can be
+    # minted without re-enabling the FLOOM_SECRET API gate (this test runs the
+    # API in unauthenticated local mode on purpose).
     main = _load_main(
-        monkeypatch,
-        tmp_path,
-        extra_env={"WORKEROS_WORKER_CALL_SECRET": "test-worker-call-secret"},
+        monkeypatch, tmp_path,
+        extra_env={"WORKEROS_WORKER_CALL_SECRET": SECRET},
     )
     from run_token import issue_worker_call_token
 

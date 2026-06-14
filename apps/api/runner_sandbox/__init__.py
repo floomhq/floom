@@ -1,6 +1,6 @@
 """Sandbox driver dispatch for Workeros.
 
-Federico 2026-05-26: cut the local in-process runner. E2B is the only sandbox.
+the operator 2026-05-26: cut the local in-process runner. E2B is the only sandbox.
 The malicious-bundle audit landed at 45/100 against the in-process runner
 (full host secret exfil, no real timeout, no memory limit, no network egress
 enforcement). Rather than reinvent sandboxing in 300+ lines of subprocess +

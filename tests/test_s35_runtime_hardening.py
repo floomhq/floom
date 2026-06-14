@@ -30,7 +30,7 @@ def _load_api(monkeypatch, tmp_path, *, run_create_rate_limit: int = 30):
     monkeypatch.setenv("WORKEROS_RUN_CREATE_RATE_WINDOW_SECONDS", "60")
     monkeypatch.delenv("WORKEROS_RATE_LIMIT_DEV", raising=False)
 
-    reset_prefixes = ("auth.", "db.")
+    reset_prefixes = ("auth.", "db.", "routers")
     reset_exact = {
         "main",
         "auth",

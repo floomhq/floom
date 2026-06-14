@@ -1375,7 +1375,7 @@ MIGRATIONS: list[Migration] = [
     _ensure_runs_artifacts_archived_column,
     # -- migration 33: persist real display name (email/login) for connections --
     # display_name stores the unredacted email resolved from Composio so the
-    # /connections page can show "depontefede@gmail.com" instead of
+    # /connections page can show "owner@example.com" instead of
     # "Connected account". Additive only — no existing columns dropped.
     """
     ALTER TABLE composio_connections ADD COLUMN display_name TEXT;
@@ -1872,7 +1872,7 @@ MIGRATIONS: list[Migration] = [
     """,
     # -- migration 65: pin workspace_id on WhatsApp sender bindings -----------
     # Adds workspace_id (nullable for backward compat — NULL = 'local-default').
-    # Backfills existing active rows to 'local-default' so the live Federico
+    # Backfills existing active rows to 'local-default' so the live the operator
     # binding keeps working without any manual intervention.
     """
     ALTER TABLE whatsapp_sender_bindings ADD COLUMN workspace_id TEXT;

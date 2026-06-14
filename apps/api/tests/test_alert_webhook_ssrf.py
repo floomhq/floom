@@ -91,7 +91,7 @@ def test_public_url_is_posted(monkeypatch):
         return MagicMock(__enter__=lambda s: s, __exit__=lambda *a: False)
 
     with patch("models.socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")):
-        with patch.object(rs, "_open_pinned_webhook", side_effect=_fake_open):
+        with patch("services.run_notifications._open_pinned_webhook", side_effect=_fake_open):
             rs._fire_alert_webhooks(
                 run_id="run_abc", worker_id="wk_1", status="failed",
                 error="boom", repos=repos,
@@ -119,7 +119,7 @@ def test_internal_url_is_not_posted(monkeypatch, bad_url):
         {"url": bad_url, "email_to": None, "events": "failed", "secret": None},
     ])
 
-    with patch.object(rs, "_open_pinned_webhook") as mock_open:
+    with patch("services.run_notifications._open_pinned_webhook") as mock_open:
         rs._fire_alert_webhooks(
             run_id="run_x", worker_id="wk_1", status="failed",
             error=None, repos=repos,
@@ -136,7 +136,7 @@ def test_delivery_failure_does_not_crash(monkeypatch):
     ])
 
     with patch("models.socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")):
-        with patch.object(rs, "_open_pinned_webhook",
+        with patch("services.run_notifications._open_pinned_webhook",
                           side_effect=OSError("connection refused")):
             # Must not raise.
             rs._fire_alert_webhooks(
@@ -162,7 +162,7 @@ def test_payload_contains_no_secret(monkeypatch):
         return MagicMock(__enter__=lambda s: s, __exit__=lambda *a: False)
 
     with patch("models.socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")):
-        with patch.object(rs, "_open_pinned_webhook", side_effect=_fake_open):
+        with patch("services.run_notifications._open_pinned_webhook", side_effect=_fake_open):
             rs._fire_alert_webhooks(
                 run_id="run_z", worker_id="wk_1", status="failed",
                 error=None, repos=repos,
@@ -271,9 +271,12 @@ def _load_api(monkeypatch, tmp_path):
     for name in list(sys.modules):
         if any(name == m or name.startswith(m + ".") for m in [
             "main", "db", "models", "worker_registry", "runner_utils",
-            "run_service", "composio_client", "auth", "contexts",
+            "run_service", "services.run_notifications",
+            "composio_client", "auth", "contexts",
         ]):
             sys.modules.pop(name, None)
+        for _rn in [x for x in list(sys.modules) if x.startswith("routers")]:
+            sys.modules.pop(_rn, None)
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
         stop_scheduler=lambda: None,

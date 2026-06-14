@@ -78,6 +78,14 @@ def _pin_db_and_auth():
     os.environ["FLOOM_BLOBS_DIR"] = str(_TEST_DIR / "blobs")
     os.environ["FLOOM_SECRET"] = _SECRET
     os.environ["WORKEROS_DEPLOY"] = "local"
+    # files.BLOBS_DIR is resolved once at module import, and sibling tests pop +
+    # re-import `files` under their own tmp dirs. The upload pipeline (now in
+    # services.uploads) resolves `files` at call time, so re-pin the LIVE
+    # instance's BLOBS_DIR to this module's dir — env alone is not enough.
+    import sys as _sys
+    _files_mod = _sys.modules.get("files")
+    if _files_mod is not None:
+        _files_mod.BLOBS_DIR = (_TEST_DIR / "blobs").resolve()
     main.init_db()
     main.app.dependency_overrides[get_auth_context] = _auth_as(_OWNER)
     try:
@@ -101,7 +109,10 @@ def _upload(client: TestClient, content: bytes) -> str:
 
 
 def _blob_exists(sha: str) -> bool:
-    return main.blob_path(sha).exists()
+    # Resolve `files` at call time like the upload pipeline does — main's
+    # module-level blob_path binding can be stale after sibling reloads.
+    from files import blob_path
+    return blob_path(sha).exists()
 
 
 def _files_row(sha: str):

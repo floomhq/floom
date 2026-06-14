@@ -214,10 +214,15 @@ def test_627_error_message_instructs_emily_to_ask_user():
 def test_627_source_code_has_validation_before_create_run():
     """Structural check: the input validation block must appear BEFORE the
     create_run call in the source, not after."""
-    src = (API_DIR / "chat_service.py").read_text(encoding="utf-8")
+    # _tool_workers_run moved to services/chat_tool_impls.py during the
+    # chat_service decomposition; span chat_service.py + its extracted submodules.
+    src = (API_DIR / "chat_service.py").read_text(encoding="utf-8") + "".join(
+        p.read_text(encoding="utf-8")
+        for p in sorted((API_DIR / "services").glob("chat_*.py"))
+    )
 
     tool_idx = src.find("def _tool_workers_run(")
-    assert tool_idx != -1, "_tool_workers_run not found in chat_service.py"
+    assert tool_idx != -1, "_tool_workers_run not found in chat_service surface"
 
     func_body = src[tool_idx: tool_idx + 3000]
 

@@ -59,6 +59,8 @@ def _load_api(monkeypatch, tmp_path, *, extra_env: dict | None = None):
     for name in ["main", "db", "models", "worker_registry", "run_service", "chat_service",
                  "channels.slack", "channels.whatsapp", "channels.common"]:
         sys.modules.pop(name, None)
+        for _rn in [n for n in list(sys.modules) if n.startswith("routers")]:
+            sys.modules.pop(_rn, None)
     # Clear sub-modules that may have been cached.
     for key in list(sys.modules.keys()):
         if key.startswith("channels"):
@@ -645,4 +647,4 @@ def test_slack_short_claim_url_defaults_to_api_host(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
 
     short_url = _slack_mod._slack_short_claim_url("deftok2")
-    assert short_url == "https://workers-api.floom.dev/c/deftok2"
+    assert short_url == "http://localhost:8000/c/deftok2"

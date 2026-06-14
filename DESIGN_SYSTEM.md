@@ -199,7 +199,7 @@ Loaded via `next/font` in `layout.tsx`. No network hop on render.
 ### Sidebar / Navigation
 
 - Background: `var(--bg-app)` (light), `var(--sidebar-glass)` which is `oklch(0.19 0 0)` (dark).
-  - **Important:** Sidebar is the darkest surface in dark mode. Federico's explicit preference.
+  - **Important:** Sidebar is the darkest surface in dark mode. the operator's explicit preference.
   - Dark sidebar shadow: `--sidebar-glass-shadow: 0 1px 0 hsl(0 0% 0% / 0.3)`
 - Active item: bg `var(--active-nav-bg)`, radius `12px`.
   - Light: `--active-nav-bg` = `#F1EEE8`, `--active-nav-text` = `#111111`
@@ -293,7 +293,7 @@ A subtle grain overlay exists at 11% opacity (light) / 7% (dark), `mix-blend-mod
 
 ## 11. Anti-Patterns (NEVER ship)
 
-1. ❌ **Colored left borders on cards** — this is AI slop. Federico's words: "red cards look like ai slop."
+1. ❌ **Colored left borders on cards** — this is AI slop. the operator's words: "red cards look like ai slop."
 2. ❌ **Warm-tint backgrounds on warning rows** — no `bg-[rgba(249,115,91,0.04)]` on alert rows.
 3. ❌ **Multiple blues in dark mode** — only ONE blue hue: `oklch(0.72 0.14 250)`.
 4. ❌ **Blue primary buttons in light mode** — primary in light is `#181818` near-black.

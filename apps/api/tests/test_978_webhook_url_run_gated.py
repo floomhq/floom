@@ -64,7 +64,7 @@ def client_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLOOM_SECRET", "dev")
     for name in list(sys.modules):
-        if name in ("main", "models", "worker_registry", "run_service", "webhook_service", "chat_service") or name.startswith(("db", "auth", "contexts")):
+        if name in ("main", "models", "worker_registry", "run_service", "webhook_service", "chat_service") or name.startswith(("routers", "services", "core", "db", "auth", "contexts")):
             sys.modules.pop(name, None)
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None, stop_scheduler=lambda: None
@@ -96,7 +96,8 @@ def test_view_only_caller_gets_no_webhook_url(client_main, monkeypatch):
         is_owner=False, can_view=True, can_edit=False,
         can_run=False, can_delete=False, can_share=False,
     )
-    monkeypatch.setattr(main, "_worker_permissions", lambda *a, **k: view_only)
+    import services.worker_serialize as _wsz
+    monkeypatch.setattr(_wsz, "_worker_permissions", lambda *a, **k: view_only)
     detail = client.get("/workers/wh-worker").json()
     assert detail.get("webhook_url") is None, (
         "view-only caller must not receive the token-bearing webhook URL (#978)"

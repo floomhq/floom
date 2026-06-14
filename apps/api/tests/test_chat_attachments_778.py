@@ -24,9 +24,11 @@ def client(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(tmp_path / "workers"))
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
-    for name in ["db", "db._legacy_sqlite", "db.sqlite", "db.factory", "db.dependency",
-                 "db.interface", "models", "worker_registry", "run_service", "scheduler", "main"]:
-        sys.modules.pop(name, None)
+    for name in list(sys.modules):
+        if name in ("db", "db._legacy_sqlite", "db.sqlite", "db.factory", "db.dependency",
+                    "db.interface", "models", "worker_registry", "run_service", "scheduler",
+                    "main") or name.startswith("routers"):
+            sys.modules.pop(name, None)
     sys.modules["scheduler"] = types.SimpleNamespace(start_scheduler=lambda: None, stop_scheduler=lambda: None)
     db = importlib.import_module("db")
     db.init_db()

@@ -1955,7 +1955,7 @@ class WorkerSummary(BaseModel):
     # Engine/system worker (manifest system_worker:true, e.g. worker-author).
     # The API already excludes these from the default /workers view, but the
     # flag is carried on the payload so the web UI can defensively classify and
-    # filter system/internal workers without hardcoding ids (Federico 2026-06-02).
+    # filter system/internal workers without hardcoding ids (the operator 2026-06-02).
     system: Optional[bool] = None
     archived: bool = False
     archive_reason: Optional[str] = None
@@ -2381,3 +2381,395 @@ class WorkspaceStats(BaseModel):
     avg_duration_ms: Optional[float] = None
     most_active_worker_id: Optional[str] = None
     most_active_worker_name: Optional[str] = None
+
+
+class VersionSummary(BaseModel):
+    id: str           # 7-char git SHA
+    sha: str          # same 7-char git SHA
+    message: str      # commit message
+    author: str       # git author name
+    timestamp: str    # ISO 8601 commit date
+    asset_type: str   # kept for API compat
+    asset_id: str     # kept for API compat
+    change_source: Optional[str] = None
+
+
+class _WorkerSuggestion(BaseModel):
+    field: str
+    current: str
+    suggested: str
+    reason: str
+
+
+class _WorkerSuggestResponse(BaseModel):
+    has_conflicts: bool
+    suggestions: list[_WorkerSuggestion]
+
+
+class _WorkerSuggestRequest(BaseModel):
+    new_description: str
+
+
+class _ImportFromShareRequest(BaseModel):
+    token: str
+
+
+class WorkerCreateRequest(BaseModel):
+    model_config = ConfigDict(extra="forbid")
+
+    worker_yml: str
+    run_py: str
+    skill_md: Optional[str] = None
+
+
+class SecretWarning(BaseModel):
+    """A masked secret-detection finding. NEVER carries the raw value."""
+
+    pattern: str
+    line: int
+    masked: str
+
+
+class ContextWorkerRef(BaseModel):
+    worker_id: str
+    worker_name: str
+
+
+class ContextSummary(BaseModel):
+    name: str
+    file_count: int
+    total_size_bytes: int
+    updated_at: Optional[str] = None
+    writeable: bool = False
+    worker_count: int = 0
+    description: Optional[str] = None
+    # Engine/system knowledge packs (e.g. worker-author-style) are surfaced
+    # read-only so operators can SEE what shapes worker generation, but cannot
+    # edit or delete them. Operator-created packs have system=False.
+    system: bool = False
+    read_only: bool = False
+    category: Optional[str] = None  # #780: content-category tag
+    # Sensitive packs are never committed to git or pushed to GitHub.
+    # Sensitive is the DEFAULT — set sensitive=False to opt in to git tracking.
+    sensitive: bool = True
+    # Members STEP 4: ownership + per-asset visibility + computed permissions.
+    # Mirrors the worker surface so the same Share control renders on brain packs.
+    owner_id: Optional[str] = None
+    visibility: str = "private"
+    permissions: AssetPermissions = Field(default_factory=AssetPermissions)
+
+
+class ContextFileItem(BaseModel):
+    path: str
+    size: int
+    mime_type: str
+    updated_at: str
+    is_binary: bool
+    description: Optional[str] = None
+    display_type: str = "File"
+    tags: List[str] = Field(default_factory=list)
+    metadata: Dict[str, Any] = Field(default_factory=dict)
+    # Set when the file's content matched a high-confidence secret pattern.
+    # The UI badges these so operators can move the credential to Secrets.
+    has_secret_warning: bool = False
+    # Populated only on the write/upload response (and the audit scan), so the
+    # operator sees WHAT was detected (masked) without re-scanning. Never
+    # persisted to disk, never contains the raw value.
+    secret_warnings: List[SecretWarning] = Field(default_factory=list)
+    # Set on a restore response when the restored version was a "deleted"
+    # snapshot, so the History UI knows the file was removed (not written).
+    deleted: bool = False
+
+
+class ContextDetail(ContextSummary):
+    files: List[ContextFileItem] = Field(default_factory=list)
+    used_by: List[ContextWorkerRef] = Field(default_factory=list)
+
+
+class ContextCategoryRequest(BaseModel):
+    category: Optional[str] = None  # #780; empty/null clears it
+
+
+class ContextCreateRequest(BaseModel):
+    writeable: bool = False
+    # Sensitive (the default) excludes the context from git versioning — it may
+    # hold credentials. Set false to opt the context into git history (versions,
+    # rollback). See contexts.is_context_sensitive.
+    sensitive: bool = True
+    category: Optional[str] = None  # #780: content-category tag
+
+
+class ContextDeleteResponse(BaseModel):
+    status: str
+    referenced_by: List[str] = Field(default_factory=list)
+
+
+class ContextFileMoveRequest(BaseModel):
+    new_path: str  # #770: destination path within the same context
+
+
+class ContextSecretScanFile(BaseModel):
+    path: str
+    secret_warnings: List[SecretWarning] = Field(default_factory=list)
+
+
+class ContextSecretScanResponse(BaseModel):
+    name: str
+    scanned_files: int
+    flagged_files: List[ContextSecretScanFile] = Field(default_factory=list)
+
+
+class ContextSensitiveRequest(BaseModel):
+    sensitive: bool
+
+
+class ContextTextWriteRequest(BaseModel):
+    content: str
+    tags: Optional[List[str]] = None
+    metadata: Optional[Dict[str, Any]] = None
+
+
+class CandidateFeedbackCreateRequest(BaseModel):
+    run_id: str = Field(min_length=1, max_length=200)
+    candidate_id: str = Field(min_length=1, max_length=200)
+    rank: int
+    feedback_text: str = Field(min_length=1, max_length=10000)
+    outcome: Literal["good", "bad", "miss"]
+    scope: Literal["global", "client"] = "global"
+    reporter: Optional[str] = Field(default=None, max_length=200)
+
+
+class CandidateFeedbackRecord(BaseModel):
+    uuid: str
+    run_id: str
+    candidate_id: str
+    rank: int
+    feedback_text: str
+    outcome: Literal["good", "bad", "miss"]
+    scope: Literal["global", "client"]
+    reporter: str
+    ts: str
+    path: str
+
+
+class ContextUploadResponse(BaseModel):
+    files: List[ContextFileItem]
+    total_size_bytes: int
+
+
+class ContextVisibilityUpdate(BaseModel):
+    """Set a brain pack's visibility. ``specific_people`` reserved (UI hides it)."""
+    visibility: Literal["private", "workspace", "specific_people"]
+
+
+class _SqliteView(BaseModel):
+    tables: List[str] = Field(default_factory=list)
+    table: Optional[str] = None
+    columns: Optional[List[str]] = None
+    rows: Optional[List[List[Any]]] = None
+    row_count: Optional[int] = None
+    truncated: Optional[bool] = None
+
+
+class WorkspaceMemberOut(BaseModel):
+    workspace_id: str
+    user_id: str
+    email: Optional[str] = None
+    display_name: Optional[str] = None
+    role: Literal["owner", "admin", "member"]
+    status: Literal["active", "invited", "removed"] = "active"
+    invited_by: Optional[str] = None
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None
+
+
+class WorkspaceMembersResponse(BaseModel):
+    """Members list + the caller's own identity/role so the web UI gates the
+    invite / change-role / remove / transfer affordances without re-deriving
+    authority from member rows."""
+
+    members: List[WorkspaceMemberOut]
+    workspace_id: str
+    my_user_id: str
+    my_role: Optional[Literal["owner", "admin", "member"]] = None
+
+
+class WorkspaceMemberInviteRequest(BaseModel):
+    email: str = Field(..., min_length=3, max_length=254)
+    # ``owner`` is rejected (use transfer ownership); default to the least
+    # privileged role, matching Notion/Linear invite defaults.
+    role: Literal["admin", "member"] = "member"
+
+
+class WorkspaceMemberRoleUpdate(BaseModel):
+    role: Literal["admin", "member"]
+
+
+class WorkspaceTransferOwnerRequest(BaseModel):
+    new_owner_id: str = Field(..., min_length=1)
+
+
+class WorkspaceShareLinkResponse(BaseModel):
+    url: str
+    token: str
+
+
+class WorkspaceImportResponse(BaseModel):
+    workers_imported: List[str] = []
+    contexts_imported: List[str] = []
+    skipped: List[Dict[str, str]] = []
+    id_remaps: Dict[str, str] = {}
+    required_secrets: List[str] = []
+    required_connections: List[str] = []
+    workspace_md_present: bool = False
+
+
+class ChangelogEntry(BaseModel):
+    asset_type: str  # "worker" | "context" | "workspace_instructions"
+    asset_id: str
+    asset_name: str
+    sha: str
+    message: str
+    committed_at: str
+
+
+class _WorkspaceSettingValue(BaseModel):
+    value: str = Field(..., max_length=4000)
+
+
+class _AuthSetupRequest(BaseModel):
+    username: str
+    password: str
+    display_name: Optional[str] = None
+
+
+class _LoginRequest(BaseModel):
+    username: str
+    password: str
+
+
+class _UserOut(BaseModel):
+    id: str
+    username: str
+    display_name: Optional[str] = None
+    role: str
+    disabled: bool
+    created_at: str
+
+
+class _UserCreateRequest(BaseModel):
+    username: str
+    password: str
+    display_name: Optional[str] = None
+    # #975: role is intentionally NOT accepted here. New users are always
+    # created as 'member'; promotion to admin is a separate explicit PATCH
+    # /users/{id} action (admin-gated, auditable). Accepting role at create
+    # let an admin (or a CSRF #947 forced request) mint a backdoor admin in
+    # one call with no audit trail.
+
+
+class _UserUpdateRequest(BaseModel):
+    display_name: Optional[str] = None
+    role: Optional[str] = None
+    disabled: Optional[bool] = None
+    password: Optional[str] = None
+
+
+class _PATOut(BaseModel):
+    id: str
+    name: str
+    last_used_at: Optional[str] = None
+    created_at: str
+    expires_at: Optional[str] = None
+
+
+class _PATCreateRequest(BaseModel):
+    name: str
+    expires_at: Optional[str] = None
+
+
+class _PATCreateResponse(BaseModel):
+    token: str  # raw value — shown once, never stored
+    pat: _PATOut
+
+
+class DraftFile(BaseModel):
+    """A single file in a skill bundle returned by draft-from-prompt."""
+    path: str      # e.g. "worker.yml", "run.py", "SKILL.md", "lib/granola_client.py"
+    content: str   # UTF-8 text content
+
+
+class DraftFromPromptRequest(BaseModel):
+    prompt: str
+
+
+class DraftFromPromptInputField(BaseModel):
+    name: str
+    type: str
+    label: str
+    required: bool = False
+    default: Optional[Any] = None
+
+
+class DraftFromPromptOutputField(BaseModel):
+    name: str
+    type: str
+    label: str
+
+
+class RequirementItem(BaseModel):
+    """One integration requirement: a single app with exactly one auth method."""
+    app: str
+    method: str  # "oauth" or "api_key" -- the CURRENT selection (default = LLM suggestion)
+    available_methods: List[str] = []  # both "oauth" and "api_key" if both supported; otherwise just the one
+    reason: str = ""
+
+
+class DraftFromPromptResponse(BaseModel):
+    worker_yml: str
+    skill_md: Optional[str] = None
+    suggested_name: str
+    suggested_title: str
+    # New: one entry per app, method is "oauth" or "api_key"
+    requirements: List[RequirementItem] = []
+    # Skill-bundle: all files returned by the LLM (worker.yml, run.py, SKILL.md, lib/*.py, etc.)
+    # When present, the frontend should use these files directly instead of constructing them.
+    files: List[DraftFile] = []
+    # Legacy fields kept for backward compatibility
+    required_connections: List[str]
+    required_secrets: List[str]
+    inputs: List[DraftFromPromptInputField]
+    outputs: List[DraftFromPromptOutputField]
+
+
+class NewWorkerFromPromptRequest(BaseModel):
+    prompt: str
+    mode: str = "draft"  # "draft" | "create"
+    parent_worker_id: Optional[str] = None
+
+
+class NewWorkerFromPromptResponse(BaseModel):
+    run_id: str
+    worker_id: str = "worker-author"
+    status: str = "running"
+
+
+class DraftAndCreateRequest(BaseModel):
+    prompt: str = ""
+    # Optional pre-built files to skip the LLM step (used for .md / .py uploads)
+    files: List[DraftFile] = []
+
+
+class DraftAndCreateResponse(BaseModel):
+    worker_id: str
+    # FIX 4 (2026-05-29): both creation paths run the smoke+repair safety net.
+    # smoke_status: "passed" | "failed" | "skipped" | None. When "failed" the
+    # worker is created but DISABLED (stays editable) — surface the reason so
+    # the caller does not present it as a clean, ready worker.
+    smoke_status: Optional[str] = None
+    smoke_reason: Optional[str] = None
+
+
+class WorkerListSummary(WorkerSummary):
+    created_at: Optional[str] = None
+    updated_at: Optional[str] = None

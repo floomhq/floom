@@ -22,9 +22,9 @@ Scope:
 | P1 | Legacy `connections: [gmail]` declarations still grant full app tool access. | `declared_composio_connections()` treats legacy strings as unrestricted. Structured `allowed_tools` is enforced. Migration to explicit allowlists remains open. |
 | P1 | Standalone/shareable approval page is not shipped. | Existing `/approvals` is in-app. No single-approval external page for worker-spawned approvals was found. |
 | P1 | Slack is not proven end-to-end. | UI has Agent Channels status, but no verified Slack app event loop/mention-to-agent E2E receipt in this audit. |
-| P1 | Overview still needs first-viewport fit and data consistency review. | Federico screenshot shows vertical scroll and `queued`/`coming up today` mismatch. Needs browser verification after UI pass. |
-| P1 | Workspace switcher has UI/state bugs. | Federico reported hover black state and newly-created workspace not selectable. Needs route/state reproduction. |
-| P1 | Worker cards and detail pages have inconsistent app/connection icons. | Federico provided card/detail screenshots; card top strip must show the same detail-page icons and remove extra top whitespace. |
+| P1 | Overview still needs first-viewport fit and data consistency review. | the operator screenshot shows vertical scroll and `queued`/`coming up today` mismatch. Needs browser verification after UI pass. |
+| P1 | Workspace switcher has UI/state bugs. | the operator reported hover black state and newly-created workspace not selectable. Needs route/state reproduction. |
+| P1 | Worker cards and detail pages have inconsistent app/connection icons. | the operator provided card/detail screenshots; card top strip must show the same detail-page icons and remove extra top whitespace. |
 | P1 | Brain UI is incomplete. | Brain icon missing in left nav/detail tab in places; worker detail needs connected brain packs as a first-class section, not worker requirements copy. |
 | P1 | Source file previews are incomplete. | All source files need raw and rendered modes; HTML/CSV/XLSX/PDF/video previews remain open. |
 | P1 | Agent page IA needs cleanup. | Instructions vs resolved prompt is unclear, settings belong lower/secondary, channel connection state needs real linkage. |

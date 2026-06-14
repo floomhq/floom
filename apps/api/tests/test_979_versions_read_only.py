@@ -44,6 +44,14 @@ def app_client(tmp_path, monkeypatch):
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
 
+    # Modular refactor: reloading only `main` leaves routers/services/core (and
+    # models) bound to whatever a prior test reloaded — a stale response_model
+    # then 422s on a fresh model instance. Purge them so main's reload reimports
+    # a consistent set (Lesson 10).
+    for name in list(sys.modules):
+        if name in ("models", "worker_registry", "run_service", "chat_service") or name.startswith(("routers", "services", "core", "db", "auth", "contexts")):
+            sys.modules.pop(name, None)
+
     import main as _main_mod
 
     importlib.reload(_main_mod)

@@ -17,11 +17,11 @@ example_output: |
 
   **5 messages reviewed**
 
-  - NovaSearch client update: Berlin Java role needs two more profiles by Friday.
-  - Candidate reply: Anna Keller available for a screening call Wednesday afternoon.
-  - Ops request: add CRM export to next reverse-match pass.
+  - Client update: the integration project needs two more sample reports by Friday.
+  - Reply from a lead: available for an intro call Wednesday afternoon.
+  - Ops request: add the latest export to the next data pass.
 
-  **Next actions:** reply to client, schedule Anna, run CRM match.
+  **Next actions:** reply to the client, schedule the intro call, run the data pass.
 how_it_works: |
   Gmail query
     -> fetch matching message metadata and bodies

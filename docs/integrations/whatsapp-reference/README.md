@@ -17,7 +17,7 @@ copy, and the `response-text` sanitizer dependency. What remains is the reusable
 ## What this is
 
 The **official Meta WhatsApp Cloud API** (Graph API at `graph.facebook.com`), not an
-unofficial library like Baileys. This is the same approach OpenPaper's production
+unofficial library like Baileys. This is the same approach ExampleCo's production
 WhatsApp bot uses. It is webhook-based: Meta hosts the WhatsApp connection; you
 register an HTTPS callback URL and exchange JSON over the Graph API.
 

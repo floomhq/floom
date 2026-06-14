@@ -100,7 +100,7 @@ export function useRunStream(runId: string | null | undefined) {
       );
     };
 
-    // S28: stale-running detection. Federico hit a case where the UI showed
+    // S28: stale-running detection. the operator hit a case where the UI showed
     // "running" for 10 minutes while the actual run had completed.
     // Mitigation: while we are subscribed but the stream has NOT reported
     // a finish event, poll the run row every 8s. If the polled run.status

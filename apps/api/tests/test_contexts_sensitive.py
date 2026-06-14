@@ -146,12 +146,15 @@ def client(monkeypatch, tmp_path):
             "alerting", "mcp_server",
         ]):
             sys.modules.pop(name)
+    for _rn in [x for x in list(sys.modules) if x.startswith("routers")]:
+        sys.modules.pop(_rn, None)
 
     stub_names = [
         "e2b", "e2b.sandbox", "openai", "anthropic", "composio_openai",
         "composio_core", "slowapi", "slowapi.util", "slowapi.errors",
         "resend", "supabase", "gotrue",
     ]
+    _newly_stubbed = [s for s in stub_names if s not in sys.modules]
     for stub in stub_names:
         if stub not in sys.modules:
             sys.modules[stub] = types.ModuleType(stub)
@@ -174,6 +177,11 @@ def client(monkeypatch, tmp_path):
     with TestClient(main_mod.app) as test_client:
         yield test_client, main_mod, git_ops_stub
     sys.modules.pop("git_ops", None)
+    # Remove only the stub modules WE installed so a later test reimports the
+    # real `openai`/`anthropic` instead of our empty stub.
+    for stub in _newly_stubbed:
+        if isinstance(sys.modules.get(stub), types.ModuleType) and not getattr(sys.modules.get(stub), "__file__", None):
+            sys.modules.pop(stub, None)
 
 
 def _auth(client_tuple):

@@ -46,7 +46,7 @@ def _load_api(monkeypatch, tmp_path, *, stock_workers: tuple[str, ...] = ()):
     monkeypatch.delenv("ALLOWED_ORIGIN_REGEX", raising=False)
     monkeypatch.delenv("WORKEROS_DEV", raising=False)
 
-    reset_prefixes = ("auth.", "db.")
+    reset_prefixes = ("auth.", "db.", "routers")
     reset_exact = {
         "main",
         "auth",
@@ -1065,10 +1065,10 @@ def test_shipped_worker_directories_match_protected_set(monkeypatch, tmp_path):
     )
     for tenant_worker in (
         "gmail-summarize-latest",
-        "openpaper-posthog-daily",
+        "analytics-daily-demo",
         "seo-opportunity-digest",
         "linkedin-post-engagements",
-        "cv_writeup",
+        "resume_helper",
         "weekly_update",
     ):
         assert tenant_worker not in protected, (
