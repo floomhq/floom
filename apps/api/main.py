@@ -2644,6 +2644,7 @@ def _make_run_summary(row: Any) -> RunSummary:
         error=_operator_error_message(d.get("error"), d.get("error_code")),
         error_code=d.get("error_code"),
         input=run_input,
+        inputs=run_input,
     )
 
 
@@ -14820,6 +14821,7 @@ def get_run(
         trigger_source=run["trigger_source"],
         runner=run["runner"],
         input=run_input,
+        inputs=run_input,
         output=run["output"],
         outputs=run["output"],
         output_schema=output_schema,
