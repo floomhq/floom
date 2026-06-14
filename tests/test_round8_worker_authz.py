@@ -691,6 +691,7 @@ def test_public_run_redacts_secret_names_across_read_surfaces(monkeypatch, tmp_p
         run_id,
         main.RunStatus.FAILED.value,
         error=leaked_error,
+        error_code="missing_secret",
         user_id="user-a",
         repos=repos,
     )
@@ -708,8 +709,10 @@ def test_public_run_redacts_secret_names_across_read_surfaces(monkeypatch, tmp_p
     assert events_response.status_code == 200, events_response.text
 
     summaries = {item["id"]: item for item in list_response.json()}
-    assert summaries[run_id]["error"] == "Missing required secrets"
-    assert detail_response.json()["error"] == "Missing required secrets"
+    assert summaries[run_id]["error"] == main._SECRET_HEADLINE
+    assert summaries[run_id]["error_code"] == "missing_secret"
+    assert detail_response.json()["error"] == main._SECRET_HEADLINE
+    assert detail_response.json()["error_code"] == "missing_secret"
     assert detail_response.json()["logs"][0]["message"] == "Missing required secrets"
     assert logs_response.json()[0]["message"] == "Missing required secrets"
     assert "Missing required secrets" in stream_response.text
@@ -761,9 +764,12 @@ def test_public_run_redacts_env_style_secret_errors_across_read_surfaces(monkeyp
     assert events_response.status_code == 200, events_response.text
 
     expected = "Required platform secret is not configured"
+    fallback_error = main._OPERATOR_ERROR_GENERIC
     summaries = {item["id"]: item for item in list_response.json()}
-    assert summaries[run_id]["error"] == expected
-    assert detail_response.json()["error"] == expected
+    assert summaries[run_id]["error"] == fallback_error
+    assert summaries[run_id]["error_code"] == "unknown_error"
+    assert detail_response.json()["error"] == fallback_error
+    assert detail_response.json()["error_code"] == "unknown_error"
     assert detail_response.json()["logs"][0]["message"] == expected
     assert logs_response.json()[0]["message"] == expected
     assert expected in stream_response.text
