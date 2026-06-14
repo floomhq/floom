@@ -3151,6 +3151,17 @@ class SupabaseApiTokenRepository(_BaseSupabaseRepository):
         ).eq("id", token_id).execute()
 
     def delete(self, *, token_id: str, user_id: str) -> bool:
+        # #275: capture the token_hash before deleting so we can evict the auth
+        # provider's PAT cache — otherwise a revoked token keeps authenticating
+        # for up to _PAT_TTL (60s).
+        hash_row = _first_row(
+            self._client.table("api_tokens")
+            .select("token_hash")
+            .eq("id", token_id)
+            .eq("user_id", user_id)
+            .limit(1)
+            .execute()
+        )
         builder = (
             self._client.table("api_tokens")
             .delete()
@@ -3161,7 +3172,14 @@ class SupabaseApiTokenRepository(_BaseSupabaseRepository):
         if workspace_id:
             builder = builder.eq("workspace_id", workspace_id)
         response = builder.execute()
-        return bool(_response_rows(response))
+        deleted = bool(_response_rows(response))
+        if deleted and hash_row and hash_row.get("token_hash"):
+            try:
+                from apps.api.auth.supabase_provider import evict_pat_cache
+                evict_pat_cache(str(hash_row["token_hash"]))
+            except Exception:
+                _repo_logger.warning("PAT cache eviction failed for token %s", token_id, exc_info=True)
+        return deleted
 
 
 # ---------------------------------------------------------------------------
