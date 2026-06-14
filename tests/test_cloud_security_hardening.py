@@ -247,3 +247,56 @@ def test_cloud_rate_limits_by_bearer_token_before_ip(monkeypatch, tmp_path):
 
     assert first_ip_statuses[5] == 429
     assert second_token_status == 422
+
+
+# ---------------------------------------------------------------------------
+# P2-A / P2-B: /metrics and /system/info must be admin-only
+# ---------------------------------------------------------------------------
+
+def test_cloud_metrics_endpoint_requires_admin(monkeypatch, tmp_path):
+    """P2-A: GET /metrics returns 403 for a non-admin member in cloud mode."""
+    main = _load_cloud_app(monkeypatch, tmp_path)
+    client = TestClient(main.app, raise_server_exceptions=False)
+
+    # In cloud dev mode the engine auth falls through to dev-context (admin).
+    # We simulate a member-role auth by calling the engine function directly.
+    from auth.context import AuthContext
+    engine = main.engine_main
+
+    import pytest as _pytest
+    from fastapi import HTTPException
+    with _pytest.raises(HTTPException) as exc_info:
+        engine.prometheus_metrics(
+            auth=AuthContext(user_id="member-1", role="member", auth_method="session")
+        )
+    assert exc_info.value.status_code == 403
+
+
+def test_cloud_system_info_endpoint_requires_admin(monkeypatch, tmp_path):
+    """P2-B: GET /system/info returns 403 for a non-admin member in cloud mode."""
+    main = _load_cloud_app(monkeypatch, tmp_path)
+    engine = main.engine_main
+
+    from auth.context import AuthContext
+    import pytest as _pytest
+    from fastapi import HTTPException
+    with _pytest.raises(HTTPException) as exc_info:
+        engine.system_info(
+            auth=AuthContext(user_id="member-1", role="member", auth_method="session")
+        )
+    assert exc_info.value.status_code == 403
+
+
+def test_cloud_system_info_admin_gets_full_payload(monkeypatch, tmp_path):
+    """P2-B: admin receives the full system info payload (no regression)."""
+    main = _load_cloud_app(monkeypatch, tmp_path)
+    engine = main.engine_main
+
+    from auth.context import AuthContext
+    info = engine.system_info(
+        auth=AuthContext(user_id="admin-1", role="admin", scopes=("admin",), auth_method="session")
+    )
+    assert "version" in info
+    assert "runner" in info
+    assert "python_version" in info
+    assert "started_at" in info
