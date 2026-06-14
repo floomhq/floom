@@ -13,7 +13,7 @@ permissions:
 jobs:
   api-tests:
     name: API tests (pytest)
-    runs-on: [self-hosted, linux, x64, workeros-ci]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/api
@@ -42,12 +42,15 @@ jobs:
           # credential lives in the workflow file or repeats across runs.
           FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
           OPENAI_API_KEY: sk-test-${{ github.run_id }}
+          # Connection/MCP tests gate on COMPOSIO_API_KEY being set (a 503 guard);
+          # a dummy value is enough — no real Composio call is made under test.
+          COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
         # #604: -p no:warnings keeps output clean; all test files auto-discovered.
         run: pytest tests/ -v --tb=short -p no:warnings
 
   runtime-tests:
     name: Runtime tests (root pytest suite)
-    runs-on: [self-hosted, linux, x64, workeros-ci]
+    runs-on: ubuntu-latest
 
     steps:
       - uses: actions/checkout@v4
@@ -73,6 +76,9 @@ jobs:
           # credential lives in the workflow file or repeats across runs.
           FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
           OPENAI_API_KEY: sk-test-${{ github.run_id }}
+          # Connection/MCP tests gate on COMPOSIO_API_KEY being set (a 503 guard);
+          # a dummy value is enough — no real Composio call is made under test.
+          COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
         # #604: root pytest.ini points at tests/ (66 files). These cover the
         # full worker runtime — agent driver, E2B sandbox, run orchestration —
         # and were previously not run in CI.
@@ -80,7 +86,7 @@ jobs:
 
   web-tests:
     name: Web tests (vitest + tsx + lint)
-    runs-on: [self-hosted, linux, x64, workeros-ci]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/web
@@ -120,7 +126,7 @@ jobs:
 
   mcp-tests:
     name: MCP package tests
-    runs-on: [self-hosted, linux, x64, workeros-ci]
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/mcp
