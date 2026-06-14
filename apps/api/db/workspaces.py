@@ -98,8 +98,9 @@ def list_for_owner(*, owner_user_id: str) -> list[dict[str, Any]]:
     client = get_supabase_service_client()
     response = (
         client.table("workspaces")
-        .select("id,name,owner_user_id,created_at")
+        .select("id,name,owner_user_id,workspace_status,created_at")
         .eq("owner_user_id", owner_user_id)
+        .eq("workspace_status", "claimed")
         .order("created_at")
         .execute()
     )
@@ -153,7 +154,7 @@ def get(*, workspace_id: str) -> dict[str, Any] | None:
     client = get_supabase_service_client()
     response = (
         client.table("workspaces")
-        .select("id,name,owner_user_id,created_at")
+        .select("id,name,owner_user_id,workspace_status,created_at")
         .eq("id", workspace_id)
         .limit(1)
         .execute()

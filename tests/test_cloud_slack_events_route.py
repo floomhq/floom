@@ -9,6 +9,7 @@ import time
 
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
+import pytest
 
 from apps.api.auth.workspace_context import get_active_workspace_id
 
@@ -46,25 +47,17 @@ def test_cloud_slack_events_routes_app_mentions_to_bound_workspace(monkeypatch, 
     monkeypatch.setattr(slack_events.engine_main, "_slack_events_enabled", lambda: True)
     monkeypatch.setattr(slack_events.engine_main, "_slack_allowed_team_ids", lambda: set())
     monkeypatch.setattr(slack_events.engine_main, "_claim_webhook_delivery", lambda *_args: True)
-    monkeypatch.setattr(
-        slack_events,
-        "resolve_slack_event_binding",
-        lambda *, team_id, channel_id: {
-            "workspace_id": "ws_bound",
-            "owner_user_id": "user_bound",
-            "binding_id": "wacb_1",
-        },
-    )
+    monkeypatch.setattr(slack_events.slack_db, "bot_token_for_team", lambda team_id: "xoxb-test-token")
 
     calls: list[dict[str, object]] = []
 
-    async def fake_handle_slack_app_mention(*, event, prompt, user_id):
+    async def fake_handle_slack_app_mention(*, event, team_id, slack_sender_id, bot_token):
         calls.append(
             {
                 "event": event,
-                "prompt": prompt,
-                "user_id": user_id,
-                "workspace_id": get_active_workspace_id(),
+                "team_id": team_id,
+                "slack_sender_id": slack_sender_id,
+                "bot_token": bot_token,
             }
         )
 
@@ -97,7 +90,7 @@ def test_cloud_slack_events_routes_app_mentions_to_bound_workspace(monkeypatch, 
         response = client.post("/api/slack/events", data=body, headers=_slack_headers(body))
 
     assert response.status_code == 200, response.text
-    assert response.json() == {"ok": True, "status": "queued", "routed": "workspace_binding"}
+    assert response.json() == {"ok": True, "status": "queued", "routed": "app_mention"}
     assert calls == [
         {
             "event": {
@@ -107,8 +100,62 @@ def test_cloud_slack_events_routes_app_mentions_to_bound_workspace(monkeypatch, 
                 "text": "<@U999> summarize failed runs",
                 "user": "U111",
             },
-            "prompt": "summarize failed runs",
-            "user_id": "user_bound",
-            "workspace_id": "ws_bound",
+            "team_id": "T123",
+            "slack_sender_id": "U111",
+            "bot_token": "xoxb-test-token",
+        }
+    ]
+
+
+def test_install_claim_link_is_not_delivered_to_unauthorized_slack_user(monkeypatch):
+    for name in [
+        "apps.api.routes.slack_events",
+        "main",
+        "db",
+        "models",
+        "worker_registry",
+        "run_service",
+        "chat_service",
+    ]:
+        sys.modules.pop(name, None)
+    slack_events = importlib.import_module("apps.api.routes.slack_events")
+
+    replies: list[dict[str, str]] = []
+    monkeypatch.setattr(
+        slack_events.slack_db,
+        "get_installation",
+        lambda _team_id: {
+            "team_id": "T123",
+            "workspace_id": "ws_1",
+            "installation_id": "00000000-0000-0000-0000-000000000001",
+            "installer_slack_user_id": "U_INSTALLER",
+        },
+    )
+    monkeypatch.setattr(slack_events.slack_db, "can_claim_install", lambda **_kwargs: False)
+    monkeypatch.setattr(
+        slack_events.slack_db,
+        "create_install_claim",
+        lambda **_kwargs: pytest.fail("unauthorized users must not receive install claim tokens"),
+    )
+    monkeypatch.setattr(
+        slack_events.engine_main,
+        "_post_slack_thread_reply",
+        lambda **kwargs: replies.append(kwargs),
+    )
+
+    slack_events._post_install_claim_link(
+        team_id="T123",
+        slack_user_id="U_ATTACKER",
+        channel="D123",
+        thread_ts="1710000000.000001",
+        bot_token="xoxb-test",
+    )
+
+    assert replies == [
+        {
+            "channel": "D123",
+            "thread_ts": "1710000000.000001",
+            "text": "Ask the original installer or a Slack admin to claim this Floom workspace.",
+            "bot_token": "xoxb-test",
         }
     ]

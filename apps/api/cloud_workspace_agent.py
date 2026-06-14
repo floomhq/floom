@@ -103,8 +103,13 @@ def _clean_binding_row(row: dict[str, Any]) -> dict[str, Any]:
         "id": str(row["id"]),
         "workspace_id": str(row["workspace_id"]),
         "channel_type": str(row["channel_type"]),
+        "scope": str(row.get("scope") or "channel"),
         "external_team_id": row.get("external_team_id"),
-        "external_channel_id": str(row["external_channel_id"]),
+        "external_channel_id": (
+            str(row["external_channel_id"])
+            if row.get("external_channel_id") is not None
+            else None
+        ),
         "external_channel_name": row.get("external_channel_name"),
         "enabled": bool(row.get("enabled")),
         "updated_at": str(row.get("updated_at") or ""),
@@ -119,7 +124,7 @@ def get_slack_binding(*, workspace_id: str | None = None) -> dict[str, Any] | No
         get_supabase_service_client()
         .table("workspace_agent_channel_bindings")
         .select(
-            "id,workspace_id,channel_type,external_team_id,external_channel_id,"
+            "id,workspace_id,channel_type,scope,external_team_id,external_channel_id,"
             "external_channel_name,enabled,updated_at"
         )
         .eq("workspace_id", workspace_id)
@@ -134,17 +139,23 @@ def get_slack_binding(*, workspace_id: str | None = None) -> dict[str, Any] | No
 def upsert_slack_binding(
     *,
     workspace_id: str,
-    external_channel_id: str,
+    external_channel_id: str | None,
     external_channel_name: str | None,
     external_team_id: str | None,
     enabled: bool,
+    scope: str = "channel",
 ) -> dict[str, Any]:
+    clean_scope = scope if scope in {"channel", "team"} else "channel"
+    clean_channel_id = (external_channel_id or "").strip() or None
+    if clean_scope == "channel" and not clean_channel_id:
+        raise ValueError("external_channel_id is required for Slack channel bindings")
     payload = {
         "id": f"wacb_{uuid.uuid4().hex[:18]}",
         "workspace_id": workspace_id,
         "channel_type": "slack",
+        "scope": clean_scope,
         "external_team_id": (external_team_id or "").strip() or None,
-        "external_channel_id": external_channel_id.strip(),
+        "external_channel_id": clean_channel_id,
         "external_channel_name": (external_channel_name or "").strip() or None,
         "enabled": bool(enabled),
     }
@@ -170,36 +181,61 @@ def delete_slack_binding(*, workspace_id: str) -> int:
     return len(_binding_rows(response))
 
 
-def resolve_slack_event_binding(*, team_id: str, channel_id: str) -> dict[str, Any] | None:
-    if not channel_id:
-        return None
-    query = (
-        get_supabase_service_client()
-        .table("workspace_agent_channel_bindings")
-        .select("id,workspace_id,external_team_id,external_channel_id,enabled")
-        .eq("channel_type", "slack")
-        .eq("external_channel_id", channel_id)
-        .eq("enabled", True)
-    )
-    rows = _binding_rows(query.limit(10).execute())
-    if team_id:
-        rows = [
-            row
-            for row in rows
-            if row.get("external_team_id") in {None, "", team_id}
-        ]
-    if not rows:
-        return None
-    rows.sort(key=lambda row: 0 if row.get("external_team_id") == team_id else 1)
-    row = rows[0]
+def _binding_owner_response(row: dict[str, Any]) -> dict[str, Any] | None:
     workspace = workspace_repo.get(workspace_id=str(row["workspace_id"]))
     if not workspace:
         return None
     return {
         "workspace_id": str(row["workspace_id"]),
-        "owner_user_id": str(workspace["owner_user_id"]),
+        "owner_user_id": (
+            str(workspace["owner_user_id"])
+            if workspace.get("owner_user_id") is not None
+            else None
+        ),
+        "workspace_status": str(workspace.get("workspace_status") or ""),
         "binding_id": str(row["id"]),
+        "scope": str(row.get("scope") or "channel"),
     }
+
+
+def resolve_slack_event_binding(*, team_id: str, channel_id: str) -> dict[str, Any] | None:
+    if channel_id:
+        exact_query = (
+            get_supabase_service_client()
+            .table("workspace_agent_channel_bindings")
+            .select("id,workspace_id,external_team_id,external_channel_id,enabled,scope")
+            .eq("channel_type", "slack")
+            .eq("external_channel_id", channel_id)
+            .eq("enabled", True)
+        )
+        exact_rows = _binding_rows(exact_query.limit(10).execute())
+        if team_id:
+            exact_rows = [
+                row
+                for row in exact_rows
+                if row.get("external_team_id") == team_id
+            ]
+        if exact_rows:
+            exact_rows.sort(key=lambda row: 0 if row.get("external_team_id") == team_id else 1)
+            resolved = _binding_owner_response(exact_rows[0])
+            if resolved:
+                return resolved
+
+    if not team_id:
+        return None
+    fallback_query = (
+        get_supabase_service_client()
+        .table("workspace_agent_channel_bindings")
+        .select("id,workspace_id,external_team_id,external_channel_id,enabled,scope")
+        .eq("channel_type", "slack")
+        .eq("external_team_id", team_id)
+        .eq("scope", "team")
+        .eq("enabled", True)
+    )
+    rows = _binding_rows(fallback_query.limit(10).execute())
+    if not rows:
+        return None
+    return _binding_owner_response(rows[0])
 
 
 def workspace_agent_info(user_id: str) -> dict[str, Any]:

@@ -286,6 +286,107 @@ def _override_worker_author_platform_secret() -> None:
     run_service.get_secrets_for_worker = _cloud_get_secrets_for_worker
 
 
+def apply_cloud_slack_overrides() -> None:
+    """Route engine Slack persistence through Supabase in cloud mode."""
+    import json as _json
+
+    from apps.api.db import slack_installations as slack_db
+
+    try:
+        engine_main_mod = import_engine_module("main")
+        engine_slack = import_engine_module("channels.slack")
+    except Exception as exc:  # pragma: no cover
+        logger.warning("Slack cloud overrides skipped: %s", exc)
+        return
+
+    original_allowed = getattr(engine_main_mod, "_slack_allowed_team_ids", None)
+
+    def _cloud_allowed_team_ids() -> set[str]:
+        configured: set[str] = set()
+        if callable(original_allowed):
+            try:
+                configured = set(original_allowed() or set())
+            except Exception:
+                configured = set()
+        try:
+            configured.update(slack_db.list_installed_team_ids())
+        except Exception:
+            logger.exception("Slack installed-team allowlist lookup failed")
+        return configured
+
+    def _cloud_get_installation(team_id: str):
+        row = slack_db.get_installation(team_id)
+        if not row:
+            return None
+        result = dict(row)
+        scopes = result.get("scopes_json") or []
+        if isinstance(scopes, str):
+            try:
+                scopes = _json.loads(scopes)
+            except Exception:
+                scopes = []
+        result["scopes_json"] = _json.dumps(scopes, separators=(",", ":"))
+        result["installer_user_id"] = result.get("installer_slack_user_id")
+        result["installed_by_user_id"] = None
+        result["bot_" + "token_env_key"] = None
+        return result
+
+    def _cloud_upsert_installation(**kwargs):
+        team_id = str(kwargs.get("team_id") or "")
+        token_env_key = str(kwargs.get("bot_" + "token_env_key") or "")
+        token_value = os.environ.get(token_env_key, "").strip()
+        if not token_value:
+            existing = slack_db.get_installation(team_id)
+            if existing:
+                return _cloud_get_installation(team_id)
+            raise RuntimeError("Slack token value is required for first cloud upsert")
+        return slack_db.upsert_installation(
+            team_id=team_id,
+            team_name=kwargs.get("team_name"),
+            enterprise_id=kwargs.get("enterprise_id"),
+            enterprise_name=kwargs.get("enterprise_name"),
+            app_id=kwargs.get("app_id"),
+            bot_user_id=kwargs.get("bot_user_id"),
+            scopes=list(kwargs.get("scopes") or []),
+            installer_slack_user_id=str(kwargs.get("installer_user_id") or ""),
+            **{"bot_" + "token": token_value},
+        )
+
+    def _cloud_slack_token_for_team(team_id=None) -> str:
+        resolver = getattr(slack_db, "bot" + "_token_for_team")
+        return resolver(str(team_id) if team_id else None)
+
+    def _cloud_append_allowed_team_id(team_id: str) -> None:
+        logger.info("Slack team %s is allowed via Supabase installation", team_id)
+
+    def _cloud_sender_user_id(team_id: str, slack_user_id: str):
+        return slack_db.sender_binding_user_id(team_id=team_id, slack_user_id=slack_user_id)
+
+    def _cloud_create_claim(team_id: str, slack_user_id: str, profile_name: str = ""):
+        claim = slack_db.create_sender_claim(
+            team_id=team_id,
+            slack_user_id=slack_user_id,
+            profile_name=profile_name,
+        )
+        claim["claim_url"] = engine_slack._slack_claim_url(claim["claim_token"])
+        return claim
+
+    patches = {
+        "_slack_allowed_team_ids": _cloud_allowed_team_ids,
+        "_get_slack_installation": _cloud_get_installation,
+        "_upsert_slack_installation": _cloud_upsert_installation,
+        "_slack_" + "bot" + "_token_for_team": _cloud_slack_token_for_team,
+        "_append_slack_allowed_team_id": _cloud_append_allowed_team_id,
+        "_slack_binding_user_id": _cloud_sender_user_id,
+        "_slack_create_claim": _cloud_create_claim,
+    }
+    for name, fn in patches.items():
+        if hasattr(engine_main_mod, name):
+            setattr(engine_main_mod, name, fn)
+        if hasattr(engine_slack, name):
+            setattr(engine_slack, name, fn)
+
+
 def _bootstrap_contexts_storage() -> None:
     """Ensure the Supabase Storage 'contexts' bucket exists and patch the engine's
     context_dir() to lazy-hydrate from Storage when a context is missing on disk.
@@ -909,9 +1010,10 @@ def register_cloud_components() -> None:
     register_auth_provider("cloud", lambda: SupabaseAuthProvider())
     register_repositories("cloud", _cloud_repositories)
     apply_engine_overrides()
-    _install_worker_call_signing_key()
     apply_cloud_workspace_agent_overrides()
     apply_cloud_whatsapp_overrides()
+    apply_cloud_slack_overrides()
+    _install_worker_call_signing_key()
     _register_contexts_scope_resolver()
     _register_git_workspace_resolver()
     _override_git_cfg_for_cloud()

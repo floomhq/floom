@@ -15,11 +15,14 @@ class _Table:
         self.error = error
         self.upserts: list[dict] = []
         self.deleted = False
+        self.filters: list[tuple[str, object]] = []
 
     def select(self, *_args):
+        self.filters = []
         return self
 
-    def eq(self, *_args):
+    def eq(self, column, value):
+        self.filters.append((column, value))
         return self
 
     def limit(self, *_args):
@@ -28,7 +31,10 @@ class _Table:
     def execute(self):
         if self.error:
             raise self.error
-        return SimpleNamespace(data=self.rows)
+        rows = self.rows
+        for column, value in self.filters:
+            rows = [row for row in rows if row.get(column) == value]
+        return SimpleNamespace(data=rows)
 
     def upsert(self, payload, **_kwargs):
         self.upserts.append(payload)
@@ -53,7 +59,7 @@ class _Client:
 
 
 def test_workspace_agent_reads_supabase_instructions(monkeypatch):
-    table = _Table(rows=[{"instructions_md": "# Workspace\n\nCloud instructions"}])
+    table = _Table(rows=[{"workspace_id": "ws_test", "instructions_md": "# Workspace\n\nCloud instructions"}])
     monkeypatch.setattr(cloud_agent, "get_supabase_service_client", lambda: _Client(table))
 
     with active_workspace("ws_test"):
@@ -106,6 +112,7 @@ def test_slack_binding_round_trip(monkeypatch):
         "id": "wacb_1",
         "workspace_id": "ws_test",
         "channel_type": "slack",
+        "scope": "channel",
         "external_team_id": "T1",
         "external_channel_id": "C1",
         "external_channel_name": "product",
@@ -152,6 +159,52 @@ def test_workspace_agent_info_includes_slack_binding(monkeypatch):
 
     assert info["channels"]["slack"]["binding"]["external_channel_id"] == "C1"
     assert info["channels"]["slack"]["events_configured"] is True
+
+
+def test_resolve_slack_event_binding_rejects_null_team_channel_rows(monkeypatch):
+    table = _Table(
+        rows=[
+            {
+                "id": "wacb_null_team",
+                "workspace_id": "ws_wrong",
+                "channel_type": "slack",
+                "scope": "channel",
+                "external_team_id": None,
+                "external_channel_id": "C_SHARED",
+                "enabled": True,
+            }
+        ]
+    )
+    monkeypatch.setattr(cloud_agent, "get_supabase_service_client", lambda: _Client(table))
+    monkeypatch.setattr(cloud_agent.workspace_repo, "get", lambda **_kwargs: {"id": "ws_wrong", "owner_user_id": "user_1"})
+
+    assert cloud_agent.resolve_slack_event_binding(team_id="T_ATTACKER", channel_id="C_SHARED") is None
+
+
+def test_resolve_slack_event_binding_accepts_matching_team_channel_row(monkeypatch):
+    table = _Table(
+        rows=[
+            {
+                "id": "wacb_team",
+                "workspace_id": "ws_right",
+                "channel_type": "slack",
+                "scope": "channel",
+                "external_team_id": "T_RIGHT",
+                "external_channel_id": "C_SHARED",
+                "enabled": True,
+            }
+        ]
+    )
+    monkeypatch.setattr(cloud_agent, "get_supabase_service_client", lambda: _Client(table))
+    monkeypatch.setattr(cloud_agent.workspace_repo, "get", lambda **_kwargs: {"id": "ws_right", "owner_user_id": "user_1"})
+
+    assert cloud_agent.resolve_slack_event_binding(team_id="T_RIGHT", channel_id="C_SHARED") == {
+        "workspace_id": "ws_right",
+        "owner_user_id": "user_1",
+        "workspace_status": "",
+        "binding_id": "wacb_team",
+        "scope": "channel",
+    }
 
 
 def test_workspace_agent_requires_active_workspace_for_save():

@@ -32,6 +32,7 @@ def test_worker_call_signing_works_without_floom_secret(monkeypatch):
     monkeypatch.delenv("WORKEROS_WORKER_CALL_SECRET", raising=False)
     monkeypatch.delenv("FLOOM_SECRET", raising=False)
     assert not (os.environ.get("FLOOM_SECRET") or "").strip()
+    monkeypatch.setenv("SUPABASE_SERVICE_ROLE_KEY", "test-service-role-key")
     startup._install_worker_call_signing_key()  # idempotent; ensure applied
     rt = _run_token()
 
