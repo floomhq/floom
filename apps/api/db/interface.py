@@ -12,6 +12,42 @@ class WorkerRepository(Protocol):
 
     def get(self, *, user_id: str, worker_id: str) -> RowDict | None: ...
 
+    def list_for_agent(
+        self,
+        *,
+        user_id: str,
+        include_all_users: bool = False,
+        stock_worker_ids: Iterable[str] = (),
+    ) -> list[RowDict]:
+        """Workers visible to the workspace agent (Emily) for *user_id*.
+
+        #1027: lets the chat tools route through the repository Protocol instead
+        of reading the SQLite db directly, so non-SQLite backends (cloud
+        Supabase) supply their own implementation. *user_id* is the effective
+        visibility user id; stock_worker_ids are passed in (caller owns the
+        PUBLIC/PROTECTED sets) to avoid a db<-main import cycle. Each row carries
+        at least id, name, trigger_type, enabled, manifest_json; the caller
+        shapes the agent output and applies system/example hiding.
+        """
+        ...
+
+    def get_for_agent(
+        self,
+        *,
+        user_id: str,
+        worker_id: str,
+        stock_worker_ids: Iterable[str] = (),
+        allow_fs_fallback: bool = False,
+    ) -> RowDict | None:
+        """Single worker for the workspace agent, gated by can-view (#1027).
+
+        Returns None when the worker is not viewable by *user_id* or is absent.
+        *user_id* is the effective visibility user id; stock_worker_ids and
+        allow_fs_fallback are passed in to avoid a db<-main import cycle. Row
+        carries id, name, trigger_type, enabled, cron_expr, manifest_json.
+        """
+        ...
+
     def get_any(self, *, worker_id: str) -> RowDict | None: ...
 
     def create(self, *, user_id: str, **fields: Any) -> RowDict: ...
