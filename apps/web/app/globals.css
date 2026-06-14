@@ -871,6 +871,7 @@ html.dark .grain {
 .c-vpill { display:inline-flex; align-items:center; gap:5px; border:var(--bd-pill); border-radius:var(--radius-pill); font-size:10.5px; padding:2px 8px; color:var(--muted-foreground); background:var(--bg-2); white-space:nowrap; flex:0 0 auto; }
 .c-dtabs { display:flex; gap:2px; padding:7px 16px; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; }
 .c-dtabs::-webkit-scrollbar { height:0; display:none; }
+.c-source-file-tabs { min-width:0; max-width:100%; flex:1 1 auto; flex-wrap:nowrap; }
 .c-dtab { display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border-radius:9px; color:var(--muted-foreground); font-size:13px; white-space:nowrap; }
 .c-dtab:hover { background:var(--bg-2); }
 .c-dtab.on { background:var(--bg-2); color:var(--ink); font-weight:500; }
