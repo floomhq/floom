@@ -148,6 +148,49 @@ def _materialize_worker_files(worker_id: str, files: dict[str, str]) -> None:
         _repo_logger.warning("Failed to materialize files for worker %s", worker_id, exc_info=True)
 
 
+def _read_worker_files_from_disk(worker_id: str) -> dict[str, str]:
+    """Read a worker's files from WORKERS_DIR/<id>/ into {relpath: text} (#269).
+
+    Mirrors _materialize_worker_files' dir resolution. The engine chat tools
+    (Emily) write worker code to the handling instance's (ephemeral) disk but,
+    unlike the REST path, never populate manifest_json._files — so a different
+    instance / post-redeploy materializes nothing and every run fails with
+    "Worker directory not found". This reads the on-disk files so a write-path
+    hook can persist them into _files. Skips binary/oversized files; bounds
+    total size; returns {} when the dir is absent or empty (caller treats {}
+    as "nothing to capture" and must NOT clobber an existing _files).
+    """
+    workers_dir_env = (os.environ.get("FLOOM_WORKERS_DIR") or "").strip()
+    workers_dir = Path(workers_dir_env) if workers_dir_env else Path("/opt/workeros-cloud/var/workers")
+    worker_dir = workers_dir / worker_id
+    if not worker_dir.is_dir():
+        return {}
+    out: dict[str, str] = {}
+    total = 0
+    MAX_FILES, MAX_TOTAL, MAX_FILE = 200, 5_000_000, 1_000_000
+    try:
+        for p in sorted(worker_dir.rglob("*")):
+            if not p.is_file():
+                continue
+            try:
+                rel = _validate_worker_file_path(p.relative_to(worker_dir).as_posix())
+            except Exception:
+                continue
+            try:
+                if p.stat().st_size > MAX_FILE:
+                    continue
+                content = p.read_text(encoding="utf-8")
+            except (UnicodeDecodeError, OSError):
+                continue  # skip binaries / unreadable
+            total += len(content.encode("utf-8"))
+            if total > MAX_TOTAL or len(out) >= MAX_FILES:
+                break
+            out[rel] = content
+    except Exception:
+        return out
+    return out
+
+
 def _json_load(value: Any, default: Any) -> Any:
     if value in (None, ""):
         return default
@@ -744,6 +787,53 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         skill_map = self._skill_versions_by_id([row.get("skill_version_id")])
         return _worker_record_from_rows(row, skill_map.get(row.get("skill_version_id")))
 
+    def _sync_disk_files_to_manifest(self, worker_id: str, skill_version_id: str) -> None:
+        """#269: persist on-disk worker files into manifest_json._files.
+
+        The engine chat tools (Emily) write code to the handling instance's
+        ephemeral disk and persist through this repo, but never populate
+        _files — only the REST path did. Without _files, get_recipe on another
+        instance materializes nothing and runs fail with "Worker directory not
+        found". This captures the current on-disk files for the worker.
+
+        Defensive + idempotent: no-op when the disk dir is empty (so a fileless
+        instance can NEVER clobber a good _files), and skips the write when
+        _files already equals what's on disk. Never raises — a capture failure
+        must not break the worker write.
+        """
+        try:
+            disk_files = _read_worker_files_from_disk(worker_id)
+            if not disk_files:
+                return
+            resp = (
+                self._client.table("skill_versions")
+                .select("manifest_json")
+                .eq("id", skill_version_id)
+                .limit(1)
+                .execute()
+            )
+            rows = resp.data or []
+            if not rows:
+                return
+            manifest = _json_load(rows[0].get("manifest_json"), {})
+            if not isinstance(manifest, dict):
+                return
+            if manifest.get("_files") == disk_files:
+                return
+            manifest["_files"] = disk_files
+            self._client.table("skill_versions").update(
+                {"manifest_json": manifest}
+            ).eq("id", skill_version_id).execute()
+            _repo_logger.info(
+                "#269 captured %d on-disk file(s) into _files for worker %s",
+                len(disk_files),
+                worker_id,
+            )
+        except Exception:
+            _repo_logger.warning(
+                "#269 disk->_files capture failed for worker %s", worker_id, exc_info=True
+            )
+
     def create(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
         worker_id = fields["worker_id"]
         manifest_json = _json_storage_value(fields.get("manifest_json"), {})
@@ -790,6 +880,8 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
                 "triggers_json": _json_storage_value(fields.get("triggers_json"), []),
             }
         ).execute()
+        # #269: capture any code the engine chat tool wrote to disk into _files.
+        self._sync_disk_files_to_manifest(worker_id, skill_version_id)
         created = self.get(user_id=user_id, worker_id=worker_id)
         if created is None:
             raise RuntimeError(f"failed to create worker {worker_id}")
@@ -916,6 +1008,8 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         # the scoped verify on that pre-existing worker raised
         # "failed to upsert applicant-followup" — aborting the whole draft
         # even when the newly authored worker was fine.
+        # #269: capture any code the engine wrote to disk into _files.
+        self._sync_disk_files_to_manifest(worker_id, skill_version_id)
         upserted = self.get_any(worker_id=worker_id)
         if upserted is None:
             raise RuntimeError(f"failed to upsert worker {worker_id}")
@@ -969,6 +1063,9 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             builder = self._client.table("workers").update(payload).eq("id", worker_id)
             builder = _scope_by_workspace(builder, user_id=user_id)
             builder.execute()
+        # #269: an update is the point where the engine's canonical editor path
+        # (persist_worker_run_py) has written run.py to disk — capture it.
+        self._sync_disk_files_to_manifest(worker_id, str(worker["skill_version_id"]))
         return self.get(user_id=user_id, worker_id=worker_id)
 
     def delete(self, *, user_id: str, worker_id: str) -> bool:
