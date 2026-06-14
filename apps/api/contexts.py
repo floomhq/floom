@@ -304,6 +304,12 @@ def safe_context_file_path(name: str, raw_path: str) -> Path:
 
 
 def normalize_context_file_path(raw_path: str) -> str:
+    # #1052 — reject percent-encoded path separators (%2f, %5c) so this validator
+    # and the worker-file validator agree; they were previously accepted as
+    # literal filenames.
+    lowered = (raw_path or "").lower()
+    if "%2f" in lowered or "%5c" in lowered:
+        raise ValueError(f"invalid context file path: {raw_path!r}")
     text = (raw_path or "").replace("\\", "/").strip("/")
     path = PurePosixPath(text)
     if not text or str(path) == ".":
