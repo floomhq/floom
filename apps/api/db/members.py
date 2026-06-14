@@ -159,7 +159,10 @@ def preview_invitation(*, raw_token: str, workspace_id: str | None = None) -> di
         .limit(1)
         .execute()
     ) or {}
-    emails = resolve_member_emails([str(invite.get("invited_by") or "")])
+    # #236: this preview is served UNAUTHENTICATED (GET /api/invites/{token}),
+    # so it must not disclose the inviter's email (PII) to anyone holding the
+    # token. The join page only needs the workspace/role/invited-email; drop
+    # inviter_email entirely (no frontend consumes it).
     return {
         "id": invite.get("id"),
         "workspace_id": invite.get("workspace_id"),
@@ -167,7 +170,6 @@ def preview_invitation(*, raw_token: str, workspace_id: str | None = None) -> di
         "email": invite.get("email"),
         "role": invite.get("role") or "member",
         "inviter_user_id": invite.get("invited_by"),
-        "inviter_email": emails.get(str(invite.get("invited_by") or ""), ""),
         "expires_at": invite.get("expires_at"),
         "expired": expired,
     }

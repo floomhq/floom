@@ -47,16 +47,28 @@ def _is_admin(auth: AuthContext, workspace_id: str) -> bool:
 
 
 def _require_admin(auth: AuthContext, workspace_id: str) -> dict:
-    """Return the workspace row or raise 404/403."""
+    """Return the workspace row or raise 404/403.
+
+    #236: don't leak workspace existence to non-members. Checking get()->404
+    BEFORE the access check let a non-member probe arbitrary ``ws_...`` ids
+    (real → 403, absent → 404). An actual member who merely lacks admin still
+    gets 403 (they already know the workspace exists); everyone else — non-
+    members AND nonexistent ids alike — gets an identical 404.
+    """
     ws = workspace_repo.get(workspace_id=workspace_id)
-    if ws is None:
-        raise HTTPException(status_code=404, detail="workspace not found")
-    if str(ws.get("owner_user_id", "")) == str(auth.user_id):
+    if ws is not None and str(ws.get("owner_user_id", "")) == str(auth.user_id):
         return ws
-    role = workspace_repo.get_member_role(workspace_id=workspace_id, user_id=auth.user_id)
-    if role != "admin":
+    role = (
+        workspace_repo.get_member_role(workspace_id=workspace_id, user_id=auth.user_id)
+        if ws is not None
+        else None
+    )
+    if role == "admin":
+        return ws
+    if role is not None:
+        # Caller is a member of an existing workspace, just not an admin.
         raise HTTPException(status_code=403, detail="admin access required")
-    return ws
+    raise HTTPException(status_code=404, detail="workspace not found")
 
 
 # ---------------------------------------------------------------------------

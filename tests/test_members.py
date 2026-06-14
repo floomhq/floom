@@ -347,6 +347,103 @@ def test_change_role(monkeypatch):
 
 
 # ---------------------------------------------------------------------------
+# #236 item 3: unauthenticated invite preview must not leak inviter PII
+# ---------------------------------------------------------------------------
+
+def test_preview_invitation_omits_inviter_email(monkeypatch):
+    import apps.api.db.members as members_db
+    future = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    invite_row = {
+        "id": "inv-1", "workspace_id": "ws_1", "email": "alice@example.com",
+        "role": "admin", "invited_by": "owner-1", "status": "pending",
+        "created_at": "2026-01-01", "expires_at": future,
+    }
+    ws_row = {"id": "ws_1", "name": "Acme", "owner_user_id": "owner-1"}
+
+    class _Chain:
+        def __init__(self, table): self._t = table
+        def select(self, *a, **k): return self
+        def eq(self, *a, **k): return self
+        def limit(self, *a, **k): return self
+        def execute(self):
+            data = (
+                [invite_row] if self._t == "workspace_invitations"
+                else [ws_row] if self._t == "workspaces" else []
+            )
+            return type("R", (), {"data": data})()
+
+    class _Client:
+        def table(self, name): return _Chain(name)
+
+    monkeypatch.setattr(members_db, "get_supabase_service_client", lambda: _Client())
+    # The inviter-email lookup must be gone entirely (no PII resolution).
+    monkeypatch.setattr(
+        members_db, "resolve_member_emails",
+        lambda *a, **k: (_ for _ in ()).throw(AssertionError("inviter PII lookup must be gone")),
+    )
+
+    preview = members_db.preview_invitation(raw_token="wsi_x")
+    assert preview is not None
+    assert "inviter_email" not in preview          # #236: PII removed
+    assert preview["workspace_name"] == "Acme"     # join page still works
+    assert preview["email"] == "alice@example.com"
+    assert preview["role"] == "admin"
+
+
+# ---------------------------------------------------------------------------
+# #236 item 2: _require_admin must not be a workspace-existence oracle
+# ---------------------------------------------------------------------------
+
+def _patch_ws(monkeypatch, *, get, role):
+    from apps.api.routes import members as members_routes
+    monkeypatch.setattr(members_routes.workspace_repo, "get", get)
+    monkeypatch.setattr(members_routes.workspace_repo, "get_member_role", role)
+    return members_routes
+
+
+def test_require_admin_non_member_gets_404_for_real_and_absent(monkeypatch):
+    from fastapi import HTTPException
+    members_routes = _patch_ws(
+        monkeypatch,
+        get=lambda *, workspace_id: {"id": workspace_id, "owner_user_id": "owner"} if workspace_id == "ws_real" else None,
+        role=lambda *, workspace_id, user_id: None,  # caller is not a member
+    )
+    auth = Mock(user_id="bob")
+    for ws_id in ("ws_real", "ws_absent"):
+        with pytest.raises(HTTPException) as ei:
+            members_routes._require_admin(auth, ws_id)
+        # Identical 404 either way -> no existence oracle.
+        assert ei.value.status_code == 404
+
+
+def test_require_admin_member_non_admin_gets_403(monkeypatch):
+    from fastapi import HTTPException
+    members_routes = _patch_ws(
+        monkeypatch,
+        get=lambda *, workspace_id: {"id": "ws_1", "owner_user_id": "owner"},
+        role=lambda *, workspace_id, user_id: "member",
+    )
+    with pytest.raises(HTTPException) as ei:
+        members_routes._require_admin(Mock(user_id="bob"), "ws_1")
+    assert ei.value.status_code == 403
+
+
+def test_require_admin_owner_and_admin_pass(monkeypatch):
+    members_routes = _patch_ws(
+        monkeypatch,
+        get=lambda *, workspace_id: {"id": "ws_1", "owner_user_id": "bob"},
+        role=lambda *, workspace_id, user_id: None,
+    )
+    assert members_routes._require_admin(Mock(user_id="bob"), "ws_1")["id"] == "ws_1"  # owner
+    _patch_ws(
+        monkeypatch,
+        get=lambda *, workspace_id: {"id": "ws_1", "owner_user_id": "owner"},
+        role=lambda *, workspace_id, user_id: "admin",
+    )
+    assert members_routes._require_admin(Mock(user_id="bob"), "ws_1")["id"] == "ws_1"  # admin
+
+
+# ---------------------------------------------------------------------------
 # routes/workspaces.py: list_workspaces includes member workspaces
 # ---------------------------------------------------------------------------
 
