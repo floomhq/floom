@@ -115,7 +115,7 @@
   --primary-text: #FFFFFF;
   --warning: #E5533D;
   --success: #2F8F5B;
-  --pending: #C98A1A;
+  --pending: #6B7280;
   --info: #3E6FE0; /* "running"/in-progress accent (SPEC §4) */
   /* v4 cool radii (final.html: --r-card:16px, --r-btn:10px) */
   --radius-card: 16px;
