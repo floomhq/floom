@@ -77,18 +77,63 @@ def _safe_path(base: Path, *parts: str) -> Path:
 
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
+    return _resolve_worker_bundle_dir(WORKERS_DIR, worker_id, config, _safe_path)
+
+
+def _resolve_worker_bundle_dir(
+    workers_dir: Path,
+    worker_id: str,
+    config: Optional["WorkerConfig"],
+    safe_path: Callable[..., Path],
+) -> Path:
+    """Resolve a worker's bundle dir under the *configured* WORKERS_DIR.
+
+    Fixes the ``var/workers`` vs ``engine/workers`` drift (#1048 follow-up):
+    a worker's ``runtime.bundle_path`` can be a STALE ABSOLUTE path baked at
+    registration time from an older ``FLOOM_WORKERS_DIR`` (e.g.
+    ``/opt/workeros-cloud/var/workers/job-digest``). At run time
+    ``FLOOM_WORKERS_DIR`` points at ``.../engine/workers``, so the stale
+    absolute path resolves outside the current root and the traversal guard
+    rejected a legitimate scheduled run.
+
+    Resolution order, traversal guard intact throughout:
+      1. If a relative bundle_path is stored, join it under ``WORKERS_DIR.parent``
+         (the historical contract) and accept it only if it stays under the
+         allowed root.
+      2. Otherwise (or if an absolute bundle_path escapes the current root —
+         the drift case), resolve the worker by its basename under the
+         *current* ``WORKERS_DIR`` via ``safe_path`` (which still rejects
+         ``..`` and symlink escapes).
+    """
     bundle_path = config.runtime.bundle_path if config and config.runtime else None
+    allowed_root = workers_dir.parent.resolve()
     if bundle_path:
         raw_path = Path(bundle_path)
-        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
-        resolved = target.resolve()
-        allowed_root = WORKERS_DIR.parent.resolve()
+        if not raw_path.is_absolute():
+            resolved = workers_dir.parent.joinpath(raw_path).resolve()
+            try:
+                resolved.relative_to(allowed_root)
+            except ValueError:
+                # Relative path escaped the root (genuine traversal): reject.
+                raise ValueError(f"Path traversal attempt: {resolved}")
+            return resolved
+        # Absolute bundle_path. Accept it only if it still lives under the
+        # current allowed root; otherwise treat it as registration-time drift
+        # and fall through to basename resolution under the configured dir.
+        resolved = raw_path.resolve()
         try:
             resolved.relative_to(allowed_root)
+            return resolved
         except ValueError:
-            raise ValueError(f"Path traversal attempt: {resolved}")
-        return resolved
-    return _safe_path(WORKERS_DIR, worker_id)
+            logger.warning(
+                "worker %s bundle_path %s is outside current WORKERS_DIR %s "
+                "(registration-time drift); resolving by basename under configured dir",
+                worker_id,
+                bundle_path,
+                workers_dir,
+            )
+            return safe_path(workers_dir, Path(bundle_path).name)
+    return safe_path(workers_dir, worker_id)
 
 
 def _resolve_connections(
