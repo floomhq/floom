@@ -326,11 +326,10 @@ export function WorkspaceSwitcher() {
               <Pencil className="size-4" />
               Rename workspace
             </DropdownMenuItem>
-            {/* G10 (Federico 2026-06-03): Members lives in the workspace cluster,
-                peer to "New workspace". One model both products: on the OS it
-                shows you as Owner; Cloud shows real members. */}
+            {/* G10 (Federico 2026-06-03): Members lives in Settings (workspace cluster).
+                One model both products: on the OS it shows you as Owner; Cloud shows real members. */}
             <DropdownMenuItem
-              render={<Link href="/members" />}
+              render={<Link href="/settings?sel=members" />}
               className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
             >
               <Users className="size-4" />
