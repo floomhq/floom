@@ -16,6 +16,7 @@ import type { WorkerFile } from "@/lib/types";
 import { humanizeCron } from "@/lib/humanize-cron";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { CodeBlock } from "@/components/file-viewer/code-block";
+import { sanitizeHref } from "@/lib/safe-url";
 
 // ---------------------------------------------------------------------------
 // Language detection helpers
@@ -534,7 +535,23 @@ function RenderedFilePreview({
   if (detected === "markdown") {
     return (
       <div className="prose prose-sm dark:prose-invert max-w-none text-foreground bg-muted/30 p-4 overflow-auto max-h-[640px] prose-pre:bg-muted prose-pre:text-foreground prose-code:text-foreground">
-        <ReactMarkdown remarkPlugins={[remarkGfm]}>{content}</ReactMarkdown>
+        <ReactMarkdown
+          remarkPlugins={[remarkGfm]}
+          components={{
+            // #1043 — neutralize dangerous protocols (javascript:/data:/vbscript:)
+            // via the shared safe-url allowlist, same pattern as MarkdownText.
+            a: ({ href, children }) => {
+              const safe = sanitizeHref(href);
+              return (
+                <a href={safe} target="_blank" rel="noopener noreferrer">
+                  {children}
+                </a>
+              );
+            },
+          }}
+        >
+          {content}
+        </ReactMarkdown>
       </div>
     );
   }
