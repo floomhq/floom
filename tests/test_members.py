@@ -171,10 +171,13 @@ def test_accept_invitation_expired_raises(monkeypatch):
         "created_at": "2026-01-01",
         "expires_at": past,
         "invited_by": "admin-user",
+        "email": "alice@example.com",
     }
     monkeypatch.setattr(members_db, "get_invitation_by_token", lambda *, raw_token: invite)
     with pytest.raises(ValueError, match="expired"):
-        members_db.accept_invitation(raw_token="wsi_test", accepting_user_id="alice")
+        members_db.accept_invitation(
+            raw_token="wsi_test", accepting_user_id="alice", accepting_user_email="alice@example.com"
+        )
 
 
 def test_accept_invitation_not_found_raises(monkeypatch):
@@ -195,15 +198,91 @@ def test_accept_invitation_success(monkeypatch):
         "created_at": "2026-01-01",
         "expires_at": future,
         "invited_by": "admin-user",
+        "email": "alice@example.com",
     }
     member_row = {"workspace_id": "ws_1", "user_id": "alice", "role": "member", "joined_at": "2026-01-02"}
     client = _make_supabase_client(member_row)
     monkeypatch.setattr(members_db, "get_invitation_by_token", lambda *, raw_token: invite)
     monkeypatch.setattr(members_db, "get_supabase_service_client", lambda: client)
-    result = members_db.accept_invitation(raw_token="wsi_ok", accepting_user_id="alice")
+    result = members_db.accept_invitation(
+        raw_token="wsi_ok", accepting_user_id="alice", accepting_user_email="alice@example.com"
+    )
     assert "pat_token" in result
     assert result["pat_token"].startswith("floom_")
     assert result["member"]["workspace_id"] == "ws_1"
+
+
+def test_accept_invitation_rejects_mismatched_email(monkeypatch):
+    """#230: a token addressed to one email must not be accepted by another."""
+    import apps.api.db.members as members_db
+    future = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    invite = {
+        "id": "inv-admin",
+        "workspace_id": "ws_victim",
+        "role": "admin",
+        "created_at": "2026-01-01",
+        "expires_at": future,
+        "invited_by": "owner-user",
+        "email": "someone-else@example.com",
+    }
+    monkeypatch.setattr(members_db, "get_invitation_by_token", lambda *, raw_token: invite)
+
+    def _boom():
+        raise AssertionError("must not touch Supabase on a rejected invite")
+
+    monkeypatch.setattr(members_db, "get_supabase_service_client", _boom)
+
+    with pytest.raises(PermissionError, match="different email"):
+        members_db.accept_invitation(
+            raw_token="wsi_leaked",
+            accepting_user_id="attacker",
+            accepting_user_email="attacker@evil.com",
+        )
+
+
+def test_accept_invitation_rejects_missing_caller_email(monkeypatch):
+    """#230: fail closed when the caller's email can't be verified."""
+    import apps.api.db.members as members_db
+    future = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    invite = {
+        "id": "inv-x",
+        "workspace_id": "ws_1",
+        "role": "member",
+        "expires_at": future,
+        "email": "alice@example.com",
+    }
+    monkeypatch.setattr(members_db, "get_invitation_by_token", lambda *, raw_token: invite)
+    monkeypatch.setattr(
+        members_db, "get_supabase_service_client",
+        lambda: (_ for _ in ()).throw(AssertionError("no DB on reject")),
+    )
+    with pytest.raises(PermissionError):
+        members_db.accept_invitation(
+            raw_token="wsi_x", accepting_user_id="alice", accepting_user_email=None
+        )
+
+
+def test_accept_invitation_email_match_is_case_insensitive(monkeypatch):
+    """#230: matching is case-insensitive (and trims) so legit accepts still work."""
+    import apps.api.db.members as members_db
+    future = (datetime.now(timezone.utc) + timedelta(days=7)).isoformat()
+    invite = {
+        "id": "inv-ci",
+        "workspace_id": "ws_1",
+        "role": "member",
+        "created_at": "2026-01-01",
+        "expires_at": future,
+        "invited_by": "admin-user",
+        "email": "Alice@Example.com",
+    }
+    member_row = {"workspace_id": "ws_1", "user_id": "alice", "role": "member", "joined_at": "2026-01-02"}
+    client = _make_supabase_client(member_row)
+    monkeypatch.setattr(members_db, "get_invitation_by_token", lambda *, raw_token: invite)
+    monkeypatch.setattr(members_db, "get_supabase_service_client", lambda: client)
+    result = members_db.accept_invitation(
+        raw_token="wsi_ci", accepting_user_id="alice", accepting_user_email="  alice@example.com  "
+    )
+    assert result["pat_token"].startswith("floom_")
 
 
 def test_revoke_invitation(monkeypatch):

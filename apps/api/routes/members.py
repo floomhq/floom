@@ -267,7 +267,11 @@ async def accept_invite(
         result = members_db.accept_invitation(
             raw_token=payload.token,
             accepting_user_id=auth.user_id,
+            accepting_user_email=auth.email,
         )
+    except PermissionError as exc:
+        # #230: invite is bound to the invited email; mismatch is forbidden.
+        raise HTTPException(status_code=403, detail=str(exc)) from exc
     except ValueError as exc:
         status = 410 if "expired" in str(exc) else 404
         raise HTTPException(status_code=status, detail=str(exc)) from exc
