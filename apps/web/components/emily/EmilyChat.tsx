@@ -17,6 +17,7 @@ import { useRouter } from "next/navigation";
 import { EmilyAvatar } from "./EmilyAvatar";
 import { MarkdownText } from "./MarkdownText";
 import { PromptInput } from "./PromptInput";
+import { CreateSourcePills } from "@/components/CreateSourcePills";
 import { FileChip } from "./FileChip";
 import { ToolCardRenderer } from "./cards/ToolCardRenderer";
 import {
@@ -294,28 +295,44 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
 
 // ── Empty state ───────────────────────────────────────────────────────────────
 
-function EmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
+function EmptyState({
+  onSuggest,
+  createMode = false,
+  onAddSource,
+}: {
+  onSuggest: (text: string) => void;
+  createMode?: boolean;
+  onAddSource?: (source: string) => void;
+}) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 px-6 text-center">
       <EmilyAvatar size="md" />
       <div>
-        <p className="text-sm font-medium">I am Emily, your Chief of Staff</p>
+        <p className="text-sm font-medium">
+          {createMode ? "Describe the worker you want" : "I am Emily, your Chief of Staff"}
+        </p>
         <p className="text-xs text-muted-foreground mt-1">
-          Ask me to create workers, check runs, or manage connections.
+          {createMode
+            ? "Tell me what it should do, then add the sources it can draw on."
+            : "Ask me to create workers, check runs, or manage connections."}
         </p>
       </div>
-      <div className="flex flex-wrap gap-1.5 justify-center">
-        {SUGGESTIONS.map((s) => (
-          <button
-            key={s}
-            type="button"
-            onClick={() => onSuggest(s)}
-            className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
-          >
-            {s}
-          </button>
-        ))}
-      </div>
+      {createMode ? (
+        onAddSource ? <CreateSourcePills onPick={onAddSource} /> : null
+      ) : (
+        <div className="flex flex-wrap gap-1.5 justify-center">
+          {SUGGESTIONS.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => onSuggest(s)}
+              className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
+      )}
     </div>
   );
 }
@@ -476,6 +493,17 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
     setAttachedFiles([]);
   }, [input, attachedFiles, sendMessage]);
 
+  // Create-mode source pill → append a natural "use my <source>" hint to the
+  // composer so the assistant knows which context to wire into the new worker.
+  const handleAddSource = useCallback((source: string) => {
+    setInput((prev) => {
+      const hint = `Use my ${source}.`;
+      if (prev.toLowerCase().includes(source.toLowerCase())) return prev;
+      const sep = prev.trim().length === 0 ? "" : prev.endsWith(" ") ? "" : " ";
+      return `${prev}${sep}${hint}`;
+    });
+  }, []);
+
   const handleExport = useCallback(() => {
     exportConversationMarkdown(messages, conversationId);
   }, [messages, conversationId]);
@@ -563,7 +591,11 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
               <p className="text-xs text-muted-foreground">Loading conversation...</p>
             </div>
           ) : (
-            <EmptyState onSuggest={(text) => { setInput(text); }} />
+            <EmptyState
+              onSuggest={(text) => { setInput(text); }}
+              createMode={createMode}
+              onAddSource={handleAddSource}
+            />
           )
         ) : (
           <div className={cn("py-5 space-y-5", fullPage ? "px-6" : "px-4")}>
