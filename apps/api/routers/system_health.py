@@ -17,7 +17,7 @@ from datetime import datetime, timedelta, timezone
 import time
 from typing import Dict, List
 
-from fastapi import APIRouter, Depends
+from fastapi import APIRouter, Depends, HTTPException
 from fastapi.responses import PlainTextResponse
 
 from auth import AuthContext, get_auth_context
@@ -119,7 +119,11 @@ def system_metrics(
 
 @system_health_router.get("/metrics", response_class=PlainTextResponse)
 def prometheus_metrics(auth: AuthContext = Depends(get_auth_context)):
-    """Prometheus text exposition for runtime health."""
+    """Prometheus text exposition for runtime health. Admin-only."""
+    # Security (#1072): Prometheus output exposes worker IDs, run counts, error
+    # counts, and internal timing data. Gate to admin — members get 403.
+    if not auth.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
     from db import get_db
 
     buckets = [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600]

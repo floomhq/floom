@@ -100,16 +100,18 @@ def channels_email_status(auth: AuthContext = Depends(get_auth_context)):
 def system_info(auth: AuthContext = Depends(get_auth_context)):
     # #837 RCA: python_version and started_at (process uptime) were returned to
     # every authenticated caller — recon data that maps the runtime for
-    # interpreter-specific exploits and restart tracking. Admins keep the full
-    # payload; everyone else gets version + runner only.
-    info: Dict[str, Any] = {
+    # interpreter-specific exploits and restart tracking.
+    # Security (#1072 / P2-B): fully admin-gate this endpoint; members get 403.
+    # version/runner are deployment reconnaissance too — no benefit to exposing
+    # them to non-admin workspace members.
+    if not auth.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return {
         "version": API_VERSION,
         "runner": "e2b",
+        "started_at": _PROCESS_STARTED_AT,
+        "python_version": sys.version.split()[0],
     }
-    if auth.is_admin:
-        info["started_at"] = _PROCESS_STARTED_AT
-        info["python_version"] = sys.version.split()[0]
-    return info
 
 
 @system_router.get("/system/workspace-agent")
