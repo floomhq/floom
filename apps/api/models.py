@@ -1677,6 +1677,7 @@ class RunSummary(BaseModel):
     # authed-owner routes (GET /runs, /connections/{id}/activity); no public/share
     # surface uses RunSummary — those return RunDetail, which redacts separately.
     input: Dict[str, Any] = Field(default_factory=dict)
+    inputs: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DetailArtifactPreview(BaseModel):
@@ -1746,6 +1747,7 @@ class RunDetail(BaseModel):
     trigger_source: str
     runner: str
     input: Dict[str, Any] = Field(default_factory=dict)
+    inputs: Dict[str, Any] = Field(default_factory=dict)
     output: Dict[str, Any] = Field(default_factory=dict)
     outputs: Dict[str, Any] = Field(default_factory=dict)
     output_schema: List["OutputField"] = Field(default_factory=list)
