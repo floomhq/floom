@@ -328,7 +328,18 @@ class SupabaseAuthProvider:
             # Determine role: owner → 'admin', else look up workspace_members.
             role = _resolve_role(workspace_id=workspace_id, user_id=user_id)
             set_active_member_role(role)
-            return AuthContext(user_id=user_id, email=None, scopes=("api",))
+            # SECURITY (A-03): the engine's admin gates read auth.is_admin off the
+            # AuthContext directly, NOT the active_member_role contextvar. The
+            # engine AuthContext.role DEFAULTS to "admin", so omitting role here
+            # silently grants every cloud member admin. Thread the resolved role
+            # in, failing closed to "member" when role can't be proven.
+            return AuthContext(
+                user_id=user_id,
+                email=None,
+                scopes=("api",),
+                role=role or "member",
+                auth_method="pat",
+            )
 
         # Legacy safety path for rows created before the workspace_id
         # migration is applied. Once migrated, all PAT rows have workspace_id.
@@ -407,8 +418,15 @@ class SupabaseAuthProvider:
         set_active_workspace_id(workspace_id)
         set_active_member_role(role)
 
+        # SECURITY (A-03): the engine's admin gates read auth.is_admin off the
+        # AuthContext directly, NOT the active_member_role contextvar. The engine
+        # AuthContext.role DEFAULTS to "admin", so omitting role here silently
+        # grants every cloud member admin. Thread the resolved role in, failing
+        # closed to "member" when role can't be proven (transient Supabase error,
+        # unresolved workspace, or non-member).
         return AuthContext(
             user_id=user_id,
             email=email,
             scopes=scopes,
+            role=role or "member",
         )

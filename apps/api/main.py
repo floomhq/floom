@@ -548,6 +548,12 @@ async def cloud_create_worker(
         user_id=auth.user_id,
         email=getattr(auth, "email", None),
         scopes=getattr(auth, "scopes", ()),
+        # SECURITY (A-03): carry the verified role/auth_method. The engine
+        # AuthContext.role defaults to "admin", so rebuilding it from only
+        # user_id/email/scopes would silently re-grant admin to a member and
+        # defeat the SupabaseAuthProvider role fix. Fail closed to "member".
+        role=getattr(auth, "role", None) or "member",
+        auth_method=getattr(auth, "auth_method", "secret"),
     )
 
     # Engine creates the worker: validates YAML, writes to disk, registers in DB.
@@ -595,6 +601,12 @@ async def cloud_draft_and_create(
         user_id=auth.user_id,
         email=getattr(auth, "email", None),
         scopes=getattr(auth, "scopes", ()),
+        # SECURITY (A-03): carry the verified role/auth_method. The engine
+        # AuthContext.role defaults to "admin", so rebuilding it from only
+        # user_id/email/scopes would silently re-grant admin to a member and
+        # defeat the SupabaseAuthProvider role fix. Fail closed to "member".
+        role=getattr(auth, "role", None) or "member",
+        auth_method=getattr(auth, "auth_method", "secret"),
     )
     result = await engine_main.draft_and_create_worker(payload, request, engine_auth, repos)
 
@@ -659,6 +671,12 @@ async def cloud_update_worker_files(worker_id: str, request: Request) -> Any:
         user_id=auth.user_id,
         email=getattr(auth, "email", None),
         scopes=getattr(auth, "scopes", ()),
+        # SECURITY (A-03): carry the verified role/auth_method. The engine
+        # AuthContext.role defaults to "admin", so rebuilding it from only
+        # user_id/email/scopes would silently re-grant admin to a member and
+        # defeat the SupabaseAuthProvider role fix. Fail closed to "member".
+        role=getattr(auth, "role", None) or "member",
+        auth_method=getattr(auth, "auth_method", "secret"),
     )
     payload = engine_main.WorkerFilesUpdateRequest(
         files=[
@@ -704,6 +722,12 @@ async def cloud_get_worker(worker_id: str, request: Request) -> Any:
         user_id=auth.user_id,
         email=getattr(auth, "email", None),
         scopes=getattr(auth, "scopes", ()),
+        # SECURITY (A-03): carry the verified role/auth_method. The engine
+        # AuthContext.role defaults to "admin", so rebuilding it from only
+        # user_id/email/scopes would silently re-grant admin to a member and
+        # defeat the SupabaseAuthProvider role fix. Fail closed to "member".
+        role=getattr(auth, "role", None) or "member",
+        auth_method=getattr(auth, "auth_method", "secret"),
     )
     try:
         result = await _asyncio.to_thread(
@@ -763,6 +787,12 @@ async def cloud_get_run(run_id: str, request: Request) -> Any:
         user_id=auth.user_id,
         email=getattr(auth, "email", None),
         scopes=getattr(auth, "scopes", ()),
+        # SECURITY (A-03): carry the verified role/auth_method. The engine
+        # AuthContext.role defaults to "admin", so rebuilding it from only
+        # user_id/email/scopes would silently re-grant admin to a member and
+        # defeat the SupabaseAuthProvider role fix. Fail closed to "member".
+        role=getattr(auth, "role", None) or "member",
+        auth_method=getattr(auth, "auth_method", "secret"),
     )
     try:
         return await _asyncio.to_thread(
@@ -1088,6 +1118,12 @@ async def cloud_clone_worker(token: str, request: Request) -> Any:
         user_id=auth.user_id,
         email=getattr(auth, "email", None),
         scopes=getattr(auth, "scopes", ()),
+        # SECURITY (A-03): carry the verified role/auth_method. The engine
+        # AuthContext.role defaults to "admin", so rebuilding it from only
+        # user_id/email/scopes would silently re-grant admin to a member and
+        # defeat the SupabaseAuthProvider role fix. Fail closed to "member".
+        role=getattr(auth, "role", None) or "member",
+        auth_method=getattr(auth, "auth_method", "secret"),
     )
 
     new_worker = engine_main._register_worker_from_files(draft_files, engine_auth, repos)
