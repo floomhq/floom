@@ -34,15 +34,21 @@ const standalonePrefixes = ["/approvals/review", "/w", "/s", "/login"];
 // The full-page /chat route renders its own Emily header; no dock needed there.
 const noDockPrefixes = ["/chat"];
 
-export function AppShell({ children }: { children: React.ReactNode }) {
+export type AppShellProps = {
+  children: React.ReactNode;
+  noSidebarPaths?: string[];
+};
+
+function pathMatchesPrefixes(pathname: string, prefixes: string[]) {
+  return prefixes.some((prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`));
+}
+
+export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
   const pathname = usePathname();
   const isDesktop = useIsDesktop();
-  const standalone = standalonePrefixes.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
-  );
-  const noDock = noDockPrefixes.some(
-    (prefix) => pathname === prefix || pathname.startsWith(`${prefix}/`)
-  );
+  const standalone = pathMatchesPrefixes(pathname, standalonePrefixes)
+    || pathMatchesPrefixes(pathname, noSidebarPaths);
+  const noDock = pathMatchesPrefixes(pathname, noDockPrefixes);
 
   if (standalone) {
     return (
