@@ -255,7 +255,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
 
   const config: CollectionConfig<RunSummary> = {
     title: "Run history",
-    subtitle: "Worker executions grouped by day.",
+    subtitle: "Worker executions.",
     items: sorted,
     loading,
     idOf: (r) => r.id,
