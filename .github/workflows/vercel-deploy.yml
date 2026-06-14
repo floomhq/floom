@@ -18,7 +18,8 @@ env:
 jobs:
   deploy-landing:
     name: Deploy workeros.floom.dev
-    runs-on: ubuntu-latest
+    # Self-hosted AX41 runner (org GitHub-hosted Actions are billing-disabled).
+    runs-on: [self-hosted, linux, x64, workeros-ci]
     timeout-minutes: 15
 
     env:
@@ -54,7 +55,8 @@ jobs:
 
   deploy-dashboard:
     name: Deploy app dashboard
-    runs-on: ubuntu-latest
+    # Self-hosted AX41 runner (org GitHub-hosted Actions are billing-disabled).
+    runs-on: [self-hosted, linux, x64, workeros-ci]
     timeout-minutes: 15
 
     env:
@@ -62,42 +64,37 @@ jobs:
       VERCEL_PROJECT_ID: ${{ secrets.VERCEL_WORKEROS_CLOUD_DASHBOARD_PROJECT_ID }}
 
     steps:
-      # Do not pass token: ${{ secrets.ENGINE_SUBMODULE_TOKEN }} to checkout — when the
-      # secret is unset that becomes an empty string and checkout@v4 fails immediately
-      # ("Input required and not supplied: token"). Initialise the private engine
-      # submodule manually (same pattern as ci.yml / dashboard-drift.yml).
+      # The private engine submodule is cloned with the self-hosted runner's
+      # local gh credentials (gh auth token), not a stored ENGINE_SUBMODULE_TOKEN
+      # secret. Initialise it manually (same pattern as ci.yml / dashboard-drift.yml).
       - uses: actions/checkout@v4
         with:
           submodules: false
 
-      - name: Initialise engine submodule
-        id: engine
-        env:
-          ENGINE_SUBMODULE_TOKEN: ${{ secrets.ENGINE_SUBMODULE_TOKEN }}
+      - name: Initialise engine submodule (runner-local gh auth)
         run: |
           set -euo pipefail
-          if [ -z "${ENGINE_SUBMODULE_TOKEN:-}" ]; then
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::ENGINE_SUBMODULE_TOKEN is not set — dashboard deploy will use"
-            echo "::warning::the tracked web/ tree without running npm run sync."
-            exit 0
+          TOKEN="$(gh auth token)"
+          if [ -z "${TOKEN:-}" ]; then
+            echo "::error::No gh token available on the self-hosted runner."
+            echo "::error::Run 'gh auth login' as the runner user (github-runner)"
+            echo "::error::with read access to floomhq/workeros."
+            exit 1
           fi
           git config --global \
-            url."https://x-access-token:${ENGINE_SUBMODULE_TOKEN}@github.com/".insteadOf \
+            url."https://x-access-token:${TOKEN}@github.com/".insteadOf \
             "https://github.com/"
           git submodule update --init --depth 1 engine
           if [ ! -d engine/apps/web ]; then
             echo "::error::engine/apps/web missing after submodule init."
             exit 1
           fi
-          echo "available=true" >> "$GITHUB_OUTPUT"
 
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
 
       - name: Sync dashboard from engine
-        if: steps.engine.outputs.available == 'true'
         working-directory: web
         run: npm run sync -- --quiet
 

@@ -25,7 +25,8 @@ permissions:
 jobs:
   guard:
     name: Verify landing app routes
-    runs-on: ubuntu-latest
+    # Self-hosted AX41 runner (org GitHub-hosted Actions are billing-disabled).
+    runs-on: [self-hosted, linux, x64, workeros-ci]
     steps:
       - uses: actions/checkout@v4
 

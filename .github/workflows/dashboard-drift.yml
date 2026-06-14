@@ -2,13 +2,13 @@ name: Dashboard drift guard
 
 # Guards against the synced dashboard (web/) silently re-forking from the engine
 # UI (engine/apps/web). The engine is a submodule of a SEPARATE private repo
-# (github.com/floomhq/workeros) that the default GITHUB_TOKEN cannot clone.
+# (github.com/floomhq/workeros).
 #
-# The whole drift check is therefore gated on a PAT (secret ENGINE_SUBMODULE_TOKEN)
-# with read access to floomhq/workeros. When that secret is absent the job emits
-# a warning and passes NEUTRALLY: it never blocks, and it never reports a false
-# "no drift" green. When the secret is present the drift check runs for real and
-# fails the job on any drift.
+# This runs on the self-hosted AX41 runner (org GitHub-hosted Actions are
+# billing-disabled). The private engine submodule is cloned with the runner's
+# LOCAL gh credentials (gh auth token) — no stored ENGINE_SUBMODULE_TOKEN secret.
+# The runner user has read access to floomhq/workeros, so the drift check ALWAYS
+# RUNS FOR REAL and fails the job on any drift. There is no neutral skip.
 
 on:
   pull_request:
@@ -30,37 +30,29 @@ permissions:
 
 jobs:
   drift-check:
-    runs-on: ubuntu-latest
+    runs-on: [self-hosted, linux, x64, workeros-ci]
     steps:
       - name: Checkout (no submodules)
         uses: actions/checkout@v4
         with:
           submodules: false
 
-      - name: Initialise engine submodule (skip cleanly if no PAT)
-        id: engine
-        env:
-          ENGINE_SUBMODULE_TOKEN: ${{ secrets.ENGINE_SUBMODULE_TOKEN }}
+      - name: Initialise engine submodule (runner-local gh auth)
         run: |
-          set -u
-          if [ -z "${ENGINE_SUBMODULE_TOKEN:-}" ]; then
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::ENGINE_SUBMODULE_TOKEN is not set. The private engine"
-            echo "::warning::submodule (floomhq/workeros) cannot be cloned, so the"
-            echo "::warning::drift check is skipped. Add a PAT with read access to"
-            echo "::warning::floomhq/workeros as secret ENGINE_SUBMODULE_TOKEN to"
-            echo "::warning::activate the gate."
-            exit 0
+          set -euo pipefail
+          TOKEN="$(gh auth token)"
+          if [ -z "${TOKEN:-}" ]; then
+            echo "::error::No gh token available on the self-hosted runner."
+            echo "::error::Run 'gh auth login' as the runner user (github-runner)"
+            echo "::error::with read access to floomhq/workeros."
+            exit 1
           fi
-          # Token present: try to fetch the engine submodule. Any failure here is
-          # surfaced as a hard error because, with a token configured, a failed
-          # clone means a real misconfiguration (bad/expired PAT or broken pin).
           git config --global \
-            url."https://x-access-token:${ENGINE_SUBMODULE_TOKEN}@github.com/".insteadOf \
+            url."https://x-access-token:${TOKEN}@github.com/".insteadOf \
             "https://github.com/"
           if ! git submodule update --init --recursive; then
-            echo "::error::Failed to init the engine submodule with"
-            echo "::error::ENGINE_SUBMODULE_TOKEN. Check the PAT's read access to"
+            echo "::error::Failed to init the engine submodule with the runner's"
+            echo "::error::gh credentials. Check the runner user's read access to"
             echo "::error::floomhq/workeros and the submodule pin."
             exit 1
           fi
@@ -68,20 +60,16 @@ jobs:
             echo "::error::engine/apps/web missing after submodule init."
             exit 1
           fi
-          echo "available=true" >> "$GITHUB_OUTPUT"
 
       - name: Setup Node
-        if: steps.engine.outputs.available == 'true'
         uses: actions/setup-node@v4
         with:
           node-version: "24"
 
       - name: Check dashboard is in sync with engine
-        if: steps.engine.outputs.available == 'true'
         working-directory: web
         run: node scripts/check-engine-sync.mjs
 
       - name: Verify sync script runs cleanly
-        if: steps.engine.outputs.available == 'true'
         working-directory: web
         run: node scripts/sync-engine-web.mjs --quiet

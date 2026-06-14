@@ -9,46 +9,57 @@ on:
 jobs:
   cloud-tests:
     name: Cloud tests (pytest)
-    runs-on: ubuntu-latest
+    # Self-hosted AX41 runner (org GitHub-hosted Actions are billing-disabled).
+    runs-on: [self-hosted, linux, x64, workeros-ci]
 
     steps:
       - uses: actions/checkout@v4
         with:
           submodules: false
 
-      - name: Initialise engine submodule (skip cleanly if no PAT)
-        id: engine
-        env:
-          ENGINE_SUBMODULE_TOKEN: ${{ secrets.ENGINE_SUBMODULE_TOKEN }}
+      - name: Initialise engine submodule (runner-local gh auth)
+        # The private engine submodule (floomhq/workeros) is cloned with the
+        # self-hosted runner's local gh credentials (gh auth token), not a
+        # stored ENGINE_SUBMODULE_TOKEN secret. The runner user is logged in to
+        # gh with read access to floomhq/workeros, so this ALWAYS runs for real
+        # on the self-hosted runner — no neutral skip.
         run: |
-          if [ -z "${ENGINE_SUBMODULE_TOKEN:-}" ]; then
-            echo "available=false" >> "$GITHUB_OUTPUT"
-            echo "::warning::ENGINE_SUBMODULE_TOKEN not set — cloud tests skipped (engine submodule needed for requirements)."
-            exit 0
+          set -euo pipefail
+          TOKEN="$(gh auth token)"
+          if [ -z "${TOKEN:-}" ]; then
+            echo "::error::No gh token available on the self-hosted runner."
+            echo "::error::Run 'gh auth login' as the runner user (github-runner)"
+            echo "::error::with read access to floomhq/workeros."
+            exit 1
           fi
           git config --global \
-            url."https://x-access-token:${ENGINE_SUBMODULE_TOKEN}@github.com/".insteadOf \
+            url."https://x-access-token:${TOKEN}@github.com/".insteadOf \
             "https://github.com/"
           git submodule update --init --recursive
-          echo "available=true" >> "$GITHUB_OUTPUT"
+          if [ ! -d engine/apps/api ]; then
+            echo "::error::engine/apps/api missing after submodule init."
+            exit 1
+          fi
 
       - uses: actions/setup-python@v5
-        if: steps.engine.outputs.available == 'true'
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: apps/api/requirements.txt
 
       - name: Install dependencies
-        if: steps.engine.outputs.available == 'true'
         run: pip install -r apps/api/requirements.txt pytest pytest-asyncio
 
       - name: Run cloud tests
-        if: steps.engine.outputs.available == 'true'
         env:
           WORKEROS_DEPLOY: cloud
           SUPABASE_URL: https://placeholder.supabase.co
           SUPABASE_ANON_KEY: placeholder
           SUPABASE_SERVICE_ROLE_KEY: placeholder
-          WORKEROS_CLOUD_SECRETS_ENCRYPTION_KEY: ci-test-key-32-bytes-padded-here
+          # Valid 32-byte url-safe base64 Fernet key for CI only (base64 of the
+          # readable string "workeros-cloud-ci-test-key-32byt"). The previous
+          # placeholder was not valid base64, so startup's Fernet init raised at
+          # import time. This was masked while the whole job neutral-skipped (no
+          # ENGINE_SUBMODULE_TOKEN); it surfaced once the suite actually runs.
+          WORKEROS_CLOUD_SECRETS_ENCRYPTION_KEY: d29ya2Vyb3MtY2xvdWQtY2ktdGVzdC1rZXktMzJieXQ=
         run: pytest tests/ -v --tb=short
