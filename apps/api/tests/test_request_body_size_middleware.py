@@ -120,3 +120,55 @@ def test_default_json_oversize_returns_friendly_message(monkeypatch, tmp_path):
     detail = response.json()["detail"]
     assert "Request body is too large" in detail
     assert detail != "Request body too large"
+
+
+def test_worker_files_put_accepts_four_mb_payload(monkeypatch, tmp_path):
+    main = load_main(monkeypatch, tmp_path)
+    worker_yml = """id: large-files
+name: Large Files
+description: Worker with bundled data.
+trigger:
+  type: manual
+runtime:
+  type: python
+  entrypoint: run.py
+  runner: e2b
+inputs: []
+outputs:
+  - name: result
+    type: string
+    label: Result
+secrets: []
+connections: []
+"""
+    run_py = """import json
+
+with open("result.json", "w", encoding="utf-8") as handle:
+    json.dump({"status": "success", "outputs": {"result": "ok"}, "artifacts": []}, handle)
+"""
+
+    with TestClient(main.app) as client:
+        created = client.post(
+            "/workers",
+            headers={"x-floom-secret": "test-secret"},
+            json={"worker_yml": worker_yml, "run_py": run_py},
+        )
+        assert created.status_code == 200, created.text
+
+        large_payload = "x" * (4 * 1024 * 1024)
+        updated = client.put(
+            "/workers/large-files/files",
+            headers={"x-floom-secret": "test-secret"},
+            json={
+                "files": [
+                    {"path": "worker.yml", "content": worker_yml},
+                    {"path": "run.py", "content": run_py},
+                    {"path": "candidates.json", "content": large_payload},
+                ]
+            },
+        )
+
+    assert updated.status_code == 200, updated.text
+    body = updated.json()
+    assert body["id"] == "large-files"
+    assert any(item["path"] == "candidates.json" for item in body["files"])

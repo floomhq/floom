@@ -990,7 +990,7 @@ class SqliteWorkerRepository:
         with get_db() as conn:
             rows = conn.execute(
                 """
-                SELECT r.id, r.worker_id, r.status, r.trigger_source, r.created_at,
+                SELECT r.id, r.worker_id, r.status, r.trigger_source, r.input_json, r.created_at,
                        r.started_at, r.completed_at, r.duration_ms, r.error, r.error_code
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
@@ -1580,7 +1580,7 @@ class SqliteRunRepository:
         select_sql = f"""
             SELECT r.id, r.worker_id,
                    COALESCE(JSON_EXTRACT(sv.manifest_json, '$.title'), w.name) AS worker_name,
-                   r.status, r.trigger_source, r.created_at, r.started_at,
+                   r.status, r.trigger_source, r.input_json, r.created_at, r.started_at,
                    r.completed_at, r.duration_ms, r.error, r.error_code,
                    r.quality_warning
             FROM runs r
