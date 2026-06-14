@@ -17,6 +17,7 @@ vi.mock("next/navigation", () => ({
   usePathname: () => "/settings",
 }));
 vi.mock("@/lib/api", () => ({
+  API_BASE: "/api/proxy",
   api: { workspace: { tokens: { list, create, revoke } } },
 }));
 
