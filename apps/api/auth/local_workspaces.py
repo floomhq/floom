@@ -16,6 +16,18 @@ ACTIVE_WORKSPACE_HEADER = "x-workeros-workspace"
 DEFAULT_WORKSPACE_ID = "local-default"
 _WORKSPACE_ID_RE = re.compile(r"^(?:local-default|ws_[a-f0-9]{14})$")
 _DERIVED_USER_RE = re.compile(r"^(?P<base>.+)__ws_[a-f0-9]{14}$")
+# Matches any HTML/XML tag (opening, closing, self-closing, or comments).
+_HTML_TAG_RE = re.compile(r"<[^>]*>")
+
+
+def _strip_html_tags(text: str) -> str:
+    """Remove HTML tags from a display-string field (defense-in-depth).
+
+    Workspace/worker names are plain text — angle-bracket markup is never
+    valid content. Stripping at the input layer means the stored value can
+    never reach any render path (JSX, markdown, email) with raw HTML in it.
+    """
+    return _HTML_TAG_RE.sub("", text)
 
 
 def local_workspace_base_user_id(user_id: str) -> str:
@@ -101,7 +113,7 @@ def get_local_workspace(owner_user_id: str, workspace_id: str) -> dict[str, Any]
 def create_local_workspace(owner_user_id: str, name: str) -> dict[str, Any]:
     ensure_default_workspace(owner_user_id)
     workspace_id = "ws_" + uuid.uuid4().hex[:14]
-    clean_name = (name or "").strip() or "Untitled"
+    clean_name = _strip_html_tags((name or "").strip()) or "Untitled"
     created_at = now_iso()
     with get_db() as conn:
         conn.execute(
@@ -143,7 +155,7 @@ def update_local_workspace(
     sets: list[str] = []
     params: list[Any] = []
     if name is not None:
-        clean_name = name.strip()
+        clean_name = _strip_html_tags(name.strip())
         if not clean_name:
             raise ValueError("workspace name required")
         sets.append("name = ?")

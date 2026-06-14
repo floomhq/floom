@@ -2497,6 +2497,20 @@ def _sanitize_download_name(name: str) -> str:
     return sanitized or "file"
 
 
+# Defense-in-depth: strip HTML/XML tags from display-string fields (worker
+# name, worker description, workspace name). These are plain-text labels —
+# angle-bracket markup is never valid content. React JSX already escapes
+# these values when rendering, but removing raw HTML at the storage layer
+# ensures no future render path (markdown header, email, export) can fire
+# stored XSS from a crafted name.
+_HTML_TAG_SANITIZE_RE = re.compile(r"<[^>]*>")
+
+
+def _strip_html_tags(text: str) -> str:
+    """Remove HTML/XML tags from a plain-text display string."""
+    return _HTML_TAG_SANITIZE_RE.sub("", text)
+
+
 _SENSITIVE_ARTIFACT_FILENAMES = frozenset({"transcript.jsonl"})
 
 
@@ -9586,13 +9600,13 @@ def update_worker(
     # manifest (skill_versions.manifest_json). Both are also patched into
     # worker.yml on disk below so they survive a registry reload.
     if payload.name is not None:
-        new_name = payload.name.strip()
+        new_name = _strip_html_tags(payload.name.strip())
         if not new_name:
             raise HTTPException(status_code=422, detail="name cannot be empty")
         updates["name"] = new_name
     if payload.description is not None:
         manifest = dict(worker.get("manifest") or {})
-        manifest["description"] = payload.description
+        manifest["description"] = _strip_html_tags(payload.description)
         updates["manifest_json"] = manifest
 
     # capabilities field is declared-not-enforced per T1c flip — just accept it
@@ -20457,16 +20471,18 @@ def channels_email_status(auth: AuthContext = Depends(get_auth_context)):
 def system_info(auth: AuthContext = Depends(get_auth_context)):
     # #837 RCA: python_version and started_at (process uptime) were returned to
     # every authenticated caller — recon data that maps the runtime for
-    # interpreter-specific exploits and restart tracking. Admins keep the full
-    # payload; everyone else gets version + runner only.
-    info: Dict[str, Any] = {
+    # interpreter-specific exploits and restart tracking.
+    # Security (P2-B): fully admin-gate this endpoint; members get 403.
+    # version/runner are also deployment reconnaissance data — no benefit to
+    # exposing them to non-admin workspace members.
+    if not auth.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
+    return {
         "version": app.version,
         "runner": "e2b",
+        "started_at": _PROCESS_STARTED_AT,
+        "python_version": sys.version.split()[0],
     }
-    if auth.is_admin:
-        info["started_at"] = _PROCESS_STARTED_AT
-        info["python_version"] = sys.version.split()[0]
-    return info
 
 
 @app.get("/system/workspace-agent")
@@ -21237,7 +21253,11 @@ _METRICS_DB_CONNECTION_ERRORS_TOTAL = 0
 
 @app.get("/metrics", response_class=PlainTextResponse)
 def prometheus_metrics(auth: AuthContext = Depends(get_auth_context)):
-    """Prometheus text exposition for runtime health."""
+    """Prometheus text exposition for runtime health. Admin-only."""
+    # Security: Prometheus output exposes worker IDs, run counts, error counts,
+    # and internal timing data. Gate to admin — members get 403.
+    if not auth.is_admin:
+        raise HTTPException(status_code=403, detail="Admin access required")
     buckets = [1, 5, 10, 30, 60, 120, 300, 600, 1800, 3600]
     try:
         from runner_sandbox.agent_driver import cancel_flag_db_read_errors_total
