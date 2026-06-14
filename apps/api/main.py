@@ -299,8 +299,20 @@ def _expire_stale_approvals() -> int:
                     (now_iso_str, r["id"]),
                 )
                 conn.execute(
-                    "UPDATE runs SET status = ? WHERE id = ? AND status = ?",
-                    (RunStatus.FAILED.value, r["run_id"], RunStatus.PENDING_APPROVAL.value),
+                    """
+                    UPDATE runs
+                    SET status = ?,
+                        error = COALESCE(NULLIF(error, ''), ?),
+                        error_code = COALESCE(NULLIF(error_code, ''), ?)
+                    WHERE id = ? AND status = ?
+                    """,
+                    (
+                        RunStatus.FAILED.value,
+                        "Approval expired before a decision was recorded.",
+                        "approval_expired",
+                        r["run_id"],
+                        RunStatus.PENDING_APPROVAL.value,
+                    ),
                 )
                 expired += 1
         for r in rows:
@@ -9978,6 +9990,7 @@ def _delete_worker_impl(worker_id: str, owner_id: str, repos: Repositories) -> N
                 run_id,
                 RunStatus.FAILED.value,
                 error="Worker deleted",
+                error_code="worker_deleted",
                 user_id=owner_id,
                 repos=repos,
             )
@@ -13273,6 +13286,7 @@ def create_worker_run(
             run_id,
             RunStatus.FAILED.value,
             error=str(exc.detail),
+            error_code="file_input_resolution_failed",
             user_id=auth.user_id,
             repos=repos,
         )
@@ -13282,6 +13296,7 @@ def create_worker_run(
             run_id,
             RunStatus.FAILED.value,
             error=str(exc),
+            error_code="file_input_resolution_failed",
             user_id=auth.user_id,
             repos=repos,
         )
@@ -15332,6 +15347,7 @@ _SECRET_HEADLINE = "This worker is missing a required credential. Add it in sett
 _OUTPUT_HEADLINE = "This worker finished but its result didn't pass validation. Check the run logs, then re-run."
 _CODE_HEADLINE = "This worker's code has an error and couldn't run. Edit the worker to fix it, or re-generate it."
 _CANCELLED_HEADLINE = "This run was cancelled before it finished."
+_SANDBOX_HEADLINE = "The sandbox could not start or stay connected. Try again, then check the E2B configuration if it repeats."
 
 _OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
     # Runtime / agent / sandbox internals (the residual G5 leak class).
@@ -15344,7 +15360,7 @@ _OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
     "context_mount_failed": _RUNTIME_HEADLINE,
     "mcp_connect_failed": _CONNECTION_HEADLINE,
     # Sandbox / timeout / resource.
-    "e2b_sandbox_error": _TIMEOUT_HEADLINE,
+    "e2b_sandbox_error": _SANDBOX_HEADLINE,
     "timeout": _TIMEOUT_HEADLINE,
     "sandbox_oom": "This worker ran out of memory and was stopped. Try simplifying the input.",
     "token_cap_exceeded": "This worker reached its output limit and was stopped. Try simplifying the task.",
@@ -15360,6 +15376,8 @@ _OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
     "skill_not_found": _CODE_HEADLINE,
     "worker_not_found": "This worker no longer exists.",
     "worker_disabled": "This worker is paused. Turn it on to run it again.",
+    "worker_deleted": "This worker was deleted while the run was still active.",
+    "file_input_resolution_failed": "This worker needs a valid uploaded file for one of its inputs. Upload the file, then re-run.",
     # Output / result.
     "output_validation_failed": _OUTPUT_HEADLINE,
     "schema_violation": _OUTPUT_HEADLINE,
@@ -15369,6 +15387,8 @@ _OPERATOR_ERROR_CODE_HEADLINES: Dict[str, str] = {
     "cancelled": _CANCELLED_HEADLINE,
     "cancelled_queued": _CANCELLED_HEADLINE,
     "cancelled_before_start": _CANCELLED_HEADLINE,
+    "approval_expired": "This run waited for approval too long and expired. Re-run it to request a fresh approval.",
+    "unknown_error": "This worker failed to run. Check the run logs for details, then edit or re-run the worker.",
 }
 
 # Generic fallback for any unknown / future error_code — never raw jargon.

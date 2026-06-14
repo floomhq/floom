@@ -13,6 +13,7 @@ except ImportError:
     _LOCK_UN = 8
 import contextvars
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -37,6 +38,44 @@ from ._legacy_sqlite import _row_dict, get_db, now_iso
 
 _SECRET_PREFIX = "__WORKEROS_SECRET__"
 _FLOOM_USER_ID = "federico"
+_UNKNOWN_RUN_ERROR_CODE = "unknown_error"
+_UNKNOWN_RUN_ERROR_MESSAGE = (
+    "Run failed before the engine captured a specific failure reason. "
+    "Check the run logs and retry."
+)
+
+logger = logging.getLogger("floom.db.sqlite")
+
+
+def _normalize_failed_error_fields(
+    *,
+    run_id: str,
+    error: str | None,
+    error_code: str | None,
+    existing_error: Any = None,
+    existing_error_code: Any = None,
+) -> tuple[str, str]:
+    normalized_error = str(error).strip() if error is not None else ""
+    normalized_error_code = str(error_code).strip() if error_code is not None else ""
+    if not normalized_error:
+        normalized_error = str(existing_error or "").strip()
+    if not normalized_error_code:
+        normalized_error_code = str(existing_error_code or "").strip()
+    if not normalized_error:
+        normalized_error = _UNKNOWN_RUN_ERROR_MESSAGE
+        logger.error(
+            "Run %s reached failed status without an error message in repo update; applying fallback",
+            run_id,
+            stack_info=True,
+        )
+    if not normalized_error_code:
+        normalized_error_code = _UNKNOWN_RUN_ERROR_CODE
+        logger.error(
+            "Run %s reached failed status without an error_code in repo update; applying fallback",
+            run_id,
+            stack_info=True,
+        )
+    return normalized_error, normalized_error_code
 
 # Curated catalog of ship-with-product stock/example workers that EVERY
 # authenticated user may run (attributed to their own scope). Resolved lazily
@@ -1805,6 +1844,14 @@ class SqliteRunRepository:
         run = self.get(user_id=user_id, run_id=run_id)
         if run is None:
             raise ValueError(f"run {run_id} not found for {user_id}")
+        if status == RunStatus.FAILED.value:
+            error, error_code = _normalize_failed_error_fields(
+                run_id=run_id,
+                error=error,
+                error_code=error_code,
+                existing_error=run.get("error"),
+                existing_error_code=run.get("error_code"),
+            )
         updates: dict[str, Any] = {"status": status}
         if output_json is not None:
             updates["output_json"] = output_json
@@ -2042,6 +2089,11 @@ class SqliteRunRepository:
             if not rows:
                 return []
             for row in rows:
+                normalized_error, normalized_error_code = _normalize_failed_error_fields(
+                    run_id=row["id"],
+                    error=error,
+                    error_code=error_code,
+                )
                 duration_ms = None
                 started_at = row["started_at"]
                 if started_at:
@@ -2061,8 +2113,8 @@ class SqliteRunRepository:
                     """,
                     (
                         RunStatus.FAILED.value,
-                        error,
-                        error_code,
+                        normalized_error,
+                        normalized_error_code,
                         completed_at,
                         duration_ms,
                         row["id"],
@@ -2108,6 +2160,11 @@ class SqliteRunRepository:
             ).fetchall()
             failed: list[dict[str, Any]] = []
             for row in rows:
+                normalized_error, normalized_error_code = _normalize_failed_error_fields(
+                    run_id=row["id"],
+                    error=error,
+                    error_code=error_code,
+                )
                 started_at = row["started_at"] or row["created_at"]
                 duration_ms = None
                 if started_at:
@@ -2127,8 +2184,8 @@ class SqliteRunRepository:
                     """,
                     (
                         RunStatus.FAILED.value,
-                        error,
-                        error_code,
+                        normalized_error,
+                        normalized_error_code,
                         completed_at,
                         duration_ms,
                         row["id"],
@@ -2174,6 +2231,11 @@ class SqliteRunRepository:
             ).fetchall()
             failed: list[dict[str, Any]] = []
             for row in rows:
+                normalized_error, normalized_error_code = _normalize_failed_error_fields(
+                    run_id=row["id"],
+                    error=error,
+                    error_code=error_code,
+                )
                 started_at = row["started_at"] or row["created_at"]
                 duration_ms = None
                 if started_at:
@@ -2191,8 +2253,8 @@ class SqliteRunRepository:
                     """,
                     (
                         RunStatus.FAILED.value,
-                        error,
-                        error_code,
+                        normalized_error,
+                        normalized_error_code,
                         completed_at,
                         duration_ms,
                         row["id"],
