@@ -24,11 +24,18 @@ if API_DIR not in sys.path:
     sys.path.insert(0, API_DIR)
 
 import chat_service  # noqa: E402
+from services import chat_slack  # noqa: E402
+
+# The Slack read tools were extracted into services/chat_slack.py (PR #1073).
+# chat_service re-imports them for backward compatibility, but the implementations
+# call _slack_api_get / _slack_read_bot_token via their own module namespace, so
+# patches must target services.chat_slack (where the names are looked up), not the
+# re-exported chat_service references.
 
 
 @pytest.fixture
 def fake_token(monkeypatch):
-    monkeypatch.setattr(chat_service, "_slack_read_bot_token", lambda: "xoxb-test")
+    monkeypatch.setattr(chat_slack, "_slack_read_bot_token", lambda: "xoxb-test")
     return "xoxb-test"
 
 
@@ -39,7 +46,7 @@ def _stub_api(monkeypatch, responses):
             return responses(method, params)
         return responses[method]
 
-    monkeypatch.setattr(chat_service, "_slack_api_get", _fake)
+    monkeypatch.setattr(chat_slack, "_slack_api_get", _fake)
 
 
 # ---------------------------------------------------------------------------
@@ -86,7 +93,7 @@ def test_list_channels_missing_scope_is_graceful(monkeypatch, fake_token):
 
 
 def test_list_channels_no_token_is_graceful(monkeypatch):
-    monkeypatch.setattr(chat_service, "_slack_read_bot_token", lambda: "")
+    monkeypatch.setattr(chat_slack, "_slack_read_bot_token", lambda: "")
     # _slack_api_get itself returns no_bot_token without a token.
     out = chat_service._tool_slack_list_channels({}, "u1")
     assert out["ok"] is False
@@ -163,7 +170,7 @@ def test_read_channel_missing_scope_is_graceful(monkeypatch, fake_token):
 
 
 def test_read_channel_no_token_is_graceful(monkeypatch):
-    monkeypatch.setattr(chat_service, "_slack_read_bot_token", lambda: "")
+    monkeypatch.setattr(chat_slack, "_slack_read_bot_token", lambda: "")
     out = chat_service._tool_slack_read_channel({"channel": "C123"}, "u1")
     assert out["ok"] is False
     assert out["error"] == "no_bot_token"
