@@ -13,7 +13,7 @@
 | Worker source bundles | `/root/workeros/workers/<worker_id>/` | AX41 disk |
 | Run artifacts | `/root/workeros/data/artifacts/` | AX41 disk |
 
-**Do NOT test against `http://localhost:8000` or `http://127.0.0.1:8000`.** That is not Workeros. The API binds explicitly to port 8011. If you see port 8000 in your test setup, you are running a misconfigured dev server, not the production service.
+**Ports.** Local development (`python main.py`) serves the API on `http://localhost:8000` by default — override with `WORKEROS_API_PORT`. The hosted production service binds `127.0.0.1:8011` behind the Cloudflare-fronted proxy (systemd unit `workeros-api.service`). So when testing the *hosted* service, target the public URL / `8011`, not `8000`; `8000` is the local dev default, not production.
 
 ## How workers execute (THE important part)
 
@@ -28,7 +28,7 @@
   follows the configured E2B runner, but that does not move the AgentDriver loop
   or its other tools into the microVM.
 
-**Verified in-sandbox isolation** (from `docs/launch-readiness/MORNING-REPORT.md` + `docs/audits/security-edge-2026-05-26.md`): a malicious bundle running `os.environ` dump inside an E2B sandbox returns only sandbox metadata. `FLOOM_SECRET`, `OPENAI_API_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_WEBHOOK_SIGNING_KEY`, `E2B_API_KEY` are all absent from `os.environ` inside the sandbox.
+**Verified in-sandbox isolation:** a malicious bundle running an `os.environ` dump inside an E2B sandbox returns only sandbox metadata. `FLOOM_SECRET`, `OPENAI_API_KEY`, `COMPOSIO_API_KEY`, `COMPOSIO_WEBHOOK_SIGNING_KEY`, `E2B_API_KEY` are all absent from `os.environ` inside the sandbox (covered by the runner-hardening test suite, e.g. `apps/api/tests/test_1000_local_runner_hardening.py`).
 
 **Also absent from `secrets.json`** as of the 2026-05-26 fix. Earlier code (`run_service.py` pre-fix at lines 340-341) unioned every key in `/root/.config/workeros/api.env` into the secrets dict serialized into the sandbox payload, leaking platform credentials to any pure-script worker that read `secrets.json`. The fix adds a `_PLATFORM_SECRET_NAMES` denylist so the names in that denylist cannot appear in the worker-secret payload, regardless of whether a worker.yml or the secrets DB tries to declare them. `OPENAI_API_KEY` is intentionally not denylisted in this single-tenant version and can be passed when declared. See `tests/test_sandbox_secrets_isolation.py` for the regression.
 

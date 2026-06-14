@@ -1,9 +1,24 @@
 {
-  "name": "floom-v0",
+  "name": "workeros",
   "version": "0.1.0",
   "private": true,
+  "description": "The open-source, self-hosted runtime for AI workers. Sandboxed by default.",
+  "license": "MIT",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/floomhq/workeros.git"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "workers",
+    "automation",
+    "self-hosted",
+    "mcp",
+    "sandbox"
+  ],
   "scripts": {
-    "dev:api": "cd apps/api && source venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port 8000 --reload",
+    "dev:api": "cd apps/api && source venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port ${WORKEROS_API_PORT:-8000} --reload",
     "dev:web": "cd apps/web && npm run dev",
     "dev": "echo 'Run dev:api and dev:web in separate terminals'",
     "build:web": "cd apps/web && npm run build",

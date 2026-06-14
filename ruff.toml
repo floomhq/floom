@@ -1,0 +1,23 @@
+# Ruff configuration for the Python codebase (apps/api, tests/, cli/).
+#
+# Incremental adoption: the selected rules are the "always a real bug" set
+# (syntax errors, invalid comparisons/literals, broken f-strings, misplaced
+# statements, pylint errors) and have ZERO violations today, so they gate every
+# PR without a disruptive mass-rewrite.
+#
+# Deliberately NOT yet enabled (tracked debt to clear, then enable):
+#   F401 unused-import   — ~1000 hits, but ~760 are intentional backward-compat
+#                          re-export shims in apps/api/main.py (the app aggregator
+#                          re-exports symbols moved into core/services/routers).
+#   B (flake8-bugbear), F811, F841, F821 — real cleanup backlog.
+target-version = "py311"
+line-length = 100
+
+[lint]
+select = ["E9", "F63", "F7", "PLE"]
+
+[lint.per-file-ignores]
+# Forward-looking: when F401/F811 are enabled, the aggregator's re-export shims
+# and local re-imports are expected and must not fail the gate.
+"apps/api/main.py" = ["F401", "F811"]
+"**/__init__.py" = ["F401"]
