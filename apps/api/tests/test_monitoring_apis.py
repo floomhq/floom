@@ -556,7 +556,7 @@ class TestAlertWebhookFiring:
         run_svc = importlib.import_module("run_service")
         with patch("models.socket.getaddrinfo",
                    return_value=[(2, 1, 6, "", ("93.184.216.34", 0))]):
-            with patch.object(run_svc, "_open_pinned_webhook", side_effect=mock_urlopen):
+            with patch("services.run_notifications._open_pinned_webhook", side_effect=mock_urlopen):
                 run_svc._fire_alert_webhooks(
                     run_id=run_id,
                     worker_id=_WORKER_ID,
@@ -578,7 +578,7 @@ class TestAlertWebhookFiring:
 
         calls = []
         run_svc = importlib.import_module("run_service")
-        with patch.object(run_svc, "_open_pinned_webhook", side_effect=lambda *a, **kw: calls.append(a)):
+        with patch("services.run_notifications._open_pinned_webhook", side_effect=lambda *a, **kw: calls.append(a)):
             run_svc._fire_alert_webhooks(
                 run_id=run_id,
                 worker_id=_WORKER_ID,
@@ -610,7 +610,7 @@ class TestAlertWebhookFiring:
 
         run_svc = importlib.import_module("run_service")
         alerting = importlib.import_module("alerting")
-        with patch.object(run_svc, "_open_pinned_webhook", side_effect=mock_open), \
+        with patch("services.run_notifications._open_pinned_webhook", side_effect=mock_open), \
              patch.object(alerting, "alert_worker_failure_if_needed", return_value=None):
             run_svc.update_run_status(
                 run_id,
@@ -644,7 +644,7 @@ class TestAlertWebhookFiring:
 
         run_svc = importlib.import_module("run_service")
         alerting = importlib.import_module("alerting")
-        with patch.object(run_svc, "_open_pinned_webhook", side_effect=mock_open), \
+        with patch("services.run_notifications._open_pinned_webhook", side_effect=mock_open), \
              patch.object(alerting, "alert_worker_failure_if_needed", return_value=None):
             run_svc.update_run_status(
                 run_id,
@@ -960,7 +960,7 @@ class TestAlertEmailFiring:
         def mock_send_email(*, to_addrs, **kwargs):
             email_calls.append(to_addrs)
 
-        with patch.object(run_svc, "_send_email_notification", side_effect=mock_send_email):
+        with patch("services.run_notifications._send_email_notification", side_effect=mock_send_email):
             run_svc._fire_alert_webhooks(
                 run_id=run_id,
                 worker_id=_WORKER_ID,
@@ -984,7 +984,7 @@ class TestAlertEmailFiring:
         run_svc = importlib.import_module("run_service")
         email_calls: list = []
 
-        with patch.object(run_svc, "_send_email_notification", side_effect=lambda **kw: email_calls.append(kw)):
+        with patch("services.run_notifications._send_email_notification", side_effect=lambda **kw: email_calls.append(kw)):
             run_svc._fire_alert_webhooks(
                 run_id=run_id,
                 worker_id=_WORKER_ID,
