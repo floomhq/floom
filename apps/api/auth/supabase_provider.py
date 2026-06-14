@@ -29,6 +29,27 @@ _ws_cache:  dict[str, tuple[str, str | None, float]] = {}   # key → (workspace
 _PAT_TTL = 60.0
 _WS_TTL  = 30.0
 
+
+def evict_pat_cache(token_hash: str) -> None:
+    """#275: drop a PAT's cached identity so a revoked/rotated token stops
+    authenticating immediately, instead of within the _PAT_TTL window."""
+    if not token_hash:
+        return
+    with _cache_lock:
+        _pat_cache.pop(token_hash, None)
+
+
+def evict_workspace_cache_for_user(user_id: str) -> None:
+    """#275: drop a user's cached workspace/role entries so a member removal or
+    role change takes effect immediately, instead of within the _WS_TTL window.
+    Keys are ``f"{user_id}:{requested_workspace}"`` — clear all for the user."""
+    if not user_id:
+        return
+    prefix = f"{user_id}:"
+    with _cache_lock:
+        for key in [k for k in _ws_cache if k.startswith(prefix)]:
+            _ws_cache.pop(key, None)
+
 import jwt
 from fastapi import HTTPException, Request
 

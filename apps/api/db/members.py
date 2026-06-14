@@ -344,12 +344,23 @@ def get_member(*, workspace_id: str, user_id: str) -> dict[str, Any] | None:
     return _row(response)
 
 
+def _evict_ws_cache(user_id: str) -> None:
+    """#275: clear the auth provider's cached workspace/role for a user so a
+    role change or removal takes effect immediately (not within _WS_TTL ~30s)."""
+    try:
+        from apps.api.auth.supabase_provider import evict_workspace_cache_for_user
+        evict_workspace_cache_for_user(user_id)
+    except Exception:
+        pass
+
+
 def change_role(*, workspace_id: str, user_id: str, new_role: str) -> dict[str, Any] | None:
     """Change the role of an active member. Returns updated row or None."""
     client = get_supabase_service_client()
     client.table("workspace_members").update({"role": new_role}).eq(
         "workspace_id", workspace_id
     ).eq("user_id", user_id).eq("status", "active").execute()
+    _evict_ws_cache(user_id)  # #275: demotion/promotion is immediate
     return get_member(workspace_id=workspace_id, user_id=user_id)
 
 
@@ -383,4 +394,7 @@ def remove_member(*, workspace_id: str, user_id: str) -> bool:
         .eq("status", "active")
         .execute()
     )
-    return bool(_rows(response))
+    removed = bool(_rows(response))
+    if removed:
+        _evict_ws_cache(user_id)  # #275: removal is immediate
+    return removed
