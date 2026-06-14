@@ -1671,6 +1671,12 @@ class RunSummary(BaseModel):
     duration_ms: Optional[int] = None
     error: Optional[str] = None  # operator-readable headline (never a raw traceback)
     error_code: Optional[str] = None
+    # #1022: the run's actual input (the "mandate"/request that was searched),
+    # parsed from input_json. Surfaced so GET /runs is a queryable request log
+    # (run_id -> input) without an N+1 of per-run detail fetches. Returned only on
+    # authed-owner routes (GET /runs, /connections/{id}/activity); no public/share
+    # surface uses RunSummary — those return RunDetail, which redacts separately.
+    input: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DetailArtifactPreview(BaseModel):
