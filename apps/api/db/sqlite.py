@@ -13,6 +13,7 @@ except ImportError:
     _LOCK_UN = 8
 import contextvars
 import json
+import logging
 import os
 import re
 import sqlite3
@@ -27,6 +28,7 @@ from models import (
     TimeseriesDay,
     WorkerConfig,
     WorkerContract,
+    WorkerNotRunnableError,
     parse_worker_manifest,
     worker_contract_to_worker_config,
 )
@@ -36,6 +38,65 @@ from ._legacy_sqlite import _row_dict, get_db, now_iso
 
 _SECRET_PREFIX = "__WORKEROS_SECRET__"
 _FLOOM_USER_ID = "federico"
+_UNKNOWN_RUN_ERROR_CODE = "unknown_error"
+_UNKNOWN_RUN_ERROR_MESSAGE = (
+    "Run failed before the engine captured a specific failure reason. "
+    "Check the run logs and retry."
+)
+
+logger = logging.getLogger("floom.db.sqlite")
+
+
+def _normalize_failed_error_fields(
+    *,
+    run_id: str,
+    error: str | None,
+    error_code: str | None,
+    existing_error: Any = None,
+    existing_error_code: Any = None,
+) -> tuple[str, str]:
+    normalized_error = str(error).strip() if error is not None else ""
+    normalized_error_code = str(error_code).strip() if error_code is not None else ""
+    if not normalized_error:
+        normalized_error = str(existing_error or "").strip()
+    if not normalized_error_code:
+        normalized_error_code = str(existing_error_code or "").strip()
+    if not normalized_error:
+        normalized_error = _UNKNOWN_RUN_ERROR_MESSAGE
+        logger.error(
+            "Run %s reached failed status without an error message in repo update; applying fallback",
+            run_id,
+            stack_info=True,
+        )
+    if not normalized_error_code:
+        normalized_error_code = _UNKNOWN_RUN_ERROR_CODE
+        logger.error(
+            "Run %s reached failed status without an error_code in repo update; applying fallback",
+            run_id,
+            stack_info=True,
+        )
+    return normalized_error, normalized_error_code
+
+# Curated catalog of ship-with-product stock/example workers that EVERY
+# authenticated user may run (attributed to their own scope). Resolved lazily
+# from the engine's main.PUBLIC_STOCK_WORKER_IDS via a DEFERRED import: importing
+# `main` at module load is heavy/circular (main imports db), so we import it the
+# first time the value is needed and cache the result.
+_PUBLIC_STOCK_WORKER_IDS_CACHE: frozenset[str] | None = None
+
+
+def _public_stock_worker_ids() -> frozenset[str]:
+    global _PUBLIC_STOCK_WORKER_IDS_CACHE
+    if _PUBLIC_STOCK_WORKER_IDS_CACHE is None:
+        try:
+            from main import PUBLIC_STOCK_WORKER_IDS  # noqa: PLC0415
+
+            _PUBLIC_STOCK_WORKER_IDS_CACHE = frozenset(PUBLIC_STOCK_WORKER_IDS)
+        except Exception:
+            # Fail closed: if the catalog can't be resolved, no extra worker
+            # becomes runnable-by-all (owner/workspace rules still apply).
+            _PUBLIC_STOCK_WORKER_IDS_CACHE = frozenset()
+    return _PUBLIC_STOCK_WORKER_IDS_CACHE
 
 # Per-request batch caches — same pattern as supabase_repos.py in the cloud.
 # Populated before per-worker loops; consumed by get_last_run() / get_recipe().
@@ -293,6 +354,56 @@ def _skill_version_id(worker_id: str, manifest: dict[str, Any]) -> str:
     return f"sv_{worker_id}_{version}"
 
 
+def _backfill_legacy_manifest(
+    manifest_raw: dict[str, Any],
+    *,
+    worker_id: str,
+    trigger_type: str | None,
+    cron_expr: str | None,
+    cron_timezone: str | None,
+) -> dict[str, Any]:
+    """Migration-on-read: heal legacy WorkerConfig manifests missing required
+    fields so they parse instead of raising a ValidationError (which the API
+    masked as a generic ``400 Invalid request``).
+
+    Stored manifests written by older engine versions can lack ``id``,
+    ``trigger`` and/or ``runtime``. The DB row carries authoritative fallbacks
+    (the ``id``, ``trigger_type``, ``cron_*`` columns), so we reconstruct the
+    minimum shape rather than crashing on the worker. Only applied to legacy
+    (non-0.3) manifests; 0.3 ``WorkerContract`` manifests have a different
+    required shape and are left untouched.
+    """
+    if not isinstance(manifest_raw, dict):
+        return manifest_raw
+    if manifest_raw.get("schema_version") == "0.3":
+        return manifest_raw
+
+    healed = dict(manifest_raw)
+    # id: fall back to the row id, then name.
+    if not healed.get("id"):
+        healed["id"] = worker_id or healed.get("name") or "worker"
+    # name: WorkerConfig also requires a name; default to id.
+    if not healed.get("name"):
+        healed["name"] = healed.get("id") or worker_id or "worker"
+    # trigger: rebuild from the row's trigger_type/cron columns (or default manual).
+    trigger = healed.get("trigger")
+    if not isinstance(trigger, dict) or not trigger.get("type"):
+        trigger = trigger if isinstance(trigger, dict) else {}
+        trigger.setdefault("type", trigger_type or "manual")
+        if cron_expr and not trigger.get("cron"):
+            trigger["cron"] = cron_expr
+        if cron_timezone and not trigger.get("timezone"):
+            trigger["timezone"] = cron_timezone
+        healed["trigger"] = trigger
+    # runtime: WorkerRuntime only hard-requires `type`; everything else defaults.
+    runtime = healed.get("runtime")
+    if not isinstance(runtime, dict) or not runtime.get("type"):
+        runtime = runtime if isinstance(runtime, dict) else {}
+        runtime.setdefault("type", "python")
+        healed["runtime"] = runtime
+    return healed
+
+
 def _config_from_manifest(
     *,
     worker_id: str,
@@ -303,6 +414,13 @@ def _config_from_manifest(
     bundle_path: str | None,
 ) -> Optional[WorkerConfig]:
     manifest_raw = json.loads(manifest_json or "{}")
+    manifest_raw = _backfill_legacy_manifest(
+        manifest_raw,
+        worker_id=worker_id,
+        trigger_type=trigger_type,
+        cron_expr=cron_expr,
+        cron_timezone=cron_timezone,
+    )
     parsed = parse_worker_manifest(manifest_raw)
     if isinstance(parsed, WorkerContract):
         config = worker_contract_to_worker_config(parsed, worker_id)
@@ -501,6 +619,180 @@ class SqliteWorkerRepository:
                     (user_id, worker_id),
                 ).fetchone()
         return _worker_record_from_row(row) if row else None
+
+    def list_for_agent(
+        self,
+        *,
+        user_id: str,
+        include_all_users: bool = False,
+        stock_worker_ids: Iterable[str] = (),
+    ) -> list[dict[str, Any]]:
+        """Workers visible to the workspace agent (Emily) — see WorkerRepository.
+
+        #1027: moved verbatim from chat_service._tool_workers_list_all so the
+        tool routes through the repo Protocol. *user_id* must already be the
+        effective visibility user id; stock ids are passed in to avoid a
+        db<-main import cycle.
+        """
+        all_stock_ids = [s for s in dict.fromkeys(stock_worker_ids) if s]
+        base_select = (
+            "SELECT w.id, w.name, w.trigger_type, w.enabled, w.owner_id, sv.manifest_json "
+            "FROM workers w "
+            "LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id "
+        )
+        with get_db() as conn:
+            try:
+                role_row = conn.execute(
+                    "SELECT role FROM users WHERE id = ?", (user_id,)
+                ).fetchone()
+                is_admin = bool(role_row) and str(role_row["role"]).lower() == "admin"
+            except Exception:
+                is_admin = False
+            if is_admin and include_all_users:
+                rows = conn.execute(base_select + "ORDER BY w.name").fetchall()
+            else:
+                try:
+                    has_members_table = bool(conn.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_members' LIMIT 1"
+                    ).fetchone())
+                except Exception:
+                    has_members_table = False
+
+                if has_members_table:
+                    rows = conn.execute(
+                        base_select
+                        + "LEFT JOIN workspace_members wm "
+                        + "  ON wm.workspace_id = COALESCE(w.workspace_id, 'local-default') "
+                        + "  AND wm.user_id = ? AND wm.status = 'active' "
+                        + "WHERE w.owner_id = ? "
+                        + "OR (COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                        + "    AND wm.user_id IS NOT NULL) "
+                        + "ORDER BY w.name",
+                        (user_id, user_id),
+                    ).fetchall()
+                    if all_stock_ids:
+                        seen_ids = {r["id"] for r in rows}
+                        missing_stock = [sid for sid in all_stock_ids if sid not in seen_ids]
+                        if missing_stock:
+                            placeholders = ",".join("?" * len(missing_stock))
+                            stock_rows = conn.execute(
+                                base_select
+                                + f"WHERE w.id IN ({placeholders}) ORDER BY w.name",
+                                missing_stock,
+                            ).fetchall()
+                            rows = list(rows) + stock_rows
+                else:
+                    if all_stock_ids:
+                        placeholders = ",".join("?" * len(all_stock_ids))
+                        rows = conn.execute(
+                            base_select
+                            + "WHERE w.owner_id = ? "
+                            + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                            + f"OR w.id IN ({placeholders}) "
+                            + "ORDER BY w.name",
+                            [user_id] + all_stock_ids,
+                        ).fetchall()
+                    else:
+                        rows = conn.execute(
+                            base_select
+                            + "WHERE w.owner_id = ? "
+                            + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                            + "ORDER BY w.name",
+                            (user_id,),
+                        ).fetchall()
+        return [
+            {
+                "id": r["id"],
+                "name": r["name"],
+                "trigger_type": r["trigger_type"],
+                "enabled": bool(r["enabled"]),
+                "manifest_json": r["manifest_json"],
+            }
+            for r in rows
+        ]
+
+    def get_for_agent(
+        self,
+        *,
+        user_id: str,
+        worker_id: str,
+        stock_worker_ids: Iterable[str] = (),
+        allow_fs_fallback: bool = False,
+    ) -> dict[str, Any] | None:
+        """Single agent-visible worker, gated by can-view — see WorkerRepository.
+
+        #1027: moved verbatim from chat_service._tool_workers_get +
+        _worker_can_view. *user_id* must already be the effective visibility user
+        id; stock ids + allow_fs_fallback are passed in to avoid a db<-main
+        import cycle.
+        """
+        import sqlite3 as _sqlite3
+
+        stock_ids = set(stock_worker_ids)
+
+        def _can_view(conn: Any) -> bool:
+            # Stock/public workers are always accessible regardless of DB state.
+            if worker_id in stock_ids:
+                return True
+            try:
+                row = conn.execute(
+                    "SELECT owner_id, workspace_id, visibility FROM workers WHERE id = ? LIMIT 1",
+                    (worker_id,),
+                ).fetchone()
+            except _sqlite3.OperationalError:
+                # DB not initialised / workers table absent — let the run path decide.
+                return True
+            if row is None:
+                # No DB row — unregistered filesystem worker or unknown.
+                return bool(allow_fs_fallback)
+            if row["owner_id"] == user_id:
+                return True
+            # Admins may view every worker (mirrors role-aware /workers + list_all).
+            try:
+                role_row = conn.execute(
+                    "SELECT role FROM users WHERE id = ? LIMIT 1", (user_id,)
+                ).fetchone()
+                if role_row and str(role_row["role"]).lower() == "admin":
+                    return True
+            except Exception:
+                pass
+            visibility = (row["visibility"] or "private").lower()
+            if visibility not in ("workspace", "shared"):
+                return False
+            workspace_id = row["workspace_id"] or "local-default"
+            try:
+                member_row = conn.execute(
+                    "SELECT 1 FROM workspace_members "
+                    "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
+                    (workspace_id, user_id),
+                ).fetchone()
+            except Exception:
+                return False
+            return member_row is not None
+
+        with get_db() as conn:
+            if not _can_view(conn):
+                return None
+            row = conn.execute(
+                """
+                SELECT w.id, w.name, w.trigger_type, w.enabled, w.cron_expr,
+                       sv.manifest_json
+                FROM workers w
+                LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
+                WHERE w.id = ?
+                """,
+                (worker_id,),
+            ).fetchone()
+        if not row:
+            return None
+        return {
+            "id": row["id"],
+            "name": row["name"],
+            "trigger_type": row["trigger_type"],
+            "enabled": bool(row["enabled"]),
+            "cron_expr": row["cron_expr"],
+            "manifest_json": row["manifest_json"],
+        }
 
     def get_any(self, *, worker_id: str) -> dict[str, Any] | None:
         with get_db() as conn:
@@ -759,7 +1051,7 @@ class SqliteWorkerRepository:
         with get_db() as conn:
             rows = conn.execute(
                 """
-                SELECT r.id, r.worker_id, r.status, r.trigger_source, r.created_at,
+                SELECT r.id, r.worker_id, r.status, r.trigger_source, r.input_json, r.created_at,
                        r.started_at, r.completed_at, r.duration_ms, r.error, r.error_code
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
@@ -1349,7 +1641,7 @@ class SqliteRunRepository:
         select_sql = f"""
             SELECT r.id, r.worker_id,
                    COALESCE(JSON_EXTRACT(sv.manifest_json, '$.title'), w.name) AS worker_name,
-                   r.status, r.trigger_source, r.created_at, r.started_at,
+                   r.status, r.trigger_source, r.input_json, r.created_at, r.started_at,
                    r.completed_at, r.duration_ms, r.error, r.error_code,
                    r.quality_warning
             FROM runs r
@@ -1415,12 +1707,32 @@ class SqliteRunRepository:
             # Non-workspace private workers can only be run by their owner.
             # When a non-owner runs a workspace worker, attribute the run to the
             # worker's owner so existing owner-scoped run queries keep working.
+            #
+            # Runnable-by-attribution carve-out: curated catalog/stock workers
+            # (PUBLIC_STOCK_WORKER_IDS) ship with the product and may be run by
+            # ANY authenticated user. They are seed-owned and `private`, so the
+            # owner/visibility checks below would reject a fresh tenant with
+            # "Worker not found"/"Invalid request". Attribute the run to the
+            # CALLER's scope so the catalog worker runs without leaking another
+            # tenant's authored worker (only this curated set is widened).
             if worker["owner_id"] == user_id:
                 effective_user_id = user_id
             elif worker["visibility"] == "workspace":
                 effective_user_id = worker["owner_id"]
+            elif worker_id in _public_stock_worker_ids():
+                # Curated catalog worker: attribute the run to the worker's owner
+                # (same as the workspace path) so the owner-scoped run JOIN
+                # (w.owner_id) resolves and get()/list() keep working.
+                effective_user_id = worker["owner_id"]
             else:
-                raise ValueError(f"worker {worker_id} does not belong to {user_id}")
+                # Genuine cross-tenant ownership denial. Raise a typed error the
+                # run endpoint catches for a clear 403, instead of the opaque 400
+                # "Invalid request" the global ValueError handler emits. The
+                # message keeps the "does not belong" marker for back-compat with
+                # the endpoint's substring fallback and existing tests.
+                raise WorkerNotRunnableError(
+                    f"worker {worker_id} does not belong to {user_id}"
+                )
             conn.execute(
                 """
                 INSERT INTO runs
@@ -1532,6 +1844,14 @@ class SqliteRunRepository:
         run = self.get(user_id=user_id, run_id=run_id)
         if run is None:
             raise ValueError(f"run {run_id} not found for {user_id}")
+        if status == RunStatus.FAILED.value:
+            error, error_code = _normalize_failed_error_fields(
+                run_id=run_id,
+                error=error,
+                error_code=error_code,
+                existing_error=run.get("error"),
+                existing_error_code=run.get("error_code"),
+            )
         updates: dict[str, Any] = {"status": status}
         if output_json is not None:
             updates["output_json"] = output_json
@@ -1769,6 +2089,11 @@ class SqliteRunRepository:
             if not rows:
                 return []
             for row in rows:
+                normalized_error, normalized_error_code = _normalize_failed_error_fields(
+                    run_id=row["id"],
+                    error=error,
+                    error_code=error_code,
+                )
                 duration_ms = None
                 started_at = row["started_at"]
                 if started_at:
@@ -1788,8 +2113,8 @@ class SqliteRunRepository:
                     """,
                     (
                         RunStatus.FAILED.value,
-                        error,
-                        error_code,
+                        normalized_error,
+                        normalized_error_code,
                         completed_at,
                         duration_ms,
                         row["id"],
@@ -1835,6 +2160,11 @@ class SqliteRunRepository:
             ).fetchall()
             failed: list[dict[str, Any]] = []
             for row in rows:
+                normalized_error, normalized_error_code = _normalize_failed_error_fields(
+                    run_id=row["id"],
+                    error=error,
+                    error_code=error_code,
+                )
                 started_at = row["started_at"] or row["created_at"]
                 duration_ms = None
                 if started_at:
@@ -1854,8 +2184,8 @@ class SqliteRunRepository:
                     """,
                     (
                         RunStatus.FAILED.value,
-                        error,
-                        error_code,
+                        normalized_error,
+                        normalized_error_code,
                         completed_at,
                         duration_ms,
                         row["id"],
@@ -1901,6 +2231,11 @@ class SqliteRunRepository:
             ).fetchall()
             failed: list[dict[str, Any]] = []
             for row in rows:
+                normalized_error, normalized_error_code = _normalize_failed_error_fields(
+                    run_id=row["id"],
+                    error=error,
+                    error_code=error_code,
+                )
                 started_at = row["started_at"] or row["created_at"]
                 duration_ms = None
                 if started_at:
@@ -1918,8 +2253,8 @@ class SqliteRunRepository:
                     """,
                     (
                         RunStatus.FAILED.value,
-                        error,
-                        error_code,
+                        normalized_error,
+                        normalized_error_code,
                         completed_at,
                         duration_ms,
                         row["id"],

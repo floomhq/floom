@@ -699,14 +699,24 @@ def _list_operator_workers(
     user_id: str,
     repos: "Repositories",
     use_cache: bool = True,
+    role: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """Workers shown in the operator's default view.
 
     Same filter as the default GET /workers view: visible (non-hidden) workers,
     minus system_worker:true and archived. Shared by /workers and the overview
     'Workers active' count so the two numbers cannot drift (1.5.4).
+
+    ``role`` MUST be threaded through identically to GET /workers
+    (``_worker_repo_role(auth)``); otherwise an admin member sees the full
+    workspace-visible set on /workers but a smaller owner-only set on the
+    overview, and the two counts diverge (the 78-vs-104 scoping bug). The
+    ``user_id`` passed here must likewise be the access-resolved id
+    (``_worker_access_user_id(auth)``), not the raw caller id.
     """
-    workers = _list_visible_workers(user_id=user_id, repos=repos, use_cache=use_cache)
+    workers = _list_visible_workers(
+        user_id=user_id, repos=repos, use_cache=use_cache, role=role
+    )
     workers = [
         w for w in workers
         if not (w.get("manifest") or {}).get("system_worker", False)
@@ -822,6 +832,7 @@ def _delete_worker_impl(worker_id: str, owner_id: str, repos: "Repositories") ->
                 run_id,
                 RunStatus.FAILED.value,
                 error="Worker deleted",
+                error_code="worker_deleted",
                 user_id=owner_id,
                 repos=repos,
             )

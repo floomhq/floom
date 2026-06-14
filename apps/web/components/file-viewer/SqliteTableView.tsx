@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import type { SqliteView } from "@/lib/types";
+import { LoadingState } from "@/components/collection/CollectionStates";
 
 // #777: inline SQLite table viewer — table picker + rows, read-only.
 export function SqliteTableView({ load }: { load: (table?: string) => Promise<SqliteView> }) {
@@ -32,7 +33,7 @@ export function SqliteTableView({ load }: { load: (table?: string) => Promise<Sq
   }, [active]);
 
   if (err) return <div style={{ color: "var(--muted-foreground)", padding: 14 }}>Could not read this database.</div>;
-  if (!view) return <div style={{ color: "var(--muted-foreground)", padding: 14 }}>Loading…</div>;
+  if (!view) return <LoadingState rows={3} />;
   if (view.tables.length === 0)
     return <div style={{ color: "var(--muted-foreground)", padding: 14 }}>This database has no tables.</div>;
 

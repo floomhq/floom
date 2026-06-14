@@ -102,6 +102,10 @@ export interface WorkerRuntime {
   type: string;
   entrypoint: string;
   runner: string;
+  command?: string | null;
+  mode?: "agent" | "pure-script" | string;
+  model?: string | null;
+  limits?: Record<string, unknown> | null;
 }
 
 export interface WorkerMcpConnection {
@@ -142,6 +146,7 @@ export interface WorkerConfig {
   id: string;
   name: string;
   description?: string;
+  model?: string | null;
   trigger: WorkerTrigger;
   runtime: WorkerRuntime;
   inputs: WorkerInput[];
@@ -517,6 +522,8 @@ export interface ContextSummary {
   system?: boolean;
   /** True when the operator cannot edit or delete this pack. */
   read_only?: boolean;
+  /** Optional content category tag, e.g. marketing/accounting/research/data. */
+  category?: string | null;
   /** Sensitive packs are never committed to git or pushed to GitHub. Default: true. */
   sensitive?: boolean;
   // Members STEP 4: ownership + per-asset visibility + computed permissions.
@@ -899,6 +906,9 @@ export interface ConnectionItem {
   display_name?: string | null;
   last_checked_at?: string | null;
   last_check_status?: string | null;
+  last_used_at?: string | null;
+  last_used_by?: string | null;
+  owner_id?: string | null;
   mcp_label?: string | null;
   mcp_url?: string | null;
   mcp_transport?: "streamable_http" | "sse" | "stdio";

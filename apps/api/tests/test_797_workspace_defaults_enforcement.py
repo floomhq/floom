@@ -103,7 +103,11 @@ class TestDefaultModel:
         import runner_sandbox.agent_driver as ad
 
         src = inspect.getsource(ad)
-        assert "config.runtime.model or _ws_default_model() or DEFAULT_WORKER_AGENT_MODEL" in src
+        # Precedence: explicit per-run model → workspace default → global default.
+        # The global default is resolved lazily (default_worker_agent_model()) so
+        # cloud dotenv config that arrives after import is honored (Bedrock, not
+        # the frozen OpenAI fallback).
+        assert "config.runtime.model or _ws_default_model() or default_worker_agent_model()" in src
 
 
 class TestTimeoutCeiling:

@@ -77,6 +77,7 @@ import socket as _socket
 import urllib.parse
 import urllib.request
 import urllib.error
+import contextlib
 
 logger = logging.getLogger("floom.run_service")
 
@@ -95,6 +96,47 @@ from services.run_notifications import (
     _fire_alert_webhooks,
     _dispatch_terminal_run_alerts,
 )
+UNKNOWN_RUN_ERROR_CODE = "unknown_error"
+UNKNOWN_RUN_ERROR_MESSAGE = (
+    "Run failed before the engine captured a specific failure reason. "
+    "Check the run logs and retry."
+)
+
+
+# #1026: the drain loop executes each queued run in a fresh thread, which does
+# NOT carry the contextvars set by the request that enqueued it (and the run is
+# dequeued later anyway, after that request is gone). Single-tenant OSS needs
+# nothing here. A multi-tenant host (cloud) registers a provider that, given a
+# run_id, returns a context manager re-establishing that run's workspace/tenant
+# scope for the duration of execution — reconstructed from the persisted run
+# row, since there is no live context to copy. Default: no-op.
+_run_execution_context_provider: Optional[Callable[[str], "contextlib.AbstractContextManager[Any]"]] = None
+
+
+def set_run_execution_context_provider(
+    provider: Optional[Callable[[str], "contextlib.AbstractContextManager[Any]"]],
+) -> None:
+    """Register (or clear with None) the per-run execution context provider.
+
+    Mirrors the engine's other host-extension hooks (e.g. the git workspace
+    resolver). The provider is called as ``provider(run_id)`` on the run thread
+    and must return a context manager; the run executes inside it.
+    """
+    global _run_execution_context_provider
+    _run_execution_context_provider = provider
+
+
+def _run_execution_context(run_id: str) -> "contextlib.AbstractContextManager[Any]":
+    provider = _run_execution_context_provider
+    if provider is None:
+        return contextlib.nullcontext()
+    try:
+        ctx = provider(run_id)
+    except Exception:
+        logger.warning("run execution context provider failed for %s", run_id, exc_info=True)
+        return contextlib.nullcontext()
+    return ctx if ctx is not None else contextlib.nullcontext()
+
 
 
 def _schedule_retry(
@@ -413,19 +455,11 @@ def _runner_key(config: Optional[WorkerConfig]) -> str:
 
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
-    bundle_path = config.runtime.bundle_path if config and config.runtime else None
-    if bundle_path:
-        raw_path = Path(bundle_path)
-        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
-    else:
-        target = WORKERS_DIR.joinpath(worker_id)
-    resolved = target.resolve()
-    allowed_root = WORKERS_DIR.parent.resolve()
-    try:
-        resolved.relative_to(allowed_root)
-    except ValueError as exc:
-        raise ValueError(f"Path traversal attempt: {resolved}") from exc
-    return resolved
+    # Delegate to the canonical resolver so the var/workers vs engine/workers
+    # bundle_path drift (#1048 follow-up) is handled identically everywhere.
+    from runner_utils import _resolve_worker_bundle_dir, _safe_path
+
+    return _resolve_worker_bundle_dir(WORKERS_DIR, worker_id, config, _safe_path)
 
 
 def _snapshot_worker_bundle(run_id: str, worker_id: str, config: Optional[WorkerConfig]) -> Optional[str]:
@@ -586,6 +620,30 @@ def update_run_status(
     run_row = repos_obj.runs.get(user_id=owner_id, run_id=run_id)
     worker_id = str((run_row or {}).get("worker_id") or "")
     previous_error = (run_row or {}).get("error")
+    previous_error_code = (run_row or {}).get("error_code")
+    if status == RunStatus.FAILED.value:
+        normalized_error = str(error).strip() if error is not None else ""
+        normalized_error_code = str(error_code).strip() if error_code is not None else ""
+        if not normalized_error:
+            normalized_error = str(previous_error).strip() if previous_error else ""
+        if not normalized_error_code:
+            normalized_error_code = str(previous_error_code).strip() if previous_error_code else ""
+        if not normalized_error:
+            normalized_error = UNKNOWN_RUN_ERROR_MESSAGE
+            logger.error(
+                "Run %s reached failed status without an error message; applying fallback",
+                run_id,
+                stack_info=True,
+            )
+        if not normalized_error_code:
+            normalized_error_code = UNKNOWN_RUN_ERROR_CODE
+            logger.error(
+                "Run %s reached failed status without an error_code; applying fallback",
+                run_id,
+                stack_info=True,
+            )
+        error = normalized_error
+        error_code = normalized_error_code
     repos_obj.runs.update_status(
         user_id=owner_id,
         run_id=run_id,
@@ -1762,33 +1820,36 @@ def _run_thread_entry_with_semaphore(
     release it in the finally block so the next queued run can be dispatched.
     """
     try:
-        # Check for pre-dispatch cancellation (cancelled while queued).
-        repos_obj = _repos(repos)
-        run_row = repos_obj.runs.get_any(run_id=run_id)
-        if run_row and run_row.get("cancel_requested"):
-            owner_id = user_id or run_row.get("user_id")
-            cancelled_at = _now_iso()
-            cancel_error = "Run was cancelled before execution started."
-            logger.info("Run %s cancelled before dispatch — skipping execution", run_id)
-            try:
-                update_run_status(
-                    run_id,
-                    RunStatus.FAILED.value,
-                    error=cancel_error,
-                    error_code="cancelled_before_start",
-                    user_id=owner_id,
-                    repos=repos_obj,
-                )
-                _publish_sse(run_id, {
-                    "type": "status",
-                    "run_id": run_id,
-                    "status": RunStatus.FAILED.value,
-                    "error": cancel_error,
-                })
-            except Exception as exc:
-                logger.warning("Failed to mark pre-dispatch cancellation for run %s: %s", run_id, exc)
-            return
-        execute_run(run_id, worker_id, inputs, user_id=user_id, repos=repos)
+        # #1026: re-establish the run's tenant/workspace scope on this thread
+        # (no-op in single-tenant OSS; cloud reconstructs it from the run row).
+        with _run_execution_context(run_id):
+            # Check for pre-dispatch cancellation (cancelled while queued).
+            repos_obj = _repos(repos)
+            run_row = repos_obj.runs.get_any(run_id=run_id)
+            if run_row and run_row.get("cancel_requested"):
+                owner_id = user_id or run_row.get("user_id")
+                cancelled_at = _now_iso()
+                cancel_error = "Run was cancelled before execution started."
+                logger.info("Run %s cancelled before dispatch — skipping execution", run_id)
+                try:
+                    update_run_status(
+                        run_id,
+                        RunStatus.FAILED.value,
+                        error=cancel_error,
+                        error_code="cancelled_before_start",
+                        user_id=owner_id,
+                        repos=repos_obj,
+                    )
+                    _publish_sse(run_id, {
+                        "type": "status",
+                        "run_id": run_id,
+                        "status": RunStatus.FAILED.value,
+                        "error": cancel_error,
+                    })
+                except Exception as exc:
+                    logger.warning("Failed to mark pre-dispatch cancellation for run %s: %s", run_id, exc)
+                return
+            execute_run(run_id, worker_id, inputs, user_id=user_id, repos=repos)
     finally:
         _unregister_active_run(run_id)
         _get_semaphore().release()

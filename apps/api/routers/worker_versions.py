@@ -126,7 +126,8 @@ def rollback_worker(
     if not this_worker_list:
         raise HTTPException(status_code=500, detail=f"Worker {worker_id!r} not found after rollback")
     with get_db() as conn:
-        _persist_discovered_workers(conn, this_worker_list, user_id=auth.user_id)
+        # Single-worker save: surface a persist failure (don't silently skip).
+        _persist_discovered_workers(conn, this_worker_list, user_id=auth.user_id, raise_on_skip=True)
 
     try:
         from worker_registry import WORKERS_DIR as _WD

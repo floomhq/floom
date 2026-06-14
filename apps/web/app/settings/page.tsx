@@ -5,7 +5,7 @@ export const dynamic = "force-dynamic";
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
-import { api } from "@/lib/api";
+import { api, API_BASE } from "@/lib/api";
 import type {
   CurrentUser,
   LocalWorkspaceListResponse,
@@ -372,11 +372,6 @@ function sectionFromCandidate(value: string | null): SectionKey | null {
 }
 
 export default function SettingsPage() {
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
-  if (!mounted) {
-    return <div className="p-6 text-sm text-muted-foreground">Loading settings...</div>;
-  }
   return <SettingsContent />;
 }
 
@@ -385,15 +380,9 @@ function SettingsContent() {
     typeof window !== "undefined" ? window.location.search : ""
   );
   const searchParams = useMemo(() => new URLSearchParams(search), [search]);
-  const initialSection = (() => {
-    const fromHash =
-      typeof window !== "undefined" ? window.location.hash.replace(/^#/, "") : null;
-    const fromQuery = searchParams.get("sel") || searchParams.get("tab");
-    return sectionFromCandidate(fromQuery || fromHash);
-  })();
   const [collectionState, setCollectionState] = useState<CollectionState>(() => ({
-    ...emptyState("list"),
-    sel: initialSection,
+    ...emptyState("grid"),
+    sel: null,
   }));
 
   const [info, setInfo] = useState<SystemInfo | null>(null);
@@ -509,7 +498,7 @@ function SettingsContent() {
     const channel = searchParams.get("from_install");
     if (!channel) return;
     setFromInstallChannel(channel);
-    const tabMap: Record<string, SectionKey> = { slack: "channels", cli: "developer" };
+    const tabMap: Record<string, SectionKey> = { slack: "channels", cli: "channels" };
     const dest = tabMap[channel];
     if (dest) setCollectionState((prev) => ({ ...prev, sel: dest, tab: null }));
     const params = new URLSearchParams(searchParams.toString());
@@ -536,6 +525,7 @@ function SettingsContent() {
       }
       setSearch(window.location.search);
     }
+    syncFromLocation();
     window.addEventListener("hashchange", syncFromLocation);
     window.addEventListener("popstate", syncFromLocation);
     return () => {
@@ -596,7 +586,7 @@ function SettingsContent() {
         { value: settingsGroup("workspace").length, label: "workspace" },
         { value: settingsGroup("account").length, label: "account" },
       ],
-      view: { default: "list", grid: true },
+      view: { default: "grid", grid: true },
       group: (item) =>
         item.scope === "workspace"
           ? groupLabel("workspace", workspaceName)
@@ -701,7 +691,12 @@ function SettingsContent() {
   }
 
   return (
-    <div className="space-y-6">
+    // Full-height flex column so the CollectionView (and its nav/content
+    // divider) stretches to the bottom of the scroll container instead of
+    // ending at the content's natural height (the divider stopped ~80px short).
+    // Banners keep their natural height; the CollectionView wrapper below takes
+    // the remaining space (mirrors the Workers collection page shell).
+    <div className="flex min-h-full flex-1 flex-col gap-6">
       {claimSuccess && (
         <ClaimSuccessOverlay
           channel={claimSuccess}
@@ -759,11 +754,13 @@ function SettingsContent() {
         </Alert>
       )}
 
-      <CollectionView
-        config={config}
-        state={collectionState}
-        onChange={handleCollectionChange}
-      />
+      <div className="min-h-0 flex-1">
+        <CollectionView
+          config={config}
+          state={collectionState}
+          onChange={handleCollectionChange}
+        />
+      </div>
     </div>
   );
 }
@@ -931,6 +928,20 @@ const CLI_INSTALL_SNIPPET = `npm i -g @floomhq/workeros
 workeros login
 workeros run <worker>`;
 
+// API base comes from the same env seam lib/api uses (NEXT_PUBLIC_API_PROXY_BASE
+// → "/api/proxy" on OSS, "/app/api/proxy" on cloud) so the snippet is never a
+// hardcoded host. The token header (x-floom-secret) matches the CLI/MCP curl
+// examples in CliCommandPanel; create the token in the Tokens tab.
+const API_CALL_SNIPPET = `# List your workers
+curl -sS ${API_BASE}/workers?shape=list \\
+  -H "x-floom-secret: <your-token>"
+
+# Run a worker
+curl -sS -X POST ${API_BASE}/workers/<worker>/runs \\
+  -H "x-floom-secret: <your-token>" \\
+  -H "content-type: application/json" \\
+  -d '{"inputs": {}}'`;
+
 function CopyCodeCard({ title, description, value }: { title: string; description: string; value: string }) {
   async function copy() {
     try {
@@ -961,13 +972,61 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
 
 function DeveloperSection() {
   return (
-    <Tabs defaultValue="mcp">
+    <Tabs defaultValue="api">
       <TabsList>
+        <TabsTrigger value="api">API</TabsTrigger>
         <TabsTrigger value="mcp">MCP</TabsTrigger>
         <TabsTrigger value="cli">CLI</TabsTrigger>
         <TabsTrigger value="tokens">Tokens</TabsTrigger>
         <TabsTrigger value="git">Git</TabsTrigger>
       </TabsList>
+      <TabsContent value="api" className="space-y-4">
+        <div className="space-y-1">
+          <h2 className="text-sm font-medium">REST API</h2>
+          <p className="text-xs text-muted-foreground">
+            Call your workspace over HTTP. Authenticate every request with a
+            personal access token in the <code className="font-mono">x-floom-secret</code> header.
+          </p>
+        </div>
+        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5">
+          <div className="min-w-0">
+            <p className="text-xs text-muted-foreground">Base URL</p>
+            <code className="break-all font-mono text-xs text-foreground">{API_BASE}</code>
+          </div>
+          <Button
+            type="button"
+            variant="outline"
+            size="sm"
+            className="shrink-0"
+            onClick={() => {
+              navigator.clipboard
+                .writeText(API_BASE)
+                .then(() => toast.success("Copied base URL"))
+                .catch(() => toast.error("Could not copy"));
+            }}
+          >
+            <Copy className="size-3.5" />
+            Copy
+          </Button>
+        </div>
+        <CopyCodeCard
+          title="Call the API"
+          description="Replace <your-token> with a personal access token from the Tokens tab."
+          value={API_CALL_SNIPPET}
+        />
+        <p className="text-xs text-muted-foreground">
+          Need a token? Open the{" "}
+          <span className="font-medium text-foreground">Tokens</span> tab.{" "}
+          <a
+            href="https://github.com/floomhq/workeros#api"
+            target="_blank"
+            rel="noopener noreferrer"
+            className="text-primary hover:underline"
+          >
+            API docs
+          </a>
+        </p>
+      </TabsContent>
       <TabsContent value="mcp" className="space-y-4">
         <CopyCodeCard
           title="Agent install"
@@ -2153,12 +2212,12 @@ function WhatsAppBindingStatus() {
 function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
   const [qrOpen, setQrOpen] = useState(false);
   return (
-    <div className="space-y-4">
+    <div>
       <Tabs defaultValue="slack">
-        <TabsList>
+        <TabsList className="mb-4">
           <TabsTrigger value="slack">Slack</TabsTrigger>
-          <TabsTrigger value="email">Email</TabsTrigger>
           <TabsTrigger value="whatsapp">WhatsApp</TabsTrigger>
+          <TabsTrigger value="agent-install">Agent install</TabsTrigger>
         </TabsList>
         <TabsContent value="slack" className="space-y-4">
           <div className="c-ltable">
@@ -2179,17 +2238,6 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
             <SlackBindingStatus />
           </div>
         </TabsContent>
-        <TabsContent value="email" className="space-y-4">
-          <div className="c-ltable">
-            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
-              <div className="c-lp-tx">
-                <div className="nm">Email</div>
-                <div className="sub">Email channel setup is not connected for this workspace yet.</div>
-              </div>
-              <span className="c-vpill">Not connected</span>
-            </div>
-          </div>
-        </TabsContent>
         <TabsContent value="whatsapp" className="space-y-4">
           <div className="c-ltable">
             <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
@@ -2207,6 +2255,18 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
             <p className="text-xs font-medium text-muted-foreground">Your link status</p>
             <WhatsAppBindingStatus />
           </div>
+        </TabsContent>
+        <TabsContent value="agent-install" className="space-y-5">
+          <CopyCodeCard
+            title="Agent install"
+            description="Copy this into Claude Desktop, Cursor, VS Code, Windsurf, Cline, or any MCP client."
+            value={MCP_INSTALL_SNIPPET}
+          />
+          <CopyCodeCard
+            title="CLI install"
+            description="Install the CLI, authenticate, and run a worker from your terminal."
+            value={CLI_INSTALL_SNIPPET}
+          />
         </TabsContent>
       </Tabs>
       <Dialog open={qrOpen} onOpenChange={setQrOpen}>

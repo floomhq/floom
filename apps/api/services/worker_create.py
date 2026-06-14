@@ -233,7 +233,8 @@ def _create_worker_from_parsed_payload(
             skill_version_id = _skill_version_id(worker_id, worker_record.get("manifest") or {})
             invalidate_worker_cache()
             with get_db() as conn:
-                _persist_discovered_workers(conn, [worker_record], user_id=auth.user_id)
+                # Single-worker create: surface a persist failure (don't silently skip).
+                _persist_discovered_workers(conn, [worker_record], user_id=auth.user_id, raise_on_skip=True)
             _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
             os.replace(staging_dir, target_dir)
             target_committed = True

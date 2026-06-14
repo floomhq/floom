@@ -682,6 +682,7 @@ def get_run(
         trigger_source=run["trigger_source"],
         runner=run["runner"],
         input=run_input,
+        inputs=run_input,
         output=run["output"],
         outputs=run["output"],
         output_schema=output_schema,

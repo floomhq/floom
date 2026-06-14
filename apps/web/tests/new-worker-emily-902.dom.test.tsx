@@ -4,13 +4,28 @@
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
 
 vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn(), prefetch: vi.fn() }),
   usePathname: () => "/chat",
   useSearchParams: () => new URLSearchParams(),
 }));
+
+// CreateSourcePills fetches Brain folders; return none so the canonical
+// suggested starter pills render (Company brain / ICP brief / ...).
+vi.mock("@/lib/api", async (importOriginal) => {
+  const mod = await importOriginal<Record<string, unknown>>();
+  return {
+    ...mod,
+    api: {
+      ...(mod.api as Record<string, unknown>),
+      contexts: { list: vi.fn().mockResolvedValue([]) },
+      chat: { uploadAttachments: vi.fn().mockResolvedValue([]) },
+    },
+  };
+});
 
 vi.mock("@/lib/useChatStream", async (importOriginal) => {
   const mod = await importOriginal<Record<string, unknown>>();
@@ -52,6 +67,31 @@ describe("#902 New worker → Emily full-screen", () => {
     expect(
       screen.getByDisplayValue("Create me: a digest worker"),
     ).toBeInTheDocument();
+  });
+
+  it("create mode shows source pills mirroring the landing", async () => {
+    render(<EmilyChatPage createMode />);
+    expect(await screen.findByText("Add sources")).toBeInTheDocument();
+    for (const label of ["Company brain", "ICP brief", "Pricing", "Tone guide", "Style guide"]) {
+      expect(screen.getByRole("button", { name: new RegExp(label, "i") })).toBeInTheDocument();
+    }
+  });
+
+  it("clicking a source pill appends a source hint to the composer", async () => {
+    const user = userEvent.setup();
+    render(<EmilyChatPage createMode />);
+    const composer = screen.getByPlaceholderText("Create me: a worker that…") as HTMLTextAreaElement;
+    expect(composer.value).toBe("");
+    await user.click(await screen.findByRole("button", { name: /Pricing/i }));
+    await waitFor(() => expect(composer.value).toContain("Use my Pricing."));
+    // A second click on the same source is a no-op (no duplicate hint).
+    await user.click(screen.getByRole("button", { name: /Pricing/i }));
+    expect(composer.value.match(/Use my Pricing\./g) ?? []).toHaveLength(1);
+  });
+
+  it("default mode shows no source pills", () => {
+    render(<EmilyChatPage />);
+    expect(screen.queryByText("Add sources")).not.toBeInTheDocument();
   });
 
   it("sidebar has the New worker button routing to the Emily create flow", () => {

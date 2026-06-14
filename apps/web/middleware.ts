@@ -42,6 +42,15 @@ const PUBLIC_PAGE_PREFIXES = [
   //       hop itself carries no session, so it must stay public here.
 ];
 
+// Pages reachable WITHOUT a session cookie, matched EXACTLY (not by prefix).
+// OW-02: the legal pages must be public, but a prefix match would silently make
+// future auth-gated routes that merely *start with* these strings public too
+// (e.g. /privacy-settings, /terms-admin). Exact-match prevents that footgun.
+const PUBLIC_PAGE_EXACT = [
+  "/privacy", // OW-02: legal page, public (no auth required)
+  "/terms", // OW-02: legal page, public (no auth required)
+];
+
 // /api/proxy sub-paths that map to PUBLIC upstream endpoints and must stay
 // reachable without a Floom session (OAuth callbacks and signed approvals).
 const PUBLIC_PROXY_PATHS = ["/api/proxy/connections/callback"];
@@ -49,6 +58,7 @@ const PUBLIC_PROXY_PREFIXES = ["/api/proxy/approvals/public/"];
 
 function isPublicPage(pathname: string): boolean {
   if (pathname === "/login") return true;
+  if (PUBLIC_PAGE_EXACT.includes(pathname)) return true;
   return PUBLIC_PAGE_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(prefix),
   );

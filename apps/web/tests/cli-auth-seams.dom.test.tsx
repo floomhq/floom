@@ -1,0 +1,63 @@
+import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { CliAuthContent } from "@/app/cli-auth/page";
+
+const pushMock = vi.fn();
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: pushMock }),
+}));
+
+describe("CLI auth seams", () => {
+  beforeEach(() => {
+    pushMock.mockReset();
+    window.history.pushState({}, "", "/cli-auth?code=ABCD-2345");
+    vi.stubGlobal(
+      "fetch",
+      vi.fn().mockResolvedValue({
+        ok: true,
+        json: async () => ({}),
+      })
+    );
+  });
+
+  afterEach(() => {
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps the OSS endpoint and client name by default", async () => {
+    render(<CliAuthContent />);
+
+    expect(await screen.findByText("Client: floom-cli")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Re-type the code from your terminal to confirm"), {
+      target: { value: "ABCD-2345" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith("/api/proxy/cli-auth/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_code: "ABCD-2345" }),
+      });
+    });
+  });
+
+  it("uses injected cloud endpoint base and CLI client name", async () => {
+    render(<CliAuthContent endpointBase="/app/api/cli-auth/" clientName="workeros-cli" />);
+
+    expect(await screen.findByText("Client: workeros-cli")).toBeInTheDocument();
+    fireEvent.change(screen.getByLabelText("Re-type the code from your terminal to confirm"), {
+      target: { value: "ABCD-2345" },
+    });
+    fireEvent.click(screen.getByRole("button", { name: "Approve" }));
+
+    await waitFor(() => {
+      expect(fetch).toHaveBeenCalledWith("/app/api/cli-auth/approve", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ user_code: "ABCD-2345" }),
+      });
+    });
+  });
+});

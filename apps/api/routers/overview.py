@@ -38,7 +38,9 @@ from services.worker_access import (
     _list_operator_workers,
     _normalize_run_status,
     _trigger_label,
+    _worker_access_user_id,
     _worker_connection_slugs,
+    _worker_repo_role,
     _worker_required_secret_names,
 )
 
@@ -374,14 +376,29 @@ def system_overview(
     # carries `enabled`) for each operator-visible worker, falling back to the
     # filesystem record for stock workers that have no DB row yet, so the
     # enabled/paused logic stays correct and the total equals /workers.
+    #
+    # SCOPING (78-vs-104 bug): GET /workers resolves the access user-id +
+    # role via _worker_access_user_id / _worker_repo_role. The overview MUST use
+    # the identical resolution, otherwise an admin member sees the full
+    # workspace set on /workers but a narrower owner-only set here and the two
+    # counts diverge. Resolve them once and thread them through BOTH the DB
+    # denominator and _list_operator_workers.
+    _overview_worker_user_id = _worker_access_user_id(auth)
+    _overview_worker_role = _worker_repo_role(auth)
     _db_workers_by_id = {
         row["id"]: row
-        for row in repos.workers.list(user_id=auth.user_id)
+        for row in repos.workers.list(
+            user_id=_overview_worker_user_id, role=_overview_worker_role
+        )
         if row.get("id")
     }
     workers = [
         _db_workers_by_id.get(w["id"], w)
-        for w in _list_operator_workers(user_id=auth.user_id, repos=repos)
+        for w in _list_operator_workers(
+            user_id=_overview_worker_user_id,
+            repos=repos,
+            role=_overview_worker_role,
+        )
         if w.get("id")
     ]
     active_workers_count = sum(1 for row in workers if not _overview_worker_paused(row))

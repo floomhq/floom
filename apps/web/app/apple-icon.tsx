@@ -4,8 +4,7 @@ export const runtime = "edge";
 export const size = { width: 180, height: 180 };
 export const contentType = "image/png";
 
-// Apple touch icon — emerald squircle with the Floom brand mark
-// (cream tag/arrow shape). Matches /icon.svg.
+// Apple touch icon with the Floom brand mark. Matches /icon.svg.
 export default async function AppleIcon() {
   return new ImageResponse(
     (
@@ -28,7 +27,7 @@ export default async function AppleIcon() {
         >
           <path
             d="M30 22 h20 l22 22 a3 3 0 0 1 0 4 l-22 22 h-20 a6 6 0 0 1 -6 -6 v-36 a6 6 0 0 1 6 -6 z"
-            fill="#FAFAF7"
+            fill="#FFFFFF"
           />
         </svg>
       </div>

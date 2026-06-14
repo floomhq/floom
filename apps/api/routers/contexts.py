@@ -17,6 +17,8 @@ from __future__ import annotations
 import json
 import shutil
 import sqlite3
+import uuid as _uuid_mod
+from datetime import datetime, timezone
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
@@ -38,6 +40,8 @@ from auth import AuthContext, get_auth_context
 from core.config import _is_cloud_deploy, _user_scoped_local_mode
 from db import Repositories, get_repos
 from models import (
+    CandidateFeedbackCreateRequest,
+    CandidateFeedbackRecord,
     ContextCategoryRequest,
     ContextCreateRequest,
     ContextDeleteResponse,
@@ -548,6 +552,91 @@ async def put_context_file(
     author_name, author_email = _git_author(auth)
     _git_commit_context(safe_name, rel, message=f"context {safe_name}: update {rel}", author_name=author_name, author_email=author_email)
     return result
+
+
+def _record_candidate_feedback_event(
+    name: str,
+    body: CandidateFeedbackCreateRequest,
+    *,
+    auth: AuthContext,
+    repos: Repositories,
+) -> CandidateFeedbackRecord:
+    context_user_id = _context_actor_user_id(auth.user_id)
+    safe_name, metadata = _require_context_for_user(
+        name,
+        user_id=context_user_id,
+        repos=repos,
+    )
+    if not bool((metadata.get(safe_name) or {}).get("writeable", False)):
+        raise HTTPException(status_code=400, detail="Candidate feedback requires a writable context.")
+
+    run_id = body.run_id.strip()
+    candidate_id = body.candidate_id.strip()
+    feedback_text = body.feedback_text.strip()
+    reporter = (body.reporter or auth.username or auth.email or auth.user_id).strip()
+    if not run_id:
+        raise HTTPException(status_code=400, detail="run_id is required.")
+    if not candidate_id:
+        raise HTTPException(status_code=400, detail="candidate_id is required.")
+    if not feedback_text:
+        raise HTTPException(status_code=400, detail="feedback_text is required.")
+    if not reporter:
+        raise HTTPException(status_code=400, detail="reporter is required.")
+
+    now = datetime.now(timezone.utc)
+    ts = now.isoformat().replace("+00:00", "Z")
+    day = now.date().isoformat()
+
+    for _attempt in range(5):
+        event_uuid = str(_uuid_mod.uuid4())
+        rel = f"feedback/raw/{day}/{event_uuid}.json"
+        if not _safe_context_file_or_400(safe_name, rel).exists():
+            break
+    else:
+        raise HTTPException(status_code=409, detail="Could not allocate feedback event path.")
+
+    event = {
+        "uuid": event_uuid,
+        "run_id": run_id,
+        "candidate_id": candidate_id,
+        "rank": body.rank,
+        "feedback_text": feedback_text,
+        "outcome": body.outcome,
+        "scope": body.scope,
+        "reporter": reporter,
+        "ts": ts,
+    }
+    _write_context_file(
+        safe_name,
+        rel,
+        (json.dumps(event, indent=2, sort_keys=True) + "\n").encode("utf-8"),
+        user_id=context_user_id,
+        tags=["candidate-feedback"],
+        file_metadata={"kind": "candidate_feedback", "run_id": run_id},
+    )
+    author_name, author_email = _git_author(auth)
+    _git_commit_context(
+        safe_name,
+        rel,
+        message=f"context {safe_name}: record candidate feedback {event_uuid}",
+        author_name=author_name,
+        author_email=author_email,
+    )
+    return CandidateFeedbackRecord(**event, path=rel)
+
+
+@contexts_router.post(
+    "/contexts/{name}/record-candidate-feedback",
+    response_model=CandidateFeedbackRecord,
+    status_code=201,
+)
+def record_candidate_feedback(
+    name: str,
+    body: CandidateFeedbackCreateRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> CandidateFeedbackRecord:
+    return _record_candidate_feedback_event(name, body, auth=auth, repos=repos)
 
 
 @contexts_router.delete("/contexts/{name}/files/{file_path:path}", response_model=ContextDetail)

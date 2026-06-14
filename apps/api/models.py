@@ -11,7 +11,31 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from enum import Enum
 
 
-DEFAULT_WORKER_AGENT_MODEL = os.environ.get("WORKEROS_WORKER_AGENT_MODEL") or "gpt-5.5"
+# The tool-calling worker default. MUST be resolved lazily (at call time), not
+# frozen at import. On the cloud the model env vars arrive via
+# `load_dotenv(~/.config/workeros/api.env, override=False)` in main.py — which
+# runs AFTER `from models import ...`. A module-level constant read here would
+# freeze to the bare "gpt-5.5" fallback (→ OpenAI) before dotenv injects
+# WORKEROS_WORKER_AGENT_MODEL=bedrock/..., so worker runs hit the (dead/quota'd)
+# OpenAI key while Emily — which reads WORKEROS_CHAT_MODEL lazily — works.
+# Resolve at call time so the live env (whatever delivery mechanism set it) wins.
+_WORKER_AGENT_MODEL_FALLBACK = "gpt-5.5"
+
+
+def default_worker_agent_model() -> str:
+    """Resolve the default worker-agent model from the live env, lazily.
+
+    Reads WORKEROS_WORKER_AGENT_MODEL every call so config delivered after import
+    (cloud dotenv path) is honored. Falls back to the bare OpenAI model only when
+    nothing is configured.
+    """
+    return os.environ.get("WORKEROS_WORKER_AGENT_MODEL") or _WORKER_AGENT_MODEL_FALLBACK
+
+
+# Backwards-compatible name. Kept as the import-time snapshot ONLY for callers
+# that need a literal default; live dispatch paths MUST use
+# default_worker_agent_model() instead (see agent_driver / contract builders).
+DEFAULT_WORKER_AGENT_MODEL = default_worker_agent_model()
 
 
 def _model_data(value: Any) -> Any:
@@ -53,6 +77,16 @@ class UnsafeOutboundUrlError(ValueError):
 # and tests import UnsafeMCPUrlError; it is the exact same exception type, so
 # `except UnsafeMCPUrlError` and `except UnsafeOutboundUrlError` both catch it.
 UnsafeMCPUrlError = UnsafeOutboundUrlError
+
+
+class WorkerNotRunnableError(ValueError):
+    """Raised by a RunsRepo.create when the caller may not run the target worker
+    (a genuine cross-tenant ownership denial — the worker is neither owned by the
+    caller, workspace-shared, nor a curated catalog/stock worker).
+
+    Subclasses ValueError so the generic ValueError handler still treats it
+    safely if uncaught, but the run endpoint catches it explicitly to return a
+    clear 403 instead of the opaque 400 'Invalid request'."""
 
 
 def _allow_private_mcp_urls() -> bool:
@@ -780,6 +814,94 @@ class WorkerContextMount(BaseModel):
 WorkerContextMountSpec = Union[str, WorkerContextMount]
 
 
+class WorkerMemoryConfig(BaseModel):
+    enabled: bool = False
+    context: Optional[str] = None
+
+    @model_validator(mode="before")
+    @classmethod
+    def coerce_memory_config(cls, value: Any) -> Any:
+        if value is None:
+            return {}
+        if isinstance(value, bool):
+            return {"enabled": value}
+        if isinstance(value, str):
+            normalized = value.strip().lower()
+            if normalized in {"enabled", "enable", "true", "yes", "on", "1"}:
+                return {"enabled": True}
+            if normalized in {"disabled", "disable", "false", "no", "off", "0"}:
+                return {"enabled": False}
+            return {"enabled": True, "context": value}
+        if isinstance(value, dict):
+            raw = dict(value)
+            if "context" not in raw:
+                for alias in ("name", "pack", "pack_name", "context_name"):
+                    if raw.get(alias):
+                        raw["context"] = raw[alias]
+                        break
+            return raw
+        return value
+
+    @field_validator("context")
+    @classmethod
+    def validate_context(cls, value: Optional[str]) -> Optional[str]:
+        if value is None:
+            return value
+        stripped = value.strip()
+        if not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9._-]{0,63}", stripped):
+            raise ValueError(
+                "memory.context must be 1-64 letters, digits, dots, underscores, or hyphens"
+            )
+        return stripped
+
+
+def default_worker_memory_context_name(worker_id: str) -> str:
+    slug = re.sub(r"[^A-Za-z0-9._-]+", "-", str(worker_id or "worker")).strip(".-_")
+    slug = slug or "worker"
+    return f"memory-{slug}"[:64].rstrip(".-_") or "memory-worker"
+
+
+def memory_context_mount_for_worker(worker_id: str, memory: WorkerMemoryConfig) -> Optional[dict[str, Any]]:
+    if not memory.enabled:
+        return None
+    return {
+        "name": memory.context or default_worker_memory_context_name(worker_id),
+        "writeable": True,
+        "source": "local",
+    }
+
+
+def _normalize_memory_contexts(
+    worker_id: str,
+    memory: WorkerMemoryConfig,
+    contexts: List[WorkerContextMountSpec],
+) -> List[WorkerContextMountSpec]:
+    memory_mount = memory_context_mount_for_worker(worker_id, memory)
+    if memory_mount is None:
+        return contexts
+
+    normalized_contexts = list(contexts or [])
+    memory_name = memory_mount["name"]
+    for idx, raw_context in enumerate(normalized_contexts):
+        try:
+            context = raw_context.model_dump() if hasattr(raw_context, "model_dump") else raw_context
+            normalized = WorkerContextMount(**context) if isinstance(context, dict) else WorkerContextMount(name=str(context))
+        except Exception:
+            continue
+        if normalized.name != memory_name:
+            continue
+        if normalized.source == "local":
+            normalized_contexts[idx] = {
+                "name": memory_name,
+                "writeable": True,
+                "source": "local",
+            }
+        return normalized_contexts
+
+    normalized_contexts.append(memory_mount)
+    return normalized_contexts
+
+
 class WorkerRuntime(BaseModel):
     type: str
     entrypoint: str = "run.py"
@@ -829,6 +951,7 @@ class WorkerConfig(BaseModel):
     secrets: List[str] = []
     connections: List[WorkerConnectionSpec] = []  # Strings are deprecated legacy Composio app slugs.
     contexts: List[WorkerContextMountSpec] = []
+    memory: WorkerMemoryConfig = Field(default_factory=WorkerMemoryConfig)
     outputs: List[WorkerOutput] = []
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
@@ -849,6 +972,7 @@ class WorkerConfig(BaseModel):
                 )
         if self.trigger.type == "composio" and not self.trigger.composio:
             raise ValueError("composio-triggered workers must declare trigger.composio")
+        self.contexts = _normalize_memory_contexts(self.id, self.memory, self.contexts)
         return self
 
 
@@ -1167,7 +1291,7 @@ class WorkerContract(BaseModel):
     version: str
     entrypoint: Optional[str] = "SKILL.md"
     system_prompt: Optional[str] = None
-    model: Optional[str] = DEFAULT_WORKER_AGENT_MODEL
+    model: Optional[str] = Field(default_factory=default_worker_agent_model)
     entrypoints: Optional[List[WorkerEntrypoint]] = None
     limits: WorkerLimits = Field(default_factory=WorkerLimits)
     targets: List[str] = Field(default_factory=lambda: ["generic"])
@@ -1184,6 +1308,7 @@ class WorkerContract(BaseModel):
     triggers: Optional[List[WorkerContractTrigger]] = None
     connections: List[WorkerConnectionSpec] = Field(default_factory=list)
     contexts: List[WorkerContextMountSpec] = Field(default_factory=list)
+    memory: WorkerMemoryConfig = Field(default_factory=WorkerMemoryConfig)
     csv_required_columns: Optional[List[str]] = None
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
     calls: List[str] = Field(default_factory=list)  # worker IDs this worker is allowed to invoke
@@ -1439,7 +1564,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         runner=runner,
         command=contract.exec.command,
         mode=contract.exec.mode or "agent",
-        model=contract.model or DEFAULT_WORKER_AGENT_MODEL,
+        model=contract.model or default_worker_agent_model(),
         system_prompt=contract.system_prompt,
         disable_tools=list(contract.exec.disable_tools or []),
         limits=_model_data(contract.limits),
@@ -1495,6 +1620,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
             _model_data(context)
             for context in (contract.contexts or contract.exec.contexts or [])
         ],
+        memory=contract.memory,
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
         approvals=contract.approvals,
@@ -1602,7 +1728,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             outputs=[_legacy_output_to_contract_field(field) for field in config.outputs],
         ),
         system_prompt=config.runtime.system_prompt,
-        model=config.runtime.model or config.model or DEFAULT_WORKER_AGENT_MODEL,
+        model=config.runtime.model or config.model or default_worker_agent_model(),
         limits=config.runtime.limits,
         capabilities=WorkerContractCapabilities(
             secrets=list(config.secrets),
@@ -1617,6 +1743,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
         ),
         connections=[_model_data(connection) for connection in config.connections],
         contexts=[_model_data(context) for context in config.contexts],
+        memory=config.memory,
         csv_required_columns=config.csv_required_columns,
     )
 
@@ -1671,6 +1798,13 @@ class RunSummary(BaseModel):
     duration_ms: Optional[int] = None
     error: Optional[str] = None  # operator-readable headline (never a raw traceback)
     error_code: Optional[str] = None
+    # #1022: the run's actual input (the "mandate"/request that was searched),
+    # parsed from input_json. Surfaced so GET /runs is a queryable request log
+    # (run_id -> input) without an N+1 of per-run detail fetches. Returned only on
+    # authed-owner routes (GET /runs, /connections/{id}/activity); no public/share
+    # surface uses RunSummary — those return RunDetail, which redacts separately.
+    input: Dict[str, Any] = Field(default_factory=dict)
+    inputs: Dict[str, Any] = Field(default_factory=dict)
 
 
 class DetailArtifactPreview(BaseModel):
@@ -1740,6 +1874,7 @@ class RunDetail(BaseModel):
     trigger_source: str
     runner: str
     input: Dict[str, Any] = Field(default_factory=dict)
+    inputs: Dict[str, Any] = Field(default_factory=dict)
     output: Dict[str, Any] = Field(default_factory=dict)
     outputs: Dict[str, Any] = Field(default_factory=dict)
     output_schema: List["OutputField"] = Field(default_factory=list)
@@ -2392,6 +2527,29 @@ class ContextTextWriteRequest(BaseModel):
     content: str
     tags: Optional[List[str]] = None
     metadata: Optional[Dict[str, Any]] = None
+
+
+class CandidateFeedbackCreateRequest(BaseModel):
+    run_id: str = Field(min_length=1, max_length=200)
+    candidate_id: str = Field(min_length=1, max_length=200)
+    rank: int
+    feedback_text: str = Field(min_length=1, max_length=10000)
+    outcome: Literal["good", "bad", "miss"]
+    scope: Literal["global", "client"] = "global"
+    reporter: Optional[str] = Field(default=None, max_length=200)
+
+
+class CandidateFeedbackRecord(BaseModel):
+    uuid: str
+    run_id: str
+    candidate_id: str
+    rank: int
+    feedback_text: str
+    outcome: Literal["good", "bad", "miss"]
+    scope: Literal["global", "client"]
+    reporter: str
+    ts: str
+    path: str
 
 
 class ContextUploadResponse(BaseModel):

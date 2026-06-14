@@ -13,8 +13,12 @@ from tests._api_source import api_source
 
 def test_system_worker_flag_maps_to_workspace_visibility():
     """The source must derive visibility='workspace' from system_worker=True."""
+    # The per-worker persist logic (incl. the visibility derivation + INSERT)
+    # lives in _persist_one_worker after the resilient-startup split;
+    # _persist_discovered_workers is now the SAVEPOINT-isolation wrapper around
+    # it. api_source() is location-robust across the modular refactor.
     src = api_source()
-    fn_start = src.find("def _persist_discovered_workers")
+    fn_start = src.find("def _persist_one_worker")
     assert fn_start != -1
     fn_body = src[fn_start: fn_start + 5000]
     assert "system_worker" in fn_body, "Must read system_worker from manifest"
@@ -25,8 +29,10 @@ def test_system_worker_flag_maps_to_workspace_visibility():
 
 def test_non_system_worker_maps_to_private_visibility():
     """The source must assign visibility='private' for non-system workers."""
+    # The per-worker persist logic lives in _persist_one_worker after the
+    # resilient-startup split; api_source() is location-robust across modules.
     src = api_source()
-    fn_start = src.find("def _persist_discovered_workers")
+    fn_start = src.find("def _persist_one_worker")
     assert fn_start != -1
     fn_body = src[fn_start: fn_start + 5000]
     assert "'private'" in fn_body or '"private"' in fn_body, (
@@ -69,11 +75,11 @@ def test_workspace_agent_is_workspace_visible_in_db():
 def test_persist_discovered_workers_includes_visibility_column():
     """The INSERT in _persist_discovered_workers must include the visibility column."""
     src = api_source()
-    fn_start = src.find("def _persist_discovered_workers")
+    fn_start = src.find("def _persist_one_worker")
     assert fn_start != -1
     fn_body = src[fn_start: fn_start + 4000]
     assert "visibility" in fn_body, (
-        "_persist_discovered_workers must include visibility in the INSERT"
+        "_persist_one_worker must include visibility in the INSERT"
     )
     assert "worker_visibility" in fn_body or "is_system_worker" in fn_body, (
         "Must derive visibility from system_worker flag"

@@ -36,7 +36,7 @@ function statusToneClass(className: unknown) {
     return "bg-[color-mix(in_srgb,var(--positive)_11%,transparent)] text-[var(--positive)]"
   }
   if (className.includes("amber")) {
-    return "bg-[color-mix(in_srgb,#9a6a16_10%,transparent)] text-[#8a5d12]"
+    return "bg-[var(--bg-2)] text-[var(--ink-soft)]"
   }
   if (className.includes("red")) {
     return "bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] text-[var(--negative)]"

@@ -115,7 +115,7 @@
   --primary-text: #FFFFFF;
   --warning: #E5533D;
   --success: #2F8F5B;
-  --pending: #C98A1A;
+  --pending: #6B7280;
   --info: #3E6FE0; /* "running"/in-progress accent (SPEC §4) */
   /* v4 cool radii (final.html: --r-card:16px, --r-btn:10px) */
   --radius-card: 16px;
@@ -373,43 +373,17 @@ html.dark ::selection {
   color: var(--ink);
 }
 
-/* Global chrome: quiet, thin scrollbars across chat rails, detail panes, source
-   lists, popovers, and code blocks. Tracks stay transparent; thumbs reveal on
-   hover/active where the platform allows it. */
+/* Global chrome: keep every scroll container scrollable, but hide visible
+   scrollbar rails/thumbs across chat, panes, popovers, and code blocks. */
 * {
-  scrollbar-width: thin;
-  scrollbar-color: transparent transparent;
-}
-
-*:hover,
-*:focus-within {
-  scrollbar-color: var(--scrollbar-thumb) transparent;
+  scrollbar-width: none;
+  -ms-overflow-style: none;
 }
 
 *::-webkit-scrollbar {
-  width: 8px;
-  height: 8px;
-}
-
-*::-webkit-scrollbar-track {
-  background: transparent;
-}
-
-*::-webkit-scrollbar-thumb {
-  min-height: 44px;
-  border-radius: var(--radius-button);
-  background-color: transparent;
-}
-
-*:hover::-webkit-scrollbar-thumb,
-*:focus-within::-webkit-scrollbar-thumb,
-*::-webkit-scrollbar-thumb:active {
-  background-color: var(--scrollbar-thumb);
-}
-
-*::-webkit-scrollbar-thumb:hover,
-*::-webkit-scrollbar-thumb:active {
-  background-color: var(--scrollbar-thumb-hover);
+  width: 0;
+  height: 0;
+  display: none;
 }
 
 @layer base {
@@ -420,7 +394,7 @@ html.dark ::selection {
   html {
     @apply font-sans;
     min-height: 100%;
-    scrollbar-gutter: stable;
+    scrollbar-gutter: auto;
     background: var(--bg);
     overflow-x: hidden;
   }
@@ -808,9 +782,11 @@ html.dark .grain {
 .c-menu { color:var(--muted-foreground); text-align:right; }
 .c-daygrp .dh { display:flex; align-items:center; padding:16px 4px 8px; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted-foreground); font-weight:600; }
 
-/* status pill — outlined/tinted + leading dot (SPEC §2a) */
-.c-pill { display:inline-flex; align-items:center; gap:6px; border-radius:var(--radius-pill); font-size:11.5px; padding:3px 10px; font-weight:500; border:var(--bd-pill); }
-.c-pill .dot { width:6px; height:6px; border-radius:var(--radius-pill); background:currentColor; }
+/* status pill — outlined/tinted + leading dot (SPEC §2a). D-08: subtle pill —
+   smaller font + tighter padding so "ok" / "missing secret" read as a quiet
+   tag, not a heavy chip. */
+.c-pill { display:inline-flex; align-items:center; gap:5px; border-radius:var(--radius-pill); font-size:10.5px; padding:1.5px 7px; font-weight:500; border:var(--bd-pill); }
+.c-pill .dot { width:5px; height:5px; border-radius:var(--radius-pill); background:currentColor; }
 .c-pill.ok   { background:color-mix(in srgb, var(--success) 8%, transparent); color:color-mix(in srgb, var(--success) 78%, var(--ink)); }
 .c-pill.err  { background:color-mix(in srgb, var(--warning) 9%, transparent); color:color-mix(in srgb, var(--warning) 78%, var(--ink)); }
 .c-pill.warn,.c-pill.pending { background:color-mix(in srgb, var(--pending) 9%, transparent); color:color-mix(in srgb, var(--pending) 76%, var(--ink)); }
@@ -826,9 +802,17 @@ html.dark .grain {
 .c-gcard .star { position:absolute; top:13px; right:13px; color:var(--muted-foreground); opacity:0; transition:opacity .12s; }
 .c-gcard:hover .star { opacity:1; }
 .c-gcard .star.on { opacity:1; color:var(--pending); }
-.c-gtop { display:flex; align-items:center; gap:11px; }
-.c-gnm { font-weight:500; font-size:15px; color:var(--ink); }
-.c-gd { color:var(--muted-foreground); font-size:13px; margin-top:10px; display:-webkit-box; -webkit-line-clamp:2; -webkit-box-orient:vertical; overflow:hidden; }
+/* D-05: reserve space at top-right for the absolute star/lock cluster so a long
+   worker name never collides with the star button. */
+.c-gtop { display:flex; align-items:center; gap:11px; padding-right:26px; min-width:0; }
+/* D-05/D-06: name truncates single-line so it never runs under the absolute
+   star/lock cluster top-right; the private lock stays inline and aligned. */
+.c-gnm { flex:1; min-width:0; font-weight:500; font-size:15px; color:var(--ink); white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+.c-gnm > span { max-width:100%; }
+.c-gnm > span > .truncate { min-width:0; }
+/* D-07: calmer card body — one clamped line of secondary text at a smaller size
+   and tighter leading so the card breathes (name + status + tools stay clear). */
+.c-gd { color:var(--muted-foreground); font-size:12.5px; line-height:1.45; margin-top:6px; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
 .c-gfoot { margin-top:auto; padding-top:12px; display:flex; align-items:center; gap:8px; color:var(--muted-foreground); font-size:12px; }
 .c-gtools { margin-left:auto; display:flex; gap:4px; }
 
@@ -871,6 +855,7 @@ html.dark .grain {
 .c-vpill { display:inline-flex; align-items:center; gap:5px; border:var(--bd-pill); border-radius:var(--radius-pill); font-size:10.5px; padding:2px 8px; color:var(--muted-foreground); background:var(--bg-2); white-space:nowrap; flex:0 0 auto; }
 .c-dtabs { display:flex; gap:2px; padding:7px 16px; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; }
 .c-dtabs::-webkit-scrollbar { height:0; display:none; }
+.c-source-file-tabs { min-width:0; max-width:100%; flex:1 1 auto; flex-wrap:nowrap; }
 .c-dtab { display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border-radius:9px; color:var(--muted-foreground); font-size:13px; white-space:nowrap; }
 .c-dtab:hover { background:var(--bg-2); }
 .c-dtab.on { background:var(--bg-2); color:var(--ink); font-weight:500; }
@@ -892,4 +877,20 @@ html.dark .grain {
   .c-body.c-split { min-height:calc(100dvh - 176px); }
   .c-split .c-detailcol { position:relative; inset:auto; width:100%; min-height:0; border-left:0; box-shadow:none; }
   .c-split .c-listcol { display:none; }
+}
+
+/* worker-form FilesEditor (react-simple-code-editor) — the library hard-codes
+   white-space:pre-wrap + word-break:keep-all as INLINE styles on its inner
+   <pre> and <textarea>. Inside the narrow Edit-source dialog column that
+   collapses code to one character per line. Force real code semantics
+   (white-space:pre + horizontal scroll) by overriding the inline styles via a
+   class — only !important wins over the library's inline rules. */
+.fe-codeeditor { overflow: auto !important; }
+.fe-codeeditor pre,
+.fe-codeeditor textarea,
+.fe-codeeditor-pre,
+.fe-codeeditor-textarea {
+  white-space: pre !important;
+  word-break: normal !important;
+  overflow-wrap: normal !important;
 }

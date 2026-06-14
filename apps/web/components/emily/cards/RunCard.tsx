@@ -15,9 +15,9 @@ export function RunCard({ card }: { card: RunCardType }) {
     <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-card/60 overflow-hidden text-sm">
       <div className="flex items-center gap-2.5 px-3.5 py-2.5">
         {isCompleted && <CheckCircle2 className="size-3.5 shrink-0 text-green-600" />}
-        {isRunning && <Loader2 className="size-3.5 shrink-0 text-[#59AAF8] animate-spin" />}
+        {isRunning && <Loader2 className="size-3.5 shrink-0 text-[var(--accent)] animate-spin" />}
         {isFailed && <XCircle className="size-3.5 shrink-0 text-destructive" />}
-        {isPending && <Clock className="size-3.5 shrink-0 text-amber-600" />}
+        {isPending && <Clock className="size-3.5 shrink-0 text-muted-foreground" />}
 
         <span className="font-medium flex-1 min-w-0 truncate">{workerName}</span>
 
