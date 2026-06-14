@@ -58,7 +58,14 @@ export function LoginEmailPanel({ next, initialMode = "magic" }: { next: string;
       const response = await postAuth(endpoint, { email, password, next: normalizedNext, mode });
       const body = await response.json().catch(() => ({}));
       if (!response.ok) {
-        throw new Error(typeof body.detail === "string" ? body.detail : "Sign-in failed");
+        const fallback = mode === "signup" ? "Sign-up failed" : "Sign-in failed";
+        // #226: an existing-email signup returns 409 with a clear "account
+        // already exists — sign in instead" detail. Surface it and flip the
+        // user to the Sign in tab so the next submit just works.
+        if (mode === "signup" && response.status === 409) {
+          setMode("signin");
+        }
+        throw new Error(typeof body.detail === "string" ? body.detail : fallback);
       }
       if (mode === "signin" || body.ok) {
         window.location.replace(normalizeNextPath(body.next || normalizedNext || "/app"));
