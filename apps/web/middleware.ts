@@ -40,8 +40,15 @@ const PUBLIC_PAGE_PREFIXES = [
   "/c/", // branded claim short-link; rewritten to the API /c/{token} route,
   //       which 302s to the (auth-gated) /settings?…_claim= URL. The short-link
   //       hop itself carries no session, so it must stay public here.
-  "/privacy", // OW-02: legal pages must be public (no auth required)
-  "/terms",   // OW-02: legal pages must be public (no auth required)
+];
+
+// Pages reachable WITHOUT a session cookie, matched EXACTLY (not by prefix).
+// OW-02: the legal pages must be public, but a prefix match would silently make
+// future auth-gated routes that merely *start with* these strings public too
+// (e.g. /privacy-settings, /terms-admin). Exact-match prevents that footgun.
+const PUBLIC_PAGE_EXACT = [
+  "/privacy", // OW-02: legal page, public (no auth required)
+  "/terms", // OW-02: legal page, public (no auth required)
 ];
 
 // /api/proxy sub-paths that map to PUBLIC upstream endpoints and must stay
@@ -51,6 +58,7 @@ const PUBLIC_PROXY_PREFIXES = ["/api/proxy/approvals/public/"];
 
 function isPublicPage(pathname: string): boolean {
   if (pathname === "/login") return true;
+  if (PUBLIC_PAGE_EXACT.includes(pathname)) return true;
   return PUBLIC_PAGE_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(prefix),
   );

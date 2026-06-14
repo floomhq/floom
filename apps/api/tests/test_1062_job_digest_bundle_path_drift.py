@@ -154,3 +154,55 @@ def test_extra_root_listed_but_dir_absent_falls_back(tmp_path, monkeypatch):
     cfg = _Config(str(var_workers / "job-digest"))
     resolved = runner_utils._resolve_worker_bundle_dir(workers_dir, "job-digest", cfg, _safe_path)
     assert resolved == (workers_dir / "job-digest").resolve()
+
+
+# --- A-05 parity: symlink-containment assert on accepted-absolute branches ----
+
+
+def test_a05_absolute_symlink_escaping_extra_root_is_not_honoured(tmp_path, monkeypatch):
+    """A-05: a symlink *inside* an allowed extra root that points outside it
+    (e.g. <var/workers>/job-digest -> /etc) must NOT be returned as the bundle
+    dir. With the realpath-containment parity assert in place, the escaping
+    target is rejected and resolution falls back to the safe basename under the
+    configured WORKERS_DIR — never the symlink target."""
+    import os
+    import runner_utils
+
+    workers_dir = _engine_workers(tmp_path)
+    var_workers = tmp_path / "var" / "workers"
+    var_workers.mkdir(parents=True)
+    # outside-root real dir the symlink will point at
+    outside = tmp_path / "outside-secret"
+    outside.mkdir()
+    link = var_workers / "job-digest"
+    os.symlink(outside, link)  # <extra_root>/job-digest -> /.../outside-secret
+
+    monkeypatch.setenv("FLOOM_EXTRA_WORKERS_DIRS", str(var_workers))
+    cfg = _Config(str(link))
+    resolved = runner_utils._resolve_worker_bundle_dir(workers_dir, "job-digest", cfg, _safe_path)
+
+    # MUST NOT resolve to the escaping symlink target.
+    assert resolved != outside.resolve()
+    # Falls back to the safe basename under the configured root.
+    assert resolved == (workers_dir / "job-digest").resolve()
+
+
+def test_a05_realpath_assert_helper_rejects_symlink_escape(tmp_path):
+    """Direct unit test of the parity helper: a symlinked path whose realpath
+    escapes the root is rejected, a contained path is returned unchanged."""
+    import os
+    import runner_utils
+
+    root = tmp_path / "root"
+    root.mkdir()
+    outside = tmp_path / "outside"
+    outside.mkdir()
+    escape = root / "evil"
+    os.symlink(outside, escape)
+
+    with pytest.raises(ValueError, match="symlink escape"):
+        runner_utils._assert_realpath_contained(escape, root)
+
+    good = root / "ok"
+    good.mkdir()
+    assert runner_utils._assert_realpath_contained(good, root) == good
