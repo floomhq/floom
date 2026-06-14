@@ -1917,19 +1917,11 @@ def _runner_key(config: Optional[WorkerConfig]) -> str:
 
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
-    bundle_path = config.runtime.bundle_path if config and config.runtime else None
-    if bundle_path:
-        raw_path = Path(bundle_path)
-        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
-    else:
-        target = WORKERS_DIR.joinpath(worker_id)
-    resolved = target.resolve()
-    allowed_root = WORKERS_DIR.parent.resolve()
-    try:
-        resolved.relative_to(allowed_root)
-    except ValueError as exc:
-        raise ValueError(f"Path traversal attempt: {resolved}") from exc
-    return resolved
+    # Delegate to the canonical resolver so the var/workers vs engine/workers
+    # bundle_path drift (#1048 follow-up) is handled identically everywhere.
+    from runner_utils import _resolve_worker_bundle_dir, _safe_path
+
+    return _resolve_worker_bundle_dir(WORKERS_DIR, worker_id, config, _safe_path)
 
 
 def _snapshot_worker_bundle(run_id: str, worker_id: str, config: Optional[WorkerConfig]) -> Optional[str]:
