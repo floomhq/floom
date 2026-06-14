@@ -140,3 +140,57 @@ def test_agent_driver_fallback_uses_default_agent_model(monkeypatch, tmp_path):
     assert result.status == "success"
     assert captured["model"] == llm.agent_model(DEFAULT_WORKER_AGENT_MODEL)
     assert captured["model"] != "gpt-5-mini"
+
+
+# ---------------------------------------------------------------------------
+# Cloud regression: WORKEROS_WORKER_AGENT_MODEL arrives AFTER `from models import`
+# (load_dotenv in main.py runs after the import block). A frozen module-level
+# constant would stay "gpt-5.5" (→ OpenAI, dead key, "exceeded your current
+# quota") while Emily, which reads WORKEROS_CHAT_MODEL lazily, works. These tests
+# pin the lazy resolution so workers route to Bedrock like Emily.
+# ---------------------------------------------------------------------------
+
+_BEDROCK = "bedrock/us.anthropic.claude-sonnet-4-6"
+
+
+def test_default_worker_agent_model_resolves_bedrock_when_env_set(monkeypatch):
+    """Env set after import must win — proves no import-time freeze."""
+    from models import default_worker_agent_model
+
+    monkeypatch.setenv("WORKEROS_WORKER_AGENT_MODEL", _BEDROCK)
+    assert default_worker_agent_model() == _BEDROCK
+
+
+def test_default_worker_agent_model_falls_back_to_openai_when_unset(monkeypatch):
+    from models import default_worker_agent_model
+
+    monkeypatch.delenv("WORKEROS_WORKER_AGENT_MODEL", raising=False)
+    assert default_worker_agent_model() == "gpt-5.5"
+
+
+def test_worker_contract_picks_up_bedrock_env_after_import(monkeypatch):
+    """A freshly built contract with no explicit model resolves to the live env
+    value, not the import-time snapshot. This is the exact cloud path."""
+    from models import WorkerContract, worker_contract_to_worker_config
+
+    monkeypatch.setenv("WORKEROS_WORKER_AGENT_MODEL", _BEDROCK)
+    contract = WorkerContract(**_contract_payload())
+    assert contract.model == _BEDROCK
+
+    config = worker_contract_to_worker_config(contract, "default-model-worker")
+    assert config.runtime.model == _BEDROCK
+
+
+def test_explicit_worker_model_choice_is_preserved(monkeypatch):
+    """A worker that intentionally pins a model keeps it even when the env
+    default points elsewhere."""
+    from models import WorkerContract, worker_contract_to_worker_config
+
+    monkeypatch.setenv("WORKEROS_WORKER_AGENT_MODEL", _BEDROCK)
+    payload = _contract_payload()
+    payload["model"] = "gpt-5.5"
+    contract = WorkerContract(**payload)
+    assert contract.model == "gpt-5.5"
+
+    config = worker_contract_to_worker_config(contract, "default-model-worker")
+    assert config.runtime.model == "gpt-5.5"

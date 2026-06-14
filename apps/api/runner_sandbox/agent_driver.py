@@ -31,7 +31,7 @@ from contexts import (
     use_context_scope,
 )
 from models import (
-    DEFAULT_WORKER_AGENT_MODEL,
+    default_worker_agent_model,
     WorkerConfig,
     WorkerResult,
 )
@@ -440,7 +440,7 @@ class AgentDriver(SandboxDriver):
                     )
 
                 force_finish = corrective_retry_used
-                _agent_model = _llm.agent_model(config.runtime.model or _ws_default_model() or DEFAULT_WORKER_AGENT_MODEL)
+                _agent_model = _llm.agent_model(config.runtime.model or _ws_default_model() or default_worker_agent_model())
                 agent = Agent(
                     name=worker_id,
                     instructions=system_prompt,
