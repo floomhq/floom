@@ -37,7 +37,7 @@ def _load_api(monkeypatch, tmp_path):
     monkeypatch.delenv("ALLOWED_ORIGIN_REGEX", raising=False)
     monkeypatch.delenv("WORKEROS_DEV", raising=False)
 
-    reset_prefixes = ("auth.", "db.")
+    reset_prefixes = ("auth.", "db.", "routers")
     reset_exact = {
         "main",
         "auth",
@@ -319,7 +319,7 @@ def test_account_info_strips_internal_ids(monkeypatch, tmp_path):
     client = TestClient(main.app)
     connection_id = _insert_connection(main)
 
-    with patch("main._fetch_composio_account_info") as fetch_info:
+    with patch("routers.connections._fetch_composio_account_info") as fetch_info:
         fetch_info.return_value = {
             "email": "user@example.com",
             "scopes": ["gmail.readonly"],

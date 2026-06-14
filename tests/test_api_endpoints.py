@@ -218,8 +218,14 @@ class TestMcpRunContract(unittest.TestCase):
             runs = _RunsRepo()
             approvals = _ApprovalsRepo()
 
-        with patch.object(app_module, "_get_run_by_explicit_id", return_value=dict(sample)), patch.object(
-            app_module, "get_worker_config_for_run", return_value=None
+        # get_run lives in routers.runs: it resolves _get_run_by_explicit_id in
+        # that module's globals and lazy-imports get_worker_config_for_run from
+        # run_service. Patch the handler's own __globals__ (reload-safe) and the
+        # run_service module — not main's re-exports.
+        import run_service as _rs
+        _ns = app_module.get_run.__globals__
+        with patch.dict(_ns, {"_get_run_by_explicit_id": lambda *a, **k: dict(sample)}), patch.object(
+            _rs, "get_worker_config_for_run", return_value=None
         ):
             result = app_module.get_run(
                 sample["id"],
@@ -921,7 +927,7 @@ class TestApprovalStatusPublisher(unittest.TestCase):
     def test_approve_run_publishes_terminal_status(self):
         run_id = self._insert_pending_approval_run()
 
-        with patch.object(app_module, "_sse_publish") as publish:
+        with patch("routers.approvals._sse_publish") as publish:
             r = client.post(f"/runs/{run_id}/approve")
 
         self.assertEqual(r.status_code, 200)
@@ -934,7 +940,7 @@ class TestApprovalStatusPublisher(unittest.TestCase):
     def test_reject_run_publishes_terminal_status(self):
         run_id = self._insert_pending_approval_run()
 
-        with patch.object(app_module, "_sse_publish") as publish:
+        with patch("routers.approvals._sse_publish") as publish:
             r = client.post(f"/runs/{run_id}/reject", json={"reason": "Not ready"})
 
         self.assertEqual(r.status_code, 200)

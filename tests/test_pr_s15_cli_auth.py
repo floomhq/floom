@@ -46,6 +46,8 @@ def _load_api(monkeypatch, tmp_path):
     for name in list(sys.modules):
         if name in reset_exact or name.startswith(reset_prefixes):
             sys.modules.pop(name, None)
+        for _rn in [n for n in list(sys.modules) if n.startswith("routers")]:
+            sys.modules.pop(_rn, None)
 
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,

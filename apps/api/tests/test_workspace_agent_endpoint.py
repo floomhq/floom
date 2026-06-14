@@ -56,6 +56,8 @@ def client_and_main(monkeypatch, tmp_path):
         "auth.interface", "auth.local", "contexts", "chat_service",
     ]:
         sys.modules.pop(name, None)
+    for name in [n for n in list(sys.modules) if n.startswith("routers")]:
+        sys.modules.pop(name, None)
 
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
@@ -184,7 +186,7 @@ def test_base_persona_and_workspace_instructions_are_separate_editable_layers(cl
     default_base = client.get("/workspace/base")
     assert default_base.status_code == 200
     assert "I'm Emily, your chief of staff." in default_base.text
-    assert "Owner: Federico" not in default_base.text
+    assert "Owner: the operator" not in default_base.text
     assert "personal Chief-of-Staff" not in default_base.text
 
     put_base = client.put(

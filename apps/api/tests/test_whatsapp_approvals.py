@@ -59,6 +59,8 @@ def _load_api(monkeypatch, tmp_path, *, with_creds: bool = True):
     for name in ["main", "db", "models", "worker_registry", "run_service", "chat_service",
                  "channels.whatsapp", "channels.common"]:
         sys.modules.pop(name, None)
+        for _rn in [n for n in list(sys.modules) if n.startswith("routers")]:
+            sys.modules.pop(_rn, None)
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
         stop_scheduler=lambda: None,

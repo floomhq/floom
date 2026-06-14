@@ -75,7 +75,7 @@ def main_env(monkeypatch, tmp_path):
     for name in [
         "db", "db._legacy_sqlite", "db.sqlite", "db.factory", "db.dependency",
         "db.interface", "models", "worker_registry", "runner_utils",
-        "run_service", "main",
+        "run_service", "main", "services.worker_registry_ops",
     ]:
         sys.modules.pop(name, None)
 
@@ -109,18 +109,21 @@ def test_bad_worker_is_skipped_good_workers_persist(main_env, monkeypatch):
     assert {w["id"] for w in workers} == {"good-one", "poison-one", "good-two"}
 
     # Force ONLY the poison worker to fail inside the per-worker persist, the
-    # way a dangling-FK / invalid-manifest worker fails in prod.
-    real_persist_one = main._persist_one_worker
+    # way a dangling-FK / invalid-manifest worker fails in prod. The persist
+    # logic lives in services.worker_registry_ops after the modular refactor;
+    # patch it there so the call inside _persist_discovered_workers is redirected.
+    ops = importlib.import_module("services.worker_registry_ops")
+    real_persist_one = ops._persist_one_worker
 
     def fake_persist_one(conn, w, *, user_id, now):
         if w["id"] == "poison-one":
             raise sqlite3.IntegrityError("FOREIGN KEY constraint failed")
         return real_persist_one(conn, w, user_id=user_id, now=now)
 
-    monkeypatch.setattr(main, "_persist_one_worker", fake_persist_one)
+    monkeypatch.setattr(ops, "_persist_one_worker", fake_persist_one)
 
     with main.get_db() as conn:
-        loaded, skipped = main._persist_discovered_workers(
+        loaded, skipped = ops._persist_discovered_workers(
             conn, workers, user_id="federico"
         )
 
@@ -142,14 +145,16 @@ def test_raise_on_skip_propagates_for_single_worker_save(main_env, monkeypatch):
     main.invalidate_worker_cache()
     workers = main.discover_workers()
 
+    ops = importlib.import_module("services.worker_registry_ops")
+
     def boom(conn, w, *, user_id, now):
         raise sqlite3.IntegrityError("FOREIGN KEY constraint failed")
 
-    monkeypatch.setattr(main, "_persist_one_worker", boom)
+    monkeypatch.setattr(ops, "_persist_one_worker", boom)
 
     with pytest.raises(sqlite3.IntegrityError):
         with main.get_db() as conn:
-            main._persist_discovered_workers(
+            ops._persist_discovered_workers(
                 conn, workers, user_id="federico", raise_on_skip=True
             )
 
@@ -167,7 +172,8 @@ def test_real_fk_violation_is_skipped_not_fatal(main_env, monkeypatch):
     main.invalidate_worker_cache()
     workers = main.discover_workers()
 
-    real_persist_one = main._persist_one_worker
+    ops = importlib.import_module("services.worker_registry_ops")
+    real_persist_one = ops._persist_one_worker
 
     def fk_break(conn, w, *, user_id, now):
         if w["id"] == "fk-broken":
@@ -182,10 +188,10 @@ def test_real_fk_violation_is_skipped_not_fatal(main_env, monkeypatch):
             return
         return real_persist_one(conn, w, user_id=user_id, now=now)
 
-    monkeypatch.setattr(main, "_persist_one_worker", fk_break)
+    monkeypatch.setattr(ops, "_persist_one_worker", fk_break)
 
     with main.get_db() as conn:
-        loaded, skipped = main._persist_discovered_workers(
+        loaded, skipped = ops._persist_discovered_workers(
             conn, workers, user_id="federico"
         )
 

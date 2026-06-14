@@ -35,7 +35,7 @@ function readStoredSecret(): string {
 }
 
 function maskSecret(secret: string): string {
-  // Federico 2026-05-29: show a full-length-style masked key like any other app
+  // the operator 2026-05-29: show a full-length-style masked key like any other app
   // (first 4 + a run of bullets + last 4), not a truncated "924a…fe59". The
   // bullet run is fixed-width so it does not leak the secret's exact length.
   if (!secret) return "<YOUR_OSS_FLOOM_SECRET>";

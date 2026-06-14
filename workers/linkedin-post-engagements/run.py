@@ -194,7 +194,7 @@ def run(inputs: dict, context) -> dict:
     if not api_key:
         raise RuntimeError("APIFY_API_KEY not set; add it via /secrets")
 
-    profile_url = (inputs.get("profile_url") or "https://www.linkedin.com/in/fedeponte/").strip()
+    profile_url = (inputs.get("profile_url") or "https://www.linkedin.com/in/USERNAME/").strip()
     posts_limit = int(inputs.get("posts_limit") or 20)
     recent_days = int(inputs.get("recent_only_days") or 0)
 

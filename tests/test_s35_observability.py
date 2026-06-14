@@ -58,13 +58,16 @@ def test_health_runs_dependency_checks_and_uses_cache(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     calls: list[str] = []
 
-    main._HEALTH_CACHE["checked_at"] = 0.0
-    main._HEALTH_CACHE["payload"] = None
-    monkeypatch.setattr(main, "_health_check_db", lambda: calls.append("db") or {"ok": True})
-    monkeypatch.setattr(main, "_health_check_disk", lambda: calls.append("disk") or {"ok": True})
-    monkeypatch.setattr(main, "_health_check_e2b", lambda: calls.append("e2b") or {"ok": True})
-    monkeypatch.setattr(main, "_health_check_openai", lambda: calls.append("openai") or {"ok": True})
-    monkeypatch.setattr(main, "_health_check_composio", lambda: calls.append("composio") or {"ok": True})
+    # Health checks moved to services.health_ops; _run_health_checks resolves the
+    # per-dep probes via that module's globals, so patch them there (not on main).
+    import services.health_ops as health_ops
+    health_ops._HEALTH_CACHE["checked_at"] = 0.0
+    health_ops._HEALTH_CACHE["payload"] = None
+    monkeypatch.setattr(health_ops, "_health_check_db", lambda: calls.append("db") or {"ok": True})
+    monkeypatch.setattr(health_ops, "_health_check_disk", lambda: calls.append("disk") or {"ok": True})
+    monkeypatch.setattr(health_ops, "_health_check_e2b", lambda: calls.append("e2b") or {"ok": True})
+    monkeypatch.setattr(health_ops, "_health_check_openai", lambda: calls.append("openai") or {"ok": True})
+    monkeypatch.setattr(health_ops, "_health_check_composio", lambda: calls.append("composio") or {"ok": True})
 
     client = TestClient(main.app)
     # #853: detailed checks moved behind admin auth at /health/details; the

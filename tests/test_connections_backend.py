@@ -48,6 +48,12 @@ def _load_api(monkeypatch, tmp_path):
         "auth.local_workspaces",
     ]:
         sys.modules.pop(name, None)
+    # routers.* must reload in lockstep with main/auth: a cached router pins the
+    # previous auth.dependency instance, so dependency_overrides keyed on the
+    # fresh main.get_auth_context would miss its routes (/me), and module-level
+    # router caches (integrations trigger catalog) would leak across tests.
+    for name in [n for n in list(sys.modules) if n.startswith("routers")]:
+        sys.modules.pop(name, None)
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
         stop_scheduler=lambda: None,
@@ -110,7 +116,7 @@ class TestAccountInfoEndpoint:
         conn = _seed_connection(client)
         local_id = conn["id"]
 
-        with patch("main._fetch_composio_account_info") as mock_fetch:
+        with patch("routers.connections._fetch_composio_account_info") as mock_fetch:
             mock_fetch.return_value = {
                 "email": "user@example.com",
                 "scopes": ["https://www.googleapis.com/auth/gmail.readonly"],
@@ -149,7 +155,7 @@ class TestAccountInfoEndpoint:
         conn = _seed_connection(client, app_name="linkedin")
         local_id = conn["id"]
 
-        with patch("main._fetch_composio_account_info") as mock_fetch:
+        with patch("routers.connections._fetch_composio_account_info") as mock_fetch:
             mock_fetch.return_value = {
                 "email": "fede@example.com",
                 "scopes": ["r_liteprofile"],
@@ -257,7 +263,7 @@ class TestConnectionsListProjection:
         conn = _seed_connection(client, app_name="slack")
         local_id = conn["id"]
 
-        with patch("main._fetch_composio_account_info") as mock_fetch:
+        with patch("routers.connections._fetch_composio_account_info") as mock_fetch:
             mock_fetch.return_value = {
                 "email": "team@example.com",
                 "scopes": ["channels:read", "chat:write"],
@@ -270,7 +276,7 @@ class TestConnectionsListProjection:
                 headers=AUTH_HEADERS,
             )
 
-        with patch("main._fetch_composio_account_info") as mock_no_call:
+        with patch("routers.connections._fetch_composio_account_info") as mock_no_call:
             list_resp = client.get("/connections", headers=AUTH_HEADERS)
             # Cached scopes keep the list endpoint local.
             mock_no_call.assert_not_called()
@@ -751,7 +757,10 @@ class TestMCPConnections:
                 FOREIGN KEY(skill_version_id) REFERENCES skill_versions(id)
             );
             CREATE TABLE runs (
-                id TEXT PRIMARY KEY
+                id TEXT PRIMARY KEY,
+                worker_id TEXT,
+                status TEXT,
+                created_at TEXT
             );
             CREATE TABLE files (
                 id TEXT PRIMARY KEY,
@@ -872,7 +881,7 @@ class TestConnectionTestEndpoint:
         local_id = conn["id"]
 
         with patch("composio_client.check_status", return_value="enabled"), patch(
-            "main._fetch_composio_account_info"
+            "routers.connections._fetch_composio_account_info"
         ) as mock_info:
             mock_info.return_value = {
                 "email": "user@example.com",

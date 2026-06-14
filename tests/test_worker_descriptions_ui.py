@@ -231,8 +231,8 @@ class TestFolderTreeGrouping:
 
     def _workers(self):
         return [
-            {"id": "cv_writeup", "folder": "Recruiting/NovaSearch"},
-            {"id": "reverse_match_crm", "folder": "Recruiting/NovaSearch"},
+            {"id": "resume_helper", "folder": "Recruiting/TeamB"},
+            {"id": "crm_matcher", "folder": "Recruiting/TeamB"},
             {"id": "dach_compliance", "folder": "Recruiting/Compliance"},
             {"id": "csv_enricher", "folder": "Operations/Data"},
             {"id": "weekly_update", "folder": "Operations/Reporting"},
@@ -255,14 +255,14 @@ class TestFolderTreeGrouping:
         tree = build_folder_tree(self._workers())
         recruiting = next(n for n in tree if n["name"] == "Recruiting")
         child_names = {c["name"] for c in recruiting["children"]}
-        assert child_names == {"Compliance", "NovaSearch"}
+        assert child_names == {"Compliance", "TeamB"}
 
     def test_count_aggregates_all_workers_under_path(self):
         tree = build_folder_tree(self._workers())
         recruiting = next(n for n in tree if n["name"] == "Recruiting")
-        # Recruiting itself = 3 (cv_writeup + reverse_match_crm + dach_compliance)
+        # Recruiting itself = 3 (resume_helper + crm_matcher + dach_compliance)
         assert recruiting["count"] == 3
-        nova = next(c for c in recruiting["children"] if c["name"] == "NovaSearch")
+        nova = next(c for c in recruiting["children"] if c["name"] == "TeamB")
         assert nova["count"] == 2
 
     def test_worker_without_folder_not_in_tree(self):
@@ -414,7 +414,7 @@ def filter_workers(
 class TestTagChipFiltering:
     def _workers(self):
         return [
-            {"id": "cv_writeup", "tags": ["recruiting", "cv", "novasearch"], "folder": "Recruiting/NovaSearch"},
+            {"id": "resume_helper", "tags": ["recruiting", "cv", "teamb"], "folder": "Recruiting/TeamB"},
             {"id": "research_brief", "tags": ["research", "brief"], "folder": "Research"},
             {"id": "weekly_update", "tags": ["reporting", "operations"], "folder": "Operations/Reporting"},
         ]
@@ -426,26 +426,26 @@ class TestTagChipFiltering:
     def test_tag_filter_matches_correct_workers(self):
         result = filter_workers(self._workers(), "recruiting", None)
         assert len(result) == 1
-        assert result[0]["id"] == "cv_writeup"
+        assert result[0]["id"] == "resume_helper"
 
     def test_tag_filter_no_match_returns_empty(self):
         result = filter_workers(self._workers(), "finance", None)
         assert len(result) == 0
 
     def test_folder_filter_top_level_includes_children(self):
-        """Filtering on 'Recruiting' includes Recruiting/NovaSearch workers."""
+        """Filtering on 'Recruiting' includes Recruiting/TeamB workers."""
         result = filter_workers(self._workers(), None, "Recruiting")
         assert len(result) == 1
-        assert result[0]["id"] == "cv_writeup"
+        assert result[0]["id"] == "resume_helper"
 
     def test_folder_filter_exact_subfolder(self):
-        result = filter_workers(self._workers(), None, "Recruiting/NovaSearch")
+        result = filter_workers(self._workers(), None, "Recruiting/TeamB")
         assert len(result) == 1
 
     def test_combined_tag_and_folder_filter(self):
         result = filter_workers(self._workers(), "cv", "Recruiting")
         assert len(result) == 1
-        assert result[0]["id"] == "cv_writeup"
+        assert result[0]["id"] == "resume_helper"
 
     def test_combined_tag_folder_mismatch_returns_empty(self):
         result = filter_workers(self._workers(), "research", "Recruiting")
@@ -488,7 +488,7 @@ def test_api_workers_list_exposes_t2b_fields(tmp_db, monkeypatch):
     assert resp.status_code == 200, resp.text
     workers = resp.json()
     assert isinstance(workers, list)
-    # csv_enricher: cv_writeup was curated out of the stock sets by #940
+    # csv_enricher: resume_helper was curated out of the stock sets by #940
     # (tenant-specific), so it no longer appears for users; csv_enricher is a
     # genuine ship-with-product template with the same T2-B metadata shape.
     cv = next((w for w in workers if w["id"] == "csv_enricher"), None)

@@ -254,6 +254,8 @@ def test_agent_writeback_persists_writeable_context(monkeypatch, tmp_path):
         "runner_sandbox.agent_driver",
     ]:
         sys.modules.pop(name, None)
+    for _n in [n for n in list(sys.modules) if n.startswith("routers")]:
+        sys.modules.pop(_n, None)
     contexts = importlib.import_module("contexts")
     importlib.reload(contexts)
     # Reload agent_capabilities AFTER contexts so its bound context_dir /
@@ -345,6 +347,8 @@ def _load_app(monkeypatch, tmp_path, *, contexts_dir=None, user_header_scope=Fal
         "run_service", "main",
     ]:
         sys.modules.pop(name, None)
+    for _n in [n for n in list(sys.modules) if n.startswith("routers")]:
+        sys.modules.pop(_n, None)
 
     db = importlib.import_module("db")
     db.init_db()

@@ -29,6 +29,20 @@ def _isolate_test_globals():
         get_auth_provider.cache_clear()
     except Exception:
         pass
+    # The failed-login lockout store moved from main into services.auth_ops, which
+    # is not reloaded per-test the way main.py is; clear it so lockout state from
+    # one test never bleeds into the next (e.g. test_password_policy_lockout).
+    _auth_ops = sys.modules.get("services.auth_ops")
+    _store = getattr(_auth_ops, "_failed_login_attempts", None)
+    if isinstance(_store, dict):
+        _store.clear()
+    # The /health 60s result cache moved into services.health_ops (not reloaded
+    # per-test); reset it so a cached health payload never bleeds across tests.
+    _health_ops = sys.modules.get("services.health_ops")
+    _hc = getattr(_health_ops, "_HEALTH_CACHE", None)
+    if isinstance(_hc, dict):
+        _hc["checked_at"] = 0.0
+        _hc["payload"] = None
     try:
         yield
     finally:
@@ -36,3 +50,19 @@ def _isolate_test_globals():
             os.environ.pop("WORKEROS_MIN_FREE_DISK_BYTES", None)
         else:
             os.environ["WORKEROS_MIN_FREE_DISK_BYTES"] = disk_threshold
+        # Drop any EMPTY stub modules a test left behind. Some fixtures
+        # (test_sqlite_viewer_777, test_brain_tags_780, test_contexts_sensitive)
+        # install bare ModuleType stubs for openai/anthropic/e2b/etc. via
+        # sys.modules.setdefault. If one survives, a later test's
+        # `from openai import AsyncOpenAI` (through the agents SDK, used by
+        # test_web_search / test_llm) fails with ModuleNotFound. Popping the bare
+        # stub here forces the real package to reimport on next use.
+        import types as _types
+        for _m in (
+            "openai", "anthropic", "e2b", "e2b.sandbox", "composio_openai",
+            "composio_core", "slowapi", "slowapi.util", "slowapi.errors",
+            "resend", "supabase", "gotrue",
+        ):
+            _mod = sys.modules.get(_m)
+            if isinstance(_mod, _types.ModuleType) and not getattr(_mod, "__file__", None):
+                sys.modules.pop(_m, None)

@@ -1,7 +1,7 @@
 """Regression tests for the legacy/bootstrap owner binding-validation bug.
 
 Incident (2026-06-10): Phase-3 hardening in whatsapp.py checked
-``SELECT 1 FROM users WHERE id = ?`` for the bound user_id.  On Federico's
+``SELECT 1 FROM users WHERE id = ?`` for the bound user_id.  On the operator's
 live install the binding is user_id="federico" (bootstrap id), which has NO
 row in the users table even though the table is non-empty (real accounts are
 UUIDs).  The check wrongly reset the binding to pending mid-walk.
@@ -68,6 +68,8 @@ def _load_api(monkeypatch, tmp_path, *, bootstrap_id: str = "federico"):
         if name in ("main", "db", "models", "worker_registry", "run_service", "chat_service") \
                 or name.startswith("channels") or name.startswith("auth"):
             sys.modules.pop(name, None)
+        for _rn in [x for x in list(sys.modules) if x.startswith('routers')]:
+            sys.modules.pop(_rn, None)
     sys.modules["scheduler"] = types.SimpleNamespace(
         start_scheduler=lambda: None,
         stop_scheduler=lambda: None,
@@ -116,13 +118,13 @@ def test_wa_bootstrap_user_non_empty_table_routes_to_agent(monkeypatch, tmp_path
         conn.execute(
             "INSERT INTO whatsapp_sender_bindings "
             "(wa_id, user_id, profile_name, status, workspace_id, created_at, updated_at) "
-            "VALUES ('4915167609512', 'federico', 'Federico', 'active', 'local-default', ?, ?)",
+            "VALUES ('4915167609512', 'federico', 'the operator', 'active', 'local-default', ?, ?)",
             (now, now),
         )
 
     asyncio.run(
         main._handle_whatsapp_message(
-            wa_id="4915167609512", text="test", message_id="wamid.BOOT1", profile_name="Federico"
+            wa_id="4915167609512", text="test", message_id="wamid.BOOT1", profile_name="the operator"
         )
     )
 
@@ -159,13 +161,13 @@ def test_wa_bootstrap_user_empty_table_routes_to_agent(monkeypatch, tmp_path):
         conn.execute(
             "INSERT INTO whatsapp_sender_bindings "
             "(wa_id, user_id, profile_name, status, workspace_id, created_at, updated_at) "
-            "VALUES ('4915167609512', 'federico', 'Federico', 'active', 'local-default', ?, ?)",
+            "VALUES ('4915167609512', 'federico', 'the operator', 'active', 'local-default', ?, ?)",
             (now, now),
         )
 
     asyncio.run(
         main._handle_whatsapp_message(
-            wa_id="4915167609512", text="test", message_id="wamid.BOOT2", profile_name="Federico"
+            wa_id="4915167609512", text="test", message_id="wamid.BOOT2", profile_name="the operator"
         )
     )
 

@@ -1,5 +1,5 @@
 schema_version: '0.3'
-is_example: false
+is_example: true
 name: gmail-inbox-manager
 title: Gmail Inbox Manager
 description: Daily Gmail cleaner that applies inbox rules, archives low-value messages, labels matching mail, and writes a markdown digest.

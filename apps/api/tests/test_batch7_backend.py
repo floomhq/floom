@@ -7,6 +7,7 @@ Run from repo root:
     cd apps/api && python3 -m pytest tests/test_batch7_backend.py -v
 """
 from pathlib import Path
+from tests._api_source import api_source
 
 MAIN_PY = Path(__file__).resolve().parents[1] / "main.py"
 
@@ -78,7 +79,7 @@ def test_551_gate_names_missing_secrets_in_detail():
 
 def test_561_run_detail_parses_input_json():
     """The run detail endpoint must read input_json from the DB row, not return {}."""
-    src = MAIN_PY.read_text()
+    src = api_source()
     # Must reference input_json from the run row
     assert "input_json" in src, (
         "main.py must reference input_json from the DB row"
@@ -94,7 +95,7 @@ def test_561_run_detail_parses_input_json():
 
 def test_561_run_detail_not_hardcoded_empty():
     """RunDetail constructor must not pass input={} as a literal — must use the parsed variable."""
-    src = MAIN_PY.read_text()
+    src = api_source()
     # Look specifically for `input={}` as a keyword argument (not `run_input = {}`)
     # by checking for the pattern `input={}` where input is a kwarg, not an assignment
     import re
@@ -108,7 +109,7 @@ def test_561_run_detail_not_hardcoded_empty():
 
 def test_561_run_input_variable_passed_to_rundetail():
     """The parsed run_input variable must be passed to the RunDetail constructor."""
-    src = MAIN_PY.read_text()
+    src = api_source()
     assert "input=run_input" in src, (
         "RunDetail must receive input=run_input (the parsed value), not a literal"
     )
