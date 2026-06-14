@@ -512,38 +512,56 @@ def _safe_context_tar_member(member_name: str) -> PurePosixPath:
 
 
 def _extract_context_tar(raw_tar: bytes, target_dir: Path) -> None:
-    tmp_dir = CONTEXTS_DIR / f".{target_dir.name}.tmp.{os.getpid()}.{threading.get_ident()}"
-    if tmp_dir.exists():
-        shutil.rmtree(tmp_dir)
-    tmp_dir.mkdir(parents=True)
-    try:
-        with tarfile.open(fileobj=io.BytesIO(raw_tar), mode="r:*") as archive:
-            for member in archive.getmembers():
-                try:
-                    rel = _safe_context_tar_member(member.name)
-                except ValueError:
-                    continue
-                if member.isdir():
-                    (tmp_dir / rel.as_posix()).mkdir(parents=True, exist_ok=True)
-                    continue
-                if not member.isfile():
-                    continue
-                extracted = archive.extractfile(member)
-                if extracted is None:
-                    continue
-                destination = (tmp_dir / rel.as_posix()).resolve()
-                try:
-                    destination.relative_to(tmp_dir.resolve())
-                except ValueError:
-                    continue
-                destination.parent.mkdir(parents=True, exist_ok=True)
-                destination.write_bytes(extracted.read())
-        if target_dir.exists():
-            shutil.rmtree(target_dir)
-        os.replace(tmp_dir, target_dir)
-    finally:
-        if tmp_dir.exists():
-            shutil.rmtree(tmp_dir, ignore_errors=True)
+    """Merge the sandbox's writeback snapshot onto the live context dir.
+
+    #1020: this used to extract to a tmp dir, ``rmtree(target_dir)``, then swap
+    the whole tree in. But the sandbox snapshot is frozen at run START, so any
+    file written to the LIVE store DURING the run — e.g. feedback captured by
+    Emily while a `distill` worker was running — was erased on completion.
+    Feedback was silently lost, breaking the whole loop.
+
+    We now OVERLAY instead of replace: every file in the tar is written over its
+    counterpart in ``target_dir`` (atomically, per file), and files already in
+    ``target_dir`` that are NOT in the tar are left untouched. The worker still
+    fully controls the files it writes; it just can no longer clobber a sibling
+    it never saw. Deletions made inside the sandbox intentionally do NOT
+    propagate — correct for the accumulate-style stores this path serves
+    (feedback, memory). Path-traversal members are skipped as before.
+    """
+    target_dir.mkdir(parents=True, exist_ok=True)
+    target_root = target_dir.resolve()
+    with tarfile.open(fileobj=io.BytesIO(raw_tar), mode="r:*") as archive:
+        for member in archive.getmembers():
+            try:
+                rel = _safe_context_tar_member(member.name)
+            except ValueError:
+                continue
+            if member.isdir():
+                (target_dir / rel.as_posix()).mkdir(parents=True, exist_ok=True)
+                continue
+            if not member.isfile():
+                continue
+            extracted = archive.extractfile(member)
+            if extracted is None:
+                continue
+            destination = (target_dir / rel.as_posix()).resolve()
+            try:
+                destination.relative_to(target_root)
+            except ValueError:
+                continue
+            destination.parent.mkdir(parents=True, exist_ok=True)
+            # Atomic per-file replace: a concurrent reader never sees a
+            # half-written file, and a mid-merge failure leaves the files
+            # written so far (and every untouched sibling) intact.
+            tmp_file = destination.parent / (
+                f".{destination.name}.tmp.{os.getpid()}.{threading.get_ident()}"
+            )
+            try:
+                tmp_file.write_bytes(extracted.read())
+                os.replace(tmp_file, destination)
+            finally:
+                if tmp_file.exists():
+                    tmp_file.unlink()
 
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
