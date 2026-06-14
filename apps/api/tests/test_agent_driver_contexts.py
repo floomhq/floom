@@ -10,6 +10,7 @@ tenant's, and a worker WITHOUT the attachment cannot read the pack at all.
 from __future__ import annotations
 
 import importlib
+import json
 import sys
 from pathlib import Path
 
@@ -57,6 +58,8 @@ def driver_env(monkeypatch, tmp_path):
     # iter_context_files, …) bound at import time; reload it AFTER contexts so it
     # picks up the env-driven CONTEXTS_DIR, then reload agent_driver which imports
     # from it.
+    from runner_sandbox import memory_context as memory_context_mod
+    importlib.reload(memory_context_mod)
     from runner_sandbox import agent_capabilities as agent_capabilities_mod
     importlib.reload(agent_capabilities_mod)
     from runner_sandbox import agent_driver as agent_driver_mod
@@ -72,6 +75,7 @@ def driver_env(monkeypatch, tmp_path):
     # Restore module state for sibling tests.
     importlib.reload(contexts_mod)
     importlib.reload(runner_utils_mod)
+    importlib.reload(memory_context_mod)
     importlib.reload(agent_capabilities_mod)
     importlib.reload(agent_driver_mod)
 
@@ -185,3 +189,96 @@ def test_stage_contexts_does_not_leak_cross_tenant(driver_env):
     assert content.strip() == "BOB SECRET"
     # bob's run never staged alice's facts subtree.
     assert not (context_root / "research-notes" / "facts").exists()
+
+
+def test_memory_enabled_worker_reads_and_persists_learning_across_runs(driver_env):
+    """`memory: enabled` creates a writable memory pack, stages it for reads,
+    and persists learnings written through the default memory tool."""
+    agent_driver_mod = driver_env["agent_driver"]
+    artifacts_dir = driver_env["artifacts_dir"]
+    contexts_dir = driver_env["contexts_dir"]
+    bundle_dir = driver_env["tmp_path"] / "workers" / "w-memory"
+    bundle_dir.mkdir()
+    (bundle_dir / "SKILL.md").write_text("Use memory when relevant.\n", encoding="utf-8")
+
+    from models import WorkerConfig, WorkerRuntime, WorkerTrigger
+
+    config = WorkerConfig(
+        id="memory-worker",
+        name="Memory Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(type="agent", entrypoint="SKILL.md", mode="agent"),
+        memory="enabled",
+        outputs=[],
+    )
+    memory_name = "memory-memory-worker"
+    assert {"name": memory_name, "writeable": True, "source": "local"} in config.contexts
+
+    driver = agent_driver_mod.AgentDriver()
+    logs: list[tuple[str, str]] = []
+    log_fn = lambda msg, level="info": logs.append((level, msg))
+
+    run1_context = artifacts_dir / "run-memory-1" / "context"
+    run1_context.mkdir(parents=True)
+    staged1 = driver._stage_contexts(
+        config=config,
+        context_root=run1_context,
+        user_id="alice",
+        log_fn=log_fn,
+    )
+
+    assert staged1 == [memory_name]
+    first_read = driver._read_file(bundle_dir, f"context/{memory_name}/MEMORY.md", run1_context)
+    assert first_read["ok"] is True
+    assert "Worker memory" in first_read["content"]
+    prompt = driver._load_system_prompt(bundle_dir, config, staged1)
+    assert "remember_learning" in prompt
+    assert any(
+        (tool.get("function") or {}).get("name") == "remember_learning"
+        for tool in driver._tool_schemas(config)
+    )
+
+    remembered = driver._handle_tool(
+        "remember_learning",
+        {"learning": "Prefer concise recruiter summaries.", "source": "test"},
+        worker_id="memory-worker",
+        run_id="run-memory-1",
+        inputs={},
+        secrets={},
+        log_fn=log_fn,
+        trace_id="trace-memory-1",
+        config=config,
+        bundle_dir=bundle_dir,
+        input_dir=artifacts_dir / "run-memory-1" / "inputs",
+        output_dir=artifacts_dir / "run-memory-1" / "outputs",
+        outputs={},
+        artifacts=[],
+        timeout_seconds=30,
+        context_dir=run1_context,
+        user_id="alice",
+    )
+    assert remembered["ok"] is True
+
+    driver._persist_writeable_contexts(
+        config=config,
+        context_root=run1_context,
+        user_id="alice",
+        log_fn=log_fn,
+    )
+
+    persisted = contexts_dir / "alice" / memory_name / "learnings.jsonl"
+    rows = [json.loads(line) for line in persisted.read_text(encoding="utf-8").splitlines()]
+    assert rows[-1]["learning"] == "Prefer concise recruiter summaries."
+
+    run2_context = artifacts_dir / "run-memory-2" / "context"
+    run2_context.mkdir(parents=True)
+    staged2 = driver._stage_contexts(
+        config=config,
+        context_root=run2_context,
+        user_id="alice",
+        log_fn=log_fn,
+    )
+    assert staged2 == [memory_name]
+    second_read = driver._read_file(bundle_dir, f"context/{memory_name}/learnings.jsonl", run2_context)
+    assert second_read["ok"] is True
+    assert "Prefer concise recruiter summaries." in second_read["content"]
