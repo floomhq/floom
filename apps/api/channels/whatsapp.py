@@ -123,7 +123,7 @@ def _whatsapp_claim_url(token: str) -> str:
     base = (
         os.environ.get("WORKERS_FRONTEND_URL")
         or os.environ.get("WORKEROS_PUBLIC_URL")
-        or "https://workers.floom.dev"
+        or "http://localhost:3000"
     ).rstrip("/")
     return f"{base}/settings?whatsapp_claim={urllib.parse.quote(token)}"
 
@@ -131,8 +131,8 @@ def _whatsapp_claim_url(token: str) -> str:
 def _public_api_base_url() -> str:
     """Public base URL of THIS API host — the host that actually serves /c/{token}.
 
-    The /c/ short-link redirect route lives on the FastAPI app (served at
-    workers-api.floom.dev), NOT on the Next.js web app (workers.floom.dev).
+    The /c/ short-link redirect route lives on the FastAPI app (served at the
+    API base URL), NOT on the Next.js web app (the frontend base URL).
     Building the short link on the frontend base produced a dead link that
     404'd / bounced to /login.  Mirrors main._public_api_base_url and
     channels.slack._public_api_base_url.
@@ -141,7 +141,7 @@ def _public_api_base_url() -> str:
         os.environ.get("WORKEROS_PUBLIC_API_URL")
         or os.environ.get("WORKEROS_API_URL")
         or os.environ.get("WORKERS_API_URL")
-        or "https://workers-api.floom.dev"
+        or "http://localhost:8000"
     ).rstrip("/")
 
 

@@ -127,7 +127,7 @@ class ConnectionInitResponse(BaseModel):
 
 def _get_callback_url() -> str:
     """Build the OAuth callback URL for Composio to redirect to."""
-    base = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    base = os.environ.get("WORKERS_FRONTEND_URL", "http://localhost:3000")
     return f"{base}/connections/callback"
 
 
@@ -908,7 +908,7 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
     """
     from fastapi.responses import RedirectResponse
 
-    frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "http://localhost:3000")
     # The floom UUID of the row the user should land on / see highlighted, plus
     # the app slug, are forwarded to the connections page for post-connect
     # feedback ("Connected <App> as <email>"). Filled in below once known.
