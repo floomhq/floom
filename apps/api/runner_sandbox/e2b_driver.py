@@ -46,6 +46,8 @@ MAX_RESULT_JSON_BYTES = 5 * 1024 * 1024  # 5 MiB
 # into memory (extracted.read()), so cap both per-member and total bytes.
 MAX_CONTEXT_TAR_MEMBER_BYTES = 100 * 1024 * 1024  # 100 MiB per member
 MAX_CONTEXT_TAR_TOTAL_BYTES = 250 * 1024 * 1024  # 250 MiB total per extraction
+E2B_COMMAND_REQUEST_TIMEOUT_BUFFER_SECONDS = 60
+E2B_INSTALL_COMMAND_MIN_REQUEST_TIMEOUT_SECONDS = 300
 _OOM_EXIT_CODES = {137, -9}
 _OOM_MARKERS = (
     "code 137",
@@ -512,6 +514,18 @@ def _safe_path(base: Path, *parts: str) -> Path:
 def _install_timeout_for_run(timeout_seconds: int) -> int:
     """Give large real-engine bundles enough time to install dependencies."""
     return max(MIN_INSTALL_TIMEOUT_SECONDS, min(int(timeout_seconds), MAX_RUN_TIMEOUT_SECONDS))
+
+
+def _e2b_command_request_timeout(timeout_seconds: int | float) -> float:
+    """HTTP request timeout for E2B commands; separate from execution timeout."""
+    return float(timeout_seconds) + E2B_COMMAND_REQUEST_TIMEOUT_BUFFER_SECONDS
+
+
+def _e2b_install_request_timeout(install_timeout: int) -> float:
+    return max(
+        E2B_INSTALL_COMMAND_MIN_REQUEST_TIMEOUT_SECONDS,
+        _e2b_command_request_timeout(install_timeout),
+    )
 
 
 def _sandbox_lifetime_timeout(timeout_seconds: int, install_timeout: int) -> int:
@@ -1085,6 +1099,7 @@ class E2BSandboxDriver(SandboxDriver):
                 install_result = sandbox.commands.run(
                     f"pip install -q -r {workdir}/requirements.txt",
                     timeout=install_timeout,
+                    request_timeout=_e2b_install_request_timeout(install_timeout),
                 )
                 if install_result.exit_code != 0:
                     err = (
@@ -1105,6 +1120,7 @@ class E2BSandboxDriver(SandboxDriver):
                 npm_install_result = sandbox.commands.run(
                     f"cd {workdir} && npm install --omit=dev --no-audit --no-fund --loglevel=error",
                     timeout=install_timeout,
+                    request_timeout=_e2b_install_request_timeout(install_timeout),
                 )
                 if npm_install_result.exit_code != 0:
                     err = (
@@ -1161,6 +1177,7 @@ class E2BSandboxDriver(SandboxDriver):
                 on_stdout=on_stdout,
                 on_stderr=on_stderr,
                 timeout=float(effective_timeout_seconds),
+                request_timeout=_e2b_command_request_timeout(effective_timeout_seconds),
             )
 
             # E2B streams stdout/stderr through callbacks while the process is
