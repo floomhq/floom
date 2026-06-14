@@ -11,6 +11,21 @@ permissions:
   contents: read
 
 jobs:
+  python-lint:
+    name: Python lint (ruff)
+    runs-on: [self-hosted, linux, x64, workeros-ci]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: pip install ruff==0.15.17
+      - name: Ruff check
+        run: ruff check .
+
   api-tests:
     name: API tests (pytest)
     runs-on: [self-hosted, linux, x64, workeros-ci]
