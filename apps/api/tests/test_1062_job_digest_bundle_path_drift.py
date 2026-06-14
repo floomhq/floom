@@ -105,3 +105,52 @@ def test_basename_fallback_still_rejects_traversal_in_basename(tmp_path):
     assert resolved == (workers_dir / "passwd").resolve()
     # crucially it did NOT return /etc/passwd
     assert resolved != Path("/etc/passwd")
+
+
+def test_stale_absolute_resolves_under_extra_root_when_listed(tmp_path, monkeypatch):
+    """The real cloud case: job-digest's bundle lives ONLY under var/workers.
+    When that root is listed in FLOOM_EXTRA_WORKERS_DIRS and the dir exists, the
+    stored absolute path resolves there instead of an absent engine/ basename."""
+    import runner_utils
+
+    workers_dir = _engine_workers(tmp_path)  # engine/workers (no job-digest)
+    var_workers = tmp_path / "var" / "workers"
+    bundle = var_workers / "job-digest"
+    bundle.mkdir(parents=True)
+
+    monkeypatch.setenv("FLOOM_EXTRA_WORKERS_DIRS", str(var_workers))
+    cfg = _Config(str(bundle))
+    resolved = runner_utils._resolve_worker_bundle_dir(workers_dir, "job-digest", cfg, _safe_path)
+    assert resolved == bundle.resolve()
+
+
+def test_extra_root_not_listed_falls_back_to_basename(tmp_path, monkeypatch):
+    """Without the env allow-list, a var/workers absolute path is NOT honoured
+    (no silent trust of arbitrary roots); it falls back to basename under engine."""
+    import runner_utils
+
+    workers_dir = _engine_workers(tmp_path)
+    var_workers = tmp_path / "var" / "workers"
+    bundle = var_workers / "job-digest"
+    bundle.mkdir(parents=True)
+
+    monkeypatch.delenv("FLOOM_EXTRA_WORKERS_DIRS", raising=False)
+    cfg = _Config(str(bundle))
+    resolved = runner_utils._resolve_worker_bundle_dir(workers_dir, "job-digest", cfg, _safe_path)
+    assert resolved == (workers_dir / "job-digest").resolve()
+    assert resolved != bundle.resolve()
+
+
+def test_extra_root_listed_but_dir_absent_falls_back(tmp_path, monkeypatch):
+    """Allow-listed root but the bundle dir doesn't exist there → basename fallback,
+    not a non-existent path under the extra root."""
+    import runner_utils
+
+    workers_dir = _engine_workers(tmp_path)
+    var_workers = tmp_path / "var" / "workers"
+    var_workers.mkdir(parents=True)  # root exists, but no job-digest inside
+
+    monkeypatch.setenv("FLOOM_EXTRA_WORKERS_DIRS", str(var_workers))
+    cfg = _Config(str(var_workers / "job-digest"))
+    resolved = runner_utils._resolve_worker_bundle_dir(workers_dir, "job-digest", cfg, _safe_path)
+    assert resolved == (workers_dir / "job-digest").resolve()
