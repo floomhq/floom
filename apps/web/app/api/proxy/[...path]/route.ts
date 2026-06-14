@@ -13,6 +13,48 @@ function getApiBase(): string | null {
   return apiBase ? apiBase : null;
 }
 
+// #1044 — the upstream API can return a 3xx with an attacker-influenced
+// `Location`. Forwarding it verbatim is an open redirect. Allow only:
+//   - relative / same-app-origin locations (forwarded unchanged), and
+//   - backend-origin locations (rewritten to a path relative to the app, so the
+//     browser stays on the app origin — the intended shape for OAuth callbacks).
+// Anything else (external host, protocol-relative //evil.com, scheme downgrade)
+// is dropped so the redirect is neutralized.
+function safeProxyLocation(
+  location: string,
+  requestUrl: string,
+  apiBase: string | null,
+): string | null {
+  if (!location) return null;
+  let appOrigin: string;
+  try {
+    appOrigin = new URL(requestUrl).origin;
+  } catch {
+    return null;
+  }
+  // Resolving against the app origin: a genuinely relative location resolves to
+  // the app origin; a protocol-relative or absolute one resolves to its own host.
+  let resolved: URL;
+  try {
+    resolved = new URL(location, appOrigin);
+  } catch {
+    return null;
+  }
+  if (resolved.origin === appOrigin) return location;
+  let apiOrigin: string | null = null;
+  if (apiBase) {
+    try {
+      apiOrigin = new URL(apiBase).origin;
+    } catch {
+      apiOrigin = null;
+    }
+  }
+  if (apiOrigin && resolved.origin === apiOrigin) {
+    return resolved.pathname + resolved.search + resolved.hash;
+  }
+  return null;
+}
+
 async function handler(
   req: NextRequest,
   { params }: { params: Promise<{ path: string[] }> }
@@ -117,7 +159,10 @@ async function handler(
       : "private, no-store, max-age=0",
   );
   const location = upstream.headers.get("location");
-  if (location) responseHeaders.set("location", location);
+  if (location) {
+    const safeLocation = safeProxyLocation(location, req.url, apiBase);
+    if (safeLocation) responseHeaders.set("location", safeLocation);
+  }
   // #927: force Secure on any backend cookie we hand to the browser
   forwardSecureSetCookies(upstream, responseHeaders);
 

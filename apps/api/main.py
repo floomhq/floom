@@ -3532,8 +3532,6 @@ class WorkerFilesUpdateRequest(BaseModel):
     files: List[WorkerFilePatch]
 
 
-
-
 def _clone_protected_worker_for_edit(
     worker_id: str,
     edited_files: List[WorkerFilePatch],

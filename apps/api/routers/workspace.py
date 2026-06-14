@@ -936,11 +936,16 @@ def list_workspace_secrets(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[Dict[str, Any]]:
-    from db.sqlite import workspace_actor_id
-
     _require_workspace_admin(auth)
-    actor = workspace_actor_id(_active_workspace_id(request))
-    rows = repos.secrets.list(user_id=actor)
+    workspace_id = _active_workspace_id(request)
+    list_ws = getattr(repos.secrets, "list_workspace_secrets", None)
+    if list_ws is not None:
+        rows = list_ws(workspace_id=workspace_id)
+    else:
+        # Legacy fallback for repos without the workspace-scoped method.
+        from db.sqlite import workspace_actor_id
+
+        rows = repos.secrets.list(user_id=workspace_actor_id(workspace_id))
     # names + status only, never values
     return [{"name": r.get("name"), "status": r.get("status"), "updated_at": r.get("updated_at")} for r in rows]
 
@@ -957,11 +962,26 @@ def set_workspace_secret(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, Any]:
-    from db.sqlite import workspace_actor_id
-
     _require_workspace_admin(auth)
-    actor = workspace_actor_id(_active_workspace_id(request))
-    repos.secrets.set(user_id=actor, name=name, value=payload.value)
+    workspace_id = _active_workspace_id(request)
+    # #1071 — route through the repo-agnostic seam with the REAL authenticated
+    # actor + workspace_id instead of importing the SQLite-specific
+    # workspace_actor_id. Under the cloud Supabase repo, user_id must be a real
+    # auth.users UUID, so passing a synthetic SQLite actor id 500'd.
+    set_ws = getattr(repos.secrets, "set_workspace_secret", None)
+    if set_ws is not None:
+        set_ws(
+            workspace_id=workspace_id,
+            actor_id=auth.user_id,
+            name=name,
+            value=payload.value,
+        )
+    else:
+        from db.sqlite import workspace_actor_id
+
+        repos.secrets.set(
+            user_id=workspace_actor_id(workspace_id), name=name, value=payload.value
+        )
     logger.info("workspace secret %r set by %s (value not logged)", name, auth.user_id)
     return {"ok": True, "name": name}
 
@@ -973,14 +993,18 @@ def delete_workspace_secret(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> None:
+    _require_workspace_admin(auth)
+    workspace_id = _active_workspace_id(request)
+    delete_ws = getattr(repos.secrets, "delete_workspace_secret", None)
+    if delete_ws is not None:
+        delete_ws(workspace_id=workspace_id, name=name)
+        return
     from db.sqlite import workspace_actor_id
 
-    _require_workspace_admin(auth)
-    actor = workspace_actor_id(_active_workspace_id(request))
     delete = getattr(repos.secrets, "delete", None)
     if delete is None:
         raise HTTPException(status_code=501, detail="secret delete not available")
-    delete(user_id=actor, name=name)
+    delete(user_id=workspace_actor_id(workspace_id), name=name)
 
 
 @workspace_router.get("/workspace/settings")
