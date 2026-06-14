@@ -11,7 +11,31 @@ from pydantic import BaseModel, ConfigDict, Field, field_validator, model_valida
 from enum import Enum
 
 
-DEFAULT_WORKER_AGENT_MODEL = os.environ.get("WORKEROS_WORKER_AGENT_MODEL") or "gpt-5.5"
+# The tool-calling worker default. MUST be resolved lazily (at call time), not
+# frozen at import. On the cloud the model env vars arrive via
+# `load_dotenv(~/.config/workeros/api.env, override=False)` in main.py — which
+# runs AFTER `from models import ...`. A module-level constant read here would
+# freeze to the bare "gpt-5.5" fallback (→ OpenAI) before dotenv injects
+# WORKEROS_WORKER_AGENT_MODEL=bedrock/..., so worker runs hit the (dead/quota'd)
+# OpenAI key while Emily — which reads WORKEROS_CHAT_MODEL lazily — works.
+# Resolve at call time so the live env (whatever delivery mechanism set it) wins.
+_WORKER_AGENT_MODEL_FALLBACK = "gpt-5.5"
+
+
+def default_worker_agent_model() -> str:
+    """Resolve the default worker-agent model from the live env, lazily.
+
+    Reads WORKEROS_WORKER_AGENT_MODEL every call so config delivered after import
+    (cloud dotenv path) is honored. Falls back to the bare OpenAI model only when
+    nothing is configured.
+    """
+    return os.environ.get("WORKEROS_WORKER_AGENT_MODEL") or _WORKER_AGENT_MODEL_FALLBACK
+
+
+# Backwards-compatible name. Kept as the import-time snapshot ONLY for callers
+# that need a literal default; live dispatch paths MUST use
+# default_worker_agent_model() instead (see agent_driver / contract builders).
+DEFAULT_WORKER_AGENT_MODEL = default_worker_agent_model()
 
 
 def _model_data(value: Any) -> Any:
@@ -1267,7 +1291,7 @@ class WorkerContract(BaseModel):
     version: str
     entrypoint: Optional[str] = "SKILL.md"
     system_prompt: Optional[str] = None
-    model: Optional[str] = DEFAULT_WORKER_AGENT_MODEL
+    model: Optional[str] = Field(default_factory=default_worker_agent_model)
     entrypoints: Optional[List[WorkerEntrypoint]] = None
     limits: WorkerLimits = Field(default_factory=WorkerLimits)
     targets: List[str] = Field(default_factory=lambda: ["generic"])
@@ -1540,7 +1564,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         runner=runner,
         command=contract.exec.command,
         mode=contract.exec.mode or "agent",
-        model=contract.model or DEFAULT_WORKER_AGENT_MODEL,
+        model=contract.model or default_worker_agent_model(),
         system_prompt=contract.system_prompt,
         disable_tools=list(contract.exec.disable_tools or []),
         limits=_model_data(contract.limits),
@@ -1704,7 +1728,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             outputs=[_legacy_output_to_contract_field(field) for field in config.outputs],
         ),
         system_prompt=config.runtime.system_prompt,
-        model=config.runtime.model or config.model or DEFAULT_WORKER_AGENT_MODEL,
+        model=config.runtime.model or config.model or default_worker_agent_model(),
         limits=config.runtime.limits,
         capabilities=WorkerContractCapabilities(
             secrets=list(config.secrets),
