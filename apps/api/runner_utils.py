@@ -97,6 +97,28 @@ def _safe_path(base: Path, *parts: str) -> Path:
     return target
 
 
+def _assert_realpath_contained(resolved: Path, root: Path) -> Path:
+    """Reject *resolved* if its symlink-followed realpath escapes *root*.
+
+    A-05 parity fix: the accepted-absolute ``bundle_path`` branches of
+    ``_resolve_worker_bundle_dir`` returned a path after only a ``relative_to``
+    check, skipping the realpath/symlink-containment assert that ``_safe_path``
+    applies on every other branch. A symlink *inside* an allowed root that
+    points outside it (``<root>/foo -> /etc``) could therefore be honoured.
+    This routes those branches through the same ``os.path.realpath`` containment
+    guard ``_safe_path`` uses, so a symlink escape is rejected everywhere.
+    """
+    real_target = os.path.realpath(str(resolved))
+    real_root = os.path.realpath(str(root))
+    try:
+        Path(real_target).relative_to(real_root)
+    except ValueError:
+        raise ValueError(
+            f"Path traversal attempt (symlink escape): {resolved}"
+        )
+    return resolved
+
+
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
     return _resolve_worker_bundle_dir(WORKERS_DIR, worker_id, config, _safe_path)
 
@@ -145,18 +167,26 @@ def _resolve_worker_bundle_dir(
         # configured dir. The traversal guard is preserved throughout: only
         # explicitly-listed roots are ever honoured.
         resolved = raw_path.resolve()
+        under_allowed_root = False
         try:
             resolved.relative_to(allowed_root)
-            return resolved
+            under_allowed_root = True
         except ValueError:
             pass
+        if under_allowed_root:
+            # A-05 parity: assert realpath containment (symlink-escape guard)
+            # before honouring the absolute path, matching _safe_path. A symlink
+            # under allowed_root that escapes it must reject, not fall through.
+            return _assert_realpath_contained(resolved, allowed_root)
         for extra in _extra_worker_roots():
             try:
                 resolved.relative_to(extra)
             except ValueError:
                 continue
             if resolved.is_dir():
-                return resolved
+                # A-05 parity: same realpath-containment assert for the
+                # explicitly-allowed extra-root case.
+                return _assert_realpath_contained(resolved, extra)
         logger.warning(
             "worker %s bundle_path %s is outside WORKERS_DIR %s and all extra "
             "worker roots (registration-time drift); resolving by basename "
