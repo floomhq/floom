@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, CheckCircle2, ExternalLink, Loader2, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
+import { capture } from "@/lib/analytics/capture";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ProviderLogos } from "@/components/connections/ProviderLogos";
@@ -46,6 +47,14 @@ function RedirectInner() {
           (c) => c.app_name?.toLowerCase() === slug && c.status === "active"
         );
         if (active) {
+          capture("connection_added", {
+            app: slug,
+            connection_id: active.id,
+            connection_type: "oauth",
+          });
+          capture("channel_installed", {
+            channel: slug,
+          });
           setPhase("done");
           setTimeout(() => router.replace(returnTo), 1200);
           return;
@@ -53,6 +62,11 @@ function RedirectInner() {
       } catch { /* ignore */ }
       if (Date.now() < deadline) {
         pollRef.current = setTimeout(tick, 3000);
+      } else {
+        capture("channel_install_failed", {
+          channel: slug,
+          error_type: "timeout",
+        });
       }
     };
     pollRef.current = setTimeout(tick, 2000);
@@ -92,6 +106,10 @@ function RedirectInner() {
       } catch (caught) {
         if (cancelled) return;
         const message = caught instanceof Error ? caught.message : "Failed to start authorization.";
+        capture("channel_install_failed", {
+          channel: slug,
+          error_type: message.startsWith("api_key_only:") ? "api_key_only" : "api_error",
+        });
         if (message.startsWith("api_key_only:")) {
           setPhase("api_key");
           setError(`${providerName} uses an API key instead of OAuth.`);

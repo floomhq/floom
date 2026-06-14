@@ -19,6 +19,7 @@ vi.mock("@/components/GitWorkspacePanel", () => ({ GitWorkspacePanel: () => <div
 vi.mock("@/components/assistant/SlackConnect", () => ({ SlackConnect: () => <div>Slack connect</div> }));
 
 vi.mock("@/lib/api", () => ({
+  API_BASE: "/api/proxy",
   api: {
     me: apiMock.me,
     workspace: {
