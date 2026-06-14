@@ -15,7 +15,7 @@ import urllib.error
 import urllib.request
 
 
-BASE_URL = os.environ.get("MCP_BASE_URL", "https://workeros-api.floom.dev/api/mcp")
+BASE_URL = os.environ.get("MCP_BASE_URL", "http://localhost:8000/api/mcp")
 API_KEY = (
     os.environ.get("MCP_API_KEY")
     or os.environ.get("WORKSPACE_AGENT_MCP_TOKEN")

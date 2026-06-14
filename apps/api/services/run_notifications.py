@@ -221,13 +221,7 @@ def _open_pinned_webhook(req: urllib.request.Request, *, timeout: int):
     return opener.open(req, timeout=timeout)
 
 
-# Floom email logo (dark rounded-square play-arrow mark + "Floom" wordmark),
-# hosted as a stable absolute https asset on the Floom OS marketing surface.
-# Gmail requires an absolute https <img> src in email (data URIs are stripped).
-FLOOM_EMAIL_LOGO_URL = "https://workers.floom.dev/brand/floom-email-logo@2x.png"
-
-
-def _floom_run_email_html(
+def _run_email_html(
     *,
     worker_name: str,
     worker_id: str,
@@ -236,7 +230,26 @@ def _floom_run_email_html(
     timestamp: str,
     error: str | None,
 ) -> str:
-    """Floom-branded run-notification email (matches the Cloud transactional design)."""
+    """Branded run-notification email. Branding is env-configurable for self-hosters:
+    WORKEROS_BRAND_NAME (default "WorkerOS"), WORKERS_FRONTEND_URL (header/footer link),
+    WORKEROS_EMAIL_LOGO_URL (optional absolute https logo; falls back to the brand name
+    as text), and WORKEROS_SUPPORT_EMAIL (optional footer contact)."""
+    brand = (os.environ.get("WORKEROS_BRAND_NAME") or "WorkerOS").strip() or "WorkerOS"
+    frontend_url = (os.environ.get("WORKERS_FRONTEND_URL") or "http://localhost:3000").rstrip("/")
+    # Gmail requires an absolute https <img> src in email (data URIs are stripped),
+    # so the logo must be a public URL; when unset we render the brand name as text.
+    logo_url = (os.environ.get("WORKEROS_EMAIL_LOGO_URL") or "").strip()
+    support_email = (os.environ.get("WORKEROS_SUPPORT_EMAIL") or "").strip()
+    brand_mark = (
+        f'<img src="{logo_url}" width="120" height="42" alt="{brand}" style="display:block;border:0;outline:none;height:42px;width:120px;max-width:120px;">'
+        if logo_url
+        else f'<span style="font-size:20px;font-weight:700;color:#181716;">{brand}</span>'
+    )
+    footer_contact = (
+        f' &middot; <a href="mailto:{support_email}" style="color:#6f6960;text-decoration:underline;">{support_email}</a>'
+        if support_email
+        else ""
+    )
     is_failed = status_label.lower() == "failed"
     status_color = "#b4231f" if is_failed else "#1f7a4d"
     rows = [
@@ -253,21 +266,21 @@ def _floom_run_email_html(
         for label, value in rows
     )
     return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><title>Floom</title></head>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><title>{brand}</title></head>
 <body style="margin:0;padding:0;background:#fbfaf7;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#181716;-webkit-font-smoothing:antialiased;">
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fbfaf7;"><tr><td align="center" style="padding:40px 16px;">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
 <tr><td style="background:#f1eee8;border:1px solid #ded8cf;border-bottom:none;border-radius:14px 14px 0 0;padding:26px 36px;border-top:2px solid #181716;">
-<a href="https://workers.floom.dev" style="text-decoration:none;display:inline-block;"><img src="{FLOOM_EMAIL_LOGO_URL}" width="120" height="42" alt="Floom" style="display:block;border:0;outline:none;height:42px;width:120px;max-width:120px;"></a>
+<a href="{frontend_url}" style="text-decoration:none;display:inline-block;">{brand_mark}</a>
 </td></tr>
 <tr><td style="background:#fffefb;border:1px solid #ded8cf;border-top:none;border-radius:0 0 14px 14px;padding:36px 40px 40px;">
 <p style="margin:0 0 10px;font-size:11px;line-height:1.4;font-weight:650;letter-spacing:0.12em;text-transform:uppercase;color:#6f6960;">Worker run</p>
 <h1 style="margin:0 0 22px;font-size:22px;line-height:1.25;font-weight:650;color:#181716;">{worker_name} {status_label}</h1>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{row_html}</table>
-<p style="font-size:13px;line-height:1.55;margin:24px 0 0;color:#6f6960;">You're receiving this because a worker run finished in your Floom workspace.</p>
+<p style="font-size:13px;line-height:1.55;margin:24px 0 0;color:#6f6960;">You're receiving this because a worker run finished in your {brand} workspace.</p>
 </td></tr>
 <tr><td style="padding:28px 4px 4px;font-size:12px;line-height:1.6;color:#6f6960;">
-<a href="https://workers.floom.dev" style="color:#181716;font-weight:650;text-decoration:none;">Floom</a> &middot; <a href="mailto:team@floom.dev" style="color:#6f6960;text-decoration:underline;">team@floom.dev</a>
+<a href="{frontend_url}" style="color:#181716;font-weight:650;text-decoration:none;">{brand}</a>{footer_contact}
 </td></tr>
 </table>
 </td></tr></table>
@@ -292,7 +305,7 @@ def _send_email_notification(
     if not to_addrs:
         return
 
-    from_addr = os.environ.get("NOTIFY_FROM_EMAIL", "notifications@workeros.floom.dev").strip()
+    from_addr = os.environ.get("NOTIFY_FROM_EMAIL", "notifications@example.com").strip()
     status_label = "failed" if status == "failed" else "completed"
     subject = (subject_template or "Worker {worker_name} {status}").format(
         worker_name=worker_name, status=status_label, run_id=run_id
@@ -304,7 +317,7 @@ def _send_email_notification(
     safe_status_label = escape(status_label)
     safe_error = escape(error) if error else None
 
-    html = _floom_run_email_html(
+    html = _run_email_html(
         worker_name=safe_worker_name,
         worker_id=safe_worker_id,
         run_id=safe_run_id,

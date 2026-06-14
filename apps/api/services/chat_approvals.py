@@ -50,7 +50,7 @@ def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str
         for row in rows:
             approval_id = row["id"]
             # Authoritative, tokenised deep link on the configured public host so
-            # Emily surfaces a working link instead of inventing a floom.dev URL.
+            # Emily surfaces a working link instead of inventing a fake URL.
             review_url = None
             if approval_id and row["run_id"] and row["owner_id"]:
                 token = _approval_public_token(

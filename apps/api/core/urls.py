@@ -16,7 +16,7 @@ import os
 
 
 def _short_link_base_url() -> str:
-    return (os.environ.get("WORKEROS_SHORT_LINK_BASE_URL") or "https://floom.dev/s").rstrip("/")
+    return (os.environ.get("WORKEROS_SHORT_LINK_BASE_URL") or "http://localhost:3000/s").rstrip("/")
 
 
 def _public_api_base_url() -> str:
@@ -24,18 +24,18 @@ def _public_api_base_url() -> str:
         os.environ.get("WORKEROS_PUBLIC_API_URL")
         or os.environ.get("WORKEROS_API_URL")
         or os.environ.get("WORKERS_API_URL")
-        or "https://workers-api.floom.dev"
+        or "http://localhost:8000"
     )
     return raw.rstrip("/")
 
 
 def _frontend_base_url() -> str:
-    return (os.environ.get("WORKERS_FRONTEND_URL") or "https://workers.floom.dev").rstrip("/")
+    return (os.environ.get("WORKERS_FRONTEND_URL") or "http://localhost:3000").rstrip("/")
 
 
 def _api_public_base() -> str:
-    return (os.environ.get("WORKEROS_API_BASE") or "https://workers-api.floom.dev").rstrip("/")
+    return (os.environ.get("WORKEROS_API_BASE") or "http://localhost:8000").rstrip("/")
 
 
 def _frontend_public_base() -> str:
-    return (os.environ.get("WORKERS_FRONTEND_URL") or "https://workers.floom.dev").rstrip("/")
+    return (os.environ.get("WORKERS_FRONTEND_URL") or "http://localhost:3000").rstrip("/")

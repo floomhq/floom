@@ -90,7 +90,7 @@ from services.run_notifications import (
     _PinnedHTTPSConnection,
     _make_pinned_handler,
     _open_pinned_webhook,
-    _floom_run_email_html,
+    _run_email_html,
     _send_email_notification,
     _fire_alert_webhooks,
     _dispatch_terminal_run_alerts,

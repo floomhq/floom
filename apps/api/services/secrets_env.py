@@ -175,7 +175,7 @@ PLATFORM_SECRET_SPECS: list[PlatformSecretSpec] = [
         "name": "WORKERS_FRONTEND_URL",
         "required": True,
         "default": None,
-        "description": "Base URL for OAuth callbacks (e.g. https://workers.floom.dev)",
+        "description": "Base URL for OAuth callbacks (e.g. https://your-domain.example)",
     },
 ]
 

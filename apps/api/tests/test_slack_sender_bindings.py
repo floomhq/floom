@@ -647,4 +647,4 @@ def test_slack_short_claim_url_defaults_to_api_host(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
 
     short_url = _slack_mod._slack_short_claim_url("deftok2")
-    assert short_url == "https://workers-api.floom.dev/c/deftok2"
+    assert short_url == "http://localhost:8000/c/deftok2"
