@@ -2970,10 +2970,23 @@ class SupabaseApiTokenRepository(_BaseSupabaseRepository):
         token_hash: str,
         workspace_id: str | None = None,
     ) -> dict[str, Any]:
-        resolved_workspace_id = _resolve_workspace_id_for_write(
-            user_id=user_id,
-            explicit_workspace_id=workspace_id,
-        )
+        # #225: _resolve_workspace_id_for_write trusts the raw
+        # x-workeros-workspace contextvar without verifying it points at a real
+        # workspace the caller can use; a stale/invalid header value then
+        # FK-violates api_tokens.workspace_id (NOT NULL + FK -> workspaces) and
+        # surfaces as a bare 500 on POST /auth/tokens. resolve_active_workspace
+        # validates ownership/membership of the requested id (falling back to
+        # the caller's default workspace, lazy-creating if none), guaranteeing a
+        # real workspaces row for the FK.
+        if workspace_id:
+            resolved_workspace_id = workspace_id
+        else:
+            active = workspace_repo.resolve_active_workspace(
+                user_id=user_id,
+                email=None,
+                requested_id=get_active_workspace_id(),
+            )
+            resolved_workspace_id = str(active["id"])
         self._client.table("api_tokens").insert(
             {
                 "user_id": user_id,
