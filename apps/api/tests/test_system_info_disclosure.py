@@ -4,7 +4,8 @@ RCA: GET /system/info returned ``python_version`` and ``started_at`` (process
 start time) to every authenticated caller — reconnaissance data that maps the
 runtime for interpreter-specific exploits and restart tracking.
 
-Fix: the full payload is admin-only; members get ``version`` and ``runner``.
+P2-B (security audit 2026-06-14): fully admin-gate the endpoint; members
+get 403 (version+runner were also recon data, not needed by members).
 
 Run:
     cd apps/api && python -m pytest tests/test_system_info_disclosure.py -v
@@ -14,6 +15,8 @@ from __future__ import annotations
 import importlib
 import sys
 from pathlib import Path
+
+import pytest
 
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
@@ -33,16 +36,16 @@ def _load_main(monkeypatch, tmp_path):
     return importlib.import_module("main")
 
 
-def test_member_does_not_see_runtime_metadata(monkeypatch, tmp_path):
+def test_member_gets_403(monkeypatch, tmp_path):
+    """P2-B: non-admin members must receive 403, not any info payload."""
+    from fastapi import HTTPException
     main = _load_main(monkeypatch, tmp_path)
     from auth.context import AuthContext
 
-    info = main.system_info(auth=AuthContext(user_id="u-1", role="member", auth_method="session"))
+    with pytest.raises(HTTPException) as exc_info:
+        main.system_info(auth=AuthContext(user_id="u-1", role="member", auth_method="session"))
 
-    assert "python_version" not in info
-    assert "started_at" not in info
-    assert info["version"]
-    assert info["runner"] == "e2b"
+    assert exc_info.value.status_code == 403
 
 
 def test_admin_sees_full_payload(monkeypatch, tmp_path):
@@ -55,3 +58,5 @@ def test_admin_sees_full_payload(monkeypatch, tmp_path):
 
     assert "python_version" in info
     assert "started_at" in info
+    assert "version" in info
+    assert "runner" in info
