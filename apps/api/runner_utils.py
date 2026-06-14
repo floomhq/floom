@@ -42,9 +42,22 @@ ARTIFACTS_DIR = Path(os.environ.get("FLOOM_ARTIFACTS_DIR", "../../data/artifacts
 DEFAULT_TIMEOUT_SECONDS = int(os.environ.get("FLOOM_RUN_TIMEOUT", "300"))
 
 def _safe_path(base: Path, *parts: str) -> Path:
-    target = base.joinpath(*parts).resolve()
+    """Join *parts* under *base*, rejecting traversal escapes.
+
+    Containment is checked against the lexically-normalised path (not the
+    symlink-followed realpath) so a symlinked deploy root (e.g. Railway's
+    ``/opt/.../var`` -> ``/data/var``) does not falsely trip the guard on a
+    valid ``<base>/<worker_id>`` path. Absolute parts and ``..`` segments are
+    still rejected.
+    """
+    for part in parts:
+        p = Path(part)
+        if p.is_absolute() or ".." in p.parts:
+            raise ValueError(f"Path traversal attempt: {base.joinpath(*parts)}")
+    norm_base = Path(os.path.normpath(str(base)))
+    target = Path(os.path.normpath(str(norm_base.joinpath(*parts))))
     try:
-        target.relative_to(base.resolve())
+        target.relative_to(norm_base)
     except ValueError:
         raise ValueError(f"Path traversal attempt: {target}")
     return target
