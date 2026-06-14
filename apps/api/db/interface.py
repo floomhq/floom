@@ -332,6 +332,19 @@ class SecretRepository(Protocol):
 
     def resolve(self, *, user_id: str, names: Iterable[str]) -> dict[str, str]: ...
 
+    # #1071 — workspace-scoped secrets. The route passes a real actor_id +
+    # workspace_id rather than a SQLite-encoded synthetic actor, so non-SQLite
+    # repos (e.g. Supabase) can stamp the real owner + active workspace.
+    def list_workspace_secrets(self, *, workspace_id: str) -> list[RowDict]: ...
+
+    def get_workspace_secret(self, *, workspace_id: str, name: str) -> RowDict | None: ...
+
+    def set_workspace_secret(
+        self, *, workspace_id: str, actor_id: str, name: str, value: str, status: str = "set"
+    ) -> RowDict: ...
+
+    def delete_workspace_secret(self, *, workspace_id: str, name: str) -> bool: ...
+
 
 class ApprovalRepository(Protocol):
     def create(self, *, owner_id: str, **fields: Any) -> RowDict: ...
