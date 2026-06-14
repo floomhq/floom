@@ -13,6 +13,7 @@ import shlex
 import shutil
 import tarfile
 import threading
+import time
 from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any, Callable, Dict, Optional
@@ -159,6 +160,81 @@ def _is_e2b_quota_or_rate_limit_error(exc: Exception) -> bool:
         message = str(exc).lower()
         return any(token in message for token in ("billing", "payment", "blocked", "quota"))
     return False
+
+
+def _exception_text(exc: Exception) -> str:
+    parts = [
+        exc.__class__.__name__,
+        str(getattr(exc, "code", "")),
+        str(getattr(exc, "type", "")),
+        str(exc),
+    ]
+    stdout = getattr(exc, "stdout", None)
+    stderr = getattr(exc, "stderr", None)
+    if stdout:
+        parts.append(str(stdout))
+    if stderr:
+        parts.append(str(stderr))
+    return " ".join(part for part in parts if part).strip()
+
+
+def _looks_like_timeout_exception(exc: Exception) -> bool:
+    text = _exception_text(exc).lower()
+    return any(
+        marker in text
+        for marker in (
+            "timeout",
+            "timed out",
+            "deadline exceeded",
+            "context deadline",
+            "took too long",
+        )
+    )
+
+
+def _timeout_elapsed_near_cap(elapsed_seconds: float, timeout_seconds: int) -> bool:
+    try:
+        cap = float(timeout_seconds)
+    except (TypeError, ValueError):
+        cap = 300.0
+    if cap <= 0:
+        return False
+    return elapsed_seconds >= max(1.0, cap * 0.9)
+
+
+def _sandbox_exception_result(
+    exc: Exception,
+    *,
+    elapsed_seconds: float,
+    timeout_seconds: int,
+) -> WorkerResult:
+    detail = str(exc).strip() or exc.__class__.__name__
+    if _looks_like_timeout_exception(exc) and _timeout_elapsed_near_cap(elapsed_seconds, timeout_seconds):
+        return WorkerResult(
+            status="error",
+            error=f"Worker exceeded its {timeout_seconds}s timeout and was stopped.",
+            error_code="timeout",
+            retryable=True,
+        )
+    return WorkerResult(
+        status="error",
+        error=f"E2B sandbox failed before the worker timeout was reached: {detail}",
+        error_code="e2b_sandbox_error",
+        retryable=True,
+    )
+
+
+def _worker_result_failure_fields(result_data: dict[str, Any]) -> tuple[Any, Any]:
+    result_status = result_data.get("status", "success")
+    if result_status not in ("error", "failed"):
+        return result_data.get("error"), result_data.get("error_code")
+    result_error = str(result_data.get("error") or "").strip()
+    result_error_code = str(result_data.get("error_code") or "").strip()
+    if not result_error:
+        result_error = "Worker reported failure without an error message."
+    if not result_error_code:
+        result_error_code = "worker_reported_error"
+    return result_error, result_error_code
 
 
 def _create_sandbox_with_key_fallback(
@@ -603,6 +679,7 @@ class E2BSandboxDriver(SandboxDriver):
         connection_ids: Optional[Dict[str, str]] = None,
         user_id: str | None = None,
     ) -> WorkerResult:
+        started_monotonic = time.monotonic()
         try:
             return self._run_in_sandbox(
                 worker_id, run_id, inputs, secrets, log_fn, trace_id,
@@ -661,13 +738,14 @@ class E2BSandboxDriver(SandboxDriver):
             logger.exception(
                 "E2B sandbox failed for worker %s run %s: %s", worker_id, run_id, exc
             )
-            log_fn(f"E2B sandbox error: {exc}", "error")
-            return WorkerResult(
-                status="error",
-                error=str(exc),
-                error_code="e2b_sandbox_error",
-                retryable=True,
+            elapsed_seconds = time.monotonic() - started_monotonic
+            result = _sandbox_exception_result(
+                exc,
+                elapsed_seconds=elapsed_seconds,
+                timeout_seconds=timeout_seconds,
             )
+            log_fn(f"E2B sandbox error after {elapsed_seconds:.3f}s: {result.error}", "error")
+            return result
 
     def _run_in_sandbox(
         self,
@@ -1013,6 +1091,7 @@ class E2BSandboxDriver(SandboxDriver):
 
             outputs = result_data.get("outputs", {})
             result_status = result_data.get("status", "success")
+            result_error, result_error_code = _worker_result_failure_fields(result_data)
             result_artifacts = result_data.get("artifacts", [])
             if not isinstance(result_artifacts, list):
                 result_artifacts = []
@@ -1044,8 +1123,8 @@ class E2BSandboxDriver(SandboxDriver):
                 status=result_status,
                 outputs=outputs,
                 artifacts=artifacts,
-                error=result_data.get("error"),
-                error_code=result_data.get("error_code"),
+                error=result_error,
+                error_code=result_error_code,
                 decision_required=decision_required,
             )
 

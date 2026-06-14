@@ -55,6 +55,70 @@ def test_run_repo_scopes_rows_by_owner(repo_bundle):
     assert repos.runs.get(user_id="user-a", run_id="run-a")["status"] == RunStatus.COMPLETED.value
 
 
+def test_failed_status_update_synthesizes_error_fields(repo_bundle):
+    repos, _db, manifest = repo_bundle
+
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="worker-a",
+        name="Worker A",
+        manifest_json=manifest("worker-a", "Worker A"),
+        bundle_path="workers/worker-a",
+    )
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-silent-fail",
+        worker_id="worker-a",
+        status=RunStatus.RUNNING.value,
+        trigger_source="manual",
+        runner="e2b",
+    )
+
+    repos.runs.update_status(
+        user_id="user-a",
+        run_id="run-silent-fail",
+        status=RunStatus.FAILED.value,
+    )
+
+    row = repos.runs.get(user_id="user-a", run_id="run-silent-fail")
+    assert row["status"] == RunStatus.FAILED.value
+    assert row["error"]
+    assert row["error_code"] == "unknown_error"
+
+
+def test_run_service_failed_status_update_synthesizes_error_fields(repo_bundle):
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="worker-a",
+        name="Worker A",
+        manifest_json=manifest("worker-a", "Worker A"),
+        bundle_path="workers/worker-a",
+    )
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-service-silent-fail",
+        worker_id="worker-a",
+        status=RunStatus.RUNNING.value,
+        trigger_source="manual",
+        runner="e2b",
+    )
+
+    run_service.update_run_status(
+        "run-service-silent-fail",
+        RunStatus.FAILED.value,
+        user_id="user-a",
+        repos=repos,
+    )
+
+    row = repos.runs.get(user_id="user-a", run_id="run-service-silent-fail")
+    assert row["status"] == RunStatus.FAILED.value
+    assert row["error"]
+    assert row["error_code"] == "unknown_error"
+
+
 def test_run_repo_fails_running_rows_by_owner(repo_bundle):
     repos, _db, manifest = repo_bundle
 
@@ -103,6 +167,34 @@ def test_run_repo_fails_running_rows_by_owner(repo_bundle):
     assert row_a["error_code"] == "interrupted_by_restart"
     assert row_a["completed_at"]
     assert row_b["status"] == RunStatus.RUNNING.value
+
+
+def test_fail_running_synthesizes_missing_error_code(repo_bundle):
+    repos, _db, manifest = repo_bundle
+
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="worker-a",
+        name="Worker A",
+        manifest_json=manifest("worker-a", "Worker A"),
+        bundle_path="workers/worker-a",
+    )
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-bulk-silent-code",
+        worker_id="worker-a",
+        status=RunStatus.RUNNING.value,
+        trigger_source="manual",
+        runner="e2b",
+    )
+
+    failed = repos.runs.fail_running(user_id="user-a", error="interrupted")
+
+    assert failed == ["run-bulk-silent-code"]
+    row = repos.runs.get(user_id="user-a", run_id="run-bulk-silent-code")
+    assert row["status"] == RunStatus.FAILED.value
+    assert row["error"] == "interrupted"
+    assert row["error_code"] == "unknown_error"
 
 
 def test_hitl_duration_excludes_approval_wait(repo_bundle):
