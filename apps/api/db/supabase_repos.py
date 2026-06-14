@@ -3246,8 +3246,20 @@ class SupabaseAssetAccessRepository:
         )
 
     def set_visibility(
-        self, *, workspace_id: str, actor_id: str, asset_type: str, asset_id: str, visibility: str
+        self,
+        *,
+        workspace_id: str,
+        actor_id: str,
+        asset_type: str,
+        asset_id: str,
+        visibility: str,
+        actor_role: str | None = None,
     ) -> dict[str, Any] | None:
+        # #266: the engine calls this with actor_role="admin" when auth.is_admin
+        # (the cloud's authoritative admin determination). The param was missing
+        # here, so the keyword raised TypeError — neither PermissionError nor
+        # ValueError — which the engine route didn't catch, 500-ing every
+        # PUT /workers/{id}/visibility (owner sharing their OWN worker included).
         if visibility not in VISIBILITY_VALUES:
             raise ValueError(f"invalid visibility {visibility!r}")
         table = _ASSET_TABLES.get(asset_type)
@@ -3262,7 +3274,10 @@ class SupabaseAssetAccessRepository:
         if asset is None:
             return None
         asset_workspace_id = str(asset.get("workspace_id") or workspace_id)
-        role = self._role(workspace_id=asset_workspace_id, user_id=actor_id)
+        # Honor the engine-supplied admin signal; fall back to the DB role.
+        role = actor_role if actor_role in {"owner", "admin"} else self._role(
+            workspace_id=asset_workspace_id, user_id=actor_id
+        )
         perms = self._compute(
             owner_id=str(asset.get("owner_id") or ""),
             visibility=str(asset.get("visibility") or "private"),
