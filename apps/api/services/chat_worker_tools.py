@@ -71,88 +71,66 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
 
 
 def _worker_can_view(conn: Any, worker_id: str, user_id: str) -> bool:
-    from chat_service import _effective_worker_visibility_user_id
-    """Return True if *user_id* may read *worker_id*.
+    """Return True if *user_id* may read/run *worker_id*.
 
-    Mirrors SqliteAssetAccessRepository._compute:
-      can_view = is_owner OR (visibility in {workspace, shared} AND user is
-      an active workspace member).
+    #237: route through ``WorkerRepository.get_for_agent`` (the same
+    workspace-scoped repo path as ``_tool_workers_get`` / #1027) instead of a
+    raw ``conn.execute`` against the engine SQLite ``workers`` table. In cloud
+    the SQLite table is a co-mingled shadow across every tenant, so a raw
+    ``WHERE owner_id=? OR visibility IN (...)`` query leaked other workspaces'
+    private workers into the run-resolver. ``get_for_agent`` is implemented by
+    each backend (SqliteWorkerRepository for OSS, SupabaseWorkerRepository for
+    cloud) and returns None when the worker is not viewable by the caller's
+    workspace, so the can-view decision is now workspace-correct on both.
 
-    "shared" is accepted as an alias for "workspace" in case a cloud-side
-    migration ever writes that value; the canonical OS value is "workspace".
-
-    File-based stock/example workers (PUBLIC_STOCK_WORKER_IDS,
-    PROTECTED_STOCK_WORKER_IDS) do NOT have a DB row; they are shared
-    read-execute resources accessible to every user.  When no row exists the
-    guard therefore falls back to the same logic used by _get_visible_worker in
-    main.py: stock workers are always accessible; in single-user / dev mode
-    (filesystem-fallback allowed) unowned on-disk workers are accessible; only
-    truly unknown IDs are blocked.  This preserves the pre-#750 behaviour for
-    owner/stock access while keeping the cross-user private-worker guard intact.
-
-    If the DB schema is not yet initialised (e.g. unit tests that stub the DB
-    at a higher level and don't run migrations), the OperationalError is caught
-    and the function returns True — the downstream run path will surface any
-    real "not found" error using its own resolution logic.
+    Visibility model (unchanged, now enforced by the repo): can_view = is_owner
+    OR (visibility in {workspace, shared} AND user is an active member of the
+    worker's workspace) OR the worker is a stock/public worker, with admins
+    seeing all. ``conn`` is retained for signature compatibility (callers still
+    pass it) but is no longer used directly.
     """
-    import sqlite3 as _sqlite3
-    # Stock/public workers are always accessible regardless of DB state.
-    # Check this first so a DB row with a different owner_id or restrictive
-    # visibility on a stock worker never blocks a valid user.
+    from chat_service import _effective_worker_visibility_user_id
+    from db import get_repositories
     from main import (
         PUBLIC_STOCK_WORKER_IDS,
         PROTECTED_STOCK_WORKER_IDS,
         _shared_filesystem_fallback_allowed,
     )
+
     visibility_user_id = _effective_worker_visibility_user_id(user_id)
-    if worker_id in PUBLIC_STOCK_WORKER_IDS or worker_id in PROTECTED_STOCK_WORKER_IDS:
-        return True
+    all_stock_ids = list(PUBLIC_STOCK_WORKER_IDS | PROTECTED_STOCK_WORKER_IDS)
+    fs_fallback = _shared_filesystem_fallback_allowed()
     try:
-        row = conn.execute(
-            "SELECT owner_id, workspace_id, visibility FROM workers WHERE id = ? LIMIT 1",
-            (worker_id,),
-        ).fetchone()
-    except _sqlite3.OperationalError:
-        # DB not initialised or workers table absent — let the run path decide.
-        return True
-    if row is None:
-        # No DB row — worker is either an unregistered filesystem worker or unknown.
-        if _shared_filesystem_fallback_allowed():
-            # Single-user / dev mode: unowned on-disk workers are always
-            # accessible.  The run path itself will return "not found" if the
-            # file doesn't actually exist.
-            return True
-        # Unknown worker ID in a multi-user deployment — block it.
-        return False
-    if row["owner_id"] == visibility_user_id:
-        return True
-    # Admins may view every worker, mirroring the role-aware /workers UI and
-    # workers__list_all. Without this, an admin who owns no workers could LIST a
-    # worker but get "not found" on read/run. Defensive: no users table (single-
-    # user OSS) -> not admin.
-    try:
-        role_row = conn.execute(
-            "SELECT role FROM users WHERE id = ? LIMIT 1", (visibility_user_id,)
-        ).fetchone()
-        if role_row and str(role_row["role"]).lower() == "admin":
-            return True
+        row = get_repositories().workers.get_for_agent(
+            user_id=visibility_user_id,
+            worker_id=worker_id,
+            stock_worker_ids=all_stock_ids,
+            allow_fs_fallback=fs_fallback,
+        )
     except Exception:
-        pass
-    visibility = (row["visibility"] or "private").lower()
-    if visibility not in ("workspace", "shared"):
-        return False
-    # Check active membership in the worker's workspace. Defensive: the
-    # workspace_members table is absent in single-user OSS.
-    workspace_id = row["workspace_id"] or "local-default"
-    try:
-        member_row = conn.execute(
-            "SELECT 1 FROM workspace_members "
-            "WHERE workspace_id = ? AND user_id = ? AND status = 'active' LIMIT 1",
-            (workspace_id, visibility_user_id),
-        ).fetchone()
-    except Exception:
-        return False
-    return member_row is not None
+        # Repo unavailable (e.g. unit test stubbing the DB at a higher level
+        # without migrations). Preserve the pre-#237 fail-open contract: the
+        # downstream run path surfaces any real "not found" error itself.
+        return True
+    if row is not None:
+        return True
+    # OSS single-user / dev mode only (NEVER cloud — _shared_filesystem_
+    # fallback_allowed() is False there): an on-disk worker that has NO DB row
+    # yet is still runnable. get_for_agent returns None for such fileless
+    # workers even with allow_fs_fallback, so preserve the pre-#237 contract
+    # here. CRITICAL: this fallback only applies when the worker has no DB row
+    # at all — a worker that HAS a DB row owned by someone else (a private
+    # cross-tenant/cross-user worker) must stay blocked, so we re-check
+    # existence with the unscoped get_any before allowing. The run path itself
+    # returns "not found" if the file is absent.
+    if fs_fallback:
+        try:
+            exists = get_repositories().workers.get_any(worker_id=worker_id) is not None
+        except Exception:
+            exists = False
+        if not exists:
+            return True
+    return False
 
 
 # Filler tokens stripped before comparing worker references (#892). These are
@@ -187,49 +165,50 @@ def _worker_match_key(value: str) -> str:
 
 
 def _list_viewable_workers(conn: Any, user_id: str) -> List[Dict[str, str]]:
-    from chat_service import _effective_worker_visibility_user_id
     """Return [{id, name}] for every worker *user_id* may run.
 
-    Mirrors _worker_can_view's visibility model (own + workspace-shared +
-    stock/public, with admins seeing all) but, unlike _tool_workers_list_all,
-    does NOT hide system/example workers — a by-id run of a stock worker must
-    still resolve. Used only by the run resolver to build candidate sets, so it
-    is intentionally permissive about WHICH workers exist; the run path itself
-    re-checks _worker_can_view before firing.
+    #237: route through ``WorkerRepository.list_for_agent`` (the same
+    workspace-scoped repo path as ``_tool_workers_list_all`` / #1027) instead of
+    a raw ``conn.execute`` against the engine SQLite ``workers`` table. In cloud
+    the SQLite table is a co-mingled shadow across every tenant, so the raw
+    ``WHERE owner_id=? OR visibility IN (...)`` candidate query returned other
+    workspaces' private worker ids/names into the run resolver. ``list_for_agent``
+    is backend-scoped (workspace-correct on cloud, owner+member on OSS) and the
+    run path still re-checks ``_worker_can_view`` before firing.
+
+    Unlike ``_tool_workers_list_all`` this does NOT hide system/example workers —
+    a by-id run of a stock worker must still resolve — so the system/example
+    filtering applied by that tool is intentionally skipped here. ``conn`` is
+    retained for signature compatibility but is no longer used directly.
     """
+    from chat_service import _effective_worker_visibility_user_id
+    from db import get_repositories
     from main import PUBLIC_STOCK_WORKER_IDS, PROTECTED_STOCK_WORKER_IDS
 
+    # include_all_users mirrors _tool_workers_list_all's default (member view
+    # even for admins, so a personal run-resolve never enumerates another
+    # member's private workers). Admin-by-id run still resolves via _worker_
+    # can_view's get_for_agent admin path. Use the effective visibility user id,
+    # exactly like _tool_workers_list_all.
     visibility_user_id = _effective_worker_visibility_user_id(user_id)
+    all_stock_ids = list(PUBLIC_STOCK_WORKER_IDS | PROTECTED_STOCK_WORKER_IDS)
     try:
-        role_row = conn.execute("SELECT role FROM users WHERE id = ?", (visibility_user_id,)).fetchone()
-        is_admin = bool(role_row) and str(role_row["role"]).lower() == "admin"
-    except Exception:
-        is_admin = False
-
-    base_select = "SELECT w.id, w.name FROM workers w "
-    rows: List[Any] = []
-    try:
-        if is_admin:
-            rows = conn.execute(base_select + "ORDER BY w.name").fetchall()
-        else:
-            rows = conn.execute(
-                base_select
-                + "WHERE w.owner_id = ? "
-                + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
-                + "ORDER BY w.name",
-                (visibility_user_id,),
-            ).fetchall()
+        rows = get_repositories().workers.list_for_agent(
+            user_id=visibility_user_id,
+            include_all_users=False,
+            stock_worker_ids=all_stock_ids,
+        )
     except Exception:
         rows = []
 
     seen: set[str] = set()
     out: List[Dict[str, str]] = []
     for r in rows:
-        wid = str(r["id"])
-        if wid in seen:
+        wid = str(r.get("id") or "")
+        if not wid or wid in seen:
             continue
         seen.add(wid)
-        out.append({"id": wid, "name": str(r["name"] or wid)})
+        out.append({"id": wid, "name": str(r.get("name") or wid)})
 
     # Stock/public workers are runnable by everyone even without a DB row.
     for sid in sorted(PUBLIC_STOCK_WORKER_IDS | PROTECTED_STOCK_WORKER_IDS):

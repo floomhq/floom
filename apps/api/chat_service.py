@@ -345,6 +345,13 @@ def _effective_worker_visibility_user_id(user_id: str) -> str:
     raw = str(user_id or "").strip()
     if not raw:
         return raw
+    try:
+        from core.config import _is_cloud_deploy
+
+        if _is_cloud_deploy():
+            return raw
+    except Exception:
+        pass
     candidates: list[str] = [raw]
     try:
         from db import get_db

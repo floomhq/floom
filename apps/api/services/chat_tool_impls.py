@@ -19,6 +19,47 @@ logger = logging.getLogger("floom.chat")
 
 
 # ---------------------------------------------------------------------------
+# Authz helpers
+# ---------------------------------------------------------------------------
+
+def _caller_is_workspace_admin(user_id: str) -> bool:
+    """Return True if *user_id* is an admin/owner in the active workspace.
+
+    #238: mirrors the HTTP route's ``auth.is_admin`` for Emily's mutation
+    tools, backend-agnostically:
+
+    - Cloud: the per-request role is stashed in the workspace-context
+      contextvar by SupabaseAuthProvider.verify; read it via a soft import so
+      the OSS engine never hard-depends on the cloud package.
+    - OSS SQLite: fall back to the ``users`` table ``role`` column (the same
+      source ``_worker_can_view`` uses for its admin check).
+
+    Defaults to False (least privilege) when the role cannot be resolved.
+    """
+    # Cloud: per-request active member role.
+    try:
+        from apps.api.auth.workspace_context import get_active_member_role
+        role = get_active_member_role()
+        if role is not None:
+            return str(role).lower() == "admin"
+    except Exception:
+        pass
+    # OSS SQLite: users-table role lookup (matches _worker_can_view).
+    try:
+        from chat_service import _effective_worker_visibility_user_id
+        from db import get_db
+
+        effective_id = _effective_worker_visibility_user_id(user_id)
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT role FROM users WHERE id = ? LIMIT 1", (effective_id,)
+            ).fetchone()
+        return bool(row) and str(row["role"]).lower() == "admin"
+    except Exception:
+        return False
+
+
+# ---------------------------------------------------------------------------
 # Tool implementations
 # ---------------------------------------------------------------------------
 
@@ -487,6 +528,23 @@ def _tool_secrets_set(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     env_key = name.upper()
     from db import get_repositories
     repos = get_repositories()
+    # #238: apply the SAME per-action authz the HTTP route enforces
+    # (_require_secret_mutation_allowed, #952). Without this, a low-priv member
+    # could overwrite another user's / the owner's workspace secret through
+    # Emily — an action the direct API blocks. The cloud SupabaseSecretRepository
+    # upserts by (workspace_id, name) only, so we MUST gate on the existing
+    # secret's creator here. On OSS SQLite, secrets are per-user so get() never
+    # surfaces another user's row and this is a no-op.
+    existing = repos.secrets.get(user_id=user_id, name=env_key)
+    if existing is not None and not _caller_is_workspace_admin(user_id):
+        creator = str(existing.get("user_id") or "")
+        if creator and creator != str(user_id):
+            return {
+                "ok": False,
+                "error": (
+                    f"only an admin or the creator can modify secret '{env_key}'"
+                ),
+            }
     repos.secrets.set(user_id=user_id, name=env_key, value=value, status="set")
     return {"ok": True, "message": f"Secret '{env_key}' set."}
 
