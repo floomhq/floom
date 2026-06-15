@@ -274,7 +274,6 @@ def _ensure_brain_pack_row(
     visibility is a UI affordance, not a hard gate (the FS owner check below
     still governs read access).
     """
-    from db import derive_workspace_id
     if repos is None or not owner_id:
         return None
     asset_access = getattr(repos, "asset_access", None)
@@ -284,13 +283,32 @@ def _ensure_brain_pack_row(
     try:
         return ensure(
             pack_id=name,
-            workspace_id=derive_workspace_id(owner_id),
+            workspace_id=_asset_workspace_id(owner_id),
             owner_id=owner_id,
             name=name,
         )
     except Exception:
         logger.debug("ensure brain_pack row failed for %s", name, exc_info=True)
         return None
+
+
+def _asset_workspace_id(owner_id: str | None) -> str:
+    """Workspace id for asset access rows.
+
+    Cloud registers an active workspace resolver; local SQLite derives the
+    workspace from its scoped owner id. Prefer the cloud resolver when present.
+    """
+    from db import derive_workspace_id
+
+    try:
+        import git_ops as _git_ops
+
+        active = (_git_ops.get_active_workspace_id() or "").strip()
+        if active:
+            return active
+    except Exception:
+        pass
+    return derive_workspace_id(owner_id)
 
 
 def _brain_pack_access(
@@ -307,7 +325,6 @@ def _brain_pack_access(
     repo is available, so the OSS single-owner UX is unchanged. Never raises.
     """
     from contexts import context_owner_id, load_context_metadata
-    from db import derive_workspace_id
     from models import AssetPermissions
     meta = metadata if metadata is not None else load_context_metadata()
     actor_user_id = _context_actor_user_id(user_id)
@@ -317,7 +334,7 @@ def _brain_pack_access(
         _ensure_brain_pack_row(name, owner_id=owner_id, repos=repos)
         try:
             perms = asset_access.get_permissions(
-                workspace_id=derive_workspace_id(owner_id),
+                workspace_id=_asset_workspace_id(owner_id),
                 user_id=actor_user_id,
                 asset_type="brain_pack",
                 asset_id=name,
@@ -466,7 +483,7 @@ def _ensure_assistant_row(
     owner is the workspace owner; on the OSS single-owner engine that is the local
     user. Never raises.
     """
-    from db import assistant_row_id, derive_workspace_id
+    from db import assistant_row_id
 
     if repos is None or not user_id:
         return None
@@ -474,7 +491,7 @@ def _ensure_assistant_row(
     ensure = getattr(asset_access, "ensure_assistant", None)
     if ensure is None:
         return None
-    workspace_id = derive_workspace_id(user_id)
+    workspace_id = _asset_workspace_id(user_id)
     try:
         return ensure(
             assistant_id=assistant_row_id(workspace_id),
@@ -497,11 +514,11 @@ def _assistant_access(
     workspace defaults when no repo/row is available (OSS single-owner: the local
     user owns + can share the assistant). Never raises.
     """
-    from db import assistant_row_id, derive_workspace_id
+    from db import assistant_row_id
     from models import AssetPermissions
 
     asset_access = getattr(repos, "asset_access", None) if repos is not None else None
-    workspace_id = derive_workspace_id(user_id)
+    workspace_id = _asset_workspace_id(user_id)
     aid = assistant_row_id(workspace_id)
     if asset_access is not None:
         _ensure_assistant_row(user_id=user_id, repos=repos)
