@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
@@ -14,6 +14,7 @@ import type {
   VersionSummary,
   RunSummary,
   TriggerSpec,
+  WorkerInput,
 } from "@/lib/types";
 import { formatVersionRows } from "@/lib/workers/versions";
 import { WORKER_DETAIL_TABS, type WorkerDetailTab } from "@/lib/workers/tabs";
@@ -35,7 +36,7 @@ import { Button } from "@/components/ui/button";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { FileText, Lock, MoreHorizontal } from "lucide-react";
+import { ArrowRight, ChevronDown, ChevronUp, FileText, Lock, MoreHorizontal, UploadCloud } from "lucide-react";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { Sparkline } from "@/components/Sparkline";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
@@ -962,17 +963,28 @@ function WorkerDetailActions({
                 inputs.map((input) => (
                   <div key={input.name} className="space-y-1.5">
                     <Label htmlFor={`run-${w.id}-${input.name}`}>{input.label || input.name}</Label>
-                    <Input
-                      id={`run-${w.id}-${input.name}`}
-                      value={runInputs[input.name] ?? ""}
-                      placeholder={input.placeholder || input.description || input.name}
-                      onChange={(event) =>
-                        setRunInputs((prev) => ({ ...prev, [input.name]: event.target.value }))
-                      }
-                    />
-                    {input.description ? (
-                      <p className="text-xs text-muted-foreground">{input.description}</p>
-                    ) : null}
+                    {isStructuredInput(input) ? (
+                      <StructuredInputField
+                        input={input}
+                        workerId={w.id}
+                        value={runInputs[input.name] ?? ""}
+                        onChange={(v) => setRunInputs((prev) => ({ ...prev, [input.name]: v }))}
+                      />
+                    ) : (
+                      <>
+                        <Input
+                          id={`run-${w.id}-${input.name}`}
+                          value={runInputs[input.name] ?? ""}
+                          placeholder={input.placeholder || input.description || input.name}
+                          onChange={(event) =>
+                            setRunInputs((prev) => ({ ...prev, [input.name]: event.target.value }))
+                          }
+                        />
+                        {input.description ? (
+                          <p className="text-xs text-muted-foreground">{input.description}</p>
+                        ) : null}
+                      </>
+                    )}
                   </div>
                 ))
               )}
@@ -1031,6 +1043,187 @@ function WorkerDetailActions({
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+// ---- #1092: Workers empty-state inline prompt --------------------------------
+
+/**
+ * A compact prompt input shown in the workers empty state so users can
+ * describe what they want done and jump straight into the Emily create flow.
+ */
+function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }) {
+  const [value, setValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    onSubmit(trimmed);
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="mt-4 flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2"
+      style={{ maxWidth: 380 }}
+    >
+      <input
+        ref={inputRef}
+        type="text"
+        className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        placeholder="Describe the job you want done…"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        autoComplete="off"
+      />
+      <button
+        type="submit"
+        disabled={!value.trim()}
+        className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--accent-foreground)] opacity-90 hover:opacity-100 disabled:opacity-30 transition-opacity"
+        aria-label="Create worker"
+      >
+        <ArrowRight className="size-3.5" />
+      </button>
+    </form>
+  );
+}
+
+// ---- #1090: Friendly structured-input field for the manual-run modal ----------
+
+/** Returns true when the input type signals a JSON/CSV/structured payload. */
+function isStructuredInput(input: WorkerInput): boolean {
+  const t = (input.type ?? "").toLowerCase();
+  return (
+    t === "array" ||
+    t === "object" ||
+    t === "json" ||
+    t === "csv" ||
+    !!input.accept_csv
+  );
+}
+
+/**
+ * A friendlier replacement for a raw textarea for structured/JSON inputs.
+ * Shows:
+ *  - A file upload button (CSV or JSON)
+ *  - A "Load example" button (calls sampleInput API)
+ *  - A collapsible "Format" details block for the schema hint
+ *  - A fallback textarea for manual paste
+ */
+function StructuredInputField({
+  input,
+  workerId,
+  value,
+  onChange,
+}: {
+  input: WorkerInput;
+  workerId: string;
+  value: string;
+  onChange: (v: string) => void;
+}) {
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const [fileName, setFileName] = useState<string | null>(null);
+  const [loading, setLoading] = useState(false);
+  const [showFormat, setShowFormat] = useState(false);
+
+  const acceptAttr = input.accept_csv ? ".csv,.json" : ".json";
+  const label = input.label || input.name;
+
+  async function loadExample() {
+    setLoading(true);
+    try {
+      const sample = await api.workers.sampleInput(workerId);
+      const raw = sample[input.name];
+      if (raw !== undefined) {
+        onChange(typeof raw === "string" ? raw : JSON.stringify(raw, null, 2));
+        setFileName(null);
+      } else {
+        toast("No example available for this input.");
+      }
+    } catch {
+      toast.error("Could not load example.");
+    } finally {
+      setLoading(false);
+    }
+  }
+
+  function handleFile(file: File | undefined) {
+    if (!file) return;
+    setFileName(file.name);
+    const reader = new FileReader();
+    reader.onload = (e) => {
+      const text = e.target?.result as string;
+      onChange(text ?? "");
+    };
+    reader.readAsText(file);
+  }
+
+  // Schema hint: description or placeholder from the input spec.
+  const hint = input.description || input.placeholder || null;
+
+  return (
+    <div className="space-y-2">
+      {/* Upload + Load example toolbar */}
+      <div className="flex items-center gap-2 flex-wrap">
+        <button
+          type="button"
+          onClick={() => fileInputRef.current?.click()}
+          className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+        >
+          <UploadCloud className="size-3.5" />
+          {fileName ?? `Upload ${acceptAttr}`}
+        </button>
+        <input
+          ref={fileInputRef}
+          type="file"
+          accept={acceptAttr}
+          className="hidden"
+          onChange={(e) => handleFile(e.target.files?.[0])}
+        />
+        <button
+          type="button"
+          disabled={loading}
+          onClick={() => void loadExample()}
+          className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+        >
+          {loading ? "Loading…" : "Load example"}
+        </button>
+        {hint && (
+          <button
+            type="button"
+            onClick={() => setShowFormat((v) => !v)}
+            className="inline-flex items-center gap-1 ml-auto text-xs text-muted-foreground hover:text-foreground transition-colors"
+          >
+            Format {showFormat ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
+          </button>
+        )}
+      </div>
+
+      {/* Collapsible format/schema hint */}
+      {showFormat && hint && (
+        <p className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2 text-xs text-muted-foreground">
+          {hint}
+        </p>
+      )}
+
+      {/* Paste textarea */}
+      <Textarea
+        id={`run-${workerId}-${input.name}`}
+        value={value}
+        placeholder={
+          input.accept_csv
+            ? `Paste CSV or JSON, or upload a file above…`
+            : `Paste JSON${hint ? ` (see Format for the schema)` : ""}…`
+        }
+        onChange={(e) => onChange(e.target.value)}
+        className="min-h-24 font-mono text-xs"
+      />
+      {label && input.required && (
+        <p className="text-[11px] text-muted-foreground">Required · {label}</p>
+      )}
+    </div>
   );
 }
 
@@ -1249,7 +1442,15 @@ export default function WorkersCollection({
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
     add: { label: "Add", onSelect: () => router.push("/chat?mode=create") }, // #902: create = Emily flow
     states: {
-      empty: { title: "No workers yet", help: "Create your first worker to get started." },
+      empty: {
+        title: "No workers yet",
+        help: "Describe a job below and we'll create your first worker.",
+        action: (
+          <WorkersEmptyPrompt
+            onSubmit={(prompt) => router.push(`/chat?mode=create&q=${encodeURIComponent(prompt)}`)}
+          />
+        ),
+      },
     },
   };
 
