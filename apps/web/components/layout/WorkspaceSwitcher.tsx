@@ -10,6 +10,7 @@ import { cn } from "@/lib/utils";
 import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-logo";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import { getWorkspaceActionCopy, isCloudMode } from "@/lib/workspace/action-copy";
+import { workspaceMonogram } from "@/lib/workspace/workspace-monogram";
 import type { LocalWorkspace } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -39,13 +40,6 @@ type WorkspaceState = {
   workspaces: LocalWorkspace[];
   activeId: string;
 };
-
-function shortInitial(name: string): string {
-  const display = resolveWorkspaceName(name);
-  const trimmed = display.trim();
-  if (!trimmed) return "?";
-  return trimmed.slice(0, 2).toUpperCase();
-}
 
 export function WorkspaceSwitcher() {
   const [state, setState] = useState<WorkspaceState | null>(null);
@@ -256,10 +250,19 @@ export function WorkspaceSwitcher() {
           )}
           aria-label="Switch workspace"
         >
-          {/* Workspace mark: company logo if available, else colored initial */}
-          <div className="size-6 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_22%,transparent)] text-[var(--accent)] grid place-items-center text-[10px] font-semibold uppercase tracking-wide">
-            {shortInitial(active.name)}
-          </div>
+          {/* Workspace mark: real logo when set (#1305), else seeded gradient monogram.
+              Squircle: var(--radius-squircle) = 9px, no border — matches #1306 user avatar. */}
+          {(() => {
+            const mono = workspaceMonogram(active.id, resolveWorkspaceName(active.name));
+            return (
+              <div
+                className="size-6 shrink-0 grid place-items-center text-[10px] font-semibold text-white uppercase tracking-wide"
+                style={{ borderRadius: "var(--radius-squircle)", background: mono.gradient }}
+              >
+                {mono.initials}
+              </div>
+            );
+          })()}
           <span className="flex-1 truncate text-left">{resolveWorkspaceName(active.name)}</span>
           <ChevronsUpDown className="size-4 opacity-0 group-hover:opacity-60 transition-opacity duration-100" />
         </DropdownMenuTrigger>
@@ -289,9 +292,17 @@ export function WorkspaceSwitcher() {
                   className="flex items-center gap-2 focus:bg-[var(--active-nav-bg)] focus:text-ink"
                   disabled={isLoading}
                 >
-                  <div className="size-5 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)] grid place-items-center text-[9px] font-semibold uppercase">
-                    {shortInitial(w.name)}
-                  </div>
+                  {(() => {
+                    const mono = workspaceMonogram(w.id, resolveWorkspaceName(w.name));
+                    return (
+                      <div
+                        className="size-5 shrink-0 grid place-items-center text-[9px] font-semibold text-white uppercase"
+                        style={{ borderRadius: "var(--radius-squircle)", background: mono.gradient }}
+                      >
+                        {mono.initials}
+                      </div>
+                    );
+                  })()}
                   <span className="flex-1 truncate">{resolveWorkspaceName(w.name)}</span>
                   {isActive ? <Check className="size-4 opacity-80" /> : null}
                 </DropdownMenuItem>
