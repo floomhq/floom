@@ -50,21 +50,25 @@ export function DetailPane({
           </button>
         </div>
       </div>
-      <div className="c-dtabs" role="tablist">
-        {tabs.map((t) => (
-          <button
-            type="button"
-            key={t.key}
-            role="tab"
-            aria-selected={t.key === current?.key}
-            className={`c-dtab ${t.key === current?.key ? "on" : ""}`}
-            onClick={() => onTab(t.key)}
-          >
-            {t.label}
-            {t.count != null && <span className="cb">{t.count}</span>}
-          </button>
-        ))}
-      </div>
+      {/* #1109: skip the tab bar when there is only one tab — it's a redundant
+          label that duplicates the section header (e.g. "Developer > Developer"). */}
+      {tabs.length > 1 && (
+        <div className="c-dtabs" role="tablist">
+          {tabs.map((t) => (
+            <button
+              type="button"
+              key={t.key}
+              role="tab"
+              aria-selected={t.key === current?.key}
+              className={`c-dtab ${t.key === current?.key ? "on" : ""}`}
+              onClick={() => onTab(t.key)}
+            >
+              {t.label}
+              {t.count != null && <span className="cb">{t.count}</span>}
+            </button>
+          ))}
+        </div>
+      )}
       <div className="c-dbody" role="tabpanel">
         {current?.render()}
       </div>
