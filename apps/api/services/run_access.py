@@ -29,6 +29,7 @@ from core.utils import row_to_dict
 from services.worker_access import (
     _get_db_worker,
     _shared_filesystem_fallback_allowed,
+    _stock_filesystem_workers_allowed,
     _worker_hidden_from_api,
 )
 
@@ -57,7 +58,12 @@ def _run_visible_to_api(row: Any, *, user_id: str, repos: "Repositories") -> boo
     if worker is not None:
         return True
     # Filesystem fallback: public stock workers are always visible.
-    if _shared_filesystem_fallback_allowed() or worker_id in PUBLIC_STOCK_WORKER_IDS:
+    # #264: the stock-id arm is off-cloud only — on cloud the on-disk worker
+    # belongs to the vendored engine tenant, so a run keyed on that id must not
+    # become visible to an unrelated workspace via the shared filesystem.
+    if _shared_filesystem_fallback_allowed() or (
+        worker_id in PUBLIC_STOCK_WORKER_IDS and _stock_filesystem_workers_allowed()
+    ):
         return get_worker(worker_id) is not None
     return False
 
