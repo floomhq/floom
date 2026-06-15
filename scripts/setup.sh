@@ -27,9 +27,15 @@ else
   echo "==> backend: apps/api/.env already exists — left untouched"
 fi
 
-# 3. Frontend dependencies.
-echo "==> frontend: npm install"
+# 3. Frontend env + dependencies.
 cd "$ROOT/apps/web"
+if [ ! -f .env ]; then
+  cp .env.example .env
+  echo "==> frontend: created apps/web/.env (points the web app at the local backend)"
+else
+  echo "==> frontend: apps/web/.env already exists — left untouched"
+fi
+echo "==> frontend: npm install"
 npm install
 
 echo

@@ -158,11 +158,12 @@ The API serves on `http://localhost:8000` with auto-reload. Start it with **`pyt
 
 ```bash
 cd apps/web
+cp .env.example .env   # points the web app at your local backend (http://localhost:8000)
 npm install
 npm run dev
 ```
 
-Open [http://localhost:3000](http://localhost:3000).
+Open [http://localhost:3000](http://localhost:3000). **Without `apps/web/.env`, the web app falls back to the production cloud API** and you'll see the production sign-in screen instead of "Create your workspace" — so don't skip the `cp` step. On a fresh install the first sign-in creates your admin account.
 
 ---
 
