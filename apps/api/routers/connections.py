@@ -39,6 +39,7 @@ from models import (
     RunSummary,
     UnsafeMCPUrlError,
     assert_safe_outbound_mcp_url,
+    pin_safe_outbound_url,
     read_only_preset_for_app,
     read_only_presets,
 )
@@ -1445,10 +1446,13 @@ def test_connection(
                         return {}
                     return body if isinstance(body, dict) else {}
 
-                # #1180: re-validate at dial time to prevent SSRF via DNS
-                # rebinding or DB/admin URL mutation after creation.
+                # #1293: pin the resolved IP at dial time to prevent DNS-rebind
+                # TOCTOU between the SSRF check and the actual HTTP connection.
+                # Resolve once, validate the IP is safe, then connect to the IP
+                # literal directly (passing the original Host header for TLS SNI
+                # / vhost routing).
                 try:
-                    mcp_url = assert_safe_outbound_mcp_url(mcp_url)
+                    mcp_url, _pinned_url = pin_safe_outbound_url(mcp_url, label="MCP server URL")
                 except Exception as _ssrf_exc:
                     _write_connection_check(
                         connection_id,
@@ -1463,7 +1467,13 @@ def test_connection(
                         reason=f"Connection URL is not permitted: {_ssrf_exc}",
                         tested_at=tested_at,
                     )
-                probe_url = mcp_url.rstrip("/")
+                # Use the IP-pinned URL for dial; preserve the original Host header
+                # so TLS SNI and vhost routing work correctly.
+                from urllib.parse import urlsplit as _urlsplit
+                _orig_host = _urlsplit(mcp_url).hostname or ""
+                if _orig_host:
+                    headers.setdefault("Host", _orig_host)
+                probe_url = _pinned_url.rstrip("/")
                 init_payload = {
                     "jsonrpc": "2.0",
                     "method": "initialize",

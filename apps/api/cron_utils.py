@@ -1,12 +1,14 @@
-"""Shared cron-expression validation.
+"""Shared cron-expression and timezone validation.
 
-Single source of truth for "is this a valid cron expression" so the
-create path (worker.yml → WorkerTrigger / WorkerContractTrigger),
-the schedule-PATCH endpoint, and the scheduler thread all agree.
+Single source of truth for "is this a valid cron expression" and
+"is this a valid IANA timezone name" so the create path
+(worker.yml → WorkerTrigger / WorkerContractTrigger), the
+schedule-PATCH endpoint, and the scheduler thread all agree.
 
 Uses croniter when available (authoritative), and falls back to a
 5-field regex when croniter is not installed so validation never
-silently disappears.
+silently disappears. Timezone validation uses zoneinfo (stdlib ≥3.9)
+with a pytz fallback and a small built-in list as last resort.
 """
 
 from __future__ import annotations
@@ -79,3 +81,63 @@ def is_valid_cron_expr(cron_expr: str) -> bool:
         return True
     except Exception:
         return False
+
+
+def is_valid_timezone(tz: str) -> bool:
+    """Return True if ``tz`` is a recognised IANA timezone identifier.
+
+    #1296: cron workers accepted an invalid ``cron_timezone`` at create/update
+    time without validation; the scheduler then fell back to UTC silently.
+    Validate at the API boundary so the caller gets a clean 400 instead of a
+    quiet wrong-timezone run.
+
+    Precedence:
+      1. ``zoneinfo.ZoneInfo`` (stdlib ≥3.9, covers tzdata if installed).
+      2. ``pytz.timezone`` fallback (older envs / some containers).
+      3. Hardcoded small allow-list (UTC + major zones) as a last resort
+         so the validator never accidentally rejects valid timezones due to a
+         missing tzdata package.
+    """
+    if not isinstance(tz, str) or not tz.strip():
+        return False
+    clean = tz.strip()
+    # Fast path for the most common values.
+    if clean in {"UTC", "utc", "GMT", "gmt"}:
+        return True
+    try:
+        import zoneinfo
+        try:
+            zoneinfo.ZoneInfo(clean)
+            return True
+        except (KeyError, zoneinfo.ZoneInfoNotFoundError):
+            return False
+        except Exception:
+            return False
+    except ImportError:
+        pass
+    try:
+        import pytz  # type: ignore[import-untyped]
+        pytz.timezone(clean)
+        return True
+    except Exception:
+        pass
+    # Minimal hardcoded list as an absolute fallback when neither zoneinfo nor
+    # pytz are available.
+    _COMMON_TZ = {
+        "UTC", "GMT",
+        "US/Eastern", "US/Central", "US/Mountain", "US/Pacific",
+        "America/New_York", "America/Chicago", "America/Denver",
+        "America/Los_Angeles", "America/Toronto", "America/Vancouver",
+        "America/Sao_Paulo", "America/Buenos_Aires", "America/Mexico_City",
+        "Europe/London", "Europe/Paris", "Europe/Berlin", "Europe/Rome",
+        "Europe/Amsterdam", "Europe/Madrid", "Europe/Warsaw", "Europe/Zurich",
+        "Europe/Stockholm", "Europe/Copenhagen", "Europe/Helsinki",
+        "Europe/Moscow", "Europe/Kyiv", "Europe/Athens", "Europe/Istanbul",
+        "Asia/Tokyo", "Asia/Shanghai", "Asia/Kolkata", "Asia/Dubai",
+        "Asia/Singapore", "Asia/Seoul", "Asia/Hong_Kong", "Asia/Bangkok",
+        "Asia/Karachi", "Asia/Baghdad", "Asia/Jerusalem", "Asia/Riyadh",
+        "Australia/Sydney", "Australia/Melbourne", "Australia/Brisbane",
+        "Pacific/Auckland", "Pacific/Honolulu",
+        "Africa/Cairo", "Africa/Nairobi", "Africa/Johannesburg",
+    }
+    return clean in _COMMON_TZ

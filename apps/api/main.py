@@ -2480,6 +2480,18 @@ def update_worker(
         if not is_valid_cron_expr(new_cron_expr):
             raise HTTPException(status_code=400, detail=f"Invalid cron expression: {new_cron_expr!r}")
 
+    # #1296: validate cron_timezone at create/update time so a bad value
+    # gets a clean 400 instead of silently falling back to UTC at run time.
+    if payload.cron_timezone is not None:
+        from cron_utils import is_valid_timezone
+        if not is_valid_timezone(payload.cron_timezone):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid cron timezone: {payload.cron_timezone!r}. "
+                       "Use an IANA timezone name such as 'UTC', 'Europe/Berlin', "
+                       "or 'America/New_York'.",
+            )
+
     updates: Dict[str, Any] = {}
 
     if payload.trigger_type is not None:
@@ -5434,6 +5446,32 @@ def _mcp_arg(arguments: Dict[str, Any], name: str) -> str:
     return value
 
 
+def _mcp_arg_str(arguments: Dict[str, Any], name: str) -> str:
+    """Like _mcp_arg but preserves falsy non-None values (0, False, "").
+
+    #1294: ``_mcp_arg`` uses ``arguments.get(name) or ""`` which silently
+    coerces falsy values (integer 0, boolean False, or an empty string) to
+    the empty string — the required-check then fires and the tool returns
+    "required" even though the caller provided a valid value.  For the
+    secrets.set ``value`` argument the key insight is:
+      - None / missing           → required error (caller omitted it)
+      - ""  (empty string)       → still invalid (blank secret is meaningless)
+      - "0", "false", 0, False   → valid; must be stringified and passed through
+
+    This function converts the raw value to str BEFORE checking emptiness, so
+    ``0`` becomes ``"0"`` (non-empty) and is accepted, while None and missing
+    both produce the required error.
+    """
+    sentinel = object()
+    raw = arguments.get(name, sentinel)
+    if raw is sentinel or raw is None:
+        raise ValueError(f"Tool argument '{name}' is required")
+    converted = str(raw)
+    if not converted:
+        raise ValueError(f"Tool argument '{name}' is required")
+    return converted
+
+
 def _internal_asgi_request() -> Request:
     """Minimal in-process Request for direct calls into route fns that require a
     ``request`` positional. host=asgi makes the worker-write workspace check
@@ -5578,8 +5616,10 @@ def _mcp_call_secrets_list(auth: AuthContext, repos: Repositories) -> Dict[str, 
 
 
 def _mcp_call_secrets_set(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    # #1294: use _mcp_arg_str for `value` so falsy-but-valid values (0, False,
+    # "0") are not silently coerced to empty and rejected as "required".
     key = _mcp_arg(arguments, "key").upper()
-    payload = SecretUpsertRequest(value=_mcp_arg(arguments, "value"))
+    payload = SecretUpsertRequest(value=_mcp_arg_str(arguments, "value"))
     data = upsert_secret(key, payload, auth=auth, repos=repos)
     return _mcp_call_result(data, "Secret saved.")
 
@@ -6848,10 +6888,42 @@ async def mcp_http_endpoint(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> JSONResponse:
+    """MCP JSON-RPC 2.0 endpoint for /mcp-tools/serve.
+
+    #1295: previously returned a raw HTTP 500 on invalid (non-dict) bodies and
+    silently ignored JSON-RPC batch requests (arrays). Now:
+      - JSON parse errors → -32700 Parse error (was already handled).
+      - Non-dict, non-list body → -32600 Invalid Request with HTTP 400.
+      - Batch array → each item dispatched; responses collected; empty batch
+        returns HTTP 204 (notifications-only batch, per JSON-RPC spec).
+    """
     try:
         body = await request.json()
     except Exception:
         return JSONResponse(_mcp_err(None, -32700, "Parse error"), status_code=400)
+
+    # #1295: handle JSON-RPC batch (array of request objects).
+    if isinstance(body, list):
+        responses = []
+        for item in body:
+            if not isinstance(item, dict):
+                responses.append(_mcp_err(None, -32600, "Invalid Request"))
+                continue
+            try:
+                result = await _mcp_handle_request(item, auth, repos, request)
+            except Exception as exc:
+                result = _mcp_err(item.get("id"), -32603, f"Internal error: {exc}")
+            # Notifications (no "id") must not be included in the batch response.
+            if result is not None and "id" in item:
+                responses.append(result)
+        if not responses:
+            return Response(status_code=204)
+        return JSONResponse(responses)
+
+    # #1295: non-dict body is not a valid JSON-RPC request.
+    if not isinstance(body, dict):
+        return JSONResponse(_mcp_err(None, -32600, "Invalid Request"), status_code=400)
+
     return JSONResponse(await _mcp_handle_request(body, auth, repos, request))
 
 
