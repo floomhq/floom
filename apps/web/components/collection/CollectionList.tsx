@@ -159,8 +159,28 @@ export function CollectionList<T>({
     );
   });
 
+  // Shared Collection column-header row (Workers/Brain/Connections all show it).
+  // Kept here so it can be reused by both the flat and the grouped (day-section)
+  // variants — the grouped list is a variant WITHIN the shared grammar, not a
+  // bespoke layout, so it must carry the same header chrome (#1225).
+  const head =
+    !compact && columns.headers.length > 0 ? (
+      <div
+        className="c-lhead"
+        style={{
+          gridTemplateColumns: columns.template,
+          ...(columns.headerTransparent ? { background: "transparent" } : {}),
+        }}
+      >
+        {columns.headers.map((h, i) => (
+          <div key={i}>{h}</div>
+        ))}
+      </div>
+    ) : null;
+
   // Day/section grouping for the resting list (hidden in compact via CSS).
-  let body: React.ReactNode = rows;
+  // The column header is shared with the flat list so Runs reads with the same
+  // grammar as the other Collection pages; the day labels are an in-list option.
   if (group && !compact) {
     const groups = new Map<string, React.ReactNode[]>();
     items.forEach((item, i) => {
@@ -168,31 +188,24 @@ export function CollectionList<T>({
       if (!groups.has(key)) groups.set(key, []);
       groups.get(key)!.push(rows[i]);
     });
-    body = Array.from(groups.entries()).map(([label, groupRows]) => (
+    const dayGroups = Array.from(groups.entries()).map(([label, groupRows]) => (
       <div className="c-daygrp" key={label}>
         <div className="dh">{label}</div>
         <div className="c-ltable">{groupRows}</div>
       </div>
     ));
-    return <div>{body}</div>;
+    return (
+      <div className="c-grouped">
+        {head}
+        {dayGroups}
+      </div>
+    );
   }
 
   return (
     <div className="c-ltable">
-      {!compact && columns.headers.length > 0 && (
-        <div
-          className="c-lhead"
-          style={{
-            gridTemplateColumns: columns.template,
-            ...(columns.headerTransparent ? { background: "transparent" } : {}),
-          }}
-        >
-          {columns.headers.map((h, i) => (
-            <div key={i}>{h}</div>
-          ))}
-        </div>
-      )}
-      {body}
+      {head}
+      {rows}
     </div>
   );
 }

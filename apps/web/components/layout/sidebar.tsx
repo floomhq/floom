@@ -128,17 +128,20 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
         <Plus className="w-4 h-4" />
         <span>New worker</span>
       </Link>
+      {/* #1315: differentiated grey background (var(--bg-2)) so the Search box
+          reads as an input, not a plain nav link. kbd chips sit on the lighter
+          card surface so they stay legible against the grey field. */}
       <button
         type="button"
         onClick={onSearch}
-        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[var(--bg-3)] hover:text-ink transition-colors duration-150"
+        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-2)] px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[var(--bg-3)] hover:text-ink transition-colors duration-150"
         aria-label="Open command palette"
       >
         <Search className="w-4 h-4 opacity-70" />
         <span>Search...</span>
         <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] tracking-widest text-[var(--ink-faint)]">
-          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-3)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</kbd>
-          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-3)] px-1 py-0.5 font-mono">K</kbd>
+          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-card)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</kbd>
+          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-card)] px-1 py-0.5 font-mono">K</kbd>
         </span>
       </button>
     </div>
