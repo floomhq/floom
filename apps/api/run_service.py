@@ -1617,6 +1617,18 @@ def execute_run(
                 )
             except Exception:
                 logger.warning("WhatsApp approval notify failed for run %s", run_id, exc_info=True)
+            # Fan-out: notify the run owner over Slack if they have an active binding.
+            try:
+                from channels.common import notify_pending_approval_via_slack
+                notify_pending_approval_via_slack(
+                    owner_id=owner_id,
+                    run_id=run_id,
+                    worker_name=_worker_name_for_notify,
+                    label=label,
+                    approval_id=approval_id,
+                )
+            except Exception:
+                logger.warning("Slack approval notify failed for run %s", run_id, exc_info=True)
             return
 
         # Output-schema enforcement — the SINGLE convergence point for ALL

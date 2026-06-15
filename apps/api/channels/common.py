@@ -131,6 +131,162 @@ def notify_pending_approval_via_whatsapp(
         )
 
 
+# ---------------------------------------------------------------------------
+# Slack approval notification (outbound fan-out hook — mirrors WhatsApp above)
+# ---------------------------------------------------------------------------
+
+def notify_pending_approval_via_slack(
+    *,
+    owner_id: str,
+    run_id: str,
+    worker_name: str,
+    label: str,
+    approval_id: str,
+) -> None:
+    """Send a Slack DM to the run owner when a run enters pending-approval state.
+
+    Reverse-looks up the owner's active Slack binding (slack_user_id + team_id)
+    by user_id, then opens a DM channel and posts a Block Kit message with
+    Approve / Reject buttons — identical to the interactive approval flow already
+    in channels/slack.py.  Does nothing when the owner has no active Slack binding
+    or when Slack is not configured.  Always best-effort — never raises.
+
+    The short approval ID suffix (last 6 hex chars) is included in the fallback
+    text for disambiguation when multiple approvals are pending simultaneously.
+    """
+    try:
+        from db import get_db
+        import requests as _requests
+
+        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+        candidate_ids = [owner_id]
+        slack_user_id: Optional[str] = None
+        team_id: Optional[str] = None
+
+        try:
+            with get_db() as conn:
+                if owner_id == bootstrap_id:
+                    try:
+                        admin_rows = conn.execute(
+                            "SELECT id FROM users WHERE role = 'admin'"
+                        ).fetchall()
+                        candidate_ids += [str(r["id"]) for r in admin_rows]
+                    except Exception:
+                        pass
+                else:
+                    candidate_ids.append(bootstrap_id)
+                seen: set[str] = set()
+                candidate_ids = [c for c in candidate_ids if c and not (c in seen or seen.add(c))]
+                placeholders = ",".join("?" * len(candidate_ids))
+                row = conn.execute(
+                    f"""
+                    SELECT slack_user_id, slack_team_id FROM slack_sender_bindings
+                    WHERE user_id IN ({placeholders}) AND status = 'active'
+                    LIMIT 1
+                    """,
+                    tuple(candidate_ids),
+                ).fetchone()
+            if row:
+                slack_user_id = str(row["slack_user_id"])
+                team_id = str(row["slack_team_id"])
+        except Exception:
+            logger.exception(
+                "Slack approval notify: binding lookup failed for owner %s", owner_id
+            )
+            return
+
+        if not slack_user_id or not team_id:
+            return
+
+        # Resolve bot token for this team.
+        try:
+            from channels.slack import _slack_bot_token_for_team, _approval_action_value
+        except Exception:
+            logger.exception("Slack approval notify: could not import Slack helpers")
+            return
+
+        bot_token = _slack_bot_token_for_team(team_id)
+        if not bot_token:
+            return
+
+        short_id = approval_id[-6:] if len(approval_id) >= 6 else approval_id
+        fallback_text = (
+            f"Approval needed for \"{worker_name}\": {label} — "
+            f"ref {short_id}"
+        )
+
+        # Build Block Kit DM — section + Approve/Reject buttons (reuses existing
+        # action_ids that the Slack interactive-payload handler already handles).
+        blocks = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Approval needed* — *{worker_name}*: {label}\n`{run_id}`",
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Approve", "emoji": False},
+                        "style": "primary",
+                        "action_id": "workeros_approval_approve",
+                        "value": _approval_action_value(run_id),
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Reject", "emoji": False},
+                        "style": "danger",
+                        "action_id": "workeros_approval_reject",
+                        "value": _approval_action_value(run_id),
+                    },
+                ],
+            },
+        ]
+
+        try:
+            # Open DM channel.
+            resp = _requests.post(
+                "https://slack.com/api/conversations.open",
+                headers={
+                    "Authorization": f"Bearer {bot_token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                json={"users": slack_user_id},
+                timeout=10,
+            )
+            dm_channel = (resp.json() or {}).get("channel", {}).get("id") if resp.ok else None
+            if not dm_channel:
+                return
+            # Post the Block Kit message.
+            _requests.post(
+                "https://slack.com/api/chat.postMessage",
+                headers={
+                    "Authorization": f"Bearer {bot_token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                json={
+                    "channel": dm_channel,
+                    "text": fallback_text,
+                    "blocks": blocks,
+                    "unfurl_links": False,
+                },
+                timeout=10,
+            )
+        except Exception:
+            logger.exception(
+                "Slack approval notify: DM send failed for slack_user %s (run %s)",
+                slack_user_id,
+                run_id,
+            )
+    except Exception:
+        logger.exception(
+            "Slack approval notify: unexpected error for owner %s run %s", owner_id, run_id
+        )
+
+
 def _auth_is_configured() -> bool:
     """True when this deployment has real auth configured (NOT legacy/dev mode).
 
