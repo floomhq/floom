@@ -315,6 +315,49 @@ def _config_from_manifest(
     return config
 
 
+def _heal_manifest_contract(manifest: Any, *, worker_id: str = "") -> Any:
+    """Self-heal a manifest_json whose top-level worker contract was clobbered.
+
+    A partial write can overwrite ``skill_versions.manifest_json`` with only state
+    fields (e.g. ``{name, paused, enabled, archive_reason}``) plus ``_files``,
+    dropping the parsed contract (``exec``/``title``/``version``/``trigger``).
+    The full recipe still lives in ``_files['worker.yml']`` — reconstruct the
+    contract from it so the worker resolves to its real config instead of
+    degrading to an empty python stub (which would run and produce nothing).
+
+    No-op for healthy manifests (they already carry ``exec``) and for manifests
+    whose ``worker.yml`` is missing/unusable.
+    """
+    if not isinstance(manifest, dict) or manifest.get("exec"):
+        return manifest
+    files = manifest.get("_files")
+    wyml = files.get("worker.yml") if isinstance(files, dict) else None
+    if not isinstance(wyml, str) or not wyml.strip():
+        return manifest
+    try:
+        import yaml  # noqa: PLC0415
+        parsed = yaml.safe_load(wyml)
+    except Exception:
+        _repo_logger.warning(
+            "manifest heal: worker.yml parse failed for %s",
+            worker_id or manifest.get("name"), exc_info=True,
+        )
+        return manifest
+    if not isinstance(parsed, dict) or not parsed.get("exec"):
+        return manifest  # worker.yml carries no contract either — nothing to heal
+    healed = dict(parsed)
+    healed["_files"] = files
+    # Preserve runtime state flags that legitimately live alongside the contract.
+    for k in ("paused", "enabled", "archived", "archive_reason"):
+        if k in manifest:
+            healed[k] = manifest[k]
+    _repo_logger.info(
+        "manifest heal: reconstructed clobbered contract from worker.yml for %s",
+        worker_id or manifest.get("name") or "<unknown>",
+    )
+    return healed
+
+
 def _worker_record_from_rows(
     worker_row: Mapping[str, Any],
     skill_version_row: Mapping[str, Any] | None,
@@ -324,6 +367,7 @@ def _worker_record_from_rows(
         if skill_version_row
         else {}
     )
+    manifest = _heal_manifest_contract(manifest, worker_id=str(worker_row.get("id") or ""))
     config = _config_from_manifest(
         worker_id=str(worker_row["id"]),
         manifest_json=manifest,
@@ -1337,6 +1381,9 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
 
         # Work on a copy so we never mutate the Supabase response object.
         manifest_json = dict(_json_load(skill.get("manifest_json"), {}))
+        # Self-heal a clobbered manifest (contract lost, recipe still in _files)
+        # before stripping _files, so the run resolves the real recipe.
+        manifest_json = _heal_manifest_contract(manifest_json, worker_id=worker_id)
 
         # Cloud: Supabase is the source of truth for worker code. If
         # _files is present in manifest_json, materialize them to
