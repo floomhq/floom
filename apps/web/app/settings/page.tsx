@@ -1516,8 +1516,26 @@ function SettingsHistoryMenu({
       <Dialog open={!!pendingRestore} onOpenChange={(open) => { if (!open) setPendingRestore(null); }}>
         <DialogContent showCloseButton={false} className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Restore version {pendingRestore?.sha}?</DialogTitle>
+            <DialogTitle>Restore this version?</DialogTitle>
           </DialogHeader>
+          {pendingRestore && (
+            <div className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5 text-sm space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs text-[var(--ink-soft)]">{pendingRestore.sha}</span>
+                {pendingRestore.author && (
+                  <span className="text-xs text-[var(--ink-mute)]">by {pendingRestore.author}</span>
+                )}
+              </div>
+              {pendingRestore.message && (
+                <p className="font-medium text-foreground truncate">{pendingRestore.message}</p>
+              )}
+              {pendingRestore.timestamp && (
+                <p className="text-xs text-[var(--ink-mute)]">
+                  {new Date(pendingRestore.timestamp).toLocaleString()}
+                </p>
+              )}
+            </div>
+          )}
           <DialogDescription>
             {confirmLabel} The current version is saved automatically before restoring.
           </DialogDescription>
