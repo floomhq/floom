@@ -5,7 +5,7 @@ import { LoginEmailPanel } from "@/components/LoginEmailPanel";
 import { V3Shell } from "@/app/v3/V3Shell";
 
 export const metadata = {
-  title: "Sign in · Floom",
+  title: "Sign in · Floom Workers",
 };
 
 export default async function LoginPage({
@@ -22,7 +22,7 @@ export default async function LoginPage({
         <section className="max-w-[430px]">
           <Image src="/floom-mark.svg" alt="" width={34} height={34} />
           <h1 className="mt-6 text-[36px] font-semibold leading-[1.04] tracking-[-0.032em] sm:text-[46px]">
-            Sign in to Floom.
+            Sign in to Floom Workers.
           </h1>
           <p className="mt-4 text-[15px] leading-relaxed text-muted-foreground">
             Review drafts, connect tools, and keep every worker run on the record.

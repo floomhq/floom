@@ -18,8 +18,7 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
-import { Brain, Check, FileCode2, FileText, Link2, Table2 } from "lucide-react";
-import { appUrl } from "@/lib/app-url";
+import { Check } from "lucide-react";
 import {
   GCalLogo,
   GmailLogo,
@@ -29,7 +28,7 @@ import {
   SheetsLogo,
   SlackLogo,
 } from "@/components/landing-icons";
-import { V3Composer, V3StickyPrompt } from "./V3Composer";
+import { V3Composer } from "./V3Composer";
 import { ChannelActions } from "./ChannelActions";
 import { V3TemplateCard } from "./V3TemplateCard";
 import { getTemplate } from "@/components/landing-ref/data";
@@ -303,20 +302,19 @@ function Templates() {
 
 /* ───────────────────────── page ───────────────────────── */
 
-const BRAIN_CHIPS = [
-  { label: "Company brain", icon: Brain },
-  { ext: "PDF", label: "ICP brief", icon: FileText },
-  { ext: "XLS", label: "Pricing", icon: Table2 },
-  { ext: "MD", label: "Tone guide", icon: FileCode2 },
-  { ext: "URL", label: "Style guide", icon: Link2 },
+const PILLS = [
+  { label: "Pipeline report", prompt: "Every Monday 9am, pull last week's pipeline from HubSpot and post a summary in #sales" },
+  { label: "Post-call follow-up", prompt: "After every call, draft a follow-up email using my CRM notes" },
+  { label: "Lead research", prompt: "Each morning, research 5 new inbound leads before my first meeting" },
 ];
 
 export function V3Body() {
+  const [fill, setFill] = useState<{ text: string; n: number } | null>(null);
   return (
     <V3Shell>
 
 
-        {/* hero: headline, one line, the jewel, three pills */}
+        {/* hero: headline, one line, the jewel, three prompt pills */}
         <section className="pb-16 pt-24 text-center sm:pt-40">
           <motion.h1
             initial={{ opacity: 0, y: 14 }}
@@ -342,6 +340,7 @@ export function V3Body() {
           >
             <V3Composer
               compact
+              fillSignal={fill}
               heading="Start with one job."
               placeholder="Tell Emily one job to handle..."
             />
@@ -350,27 +349,18 @@ export function V3Body() {
             initial={{ opacity: 0 }}
             animate={{ opacity: 1 }}
             transition={{ duration: 0.5, delay: 0.36 }}
-            className="mx-auto mt-4 flex max-w-[560px] flex-wrap items-center justify-center gap-2"
+            className="mt-4 flex flex-wrap items-center justify-center gap-2"
           >
-            {BRAIN_CHIPS.map((chip) => {
-              const Icon = chip.icon;
-              return (
-                <span
-                  key={chip.label}
-                  className="inline-flex h-8 items-center gap-2 rounded-full bg-card px-2.5 text-[12px] font-medium text-foreground/80 ring-1 ring-[var(--border-soft)]"
-                >
-                  <span className="flex h-5 w-5 items-center justify-center rounded-full bg-secondary text-muted-foreground">
-                    <Icon className="h-3.5 w-3.5" />
-                  </span>
-                  {"ext" in chip ? (
-                    <span className="font-mono text-[10.5px] font-semibold text-muted-foreground">
-                      {chip.ext}
-                    </span>
-                  ) : null}
-                  <span>{chip.label}</span>
-                </span>
-              );
-            })}
+            {PILLS.map((p) => (
+              <button
+                key={p.label}
+                type="button"
+                onClick={() => setFill((f) => ({ text: p.prompt, n: (f?.n ?? 0) + 1 }))}
+                className="rounded-full bg-secondary px-3.5 py-1.5 text-[12px] font-medium text-foreground/70 transition-colors hover:bg-[var(--bg-3)] hover:text-foreground"
+              >
+                {p.label}
+              </button>
+            ))}
           </motion.div>
           <motion.div
             initial={{ opacity: 0 }}
@@ -402,7 +392,7 @@ export function V3Body() {
 
         <Templates />
 
-        {/* close: headline + one button */}
+        {/* close: headline + prompt box so visitors can start without scrolling back up */}
         <section className="pb-10 pt-4 text-center">
           <motion.h2
             initial={{ opacity: 0, y: 12 }}
@@ -420,17 +410,9 @@ export function V3Body() {
             transition={{ duration: 0.5, delay: 0.1, ease: EASE }}
             className="mt-8"
           >
-            <Link
-              href={appUrl("/workers/new")}
-              className="inline-flex items-center gap-2 rounded-[12px] px-6 py-3 text-[14.5px] font-medium text-white"
-              style={{ background: "var(--v3-accent)" }}
-            >
-              Hire your first worker
-            </Link>
+            <V3Composer compact placeholder="Tell Emily one job to handle..." />
           </motion.div>
         </section>
-
-        <V3StickyPrompt />
 
     </V3Shell>
   );
