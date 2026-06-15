@@ -32,12 +32,29 @@ describe("InlineFileOpen", () => {
     expect(document.querySelector("img")).toBeNull(); // back to the list
   });
 
-  it("loads text content inline via loadText", async () => {
+  it("loads text content inline via loadText (markdown rendered in Preview)", async () => {
     const loadText = vi.fn().mockResolvedValue("# hello brain");
     render(<InlineFileOpen files={files} rootLabel="company-facts" loadText={loadText} />);
     fireEvent.click(screen.getByText("notes.md"));
-    await waitFor(() => expect(screen.getByText("# hello brain")).toBeTruthy());
+    // #1289: Preview is the default — a .md file renders its heading, not the
+    // raw "# hello brain" source.
+    await waitFor(() => expect(screen.getByRole("heading", { name: "hello brain" })).toBeTruthy());
     expect(loadText).toHaveBeenCalledWith(expect.objectContaining({ id: "notes.md" }));
+  });
+
+  it("#1289: Preview/Raw toggle switches between rendered markdown and raw source", async () => {
+    const loadText = vi.fn().mockResolvedValue("# hello brain");
+    render(<InlineFileOpen files={files} rootLabel="company-facts" loadText={loadText} />);
+    fireEvent.click(screen.getByText("notes.md"));
+    // Preview (default): rendered heading, no literal "#".
+    await waitFor(() => expect(screen.getByRole("heading", { name: "hello brain" })).toBeTruthy());
+    expect(screen.queryByText("# hello brain")).toBeNull();
+    // Switch to Raw: the literal markdown source is shown.
+    fireEvent.click(screen.getByRole("button", { name: /^Raw$/i }));
+    await waitFor(() => expect(screen.getByText("# hello brain")).toBeTruthy());
+    // Back to Preview.
+    fireEvent.click(screen.getByRole("button", { name: /^Preview$/i }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "hello brain" })).toBeTruthy());
   });
 
   it("never text-loads binary files; .db gets the #777 fallback", () => {
@@ -91,7 +108,8 @@ describe("InlineFileOpen", () => {
     const onSaveText = vi.fn().mockResolvedValue(undefined);
     render(<InlineFileOpen files={files} rootLabel="company-facts" loadText={loadText} onSaveText={onSaveText} />);
     fireEvent.click(screen.getByText("notes.md"));
-    await waitFor(() => expect(screen.getByText("# old")).toBeTruthy());
+    // #1289: Preview renders the markdown heading by default.
+    await waitFor(() => expect(screen.getByRole("heading", { name: "old" })).toBeTruthy());
 
     const back = screen.getByRole("button", { name: /Back/i });
     const edit = screen.getByRole("button", { name: /Edit/i });
@@ -105,6 +123,7 @@ describe("InlineFileOpen", () => {
     fireEvent.click(screen.getByRole("button", { name: /Save/i }));
 
     await waitFor(() => expect(onSaveText).toHaveBeenCalledWith(expect.objectContaining({ id: "notes.md" }), "# new"));
-    expect(screen.getByText("# new")).toBeTruthy();
+    // After save, Preview re-renders the new markdown heading.
+    await waitFor(() => expect(screen.getByRole("heading", { name: "new" })).toBeTruthy());
   });
 });
