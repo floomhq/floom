@@ -650,6 +650,17 @@ class SqliteWorkerRepository:
                 is_admin = False
             if is_admin and include_all_users:
                 rows = conn.execute(base_select + "ORDER BY w.name").fetchall()
+            elif is_admin:
+                # #1139: admins see their own workers plus all workspace-visible
+                # workers without needing a workspace_members row. Previously,
+                # admins who were not in workspace_members saw 0 workers.
+                rows = conn.execute(
+                    base_select
+                    + "WHERE w.owner_id = ? "
+                    + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                    + "ORDER BY w.name",
+                    (user_id,),
+                ).fetchall()
             else:
                 try:
                     has_members_table = bool(conn.execute(
@@ -1589,6 +1600,11 @@ class SqliteWorkerRepository:
 
 
 class SqliteRunRepository:
+    _COMPLETED_STATUSES = ("completed", "approved", "success", "succeeded")
+    _FAILED_STATUSES = ("failed", "error", "cancelled", "rejected", "timeout")
+    _OUTCOME_STATUSES = ("completed", "approved", "success")
+    _TERMINAL_STATUSES = _COMPLETED_STATUSES + _FAILED_STATUSES
+
     def list_for_worker(
         self,
         *,
@@ -1659,6 +1675,220 @@ class SqliteRunRepository:
                 (*params, limit, offset),
             ).fetchall()
         return [_row_dict(row) for row in rows], int(total or 0)
+
+    @staticmethod
+    def _in_clause(values: list[str] | tuple[str, ...]) -> str:
+        return ", ".join("?" for _ in values)
+
+    def overview_status_rollup(
+        self,
+        *,
+        user_id: str,
+        since: str,
+        window_7d: str,
+        today_start: str,
+    ) -> list[dict[str, Any]]:
+        """Grouped run counts for overview headline stats.
+
+        The overview needs 14d, 7d, and today status counts. Returning one row
+        per worker/status keeps Python's existing scoping rules without pulling
+        every run row into the API process.
+        """
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    r.worker_id,
+                    r.status,
+                    SUM(CASE WHEN r.created_at >= ? THEN 1 ELSE 0 END) AS count_7d,
+                    SUM(CASE WHEN r.created_at < ? THEN 1 ELSE 0 END) AS count_previous_7d,
+                    SUM(CASE WHEN r.created_at >= ? THEN 1 ELSE 0 END) AS count_today
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE w.owner_id = ?
+                  AND r.created_at >= ?
+                GROUP BY r.worker_id, r.status
+                """,
+                (window_7d, window_7d, today_start, user_id, since),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def overview_sparkline_buckets(
+        self,
+        *,
+        user_id: str,
+        since: str,
+        until: str,
+        bucket_seconds: int,
+    ) -> list[dict[str, Any]]:
+        bucket_seconds = max(1, int(bucket_seconds))
+        with get_db() as conn:
+            rows = conn.execute(
+                """
+                SELECT
+                    CAST(
+                        (strftime('%s', r.created_at) - strftime('%s', ?)) / ? AS INTEGER
+                    ) AS bucket,
+                    r.status,
+                    COUNT(*) AS total
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE w.owner_id = ?
+                  AND r.created_at >= ?
+                  AND r.created_at <= ?
+                GROUP BY bucket, r.status
+                """,
+                (since, bucket_seconds, user_id, since, until),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def overview_current_counts(
+        self,
+        *,
+        user_id: str,
+        statuses: list[str],
+    ) -> dict[str, int]:
+        if not statuses:
+            return {}
+        status_sql = self._in_clause(statuses)
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT r.status, COUNT(*) AS total
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE w.owner_id = ?
+                  AND r.status IN ({status_sql})
+                GROUP BY r.status
+                """,
+                (user_id, *statuses),
+            ).fetchall()
+        return {str(row["status"]): int(row["total"] or 0) for row in rows}
+
+    def overview_top_completed_by_worker(
+        self,
+        *,
+        user_id: str,
+        since: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        status_sql = self._in_clause(self._OUTCOME_STATUSES)
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT r.worker_id, COUNT(*) AS count, MAX(r.created_at) AS latest_created_at
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE w.owner_id = ?
+                  AND r.created_at >= ?
+                  AND r.status IN ({status_sql})
+                GROUP BY r.worker_id
+                ORDER BY count DESC, latest_created_at DESC, r.worker_id ASC
+                LIMIT ?
+                """,
+                (user_id, since, *self._OUTCOME_STATUSES, limit),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def overview_recent_visible_runs(
+        self,
+        *,
+        user_id: str,
+        worker_ids: list[str],
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if not worker_ids:
+            return []
+        worker_sql = self._in_clause(worker_ids)
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT r.id, r.worker_id,
+                       COALESCE(JSON_EXTRACT(sv.manifest_json, '$.title'), w.name) AS worker_name,
+                       r.status, r.trigger_source, r.created_at, r.started_at,
+                       r.completed_at, r.duration_ms, r.error, r.error_code
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
+                WHERE w.owner_id = ?
+                  AND r.worker_id IN ({worker_sql})
+                ORDER BY r.created_at DESC, r.id DESC
+                LIMIT ?
+                """,
+                (user_id, *worker_ids, limit),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def overview_latest_failures_by_worker(
+        self,
+        *,
+        user_id: str,
+        worker_ids: list[str],
+        since: str,
+        limit: int,
+    ) -> list[dict[str, Any]]:
+        if not worker_ids:
+            return []
+        worker_sql = self._in_clause(worker_ids)
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM (
+                    SELECT
+                        r.id, r.worker_id, r.status, r.trigger_source, r.created_at,
+                        r.started_at, r.completed_at, r.duration_ms, r.error, r.error_code,
+                        COUNT(*) OVER (PARTITION BY r.worker_id) AS failure_count,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY r.worker_id
+                            ORDER BY COALESCE(r.started_at, r.completed_at, r.created_at) DESC,
+                                     r.created_at DESC,
+                                     r.id DESC
+                        ) AS row_number
+                    FROM runs r
+                    JOIN workers w ON w.id = r.worker_id
+                    WHERE w.owner_id = ?
+                      AND r.worker_id IN ({worker_sql})
+                      AND r.status = ?
+                      AND r.created_at >= ?
+                )
+                WHERE row_number = 1
+                ORDER BY failure_count DESC,
+                         COALESCE(started_at, completed_at, created_at) DESC,
+                         worker_id ASC
+                LIMIT ?
+                """,
+                (user_id, *worker_ids, "failed", since, limit),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
+
+    def overview_terminal_runs(
+        self,
+        *,
+        user_id: str,
+        worker_ids: list[str],
+        since: str,
+    ) -> list[dict[str, Any]]:
+        if not worker_ids:
+            return []
+        worker_sql = self._in_clause(worker_ids)
+        status_sql = self._in_clause(self._TERMINAL_STATUSES)
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT r.id, r.worker_id, r.status, r.trigger_source, r.created_at,
+                       r.started_at, r.completed_at, r.duration_ms, r.error, r.error_code
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE w.owner_id = ?
+                  AND r.worker_id IN ({worker_sql})
+                  AND r.status IN ({status_sql})
+                  AND r.created_at >= ?
+                ORDER BY r.created_at DESC, r.id DESC
+                """,
+                (user_id, *worker_ids, *self._TERMINAL_STATUSES, since),
+            ).fetchall()
+        return [_row_dict(row) for row in rows]
 
     def get(self, *, user_id: str, run_id: str) -> dict[str, Any] | None:
         with get_db() as conn:

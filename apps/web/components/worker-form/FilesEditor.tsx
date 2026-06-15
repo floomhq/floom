@@ -136,14 +136,14 @@ function span(color: string, s: string, extra = ""): string {
 // Colors chosen to be legible on both the light (var(--bg-2)) and dark
 // (#1a1a1a) editor backgrounds used by FilesEditor.
 const YC = {
-  key:     "hsl(210 80% 55%)",   // blue — keys
-  colon:   "hsl(220 10% 55%)",   // muted — : separator
-  string:  "hsl(142 55% 42%)",   // green — quoted strings
-  number:  "hsl(200 70% 48%)",   // cyan-blue — numbers
-  bool:    "hsl(270 55% 62%)",   // purple — true/false/null
-  comment: "hsl(220 10% 58%)",   // grey — comments
-  dash:    "hsl(220 10% 55%)",   // muted — list dash
-  anchor:  "hsl(340 60% 58%)",   // pink — YAML anchors & tags
+  key:     "hsl(210 80% 55%)",   // blue: keys
+  colon:   "hsl(220 10% 55%)",   // muted: colon separator
+  string:  "hsl(142 55% 42%)",   // green: quoted strings
+  number:  "hsl(200 70% 48%)",   // cyan-blue: numbers
+  bool:    "hsl(270 55% 62%)",   // purple: true/false/null
+  comment: "hsl(220 10% 58%)",   // grey: comments
+  dash:    "hsl(220 10% 55%)",   // muted: list dash
+  anchor:  "hsl(340 60% 58%)",   // pink: YAML anchors and tags
 };
 
 function colorYamlValue(raw: string): string {

@@ -57,7 +57,7 @@ export const MCP_SUGGESTIONS: McpSuggestion[] = [
   {
     name: "Stripe",
     npm_package: "@stripe/mcp",
-    description: "Customers, charges, subscriptions, products — read + write via Stripe API.",
+    description: "Customers, charges, subscriptions, products; read + write via Stripe API.",
     env_vars: ["STRIPE_SECRET_KEY"],
     homepage: "https://github.com/stripe/agent-toolkit",
   },

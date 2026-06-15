@@ -321,7 +321,7 @@ export default function AssistantPage() {
           ) : null}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          How Emily works for this workspace — her persona, what she knows
+          How Emily works for this workspace: her persona, what she knows
           about your company, and the prompt she runs on. To get work done,
           just talk to her.
         </p>

@@ -258,7 +258,7 @@ export function WorkerIconPills({
   // as a single image with a label summarizing what it represents — the
   // worker's identity, inputs, and connected tools — so it is never a silent
   // run of unlabeled glyphs.
-  const stripLabel = `${worker?.name ? `${worker.name}: ` : ""}inputs and tools — ${entries
+  const stripLabel = `${worker?.name ? `${worker.name}: ` : ""}inputs and tools: ${entries
     .map((e) => e.title)
     .join(", ")}`;
 

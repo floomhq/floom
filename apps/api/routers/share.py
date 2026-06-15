@@ -19,7 +19,7 @@ import sqlite3
 import uuid as _uuid_mod
 from typing import List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Response
 from pydantic import BaseModel, Field
 
 from auth import AuthContext, get_auth_context
@@ -121,12 +121,12 @@ def list_share_grants(
     ]
 
 
-@share_router.delete("/share/grants/{grant_id}", status_code=204)
+@share_router.delete("/share/grants/{grant_id}", status_code=204, response_class=Response)
 def delete_share_grant(
     grant_id: str,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
-) -> None:
+) -> Response:
     """#767: revoke a person's access grant."""
     from db import get_db
 
@@ -136,3 +136,4 @@ def delete_share_grant(
         )
     if cur.rowcount == 0:
         raise HTTPException(status_code=404, detail="Grant not found")
+    return Response(status_code=204)

@@ -65,7 +65,7 @@ export default async function PublicWorkerPage({
           <Link href="/" className="font-medium text-[var(--ink)] no-underline hover:underline">
             Floom
           </Link>{" "}
-          — AI workers that use your tools and run on a schedule, webhook, or on demand.
+          AI workers that use your tools and run on a schedule, webhook, or on demand.
         </p>
       </div>
     </ShareCardShell>

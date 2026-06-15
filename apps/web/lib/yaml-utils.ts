@@ -58,7 +58,7 @@ export function patchInputDefault(yaml: string, inputName: string, value: string
     const indent = line.length - trimmed.length;
 
     if (trimmed.startsWith("- name:")) {
-      if (inTargetBlock) break; // next input block starts — we're done
+      if (inTargetBlock) break; // next input block starts; we're done
       const nameVal = trimmed.slice("- name:".length).trim().replace(/^["']|["']$/g, "");
       if (nameVal === inputName) {
         inTargetBlock = true;
