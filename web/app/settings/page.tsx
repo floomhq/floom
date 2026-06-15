@@ -392,7 +392,7 @@ function SettingsContent() {
   const [waClaimBanner, setWaClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
   const [claimedSlackToken, setClaimedSlackToken] = useState<string | null>(null);
   const [slackClaimBanner, setSlackClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
-  // Federico 2026-06-11: a successful claim shows a full-screen confirmation,
+  // the operator 2026-06-11: a successful claim shows a full-screen confirmation,
   // not just an inline banner. Channel-aware copy; null = no overlay.
   const [claimSuccess, setClaimSuccess] = useState<ClaimChannel | null>(null);
   const [fromInstallChannel, setFromInstallChannel] = useState<string | null>(null);
@@ -565,7 +565,7 @@ function SettingsContent() {
     currentUser?.display_name?.trim() ||
     currentUser?.email?.trim() ||
     currentUser?.username?.trim() ||
-    "Federico";
+    "the operator";
 
   const config = useMemo<CollectionConfig<SettingsNavItemWithIcon>>(() => {
     const items = SETTINGS_NAV.map((item) => ({ ...item, icon: iconForSection(item.key) }));

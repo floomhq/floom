@@ -22,7 +22,7 @@ describe("#190 FilesEditor markdown link sanitization", () => {
       <FilesEditor
         mode="view"
         selectedPath="README.md"
-        files={[{ path: "README.md", content, language: "markdown" }]}
+        files={[{ path: "README.md", content, language: "markdown", binary: false, size: content.length }]}
       />,
     );
 
@@ -42,6 +42,8 @@ describe("#190 FilesEditor markdown link sanitization", () => {
             path: "README.md",
             content: "[site](https://example.com) [rel](/workers/abc)",
             language: "markdown",
+            binary: false,
+            size: 47,
           },
         ]}
       />,

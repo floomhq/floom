@@ -148,7 +148,7 @@ export function ConnectionEventPicker({
   // N4: show the connected account alongside the app name in the Integration
   // dropdown. The account is carried on the connection (display_name /
   // account_label). When exactly one connection exists for an app we can
-  // surface it here (e.g. "Gmail · depontefede@gmail.com"); apps with multiple
+  // surface it here (e.g. "Gmail · owner@example.com"); apps with multiple
   // accounts disambiguate in the dedicated Account step below, so we keep their
   // Integration label to just the app name.
   function appOptionLabel(slug: string): string {

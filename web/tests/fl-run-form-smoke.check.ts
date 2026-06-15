@@ -93,9 +93,9 @@ function test691FileSamplesRespectInputContracts(): void {
   const csvYml = read("workers/csv_enricher/worker.yml");
   assert(!csvYml.includes("csv_file: null"), "csv_enricher example_input must not leave csv_file null");
   assert(csvYml.includes("name,company,title,location"), "csv_enricher must include inline CSV sample content");
-
-  const cvYml = read("workers/cv_writeup/worker.yml");
-  assert(cvYml.includes("cv_file: null"), "cv_writeup example_input must leave cv_file null");
+  // Note: the prior "leave file null" half of this contract referenced the
+  // cv_writeup example worker, which was removed in the OSS scrub. No shipped
+  // example currently uses the null-file pattern, so that assertion is dropped.
 }
 
 const tests: [string, () => void][] = [

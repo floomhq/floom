@@ -250,7 +250,7 @@
 
 html.dark {
   color-scheme: dark;
-  /* PR S20 matte dark — openchat-v2 palette (Federico's explicit preference).
+  /* PR S20 matte dark — openchat-v2 palette (the operator's explicit preference).
      Sidebar is the DARKEST surface. Pure white borders at low alpha — matte.
      v4 Phase 1: accent updated to #5B8DEF (final.html body.dark --accent).
      --primary in dark = near-white (ECEDEF per final.html), not the blue. */
@@ -653,7 +653,7 @@ html.dark .grain {
   }
 }
 
-/* Icon-only theme toggle (V6, Federico 2026-06-02: "remove the labels here,
+/* Icon-only theme toggle (V6, the operator 2026-06-02: "remove the labels here,
    the icons are enough."). Square icon button; the mode name lives only in the
    aria-label + title for accessibility. */
 .theme-mode-button {

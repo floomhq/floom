@@ -1,7 +1,6 @@
 "use client";
 
 import { useEffect } from "react";
-import { captureException } from "@/lib/analytics/capture";
 
 // Root error boundary. Catches any unhandled error in the app shell.
 //
@@ -33,11 +32,6 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    captureException(error, {
-      source: "global_error_boundary",
-      digest: error.digest ?? null,
-      error_type: isChunkLoadError(error) ? "chunk_load" : "runtime",
-    });
     if (!isChunkLoadError(error)) return;
 
     // Avoid infinite reload loops: only attempt once per session.

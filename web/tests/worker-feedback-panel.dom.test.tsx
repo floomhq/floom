@@ -20,7 +20,7 @@ const item = {
   id: "fdbk_1",
   worker_id: "w1",
   author_id: "u1",
-  author_name: "Federico",
+  author_name: "the operator",
   content: "Discord formatting is off.",
   created_at: "2026-06-09T12:00:00Z",
 };
@@ -38,7 +38,7 @@ describe("WorkerFeedbackPanel", () => {
     render(<WorkerFeedbackPanel workerId="w1" canLeave canModerate />);
 
     expect(await screen.findByText("Discord formatting is off.")).toBeInTheDocument();
-    expect(screen.getByText("Federico")).toBeInTheDocument();
+    expect(screen.getByText("the operator")).toBeInTheDocument();
 
     await user.type(screen.getByLabelText("Leave feedback"), "New note");
     await user.click(screen.getByRole("button", { name: /Post feedback/ }));
