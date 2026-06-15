@@ -248,13 +248,16 @@ export function WorkspaceSwitcher() {
   return (
     <div className="w-full">
       <DropdownMenu>
-        {/* V4 SPEC §2: workspace identity — mark + name + chevron-on-hover */}
+        {/* V4 SPEC §2: workspace identity — mark + name + chevron-on-hover.
+            #1264: explicit asChild=false + onPointerDown stop so the trigger only
+            fires on the workspace name row itself, not on adjacent sidebar elements. */}
         <DropdownMenuTrigger
           className={cn(
-            "group flex h-10 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm font-semibold text-ink transition-colors duration-150",
+            "group flex h-9 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2 text-sm font-semibold text-ink transition-colors duration-150",
             "hover:bg-[var(--active-nav-bg)] focus-visible:outline-none"
           )}
           aria-label="Switch workspace"
+          onPointerDown={(e) => e.stopPropagation()}
         >
           {/* Workspace mark: company logo if available, else colored initial */}
           <div className="size-6 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_22%,transparent)] text-[var(--accent)] grid place-items-center text-[10px] font-semibold uppercase tracking-wide">
