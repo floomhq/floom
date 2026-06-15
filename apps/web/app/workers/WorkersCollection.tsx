@@ -831,6 +831,7 @@ function WorkerDetailActions({
   onUpdated: (w: WorkerSummary) => void;
   canManage?: boolean;
 }) {
+  const router = useRouter();
   const [d, applyDetail] = useWorkerDetail(w.id);
   const [runOpen, setRunOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
@@ -872,7 +873,7 @@ function WorkerDetailActions({
       const result = await api.workers.run(w.id, payload);
       toast.success("Run queued");
       setRunOpen(false);
-      if (result.run_id) window.location.href = `/runs?sel=${encodeURIComponent(result.run_id)}`;
+      if (result.run_id) router.push(`/runs?sel=${encodeURIComponent(result.run_id)}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not run worker");
     } finally {
@@ -1369,7 +1370,7 @@ export default function WorkersCollection({
         rel(w.recent_stats?.last_run_at),
       ],
       status: workerStatusPill(w),
-      menu: [{ label: "Open", onSelect: () => (window.location.href = `/workers?sel=${encodeURIComponent(w.id)}`) }],
+      menu: [{ label: "Open", onSelect: () => router.push(`/workers?sel=${encodeURIComponent(w.id)}`) }],
     }),
     card: (w) => {
       const meta = workerCardMeta(w);

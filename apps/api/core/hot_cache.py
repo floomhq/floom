@@ -9,7 +9,7 @@ from collections.abc import Hashable
 from typing import Any
 
 
-_CACHE_TTL_SECONDS = 2.0
+_CACHE_TTL_SECONDS = 30.0
 _MAX_ENTRIES = 256
 _lock = threading.Lock()
 _items: dict[Hashable, tuple[float, Any]] = {}
@@ -38,6 +38,11 @@ def set(key: Hashable, value: Any) -> None:
             if len(_items) >= _MAX_ENTRIES:
                 _items.pop(next(iter(_items)))
         _items[key] = (now + _CACHE_TTL_SECONDS, copy.deepcopy(value))
+
+
+def delete(key: Hashable) -> None:
+    with _lock:
+        _items.pop(key, None)
 
 
 def clear() -> None:
