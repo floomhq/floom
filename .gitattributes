@@ -1,0 +1,6 @@
+# Shell scripts must stay LF, even when checked out on Windows (core.autocrlf=true
+# would otherwise give them CRLF and break the `#!/usr/bin/env bash` shebang on
+# Linux/macOS). PowerShell scripts are fine either way; pin them to CRLF for
+# native Windows editing.
+*.sh  text eol=lf
+*.ps1 text eol=crlf
