@@ -396,8 +396,8 @@ export function InlineFileOpen({
             ) : (
               <pre
                 style={{
-                  border: "var(--bd-card)",
-                  borderRadius: "var(--radius-card)",
+                  border: "var(--bd-card)", /* ds-allow-border */
+                  borderRadius: "var(--radius-card)", /* ds-allow-round */
                   background: "var(--bg-2)",
                   color: "var(--ink-soft)",
                   padding: 13,

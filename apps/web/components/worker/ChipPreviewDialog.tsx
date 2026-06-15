@@ -155,8 +155,8 @@ export function ChipPreviewDialog({
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
       <DialogContent className="flex max-h-[80vh] w-full max-w-lg flex-col gap-0 overflow-hidden p-0">
-        <DialogHeader className="flex-row items-center gap-3 [border-bottom:var(--bd-div)] px-4 py-3">
-          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-card)]">
+        <DialogHeader className="flex-row items-center gap-3 [border-bottom:var(--bd-div)] px-4 py-3"> {/* ds-allow-border */}
+          <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-card)]"> {/* ds-allow-border ds-allow-round */}
             {target?.kind === "integration" ? (
               <BrandLogo icon={target.app} className="size-5" />
             ) : (

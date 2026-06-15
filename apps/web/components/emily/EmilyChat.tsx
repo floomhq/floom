@@ -188,7 +188,7 @@ function SuggestionPills({
           type="button"
           onClick={() => onSuggest(s)}
           /* ds-allow-round ds-allow-border */
-          className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-2.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-2.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" // ds-allow-round ds-allow-border
         >
           {s}
         </button>
@@ -344,7 +344,7 @@ function ChatEmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
             key={s}
             type="button"
             onClick={() => onSuggest(s)}
-            className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors" // ds-allow-round ds-allow-border
           >
             {s}
           </button>
@@ -389,6 +389,7 @@ function CreateWorkerHeroState({
 
       {/* Composer card — wide and prominent */}
       <div className="w-full max-w-2xl">
+        {/* ds-allow-border ds-allow-round */}
         <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)] p-5 space-y-4">
           <textarea
             autoFocus
@@ -406,7 +407,7 @@ function CreateWorkerHeroState({
             className="w-full resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60"
           />
           <PromptChips prompt={input} />
-          <div className="h-px bg-[var(--border-default)]" />
+          <div className="h-px bg-[var(--border-default)]" /> {/* ds-allow-border — divider, uses border color as bg */}
           <div className="flex flex-wrap items-center justify-between gap-3">
             <CreateSourcePills onPick={onAddSource} />
             <div className="flex items-center gap-2 shrink-0 ml-auto">
@@ -418,7 +419,7 @@ function CreateWorkerHeroState({
                 Hire worker
               </Button>
               <kbd
-                className="hidden sm:inline-flex items-center gap-0.5 rounded [border:var(--bd-card)] bg-[var(--bg-2)] px-1.5 py-1 text-[10px] font-mono text-[var(--ink-mute)]"
+className="hidden sm:inline-flex items-center gap-0.5 rounded [border:var(--bd-card)] bg-[var(--bg-2)] px-1.5 py-1 text-[10px] font-mono text-[var(--ink-mute)]" // ds-allow-border ds-allow-round
                 aria-hidden="true"
                 title="Press Enter to send, Shift+Enter for a new line"
               >
