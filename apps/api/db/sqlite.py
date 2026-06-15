@@ -12,6 +12,7 @@ except ImportError:
     _LOCK_EX = 1
     _LOCK_UN = 8
 import contextvars
+import base64
 import hashlib
 import json
 import logging
@@ -38,6 +39,8 @@ from ._legacy_sqlite import _row_dict, get_db, now_iso
 
 
 _SECRET_PREFIX = "__WORKEROS_SECRET__"
+_SECRET_ENC_PREFIX = "enc:v1:"
+_LOCAL_SECRETS_KEY_PATH = Path.home() / ".config" / "workeros" / "secrets.key"
 _FLOOM_USER_ID = "federico"
 _UNKNOWN_RUN_ERROR_CODE = "unknown_error"
 _UNKNOWN_RUN_ERROR_MESSAGE = (
@@ -273,6 +276,71 @@ def _looks_like_session_hash(value: str | None) -> bool:
     return bool(value and re.fullmatch(r"[0-9a-f]{64}", value))
 
 
+def _decode_configured_secret_key(raw: str) -> bytes | None:
+    raw = (raw or "").strip()
+    if not raw:
+        return None
+    for candidate in (raw, raw.replace("-", "+").replace("_", "/")):
+        padded = candidate + ("=" * (-len(candidate) % 4))
+        try:
+            decoded = base64.b64decode(padded)
+        except Exception:
+            continue
+        if len(decoded) == 32:
+            return decoded
+    raw_bytes = raw.encode("utf-8")
+    if len(raw_bytes) == 32:
+        return raw_bytes
+    return None
+
+
+def _local_secret_encryption_key() -> bytes:
+    configured = os.environ.get("WORKEROS_SECRETS_KEY") or os.environ.get("WORKEROS_SECRET_ENCRYPTION_KEY")
+    key = _decode_configured_secret_key(configured or "")
+    if key is not None:
+        return key
+    if _LOCAL_SECRETS_KEY_PATH.exists():
+        key = _LOCAL_SECRETS_KEY_PATH.read_bytes()
+        if len(key) == 32:
+            return key
+        decoded = _decode_configured_secret_key(key.decode("utf-8", errors="ignore"))
+        if decoded is not None:
+            return decoded
+    _LOCAL_SECRETS_KEY_PATH.parent.mkdir(parents=True, exist_ok=True)
+    key = os.urandom(32)
+    _LOCAL_SECRETS_KEY_PATH.write_bytes(key)
+    _LOCAL_SECRETS_KEY_PATH.chmod(0o600)
+    return key
+
+
+def _encrypt_secret_env_value(value: str) -> str:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    key = _local_secret_encryption_key()
+    nonce = os.urandom(12)
+    ciphertext = AESGCM(key).encrypt(nonce, value.encode("utf-8"), None)
+    return _SECRET_ENC_PREFIX + base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii")
+
+
+def _decrypt_secret_env_value(value: str) -> str | None:
+    if not value.startswith(_SECRET_ENC_PREFIX):
+        return value
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    encoded = value[len(_SECRET_ENC_PREFIX):]
+    try:
+        blob = base64.urlsafe_b64decode(encoded + ("=" * (-len(encoded) % 4)))
+        nonce, ciphertext = blob[:12], blob[12:]
+        return AESGCM(_local_secret_encryption_key()).decrypt(nonce, ciphertext, None).decode("utf-8")
+    except Exception:
+        logger.warning("Failed to decrypt local secret value from %s", secret_store_env_path(), exc_info=True)
+        return None
+
+
+def _secret_env_storage_value(value: str) -> str:
+    return _encrypt_secret_env_value(value)
+
+
 def _read_env_lines(path: Path | None = None) -> list[str]:
     """Read lines from a secret env file (defaults to the canonical write path)."""
     env_path = path if path is not None else _env_path()
@@ -296,7 +364,7 @@ def _upsert_env_var(name: str, value: str) -> None:
     if any(ord(ch) < 32 or ord(ch) == 127 for ch in value):
         raise ValueError("Secret value must not contain newline or control characters")
     lines = _read_env_lines()
-    new_line = f"{name}={value}\n"
+    new_line = f"{name}={_secret_env_storage_value(value)}\n"
     replaced = False
     updated: list[str] = []
     for line in lines:
@@ -331,7 +399,7 @@ def _delete_env_var(name: str) -> bool:
 def _read_env_var(name: str) -> str | None:
     value = os.environ.get(name)
     if value is not None:
-        return value
+        return _decrypt_secret_env_value(value)
     # Scan the canonical store first, then legacy locations, so secrets written
     # before the N4-1 fix (orphaned in a prior deploy tree's apps/api/.env)
     # still resolve. First match wins.
@@ -339,7 +407,7 @@ def _read_env_var(name: str) -> str | None:
         for line in _read_env_lines(env_path):
             stripped = line.rstrip("\n")
             if stripped.startswith(f"{name}="):
-                return stripped.split("=", 1)[1]
+                return _decrypt_secret_env_value(stripped.split("=", 1)[1])
     return None
 
 
@@ -354,7 +422,9 @@ def _build_env_lookup() -> dict[str, str]:
             stripped = line.rstrip("\n")
             if "=" in stripped and not stripped.startswith("#"):
                 k, _, v = stripped.partition("=")
-                result.setdefault(k, v)  # first file / first occurrence wins
+                decrypted = _decrypt_secret_env_value(v)
+                if decrypted is not None:
+                    result.setdefault(k, decrypted)  # first file / first occurrence wins
     return result
 
 
@@ -2892,7 +2962,11 @@ class SqliteSecretRepository:
             # Use `is not None` so an intentionally-empty string value "" is
             # preserved rather than falling through to the file-based lookup.
             _env_val = os.environ.get(env_key)
-            item["value"] = _env_val if _env_val is not None else env_lookup.get(env_key)
+            item["value"] = (
+                _decrypt_secret_env_value(_env_val)
+                if _env_val is not None
+                else env_lookup.get(env_key)
+            )
         return items
 
     def get(self, *, user_id: str, name: str) -> dict[str, Any] | None:

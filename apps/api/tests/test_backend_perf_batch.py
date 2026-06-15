@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import hashlib
 import importlib
+import base64
+import os
 import types
 
 
@@ -57,6 +59,30 @@ def test_session_ids_are_hashed_and_legacy_plaintext_migrates(tmp_path, monkeypa
     with sqlite.get_db() as conn:
         migrated = conn.execute("SELECT id FROM user_sessions WHERE id = ?", (legacy_hash,)).fetchone()
     assert migrated is not None
+
+
+def test_local_secret_values_are_encrypted_on_disk_and_decrypted_on_read(tmp_path, monkeypatch):
+    monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+    monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "secrets.env"))
+    monkeypatch.setenv("WORKEROS_SECRETS_KEY", base64.b64encode(os.urandom(32)).decode("ascii"))
+
+    import db
+    import db.sqlite as sqlite
+
+    db = importlib.reload(db)
+    sqlite = importlib.reload(sqlite)
+    db.init_db()
+    repos = db.get_repositories()
+
+    item = repos.secrets.set(user_id="user-1", name="API_KEY", value="plain-secret-value")
+    assert item["value"] == "plain-secret-value"
+    assert repos.secrets.read_value(user_id="user-1", name="API_KEY") == "plain-secret-value"
+    assert repos.secrets.resolve(user_id="user-1", names=["API_KEY"]) == {"API_KEY": "plain-secret-value"}
+    assert repos.secrets.list(user_id="user-1")[0]["value"] == "plain-secret-value"
+
+    env_text = (tmp_path / "secrets.env").read_text()
+    assert "plain-secret-value" not in env_text
+    assert "enc:v1:" in env_text
 
 
 def test_e2b_network_policy_and_sandbox_create_kwargs(monkeypatch):
