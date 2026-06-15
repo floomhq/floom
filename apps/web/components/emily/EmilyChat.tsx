@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, PenSquare, Download, History, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -681,6 +682,17 @@ export function EmilyDock({ className }: { className?: string }) {
   const [coreConversationId, setCoreConversationId] = useState<string | null>(null);
   // Local state for recent chats popover in the header ⋯ menu
   const [recentItems, setRecentItems] = useState<import("@/lib/types").ConversationSummary[] | null>(null);
+  // #1141: reset the dock conversation when navigating away from /chat?mode=create
+  // so the Overview Emily panel shows a fresh context instead of the create-mode thread.
+  const pathname = usePathname();
+  const prevPathname = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevPathname.current;
+    prevPathname.current = pathname;
+    if (prev !== null && prev.startsWith("/chat") && !pathname.startsWith("/chat")) {
+      coreActionsRef.current?.newSession();
+    }
+  }, [pathname]);
 
   return (
     <div

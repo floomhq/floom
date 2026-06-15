@@ -878,7 +878,13 @@ function WorkerDetailActions({
   return (
     <>
       {(canManage || can("run", w)) && (
-        <button type="button" className="c-addbtn" style={pillBtn} onClick={() => setRunOpen(true)}>
+        <button
+          type="button"
+          className="c-addbtn"
+          style={pillBtn}
+          onClick={() => setRunOpen(true)}
+          title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused — it may not run as expected" : undefined}
+        >
           Run
         </button>
       )}
@@ -887,8 +893,36 @@ function WorkerDetailActions({
           <DropdownMenuTrigger className="c-vpill" style={pillBtn} aria-label="More worker actions">
             <MoreHorizontal className="size-3.5" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-36 p-1">
+          <DropdownMenuContent align="end" className="w-44 p-1">
             <DropdownMenuItem onClick={() => setEditOpen(true)}>Edit</DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                const isArchived = (w as WorkerSummary & { archived?: boolean }).archived;
+                const action = isArchived ? api.workers.restore : api.workers.archive;
+                action(w.id)
+                  .then(() => {
+                    toast.success(isArchived ? "Worker restored" : "Worker archived");
+                    onUpdated({ ...w });
+                  })
+                  .catch((err: Error) => toast.error(err.message || "Could not update worker"));
+              }}
+            >
+              {(w as WorkerSummary & { archived?: boolean }).archived ? "Restore" : "Archive"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onClick={() => {
+                if (!window.confirm(`Delete "${w.name}"? This cannot be undone.`)) return;
+                api.workers.delete(w.id)
+                  .then(() => {
+                    toast.success("Worker deleted");
+                    onUpdated({ ...w, _deleted: true } as WorkerSummary & { _deleted?: boolean });
+                  })
+                  .catch((err: Error) => toast.error(err.message || "Could not delete worker"));
+              }}
+            >
+              Delete
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       )}
@@ -900,6 +934,11 @@ function WorkerDetailActions({
               <DialogTitle>Run {w.name}</DialogTitle>
               <DialogDescription>Provide inputs for this manual run.</DialogDescription>
             </DialogHeader>
+            {w.enabled === false && (
+              <div className="rounded-[var(--radius-card)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
+                This worker is paused. Running it manually may not behave as expected.
+              </div>
+            )}
             <div className="space-y-3">
               {inputs.length === 0 ? (
                 <p className="rounded-[var(--radius-card)] bg-[var(--bg-2)] p-3 text-sm text-muted-foreground">
@@ -1126,9 +1165,13 @@ export default function WorkersCollection({
         <WorkerDetailActions
           w={w}
           canManage={canManageWorkers}
-          onUpdated={(updated) =>
-            setWorkers((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)))
-          }
+          onUpdated={(updated) => {
+            if ((updated as WorkerSummary & { _deleted?: boolean })._deleted) {
+              setWorkers((prev) => prev.filter((item) => item.id !== updated.id));
+            } else {
+              setWorkers((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
+            }
+          }}
         />
       );
       return {
@@ -1136,7 +1179,7 @@ export default function WorkersCollection({
           // V4 SPEC rule 3: no avatar monogram in detail header. Lock inline after title.
           leading: undefined,
           title: w.visibility === "private"
-            ? <span className="inline-flex items-center gap-1.5">{w.name}<Lock className="size-3.5 shrink-0 text-[var(--muted-foreground)]" /></span>
+            ? <span className="inline-flex min-w-0 items-center gap-1.5"><span className="truncate">{w.name}</span><Lock className="size-3.5 shrink-0 text-[var(--muted-foreground)]" /></span>
             : w.name,
           actions,
           sub: (

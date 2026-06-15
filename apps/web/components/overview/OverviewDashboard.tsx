@@ -509,7 +509,7 @@ export function OverviewDashboard({
         context:
           workTrend !== null
             ? `${workTrend >= 0 ? "+" : ""}${workTrend}% vs last week`
-            : "Your active workers, last 7 days",
+            : "Last 7 days",
         trend: workTrend,
         sparkline: runs7dSparkline,
       },
@@ -525,13 +525,18 @@ export function OverviewDashboard({
         warning: Boolean(failedToday),
         sparkline: runs7dSparkline,
       },
-      {
-        value: data?.stats.active_workers_count ?? 0,
-        label: "Workers active",
-        href: "/workers",
-        context: `${data?.stats.paused_workers_count ?? 0} paused`,
-        sparkline: runs7dSparkline,
-      },
+      (() => {
+        const activeCount = data?.stats.active_workers_count ?? 0;
+        const pausedCount = data?.stats.paused_workers_count ?? 0;
+        const allPaused = activeCount === 0 && pausedCount > 0;
+        return {
+          value: allPaused ? pausedCount : activeCount,
+          label: allPaused ? "Workers paused" : "Workers active",
+          href: "/workers",
+          context: allPaused ? "All workers paused" : `${pausedCount} paused`,
+          sparkline: runs7dSparkline,
+        };
+      })(),
       {
         value: data?.stats.scheduled_24h_count ?? data?.scheduled_today?.length ?? 0,
         label: "Coming up today",

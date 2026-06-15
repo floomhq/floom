@@ -343,28 +343,31 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                         <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
                           {setupItems.map((item) => item.worker_name || item.worker_id).join(", ")}
                         </p>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {setupItems.map((item) =>
-                            item.kind === "missing_connection" ? (
+                        <div className="mt-2 flex flex-col gap-1">
+                          {setupItems.map((item) => {
+                            const workerLabel = item.worker_name || humanizeSlug(item.worker_id, "Worker");
+                            return item.kind === "missing_connection" ? (
                               <Link
                                 key={item.worker_id}
-                                href="/connections"
+                                href={`/connections?worker=${encodeURIComponent(item.worker_id ?? "")}`}
                                 onClick={() => setOpen(false)}
-                                className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                                className="inline-flex h-7 items-center justify-between gap-2 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                               >
-                                Add connection
+                                <span className="truncate text-[var(--ink-soft)]">{workerLabel}</span>
+                                <span className="shrink-0">Add connection →</span>
                               </Link>
                             ) : (
                               <Link
                                 key={item.worker_id}
-                                href="/connections/secrets"
+                                href={`/secrets?worker=${encodeURIComponent(item.worker_id ?? "")}`}
                                 onClick={() => setOpen(false)}
-                                className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                                className="inline-flex h-7 items-center justify-between gap-2 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                               >
-                                Add secret
+                                <span className="truncate text-[var(--ink-soft)]">{workerLabel}</span>
+                                <span className="shrink-0">Add secret →</span>
                               </Link>
-                            )
-                          )}
+                            );
+                          })}
                         </div>
                       </div>
                     </div>

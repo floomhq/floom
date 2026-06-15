@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
+import { CheckSquare2 } from "lucide-react";
 import { api } from "@/lib/api";
 import type { ApprovalRow, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey, TagOption } from "@/lib/collection/types";
@@ -235,7 +236,7 @@ export default function ApprovalsCollection() {
       };
     },
     states: {
-      empty: { title: "No pending approvals", help: "Workers will appear here when they need a decision." },
+      empty: { title: "No pending approvals", help: "Workers will appear here when they need a decision.", icon: CheckSquare2 },
       errorRetry: () => {
         setLoading(true);
         void refresh();
