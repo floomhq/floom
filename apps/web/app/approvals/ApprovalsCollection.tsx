@@ -89,7 +89,7 @@ export default function ApprovalsCollection() {
     // Safety timeout: if the API proxy is unreachable and the request hangs,
     // stop showing the skeleton after 10 s so users see an error + retry.
     const timeout = setTimeout(() => {
-      setLoading((prev) => {
+      setLoading((prev: boolean) => {
         if (prev) {
           setError("Could not load approvals. Check your connection and try again.");
         }

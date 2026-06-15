@@ -271,10 +271,10 @@ function OverviewTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      <LatestOutput w={w} d={d} />
+      <LatestOutput w={w} d={d ?? undefined} />
       <div>
         <h4 style={h4}>WHAT IT DOES</h4>
-        <AboutBody w={w} d={d} />
+        <AboutBody w={w} d={d ?? undefined} />
       </div>
     </div>
   );
