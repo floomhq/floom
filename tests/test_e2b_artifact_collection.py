@@ -979,14 +979,14 @@ def test_cancel_sandbox_kills_registered_sandbox():
 def test_long_worker_timeout_extends_install_and_sandbox_lifetime():
     install_timeout = _install_timeout_for_run(1200)
 
-    assert install_timeout == 900
-    assert _sandbox_lifetime_timeout(1200, install_timeout) == 2160
+    assert install_timeout == 1200
+    assert _sandbox_lifetime_timeout(1200, install_timeout) == 2460
 
 
 def test_sandbox_lifetime_caps_at_e2b_one_hour_limit():
     install_timeout = _install_timeout_for_run(3600)
 
-    assert install_timeout == 900
+    assert install_timeout == 3600
     assert _sandbox_lifetime_timeout(3600, install_timeout) == 3600
 
 
