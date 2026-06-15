@@ -292,8 +292,8 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
 }
 
 
-// SPEC §4 History: recent runs w/ durations, link to Runs.
-function HistoryTab({ w }: { w: WorkerSummary }) {
+// Runs: recent runs w/ durations, link to the full Runs surface.
+function RunsTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
   const runs = d?.recent_runs ?? (w.last_run ? [w.last_run] : []);
   return (
@@ -726,66 +726,41 @@ function stripRowId(row: TriggerRow): Omit<TriggerRow, "id"> {
   return rest;
 }
 
-// SPEC §4 Config: Tools · Brain attach · Triggers · Limits in one tab.
+// Config: Tools · Brain attach · Triggers · runtime in one scroll.
 // ("paused" = enabled:false — there is no paused status; pause/resume is #788;
 // spend cap is #793; PATCH name/desc is #785; brain attach/detach is #790 —
 // today these route through the full worker-YAML PUT.)
 function ConfigTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
-  const [activeTab, setActiveTab] = useState<"Tools" | "Brain" | "Triggers">("Tools");
   if (!d) return <Loading />;
   const runtime = d.config?.runtime;
   const modelId = runtime?.model ?? d.config?.model;
-  const runtimeRows: Array<[string, React.ReactNode]> = [
-    [
-      "Runtime",
-      runtimeSummary({
-        runner: runtime?.runner ?? d.runner ?? w.runner,
-        runtime: runtime?.type ?? w.runtime,
-      }),
-    ],
-  ];
-  if (runtime?.mode) runtimeRows.push(["Mode", friendlyToken(runtime.mode)]);
-  if (runtime?.entrypoint) {
-    runtimeRows.push(["Entrypoint", <span key="entrypoint" className="font-mono text-xs">{runtime.entrypoint}</span>]);
-  }
-  if (modelId) runtimeRows.push(["Model", modelLabel(modelId)]);
-  const tabs = ["Tools", "Brain", "Triggers"] as const;
+  const runtimeLine = [
+    d.enabled === false ? "Paused" : "Enabled",
+    runtimeSummary({
+      runner: runtime?.runner ?? d.runner ?? w.runner,
+      runtime: runtime?.type ?? w.runtime,
+    }),
+    runtime?.mode ? friendlyToken(runtime.mode) : null,
+    runtime?.entrypoint ? `Entry ${runtime.entrypoint}` : null,
+    modelId ? modelLabel(modelId) : null,
+  ].filter(Boolean).join(" · ");
   return (
-    <div className="flex flex-col gap-5">
-      <div className="c-dtabs px-0 pt-0" role="tablist" aria-label="Config sections">
-        {tabs.map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === tab}
-            className={`c-dtab ${activeTab === tab ? "on" : ""}`}
-            onClick={() => setActiveTab(tab)}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
-      {activeTab === "Tools" && <ToolsTab w={w} />}
-      {activeTab === "Brain" && <BrainTab w={w} />}
-      {activeTab === "Triggers" && (
-        <div className="flex flex-col gap-5">
-          {/* W-02: editable trigger control (schedule / webhook / app-event / manual). */}
-          <TriggersTab w={w} />
-          <ConfigInfoGrid
-            rows={[
-              [
-                "Status",
-                // TODO(#788): pause/resume toggle — "paused" is enabled:false today.
-                <span key="status" className="c-vpill">{d.enabled === false ? "Paused" : "Enabled"}</span>,
-              ],
-            ]}
-          />
-          <ConfigInfoGrid rows={runtimeRows} />
-          {/* TODO(#793): monthly spend cap field. */}
-        </div>
-      )}
+    <div className="flex flex-col gap-7">
+      <p className="m-0 text-[12.5px] text-muted-foreground">{runtimeLine}</p>
+      <section>
+        <h4 style={h4}>Tools</h4>
+        <ToolsTab w={w} />
+      </section>
+      <section>
+        <h4 style={h4}>Brain</h4>
+        <BrainTab w={w} />
+      </section>
+      <section>
+        <h4 style={h4}>Triggers</h4>
+        {/* W-02: editable trigger control (schedule / webhook / app-event / manual). */}
+        <TriggersTab w={w} />
+      </section>
       {FEEDBACK_BACKEND_AVAILABLE && (
         <section>
           <h4 style={h4}>Feedback</h4>
@@ -800,10 +775,10 @@ function ConfigTab({ w }: { w: WorkerSummary }) {
 // contract test guards the live tab set, not a parallel constant.
 const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }) => React.ReactNode> = {
   Overview: OverviewTab,
-  History: HistoryTab,
+  Runs: RunsTab,
+  Config: ConfigTab,
   Source: SourceTab,
   Versions: VersionsTab,
-  Config: ConfigTab,
 };
 
 function WorkerDetailActions({
@@ -1433,7 +1408,7 @@ export default function WorkersCollection({
           return {
             key,
             label: key,
-            count: key === "History" ? w.recent_stats?.runs_7d ?? (w.last_run ? 1 : undefined) : undefined,
+            count: key === "Runs" ? w.recent_stats?.runs_7d ?? (w.last_run ? 1 : undefined) : undefined,
             render: () => <Tab w={w} />,
           };
         }),
