@@ -4701,6 +4701,7 @@ from routers.connections import (
     test_connection,
     get_connection_tools,
     sweep_connections_endpoint,
+    _run_connection_sweep,
 )
 app.include_router(connections_router)
 
@@ -6977,13 +6978,21 @@ if __name__ == "__main__":
     # bundles in WORKERS_DIR are likewise data, not source. Paths must be absolute
     # because watchfiles yields absolute paths and uvicorn matches exclude *dirs*
     # via `exclude_dir in path.parents`.
+    #
+    # uvicorn (>=0.49) globs any exclude that is not an *existing* dir, and
+    # pathlib.glob() raises NotImplementedError on an absolute pattern — so on a
+    # fresh clone, where data/ does not exist yet at startup, `python main.py`
+    # would crash before serving. Create data/ up front and pass only paths that
+    # already exist, so uvicorn keeps them as dir-excludes and never globs.
     _api_dir = _Path(__file__).resolve().parent
-    _reload_excludes = [str(_api_dir / "data")]
+    (_api_dir / "data").mkdir(parents=True, exist_ok=True)
+    _exclude_candidates = [_api_dir / "data"]
     try:
         from worker_registry import WORKERS_DIR as _WORKERS_DIR
-        _reload_excludes.append(str(_Path(_WORKERS_DIR).resolve()))
+        _exclude_candidates.append(_Path(_WORKERS_DIR).resolve())
     except Exception:
         pass
+    _reload_excludes = [str(p) for p in _exclude_candidates if p.is_dir()]
     uvicorn.run(
         "main:app",
         host=os.environ.get("WORKEROS_API_HOST", "0.0.0.0"),
