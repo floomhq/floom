@@ -64,16 +64,9 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from dotenv import load_dotenv
 
-# Frictionless local first-run: load `.env` from the cwd in LOCAL mode (the
-# default) HERE — before any module below (contexts, worker_registry, auth)
-# resolves FLOOM_*_DIR / credentials at import time. A fresh `uvicorn main:app`
-# then Just Works: copy .env.example -> .env, add a key, run. No WORKEROS_DEV.
-# #997 security: NEVER auto-load a cwd .env in production — set WORKEROS_DEPLOY to
-# anything other than 'local' and a stale/attacker-dropped .env is ignored (prod
-# supplies env via the orchestrator). WORKEROS_DEV=1 forces the cwd load on.
-if os.environ.get("WORKEROS_DEV") == "1" or (
-    os.environ.get("WORKEROS_DEPLOY") or "local"
-).strip().lower() == "local":
+# #997 security: never auto-load a cwd .env outside explicit dev mode. Production
+# supplies env via the orchestrator, and fixed api.env loading remains below.
+if os.environ.get("WORKEROS_DEV") == "1":
     load_dotenv()
 
 from auth import AuthContext, get_auth_context, get_auth_provider

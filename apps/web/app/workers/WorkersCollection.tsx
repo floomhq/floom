@@ -883,7 +883,7 @@ function WorkerDetailActions({
           className="c-addbtn"
           style={pillBtn}
           onClick={() => setRunOpen(true)}
-          title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused — it may not run as expected" : undefined}
+          title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused; it may not run as expected" : undefined}
         >
           Run
         </button>
