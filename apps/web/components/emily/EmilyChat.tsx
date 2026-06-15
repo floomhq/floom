@@ -315,7 +315,10 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
           }
           return null;
         })}
-        <MessageActions>
+        {/* #1219: copy on an Emily message is hover-only (matches the user
+            message). Revealed on hover/focus of the message row; focus-within
+            keeps it keyboard-accessible. */}
+        <MessageActions className="opacity-0 focus-within:opacity-100 group-hover/message:opacity-100">
           <MessageCopyAction text={text} />
         </MessageActions>
       </div>
@@ -393,7 +396,8 @@ function CreateWorkerHeroState({
             value={input}
             onChange={(e) => onInput(e.target.value)}
             onKeyDown={(e) => {
-              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+              // #1313: Enter sends, Shift+Enter inserts a newline.
+              if (e.key === "Enter" && !e.shiftKey) {
                 e.preventDefault();
                 onSubmit();
               }
@@ -416,8 +420,8 @@ function CreateWorkerHeroState({
               <kbd
                 className="hidden sm:inline-flex items-center gap-0.5 rounded [border:var(--bd-card)] bg-[var(--bg-2)] px-1.5 py-1 text-[10px] font-mono text-[var(--ink-mute)]"
                 aria-hidden="true"
+                title="Press Enter to send, Shift+Enter for a new line"
               >
-                <span style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</span>
                 <span>↵</span>
               </kbd>
             </div>
@@ -489,7 +493,7 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
     sendMessage,
     newSession,
     loadConversation,
-  } = useChatStream();
+  } = useChatStream({ ephemeral: createMode });
   const router = useRouter();
   const [input, setInput] = useState(primeInput ?? "");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
