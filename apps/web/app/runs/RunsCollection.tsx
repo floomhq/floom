@@ -130,6 +130,12 @@ function TraceTab({ r }: { r: RunSummary }) {
           </pre>
         </div>
       )}
+      <details>
+        <summary className="c-vpill inline-flex cursor-pointer" style={{ padding: "6px 11px", fontSize: 12.5 }}>
+          View raw JSON
+        </summary>
+        <pre style={{ ...code, marginTop: 10 }}>{JSON.stringify(d, null, 2)}</pre>
+      </details>
     </div>
   );
 }
@@ -143,20 +149,12 @@ function InputsTab({ r }: { r: RunSummary }) {
   return <pre style={code}>{JSON.stringify(input, null, 2)}</pre>;
 }
 
-// SPEC §4: Raw — the full run record.
-function RawTab({ r }: { r: RunSummary }) {
-  const d = useRunDetail(r.id);
-  if (!d) return <LoadingState rows={4} />;
-  return <pre style={code}>{JSON.stringify(d, null, 2)}</pre>;
-}
-
 // Tab key → its (named) component, keyed by RUN_DETAIL_TABS so the §4 contract
 // test guards the live tab set.
 const RUN_TAB_COMPONENT: Record<RunDetailTab, (props: { r: RunSummary }) => React.ReactNode> = {
   Output: OutputTab,
   Trace: TraceTab,
   Inputs: InputsTab,
-  Raw: RawTab,
 };
 
 const PAGE_SIZE = 50;
