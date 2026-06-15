@@ -1,8 +1,10 @@
 from __future__ import annotations
 
+import asyncio
 import importlib
 import json
 import sys
+from types import SimpleNamespace
 from pathlib import Path
 
 import pytest
@@ -172,6 +174,95 @@ def test_worker_list_tool_metadata_uses_renderable_worker_list_card(booted):
     assert metadata["card"]["kind"] == "worker-list"
     assert metadata["card"]["status"] == "completed"
     assert metadata["resource"] is None
+
+
+def test_worker_list_fallback_summary_uses_successful_tool_result(booted):
+    chat_service = booted["chat_service"]
+
+    reply = chat_service._fallback_reply_from_successful_tools([
+        (
+            "workers__list_all",
+            {
+                "ok": True,
+                "count": 2,
+                "workers": [
+                    {"id": "research", "title": "Research Brief"},
+                    {"id": "digest", "name": "GitHub Digest"},
+                ],
+            },
+        )
+    ])
+
+    assert reply == (
+        "You have 2 workers in this workspace. "
+        "Here are the first 2: Research Brief, GitHub Digest."
+    )
+
+
+@pytest.mark.asyncio
+async def test_stream_chat_uses_tool_result_when_provider_fails_after_workers_tool(booted, monkeypatch):
+    chat_service = booted["chat_service"]
+
+    monkeypatch.setattr(chat_service, "_workspace_tools", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(chat_service, "_brain_read_tools", lambda *_args, **_kwargs: [])
+    monkeypatch.setattr(chat_service, "_composio_read_tools", lambda *_args, **_kwargs: [])
+
+    async def _no_mcp(*_args, **_kwargs):
+        return []
+
+    from runner_sandbox import agent_capabilities
+    monkeypatch.setattr(agent_capabilities, "connect_mcp_servers", _no_mcp)
+    monkeypatch.setattr(agent_capabilities, "cleanup_mcp_servers", _no_mcp)
+
+    import runner_sandbox.stream_adapter as stream_adapter
+
+    monkeypatch.setattr(stream_adapter, "decode_stream_event", lambda event: event)
+
+    class _FakeResult:
+        async def stream_events(self):
+            yield SimpleNamespace(
+                kind="tool_call",
+                call_id="call_workers",
+                tool_name="workers__list_all",
+                args={},
+            )
+            yield SimpleNamespace(
+                kind="tool_output",
+                call_id="call_workers",
+                output={
+                    "ok": True,
+                    "count": 2,
+                    "workers": [
+                        {"id": "research", "title": "Research Brief"},
+                        {"id": "digest", "name": "GitHub Digest"},
+                    ],
+                },
+                is_error=False,
+            )
+            raise RuntimeError("Error code: 401 invalid_api_key")
+
+    import agents
+
+    monkeypatch.setattr(agents.Runner, "run_streamed", staticmethod(lambda *_args, **_kwargs: _FakeResult()))
+
+    q: asyncio.Queue = asyncio.Queue()
+    await chat_service.stream_chat(
+        message="What workers do I have?",
+        user_id="federico",
+        conversation_id=None,
+        part_queue=q,
+        source="web",
+    )
+
+    events = []
+    while not q.empty():
+        events.append(q.get_nowait())
+
+    assert "error" not in [event.get("type") for event in events]
+    text_events = [event for event in events if event.get("type") == "text"]
+    assert text_events
+    assert "You have 2 workers" in text_events[-1]["text"]
+    assert events[-1]["type"] == "finish"
 
 
 def test_worker_run_tool_metadata_uses_renderable_run_card(booted):
