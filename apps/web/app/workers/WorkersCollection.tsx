@@ -111,8 +111,12 @@ function displayBrandCopy(value?: string | null): string {
 // ---- detail (lazy WorkerDetail, cached so tab switches don't refetch) ----
 const detailCache = new Map<string, WorkerDetail>();
 
-function useWorkerDetail(id: string): [WorkerDetail | undefined, (d: WorkerDetail) => void] {
-  const [detail, setDetail] = useState<WorkerDetail | undefined>(detailCache.get(id));
+// Returns [detail, apply] where detail is:
+//   undefined → still loading
+//   null      → load failed (show an error/empty state)
+//   WorkerDetail → loaded
+function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: WorkerDetail) => void] {
+  const [detail, setDetail] = useState<WorkerDetail | undefined | null>(detailCache.get(id));
   useEffect(() => {
     if (detailCache.has(id)) {
       setDetail(detailCache.get(id));
@@ -125,10 +129,20 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined, (d: WorkerDetai
         detailCache.set(id, d);
         if (alive) setDetail(d);
       })
-      .catch(() => {});
+      .catch(() => {
+        // null signals "failed to load" so tabs show an error state instead of
+        // spinning forever (#1279).
+        if (alive) setDetail(null);
+      });
+    // Safety timeout: if the API proxy hangs, surface an error after 10 s.
+    const timeout = setTimeout(() => {
+      if (alive && detail === undefined) setDetail(null);
+    }, 10_000);
     return () => {
       alive = false;
+      clearTimeout(timeout);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
   const apply = useCallback(
     (d: WorkerDetail) => {
@@ -175,6 +189,14 @@ function coerceInputValue(value: string, type?: string): unknown {
 
 function Loading() {
   return <LoadingState rows={4} />;
+}
+
+function DetailError() {
+  return (
+    <div style={{ color: "var(--muted-foreground)", padding: "14px 0" }}>
+      Could not load details. Check your connection and try again.
+    </div>
+  );
 }
 
 function friendlyToken(value?: string | null): string {
@@ -385,12 +407,17 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
       .listVersions(w.id)
       .then((v) => alive && setVersions(v))
       .catch(() => alive && setVersions([]));
+    // Safety timeout: stop the skeleton after 10 s if the API proxy hangs.
+    const timeout = setTimeout(() => {
+      if (alive) setVersions((prev) => prev ?? []);
+    }, 10_000);
     return () => {
       alive = false;
+      clearTimeout(timeout);
     };
   }, [w.id]);
 
-  if (!versions) return <Loading />;
+  if (versions === null) return <Loading />;
   if (versions.length === 0) return <div style={muted}>No version history yet.</div>;
   const rows = formatVersionRows(versions, now);
 
@@ -520,7 +547,8 @@ function SourceTab({ w }: { w: WorkerSummary }) {
   const [draftFiles, setDraftFiles] = useState<SourceEditorFile[]>([]);
   const [draftPath, setDraftPath] = useState<string>("worker.yml");
   const [saving, setSaving] = useState(false);
-  if (!d) return <Loading />;
+  if (d === undefined) return <Loading />;
+  if (d === null) return <DetailError />;
   const ordered = orderedSourceFiles(d.files ?? []);
   if (ordered.length === 0) return <div style={muted}>No source files.</div>;
   const file = ordered.find((f) => f.path === active) ?? ordered[0];
@@ -601,7 +629,8 @@ function BrainTab({ w }: { w: WorkerSummary }) {
   useEffect(() => {
     refreshPacks();
   }, [refreshPacks]);
-  if (!d) return <Loading />;
+  if (d === undefined) return <Loading />;
+  if (d === null) return <DetailError />;
   const editable = can("edit", d);
   const contexts = d.config?.contexts ?? [];
   // Per-worker memory folder convention: "<worker-id>-memory". Connecting it
@@ -656,7 +685,8 @@ function BrainTab({ w }: { w: WorkerSummary }) {
 function ToolsTab({ w }: { w: WorkerSummary }) {
   const [d, applyDetail] = useWorkerDetail(w.id);
   const [busy, setBusy] = useState(false);
-  if (!d) return <Loading />;
+  if (d === undefined) return <Loading />;
+  if (d === null) return <DetailError />;
   const editable = can("edit", d);
   const save = async (next: WorkerConnectionSpec[]) => {
     setBusy(true);
@@ -704,7 +734,8 @@ function TriggersTab({ w }: { w: WorkerSummary }) {
     if (d && rows === null) setRows(currentTriggerRows(d));
   }, [d, rows]);
 
-  if (!d || rows === null) return <Loading />;
+  if (d === undefined || rows === null) return <Loading />;
+  if (d === null) return <DetailError />;
   const editable = can("edit", d);
   const baseline = JSON.stringify(currentTriggerRows(d).map(stripRowId));
   const dirty = JSON.stringify(rows.map(stripRowId)) !== baseline;
@@ -773,7 +804,10 @@ function stripRowId(row: TriggerRow): Omit<TriggerRow, "id"> {
 // today these route through the full worker-YAML PUT.)
 function ConfigTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
-  if (!d) return <Loading />;
+  // #1279: distinguish loading (undefined) from load-failure (null) so a hung
+  // API surfaces an error instead of an infinite skeleton.
+  if (d === undefined) return <Loading />;
+  if (d === null) return <DetailError />;
   const runtime = d.config?.runtime;
   const modelId = runtime?.model ?? d.config?.model;
   const runtimeLine = [
@@ -1025,8 +1059,10 @@ function WorkerDetailActions({
               <DialogTitle>Edit worker</DialogTitle>
               <DialogDescription>Update the worker identity without leaving the split detail.</DialogDescription>
             </DialogHeader>
-            {!d ? (
+            {d === undefined ? (
               <Loading />
+            ) : d === null ? (
+              <DetailError />
             ) : (
               <div className="space-y-3">
                 <div className="space-y-1.5">
