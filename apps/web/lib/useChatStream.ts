@@ -16,7 +16,6 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { api, apiProxyPath, getActiveWorkspaceId } from "@/lib/api";
-import { capture } from "@/lib/analytics/capture";
 import type { AttachedFile, ChatMessage } from "./emily-chat-types";
 import {
   CONVERSATION_STORAGE_KEY,
@@ -39,14 +38,6 @@ export interface ChatStreamState {
   newSession: () => void;
   /** Load a past conversation into the live stream (Emily history rail). */
   loadConversation: (id: string) => void;
-}
-
-function messageLengthBucket(text: string): string {
-  const length = text.trim().length;
-  if (length === 0) return "empty";
-  if (length <= 80) return "short";
-  if (length <= 400) return "medium";
-  return "long";
 }
 
 export function useChatStream(): ChatStreamState {
@@ -289,19 +280,6 @@ export function useChatStream(): ChatStreamState {
       // We read conversationId from the ref so we can pass it in the body even
       // when the closure over state would be stale.
       const currentConversationId = conversationId;
-      if (!currentConversationId) {
-        capture("emily_chat_started", {
-          source: files && files.length > 0 ? "message_with_attachment" : "message",
-        }, {
-          setOnce: { first_emily_chat_started_at: new Date().toISOString() },
-        });
-      }
-      capture("emily_message_sent", {
-        conversation_id: currentConversationId,
-        has_attachments: Boolean(files && files.length > 0),
-        attachment_count: files?.length ?? 0,
-        length_bucket: messageLengthBucket(text),
-      });
 
       (async () => {
         try {
@@ -379,30 +357,6 @@ export function useChatStream(): ChatStreamState {
               }
 
               // Fold event into messages
-              if (event.type === "tool-call" && !isInternalToolName(event.toolName)) {
-                capture("emily_tool_used", {
-                  tool: normalizeToolName(event.toolName),
-                });
-              }
-              if (event.type === "tool-result") {
-                const tool = event.toolName ? normalizeToolName(event.toolName) : "";
-                const result = asRecord(event.result);
-                const workerId =
-                  optionalString(result?.worker_id) ??
-                  optionalString(asRecord(result?.worker)?.id);
-                const createdWorker =
-                  event.card?.kind === "worker-create" ||
-                  tool.includes("create") ||
-                  tool.includes("draft");
-                if (workerId && createdWorker) {
-                  capture("emily_worker_created_from_prompt", {
-                    worker_id: workerId,
-                    tool,
-                  }, {
-                    setOnce: { first_worker_created_at: new Date().toISOString() },
-                  });
-                }
-              }
               setMessages((prev) => reduceSSEEvent(prev, event, assistantMsgId));
 
               if (event.type === "error") {
