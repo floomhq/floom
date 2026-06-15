@@ -3,7 +3,7 @@
 // S44: accepts server-fetched initialData to eliminate client-side fetch round-trip.
 // S45: sparklines on metric tiles, alerts moved to AlertsBell in header.
 // W8: worker icons in activity + upcoming list rows.
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import {
   ArrowUp,
@@ -179,7 +179,9 @@ function useOverview(initialData: SystemOverview | null) {
   const [data, setData] = useState<SystemOverview | null>(initialData);
   const [loading, setLoading] = useState(initialData === null);
 
-  const load = useCallback(async () => {
+  // Explicit reload (e.g. triggered by the bell button): shows the skeleton so
+  // the user gets clear feedback that a refresh is in progress.
+  const reload = useCallback(async () => {
     setLoading(true);
     try {
       const result = await api.system.overview();
@@ -188,6 +190,18 @@ function useOverview(initialData: SystemOverview | null) {
       console.error(error);
     } finally {
       setLoading(false);
+    }
+  }, []);
+
+  // Silent revalidation: fetches fresh data but never flashes the skeleton
+  // because we already have something to paint (avoids a jarring blink when
+  // switching back to the tab).
+  const revalidate = useCallback(async () => {
+    try {
+      const result = await api.system.overview();
+      setData(result);
+    } catch {
+      // Ignore — silently stale is better than a skeleton on focus.
     }
   }, []);
 
@@ -214,18 +228,15 @@ function useOverview(initialData: SystemOverview | null) {
     };
   }, []); // eslint-disable-line react-hooks/exhaustive-deps
 
-  // Re-fetch when the tab regains focus so cross-view status stays consistent
-  // (navigating /runs -> /overview, or returning to the tab, surfaces the
-  // latest run statuses rather than the value cached at SSR time).
+  // Re-fetch silently when the tab regains focus so cross-view status stays
+  // consistent (navigating /runs → /overview, or returning to the tab, shows
+  // the latest run statuses) without flashing the skeleton on every tab switch.
   useEffect(() => {
-    function onFocus() {
-      void load();
-    }
-    window.addEventListener("focus", onFocus);
-    return () => window.removeEventListener("focus", onFocus);
-  }, [load]);
+    window.addEventListener("focus", revalidate);
+    return () => window.removeEventListener("focus", revalidate);
+  }, [revalidate]);
 
-  return { data, loading, reload: load };
+  return { data, loading, reload };
 }
 
 function useOverviewVisibleRows() {
@@ -272,6 +283,28 @@ function WorkerRowIcon({ workerId, workerName }: { workerId: string; workerName?
   );
 }
 
+// Group consecutive runs by worker_id + status so repeated failures ("Granola
+// to HubSpot … Failed" × 5) collapse into a single row with a count badge.
+// We keep groups in chronological order (most-recent first) and navigate to the
+// most-recent run in the group on click.
+type ActivityGroup = {
+  run: SystemOverviewRunItem; // representative (most-recent) run
+  count: number;
+};
+
+function groupRuns(runs: SystemOverviewRunItem[]): ActivityGroup[] {
+  const groups: ActivityGroup[] = [];
+  for (const run of runs) {
+    const last = groups[groups.length - 1];
+    if (last && last.run.worker_id === run.worker_id && last.run.status === run.status) {
+      last.count += 1;
+    } else {
+      groups.push({ run, count: 1 });
+    }
+  }
+  return groups;
+}
+
 function WorkerActivity({
   runs,
   loading,
@@ -281,11 +314,12 @@ function WorkerActivity({
   loading: boolean;
   visibleRows: number;
 }) {
-  const visibleRuns = runs.slice(0, visibleRows);
+  // Dedupe consecutive repeated failures/outcomes, then cap to visibleRows.
+  const grouped = groupRuns(runs).slice(0, visibleRows);
   return (
     <section className="flex min-h-0 flex-col">
       <div className="mb-3 flex items-center justify-between shrink-0">
-        <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Worker activity</h2>
+        <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Recent activity</h2>
         <Link href="/runs" className="text-[12.5px] text-[var(--accent)] hover:underline">
           See all
         </Link>
@@ -302,7 +336,7 @@ function WorkerActivity({
         </div>
       ) : (
         <div className={cn(listClass, "flex-1 min-h-0 overflow-y-auto [&>*+*]:[border-top:var(--bd-div)]")}>
-          {visibleRuns.map((run) => {
+          {grouped.map(({ run, count }) => {
             const meta = statusMeta(run.status);
             return (
               <Link
@@ -321,16 +355,24 @@ function WorkerActivity({
                     <span>{formatDuration(run.duration_ms)}</span>
                   </p>
                 </div>
-                {/* V4 SPEC §4: status pill right-aligned, no inline colored status word */}
-                <span
-                  className="shrink-0 rounded-[var(--radius-pill)] px-2 py-0.5 text-[11px] font-medium leading-none"
-                  style={{
-                    color: meta.color,
-                    background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
-                  }}
-                >
-                  {meta.label}
-                </span>
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {/* Count badge when the same worker repeated the same outcome */}
+                  {count > 1 && (
+                    <span className="text-[11px] font-medium text-[var(--text-muted)]">
+                      ×{count}
+                    </span>
+                  )}
+                  {/* V4 SPEC §4: status pill right-aligned */}
+                  <span
+                    className="rounded-[var(--radius-pill)] px-2 py-0.5 text-[11px] font-medium leading-none"
+                    style={{
+                      color: meta.color,
+                      background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
+                    }}
+                  >
+                    {meta.label}
+                  </span>
+                </div>
               </Link>
             );
           })}
@@ -465,9 +507,20 @@ export function OverviewDashboard({
     [data?.needs_attention, workerNames],
   );
 
-  // S45: bubble attention items up so the AlertsBell in the header can show a badge
+  // S45: bubble attention items up so the AlertsBell in the header can show a badge.
+  // Use a serialized comparison so we only call onAttentionItems when the *value*
+  // actually changed — not just when the memo produced a new array reference after
+  // an unrelated re-render (e.g. workerNames map rebuilt with identical entries).
+  // Without this guard the parent's setAttentionItems fires every render cycle,
+  // causing an infinite loop: setAttentionItems → re-render → new attentionItems
+  // ref → effect fires again → repeat.
+  const prevAttentionJson = useRef<string>("");
   useEffect(() => {
-    if (onAttentionItems) onAttentionItems(attentionItems);
+    if (!onAttentionItems) return;
+    const json = JSON.stringify(attentionItems);
+    if (json === prevAttentionJson.current) return;
+    prevAttentionJson.current = json;
+    onAttentionItems(attentionItems);
   }, [attentionItems, onAttentionItems]);
 
   // S45: expose reload to parent via ref so bell buttons can trigger a refresh
