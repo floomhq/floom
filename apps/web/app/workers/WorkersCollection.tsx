@@ -53,6 +53,7 @@ import {
 import { WorkerBrainEditor } from "@/components/worker/WorkerBrainEditor";
 import { WorkerToolsEditor } from "@/components/worker/WorkerToolsEditor";
 import { WorkerFeedbackPanel } from "@/components/worker/WorkerFeedbackPanel";
+import { VersionDiffPanel } from "@/components/VersionDiffPanel";
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -273,7 +274,9 @@ function OverviewTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      <LatestOutput w={w} d={d} />
+      {/* #1290: "Latest output" removed — its purpose was unclear to operators
+          (Federico: "why is latest output shown?") and it only showed run status +
+          ID with no actual output text. The History tab shows the run list. */}
       <div>
         <h4 style={h4}>WHAT IT DOES</h4>
         <AboutBody w={w} d={d} />
@@ -394,9 +397,15 @@ function RunsTab({ w }: { w: WorkerSummary }) {
 // SPEC §4 Versions: git log in the GLOBAL list style — message + `sha · author ·
 // age`, current marker, Diff (modal) + Restore (confirm). Endpoints BUILT.
 function VersionsTab({ w }: { w: WorkerSummary }) {
-  const [, applyDetail] = useWorkerDetail(w.id);
+  const [d, applyDetail] = useWorkerDetail(w.id);
   const [versions, setVersions] = useState<VersionSummary[] | null>(null);
-  const [diff, setDiff] = useState<{ id: string; content: string } | null>(null);
+  // #1249: store both version files AND current files so the modal can show a
+  // proper line-level diff (VersionDiffPanel) instead of a raw file view.
+  const [diff, setDiff] = useState<{
+    id: string;
+    versionFiles: { path: string; content: string }[];
+    currentFiles: { path: string; content: string }[];
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [now] = useState(() => Date.now());
   const editable = can("edit", w);
@@ -424,8 +433,18 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
   const showDiff = async (id: string) => {
     try {
       const v = await api.workers.getVersion(w.id, id);
-      const file = v.files?.find((f) => f.path === "worker.yml") ?? v.files?.[0];
-      setDiff({ id, content: file?.content ?? "" });
+      // Current files: prefer already-loaded detail; fall back to fetching the
+      // worker detail on demand (the cache will pick it up on the next render).
+      const currentFilesRaw =
+        d?.files
+          ?.filter((f) => !f.binary && f.content != null)
+          .map((f) => ({ path: f.path, content: f.content as string })) ??
+        [];
+      setDiff({
+        id,
+        versionFiles: (v.files ?? []).map((f) => ({ path: f.path, content: f.content })),
+        currentFiles: currentFilesRaw,
+      });
     } catch {
       toast.error("Could not load that version.");
     }
@@ -477,12 +496,23 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
           </div>
         ))}
       </div>
+      {/* #1249: replaced CodeBlock (read-only full-file view) with VersionDiffPanel
+          which shows a proper line-level diff between this version and current. */}
       <Dialog open={!!diff} onOpenChange={(o) => !o && setDiff(null)}>
-        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto p-0">
+          <DialogHeader className="px-6 pt-5 pb-3">
             <DialogTitle>Version {diff?.id.slice(0, 7)}</DialogTitle>
           </DialogHeader>
-          {diff && <CodeBlock text={diff.content} filePath="worker.yml" />}
+          {diff && (
+            <VersionDiffPanel
+              versionSha={diff.id.slice(0, 7)}
+              versionFiles={diff.versionFiles}
+              currentFiles={diff.currentFiles}
+              isRestoring={busy}
+              canRestore={editable && rows.find((r) => r.id === diff.id && !r.isCurrent) !== undefined}
+              onRestore={() => void restore(diff.id).then(() => setDiff(null))}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
@@ -1489,7 +1519,15 @@ export default function WorkersCollection({
           return {
             key,
             label: key,
-            count: key === "Runs" ? w.recent_stats?.runs_7d ?? (w.last_run ? 1 : undefined) : undefined,
+            // #1251: badge must match the count actually listed in the Runs tab,
+            // which renders d?.recent_runs (the capped list from WorkerDetail).
+            // Use cached recent_runs length when available; otherwise fall back to
+            // last_run presence so the badge shows something before detail loads.
+            // Avoids the mismatch where runs_7d (7-day total) differed from the list.
+            count: key === "Runs"
+              ? (detailCache.get(w.id)?.recent_runs?.length
+                  ?? (w.last_run ? 1 : undefined))
+              : undefined,
             render: () => <Tab w={w} />,
           };
         }),
