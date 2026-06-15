@@ -1,6 +1,7 @@
 "use client";
 
 import { Suspense, useCallback, useEffect, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -31,6 +32,9 @@ function SecretsContent() {
   const searchParams = useSearchParams();
   const prefillName = searchParams.get("prefill") ?? "";
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
+  // #1226: resolve `used_by` worker names → ids so the "Used by" list links to
+  // each worker's detail.
+  const [workerIdByName, setWorkerIdByName] = useState<Map<string, string>>(new Map());
   const [loading, setLoading] = useState(true);
   const [addingName, setAddingName] = useState(prefillName);
   const [addingValue, setAddingValue] = useState("");
@@ -51,8 +55,14 @@ function SecretsContent() {
   const refresh = useCallback(async () => {
     if (!isAdmin) return;
     try {
-      const s = await api.secrets.list();
-      setSecrets(s);
+      const [s, w] = await Promise.allSettled([api.secrets.list(), api.workers.list()]);
+      if (s.status === "fulfilled") setSecrets(s.value);
+      else throw s.reason;
+      if (w.status === "fulfilled") {
+        const map = new Map<string, string>();
+        for (const worker of w.value) map.set(worker.name, worker.id);
+        setWorkerIdByName(map);
+      }
     } catch {
       toast.error("Failed to load secrets");
     } finally {
@@ -272,7 +282,24 @@ function SecretsContent() {
                         {s.used_by.length > 0 && (
                           <p className="text-xs text-muted-foreground mt-0.5">
                             <span className="opacity-70">Used by: </span>
-                            {usedByVisible.join(", ")}
+                            {usedByVisible.map((wname, i) => {
+                              const id = workerIdByName.get(wname);
+                              return (
+                                <span key={wname}>
+                                  {i > 0 && ", "}
+                                  {id ? (
+                                    <Link
+                                      href={`/workers?sel=${encodeURIComponent(id)}`}
+                                      className="underline underline-offset-2 hover:text-foreground"
+                                    >
+                                      {wname}
+                                    </Link>
+                                  ) : (
+                                    wname
+                                  )}
+                                </span>
+                              );
+                            })}
                             {!usedByExpanded && usedByHidden > 0 ? (
                               <button
                                 type="button"

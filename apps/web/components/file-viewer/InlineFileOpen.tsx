@@ -4,10 +4,28 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { ArrowLeft, Download, Folder as FolderIcon, Pencil, Plus, Save, Upload, X } from "lucide-react";
 import { isImageFile } from "@/lib/runs/trace";
 import { SqliteTableView } from "@/components/file-viewer/SqliteTableView";
+import { CodeBlock } from "@/components/file-viewer/code-block";
+import { MarkdownRenderer } from "@/components/contexts/markdown-renderer";
 import type { SqliteView } from "@/lib/types";
 
 function isDbFile(name: string): boolean {
   return /\.(db|sqlite|sqlite3)$/i.test(name);
+}
+
+function isMarkdownFile(name: string): boolean {
+  return /\.(md|markdown|mdx)$/i.test(name);
+}
+
+/**
+ * Whether a text file has a "rendered" representation distinct from its raw
+ * source. Markdown renders to formatted prose; code files render with syntax
+ * highlighting. Plain `.txt` has no richer view, so the Preview/Raw toggle is
+ * still shown (#1289 — every file gets the toggle) but both modes look alike.
+ */
+function previewKind(name: string): "markdown" | "code" | "plain" {
+  if (isMarkdownFile(name)) return "markdown";
+  if (/\.(txt|log|text)$/i.test(name)) return "plain";
+  return "code";
 }
 
 const ROW_DRAG_MIME = "application/x-workeros-brain-row";
@@ -105,6 +123,8 @@ export function InlineFileOpen({
   const [editing, setEditing] = useState(false);
   const [editValue, setEditValue] = useState("");
   const [savingEdit, setSavingEdit] = useState(false);
+  // #1289: rendered (Preview) vs raw source (Raw) for the open text file.
+  const [viewMode, setViewMode] = useState<"preview" | "raw">("preview");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const open = files.find((f) => f.id === openId) ?? null;
   const brainDnD = Boolean(onMoveItem || onCreateSubfolder);
@@ -224,6 +244,7 @@ export function InlineFileOpen({
     setText(null);
     setEditing(false);
     setEditValue("");
+    setViewMode("preview");
     if (!canLoadText || !open || !loadText) return;
     let alive = true;
     setLoading(true);
@@ -270,12 +291,37 @@ export function InlineFileOpen({
           <span style={{ color: "var(--muted-foreground)" }}>
             {rootLabel} / <span style={{ color: "var(--ink)" }}>{open.name}</span>
           </span>
-          {onSaveText && (
+          {/* #1289: Preview / Raw segmented toggle — rendered vs raw source.
+              Hidden while editing (the editor is always raw text). */}
+          {canLoadText && !editing && (
+            <div className="c-vtog" role="group" aria-label="View mode" style={{ marginLeft: "auto" }}>
+              <button
+                type="button"
+                className={viewMode === "preview" ? "on" : ""}
+                aria-pressed={viewMode === "preview"}
+                onClick={() => setViewMode("preview")}
+              >
+                Preview
+              </button>
+              <button
+                type="button"
+                className={viewMode === "raw" ? "on" : ""}
+                aria-pressed={viewMode === "raw"}
+                onClick={() => setViewMode("raw")}
+              >
+                Raw
+              </button>
+            </div>
+          )}
+          {/* #1289: refined Edit affordance — a clear icon+label pill grouped
+              with the other file actions, only shown when editing is possible
+              and not already underway (was a lone, awkward right-floated pill). */}
+          {canEditText && !editing && (
             <button
               type="button"
               className="c-vpill"
-              style={{ padding: "4px 9px", marginLeft: "auto" }}
-              disabled={!canEditText || loading}
+              style={{ padding: "4px 9px", marginLeft: canLoadText ? 0 : "auto" }}
+              disabled={loading}
               onClick={() => {
                 setEditing(true);
                 setEditValue(text ?? "");
@@ -289,7 +335,7 @@ export function InlineFileOpen({
               <button
                 type="button"
                 className="c-vpill"
-                style={{ padding: "4px 9px" }}
+                style={{ padding: "4px 9px", marginLeft: "auto" }}
                 disabled={savingEdit}
                 onClick={() => void saveEdit()}
               >
@@ -310,7 +356,7 @@ export function InlineFileOpen({
             href={open.url}
             download={open.name}
             className="c-vpill"
-            style={{ marginLeft: onSaveText ? 0 : "auto", padding: "4px 9px", textDecoration: "none" }}
+            style={{ marginLeft: canLoadText || canEditText || editing ? 0 : "auto", padding: "4px 9px", textDecoration: "none" }}
           >
             <Download size={13} /> Download
           </a>
@@ -336,7 +382,37 @@ export function InlineFileOpen({
                 if (e.key === "Escape") setEditing(false);
               }}
             />
+          ) : viewMode === "preview" ? (
+            // #1289 Preview: markdown → rendered prose; code → syntax-highlighted;
+            // plain text → readable wrapped block.
+            previewKind(open.name) === "markdown" ? (
+              <div style={{ maxHeight: 420, overflow: "auto" }}>
+                <MarkdownRenderer content={text ?? ""} />
+              </div>
+            ) : previewKind(open.name) === "code" ? (
+              <div style={{ maxHeight: 420, overflow: "auto" }}>
+                <CodeBlock text={text ?? ""} filePath={open.name} />
+              </div>
+            ) : (
+              <pre
+                style={{
+                  border: "var(--bd-card)",
+                  borderRadius: "var(--radius-card)",
+                  background: "var(--bg-2)",
+                  color: "var(--ink-soft)",
+                  padding: 13,
+                  whiteSpace: "pre-wrap",
+                  overflow: "auto",
+                  fontSize: 12,
+                  fontFamily: "var(--font-mono)",
+                  maxHeight: 420,
+                }}
+              >
+                {text ?? ""}
+              </pre>
+            )
           ) : (
+            // #1289 Raw: always the unstyled source, regardless of file type.
             <pre
               style={{
                 border: "var(--bd-card)",

@@ -10,6 +10,8 @@ import {
   addConnection,
   removeConnection,
 } from "@/lib/worker-manifest";
+import { BrandLogo } from "@/components/connections/BrandLogo";
+import { ChipPreviewDialog, type ChipPreviewTarget } from "@/components/worker/ChipPreviewDialog";
 
 interface WorkerToolsEditorProps {
   connections: WorkerConnectionSpec[];
@@ -26,6 +28,8 @@ interface WorkerToolsEditorProps {
  */
 export function WorkerToolsEditor({ connections, editable, busy, onChange }: WorkerToolsEditorProps) {
   const [adding, setAdding] = useState("");
+  // #1303: read-only preview popup for a clicked tool/integration chip.
+  const [preview, setPreview] = useState<ChipPreviewTarget | null>(null);
 
   return (
     <div>
@@ -36,12 +40,23 @@ export function WorkerToolsEditor({ connections, editable, busy, onChange }: Wor
           return (
             <div key={app} className="c-lrow" style={{ gridTemplateColumns: "1fr auto", gap: 12 }}>
               <div className="c-lprimary" style={{ flexDirection: "column", alignItems: "flex-start", gap: 6 }}>
-                <div className="c-lp-tx">
-                  <div className="nm" style={{ textTransform: "capitalize" }}>
-                    {app}
-                  </div>
-                  <div className="sub">{tools ? `${tools.length} tool(s) allowed` : "All tools"}</div>
-                </div>
+                <button
+                  type="button"
+                  className="c-lp-tx"
+                  style={{ display: "flex", alignItems: "center", gap: 8, background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left", minWidth: 0 }}
+                  title={`See ${app} actions`}
+                  onClick={() => setPreview({ kind: "integration", app })}
+                >
+                  <span className="c-logo">
+                    <BrandLogo icon={app} className="size-4" />
+                  </span>
+                  <span style={{ minWidth: 0, display: "flex", flexDirection: "column" }}>
+                    <span className="nm" style={{ display: "block", textTransform: "capitalize", textDecoration: "underline", textUnderlineOffset: 2, textDecorationColor: "var(--border)" }}>
+                      {app}
+                    </span>
+                    <span className="sub" style={{ display: "block" }}>{tools ? `${tools.length} tool(s) allowed` : "All tools"}</span>
+                  </span>
+                </button>
                 {editable && (
                   <input
                     key={(tools ?? []).join(",")}
@@ -105,6 +120,8 @@ export function WorkerToolsEditor({ connections, editable, busy, onChange }: Wor
           </button>
         </div>
       )}
+
+      <ChipPreviewDialog target={preview} onOpenChange={(o) => !o && setPreview(null)} />
     </div>
   );
 }
