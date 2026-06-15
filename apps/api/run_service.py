@@ -771,6 +771,40 @@ from services.run_pause_policy import (  # noqa: E402,F401
     _alert_consecutive_failure_threshold,
     _maybe_pause_worker_after_consecutive_failures,
 )
+def _resolved_worker_timeout_seconds(config: Optional["WorkerConfig"]) -> int:
+    """Resolve the effective run timeout for a worker dispatch.
+
+    Policy (#1127/#1314):
+    - Default: ``config.runtime.limits.timeout_seconds`` (per-worker, default 300 s).
+    - Workspace ``default_timeout_seconds`` overrides the per-worker value when
+      set, enabling opt-in runs up to MAX_RUN_TIMEOUT_SECONDS (3600 s = 1 hour).
+    - Absolute ceiling: MAX_RUN_TIMEOUT_SECONDS (never exceeds 3600 s).
+
+    Examples:
+      worker limits=300, ws unset   → 300   (existing behaviour unchanged)
+      worker limits=300, ws=3600    → 3600  (workspace opt-in to 1 h)
+    """
+    from runtime_limits import MAX_RUN_TIMEOUT_SECONDS
+
+    if config and config.runtime and config.runtime.limits:
+        per_worker = config.runtime.limits.timeout_seconds
+    else:
+        per_worker = DEFAULT_TIMEOUT_SECONDS
+
+    raw = (_workspace_setting("default_timeout_seconds") or "").strip()
+    ws_timeout: Optional[int] = None
+    if raw:
+        try:
+            n = int(float(raw))
+            if n > 0:
+                ws_timeout = n
+        except (ValueError, TypeError):
+            pass
+
+    effective = ws_timeout if ws_timeout is not None else per_worker
+    return min(effective, MAX_RUN_TIMEOUT_SECONDS)
+
+
 def active_run_count() -> int:
     with _active_runs_lock:
         return len(_active_runs)
@@ -1383,11 +1417,9 @@ def execute_run(
         if config and config.runtime:
             runner = config.runtime.runner or "e2b"
         mode = config.runtime.mode if config and config.runtime else "pure-script"
-        timeout_seconds = (
-            config.runtime.limits.timeout_seconds
-            if config and config.runtime and config.runtime.limits
-            else 300
-        )
+        # #1127/#1314: resolve effective timeout — workspace default_timeout_seconds
+        # can raise the ceiling up to MAX_RUN_TIMEOUT_SECONDS (3600 s = 1 hour).
+        timeout_seconds = _resolved_worker_timeout_seconds(config)
         log_fn(f"Executing worker (mode={mode}, runner={runner})", level="debug")
         driver = get_sandbox_driver(runner, config=config)
         with use_context_scope(context_scope_for_user(owner_id)):
