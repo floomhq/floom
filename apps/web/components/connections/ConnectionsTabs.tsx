@@ -28,8 +28,8 @@ export function ConnectionsTabs() {
             href={tab.href}
             className={
               active
-                ? "relative inline-flex h-9 shrink-0 items-center rounded-[var(--radius-button)] bg-[var(--active-nav-bg)] px-2 text-sm font-medium text-[var(--accent)] sm:px-3"
-                : "relative inline-flex h-9 shrink-0 items-center rounded-[var(--radius-button)] px-2 text-sm font-medium text-muted-foreground hover:bg-[var(--active-nav-bg)] hover:text-foreground sm:px-3"
+                ? "relative inline-flex h-9 shrink-0 items-center rounded-[var(--radius-ui)] bg-[var(--active-nav-bg)] px-2 text-sm font-medium text-[var(--accent)] sm:px-3"
+                : "relative inline-flex h-9 shrink-0 items-center rounded-[var(--radius-ui)] px-2 text-sm font-medium text-muted-foreground hover:bg-[var(--active-nav-bg)] hover:text-foreground sm:px-3"
             }
             aria-current={active ? "page" : undefined}
           >

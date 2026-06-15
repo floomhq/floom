@@ -131,7 +131,7 @@ export function VersionDiffPanel({
               <button
                 key={p}
                 onClick={() => setActiveFile(p)}
-                className={`shrink-0 rounded-md px-2.5 py-1 text-[11px] font-medium transition-colors ${
+                className={`shrink-0 rounded-[var(--radius-ui)] px-2.5 py-1 text-[11px] font-medium transition-colors ${
                   activeFile === p
                     ? "bg-[var(--bg-card)] text-foreground shadow-[var(--shadow-sm)]"
                     : "text-muted-foreground hover:text-foreground"
@@ -145,7 +145,7 @@ export function VersionDiffPanel({
         </div>
 
         {/* Diff / Full toggle */}
-        <div className="flex shrink-0 items-center rounded-md [border:var(--bd-card)] bg-[var(--bg-card)] p-0.5">
+        <div className="flex shrink-0 items-center rounded-[var(--radius-ui)] bg-[var(--bg-card)] p-0.5">
           <button
             onClick={() => setMode("diff")}
             className={`flex items-center gap-1 rounded px-2 py-1 text-[11px] font-medium transition-colors ${

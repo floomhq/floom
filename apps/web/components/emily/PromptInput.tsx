@@ -105,13 +105,12 @@ export function PromptInput({
           /workers/new (lib/prompt-detect). */}
       <PromptChips prompt={value} className="px-1" />
 
-      <div className="flex items-center gap-2 rounded-xl [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2.5 shadow-sm focus-within:[border:var(--bd-card)] transition-shadow">
-        {/* Attach button */}
+      <div className="flex items-center gap-2 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-3 py-2.5 transition-colors focus-within:bg-[var(--bg-3)]">        {/* Attach button */}
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
           disabled={disabled}
-          className="shrink-0 rounded-md p-1 text-muted-foreground hover:text-foreground hover:bg-muted transition-colors disabled:opacity-40"
+          className="shrink-0 rounded-[var(--radius-ui)] p-1 text-muted-foreground hover:text-foreground hover:bg-[var(--bg-card)] transition-colors disabled:opacity-40"
           title="Attach file"
           aria-label="Attach file"
         >

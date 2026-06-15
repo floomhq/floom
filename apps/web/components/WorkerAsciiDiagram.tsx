@@ -31,7 +31,7 @@ import { cn } from "@/lib/utils";
 //
 // This is NOT raw terminal output. It is an architecture diagram drawn in
 // SOLID box-drawing characters (─ │ ┌ ┐ └ ┘ ├ ┤ ┬ ┴ ┼), rendered in the app
-// mono font, wrapped in the design system (--radius-card frame, --bg-card
+// mono font, wrapped in the design system (--radius-ui frame, --bg-card
 // surface, --line hairline), and themed with design-system colors:
 //   • input / output node text  → --ink
 //   • connector rules / buses    → --ink-faint
@@ -476,7 +476,7 @@ export function WorkerAsciiDiagram({
           viewport. */}
       <div
         className="max-w-full overflow-x-auto bg-[var(--bg-2)] px-5 py-4"
-        style={{ borderRadius: "var(--radius-card)" }}
+        style={{ borderRadius: "var(--radius-ui)" }}
       >
         {/* The diagram is a positioned stack: the text grid (box-drawing) plus
             an absolute glyph overlay measured in `ch` (monospace cell width)
@@ -565,7 +565,7 @@ export function WorkerAsciiDiagram({
                   key={slug}
                   title={slug}
                   className="inline-flex items-center gap-1.5 bg-[var(--bg-card)] px-1.5 py-1 text-[11px] text-[var(--ink-soft)]"
-                  style={{ borderRadius: "var(--radius-squircle)" }}
+                  style={{ borderRadius: "var(--radius-ui)" }}
                 >
                   <BrandLogo icon={slug} className="size-3.5" />
                   <span className="capitalize">{slug.replace(/-/g, " ")}</span>

@@ -22,7 +22,7 @@ function commitMessageBadge(message: string) {
   return (
     <span
       className={cn(
-        "inline-flex max-w-[140px] items-center truncate rounded-[var(--radius-pill)] [border:var(--bd-pill)] px-1.5 py-0.5 text-[10px] font-medium",
+        "inline-flex max-w-[140px] items-center truncate rounded-[var(--radius-ui)] px-1.5 py-0.5 text-[10px] font-medium",
         isRollback
           ? "bg-[var(--bg-2)] text-[var(--ink-soft)] group-focus/dropdown-menu-item:bg-[var(--bg-3)]"
           : isAi

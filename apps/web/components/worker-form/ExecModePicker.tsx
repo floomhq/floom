@@ -33,7 +33,7 @@ export function ExecModePicker({ detectedEntry }: ExecModePickerProps) {
           Add a SKILL.md to run as an agent; add a run.py to run as a script.
         </p>
         <div
-          className={`flex items-start gap-3 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 py-2.5 ${
+          className={`flex items-start gap-3 rounded-[var(--radius-ui)] px-3 py-2.5 ${
             isAgent ? "bg-muted/50" : "opacity-60"
           }`}
         >
@@ -48,7 +48,7 @@ export function ExecModePicker({ detectedEntry }: ExecModePickerProps) {
           </div>
         </div>
         <div
-          className={`flex items-start gap-3 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 py-2.5 ${
+          className={`flex items-start gap-3 rounded-[var(--radius-ui)] px-3 py-2.5 ${
             isScript ? "bg-muted/50" : "opacity-60"
           }`}
         >
@@ -63,7 +63,7 @@ export function ExecModePicker({ detectedEntry }: ExecModePickerProps) {
           </div>
         </div>
         {detectedEntry === "none" && (
-          <p className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] px-3 py-2 text-xs text-[var(--warning)]">
+          <p className="rounded-[var(--radius-ui)] bg-[color-mix(in_srgb,var(--warning)_12%,transparent)] px-3 py-2 text-xs text-[var(--warning)]">
             Add SKILL.md (agent) or run.py (script) to the file list to set the entry point.
           </p>
         )}

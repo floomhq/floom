@@ -366,7 +366,7 @@ export function InlineFileOpen({
           <img
             src={open.url}
             alt={open.name}
-            style={{ maxWidth: "100%", borderRadius: "var(--r-card, 16px)", display: "block" }}
+            style={{ maxWidth: "100%", borderRadius: "var(--radius-ui)", display: "block" }}
           />
         ) : canLoadText ? (
           loading ? (
@@ -415,8 +415,7 @@ export function InlineFileOpen({
             // #1289 Raw: always the unstyled source, regardless of file type.
             <pre
               style={{
-                border: "var(--bd-card)",
-                borderRadius: "var(--radius-card)",
+                borderRadius: "var(--radius-ui)",
                 background: "var(--bg-2)",
                 color: "var(--ink-soft)",
                 padding: 13,
@@ -461,8 +460,47 @@ export function InlineFileOpen({
   const visibleCount = folders.length + levelFiles.length;
 
   return (
-    <div>
-      {onUpload && (
+    <div
+      onDragOver={
+        onUpload
+          ? (e) => {
+              e.preventDefault();
+              if (!dragOver) setDragOver(true);
+            }
+          : undefined
+      }
+      onDragLeave={
+        onUpload
+          ? (e) => {
+              // Only clear when the pointer actually leaves the dropzone (not a child).
+              if (e.currentTarget === e.target) setDragOver(false);
+            }
+          : undefined
+      }
+      onDrop={
+        onUpload
+          ? (e) => {
+              e.preventDefault();
+              setDragOver(false);
+              const dropped = Array.from(e.dataTransfer.files);
+              void doUpload(dropped);
+            }
+          : undefined
+      }
+      style={
+        onUpload
+          ? {
+              position: "relative",
+              borderRadius: "var(--radius-ui)",
+              // ds-allow-border: drag target affordance while files are over the drop zone.
+              outline: dragOver ? "2px dashed var(--ink-soft)" : "2px dashed transparent",
+              outlineOffset: 4,
+              transition: "outline-color .12s ease",
+            }
+          : undefined
+      }
+    >
+      {/* Upload affordance — drag files anywhere onto the list, or Browse. */}      {onUpload && (
         <input
           ref={fileInputRef}
           type="file"
@@ -643,7 +681,7 @@ export function InlineFileOpen({
                         style={{
                           fontSize: 10.5,
                           padding: "1px 7px",
-                          borderRadius: "var(--r-pill, 9999px)",
+                          borderRadius: "var(--radius-ui)",
                           background: "var(--bg-2)",
                           color: "var(--muted-foreground)",
                         }}

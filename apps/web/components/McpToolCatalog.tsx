@@ -175,7 +175,7 @@ export function McpToolCatalog() {
         value={query}
         onChange={(e) => setQuery(e.target.value)}
         placeholder="Filter tools..."
-        className="h-9 w-full rounded-[var(--radius-input)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 text-sm outline-none placeholder:text-muted-foreground sm:max-w-xs"
+        className="h-9 w-full rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-3 text-sm outline-none placeholder:text-muted-foreground sm:max-w-xs"
       />
 
       {filteredGroups.length === 0 ? (
@@ -192,7 +192,7 @@ export function McpToolCatalog() {
             return (
               <div
                 key={group.group}
-                className="overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)]"
+                className="overflow-hidden rounded-[var(--radius-ui)]"
               >
                 <button
                   type="button"

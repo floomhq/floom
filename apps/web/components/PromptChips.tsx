@@ -63,7 +63,7 @@ export function PromptChips({
         return (
           <span
             key={it.id}
-            className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--bg-2)] py-0.5 pl-2 pr-1.5 text-xs text-foreground"
+            className="inline-flex items-center gap-1.5 rounded-[var(--radius-ui)] bg-[var(--bg-2)] py-0.5 pl-2 pr-1.5 text-xs text-foreground"
           >
             {it.brand ? (
               <BrandLogo icon={it.brand} className="size-3.5 shrink-0" />
@@ -75,7 +75,7 @@ export function PromptChips({
               <button
                 type="button"
                 onClick={() => onDismiss?.(it.id)}
-                className="ml-0.5 inline-flex size-3.5 items-center justify-center rounded-[var(--radius-pill)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
+                className="ml-0.5 inline-flex size-3.5 items-center justify-center rounded-[var(--radius-ui)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
                 aria-label={`Remove ${it.label}`}
               >
                 <X className="size-3" />

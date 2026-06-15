@@ -17,7 +17,8 @@ const config = {
         "active-nav-bg": "var(--active-nav-bg)",
       },
       borderRadius: {
-        card: "var(--radius-card)",
+        ui: "var(--radius-ui)",
+        card: "var(--radius-ui)",
       },
       boxShadow: {
         card: "var(--shadow-card)",

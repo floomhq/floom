@@ -35,7 +35,7 @@ export function Tool({
   const showState = Boolean(status) || state !== "done";
   return (
     <Collapsible defaultOpen={false}>
-      <div className={cn("rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card", className)}>
+      <div className={cn("rounded-[var(--radius-ui)] bg-card", className)}>
         <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
           <div className="flex min-w-0 items-center gap-2">
             {isError ? (
@@ -57,7 +57,7 @@ export function Tool({
             {showState && (
               <span
                 className={cn(
-                  "rounded-[var(--radius-button)] [border:var(--bd-pill)] px-1.5 py-0.5 text-[11px] font-medium",
+                  "rounded-[var(--radius-ui)] px-1.5 py-0.5 text-[11px] font-medium",
                   state === "error"
                     ? "bg-error/10 text-error"
                     : state === "done"
@@ -138,7 +138,7 @@ function ToolBlock({ label, value }: { label: string; value: unknown }) {
       </div>
       <pre
         className={cn(
-          "overflow-auto rounded-[var(--radius-button)] bg-muted p-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words",
+          "overflow-auto rounded-[var(--radius-ui)] bg-muted p-2 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words",
           expanded ? "max-h-none" : "max-h-[280px]",
         )}
       >

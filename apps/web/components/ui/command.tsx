@@ -15,7 +15,7 @@ function Command({
     <CommandPrimitive
       data-slot="command"
       className={cn(
-        "flex h-full w-full flex-col overflow-hidden rounded-[var(--radius-card)] bg-popover text-popover-foreground",
+        "flex h-full w-full flex-col overflow-hidden rounded-[var(--radius-ui)] bg-popover text-popover-foreground",
         className,
       )}
       {...props}
@@ -44,7 +44,7 @@ function CommandDialog({
         />
         <DialogPrimitive.Popup
           className={cn(
-            "fixed top-[20%] left-1/2 z-50 w-full max-w-[calc(100%-2rem)] -translate-x-1/2 overflow-hidden rounded-[var(--radius-card)] bg-popover p-0 text-popover-foreground shadow-pop duration-100 outline-none sm:max-w-xl data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
+            "fixed top-[20%] left-1/2 z-50 w-full max-w-[calc(100%-2rem)] -translate-x-1/2 overflow-hidden rounded-[var(--radius-ui)] bg-popover p-0 text-popover-foreground shadow-pop duration-100 outline-none sm:max-w-xl data-open:animate-in data-open:fade-in-0 data-open:zoom-in-95 data-closed:animate-out data-closed:fade-out-0 data-closed:zoom-out-95",
             className,
           )}
         >
@@ -74,7 +74,7 @@ function CommandInput({
       <CommandPrimitive.Input
         data-slot="command-input"
         className={cn(
-          "placeholder:text-muted-foreground flex h-12 w-full rounded-[var(--radius-button)] bg-transparent py-3 text-sm outline-hidden disabled:cursor-not-allowed disabled:opacity-50",
+          "placeholder:text-muted-foreground flex h-12 w-full rounded-[var(--radius-ui)] bg-transparent py-3 text-sm outline-hidden disabled:cursor-not-allowed disabled:opacity-50",
           className,
         )}
         {...props}
@@ -146,7 +146,7 @@ function CommandItem({
     <CommandPrimitive.Item
       data-slot="command-item"
       className={cn(
-        "data-[selected=true]:bg-accent/10 data-[selected=true]:text-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex cursor-default items-center gap-2.5 rounded-[var(--radius-button)] px-3 py-2.5 text-sm outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
+        "data-[selected=true]:bg-accent/10 data-[selected=true]:text-foreground [&_svg:not([class*='text-'])]:text-muted-foreground relative flex cursor-default items-center gap-2.5 rounded-[var(--radius-ui)] px-3 py-2.5 text-sm outline-hidden select-none data-[disabled=true]:pointer-events-none data-[disabled=true]:opacity-50 [&_svg]:pointer-events-none [&_svg]:shrink-0 [&_svg:not([class*='size-'])]:size-4",
         className,
       )}
       {...props}
@@ -162,7 +162,7 @@ function CommandShortcut({
     <span
       data-slot="command-shortcut"
       className={cn(
-        "text-muted-foreground ml-auto inline-flex items-center gap-0.5 text-[11px] tracking-widest [&>kbd]:inline-flex [&>kbd]:items-center [&>kbd]:justify-center [&>kbd]:rounded-[var(--radius-button)] [&>kbd]:[border:var(--bd-pill)] [&>kbd]:bg-bg-2 [&>kbd]:px-1.5 [&>kbd]:py-0.5 [&>kbd]:font-mono [&>kbd]:text-[10px]",
+        "text-muted-foreground ml-auto inline-flex items-center gap-0.5 text-[11px] tracking-widest [&>kbd]:inline-flex [&>kbd]:items-center [&>kbd]:justify-center [&>kbd]:rounded-[var(--radius-ui)] [&>kbd]: [&>kbd]:bg-bg-2 [&>kbd]:px-1.5 [&>kbd]:py-0.5 [&>kbd]:font-mono [&>kbd]:text-[10px]",
         className,
       )}
       {...props}

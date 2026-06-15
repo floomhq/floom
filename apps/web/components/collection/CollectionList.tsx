@@ -45,8 +45,7 @@ function RowMenu({ items }: { items: RowMenuItem[] }) {
             zIndex: 30,
             minWidth: 168,
             background: "var(--bg-card)",
-            border: "var(--bd-card)",
-            borderRadius: "var(--radius-card)",
+            borderRadius: "var(--radius-ui)",
             boxShadow: "var(--shadow-pop)",
             padding: 5,
           }}
@@ -66,7 +65,7 @@ function RowMenu({ items }: { items: RowMenuItem[] }) {
                 width: "100%",
                 textAlign: "left",
                 padding: "8px 10px",
-                borderRadius: "var(--radius-button)",
+                borderRadius: "var(--radius-ui)",
                 fontSize: 13,
                 color: it.danger ? "var(--warning)" : "var(--ink-soft)",
               }}

@@ -156,7 +156,7 @@ export function RunDetailSplitPane({
       </div>
 
       {streamUnavailable && isActive && (
-        <div className="flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-ui)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] px-4 py-3">
           <div className="min-w-0">
             <p className="text-sm font-medium text-[var(--ink)]">Run status connection lost</p>
             <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
@@ -177,7 +177,7 @@ export function RunDetailSplitPane({
       {/* R4: the split pane was unbounded — long transcripts/logs grew the
           whole page so it scrolled "into infinity". Cap the pane at a
           viewport-relative height and let each pane scroll WITHIN itself. */}
-      <div className="flex min-h-[280px] max-h-[calc(100vh-13rem)] flex-col gap-0 overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] md:flex-row">
+      <div className="flex min-h-[280px] max-h-[calc(100vh-13rem)] flex-col gap-0 overflow-hidden rounded-[var(--radius-ui)] bg-[var(--bg-card)] md:flex-row">
         {/* R5 (2026-05-30): the timeline pane previously had `md:resize-x` (a
             CSS textarea-style drag handle showed in its corner) and
             `md:max-h-none`, which stretched a short timeline into a huge empty
@@ -279,7 +279,7 @@ function RunMetricsStrip({ run, status }: { run: RunDetail; status: string }) {
   const durationValue =
     run.duration_ms != null ? formatDuration(run.duration_ms) : status === "unknown" ? "Unknown" : "Running";
   return (
-    <dl className="grid gap-px overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--border-default)] text-sm sm:grid-cols-2 lg:grid-cols-5">
+    <dl className="grid gap-px overflow-hidden rounded-[var(--radius-ui)] bg-[var(--bg-3)] text-sm sm:grid-cols-2 lg:grid-cols-5">
       <RunMetric label="Status" value={statusLabel(status)} />
       <RunMetric label="Started" value={run.started_at ? formatAbsolute(run.started_at) : "Not started"} />
       <RunMetric label="Duration" value={durationValue} />
@@ -305,7 +305,7 @@ function TimelineRow({ item }: { item: TimelineItem }) {
         <RunStatusGlyph status={item.status} className="size-4" />
         <div className="mt-1 h-full w-px bg-border" />
       </div>
-      <div className="min-w-0 flex-1 rounded-[var(--radius-button)] px-2 py-1 hover:bg-muted">
+      <div className="min-w-0 flex-1 rounded-[var(--radius-ui)] px-2 py-1 hover:bg-muted">
         <div className="flex items-center justify-between gap-2">
           <p className="truncate text-sm font-medium">{item.label}</p>
           <span className="shrink-0 text-[11px] text-muted-foreground">{item.duration}</span>
@@ -370,7 +370,7 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
         }
         if (part.type === "text" || part.type === "reasoning") {
           return (
-            <div key={`${part.type}-${index}`} className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/40 p-3">
+            <div key={`${part.type}-${index}`} className="rounded-[var(--radius-ui)] bg-muted/40 p-3">
               <p className="mb-1 text-[11px] font-medium uppercase text-muted-foreground">
                 {part.type === "reasoning" ? "Reasoning" : "Text"}
               </p>
@@ -428,7 +428,7 @@ function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
 function RunResultOverview({ run }: { run: RunDetail }) {
   return (
     <div className="space-y-6">
-      <section className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/20 p-4">
+      <section className="rounded-[var(--radius-ui)] bg-muted/20 p-4">
         <div className="flex flex-wrap items-start justify-between gap-3">
           <div className="min-w-0">
             <p className="text-sm font-semibold">{run.status === "completed" ? "Run completed" : statusLabel(run.status)}</p>
@@ -479,7 +479,7 @@ function OutputSummary({ run }: { run: RunDetail }) {
       </div>
 
       {metricEntries.length > 0 && (
-        <dl className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-px overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--border-default)]">
+        <dl className="grid grid-cols-[repeat(auto-fit,minmax(220px,1fr))] gap-px overflow-hidden rounded-[var(--radius-ui)] bg-[var(--bg-3)]">
           {metricEntries.map(([key, value]) => (
             <div key={key} className="min-w-0 bg-card px-3 py-2">
               {/* P2-1: human label (no raw uppercased JSON key) */}
@@ -498,13 +498,13 @@ function OutputSummary({ run }: { run: RunDetail }) {
               <li
                 key={key}
                 className={cn(
-                  "inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] [border:var(--bd-pill)] px-2.5 py-0.5 text-xs font-medium",
+                  "inline-flex items-center gap-1.5 rounded-[var(--radius-ui)] px-2.5 py-0.5 text-xs font-medium",
                   state.tone === "ok"
                     ? "bg-success/10 text-success"
                     : "bg-muted text-muted-foreground",
                 )}
               >
-                <span className="size-1.5 rounded-[var(--radius-pill)] bg-current opacity-70" aria-hidden="true" />
+                <span className="size-2 rounded-[var(--radius-ui)] bg-current opacity-70" aria-hidden="true" />
                 {exportStateText(state)}
               </li>
             );
@@ -530,7 +530,7 @@ function OutputFileLink({ run, label, path }: { run: RunDetail; label: string; p
     <a
       href={href}
       download
-      className="flex min-w-0 items-center justify-between gap-3 rounded-lg [border:var(--bd-card)] bg-[var(--bg-card)] px-3 py-2 text-sm hover:bg-[var(--active-nav-bg)] transition-colors"
+      className="flex min-w-0 items-center justify-between gap-3 rounded-[var(--radius-ui)] bg-[var(--bg-card)] px-3 py-2 text-sm hover:bg-[var(--active-nav-bg)] transition-colors"
     >
       <span className="flex min-w-0 items-center gap-2">
         <FileText className="size-4 shrink-0 text-muted-foreground" />
@@ -566,7 +566,7 @@ function ArtifactsList({ run }: { run: RunDetail }) {
             key={artifact.id}
             href={api.runs.artifactUrl(run.id, artifact.id)}
             download
-            className="flex min-w-0 items-center justify-between gap-3 rounded-lg [border:var(--bd-card)] bg-[var(--bg-card)] px-3 py-2 text-sm hover:bg-[var(--active-nav-bg)] transition-colors"
+            className="flex min-w-0 items-center justify-between gap-3 rounded-[var(--radius-ui)] bg-[var(--bg-card)] px-3 py-2 text-sm hover:bg-[var(--active-nav-bg)] transition-colors"
           >
             <span className="min-w-0">
               <span className="block truncate font-mono text-xs">{artifact.name}</span>
@@ -593,7 +593,7 @@ function RecentLogsPreview({ run }: { run: RunDetail }) {
         <h2 className="text-sm font-semibold">Recent logs</h2>
         <p className="text-xs text-muted-foreground">Last {recent.length} server-side log entr{recent.length === 1 ? "y" : "ies"}.</p>
       </div>
-      <div className="overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)]">
+      <div className="overflow-hidden rounded-[var(--radius-ui)]">
         {recent.map((log, index) => (
           <div key={`${log.timestamp}-${index}`} className="grid gap-2 [border-bottom:var(--bd-div)] bg-[var(--bg-card)] px-3 py-2 text-xs last:[border-bottom:0] sm:grid-cols-[8.5rem_5rem_1fr]">
             <span className="font-mono text-muted-foreground">{formatTime(log.timestamp)}</span>
@@ -735,7 +735,7 @@ function RawView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
         {parts.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">No parts captured.</p>
         ) : (
-          <pre className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] dark:bg-[#1a1a1a] p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words overflow-auto max-h-[400px]">
+          <pre className="rounded-[var(--radius-ui)] bg-[var(--bg-2)] dark:bg-[#1a1a1a] p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words overflow-auto max-h-[400px]">
             {parts.map((p, i) => `[${i.toString().padStart(3, "0")}] ${p.type}\n${JSON.stringify(p, null, 2)}`).join("\n\n")}
           </pre>
         )}
@@ -746,7 +746,7 @@ function RawView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
         {run.logs.length === 0 ? (
           <p className="text-xs text-muted-foreground italic">No logs captured.</p>
         ) : (
-          <pre className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] dark:bg-[#1a1a1a] p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words overflow-auto max-h-[400px]">
+          <pre className="rounded-[var(--radius-ui)] bg-[var(--bg-2)] dark:bg-[#1a1a1a] p-3 font-mono text-xs leading-relaxed whitespace-pre-wrap break-words overflow-auto max-h-[400px]">
             {run.logs.map((l) => `${l.timestamp} [${l.level.toUpperCase()}]${l.trace_id ? ` ${l.trace_id}` : ""} ${l.message}`).join("\n")}
           </pre>
         )}
@@ -766,11 +766,11 @@ function InputsView({ run }: { run: RunDetail }) {
         <div key={key} className="space-y-1">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{key}</p>
           {typeof value === "string" ? (
-            <p className="text-sm text-foreground whitespace-pre-wrap break-words rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 px-3 py-2">
+            <p className="text-sm text-foreground whitespace-pre-wrap break-words rounded-[var(--radius-ui)] bg-muted/30 px-3 py-2">
               {value || <span className="italic text-muted-foreground">empty</span>}
             </p>
           ) : (
-            <pre className="text-xs text-foreground whitespace-pre-wrap break-words rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 px-3 py-2">
+            <pre className="text-xs text-foreground whitespace-pre-wrap break-words rounded-[var(--radius-ui)] bg-muted/30 px-3 py-2">
               {JSON.stringify(value, null, 2)}
             </pre>
           )}
@@ -787,7 +787,7 @@ function ToolCallsView({ calls }: { calls: ToolCallEntry[] }) {
   return (
     <div className="space-y-3">
       {calls.map((call) => (
-        <div key={call.id} className="rounded-[var(--radius-button)] [border:var(--bd-card)] overflow-hidden">
+        <div key={call.id} className="rounded-[var(--radius-ui)] overflow-hidden">
           <div className="flex items-center gap-2 bg-muted/40 px-3 py-2 [border-bottom:var(--bd-div)]">
             <span className="font-mono text-xs font-medium text-foreground">{call.name}</span>
             {call.error && (
@@ -832,13 +832,13 @@ function ApprovalView({ approval }: { approval: ApprovalEntry | null }) {
       : "text-[var(--ink-soft)]";
   return (
     <div className="space-y-4 max-w-lg">
-      <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] p-4 space-y-3">
+      <div className="rounded-[var(--radius-ui)] p-4 space-y-3">
         <div className="flex items-center justify-between">
           <span className="text-sm font-medium">{approval.label || "Approval checkpoint"}</span>
           <span className={cn("text-xs font-medium capitalize", statusColor)}>{approval.status}</span>
         </div>
         {approval.preview && (
-          <pre className="text-xs text-foreground whitespace-pre-wrap break-words rounded [border:var(--bd-card)] bg-muted/30 px-3 py-2">
+          <pre className="text-xs text-foreground whitespace-pre-wrap break-words rounded bg-muted/30 px-3 py-2">
             {approval.preview}
           </pre>
         )}
@@ -892,7 +892,7 @@ function MetadataView({ run }: { run: RunDetail }) {
     })),
   };
   return (
-    <pre className="max-h-[620px] overflow-auto rounded-[var(--radius-button)] bg-muted p-3 font-mono text-xs leading-relaxed">
+    <pre className="max-h-[620px] overflow-auto rounded-[var(--radius-ui)] bg-muted p-3 font-mono text-xs leading-relaxed">
       {JSON.stringify(metadata, null, 2)}
     </pre>
   );

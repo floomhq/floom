@@ -59,7 +59,7 @@ export function WorkerBrainEditor({
       {showMemoryCta && (
         <button
           type="button"
-          className="mb-3 flex w-full items-center gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-3)] disabled:opacity-60"
+          className="mb-3 flex w-full items-center gap-3 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-3)] disabled:opacity-60"
           disabled={busy}
           onClick={() => void onAttachMemory?.()}
         >
@@ -157,7 +157,7 @@ export function WorkerBrainEditor({
                 id={listboxId}
                 role="listbox"
                 aria-label="Attach folder"
-                className="absolute left-0 right-0 top-full z-20 mt-1 max-h-52 overflow-auto rounded-[var(--radius-card)] bg-[var(--bg-card)] p-1 shadow-[var(--shadow-pop)] [border:var(--bd-card)]"
+                className="absolute left-0 right-0 top-full z-20 mt-1 max-h-52 overflow-auto rounded-[var(--radius-ui)] bg-[var(--bg-card)] p-1 shadow-[var(--shadow-pop)]"
               >
                 {unattached.map((p) => (
                   <button
@@ -165,7 +165,7 @@ export function WorkerBrainEditor({
                     type="button"
                     role="option"
                     aria-selected={p.name === attach}
-                    className={`flex w-full items-center gap-2 rounded-[var(--radius-button)] px-2.5 py-2 text-left text-sm ${
+                    className={`flex w-full items-center gap-2 rounded-[var(--radius-ui)] px-2.5 py-2 text-left text-sm ${
                       p.name === attach
                         ? "bg-[var(--bg-2)] text-foreground"
                         : "text-muted-foreground hover:bg-[var(--bg-2)] hover:text-foreground"

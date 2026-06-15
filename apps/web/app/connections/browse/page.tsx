@@ -101,8 +101,33 @@ function outcomeText(item: IntegrationCatalogItem): string {
   return `Connect ${item.name} so your workers can take action.`;
 }
 
-// Module-level cache: fetched tools per slug, shared across modal instances.
-const _toolsCache: Map<string, CatalogToolItem[]> = new Map();
+function CatalogSkeleton() {
+  return (
+    <>
+      {Array.from({ length: PAGE_SIZE }).map((_, index) => (
+        <div
+          key={index}
+          className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-[var(--radius-ui)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)]"
+        >
+          <div className="flex items-center gap-3">
+            <Skeleton className="h-10 w-10 rounded-[var(--radius-ui)]" />
+            <div className="min-w-0 flex-1 space-y-2">
+              <Skeleton className="h-4 w-24" />
+              <Skeleton className="h-3 w-14" />
+            </div>
+          </div>
+          <div className="pt-4">
+            <Skeleton className="h-3 w-full" />
+            <Skeleton className="mt-2 h-3 w-2/3" />
+          </div>
+          <Skeleton className="h-7 w-full rounded-[var(--radius-ui)]" />
+        </div>
+      ))}
+    </>
+  );
+}
+
+// Module-level cache: fetched tools per slug, shared across card instances.const _toolsCache: Map<string, CatalogToolItem[]> = new Map();
 
 // ToolsModal: opens on "What can it do?" click; lazy-fetches with search + scroll.
 function ToolsModal({
@@ -163,8 +188,7 @@ function ToolsModal({
       >
         {/* Header: logo + name */}
         <DialogHeader className="flex-row items-center gap-3 [border-bottom:var(--bd-div)] px-4 py-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-lg bg-[var(--bg-2)]">
-            <img
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-2)]">            <img
               src={item.logo_url}
               alt={`${item.name} logo`}
               className="h-6 w-6 object-contain"
@@ -190,9 +214,8 @@ function ToolsModal({
               type="text"
               value={toolSearch}
               onChange={(e) => setToolSearch(e.target.value)}
-              placeholder="Filter actions..."
-              className="h-8 w-full rounded-[var(--radius-input)] bg-[var(--bg-2)] pl-8 pr-3 text-xs text-ink placeholder:text-muted-foreground focus:outline-none"
-            />
+              placeholder="Filter tools..."
+              className="h-8 w-full rounded-[var(--radius-ui)] bg-[var(--bg-2)] pl-8 pr-3 text-xs text-ink placeholder:text-muted-foreground focus:outline-none"            />
             {toolSearch ? (
               <button
                 type="button"
@@ -292,17 +315,20 @@ function CatalogRow({
 
   return (
     <>
-      <article className="group flex min-h-[60px] items-center gap-4 rounded-[var(--radius-card)] px-3 py-3 transition-colors duration-100 hover:bg-[var(--bg-2)]">
-        {/* Logo */}
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-[var(--bg-2)] transition-colors group-hover:bg-[var(--bg-card)]">
-          <img
-            src={item.logo_url}
-            alt={`${item.name} logo`}
-            className="h-6 w-6 object-contain"
-            loading="lazy"
-            decoding="async"
-          />
-        </div>
+      <article className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-[var(--radius-ui)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] transition-[background-color,box-shadow] duration-150 ease-[var(--ease)] hover:bg-[var(--bg-2)]">
+        <div className="flex min-w-0 items-center gap-3">
+          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-2)]">
+            <img
+              src={item.logo_url}
+              alt={`${item.name} logo`}
+              className="h-6 w-6 object-contain"
+              loading="eager"
+              decoding="async"
+            />
+          </div>
+          <div className="min-w-0 flex-1">
+            <h2 className="line-clamp-2 text-sm font-semibold text-ink">{item.name}</h2>
+          </div>        </div>
 
         {/* Name + outcome text */}
         <div className="min-w-0 flex-1">
@@ -318,9 +344,8 @@ function CatalogRow({
             <button
               type="button"
               onClick={() => setModalOpen(true)}
-              className="hidden whitespace-nowrap text-xs text-muted-foreground transition-colors hover:text-[var(--accent)] sm:block"
-              title="See what this integration can do"
-            >
+              className="mt-2 inline-flex items-center gap-1 rounded-[var(--radius-ui)] px-2 py-0.5 text-[11px] font-medium text-muted-foreground transition-colors hover:text-[var(--accent)]"
+              title="View tools in this integration"            >
               {item.tools_count} actions
             </button>
           ) : null}
@@ -568,34 +593,56 @@ export default function ConnectionsBrowsePage() {
         </div>
       </section>
 
-      {/* Main content */}
-      {loading ? (
-        <section className="space-y-0.5">
-          <CatalogSkeleton count={PAGE_SIZE} />
-        </section>
-      ) : loadError ? (
-        <div className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-12 text-center">
-          <p className="text-sm font-medium text-ink">Could not load integrations</p>
-          <p className="mt-1 text-sm text-muted-foreground">{loadError}</p>
-          <button
-            type="button"
-            onClick={() => void loadCatalog()}
-            className="mt-3 text-xs underline text-muted-foreground hover:text-ink transition-colors"
-          >
-            Try again
-          </button>
-        </div>
-      ) : catalog?.items.length ? (
-        <div className="space-y-8">
-          {/* Connected integrations — only show when not actively filtering */}
-          {!isFiltering && connectedItems.length > 0 ? (
-            <ConnectedSection
-              items={connectedItems}
-              connecting={connecting}
+      <section className="grid grid-cols-[repeat(auto-fill,minmax(176px,1fr))] gap-3">
+        {loading ? (
+          <CatalogSkeleton />
+        ) : loadError ? (
+          <div className="col-span-full space-y-3 rounded-[var(--radius-ui)] bg-[var(--bg-card)] px-4 py-12 text-center">
+            <p className="text-sm font-medium text-ink">Could not load integrations</p>
+            <p className="mt-1 text-sm text-[var(--ink-soft)]">{loadError}</p>
+            <button
+              type="button"
+              onClick={() => void loadCatalog()}
+              className="text-xs underline text-[var(--ink-soft)] hover:text-ink transition-colors"
+            >
+              Try again
+            </button>
+          </div>
+        ) : catalog?.items.length ? (
+          catalog.items.map((item) => (
+            <CatalogCard
+              key={item.slug}
+              item={item}
+              connecting={connecting === item.slug}
+              isConnected={connectedSlugs.has(item.slug.toLowerCase())}
               onConnect={handleConnect}
             />
-          ) : null}
-
+          ))
+        ) : (
+          // S24: when Composio catalog returns no match for the search,
+          // bridge to the manual path: store a raw API key as a Secret.
+          // Many apps that lack Composio OAuth still expose a simple key.
+          <div className="col-span-full rounded-[var(--radius-ui)] bg-[var(--bg-card)] px-6 py-10 text-center">
+            <p className="text-sm font-medium text-ink">No integrations found</p>
+            <p className="mt-1 text-sm text-[var(--ink-soft)]">
+              Clear filters or try a broader search.
+            </p>
+            {search.trim().length > 0 && (
+              <div className="mt-5 inline-flex flex-col items-center gap-2">
+                <p className="text-xs text-[var(--ink-mute)]">
+                  Does the app you need expose an API key? Add it as a secret and any worker can read it.
+                </p>
+                <Link
+                  href={`/connections/secrets?prefill=${encodeURIComponent(search.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, "_") + "_API_KEY")}`}
+                  className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-ui)] bg-[var(--accent-soft)] px-3 text-xs font-medium text-[var(--accent)] transition-opacity hover:opacity-90"
+                >
+                  Add {search.trim()} as a secret
+                </Link>
+              </div>
+            )}
+          </div>
+        )}
+      </section>
           {/* Browse / Available section */}
           <section>
             {!isFiltering && availableItems.length > 0 ? (

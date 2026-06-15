@@ -506,14 +506,14 @@ export default function McpConnectionsPage() {
       {/* ============================================================= */}
       {/* Concept A — Use Floom Workers IN your AI client (secondary)   */}
       {/* ============================================================= */}
-      <section className="rounded-xl [border:var(--bd-card)] bg-[var(--bg-card)]">
+      <section className="rounded-[var(--radius-ui)] bg-[var(--bg-card)]">
         <button
           type="button"
           onClick={() => setInstallOpen((v) => !v)}
           aria-expanded={installOpen}
-          className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left transition-colors hover:bg-[var(--active-nav-bg)]"
+          className="flex w-full items-center gap-3 rounded-[var(--radius-ui)] px-4 py-3.5 text-left transition-colors hover:bg-[var(--active-nav-bg)]"
         >
-          <div className="flex size-8 shrink-0 items-center justify-center rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)]">
+          <div className="flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-app)]">
             <Terminal className="size-4 text-muted-foreground" />
           </div>
           <div className="min-w-0 flex-1">
@@ -535,7 +535,7 @@ export default function McpConnectionsPage() {
                   key={target.target}
                   type="button"
                   onClick={() => setInstallTarget(target.target)}
-                  className={`rounded-[var(--radius-button)] [border:var(--bd-pill)] px-2.5 py-1 text-xs font-medium transition-colors ${
+                  className={`rounded-[var(--radius-ui)] px-2.5 py-1 text-xs font-medium transition-colors ${
                     installTarget === target.target
                       ? "bg-[var(--ink)] text-[var(--bg-app)]"
                       : "bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
@@ -579,7 +579,7 @@ export default function McpConnectionsPage() {
 
       {/* Single add flow: JSON config first, with form and bulk import as secondary paths. */}
       {formOpen && (
-        <div className="rounded-xl [border:var(--bd-card)] bg-[var(--bg-card)] p-4">
+        <div className="rounded-[var(--radius-ui)] bg-[var(--bg-card)] p-4">
           <div className="mb-4 flex flex-wrap items-start justify-between gap-3">
             <div>
               <h3 className="text-sm font-medium text-foreground">Add MCP server</h3>
@@ -587,11 +587,11 @@ export default function McpConnectionsPage() {
                 Paste a JSON config. Use secret names, not secret values.
               </p>
             </div>
-          <div className="inline-flex rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)] p-0.5">
+          <div className="inline-flex rounded-[var(--radius-ui)] bg-[var(--bg-app)] p-0.5">
             <button
               type="button"
               onClick={() => setMode("json")}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`rounded-[var(--radius-ui)] px-3 py-1.5 text-xs font-medium transition-colors ${
                 mode === "json"
                   ? "bg-[var(--bg-card)] text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
@@ -602,7 +602,7 @@ export default function McpConnectionsPage() {
             <button
               type="button"
               onClick={() => setMode("form")}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`rounded-[var(--radius-ui)] px-3 py-1.5 text-xs font-medium transition-colors ${
                 mode === "form"
                   ? "bg-[var(--bg-card)] text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
@@ -613,7 +613,7 @@ export default function McpConnectionsPage() {
             <button
               type="button"
               onClick={() => setMode("import")}
-              className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
+              className={`rounded-[var(--radius-ui)] px-3 py-1.5 text-xs font-medium transition-colors ${
                 mode === "import"
                   ? "bg-[var(--bg-card)] text-foreground shadow-sm"
                   : "text-muted-foreground hover:text-foreground"
@@ -686,7 +686,7 @@ export default function McpConnectionsPage() {
                     id="mcp-transport"
                     value={transport}
                     onChange={(e) => setTransport(e.target.value as McpTransport)}
-                    className="flex h-9 w-full rounded-[var(--radius-input)] [border:var(--bd-input)] bg-[var(--bg-2)] px-3 text-sm outline-none"
+                    className="flex h-9 w-full rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-3 text-sm outline-none"
                   >
                     <option value="streamable_http">HTTP</option>
                     <option value="sse">SSE</option>
@@ -700,7 +700,7 @@ export default function McpConnectionsPage() {
                     id="mcp-auth-secret"
                     value={authSecret}
                     onChange={(e) => setAuthSecret(e.target.value)}
-                    className="flex h-9 w-full rounded-[var(--radius-input)] [border:var(--bd-input)] bg-[var(--bg-2)] px-3 text-sm outline-none"
+                    className="flex h-9 w-full rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-3 text-sm outline-none"
                   >
                     <option value="">No bearer token</option>
                     {secrets.map((s) => (
@@ -828,14 +828,14 @@ export default function McpConnectionsPage() {
                     {importParsed.map((item) => (
                       <div
                         key={item.key}
-                        className={`flex items-center gap-3 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 py-2.5 text-sm transition-colors ${
+                        className={`flex items-center gap-3 rounded-[var(--radius-ui)] px-3 py-2.5 text-sm transition-colors ${
                           item.transport !== "stdio" && !item.url
                             ? "cursor-not-allowed bg-muted/30 opacity-60"
                             : "cursor-pointer bg-[var(--bg-app)] hover:bg-muted/40"
                         }`}
                         onClick={() => { if (item.transport === "stdio" || item.url) toggleImportItem(item.key); }}
                       >
-                        <div className={`flex size-4 shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-pill)] ${
+                        <div className={`flex size-4 shrink-0 items-center justify-center rounded-[var(--radius-ui)] ${
                           item.selected ? "bg-[var(--accent)]" : "bg-[var(--bg-2)]"
                         }`}>
                           {item.selected && <Check className="size-3 text-white" />}
@@ -887,7 +887,7 @@ export default function McpConnectionsPage() {
       )}
 
       {/* Saved servers list */}
-      <div className="overflow-hidden rounded-xl [border:var(--bd-card)] bg-[var(--bg-card)]">
+      <div className="overflow-hidden rounded-[var(--radius-ui)] bg-[var(--bg-card)]">
         {/* Header row */}
         <div className="hidden grid-cols-[32px_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] gap-4 [border-bottom:var(--bd-div)] bg-[var(--bg-2)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid">
           <span />
@@ -904,7 +904,7 @@ export default function McpConnectionsPage() {
           ))
         ) : connections.length === 0 ? (
           <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
-            <div className="flex size-10 items-center justify-center rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--bg-app)]">
+            <div className="flex size-10 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-app)]">
               <Server className="size-5 text-muted-foreground/50" />
             </div>
             <div>
@@ -960,19 +960,19 @@ function CommandBlock({
   onCopy: () => void;
 }) {
   return (
-    <div className="rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)] p-3">
+    <div className="rounded-[var(--radius-ui)] bg-[var(--bg-app)] p-3">
       <div className="mb-2 flex items-center justify-between gap-2">
         <span className="text-xs font-medium uppercase tracking-wide text-muted-foreground">{title}</span>
         <button
           type="button"
           onClick={onCopy}
-          className="inline-flex size-7 items-center justify-center rounded-md [border:var(--bd-card)] bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
+          className="inline-flex size-7 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-card)] text-muted-foreground hover:text-foreground"
           title="Copy command"
         >
           {copied ? <Check className="size-3.5" /> : <Copy className="size-3.5" />}
         </button>
       </div>
-      <pre className="overflow-x-auto rounded-md bg-[var(--ink)] px-3 py-2 text-xs text-[var(--bg-app)]">
+      <pre className="overflow-x-auto rounded-[var(--radius-ui)] bg-[var(--ink)] px-3 py-2 text-xs text-[var(--bg-app)]">
         <code>{command}</code>
       </pre>
     </div>
@@ -1023,7 +1023,7 @@ function McpRow({
         className={`group grid grid-cols-[32px_1fr_auto] items-center gap-3 px-3 py-2.5 md:grid-cols-[32px_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] md:gap-4 ${onToggle ? "cursor-pointer select-none hover:bg-[var(--active-nav-bg)]" : "hover:bg-[var(--active-nav-bg)]"} transition-colors`}
       >
         {/* Icon */}
-        <div className="flex size-7 shrink-0 items-center justify-center rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)]">
+        <div className="flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-app)]">
           <Server className="size-3.5 text-muted-foreground" />
         </div>
 
@@ -1102,7 +1102,7 @@ function McpRow({
       {expanded && (
         <div className="[border-top:var(--bd-div)] bg-[color-mix(in_srgb,var(--active-nav-bg)_60%,transparent)] px-3 py-3 md:pl-[52px]">
           <div className="flex flex-wrap items-center gap-x-6 gap-y-2 text-sm">
-            <span className={`inline-flex items-center rounded-[var(--radius-pill)] [border:var(--bd-pill)] px-2 py-0.5 text-xs font-medium ${isActive ? "bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] text-[var(--positive)]" : "bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] text-[var(--negative)]"}`}>
+            <span className={`inline-flex items-center rounded-[var(--radius-ui)] px-2 py-0.5 text-xs font-medium ${isActive ? "bg-[color-mix(in_srgb,var(--positive)_10%,transparent)] text-[var(--positive)]" : "bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] text-[var(--negative)]"}`}>
               {statusLabel}
             </span>
             <span className="text-[var(--ink-soft)]">{toolLabel}</span>

@@ -207,10 +207,10 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
               key={f}
               type="button"
               onClick={() => handleFreqChange(f)}
-              className={`h-7 rounded-[var(--radius-button)] [border:var(--bd-pill)] px-2.5 text-xs font-medium transition-colors ${
+              className={`h-7 rounded-[var(--radius-ui)] px-2.5 text-xs font-medium transition-colors ${
                 freq === f
                   ? "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)]"
-                  : "[border:var(--bd-card)] bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
+                  : " bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
               }`}
             >
               {label}
@@ -225,7 +225,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
           <div className="space-y-1.5 flex-1">
             <Label className="text-xs text-muted-foreground">Hour</Label>
             <Select value={String(hour)} onValueChange={(v) => setHour(parseInt(v ?? "0"))}>
-              <SelectTrigger className="[border:var(--bd-card)] h-8 text-xs">
+              <SelectTrigger className=" h-8 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="max-h-52">
@@ -240,7 +240,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
           <div className="space-y-1.5 flex-1">
             <Label className="text-xs text-muted-foreground">Minute</Label>
             <Select value={String(minute)} onValueChange={(v) => setMinute(parseInt(v ?? "0"))}>
-              <SelectTrigger className="[border:var(--bd-card)] h-8 text-xs">
+              <SelectTrigger className=" h-8 text-xs">
                 <SelectValue />
               </SelectTrigger>
               <SelectContent className="max-h-52">
@@ -265,10 +265,10 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
                 key={v}
                 type="button"
                 onClick={() => toggleDow(v)}
-                className={`h-7 w-10 rounded-[var(--radius-button)] [border:var(--bd-pill)] text-xs font-medium transition-colors ${
+                className={`h-7 w-10 rounded-[var(--radius-ui)] text-xs font-medium transition-colors ${
                   dow.includes(v)
                     ? "bg-[color-mix(in_srgb,var(--accent)_12%,transparent)] text-[var(--accent)]"
-                    : "[border:var(--bd-card)] bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
+                    : " bg-card text-muted-foreground hover:bg-muted hover:text-foreground"
                 }`}
               >
                 {label}
@@ -283,7 +283,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
         <div className="space-y-1.5">
           <Label className="text-xs text-muted-foreground">Day of month</Label>
           <Select value={String(dom)} onValueChange={(v) => setDom(parseInt(v ?? "1"))}>
-            <SelectTrigger className="[border:var(--bd-card)] h-8 text-xs w-28">
+            <SelectTrigger className=" h-8 text-xs w-28">
               <SelectValue />
             </SelectTrigger>
             <SelectContent className="max-h-52">
@@ -299,7 +299,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
 
       {/* Human preview */}
       {preview && (
-        <p className="text-xs text-muted-foreground bg-muted rounded-[var(--radius-button)] px-3 py-2 font-medium">
+        <p className="text-xs text-muted-foreground bg-muted rounded-[var(--radius-ui)] px-3 py-2 font-medium">
           {preview}
         </p>
       )}
@@ -322,7 +322,7 @@ export function CronBuilder({ value, onChange }: CronBuilderProps) {
           <Input
             value={customExpr}
             onChange={(e) => handleCustomChange(e.target.value)}
-            className="[border:var(--bd-card)] font-mono text-sm"
+            className=" font-mono text-sm"
             placeholder="0 9 * * *"
             spellCheck={false}
           />

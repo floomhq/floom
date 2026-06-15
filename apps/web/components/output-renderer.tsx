@@ -81,7 +81,7 @@ export function OutputRenderer({ field, runId }: { field: OutputField; runId?: s
         <GenericOutput
           type={type}
           value={value}
-          className={framed ? "bg-muted/30 p-4 rounded-[var(--radius-button)] [border:var(--bd-card)]" : undefined}
+          className={framed ? "bg-muted/30 p-4 rounded-[var(--radius-ui)]" : undefined}
         />
         {spec && type !== "file" && (
           <DownloadButton

@@ -41,7 +41,7 @@ export function LoadingState({ rows = 5 }: { rows?: number }) {
             <div className="c-lp-tx" style={{ flex: 1 }}>
               <div
                 className="animate-pulse"
-                style={{ height: 12, width: "40%", background: "var(--bg-3)", borderRadius: "var(--radius-button)" }}
+                style={{ height: 12, width: "40%", background: "var(--bg-3)", borderRadius: "var(--radius-ui)" }}
               />
               <div
                 className="animate-pulse"
@@ -49,7 +49,7 @@ export function LoadingState({ rows = 5 }: { rows?: number }) {
                   height: 10,
                   width: "60%",
                   background: "var(--bg-3)",
-                  borderRadius: "var(--radius-button)",
+                  borderRadius: "var(--radius-ui)",
                   marginTop: 6,
                 }}
               />

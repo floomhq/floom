@@ -148,7 +148,7 @@ export function Sparkline({
         {active >= 0 ? (
           <div
             role="tooltip"
-            className="pointer-events-none absolute bottom-full z-10 mb-1 whitespace-nowrap rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--popover)] px-2 py-1 text-[11px] leading-tight text-[var(--popover-foreground)] shadow-[var(--shadow-pop)]"
+            className="pointer-events-none absolute bottom-full z-10 mb-1 whitespace-nowrap rounded-[var(--radius-ui)] bg-[var(--popover)] px-2 py-1 text-[11px] leading-tight text-[var(--popover-foreground)] shadow-[var(--shadow-pop)]"
             style={{
               left: `${tooltipLeft}%`,
               // Keep edge tooltips from overflowing the card.

@@ -51,10 +51,10 @@ export function ConnectionGridCard({
   const statusSpec = statusBadgeSpec(connection.status);
 
   return (
-    <article className="group grid h-[172px] grid-rows-[auto_1fr_auto] rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] transition-[background-color,box-shadow] duration-150 ease-[var(--ease)] hover:bg-[var(--bg-2)] hover:shadow-md">
+    <article className="group grid h-[172px] grid-rows-[auto_1fr_auto] rounded-[var(--radius-ui)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] transition-[background-color,box-shadow] duration-150 ease-[var(--ease)] hover:bg-[var(--bg-2)] hover:shadow-md">
       {/* Top row: logo + name + slug (account label) */}
       <div className="flex min-w-0 items-center gap-3">
-        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)]">
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-2)]">
           <BrandLogo icon={connection.icon} className="size-6" />
         </div>
         <div className="min-w-0">

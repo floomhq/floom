@@ -17,7 +17,7 @@ export function RunCard({ card }: { card: RunCardType }) {
   const providerSlug = resolveProviderSlug(toolName) ?? resolveProviderSlug(workerName);
 
   return (
-    <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-card/60 overflow-hidden text-sm">
+    <div className="rounded-[var(--radius-ui)] bg-card/60 overflow-hidden text-sm">
       <div className="flex items-center gap-2.5 px-3.5 py-2.5">
         {providerSlug ? (
           <BrandLogo icon={providerSlug} className="size-3.5 shrink-0" />
@@ -45,7 +45,7 @@ export function RunCard({ card }: { card: RunCardType }) {
             <p className="text-xs text-muted-foreground">{logLines} log lines</p>
           )}
           {artifact && (
-            <div className="flex items-center gap-2 rounded-md bg-muted/50 px-2.5 py-1.5">
+            <div className="flex items-center gap-2 rounded-[var(--radius-ui)] bg-muted/50 px-2.5 py-1.5">
               <FileText className="size-3.5 text-muted-foreground shrink-0" />
               <span className="text-xs font-mono flex-1 min-w-0 truncate text-foreground/80">
                 {artifact.name}
@@ -70,7 +70,7 @@ export function RunCard({ card }: { card: RunCardType }) {
             <a
               key={action.id}
               href={action.href}
-              className="inline-flex h-7 items-center rounded-md [border:var(--bd-card)] bg-background px-2.5 text-xs font-normal text-foreground hover:bg-accent transition-colors"
+              className="inline-flex h-7 items-center rounded-[var(--radius-ui)] bg-background px-2.5 text-xs font-normal text-foreground hover:bg-[var(--active-nav-bg)] transition-colors"
             >
               {action.label ?? action.id}
             </a>

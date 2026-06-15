@@ -16,9 +16,9 @@ export function ConnectAppRow({
   onConnect: (slug: string) => void;
 }) {
   return (
-    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--glass-bg)] p-3 transition-colors hover:bg-[var(--paper-2)]">
+    <div className="flex items-center justify-between gap-3 rounded-[var(--radius-ui)] bg-[var(--glass-bg)] p-3 transition-colors hover:bg-[var(--paper-2)]">
       <div className="flex min-w-0 items-center gap-3">
-        <div className="flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)]">
+        <div className="flex size-8 shrink-0 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--paper)]">
           <BrandLogo icon={app.icon} className="size-4" />
         </div>
         <span className="truncate text-sm font-medium text-[var(--ink)]">

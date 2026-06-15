@@ -36,9 +36,9 @@ export type { SystemOverviewAttentionItem };
 // --bd-card is `none` per design tokens; use the full border shorthand so the
 // computed border width is 0px when the token is none.
 const cardClass =
-  "rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
+  "rounded-[var(--radius-ui)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
 const listClass =
-  "overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-list)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
+  "overflow-hidden rounded-[var(--radius-ui)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
 
 function metricTrend(current: number, previous: number) {
   if (previous <= 0) return null;
@@ -115,14 +115,14 @@ function MetricCard({
       {/* Stat at the top */}
       <div className="px-[18px] pt-[18px]">
         {loading ? (
-          <Skeleton className="h-7 w-16 rounded-[var(--radius-button)]" />
+          <Skeleton className="h-7 w-16 rounded-[var(--radius-ui)]" />
         ) : (
           <div className="text-[26px] font-semibold leading-tight text-[var(--text-primary)]">{value}</div>
         )}
         <div className="mt-1 flex items-center gap-1.5">
           {warning ? (
             <span
-              className="size-1.5 rounded-[var(--radius-pill)] bg-[var(--warning)]"
+              className="size-2 rounded-[var(--radius-ui)] bg-[var(--warning)]"
               aria-label="Has failures"
             />
           ) : null}
@@ -275,8 +275,8 @@ function WorkerRowIcon({ workerId, workerName }: { workerId: string; workerName?
   const resolved = workerIcon({ id: workerId, name: workerName || undefined });
   return (
     <span
-      className="inline-flex shrink-0 items-center justify-center size-5 bg-[var(--accent-soft)] text-[var(--accent)] [border:var(--bd-card)]"
-      style={{ borderRadius: "var(--radius-squircle)" }}
+      className="inline-flex shrink-0 items-center justify-center size-5 bg-[var(--accent-soft)] text-[var(--accent)]"
+      style={{ borderRadius: "var(--radius-ui)" }}
       aria-hidden="true"
     >
       {resolved.kind === "brand" ? (
@@ -332,7 +332,7 @@ function WorkerActivity({
       {loading ? (
         <div className={cn(listClass, "space-y-2 p-2")}>
           {Array.from({ length: 6 }).map((_, index) => (
-            <Skeleton key={index} className="h-[52px] w-full rounded-[var(--radius-button)]" />
+            <Skeleton key={index} className="h-[52px] w-full rounded-[var(--radius-ui)]" />
           ))}
         </div>
       ) : runs.length === 0 ? (
@@ -360,25 +360,16 @@ function WorkerActivity({
                     <span>{formatDuration(run.duration_ms)}</span>
                   </p>
                 </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  {/* Count badge when the same worker repeated the same outcome */}
-                  {count > 1 && (
-                    <span className="text-[11px] font-medium text-[var(--text-muted)]">
-                      ×{count}
-                    </span>
-                  )}
-                  {/* V4 SPEC §4: status pill right-aligned */}
-                  <span
-                    className="rounded-[var(--radius-pill)] px-2 py-0.5 text-[11px] font-medium leading-none"
-                    style={{
-                      color: meta.color,
-                      background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
-                    }}
-                  >
-                    {meta.label}
-                  </span>
-                </div>
-              </Link>
+                {/* V4 SPEC §4: status pill right-aligned, no inline colored status word */}
+                <span
+                  className="shrink-0 rounded-[var(--radius-ui)] px-2 py-0.5 text-[11px] font-medium leading-none"
+                  style={{
+                    color: meta.color,
+                    background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
+                  }}
+                >
+                  {meta.label}
+                </span>              </Link>
             );
           })}
         </div>
@@ -408,7 +399,7 @@ function ComingUp({
       {loading ? (
         <div className={cn(listClass, "space-y-2 p-2")}>
           {Array.from({ length: 3 }).map((_, index) => (
-            <Skeleton key={index} className="h-[56px] w-full rounded-[var(--radius-button)]" />
+            <Skeleton key={index} className="h-[56px] w-full rounded-[var(--radius-ui)]" />
           ))}
         </div>
       ) : items.length === 0 ? (
@@ -452,7 +443,7 @@ function ComingUp({
                     {item.worker_name || humanizeSlug(item.worker_id, "Worker")}
                   </span>
                   {item.paused && (
-                    <span className="shrink-0 rounded-[var(--radius-pill)] [border:var(--bd-card)] px-1.5 py-px text-[10px] font-medium leading-none text-[var(--text-muted)]">
+                    <span className="shrink-0 rounded-[var(--radius-ui)] px-1.5 py-px text-[10px] font-medium leading-none text-[var(--text-muted)]">
                       Paused
                     </span>
                   )}

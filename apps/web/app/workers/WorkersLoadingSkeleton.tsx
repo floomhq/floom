@@ -16,9 +16,9 @@ export default function WorkersLoadingSkeleton() {
             <CardContent className="p-5 space-y-3">
               <div className="flex items-start justify-between gap-2">
                 <Skeleton className="h-4 w-3/4" />
-                <Skeleton className="size-5 rounded-[var(--radius-pill)]" />
+                <Skeleton className="size-5 rounded-[var(--radius-ui)]" />
               </div>
-              <Skeleton className="h-5 w-24 rounded-[var(--radius-pill)]" />
+              <Skeleton className="h-5 w-24 rounded-[var(--radius-ui)]" />
               <Skeleton className="h-3 w-full" />
               <Skeleton className="h-3 w-5/6" />
               <div className="flex gap-1.5">

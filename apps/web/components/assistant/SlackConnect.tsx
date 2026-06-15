@@ -114,7 +114,7 @@ export function SlackConnect() {
   }
 
   return (
-    <section className="space-y-4 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-card p-5">
+    <section className="space-y-4 rounded-[var(--radius-ui)] bg-card p-5">
       <div className="flex items-start justify-between gap-3">
         <div>
           <h2 className="text-sm font-medium">Connect to Slack</h2>
@@ -142,7 +142,7 @@ export function SlackConnect() {
               OAuth round-trip. Dismissed once the user navigates away or
               dismisses manually by clicking the link. */}
           {justConnectedTeam || (justConnectedTeamId && connected) ? (
-            <div className="flex items-center justify-between gap-3 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-emerald-50 px-4 py-3 dark:bg-emerald-950/30">
+            <div className="flex items-center justify-between gap-3 rounded-[var(--radius-ui)] bg-emerald-50 px-4 py-3 dark:bg-emerald-950/30">
               <div className="flex items-center gap-2 min-w-0">
                 <CheckCircle2 className="size-4 shrink-0 text-emerald-600 dark:text-emerald-400" />
                 <div className="min-w-0">
@@ -170,7 +170,7 @@ export function SlackConnect() {
                 target="_blank"
                 rel="noopener noreferrer"
                 onClick={() => { setJustConnectedTeamId(null); setSlackRedirectCountdown(null); }}
-                className="inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-btn)] bg-[#4A154B] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#3d1140]"
+                className="inline-flex shrink-0 items-center gap-1.5 rounded-[var(--radius-ui)] bg-[#4A154B] px-3 py-1.5 text-xs font-semibold text-white transition-colors hover:bg-[#3d1140]"
               >
                 <SlackMark className="size-3.5" />
                 Open{justConnectedTeam?.team_name ? ` ${justConnectedTeam.team_name}` : ""} in Slack
@@ -186,7 +186,7 @@ export function SlackConnect() {
               type="button"
               onClick={() => void addToSlack()}
               disabled={connecting}
-              className="inline-flex h-11 items-center gap-2 rounded-[var(--radius-button)] [border:var(--bd-btn)] bg-[#4A154B] px-4 text-[15px] font-semibold text-white transition-colors hover:bg-[#3d1140] focus-visible:outline-none disabled:pointer-events-none disabled:opacity-60"
+              className="inline-flex h-11 items-center gap-2 rounded-[var(--radius-ui)] bg-[#4A154B] px-4 text-[15px] font-semibold text-white transition-colors hover:bg-[#3d1140] focus-visible:outline-none disabled:pointer-events-none disabled:opacity-60"
             >
               {connecting ? (
                 <Loader2 className="size-5 animate-spin" />
@@ -230,7 +230,7 @@ export function SlackConnect() {
 
           {connected ? (
             <div className="space-y-3">
-              <div className="overflow-hidden rounded-[var(--radius-button)] [border:var(--bd-card)]">
+              <div className="overflow-hidden rounded-[var(--radius-ui)]">
                 {installedTeams.map((team) => (
                   <div
                     key={team.team_id}
@@ -250,7 +250,7 @@ export function SlackConnect() {
                         href={`https://app.slack.com/client/${team.team_id}`}
                         target="_blank"
                         rel="noopener noreferrer"
-                        className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-btn)] bg-[#4A154B] px-2.5 text-xs font-medium text-white transition-colors hover:bg-[#3d1140]"
+                        className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-ui)] bg-[#4A154B] px-2.5 text-xs font-medium text-white transition-colors hover:bg-[#3d1140]"
                       >
                         <SlackMark className="size-3.5" />
                         Open {team.team_name ?? "Slack"}

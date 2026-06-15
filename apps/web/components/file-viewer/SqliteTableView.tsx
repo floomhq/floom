@@ -58,7 +58,7 @@ export function SqliteTableView({ load }: { load: (table?: string) => Promise<Sq
         ))}
       </div>
       {view.columns && view.rows ? (
-        <div style={{ overflow: "auto", border: "var(--bd-list)", borderRadius: "var(--radius-card)" }}>
+        <div style={{ overflow: "auto", borderRadius: "var(--radius-ui)" }}>
           <table style={{ borderCollapse: "collapse", fontSize: 12, fontFamily: "var(--font-mono)", width: "100%" }}>
             <thead>
               <tr>

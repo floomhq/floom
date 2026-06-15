@@ -54,7 +54,7 @@ export default function GlobalError({
             sessionStorage.removeItem(RELOAD_ATTEMPTED_KEY);
             reset();
           }}
-          className="inline-flex h-8 items-center rounded-md [border:var(--bd-card)] bg-card px-4 text-sm font-medium hover:bg-muted transition-colors"
+          className="inline-flex h-8 items-center rounded-[var(--radius-ui)] bg-card px-4 text-sm font-medium hover:bg-muted transition-colors"
         >
           Try again
         </button>

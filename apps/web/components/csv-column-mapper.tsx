@@ -232,7 +232,7 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
       <div>
         {label && <p className="text-sm font-medium mb-1.5">{label}</p>}
         <div
-          className={`relative rounded-[var(--radius-card)] [border:var(--bd-input)] p-6 text-center transition-colors cursor-pointer ${
+          className={`relative rounded-[var(--radius-ui)] p-6 text-center transition-colors cursor-pointer ${
             dragging ? "bg-[color-mix(in_srgb,var(--accent)_10%,transparent)]" : "hover:bg-muted/40"
           }`}
           onDragOver={(e) => { e.preventDefault(); setDragging(true); }}
@@ -280,7 +280,7 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
         )}
       </p>
 
-      <div className="[border:var(--bd-card)] rounded-lg overflow-hidden">
+      <div className=" rounded-[var(--radius-ui)] overflow-hidden">
         <div className="grid grid-cols-2 gap-0 bg-muted/50 px-4 py-2 text-xs font-medium text-muted-foreground [border-bottom:var(--bd-div)]">
           <span>Required column</span>
           <span>Your CSV column</span>
@@ -294,7 +294,7 @@ export function CsvColumnMapper({ requiredColumns, onMapped, label }: CsvColumnM
                   value={mapping[col] || ""}
                   onValueChange={(val: string | null) => setMapping((prev) => ({ ...prev, [col]: val ?? "" }))}
                 >
-                  <SelectTrigger className="h-7 text-xs [border:var(--bd-card)] w-full">
+                  <SelectTrigger className="h-7 text-xs w-full">
                     <SelectValue placeholder="(skip)" />
                   </SelectTrigger>
                   <SelectContent>

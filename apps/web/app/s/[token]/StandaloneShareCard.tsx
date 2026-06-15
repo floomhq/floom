@@ -102,7 +102,7 @@ export function StandaloneShareCard({
   if (share.entity_type === "worker" && share.worker) {
     return (
       <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 680 }}>
-        <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
+        <div className="rounded-[var(--radius-ui)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
           <WorkerShareCard worker={share.worker} authed={authed} token={token} />
         </div>
       </div>
@@ -142,9 +142,9 @@ export function StandaloneShareCard({
 
   return (
     <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 760 }}>
-      <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
+      <div className="rounded-[var(--radius-ui)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
         {/* Nav */}
-        <div className="flex items-center justify-between rounded-t-[var(--radius-card)] [border-bottom:var(--bd-div)] bg-[var(--bg-card)] px-5 py-3">
+        <div className="flex items-center justify-between rounded-t-[var(--radius-ui)] [border-bottom:var(--bd-div)] bg-[var(--bg-card)] px-5 py-3">
           <FloomMark />
           <Link href={ctaHref} className="text-sm text-[var(--ink-soft)] no-underline hover:text-[var(--ink)]">
             {ctaLabel}
@@ -172,7 +172,7 @@ export function StandaloneShareCard({
               <button
                 type="button"
                 onClick={() => { setFolderPrefix(""); setOpenFilePath(null); }}
-                className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-button)] px-2.5 text-xs text-[var(--ink-soft)] hover:bg-[var(--bg-2)]"
+                className="inline-flex h-7 items-center gap-1 rounded-[var(--radius-ui)] px-2.5 text-xs text-[var(--ink-soft)] hover:bg-[var(--bg-2)]"
               >
                 <X className="size-3" />
                 Close
@@ -182,7 +182,7 @@ export function StandaloneShareCard({
 
           {/* ONE card, fixed height — content swaps in place */}
           <div
-            className="flex flex-col overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]"
+            className="flex flex-col overflow-hidden rounded-[var(--radius-ui)] bg-[var(--bg-card)]"
             style={{ height: SHARE_CARD_BODY_HEIGHT }}
           >
             {openFile ? (
@@ -272,7 +272,7 @@ function PackView({
                   key={`folder-${node.name}`}
                   type="button"
                   onClick={() => onOpenFolder(node.name)}
-                  className="flex items-center gap-3 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3 py-2.5 text-left hover:bg-[rgba(107,104,97,0.07)]"
+                  className="flex items-center gap-3 rounded-[var(--radius-ui)] bg-[var(--bg-app)] px-3 py-2.5 text-left hover:bg-[rgba(107,104,97,0.07)]"
                 >
                   <Folder className="size-3.5 shrink-0 text-[var(--ink-soft)]" />
                   <div className="min-w-0 flex-1">
@@ -288,7 +288,7 @@ function PackView({
                   key={`file-${node.file.path}`}
                   type="button"
                   onClick={() => onOpenFile(node.file.path)}
-                  className="flex items-center gap-3 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3 py-2.5 text-left hover:bg-[rgba(107,104,97,0.07)]"
+                  className="flex items-center gap-3 rounded-[var(--radius-ui)] bg-[var(--bg-app)] px-3 py-2.5 text-left hover:bg-[rgba(107,104,97,0.07)]"
                 >
                   <FileText className="size-3.5 shrink-0 text-[var(--ink-soft)]" />
                   <div className="min-w-0 flex-1">
@@ -298,7 +298,7 @@ function PackView({
                       {node.file.display_type ? ` · ${node.file.display_type}` : ""}
                     </p>
                   </div>
-                  <span className="shrink-0 rounded-[var(--radius-button)] [border:var(--bd-card)] px-2.5 py-1 text-[11px] text-[var(--ink-soft)]">
+                  <span className="shrink-0 rounded-[var(--radius-ui)] px-2.5 py-1 text-[11px] text-[var(--ink-soft)]">
                     Open
                   </span>
                 </button>
@@ -313,7 +313,7 @@ function PackView({
         <p className="text-xs text-[var(--ink-soft)]">Add this folder so your workers can use it.</p>
         <Link
           href={ctaHref}
-          className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
+          className="inline-flex h-9 items-center rounded-[var(--radius-ui)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
         >
           {ctaLabel}
         </Link>
@@ -341,7 +341,7 @@ function FileView({
     <>
       {/* File header */}
       <div className="flex shrink-0 items-center gap-3 [border-bottom:var(--bd-div)] bg-[var(--bg-card)] px-5 py-3.5">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)]">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-app)]">
           <FileText className="size-4 text-[var(--ink-soft)]" />
         </div>
         <div className="min-w-0 flex-1">
@@ -354,7 +354,7 @@ function FileView({
           <a
             href={file.download_url}
             download
-            className="inline-flex size-7 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] text-[var(--ink-soft)] no-underline hover:bg-[var(--bg-2)]"
+            className="inline-flex size-7 items-center justify-center rounded-[var(--radius-ui)] text-[var(--ink-soft)] no-underline hover:bg-[var(--bg-2)]"
             title="Download"
           >
             <Download className="size-3.5" />
@@ -380,13 +380,13 @@ function FileView({
       <div className="flex shrink-0 flex-wrap items-center gap-3 [border-top:var(--bd-div)] bg-[var(--bg-2)] px-5 py-3">
         <Link
           href={ctaHref}
-          className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
+          className="inline-flex h-9 items-center rounded-[var(--radius-ui)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
         >
           {ctaLabel}
         </Link>
         <a
           href={downloadHref}
-          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3.5 text-[13px] font-medium no-underline hover:bg-[var(--bg-2)]"
+          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-ui)] px-3.5 text-[13px] font-medium no-underline hover:bg-[var(--bg-2)]"
         >
           <Download className="size-3.5" />
           Download
@@ -401,7 +401,7 @@ function FileView({
 
 function Metric({ label, value }: { label: string; value: string | number }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3 py-1.5 text-xs">
+    <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-ui)] bg-[var(--bg-app)] px-3 py-1.5 text-xs">
       <span className="text-[var(--ink-soft)]">{label}</span>
       <span className="font-medium">{value}</span>
     </span>

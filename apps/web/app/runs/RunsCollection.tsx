@@ -462,8 +462,7 @@ const h4: React.CSSProperties = {
 const kv: React.CSSProperties = { display: "grid", gridTemplateColumns: "140px 1fr", gap: "9px 16px" };
 const kvK: React.CSSProperties = { color: "var(--muted-foreground)", fontSize: 12.5 };
 const code: React.CSSProperties = {
-  border: "var(--bd-card)",
-  borderRadius: "var(--radius-card)",
+  borderRadius: "var(--radius-ui)",
   background: "var(--bg-2)",
   color: "var(--ink-soft)",
   padding: 13,

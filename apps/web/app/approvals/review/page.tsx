@@ -232,14 +232,14 @@ function PreviewUnavailable({
 }) {
   return (
     <div className="flex min-h-[220px] items-center justify-center p-5">
-      <div className="max-w-lg rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--paper)] p-5 text-sm">
+      <div className="max-w-lg rounded-[var(--radius-ui)] bg-[var(--paper)] p-5 text-sm">
         <p className="font-medium text-[var(--ink)]">{title}</p>
         <p className="mt-2 leading-6 text-[var(--ink-soft)]">{detail}</p>
         <div className="mt-4 flex flex-wrap items-center gap-2">
           <button
             type="button"
             onClick={onRetry}
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 text-sm hover:bg-[var(--bg-2)]"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-ui)] px-3 text-sm hover:bg-[var(--bg-2)]"
           >
             <RotateCcw className="h-3.5 w-3.5" />
             Retry
@@ -247,7 +247,7 @@ function PreviewUnavailable({
           <a
             href={href}
             download
-            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 text-sm hover:bg-[var(--bg-2)]"
+            className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-ui)] px-3 text-sm hover:bg-[var(--bg-2)]"
           >
             <Download className="h-3.5 w-3.5" />
             Download
@@ -262,7 +262,7 @@ function LoadingPreview() {
   return (
     <div className="space-y-2 p-4">
       {[1, 2, 3, 4].map((index) => (
-        <div key={index} className="h-4 animate-pulse rounded-[var(--radius-button)] bg-[var(--border-soft)]" />
+        <div key={index} className="h-4 animate-pulse rounded-[var(--radius-ui)] bg-[var(--border-soft)]" />
       ))}
     </div>
   );
@@ -285,7 +285,7 @@ function TablePreview({ rows }: { rows: string[][] }) {
           {visibleRows.map((row, rowIndex) => (
             <tr key={rowIndex} className={rowIndex === 0 ? "bg-[var(--bg-2)] font-medium" : "odd:bg-[var(--bg-2)]/45"}>
               {Array.from({ length: colCount }).map((_, colIndex) => (
-                <td key={colIndex} className="max-w-[260px] [border:var(--bd-card)] px-2.5 py-1.5 align-top">
+                <td key={colIndex} className="max-w-[260px] px-2.5 py-1.5 align-top">
                   <span className="block truncate" title={row[colIndex] ?? ""}>
                     {row[colIndex] ?? ""}
                   </span>
@@ -360,7 +360,7 @@ function ArtifactObjectUrlPreview({
   if (kind === "video") {
     return (
       <div className="flex min-h-[360px] items-center justify-center bg-[var(--bg-2)] p-4">
-        <video src={src} controls className="max-h-[52vh] max-w-full rounded-[var(--radius-button)] [border:var(--bd-card)] bg-black">
+        <video src={src} controls className="max-h-[52vh] max-w-full rounded-[var(--radius-ui)] bg-black">
           <a href={href}>Download video</a>
         </video>
       </div>
@@ -370,7 +370,7 @@ function ArtifactObjectUrlPreview({
   return (
     <div className="flex max-h-[52vh] items-center justify-center overflow-auto bg-[var(--bg-2)] p-4">
       {/* eslint-disable-next-line @next/next/no-img-element */}
-      <img src={src} alt={file.title} className="max-h-[48vh] max-w-full rounded-[var(--radius-button)] object-contain" />
+      <img src={src} alt={file.title} className="max-h-[48vh] max-w-full rounded-[var(--radius-ui)] object-contain" />
     </div>
   );
 }
@@ -533,7 +533,7 @@ function PdfArtifactPreview({ href, file }: { href: string; file: PreviewFile })
     <div className="flex max-h-[56vh] min-h-[420px] flex-col bg-[var(--bg-2)]">
       <div className="flex shrink-0 items-center justify-between [border-bottom:var(--bd-div)] bg-[var(--paper)] px-4 py-2 text-xs text-[var(--ink-soft)]">
         <span>{pageCount ? `Page 1 of ${pageCount}` : `Rendering ${file.title}`}</span>
-        <a href={href} download className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-2.5 hover:bg-[var(--bg-2)]">
+        <a href={href} download className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-ui)] px-2.5 hover:bg-[var(--bg-2)]">
           <Download className="h-3.5 w-3.5" />
           Download
         </a>
@@ -542,7 +542,7 @@ function PdfArtifactPreview({ href, file }: { href: string; file: PreviewFile })
         {loading && <LoadingPreview />}
         <canvas
           ref={canvasRef}
-          className={`mx-auto max-w-full rounded-[var(--radius-button)] bg-white shadow-[var(--shadow-card)] ${loading ? "invisible" : ""}`}
+          className={`mx-auto max-w-full rounded-[var(--radius-ui)] bg-white shadow-[var(--shadow-card)] ${loading ? "invisible" : ""}`}
         />
       </div>
     </div>
@@ -665,7 +665,7 @@ function ApprovalFilePreview({
   return (
     <div>
       <h2 className="text-sm font-medium text-[var(--ink)]">File preview</h2>
-      <div className="mt-2 overflow-hidden rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)]">
+      <div className="mt-2 overflow-hidden rounded-[var(--radius-ui)] bg-[var(--bg-2)]">
         <div className="flex min-w-0 items-center justify-between gap-3 [border-bottom:var(--bd-div)] px-4 py-3">
           <span className="flex min-w-0 items-center gap-2">
             {fileKindIcon(kind)}
@@ -678,7 +678,7 @@ function ApprovalFilePreview({
             <a
               href={href}
               download
-              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-2.5 text-xs font-medium text-[var(--ink)] hover:bg-[var(--paper)]"
+              className="inline-flex h-8 shrink-0 items-center gap-1.5 rounded-[var(--radius-ui)] px-2.5 text-xs font-medium text-[var(--ink)] hover:bg-[var(--paper)]"
             >
               <Download className="h-3.5 w-3.5" />
               Download
@@ -876,7 +876,7 @@ function ReviewContent() {
                 onClick={() => setIndex((i) => Math.max(0, i - 1))}
                 disabled={index === 0 || !!busy}
                 aria-label="Previous approval"
-                className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] disabled:opacity-40 hover:bg-[var(--bg-2)]"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-ui)] disabled:opacity-40 hover:bg-[var(--bg-2)]"
               >
                 <ChevronLeft className="h-3.5 w-3.5" />
               </button>
@@ -886,7 +886,7 @@ function ReviewContent() {
                 onClick={() => setIndex((i) => Math.min(rows.length - 1, i + 1))}
                 disabled={index >= rows.length - 1 || !!busy}
                 aria-label="Next approval"
-                className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] disabled:opacity-40 hover:bg-[var(--bg-2)]"
+                className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-ui)] disabled:opacity-40 hover:bg-[var(--bg-2)]"
               >
                 <ChevronRight className="h-3.5 w-3.5" />
               </button>
@@ -897,7 +897,7 @@ function ReviewContent() {
 
       {/* Wave 3: ONE fixed-height 480px card */}
       <div
-        className="flex w-full max-w-[560px] flex-col rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--paper)] shadow-[var(--shadow-card)]"
+        className="flex w-full max-w-[560px] flex-col rounded-[var(--radius-ui)] bg-[var(--paper)] shadow-[var(--shadow-card)]"
         style={{ height: "480px" }}
       >
         {/* Card header: brand + "Approval request" + shared-link marker */}
@@ -907,7 +907,7 @@ function ReviewContent() {
             <span className="text-sm font-medium text-[var(--ink)]">Approval request</span>
           </div>
           {isSignedLink && (
-            <span className="rounded-[var(--radius-pill)] bg-[var(--bg-2)] px-2 py-0.5 text-xs text-[var(--ink-soft)]">
+            <span className="rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-2 py-0.5 text-xs text-[var(--ink-soft)]">
               Shared link
             </span>
           )}
@@ -921,13 +921,13 @@ function ReviewContent() {
               <div className="h-20 animate-pulse rounded bg-[var(--bg-2)]" />
             </div>
           ) : loadError ? (
-            <div className="flex h-full flex-col justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-red-50/80 px-4 py-4 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">
+            <div className="flex h-full flex-col justify-center rounded-[var(--radius-ui)] bg-red-50/80 px-4 py-4 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">
               <div className="font-medium">Could not load approvals.</div>
               <div className="mt-1">{loadError}</div>
               <button
                 type="button"
                 onClick={() => void load()}
-                className="mt-3 inline-flex h-8 w-fit items-center rounded-[var(--radius-button)] [border:var(--bd-btn)] px-3 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/40"
+                className="mt-3 inline-flex h-8 w-fit items-center rounded-[var(--radius-ui)] px-3 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/40"
               >
                 Retry
               </button>
@@ -943,7 +943,7 @@ function ReviewContent() {
           ) : (
             <>
               {/* Plain-language action line */}
-              <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--pending)_8%,var(--bg-2))] px-4 py-3">
+              <div className="rounded-[var(--radius-ui)] bg-[color-mix(in_srgb,var(--pending)_8%,var(--bg-2))] px-4 py-3">
                 <p className="text-[14px] font-semibold leading-snug text-[var(--ink)]">
                   {approvalActionLine(approval.label, decisionInput)}
                 </p>
@@ -960,7 +960,7 @@ function ReviewContent() {
 
               {/* Proposed output via GenericOutput */}
               {approval.preview && (
-                <div className="max-h-[120px] overflow-y-auto rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] p-4">
+                <div className="max-h-[120px] overflow-y-auto rounded-[var(--radius-ui)] bg-[var(--bg-2)] p-4">
                   <GenericOutput type={inferPreviewType(approval.preview)} value={approval.preview} />
                 </div>
               )}
@@ -991,7 +991,7 @@ function ReviewContent() {
         <div className="shrink-0 [border-top:var(--bd-div)]">
           {/* Chatbox — resizable, auto-grows, drag-and-drop for images and files */}
           <div
-            className={`mx-3 mt-3 flex items-start gap-2 rounded-[var(--radius-button)] [border:var(--bd-input)] px-3 py-2 transition-colors ${
+            className={`mx-3 mt-3 flex items-start gap-2 rounded-[var(--radius-ui)] px-3 py-2 transition-colors ${
               dragOver
                 ? "bg-[color-mix(in_srgb,var(--primary)_6%,var(--bg-2))]"
                 : "bg-[var(--bg-2)]"
@@ -1040,7 +1040,7 @@ function ReviewContent() {
               {chatFiles.map((f, i) => (
                 <span
                   key={i}
-                  className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--bg-2)] px-2 py-0.5 text-xs text-[var(--ink-soft)]"
+                  className="inline-flex items-center gap-1 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-2 py-0.5 text-xs text-[var(--ink-soft)]"
                 >
                   <ImageIcon className="h-3 w-3" />
                   {f.name}
@@ -1063,7 +1063,7 @@ function ReviewContent() {
               type="button"
               onClick={approve}
               disabled={!!busy || !approval}
-              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-sm font-medium text-[var(--primary-text)] shadow-[var(--shadow-btn)] disabled:opacity-40"
+              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-ui)] bg-[var(--primary)] px-4 text-sm font-medium text-[var(--primary-text)] shadow-[var(--shadow-btn)] disabled:opacity-40"
             >
               <CheckCircle className="h-4 w-4" />
               {busy === "approve" ? "Approving…" : "Approve"}
@@ -1072,7 +1072,7 @@ function ReviewContent() {
               type="button"
               onClick={reject}
               disabled={!!busy || !approval}
-              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-4 text-sm font-medium text-destructive disabled:opacity-40"
+              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-ui)] px-4 text-sm font-medium text-destructive disabled:opacity-40"
             >
               <XCircle className="h-4 w-4" />
               {busy === "reject" ? "Rejecting…" : "Reject"}
