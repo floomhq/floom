@@ -388,6 +388,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
             <div className="c-listcol" ref={bodyRef} style={{ padding: `0 ${PAGE_X}px 26px` }}>
               {config.banner}
               {listOrGrid(false)}
+              {config.footer}
             </div>
           </div>
         </>
