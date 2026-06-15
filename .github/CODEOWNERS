@@ -1,10 +1,9 @@
 # Code owners — auto-requested for review on matching paths.
-# TODO: replace @floomhq/maintainers with the real maintainer team or handle
-# before going public (an unknown owner shows a warning on the CODEOWNERS file).
+# Resolved from commit history via the GitHub commits API.
 
-*                       @floomhq/maintainers
+*                       @federicodeponte @itachi-hue
 
-/apps/api/              @floomhq/maintainers
-/apps/web/              @floomhq/maintainers
-/apps/mcp/              @floomhq/maintainers
-/.github/               @floomhq/maintainers
+/apps/api/              @federicodeponte @itachi-hue
+/apps/web/              @federicodeponte @itachi-hue
+/apps/mcp/              @federicodeponte @itachi-hue
+/.github/               @federicodeponte @itachi-hue
