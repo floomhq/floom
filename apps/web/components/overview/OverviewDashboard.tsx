@@ -418,7 +418,10 @@ function ComingUp({
     <section className="flex min-h-0 flex-col">
       <div className="mb-3 flex items-center justify-between shrink-0">
         <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Coming up today</h2>
-        <Link href="/runs" className="text-[12.5px] text-[var(--accent)] hover:underline">
+        {/* #1280 #1261: "Coming up today" → workers (scheduled triggers live there),
+            NOT /runs which is historical activity. WorkerActivity "See all" stays
+            on /runs. This also fixes both links going to the same destination. */}
+        <Link href="/workers" className="text-[12.5px] text-[var(--accent)] hover:underline">
           See all
         </Link>
       </div>
