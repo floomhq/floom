@@ -7,9 +7,9 @@ at ``context/worker-author-style/`` inside the sandbox working directory.
 
 Protocol (matches the E2B pure-script contract, e.g. gmail_intake_brief):
   1. Read inputs from ``inputs.json``.
-  2. Load secrets from ``.env.local`` (python-dotenv) — OPENAI_API_KEY ships here
-     because worker.yml declares ``exec.secrets: [OPENAI_API_KEY]``.
-  3. Call OpenAI to draft worker.yml + SKILL.md / run.py, validate the YAML.
+  2. Load secrets from ``.env.local`` plus provider env passed by the API runner.
+  3. Call the configured platform provider to draft worker.yml + SKILL.md / run.py,
+     validate the YAML.
   4. Write the bundle to ``out/bundle.json``.
   5. Write ``result.json`` with ``{"status", "outputs": {"bundle": "out/bundle.json"},
      "artifacts": [...]}`` so the driver surfaces the result to the UI.
@@ -40,33 +40,112 @@ except ImportError:
 # Code-generation model (kept in sync with apps/api/codegen_model.py).
 # This worker runs in an E2B sandbox and cannot import the API module, so the
 # strong default + the gpt-5.x param handling are duplicated here intentionally.
-# Override with the WORKEROS_CODEGEN_MODEL env var (passed into the sandbox).
+# Override with WORKEROS_CODEGEN_MODEL, or fall back to WORKEROS_CHAT_MODEL when
+# the platform only configured Emily's provider.
 # ---------------------------------------------------------------------------
 
 _DEFAULT_CODEGEN_MODEL = "gpt-5.1"
 
 
 def _codegen_model() -> str:
-    return (os.environ.get("WORKEROS_CODEGEN_MODEL") or "").strip() or _DEFAULT_CODEGEN_MODEL
+    return (
+        (os.environ.get("WORKEROS_CODEGEN_MODEL") or "").strip()
+        or (os.environ.get("WORKEROS_CHAT_MODEL") or "").strip()
+        or _DEFAULT_CODEGEN_MODEL
+    )
+
+
+def _is_litellm_model(model: str) -> bool:
+    if "/" not in model:
+        return False
+    return not model.startswith(("openai/", "litellm/openai/"))
+
+
+def _is_anthropic_model(model: str) -> bool:
+    m = model.lower()
+    return "anthropic" in m or "claude" in m
+
+
+def _with_prompt_cache(messages: list, model: str) -> list:
+    if not _is_anthropic_model(model):
+        return list(messages)
+    out: list = []
+    cached = False
+    for msg in messages:
+        if not cached and msg.get("role") == "system" and isinstance(msg.get("content"), str):
+            msg = {
+                **msg,
+                "content": [
+                    {
+                        "type": "text",
+                        "text": msg["content"],
+                        "cache_control": {"type": "ephemeral"},
+                    }
+                ],
+            }
+            cached = True
+        out.append(msg)
+    return out
+
+
+def _provider_credentials_error(model: str) -> Optional[str]:
+    if _is_litellm_model(model):
+        if "bedrock" in model.lower():
+            has_auth = bool(
+                os.environ.get("AWS_ACCESS_KEY_ID")
+                or os.environ.get("AWS_BEARER_TOKEN_BEDROCK")
+                or os.environ.get("AWS_PROFILE")
+            )
+            has_region = bool(os.environ.get("AWS_REGION_NAME") or os.environ.get("AWS_DEFAULT_REGION"))
+            if not has_auth:
+                return "Bedrock model configured but AWS credentials are not available in the worker-author sandbox"
+            if not has_region:
+                return "Bedrock model configured but AWS_REGION_NAME or AWS_DEFAULT_REGION is not set"
+        return None
+    if not (os.environ.get("OPENAI_API_KEY") or os.environ.get("PLATFORM_OPENAI_API_KEY")):
+        return "OpenAI model configured but OPENAI_API_KEY or PLATFORM_OPENAI_API_KEY is not available"
+    return None
 
 
 def _codegen_chat(
-    client: Any,
     *,
     messages: list,
     max_output_tokens: int,
     temperature: float = 0.2,
     response_format: Optional[Dict[str, Any]] = None,
 ) -> Any:
-    """chat.completions.create with the codegen model, param-compatible across
-    gpt-4 (max_tokens) and gpt-5.x/o-series (max_completion_tokens) families."""
+    """Provider-routed chat completion with an OpenAI-shaped response."""
     model = _codegen_model()
+    credentials_error = _provider_credentials_error(model)
+    if credentials_error:
+        raise RuntimeError(credentials_error)
+
+    if _is_litellm_model(model):
+        import litellm  # type: ignore
+
+        kwargs: Dict[str, Any] = {
+            "model": model,
+            "messages": _with_prompt_cache(messages, model),
+            "max_tokens": max_output_tokens,
+        }
+        if response_format is not None:
+            kwargs["response_format"] = response_format
+        try:
+            return litellm.completion(temperature=temperature, **kwargs)
+        except Exception as exc:  # noqa: BLE001 - some providers reject temperature
+            if "temperature" in str(exc).lower():
+                return litellm.completion(**kwargs)
+            raise
+
     ml = model.lower()
     token_kwarg = (
         "max_completion_tokens"
         if ml.startswith(("gpt-5", "o1", "o3", "o4"))
         else "max_tokens"
     )
+    from openai import OpenAI  # type: ignore
+
+    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY") or os.environ.get("PLATFORM_OPENAI_API_KEY"))
 
     def _create(token_param: str, *, include_temperature: bool = True) -> Any:
         kwargs: Dict[str, Any] = {
@@ -478,10 +557,10 @@ def _stdout_log(msg: str, **kwargs: Any) -> None:
 def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
     """Draft a worker bundle from the prompt. Returns the bundle dict.
 
-    Raises ValueError for a missing prompt and RuntimeError if OPENAI_API_KEY
-    is not available. A bundle whose YAML failed validation after all retries
-    is still returned (with a ``bundle["error"]`` key) so the operator can fix
-    it in the editor rather than seeing a hard failure.
+    Raises ValueError for a missing prompt and RuntimeError if provider
+    credentials are not available. A bundle whose YAML failed validation after
+    all retries is still returned (with a ``bundle["error"]`` key) so the
+    operator can fix it in the editor rather than seeing a hard failure.
     """
     log = log or _stdout_log
     started_at = time.perf_counter()
@@ -527,14 +606,6 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
     )
     log(f"worker-author: prompt assembled in {time.perf_counter() - stage_at:.2f}s")
 
-    # Call OpenAI
-    openai_key = os.environ.get("OPENAI_API_KEY", "")
-    if not openai_key:
-        raise RuntimeError("OPENAI_API_KEY is not set in the sandbox environment")
-
-    from openai import OpenAI  # type: ignore
-    client = OpenAI(api_key=openai_key)
-
     log(f"worker-author: calling LLM (model={_codegen_model()})")
     max_attempts = 2
     parsed: Dict[str, Any] = {}
@@ -554,7 +625,6 @@ def generate_bundle(inputs: Dict[str, Any], log: Any = None) -> Dict[str, Any]:
 
         attempt_started_at = time.perf_counter()
         resp = _codegen_chat(
-            client,
             messages=call_messages,
             temperature=0.2,
             max_output_tokens=8000,

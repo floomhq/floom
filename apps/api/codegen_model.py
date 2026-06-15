@@ -1,7 +1,7 @@
 """Single source of truth for the code-generation / repair LLM model.
 
-The prompt-to-worker wedge depends on three OpenAI calls that all generate or
-repair Python ``run.py`` code:
+The prompt-to-worker wedge depends on three provider-routed calls that all
+generate or repair Python ``run.py`` code:
 
   1. ``workers/worker-author/run.py`` — the meta-worker that drafts the bundle
      (runs in an E2B sandbox; ``WORKEROS_CODEGEN_MODEL`` is propagated there).
@@ -38,12 +38,21 @@ from typing import Any, Dict, List
 DEFAULT_CODEGEN_MODEL = "gpt-5.5"
 
 _CODEGEN_MODEL_ENV = "WORKEROS_CODEGEN_MODEL"
+_CHAT_MODEL_ENV = "WORKEROS_CHAT_MODEL"
 
 
 def codegen_model() -> str:
-    """Return the configured code-generation model (env override or default)."""
+    """Return the configured code-generation model.
+
+    ``WORKEROS_CODEGEN_MODEL`` is the explicit knob. When cloud config only sets
+    Emily's platform model, fall back to ``WORKEROS_CHAT_MODEL`` so worker
+    creation stays on the same provider/auth path as the working chat surface.
+    """
     value = (os.environ.get(_CODEGEN_MODEL_ENV) or "").strip()
-    return value or DEFAULT_CODEGEN_MODEL
+    if value:
+        return value
+    chat_value = (os.environ.get(_CHAT_MODEL_ENV) or "").strip()
+    return chat_value or DEFAULT_CODEGEN_MODEL
 
 
 def _uses_max_completion_tokens(model: str) -> bool:

@@ -2037,6 +2037,22 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_export_audit_time
         ON workspace_export_audit(exported_at);
     """,
+    # -- migration 80: overview dashboard query indexes (#1105) ----------------
+    # The /system/overview dashboard filters runs by owner via workers, then by
+    # created_at/status/worker_id for aggregates, recent activity, and failure
+    # clusters. These composites keep those reads on bounded index scans.
+    """
+    CREATE INDEX IF NOT EXISTS idx_runs_created_status_worker
+        ON runs(created_at DESC, status, worker_id);
+    CREATE INDEX IF NOT EXISTS idx_runs_status_created_worker
+        ON runs(status, created_at DESC, worker_id);
+    CREATE INDEX IF NOT EXISTS idx_workers_owner_enabled_next_run
+        ON workers(owner_id, enabled, next_run_at);
+    CREATE INDEX IF NOT EXISTS idx_workers_workspace_enabled_next_run
+        ON workers(workspace_id, enabled, next_run_at);
+    CREATE INDEX IF NOT EXISTS idx_worker_triggers_schedule_due
+        ON worker_triggers(type, enabled, next_run_at);
+    """,
 ]
 
 

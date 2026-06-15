@@ -9,6 +9,7 @@ from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional, Union
 from urllib.parse import unquote, urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from enum import Enum
+from runtime_limits import MAX_RUN_TIMEOUT_SECONDS
 
 
 # The tool-calling worker default. MUST be resolved lazily (at call time), not
@@ -1092,22 +1093,16 @@ class WorkerLimits(BaseModel):
     max_tool_iterations: int = Field(default=12, ge=1)
     max_output_tokens: int = Field(default=1000000, ge=1)
     max_total_tokens: int = Field(default=1000000, ge=1)
-    timeout_seconds: int = Field(default=300, ge=1)
+    timeout_seconds: int = Field(default=300, ge=1, le=MAX_RUN_TIMEOUT_SECONDS)
     # #793: per-worker monthly spend cap in USD. None = unlimited. Enforced at
     # dispatch: a run is refused (failed, error_code=spend_cap_exceeded) when
     # the worker's month-to-date cost has already reached the cap.
     max_monthly_cost_usd: Optional[float] = Field(default=None, ge=0)
 
-    # #1067 — author-supplied limits were stored verbatim with no operator
-    # ceiling, so a worker could set an ~11-day timeout and a ~1B-token budget
-    # (billed to the operator, holding an e2b sandbox open). Clamp each to an
-    # operator maximum (env-overridable). Ceilings sit at/above the defaults, so
-    # ordinary workers are unaffected; only abusive values are capped.
-    @field_validator("timeout_seconds", mode="after")
-    @classmethod
-    def _clamp_timeout_seconds(cls, v: int) -> int:
-        return min(v, _ceiling_from_env("FLOOM_MAX_TIMEOUT_SECONDS", 3600))
-
+    # #1067/#1114 — author-supplied token budgets remain clamped to operator
+    # maxima; run timeout is rejected above MAX_RUN_TIMEOUT_SECONDS by the Field
+    # bound so oversized long-running workers fail validation instead of being
+    # silently truncated.
     @field_validator("max_output_tokens", mode="after")
     @classmethod
     def _clamp_max_output_tokens(cls, v: int) -> int:

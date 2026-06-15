@@ -14,7 +14,7 @@ import re
 import uuid as _uuid_mod
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+from fastapi import APIRouter, Depends, HTTPException, Query, Response
 
 from auth import AuthContext, get_auth_context
 from core.utils import _parse_iso8601
@@ -345,13 +345,13 @@ def list_worker_alerts(
     ]
 
 
-@worker_telemetry_router.delete("/workers/{worker_id}/alerts/{alert_id}", status_code=204)
+@worker_telemetry_router.delete("/workers/{worker_id}/alerts/{alert_id}", status_code=204, response_class=Response)
 def delete_worker_alert(
     worker_id: str,
     alert_id: str,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
-) -> None:
+) -> Response:
     """Remove a registered webhook alert."""
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
@@ -359,6 +359,7 @@ def delete_worker_alert(
     deleted = repos.alerts.delete(alert_id=alert_id, worker_id=worker_id)
     if not deleted:
         raise HTTPException(status_code=404, detail="Alert not found")
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
@@ -420,13 +421,13 @@ def list_worker_feedback(
     return [_feedback_to_model(r) for r in repos.feedback.list(worker_id=worker_id)]
 
 
-@worker_telemetry_router.delete("/workers/{worker_id}/feedback/{feedback_id}", status_code=204)
+@worker_telemetry_router.delete("/workers/{worker_id}/feedback/{feedback_id}", status_code=204, response_class=Response)
 def delete_worker_feedback(
     worker_id: str,
     feedback_id: str,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
-) -> None:
+) -> Response:
     """Delete a feedback comment. The author, the worker owner, or an admin may remove it."""
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
@@ -442,4 +443,4 @@ def delete_worker_feedback(
     if not (is_author or is_worker_owner or auth.is_admin):
         raise HTTPException(status_code=403, detail="Not allowed to delete this feedback.")
     repos.feedback.delete(feedback_id=feedback_id, worker_id=worker_id)
-    return None
+    return Response(status_code=204)

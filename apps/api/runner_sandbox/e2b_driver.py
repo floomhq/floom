@@ -24,11 +24,18 @@ from models import WorkerConfig, WorkerResult
 import contexts as _contexts_module
 from contexts import CONTEXTS_DIR, context_scope_for_user, normalize_context_mount, use_context_scope
 from runner_utils import ARTIFACTS_DIR
+from runtime_limits import (
+    DEFAULT_RUN_TIMEOUT_SECONDS,
+    E2B_MAX_SANDBOX_LIFETIME_SECONDS,
+    MAX_RUN_TIMEOUT_SECONDS,
+    MIN_INSTALL_TIMEOUT_SECONDS,
+    SANDBOX_LIFETIME_BUFFER_SECONDS,
+)
 from worker_registry import WORKERS_DIR
 
 logger = logging.getLogger("floom.runner_sandbox.e2b")
 
-MAX_E2B_SANDBOX_LIFETIME_SECONDS = 3600
+MAX_E2B_SANDBOX_LIFETIME_SECONDS = E2B_MAX_SANDBOX_LIFETIME_SECONDS
 # Hard cap on the raw result.json the worker writes. Read + json.loads +
 # persist into the run `output_json` DB column all happen on this blob, so an
 # unbounded multi-MB output bloats the DB row and the run-detail response.
@@ -61,6 +68,17 @@ class E2BKeyExhaustedError(RuntimeError):
 
 
 _WORKER_AUTHOR_ID = "worker-author"
+_WORKER_AUTHOR_PROVIDER_ENV_VARS = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_REGION_NAME",
+    "AWS_DEFAULT_REGION",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "ANTHROPIC_API_KEY",
+    "PLATFORM_OPENAI_API_KEY",
+    "OPENAI_API_KEY",
+)
 
 # #977: internal vars the WORKER process must never see. The worker-author
 # meta-worker legitimately needs the codegen model; everything else here is
@@ -88,6 +106,24 @@ def _scrub_internal_env_command(command: str, worker_id: str | None) -> str:
         to_unset.append("WORKEROS_CODEGEN_MODEL")
     unset_flags = " ".join(f"-u {name}" for name in to_unset)
     return f"env {unset_flags} sh -c {shlex.quote(command)}"
+
+
+def _worker_author_platform_env() -> dict[str, str]:
+    """Platform LLM env allowed only for the first-party worker-author."""
+    env: dict[str, str] = {}
+    try:
+        from codegen_model import codegen_model
+
+        model = codegen_model()
+    except Exception:
+        model = (os.environ.get("WORKEROS_CODEGEN_MODEL") or os.environ.get("WORKEROS_CHAT_MODEL") or "").strip()
+    if model:
+        env["WORKEROS_CODEGEN_MODEL"] = model
+    for name in _WORKER_AUTHOR_PROVIDER_ENV_VARS:
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            env[name] = value
+    return env
 
 
 def _split_env_values(raw_value: str | None) -> list[str]:
@@ -475,13 +511,44 @@ def _safe_path(base: Path, *parts: str) -> Path:
 
 def _install_timeout_for_run(timeout_seconds: int) -> int:
     """Give large real-engine bundles enough time to install dependencies."""
-    return max(180, min(int(timeout_seconds), 900))
+    return max(MIN_INSTALL_TIMEOUT_SECONDS, min(int(timeout_seconds), MAX_RUN_TIMEOUT_SECONDS))
 
 
 def _sandbox_lifetime_timeout(timeout_seconds: int, install_timeout: int) -> int:
     """Sandbox lifetime must cover dependency install plus worker execution."""
-    requested_timeout = max(int(timeout_seconds) + int(install_timeout) + 60, 180)
+    requested_timeout = max(
+        int(timeout_seconds) + int(install_timeout) + SANDBOX_LIFETIME_BUFFER_SECONDS,
+        MIN_INSTALL_TIMEOUT_SECONDS,
+    )
     return min(requested_timeout, MAX_E2B_SANDBOX_LIFETIME_SECONDS)
+
+
+def _effective_run_timeout(timeout_seconds: int) -> int:
+    """Enforce the runtime ceiling for direct driver callers as a final guard."""
+    return max(1, min(int(timeout_seconds), MAX_RUN_TIMEOUT_SECONDS))
+
+
+def _refresh_sandbox_lifetime(
+    sandbox: Any,
+    *,
+    timeout: int,
+    log_fn: Callable[[str, str], None],
+) -> None:
+    set_timeout = getattr(sandbox, "set_timeout", None)
+    if not callable(set_timeout):
+        logger.debug("E2B sandbox object does not expose set_timeout(); skipping lifetime refresh")
+        return
+    try:
+        set_timeout(timeout)
+        log_fn(f"[e2b] Refreshed sandbox lifetime to {timeout}s before worker command", "debug")
+    except Exception as exc:
+        log_fn(
+            "[e2b] Failed to refresh sandbox lifetime to "
+            f"{timeout}s before worker command: {exc}. "
+            "E2B may enforce a lower maximum for this account or plan.",
+            "error",
+        )
+        raise
 
 
 def _sandbox_api_url() -> str:
@@ -701,16 +768,23 @@ class E2BSandboxDriver(SandboxDriver):
         secrets: Dict[str, str],
         log_fn: Callable[[str, str], None],
         trace_id: str,
-        timeout_seconds: int = 300,
+        timeout_seconds: int = DEFAULT_RUN_TIMEOUT_SECONDS,
         config: Optional[WorkerConfig] = None,
         connection_ids: Optional[Dict[str, str]] = None,
         user_id: str | None = None,
     ) -> WorkerResult:
         started_monotonic = time.monotonic()
+        effective_timeout_seconds = _effective_run_timeout(timeout_seconds)
+        if effective_timeout_seconds < int(timeout_seconds):
+            log_fn(
+                "[e2b] Capping worker command timeout at "
+                f"{effective_timeout_seconds}s (WORKEROS_MAX_RUN_TIMEOUT)",
+                "warning",
+            )
         try:
             return self._run_in_sandbox(
                 worker_id, run_id, inputs, secrets, log_fn, trace_id,
-                timeout_seconds, config, connection_ids or {}, user_id,
+                effective_timeout_seconds, config, connection_ids or {}, user_id,
             )
         except E2BKeyExhaustedError as exc:
             logger.warning(
@@ -769,7 +843,7 @@ class E2BSandboxDriver(SandboxDriver):
             result = _sandbox_exception_result(
                 exc,
                 elapsed_seconds=elapsed_seconds,
-                timeout_seconds=timeout_seconds,
+                timeout_seconds=effective_timeout_seconds,
             )
             log_fn(f"E2B sandbox error after {elapsed_seconds:.3f}s: {result.error}", "error")
             return result
@@ -811,15 +885,27 @@ class E2BSandboxDriver(SandboxDriver):
                 error_code="worker_not_found",
             )
 
+        effective_timeout_seconds = _effective_run_timeout(timeout_seconds)
+        if effective_timeout_seconds < int(timeout_seconds):
+            log_fn(
+                "[e2b] Capping worker command timeout at "
+                f"{effective_timeout_seconds}s (WORKEROS_MAX_RUN_TIMEOUT)",
+                "warning",
+            )
+
         log_fn(f"[e2b] Spawning sandbox for run {run_id}", "info")
-        install_timeout = _install_timeout_for_run(timeout_seconds)
-        sandbox_timeout = _sandbox_lifetime_timeout(timeout_seconds, install_timeout)
-        requested_sandbox_timeout = max(timeout_seconds + install_timeout + 60, 180)
+        install_timeout = _install_timeout_for_run(effective_timeout_seconds)
+        sandbox_timeout = _sandbox_lifetime_timeout(effective_timeout_seconds, install_timeout)
+        requested_sandbox_timeout = max(
+            effective_timeout_seconds + install_timeout + SANDBOX_LIFETIME_BUFFER_SECONDS,
+            MIN_INSTALL_TIMEOUT_SECONDS,
+        )
         if sandbox_timeout < requested_sandbox_timeout:
             log_fn(
                 "[e2b] Capping sandbox lifetime at "
-                f"{sandbox_timeout}s, the E2B API maximum; worker command "
-                f"timeout remains {timeout_seconds}s",
+                f"{sandbox_timeout}s, the configured E2B maximum; worker command "
+                f"timeout remains {effective_timeout_seconds}s and the lifetime "
+                "will be refreshed before execution",
                 "warning",
             )
 
@@ -856,15 +942,11 @@ class E2BSandboxDriver(SandboxDriver):
             "WORKEROS_RUN_TOKEN": _worker_call_token if _worker_call_token else make_run_token(run_id),
             **({"WORKEROS_CALL_DEPTH": str(_self_depth)} if _worker_call_token else {}),  # #994
         }
-        # Propagate the codegen model override so the worker-author meta-worker
-        # (which generates code from inside the sandbox) uses the same model the
-        # API-side draft/repair calls do. Falls back to its baked-in default.
-        # #977: only the worker-author meta-worker generates code inside the
-        # sandbox and needs the codegen model; injecting it for every worker
-        # leaked an internal architecture detail to untrusted worker code.
-        _codegen_model_override = (os.environ.get("WORKEROS_CODEGEN_MODEL") or "").strip()
-        if _codegen_model_override and worker_id == _WORKER_AUTHOR_ID:
-            _sandbox_envs["WORKEROS_CODEGEN_MODEL"] = _codegen_model_override
+        # #1137: worker-author is first-party code that generates the bundle
+        # inside E2B, so it needs the platform LLM provider env. Regular workers
+        # still receive only declared user secrets plus callback vars.
+        _worker_author_env = _worker_author_platform_env() if worker_id == _WORKER_AUTHOR_ID else {}
+        _sandbox_envs.update(_worker_author_env)
         sandbox = _create_sandbox_with_key_fallback(
             Sandbox,
             api_keys=api_keys,
@@ -1037,6 +1119,12 @@ class E2BSandboxDriver(SandboxDriver):
                     )
                 log_fn("[e2b] npm install complete", "info")
 
+            _refresh_sandbox_lifetime(
+                sandbox,
+                timeout=sandbox_timeout,
+                log_fn=log_fn,
+            )
+
             # Run the worker — commands.run() is sync, returns CommandResult directly
             command = "python run.py"
             if config and config.runtime and config.runtime.command:
@@ -1057,6 +1145,7 @@ class E2BSandboxDriver(SandboxDriver):
                 _emit_command_output(chunk, "warning", "[e2b] stderr: ", log_fn)
 
             _cmd_envs: dict[str, str] = {
+                **_worker_author_env,
                 **secrets,
                 "FLOOM_RUN_ID": run_id,
                 "FLOOM_TRACE_ID": trace_id,
@@ -1071,7 +1160,7 @@ class E2BSandboxDriver(SandboxDriver):
                 envs=_cmd_envs,
                 on_stdout=on_stdout,
                 on_stderr=on_stderr,
-                timeout=float(timeout_seconds),
+                timeout=float(effective_timeout_seconds),
             )
 
             # E2B streams stdout/stderr through callbacks while the process is

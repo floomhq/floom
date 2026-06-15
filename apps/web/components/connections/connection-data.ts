@@ -147,7 +147,7 @@ export function getConnectionAccountLabel(conn: ConnectionRecord) {
     status === "inactive" ||
     lastCheck === "expired" ||
     lastCheck === "failed";
-  if (isBroken) return "Expired — reconnect to see account";
+  if (isBroken) return "Expired; reconnect to see account";
   // Use the last 6 chars of the connection ID as a short disambiguator
   const idSuffix = conn.id ? conn.id.slice(-6) : "";
   return idSuffix ? `account …${idSuffix}` : "unknown account";

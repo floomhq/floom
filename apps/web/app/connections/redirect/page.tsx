@@ -179,7 +179,7 @@ function RedirectInner() {
                   className="mt-6 w-full"
                   onClick={startPolling}
                 >
-                  I&apos;ve authorized — take me back
+                  I&apos;ve authorized: take me back
                 </Button>
                 <Link href={returnTo} className={buttonVariants({ variant: "ghost", className: "mt-2 w-full" })}>
                   Go to connections
@@ -225,7 +225,7 @@ function RedirectInner() {
                   className="mt-2 w-full"
                   onClick={startPolling}
                 >
-                  I&apos;ve authorized — take me back
+                  I&apos;ve authorized: take me back
                 </Button>
               </>
 

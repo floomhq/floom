@@ -1361,7 +1361,7 @@ function PackDetailPane({
             {!readOnly && (
               <button
                 type="button"
-                title={(detail.sensitive ?? true) ? "Sensitive — not tracked by git. Click to enable git tracking." : "Git-tracked. Click to make sensitive (exclude from git)."}
+                title={(detail.sensitive ?? true) ? "Sensitive: not tracked by git. Click to enable git tracking." : "Git-tracked. Click to make sensitive (exclude from git)."}
                 onClick={async () => {
                   const next = !(detail.sensitive ?? true);
                   await api.contexts.setSensitive(detail.name, next);
@@ -2404,7 +2404,7 @@ function FileHistoryMenu({
     try {
       const result = await api.contexts.restoreFileVersion(packName, filePath, v.sha);
       if (result.deleted) {
-        toast.error("This commit recorded the file as deleted — it has been removed.");
+        toast.error("This commit recorded the file as deleted; it has been removed.");
       } else {
         try {
           const text = await api.contexts.readTextFile(packName, filePath);

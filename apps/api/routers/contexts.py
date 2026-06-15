@@ -70,6 +70,7 @@ from services.context_access import (
     _context_upload_limit_bytes,
     _context_visible_to_user,
     _context_worker_counts,
+    _asset_workspace_id,
     _ensure_brain_pack_row,
     _git_commit_context,
     _is_system_context_pack,
@@ -402,7 +403,6 @@ def set_context_visibility(
     packs are read-only (404 from the require helper). 404 for an invisible pack.
     """
     from contexts import context_owner_id
-    from db import derive_workspace_id
 
     context_user_id = _context_actor_user_id(auth.user_id)
     safe_name, metadata = _require_context_for_user(
@@ -422,7 +422,7 @@ def set_context_visibility(
     _ensure_brain_pack_row(safe_name, owner_id=owner_id, repos=repos)
     try:
         result = asset_access.set_visibility(
-            workspace_id=derive_workspace_id(owner_id),
+            workspace_id=_asset_workspace_id(owner_id),
             actor_id=context_user_id,
             asset_type="brain_pack",
             asset_id=safe_name,
