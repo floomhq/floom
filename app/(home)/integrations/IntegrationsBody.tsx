@@ -63,10 +63,14 @@ export function IntegrationsBody() {
         </motion.p>
       </div>
 
+      {/* #296: the catalog must NOT be gated behind Reveal's whileInView.
+          Reveal uses viewport amount:0.25, and the full catalog is taller than
+          ~4 viewports, so 25% of it can never be in view at once -> whileInView
+          never fires -> the catalog stays at opacity:0 and the page renders
+          blank (only the `animate` heading and the short footer Reveal show).
+          The catalog is the page's core content; render it directly. */}
       <div className="pb-16">
-        <Reveal delay={0.1}>
-          <IntegrationsCatalog catalog={catalog} />
-        </Reveal>
+        <IntegrationsCatalog catalog={catalog} />
       </div>
 
       {/* close — product-style centered CTA */}
