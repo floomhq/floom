@@ -165,7 +165,9 @@ describe("page components render with data (no client crash)", () => {
   it("BrainCollection renders the folder", async () => {
     const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
     render(<BrainCollection initialFolders={[folder as never]} />);
-    expect(await screen.findByText("Company facts")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Company facts 3 files/i })).toBeInTheDocument();
+    expect(screen.getAllByText("Company facts")).toHaveLength(2);
+    expect(screen.getByText("Contexts")).toBeInTheDocument();
   });
 
   it("ApprovalsCollection fetches + renders the approval", async () => {
