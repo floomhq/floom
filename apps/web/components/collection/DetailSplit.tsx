@@ -11,6 +11,15 @@ interface DetailPaneProps {
   onTab: (key: string) => void;
   onClose: () => void;
   onCollapse: () => void;
+  /**
+   * When provided, an "Advanced" disclosure button is appended after the last
+   * tab. `advancedOpen` controls whether it shows as active; `onAdvancedToggle`
+   * is called on click.
+   */
+  advancedToggle?: {
+    open: boolean;
+    onToggle: () => void;
+  };
 }
 
 /** The 70% detail pane: header + locked tab row + body (SPEC §3). */
@@ -21,6 +30,7 @@ export function DetailPane({
   onTab,
   onClose,
   onCollapse,
+  advancedToggle,
 }: DetailPaneProps) {
   const headerRef = useRef<HTMLDivElement>(null);
   const current = tabs.find((t) => t.key === activeTab) ?? tabs[0];
@@ -53,7 +63,7 @@ export function DetailPane({
       {/* #1109: skip the tab bar when there is only one tab — it's a redundant
           label that duplicates the section header (e.g. "Developer > Developer"). */}
       {tabs.length > 1 && (
-        <div className="c-dtabs" role="tablist">
+        <div className="c-dtabs" role="tablist" aria-label="Worker detail tabs">
           {tabs.map((t) => (
             <button
               type="button"
@@ -67,6 +77,22 @@ export function DetailPane({
               {t.count != null && <span className="cb">{t.count}</span>}
             </button>
           ))}
+          {/* #1384: Advanced disclosure toggle — appended after operator tabs.
+              Not a real tab: clicking toggles visibility of developer tabs,
+              not the active body. Styled to match c-dtab but visually lighter. */}
+          {advancedToggle && (
+            <button
+              type="button"
+              role="tab"
+              aria-selected={advancedToggle.open}
+              aria-label={advancedToggle.open ? "Hide developer tabs" : "Show developer tabs"}
+              className={`c-dtab ml-auto text-[11px] text-muted-foreground ${advancedToggle.open ? "on" : ""}`}
+              style={{ opacity: advancedToggle.open ? 1 : 0.6 }}
+              onClick={advancedToggle.onToggle}
+            >
+              Advanced
+            </button>
+          )}
         </div>
       )}
       <div className="c-dbody" role="tabpanel">

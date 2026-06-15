@@ -439,6 +439,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
                   onTab={(key) => patch({ tab: key })}
                   onClose={close}
                   onCollapse={() => setListCollapsed((v) => !v)}
+                  advancedToggle={config.detailAdvancedToggle}
                 />
               )
             )}

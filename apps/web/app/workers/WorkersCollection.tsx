@@ -17,7 +17,13 @@ import type {
   WorkerInput,
 } from "@/lib/types";
 import { formatVersionRows } from "@/lib/workers/versions";
-import { WORKER_DETAIL_TABS, type WorkerDetailTab } from "@/lib/workers/tabs";
+import {
+  WORKER_DETAIL_TABS,
+  OPERATOR_TABS,
+  ADVANCED_TABS,
+  ADVANCED_MODE_STORAGE_KEY,
+  type WorkerDetailTab,
+} from "@/lib/workers/tabs";
 import { formatDuration } from "@/lib/runs/format";
 import { modelLabel } from "@/lib/model-labels";
 import { runtimeSummary } from "@/lib/runtime-labels";
@@ -1259,6 +1265,28 @@ export default function WorkersCollection({
   const [canManageWorkers, setCanManageWorkers] = useState(false);
   const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
 
+  // #1384: Operator view — default OFF (advanced/developer tabs hidden).
+  // Persisted in localStorage so the preference survives page reloads.
+  const [advancedOpen, setAdvancedOpen] = useState<boolean>(() => {
+    if (typeof window === "undefined") return false;
+    try {
+      return window.localStorage.getItem(ADVANCED_MODE_STORAGE_KEY) === "true";
+    } catch {
+      return false;
+    }
+  });
+  const toggleAdvanced = useCallback(() => {
+    setAdvancedOpen((prev) => {
+      const next = !prev;
+      try {
+        window.localStorage.setItem(ADVANCED_MODE_STORAGE_KEY, String(next));
+      } catch {
+        // localStorage unavailable (private browsing, quota, etc.) — silently ignore.
+      }
+      return next;
+    });
+  }, []);
+
   useEffect(() => {
     let alive = true;
     setFavorites(getFavorites());
@@ -1428,17 +1456,26 @@ export default function WorkersCollection({
         },
         // SPEC §4: tabs are DERIVED from WORKER_DETAIL_TABS so the contract test
         // guards what actually renders (no drift between constant and component).
-        tabs: WORKER_DETAIL_TABS.map((key) => {
-          const Tab = WORKER_TAB_COMPONENT[key];
-          return {
-            key,
-            label: key,
-            count: key === "History" ? w.recent_stats?.runs_7d ?? (w.last_run ? 1 : undefined) : undefined,
-            render: () => <Tab w={w} />,
-          };
-        }),
+        // #1384: Operator view — filter to OPERATOR_TABS by default; show
+        // ADVANCED_TABS when the "Advanced" disclosure toggle is open.
+        tabs: WORKER_DETAIL_TABS
+          .filter((key) =>
+            (OPERATOR_TABS as readonly WorkerDetailTab[]).includes(key) ||
+            (advancedOpen && (ADVANCED_TABS as readonly WorkerDetailTab[]).includes(key))
+          )
+          .map((key) => {
+            const Tab = WORKER_TAB_COMPONENT[key];
+            return {
+              key,
+              label: key,
+              count: key === "History" ? w.recent_stats?.runs_7d ?? (w.last_run ? 1 : undefined) : undefined,
+              render: () => <Tab w={w} />,
+            };
+          }),
       };
     },
+    // #1384: Advanced toggle wired through the generic collection detailAdvancedToggle slot.
+    detailAdvancedToggle: { open: advancedOpen, onToggle: toggleAdvanced },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
     add: { label: "Add", onSelect: () => router.push("/chat?mode=create") }, // #902: create = Emily flow
     states: {

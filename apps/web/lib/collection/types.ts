@@ -153,6 +153,17 @@ export interface CollectionConfig<T> {
 
   detail: (item: T) => { header: DetailHeader; tabs: DetailTab[] };
 
+  /**
+   * When supplied, an "Advanced" toggle button is appended after the last tab
+   * in the detail pane tab bar. The host (e.g. WorkersCollection) owns the
+   * open/close state and passes it here; CollectionView just wires the prop
+   * through to DetailPane.
+   */
+  detailAdvancedToggle?: {
+    open: boolean;
+    onToggle: () => void;
+  };
+
   states?: CollectionStates;
 
   /**
