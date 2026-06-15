@@ -211,7 +211,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
       <Link
         href="/chat?mode=create"
         onClick={() => onNavigate?.()}
-        className="flex h-9 w-full items-center justify-center gap-2 rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-sm font-medium text-white transition-colors duration-150 hover:opacity-90"
+        className="flex h-9 w-full items-center justify-center gap-2 rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-sm font-medium text-[var(--primary-text)] transition-colors duration-150 hover:opacity-90"
       >
         <Plus className="w-4 h-4" />
         <span>New worker</span>
