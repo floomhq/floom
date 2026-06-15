@@ -34,9 +34,14 @@ class _FakeTable:
         self.or_filters: list[str] = []
         self.limit_value = None
         self.selected = None
+        self.update_values = None
 
     def select(self, value, **_kwargs):
         self.selected = value
+        return self
+
+    def update(self, values):
+        self.update_values = values
         return self
 
     def eq(self, key, value):
@@ -76,6 +81,15 @@ class _FakeTable:
                     for clause in clauses
                 )
             ]
+        if self.update_values is not None:
+            # UPDATE: mutate the matching rows in place (so a sibling table()
+            # handle / get_by_run_id sees the change) and return only the rows
+            # actually affected — postgrest's return=representation semantics.
+            # This models the #280 atomic claim: a conditional UPDATE filtering
+            # status='pending' flips no row (returns []) once the row is decided.
+            for row in rows:
+                row.update(self.update_values)
+            return _FakeResponse(rows)
         if self.limit_value is not None:
             rows = rows[: self.limit_value]
         return _FakeResponse(rows)
@@ -568,3 +582,79 @@ def test_supabase_repositories_enforce_rls_between_users():
                 service.auth.admin.delete_user(user["id"])
             except Exception:
                 pass
+
+
+# ---------------------------------------------------------------------------
+# #280 — approval-decision TOCTOU: approve()/reject() MUST return None when the
+# conditional UPDATE flips no pending row, so the engine route's `claimed is
+# None` 409 guard fires instead of letting a race loser spawn a follow-up run
+# (double-spend) or execute a rejected HITL run. The cloud repo previously
+# returned get_by_run_id() unconditionally, defeating the gate.
+# ---------------------------------------------------------------------------
+
+
+def _pending_approval(run_id="run_280", owner_id="user_280"):
+    return {
+        "id": "apr_280",
+        "run_id": run_id,
+        "owner_id": owner_id,
+        "workspace_id": "ws_280",
+        "worker_id": "wk_280",
+        "status": "pending",
+        "created_at": _now_iso(),
+    }
+
+
+def test_approve_returns_row_when_it_wins_the_claim():
+    client = _FakeClient([_pending_approval()])
+    repo = SupabaseApprovalRepository(client=client)
+
+    claimed = repo.approve(owner_id="user_280", run_id="run_280", decided_at=_now_iso())
+
+    assert claimed is not None
+    assert claimed["status"] == "approved"
+
+
+def test_second_decision_returns_none_after_approve_wins():
+    # approve wins the claim; a concurrent reject must lose -> None (else the
+    # rejected run would still proceed). Same row, already flipped to approved.
+    client = _FakeClient([_pending_approval()])
+    repo = SupabaseApprovalRepository(client=client)
+
+    assert repo.approve(owner_id="user_280", run_id="run_280", decided_at=_now_iso()) is not None
+    lost = repo.reject(owner_id="user_280", run_id="run_280", decided_at=_now_iso())
+
+    assert lost is None  # status no longer 'pending' -> conditional UPDATE flips nothing
+
+
+def test_double_approve_second_call_returns_none():
+    client = _FakeClient([_pending_approval()])
+    repo = SupabaseApprovalRepository(client=client)
+
+    assert repo.approve(owner_id="user_280", run_id="run_280", decided_at=_now_iso()) is not None
+    second = repo.approve(owner_id="user_280", run_id="run_280", decided_at=_now_iso())
+
+    assert second is None  # no second follow-up run / double-spend
+
+
+def test_reject_then_approve_returns_none():
+    client = _FakeClient([_pending_approval()])
+    repo = SupabaseApprovalRepository(client=client)
+
+    assert repo.reject(owner_id="user_280", run_id="run_280", decided_at=_now_iso()) is not None
+    racing_approve = repo.approve(owner_id="user_280", run_id="run_280", decided_at=_now_iso())
+
+    assert racing_approve is None  # an approve cannot win after a reject already decided
+
+
+def test_attach_follow_up_records_run_id_on_approved_row():
+    client = _FakeClient([_pending_approval()])
+    repo = SupabaseApprovalRepository(client=client)
+
+    repo.approve(owner_id="user_280", run_id="run_280", decided_at=_now_iso())
+    updated = repo.attach_follow_up(
+        owner_id="user_280", run_id="run_280", follow_up_run_id="run_followup"
+    )
+
+    assert updated is not None
+    assert updated["follow_up_run_id"] == "run_followup"

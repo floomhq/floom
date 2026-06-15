@@ -3429,16 +3429,53 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         # /approvals approve route passes them -> TypeError on every HITL
         # approve carrying annotations. Accept + persist (annotations_json
         # column added in migration 0034).
-        self._client.table(self._TABLE).update(
-            {
-                "status": "approved",
-                "decided_at": decided_at,
-                "edited_output_json": edited_output_json,
-                "follow_up_run_id": follow_up_run_id,
-                "annotations_json": annotations_json,
-                "reason": reason,
-            }
-        ).eq("run_id", run_id).eq("owner_id", owner_id).eq("status", "pending").execute()
+        #
+        # #280: the conditional `eq("status", "pending")` UPDATE is the atomic
+        # claim gate. The engine route only proceeds (spawns the follow-up run,
+        # double-spends) when this returns a row, and 409s when it returns None.
+        # Returning get_by_run_id() unconditionally defeated that: a race loser
+        # got the now-approved/rejected row back, so `claimed is None` never
+        # fired and concurrent approve+reject / double-approve both won. Postgres
+        # re-evaluates `status='pending'` after the row lock, so only the call
+        # that actually flipped the row gets data back -> return None otherwise.
+        response = (
+            self._client.table(self._TABLE)
+            .update(
+                {
+                    "status": "approved",
+                    "decided_at": decided_at,
+                    "edited_output_json": edited_output_json,
+                    "follow_up_run_id": follow_up_run_id,
+                    "annotations_json": annotations_json,
+                    "reason": reason,
+                }
+            )
+            .eq("run_id", run_id)
+            .eq("owner_id", owner_id)
+            .eq("status", "pending")
+            .execute()
+        )
+        if not (getattr(response, "data", None) or []):
+            return None  # lost the claim — another decision already won
+        return self.get_by_run_id(run_id=run_id)
+
+    def attach_follow_up(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        follow_up_run_id: str,
+        edited_output_json: str | None = None,
+    ) -> dict[str, Any] | None:
+        # #280: approve() claims pending->approved atomically *before* the
+        # follow-up run is spawned, so the spawned run id is recorded here in a
+        # second step. Scoped to the already-approved row this owner just won.
+        update: dict[str, Any] = {"follow_up_run_id": follow_up_run_id}
+        if edited_output_json is not None:
+            update["edited_output_json"] = edited_output_json
+        self._client.table(self._TABLE).update(update).eq("run_id", run_id).eq(
+            "owner_id", owner_id
+        ).eq("status", "approved").execute()
         return self.get_by_run_id(run_id=run_id)
 
     def reject(
@@ -3450,14 +3487,26 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
         reason: str | None = None,
         annotations_json: str | None = None,
     ) -> dict[str, Any] | None:
-        self._client.table(self._TABLE).update(
-            {
-                "status": "rejected",
-                "decided_at": decided_at,
-                "reason": reason,
-                "annotations_json": annotations_json,
-            }
-        ).eq("run_id", run_id).eq("owner_id", owner_id).eq("status", "pending").execute()
+        # #280: same atomic-claim semantics as approve() — return None when the
+        # conditional UPDATE flipped no pending row so the route's `claimed is
+        # None` 409 guard fires instead of letting a race loser proceed.
+        response = (
+            self._client.table(self._TABLE)
+            .update(
+                {
+                    "status": "rejected",
+                    "decided_at": decided_at,
+                    "reason": reason,
+                    "annotations_json": annotations_json,
+                }
+            )
+            .eq("run_id", run_id)
+            .eq("owner_id", owner_id)
+            .eq("status", "pending")
+            .execute()
+        )
+        if not (getattr(response, "data", None) or []):
+            return None  # lost the claim — another decision already won
         return self.get_by_run_id(run_id=run_id)
 
 
