@@ -2608,6 +2608,35 @@ class SqliteRunRepository:
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
+    def claim_queued(self, *, user_id: str, run_id: str, started_at: str) -> dict[str, Any] | None:
+        """Atomically move one queued, uncancelled run to running.
+
+        Returns the updated row only for the process that wins the claim.
+        Concurrent drainers that saw the same queued row receive ``None``.
+        """
+        with get_db() as conn:
+            cur = conn.execute(
+                """
+                UPDATE runs
+                SET status = 'running',
+                    started_at = ?,
+                    error = NULL,
+                    error_code = NULL
+                WHERE id = ?
+                  AND status = 'queued'
+                  AND (cancel_requested = 0 OR cancel_requested IS NULL)
+                  AND EXISTS (
+                      SELECT 1 FROM workers
+                      WHERE workers.id = runs.worker_id
+                        AND workers.owner_id = ?
+                  )
+                """,
+                (started_at, run_id, user_id),
+            )
+            if cur.rowcount != 1:
+                return None
+        return self.get(user_id=user_id, run_id=run_id)
+
     def count_queued(self) -> int:
         """Return the number of pending queued runs (not yet cancelled)."""
         with get_db() as conn:
