@@ -58,7 +58,6 @@ import {
   Code2,
   Copy,
   History,
-  KeyRound,
   MessageSquare,
   Palette,
   QrCode,
@@ -370,10 +369,14 @@ function isValidSection(value: string | null): value is SectionKey {
 
 function sectionFromCandidate(value: string | null): SectionKey | null {
   const candidate =
+    // Legacy aliases kept for back-compat with old deep-links.
     value === "api" ? "developer" :
     value === "slack" ? "channels" :
     value === "notifications" ? "channels" :
     value === "git" ? "developer" :
+    // workspace_tokens was a standalone nav item before #1088 MECE fix.
+    // Deep-links to ?sel=workspace_tokens now land on Developer (Tokens tab).
+    value === "workspace_tokens" ? "developer" :
     value;
   return isValidSection(candidate) ? candidate : null;
 }
@@ -676,8 +679,6 @@ function SettingsContent() {
         return <MembersSettingsPanel />;
       case "versions":
         return <VersionHistorySettingsPanel />;
-      case "workspace_tokens":
-        return <WorkspaceTokensPanel />;
       case "danger":
         return (
           <DangerSection
@@ -789,8 +790,6 @@ function iconForSection(key: SectionKey): SettingsIconType {
       return Users;
     case "versions":
       return History;
-    case "workspace_tokens":
-      return KeyRound;
     case "danger":
       return ShieldAlert;
     case "developer":
@@ -981,6 +980,11 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
   );
 }
 
+// DeveloperSection (#1088 MECE fix): one place for ALL access credentials —
+//   personal tokens (account-scoped), workspace token (admin-only, workspace-
+//   scoped), plus API/MCP/CLI reference and Git sync. Removed the standalone
+//   "Workspace token" nav item; tokens of both scopes live here to avoid the
+//   overlap between Channels (agent install) and Developer (API tokens).
 function DeveloperSection() {
   return (
     <Tabs defaultValue="api">
@@ -988,7 +992,8 @@ function DeveloperSection() {
         <TabsTrigger value="api">API</TabsTrigger>
         <TabsTrigger value="mcp">MCP</TabsTrigger>
         <TabsTrigger value="cli">CLI</TabsTrigger>
-        <TabsTrigger value="tokens">Tokens</TabsTrigger>
+        <TabsTrigger value="tokens">My tokens</TabsTrigger>
+        <TabsTrigger value="workspace_token">Workspace token</TabsTrigger>
         <TabsTrigger value="git">Git</TabsTrigger>
       </TabsList>
       <TabsContent value="api" className="space-y-4">
@@ -996,7 +1001,8 @@ function DeveloperSection() {
           <h2 className="text-sm font-medium">REST API</h2>
           <p className="text-xs text-muted-foreground">
             Call your workspace over HTTP. Authenticate every request with a
-            personal access token in the <code className="font-mono">x-floom-secret</code> header.
+            personal access token (My tokens tab) or a workspace token (admin only)
+            in the <code className="font-mono">x-floom-secret</code> header.
           </p>
         </div>
         <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5">
@@ -1022,12 +1028,12 @@ function DeveloperSection() {
         </div>
         <CopyCodeCard
           title="Call the API"
-          description="Replace <your-token> with a personal access token from the Tokens tab."
+          description="Replace <your-token> with a personal access token from the My tokens tab."
           value={API_CALL_SNIPPET}
         />
         <p className="text-xs text-muted-foreground">
           Need a token? Open the{" "}
-          <span className="font-medium text-foreground">Tokens</span> tab.{" "}
+          <span className="font-medium text-foreground">My tokens</span> tab.{" "}
           <a
             href="https://github.com/floomhq/workeros#api"
             target="_blank"
@@ -1054,6 +1060,9 @@ function DeveloperSection() {
       </TabsContent>
       <TabsContent value="tokens" className="space-y-4">
         <PersonalAccessTokensPanel />
+      </TabsContent>
+      <TabsContent value="workspace_token" className="space-y-4">
+        <WorkspaceTokensPanel />
       </TabsContent>
       <TabsContent value="git" className="space-y-4">
         <GitWorkspacePanel />
