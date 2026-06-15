@@ -401,8 +401,23 @@ def system_overview(
         )
         if w.get("id")
     ]
-    active_workers_count = sum(1 for row in workers if not _overview_worker_paused(row))
-    paused_workers_count = max(0, len(workers) - active_workers_count)
+    # #1080: example/stock workers are shipped templates, not the operator's own
+    # workers. Emily already reports zero of them for a fresh user (#841); the
+    # dashboard headline must agree. Exclude examples from the active/paused
+    # counts AND from the needs-attention inbox below so the two surfaces stay
+    # consistent (a brand-new user with 0 real workers must not see "3 active /
+    # 3 needs attention" sourced entirely from other workspaces' examples).
+    def _is_example_worker(row: Dict[str, Any]) -> bool:
+        if row.get("is_example") is True:
+            return True
+        manifest = row.get("manifest")
+        if isinstance(manifest, dict) and manifest.get("is_example") is True:
+            return True
+        return row.get("id") in PUBLIC_STOCK_WORKER_IDS or row.get("id") in PROTECTED_STOCK_WORKER_IDS
+
+    _real_workers = [row for row in workers if not _is_example_worker(row)]
+    active_workers_count = sum(1 for row in _real_workers if not _overview_worker_paused(row))
+    paused_workers_count = max(0, len(_real_workers) - active_workers_count)
     worker_names = {row["id"]: row.get("name") or row["id"] for row in workers if row.get("id")}
     # Pre-built once to avoid N+1 _get_db_worker() calls when filtering run lists
     # by worker visibility (set lookup vs one SELECT per row).
@@ -412,15 +427,8 @@ def system_overview(
     # real workers — not legacy/paused/example/system churn that drags the
     # aggregate down (the 54.6% both scorers flagged). Build the set of
     # worker_ids that count: operator-visible (already excludes system/hidden),
-    # not paused, and not an example/stock worker.
-    def _is_example_worker(row: Dict[str, Any]) -> bool:
-        if row.get("is_example") is True:
-            return True
-        manifest = row.get("manifest")
-        if isinstance(manifest, dict) and manifest.get("is_example") is True:
-            return True
-        return row.get("id") in PUBLIC_STOCK_WORKER_IDS or row.get("id") in PROTECTED_STOCK_WORKER_IDS
-
+    # not paused, and not an example/stock worker (_is_example_worker defined
+    # above where the headline counts also use it — #1080).
     _active_real_worker_ids = {
         row["id"]
         for row in workers
@@ -586,7 +594,7 @@ def system_overview(
     # NO failed runs (the smoke gate disables it before any real run). Skip any
     # worker already surfaced above as a failure cluster to avoid duplicates.
     _already_surfaced = {item.worker_id for item in attention_items if item.worker_id}
-    for worker in workers:
+    for worker in _real_workers:  # #1080: never surface example workers as needing setup
         wid = worker.get("id")
         if not wid or wid in _already_surfaced:
             continue
@@ -611,7 +619,7 @@ def system_overview(
     # global needs-attention inbox so operators know exactly what to fix.
     _ov_available_secrets = _available_secret_names_for_user(auth.user_id, repos)
     _ov_available_conns = _available_connection_slugs_for_user(auth.user_id, repos)
-    for worker in workers:
+    for worker in _real_workers:  # #1080: examples are templates, not setup-incomplete user workers
         wid = worker.get("id")
         if not wid or wid in _already_surfaced:
             continue
