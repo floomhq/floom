@@ -21,7 +21,8 @@ from typing import Any, Callable, Dict, Optional
 from .base import SandboxDriver
 from .memory_context import ensure_memory_context_pack
 from models import WorkerConfig, WorkerResult
-from contexts import CONTEXTS_DIR, context_dir, context_scope_for_user, normalize_context_mount, use_context_scope
+import contexts as _contexts_module
+from contexts import CONTEXTS_DIR, context_scope_for_user, normalize_context_mount, use_context_scope
 from runner_utils import ARTIFACTS_DIR
 from worker_registry import WORKERS_DIR
 
@@ -1211,7 +1212,7 @@ class E2BSandboxDriver(SandboxDriver):
                         )
                     continue
 
-                local_dir = context_dir(name)
+                local_dir = _contexts_module.context_dir(name)
                 if not local_dir.is_dir():
                     log_fn(f"[e2b] context {name!r} not found locally", "warning")
                     continue
@@ -1287,7 +1288,7 @@ class E2BSandboxDriver(SandboxDriver):
                     continue
                 try:
                     raw_tar = sandbox.files.read(tar_path, format="bytes", request_timeout=120)
-                    _extract_context_tar(bytes(raw_tar), context_dir(name))
+                    _extract_context_tar(bytes(raw_tar), _contexts_module.context_dir(name))
                     log_fn(f"[e2b] Persisted writeable context {name!r}", "info")
                 except Exception as exc:
                     log_fn(f"[e2b] Failed to persist writeable context {name!r}: {exc}", "warning")
