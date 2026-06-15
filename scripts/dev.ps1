@@ -5,6 +5,11 @@ $root = Split-Path -Parent $PSScriptRoot
 $py = "$root\apps\api\venv\Scripts\python.exe"
 if (-not (Test-Path $py)) { Write-Error "backend venv missing - run .\scripts\setup.ps1 first"; exit 1 }
 
+# Explicit local dev mode: makes the backend load apps\api\.env (FLOOM_DB + creds).
+# Without it a fresh clone has no .env loaded, so auth collapses every session to
+# the 'federico' dev default and no provider keys are picked up.
+$env:WORKEROS_DEV = "1"
+
 $procs = @()
 try {
   Write-Host "==> backend  -> http://localhost:8000"
