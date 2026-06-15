@@ -51,7 +51,7 @@ from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Dict, Iterable, List, Literal, NotRequired, Optional, TypedDict
+from typing import Annotated, Any, Dict, Iterable, List, Literal, NotRequired, Optional, Protocol, TypedDict
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -4271,9 +4271,33 @@ def _webhook_receipt_ttl_seconds() -> int:
         return 604800
 
 
-def _claim_webhook_delivery(source: str, delivery_id: str) -> bool:
-    if not delivery_id:
-        return True
+# --- #1075: pluggable webhook delivery-receipt store seam --------------------
+# `_claim_webhook_delivery` dedups inbound webhooks (GitHub/Composio redeliver
+# with the same delivery id). The default is SQLite, which on the ephemeral,
+# sometimes multi-instance managed cloud (a) loses receipts across redeploys, so
+# sender retries fire the worker again, and (b) can raise "database is locked"
+# under concurrent inbound webhooks. Cloud registers a Supabase-backed store via
+# `set_webhook_delivery_store` so claims are atomic + durable across instances —
+# same seam pattern as set_context_scope_resolver / set_worker_call_secret_resolver.
+class WebhookDeliveryStore(Protocol):
+    def claim(self, source: str, delivery_id: str) -> bool:
+        """Atomically record (source, delivery_id). Return True if this is the
+        FIRST time it is seen (claim succeeds → process the webhook), False if it
+        is a duplicate/redelivery (drop it). Implementations own their own TTL."""
+        ...
+
+
+_webhook_delivery_store: "WebhookDeliveryStore | None" = None
+
+
+def set_webhook_delivery_store(store: "WebhookDeliveryStore | None") -> None:
+    """Register a pluggable webhook delivery-receipt store (cloud: Supabase).
+    Pass ``None`` to clear and fall back to the SQLite default (OSS mode)."""
+    global _webhook_delivery_store
+    _webhook_delivery_store = store
+
+
+def _sqlite_claim_webhook_delivery(source: str, delivery_id: str) -> bool:
     now_ts = time.time()
     cutoff = now_ts - _webhook_receipt_ttl_seconds()
     with get_db() as conn:
@@ -4292,6 +4316,15 @@ def _claim_webhook_delivery(source: str, delivery_id: str) -> bool:
         except sqlite3.IntegrityError:
             return False
     return True
+
+
+def _claim_webhook_delivery(source: str, delivery_id: str) -> bool:
+    if not delivery_id:
+        return True
+    store = _webhook_delivery_store
+    if store is not None:
+        return store.claim(source, delivery_id)
+    return _sqlite_claim_webhook_delivery(source, delivery_id)
 
 
 def _candidate_composio_trigger_ids(payload: Any, request: Request) -> list[str]:
