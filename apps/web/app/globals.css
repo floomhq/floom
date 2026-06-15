@@ -754,7 +754,7 @@ html.dark .grain {
 .c-tagbar-wrap { position:relative; overflow:hidden; }
 .c-tagbar-wrap::after { content:''; position:absolute; top:0; right:0; bottom:0; width:40px; pointer-events:none; background:linear-gradient(to right, transparent, var(--bg-app)); }
 .dark .c-tagbar-wrap::after { background:linear-gradient(to right, transparent, var(--bg-app)); }
-.c-tagbar { display:flex; flex-wrap:nowrap; gap:10px; align-items:center; overflow-x:auto; scrollbar-width:none; }
+.c-tagbar { display:flex; flex-wrap:nowrap; gap:10px; align-items:center; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
 .c-tagbar::-webkit-scrollbar { height:0; display:none; }
 .c-tgroup { display:flex; gap:5px; align-items:center; flex:0 0 auto; }
 .c-tgroup + .c-tgroup { padding-left:10px; border-left:var(--bd-div); }
@@ -845,7 +845,7 @@ html.dark .grain {
 .c-dhead .lcbtn, .c-dhead .x { color:var(--muted-foreground); padding:5px; border-radius:7px; flex:0 0 auto; }
 .c-dhead .lcbtn:hover, .c-dhead .x:hover { background:var(--bg-2); }
 .c-dh-main { flex:1 1 auto; min-width:0; overflow:hidden; }
-.c-dh-title { display:flex; align-items:center; gap:8px; min-width:0; }
+.c-dh-title { display:flex; align-items:center; gap:8px; min-width:0; overflow:hidden; }
 /* Title: 15px for 56px header so title+sub both fit at 56px height */
 .c-dh-title .nm { display:block; min-width:0; max-width:100%; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
 /* Sub: badge row sits under title — 2px gap is tighter than 3px to fit 56px header */
@@ -853,14 +853,14 @@ html.dark .grain {
 .c-dh-sub .c-dh-desc { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .c-dh-act { display:flex; gap:7px; align-items:center; flex:0 0 auto; min-width:0; }
 .c-vpill { display:inline-flex; align-items:center; gap:5px; border:var(--bd-pill); border-radius:var(--radius-pill); font-size:10.5px; padding:2px 8px; color:var(--muted-foreground); background:var(--bg-2); white-space:nowrap; flex:0 0 auto; }
-.c-dtabs { display:flex; gap:2px; padding:7px 16px; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; }
+.c-dtabs { display:flex; gap:2px; padding:7px 16px; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
 .c-dtabs::-webkit-scrollbar { height:0; display:none; }
 .c-source-file-tabs { min-width:0; max-width:100%; flex:1 1 auto; flex-wrap:nowrap; }
 .c-dtab { display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border-radius:9px; color:var(--muted-foreground); font-size:13px; white-space:nowrap; }
 .c-dtab:hover { background:var(--bg-2); }
 .c-dtab.on { background:var(--bg-2); color:var(--ink); font-weight:500; }
 .c-dtab .cb { background:var(--bg-3); color:var(--ink-soft); font-size:10.5px; border-radius:var(--radius-pill); padding:0 6px; }
-.c-dbody { flex:1; min-width:0; overflow:auto; overflow-x:hidden; padding:18px 20px; }
+.c-dbody { flex:1; min-width:0; overflow:auto; padding:18px 20px; }
 
 /* states (SPEC §7) */
 .c-statebox { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; color:var(--muted-foreground); padding:50px; }

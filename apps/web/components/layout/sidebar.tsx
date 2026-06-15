@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight } from "lucide-react";
+import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -493,6 +493,13 @@ export function UserProfileFooter({
           </div>
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-48 p-1">
+          <DropdownMenuItem
+            render={<Link href="/settings?sel=profile" onClick={onNavigate} />}
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <UserRound className="size-4" />
+            Edit profile
+          </DropdownMenuItem>
           <DropdownMenuItem
             render={<Link href="/settings" onClick={onNavigate} />}
             className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
