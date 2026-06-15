@@ -350,12 +350,12 @@ def update_user(
                     role=row["role"], disabled=bool(row["disabled"]), created_at=row["created_at"])
 
 
-@auth_router.delete("/users/{uid}", status_code=204)
+@auth_router.delete("/users/{uid}", status_code=204, response_class=Response)
 def delete_user(
     uid: str = PathParam(...),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
-) -> None:
+) -> Response:
     _require_admin(auth)
     user_repo, _, _ = _require_multi_member_repos(repos)
     if uid == auth.user_id:
@@ -374,6 +374,7 @@ def delete_user(
             )
     except Exception:
         logger.exception("failed to revoke CLI tokens for deleted user %s", uid)
+    return Response(status_code=204)
 
 
 @auth_router.get("/auth/tokens", response_model=List[_PATOut])
@@ -425,15 +426,16 @@ def create_token(
     return _PATCreateResponse(token=raw, pat=pat)
 
 
-@auth_router.delete("/auth/tokens/{token_id}", status_code=204)
+@auth_router.delete("/auth/tokens/{token_id}", status_code=204, response_class=Response)
 def delete_token(
     token_id: str = PathParam(...),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
-) -> None:
+) -> Response:
     _, _, token_repo = _require_multi_member_repos(repos)
     if not token_repo.delete(token_id=token_id, user_id=auth.user_id):
         raise HTTPException(status_code=404, detail="token not found")
+    return Response(status_code=204)
 
 
 @auth_router.post("/auth/tokens/{token_id}/rotate", response_model=_PATCreateResponse)

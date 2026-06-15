@@ -650,6 +650,17 @@ class SqliteWorkerRepository:
                 is_admin = False
             if is_admin and include_all_users:
                 rows = conn.execute(base_select + "ORDER BY w.name").fetchall()
+            elif is_admin:
+                # #1139: admins see their own workers plus all workspace-visible
+                # workers without needing a workspace_members row. Previously,
+                # admins who were not in workspace_members saw 0 workers.
+                rows = conn.execute(
+                    base_select
+                    + "WHERE w.owner_id = ? "
+                    + "OR COALESCE(w.visibility, 'private') IN ('workspace', 'shared', 'public') "
+                    + "ORDER BY w.name",
+                    (user_id,),
+                ).fetchall()
             else:
                 try:
                     has_members_table = bool(conn.execute(

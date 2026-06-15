@@ -25,10 +25,14 @@ export function formatRelativeFuture(iso: string | null | undefined): string {
   return `in ${Math.round(ms / DAY_MS)}d`;
 }
 
+// #1130: cap duration display — anything beyond 24h is a zombie/timed-out run.
+const ZOMBIE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
+
 export function formatDuration(ms: number | null | undefined): string {
   if (!ms || ms <= 0) return "-";
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60_000) return `${(ms / 1000).toFixed(1)}s`;
+  if (ms >= ZOMBIE_THRESHOLD_MS) return "Timed out";
   return `${Math.round(ms / 1000 / 60)}min`;
 }
 

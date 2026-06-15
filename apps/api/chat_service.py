@@ -315,7 +315,13 @@ DEFAULT_WORKSPACE_AGENT_SETTINGS: Dict[str, bool] = {
 
 
 def _effective_worker_visibility_user_id(user_id: str) -> str:
-    """Resolve the owner id Emily should use for worker visibility checks."""
+    """Resolve the owner id Emily should use for worker visibility checks.
+
+    #1139: also try the bootstrap/configured user ID as a fallback so that in
+    OSS/multi-member setups where workers were originally created by the
+    bootstrap user (e.g. 'federico' or WORKEROS_USER_ID), a newly-enrolled
+    admin who hasn't created any workers yet still sees them.
+    """
     raw = str(user_id or "").strip()
     if not raw:
         return raw
@@ -339,6 +345,29 @@ def _effective_worker_visibility_user_id(user_id: str) -> str:
         effective = None
     if effective:
         candidates.append(str(effective))
+    # #1139: include bootstrap user as a candidate so non-admin users can see
+    # workers created by the original bootstrap identity in single-user OSS
+    # setups. Skip when the caller is already in the DB as an admin — those
+    # users are handled by list_for_agent's admin fast-path which shows all
+    # workspace-visible workers without needing to re-route to bootstrap.
+    try:
+        from core.config import _bootstrap_user_id as _buid
+        from db import get_db as _get_db
+        bootstrap = _buid()
+        if bootstrap and bootstrap not in candidates:
+            caller_is_admin = False
+            try:
+                with _get_db() as _conn:
+                    _row = _conn.execute(
+                        "SELECT role FROM users WHERE id = ? LIMIT 1", (raw,)
+                    ).fetchone()
+                    caller_is_admin = bool(_row) and str(_row["role"]).lower() == "admin"
+            except Exception:
+                pass
+            if not caller_is_admin:
+                candidates.append(bootstrap)
+    except Exception:
+        pass
     seen: set[str] = set()
     unique_candidates: list[str] = []
     for candidate in candidates:
