@@ -33,6 +33,7 @@ import { SESSION_COOKIE, verifySessionToken } from "@/lib/web-session";
 // Pages reachable WITHOUT a session cookie. Exact path or prefix match.
 const PUBLIC_PAGE_PREFIXES = [
   "/login",
+  "/auth/magic/", // public token consumer; the token is validated by the backend
   "/connections/callback", // OAuth provider return path; finishes via tokenless callback id
   "/approvals/review", // external signed-link approval review
   "/w/", // public worker share (token-gated, server-rendered)

@@ -87,6 +87,48 @@ def test_magic_link_issuance_works_with_configured_secret(monkeypatch, tmp_path)
         assert consumed.status_code == 200, consumed.text
 
 
+def test_magic_link_issuance_uses_request_origin_for_preview(monkeypatch, tmp_path):
+    main = _load_main(
+        monkeypatch,
+        tmp_path,
+        env={
+            "WORKEROS_MAGIC_LINK_SECRET": "g1-magic-secret",
+            "WORKERS_FRONTEND_URL": "https://workers.floom.dev",
+        },
+    )
+    with _client(main) as client:
+        _login_session(client)
+        resp = client.post(
+            "/auth/magic-link",
+            headers={"origin": "https://workeros-git-fix-1262-floomhq.vercel.app"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["url"].startswith(
+        "https://workeros-git-fix-1262-floomhq.vercel.app/auth/magic/"
+    )
+
+
+def test_magic_link_issuance_uses_forwarded_public_origin(monkeypatch, tmp_path):
+    main = _load_main(
+        monkeypatch,
+        tmp_path,
+        env={
+            "WORKEROS_MAGIC_LINK_SECRET": "g1-magic-secret",
+            "WORKERS_FRONTEND_URL": "https://workers.floom.dev",
+        },
+    )
+    with _client(main) as client:
+        _login_session(client)
+        resp = client.post(
+            "/auth/magic-link",
+            headers={"x-workeros-public-origin": "https://workeros-preview.example.test"},
+        )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json()["url"].startswith("https://workeros-preview.example.test/auth/magic/")
+
+
 # ---------------------------------------------------------------------------
 # #930 — upload signing key fallback is not a public constant
 # ---------------------------------------------------------------------------

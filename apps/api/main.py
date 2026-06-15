@@ -17995,8 +17995,45 @@ def _public_api_base_url() -> str:
     return raw.rstrip("/")
 
 
+def _origin_from_url(value: str | None) -> str | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = urllib.parse.urlparse(raw)
+    except Exception:
+        return None
+    if parsed.scheme not in ("http", "https") or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+
+
 def _frontend_base_url() -> str:
-    return (os.environ.get("WORKERS_FRONTEND_URL") or "https://workers.floom.dev").rstrip("/")
+    return (
+        os.environ.get("WORKERS_FRONTEND_URL")
+        or os.environ.get("WORKEROS_PUBLIC_URL")
+        or "https://workers.floom.dev"
+    ).rstrip("/")
+
+
+def _frontend_base_url_for_request(request: Request | None) -> str:
+    if request is not None:
+        for header in ("x-workeros-public-origin", "origin", "referer"):
+            origin = _origin_from_url(request.headers.get(header))
+            if origin:
+                return origin
+        forwarded_host = (request.headers.get("x-forwarded-host") or "").split(",")[0].strip()
+        if forwarded_host:
+            forwarded_proto = (request.headers.get("x-forwarded-proto") or "https").split(",")[0].strip()
+            origin = _origin_from_url(f"{forwarded_proto}://{forwarded_host}")
+            if origin:
+                return origin
+    vercel_url = (os.environ.get("VERCEL_URL") or "").strip()
+    if vercel_url:
+        origin = _origin_from_url(vercel_url if "://" in vercel_url else f"https://{vercel_url}")
+        if origin:
+            return origin
+    return _frontend_base_url()
 
 
 # ---------------------------------------------------------------------------
@@ -22787,6 +22824,7 @@ def _validate_magic_link(token: str) -> str:
 
 @app.post("/auth/magic-link")
 def auth_issue_magic_link(
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
 ) -> dict:
     """Issue a one-time sign-in URL for the authenticated user (multi-member mode only)."""
@@ -22800,7 +22838,7 @@ def auth_issue_magic_link(
             detail="Magic links require WORKEROS_MAGIC_LINK_SECRET or FLOOM_SECRET to be configured",
         )
     token = _issue_magic_link(user_id=auth.user_id)
-    url = f"{_frontend_base_url()}/auth/magic/{token}"
+    url = f"{_frontend_base_url_for_request(request)}/auth/magic/{token}"
     return {"url": url, "expires_in": 900}
 
 
