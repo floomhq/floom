@@ -410,7 +410,7 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
         ))}
       </div>
       <Dialog open={!!diff} onOpenChange={(o) => !o && setDiff(null)}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
+        <DialogContent className="sm:max-w-2xl max-h-[80vh] overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Version {diff?.id.slice(0, 7)}</DialogTitle>
           </DialogHeader>
@@ -524,7 +524,7 @@ function SourceTab({ w }: { w: WorkerSummary }) {
         <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} />
       </div>
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-h-[90vh] max-w-6xl overflow-y-auto">
+        <DialogContent className="max-h-[90vh] sm:max-w-6xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit source</DialogTitle>
             <DialogDescription>Update this worker&apos;s source files.</DialogDescription>

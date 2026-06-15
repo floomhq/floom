@@ -905,7 +905,7 @@ function FilesEditorEdit({
         </CardContent>
       </Card>
 
-      <Card className="[border:var(--bd-card)] shadow-none bg-card">
+      <Card className="[border:var(--bd-card)] shadow-none bg-card min-w-0">
         <CardHeader className="py-2 px-4 [border-bottom:var(--bd-div)]">
           <div className="flex items-center justify-between gap-3">
             <CardTitle className="text-xs font-medium font-mono text-muted-foreground">
