@@ -1106,13 +1106,18 @@ def claim_slack_sender(
 
     # Welcome the newly bound user from Emily (best-effort; never block the claim).
     # Chief-of-staff persona; Slack mrkdwn uses single *asterisk* emphasis.
+    # #1372 — include 3 concrete example commands so users know what to ask.
     try:
         _post_slack_dm(
             slack_user_id=slack_user_id,
             team_id=team_id,
             text=(
                 "Hi, it's *Emily*, your chief of staff. We're connected. "
-                "Tell me what you want handled and I'll take it from here."
+                "Tell me what you want handled and I'll take it from here.\n\n"
+                "Try:\n"
+                "• _run my daily digest_\n"
+                "• _what ran today?_\n"
+                "• _approve the pending run_"
             ),
             bot_token=_slack_bot_token_for_team(team_id),
         )
