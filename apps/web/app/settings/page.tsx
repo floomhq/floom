@@ -819,7 +819,11 @@ function SystemSection({
           {info ? (
             <>
               <SystemInfoRow label="Version" value={info.version} mono />
-              <SystemInfoRow label="Started at" value={info.started_at} mono />
+              <SystemInfoRow
+                label="Started at"
+                value={formatSystemInfoTimestamp(info.started_at)}
+                title={info.started_at}
+              />
               <SystemInfoRow label="Python" value={info.python_version} mono />
               <SystemInfoRow label="Runner" value={info.runner} />
             </>
@@ -904,18 +908,37 @@ function SystemSection({
 function SystemInfoRow({
   label,
   value,
+  title,
   mono,
 }: {
   label: string;
   value: string;
+  title?: string;
   mono?: boolean;
 }) {
   return (
-    <div className="flex min-w-0 items-start justify-between gap-4 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-3">
-      <span className="text-muted-foreground">{label}</span>
-      <span className={`min-w-0 break-words text-right font-medium ${mono ? "font-mono" : ""}`}>{value}</span>
+    <div className="flex min-w-0 items-start justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-3">
+      <span className="shrink-0 text-muted-foreground">{label}</span>
+      <span
+        className={`min-w-0 break-words text-right font-medium ${mono ? "font-mono" : ""}`}
+        title={title}
+      >
+        {value}
+      </span>
     </div>
   );
+}
+
+function formatSystemInfoTimestamp(value: string): string {
+  const date = new Date(value);
+  if (Number.isNaN(date.getTime())) return value;
+  return date.toLocaleString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: "numeric",
+    hour: "2-digit",
+    minute: "2-digit",
+  });
 }
 
 const MCP_INSTALL_SNIPPET = `{
@@ -963,7 +986,7 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
           Copy
         </Button>
       </div>
-      <pre className="overflow-auto rounded-[var(--radius-button)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]">
+      <pre className="max-w-full overflow-x-auto whitespace-pre-wrap break-words rounded-[var(--radius-button)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)] [overflow-wrap:anywhere] sm:whitespace-pre sm:break-normal">
         {value}
       </pre>
     </div>
@@ -973,7 +996,7 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
 function DeveloperSection() {
   return (
     <Tabs defaultValue="api">
-      <TabsList>
+      <TabsList className="max-w-full justify-start overflow-x-auto">
         <TabsTrigger value="api">API</TabsTrigger>
         <TabsTrigger value="mcp">MCP</TabsTrigger>
         <TabsTrigger value="cli">CLI</TabsTrigger>

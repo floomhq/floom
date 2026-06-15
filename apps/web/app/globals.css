@@ -752,9 +752,9 @@ html.dark .grain {
 /* tag bar — small chips, single scrollable row, families divided */
 /* Wrapper provides the right-edge fade mask (spec §3: "fades out at right edge, no hard cut"). */
 .c-tagbar-wrap { position:relative; overflow:hidden; }
-.c-tagbar-wrap::after { content:''; position:absolute; top:0; right:0; bottom:0; width:40px; pointer-events:none; background:linear-gradient(to right, transparent, var(--bg-app)); }
-.dark .c-tagbar-wrap::after { background:linear-gradient(to right, transparent, var(--bg-app)); }
-.c-tagbar { display:flex; flex-wrap:nowrap; gap:10px; align-items:center; overflow-x:auto; scrollbar-width:none; }
+.c-tagbar-wrap::after { content:''; position:absolute; top:0; right:0; bottom:0; width:56px; pointer-events:none; background:linear-gradient(to right, transparent, color-mix(in srgb, var(--bg-app) 72%, transparent), var(--bg-app)); }
+.dark .c-tagbar-wrap::after { background:linear-gradient(to right, transparent, color-mix(in srgb, var(--bg-app) 72%, transparent), var(--bg-app)); }
+.c-tagbar { display:flex; flex-wrap:nowrap; gap:10px; align-items:center; overflow-x:auto; padding-right:48px; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
 .c-tagbar::-webkit-scrollbar { height:0; display:none; }
 .c-tgroup { display:flex; gap:5px; align-items:center; flex:0 0 auto; }
 .c-tgroup + .c-tgroup { padding-left:10px; border-left:var(--bd-div); }
@@ -847,13 +847,17 @@ html.dark .grain {
 .c-dh-main { flex:1 1 auto; min-width:0; overflow:hidden; }
 .c-dh-title { display:flex; align-items:center; gap:8px; min-width:0; }
 /* Title: 15px for 56px header so title+sub both fit at 56px height */
-.c-dh-title .nm { display:block; min-width:0; max-width:100%; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
+.c-dh-title .nm { display:block; flex:1 1 auto; min-width:0; width:100%; max-width:100%; font-size:15px; font-weight:600; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; color:var(--ink); }
 /* Sub: badge row sits under title — 2px gap is tighter than 3px to fit 56px header */
 .c-dh-sub { color:var(--muted-foreground); font-size:12px; margin-top:2px; display:flex; align-items:center; gap:6px; min-width:0; max-width:100%; overflow:hidden; flex-wrap:nowrap; }
 .c-dh-sub .c-dh-desc { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .c-dh-act { display:flex; gap:7px; align-items:center; flex:0 0 auto; min-width:0; }
 .c-vpill { display:inline-flex; align-items:center; gap:5px; border:var(--bd-pill); border-radius:var(--radius-pill); font-size:10.5px; padding:2px 8px; color:var(--muted-foreground); background:var(--bg-2); white-space:nowrap; flex:0 0 auto; }
-.c-dtabs { display:flex; gap:2px; padding:7px 16px; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; }
+.c-dtabs-wrap { position:relative; flex:0 0 auto; overflow:hidden; border-bottom:var(--bd-div); }
+.c-dtabs-wrap::after { content:''; position:absolute; top:0; right:0; bottom:0; width:48px; pointer-events:none; background:linear-gradient(to right, transparent, color-mix(in srgb, var(--bg-card) 72%, transparent), var(--bg-card)); }
+.dark .c-dtabs-wrap::after { background:linear-gradient(to right, transparent, color-mix(in srgb, var(--bg-card) 72%, transparent), var(--bg-card)); }
+.c-dtabs { display:flex; gap:2px; padding:7px 16px; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+.c-dtabs-wrap .c-dtabs { border-bottom:0; padding-right:52px; }
 .c-dtabs::-webkit-scrollbar { height:0; display:none; }
 .c-source-file-tabs { min-width:0; max-width:100%; flex:1 1 auto; flex-wrap:nowrap; }
 .c-dtab { display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border-radius:9px; color:var(--muted-foreground); font-size:13px; white-space:nowrap; }
