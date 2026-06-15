@@ -66,7 +66,11 @@ _OOM_MARKERS = (
 _active_sandboxes: dict[str, Any] = {}
 _active_sandboxes_lock = threading.Lock()
 _DEFAULT_E2B_DENY_OUT = (
-    "0.0.0.0/8",
+    # NOTE: "0.0.0.0/8" intentionally omitted — E2B's network-policy API rejects it
+    # ("400: invalid denied CIDR 0.0.0.0/8"), which kills sandbox creation for any
+    # egress worker (e.g. worker-author). It's the non-routable "this network"
+    # reserved range (RFC 1122), not a real SSRF target, so the loss is negligible;
+    # the actual private/link-local/metadata ranges below still block SSRF.
     "10.0.0.0/8",
     "100.64.0.0/10",
     "127.0.0.0/8",
@@ -96,6 +100,13 @@ _WORKER_AUTHOR_PROVIDER_ENV_VARS = (
     "ANTHROPIC_API_KEY",
     "PLATFORM_OPENAI_API_KEY",
     "OPENAI_API_KEY",
+    # worker-author smoke-tests the worker it generates in a NESTED E2B sandbox,
+    # which reads the E2B key from *this* sandbox's env. Without it the nested run
+    # fails with "Invalid API key format". Normal workers never self-test, so they
+    # never needed E2B creds inside the sandbox — only worker-author does.
+    "E2B_API_KEY",
+    "E2B_API_KEY_FALLBACK",
+    "E2B_API_KEYS",
 )
 
 # #977: internal vars the WORKER process must never see. The worker-author
@@ -188,20 +199,47 @@ def _worker_network_caps(config: WorkerConfig | None) -> tuple[bool, list[str], 
 
 
 def _e2b_network_policy(config: WorkerConfig | None, *, api_url: str | None = None) -> dict[str, Any]:
-    egress, declared_allow, declared_deny = _worker_network_caps(config)
-    deny_out = list(dict.fromkeys([*_DEFAULT_E2B_DENY_OUT, *_csv_env("WORKEROS_E2B_DENY_OUT"), *declared_deny]))
-    allow_out = list(dict.fromkeys([*_platform_egress_hosts(api_url), *declared_allow]))
-    strict_public = (os.environ.get("WORKEROS_E2B_RESTRICT_EGRESS") or "").strip().lower() in {
-        "1",
-        "true",
-        "yes",
-        "on",
-    }
-    return {
-        "allow_public_traffic": bool(egress and not strict_public),
-        "allow_out": allow_out,
-        "deny_out": deny_out,
-    }
+    """Build the E2B sandbox network policy.
+
+    E2B egress model, verified against the e2b SDK *and* a live API probe:
+      * ``deny_out`` accepts IP CIDRs ONLY. Domains, the non-routable "0.0.0.0/8"
+        range, and the "ALL_TRAFFIC" sentinel are ALL rejected with
+        ``400: invalid denied CIDR ...``.
+      * A DOMAIN in ``allow_out`` forces allowlist mode, which then demands
+        "ALL_TRAFFIC" in ``deny_out`` — but that's rejected too, so a domain
+        allowlist is simply unusable on this API version.
+
+    The probe showed exactly one shape E2B accepts for an egress worker: allow all
+    public traffic and only BLOCK the private/internal ranges (SSRF protection).
+    Public platform endpoints (OpenAI / Anthropic / Bedrock / Composio / the API
+    host) need no explicit allow entry — they're public, so default-allow reaches
+    them. (The previous code sent platform *domains* in ``allow_out``, which is what
+    broke every egress worker, e.g. worker-author.)
+    """
+    _egress, declared_allow, declared_deny = _worker_network_caps(config)
+
+    import ipaddress as _ipaddress
+
+    def _is_ip_cidr(value: str) -> bool:
+        try:
+            _ipaddress.ip_network(value, strict=False)
+            return True
+        except ValueError:
+            return False
+
+    deny_candidates = dict.fromkeys(
+        [*_DEFAULT_E2B_DENY_OUT, *_csv_env("WORKEROS_E2B_DENY_OUT"), *declared_deny]
+    )
+    deny_out = [d for d in deny_candidates if _is_ip_cidr(d)]
+    # Only IP/CIDR allow-overrides are safe; a domain allow entry would trip the
+    # allowlist mode E2B can't satisfy, so domains in declared allow_out are dropped
+    # (default-allow already reaches public hosts).
+    allow_out = [a for a in dict.fromkeys(declared_allow) if _is_ip_cidr(a)]
+
+    policy: dict[str, Any] = {"allow_public_traffic": True, "deny_out": deny_out}
+    if allow_out:
+        policy["allow_out"] = allow_out
+    return policy
 
 
 def _split_env_values(raw_value: str | None) -> list[str]:
