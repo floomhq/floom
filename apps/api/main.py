@@ -65,8 +65,14 @@ from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from dotenv import load_dotenv
 
 # #997 security: never auto-load a cwd .env outside explicit dev mode. Production
-# supplies env via the orchestrator, and fixed api.env loading remains below.
-if os.environ.get("WORKEROS_DEV") == "1":
+# supplies env via the orchestrator (WORKEROS_DEPLOY != local); fixed api.env
+# loading remains below. LOCAL deploy (the default) IS dev mode, so load the cwd
+# .env there too — otherwise `python main.py` / scripts/dev.* get no FLOOM_DB and
+# no provider creds, and auth collapses EVERY session to the 'federico' dev
+# default (db/__init__ + auth/dependency._is_local_dev_mode both key off FLOOM_DB).
+if os.environ.get("WORKEROS_DEV") == "1" or (
+    os.environ.get("WORKEROS_DEPLOY") or "local"
+).strip().lower() == "local":
     load_dotenv()
 
 from auth import AuthContext, get_auth_context, get_auth_provider
