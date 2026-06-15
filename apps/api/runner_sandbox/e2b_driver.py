@@ -1207,6 +1207,29 @@ class E2BSandboxDriver(SandboxDriver):
                     )
                 log_fn("[e2b] npm install complete", "info")
 
+            # Bedrock via litellm needs boto3, which the sandbox image doesn't ship.
+            # Only the platform-privileged worker-author runs an LLM call *inside*
+            # the sandbox (normal agent workers proxy LLM through the host, and the
+            # host venv already has boto3). Install it just for that case + Bedrock,
+            # so `litellm.APIConnectionError: No module named 'boto3'` can't bite.
+            _author_model = _worker_author_env.get("WORKEROS_CODEGEN_MODEL", "")
+            if "bedrock" in _author_model.lower():
+                log_fn("[e2b] Installing boto3 (Bedrock runtime dep)...", "info")
+                _boto_res = sandbox.commands.run(
+                    "pip install -q boto3",
+                    timeout=install_timeout,
+                )
+                if _boto_res.exit_code != 0:
+                    err = (
+                        f"boto3 install failed (exit {_boto_res.exit_code}): "
+                        f"{(_boto_res.stderr or '')[:300]}"
+                    )
+                    log_fn(f"[e2b] {err}", "error")
+                    return WorkerResult(
+                        status="error", error=err, error_code="install_failed"
+                    )
+                log_fn("[e2b] boto3 installed", "info")
+
             _refresh_sandbox_lifetime(
                 sandbox,
                 timeout=sandbox_timeout,
