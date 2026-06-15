@@ -111,13 +111,67 @@ class TestDefaultModel:
 
 
 class TestTimeoutCeiling:
-    def test_workspace_timeout_is_a_ceiling(self):
+    def test_resolve_timeout_seconds_uses_workspace_when_set(self):
+        """#1127/#1314: workspace default_timeout_seconds overrides per-worker limit upward."""
+        import runner_sandbox.agent_driver as ad
+        import types
+
+        # Simulate limits with per-worker default of 300 s
+        limits = types.SimpleNamespace(timeout_seconds=300)
+
+        # Workspace sets 3600 s → _resolve_timeout_seconds should return 3600
+        ad._ws_setting = lambda key: "3600" if key == "default_timeout_seconds" else None
+        assert ad._resolve_timeout_seconds(300, limits) == 3600
+
+    def test_resolve_timeout_seconds_uses_per_worker_when_ws_unset(self):
+        """#1127/#1314: without a workspace setting, per-worker limit applies."""
+        import runner_sandbox.agent_driver as ad
+        import types
+
+        limits = types.SimpleNamespace(timeout_seconds=300)
+        ad._ws_setting = lambda key: None
+        assert ad._resolve_timeout_seconds(300, limits) == 300
+
+    def test_resolve_timeout_seconds_never_exceeds_3600(self):
+        """#1127/#1314: absolute ceiling is MAX_RUN_TIMEOUT_SECONDS (3600)."""
+        import runner_sandbox.agent_driver as ad
+        import types
+
+        limits = types.SimpleNamespace(timeout_seconds=300)
+        # Even if somehow a larger value slipped in, cap at 3600
+        ad._ws_setting = lambda key: "9999" if key == "default_timeout_seconds" else None
+        assert ad._resolve_timeout_seconds(300, limits) == 3600
+
+    def test_workspace_setting_rejects_3601(self):
+        """#1127/#1314: validate_default_timeout_seconds rejects values > 3600."""
+        import pytest
+        from runtime_limits import validate_default_timeout_seconds
+
+        with pytest.raises(ValueError, match="3600"):
+            validate_default_timeout_seconds(3601)
+
+    def test_workspace_setting_accepts_3600(self):
+        """#1127/#1314: validate_default_timeout_seconds accepts 3600 exactly."""
+        from runtime_limits import validate_default_timeout_seconds
+
+        assert validate_default_timeout_seconds(3600) == 3600
+
+    def test_workspace_setting_rejects_zero(self):
+        """#1127/#1314: validate_default_timeout_seconds rejects non-positive values."""
+        import pytest
+        from runtime_limits import validate_default_timeout_seconds
+
+        with pytest.raises(ValueError, match="positive"):
+            validate_default_timeout_seconds(0)
+
+    def test_workspace_timeout_in_source(self):
+        """Verify _resolve_timeout_seconds function and ws lookup are in source."""
         import inspect
         import runner_sandbox.agent_driver as ad
 
         src = inspect.getsource(ad)
         assert '_ws_default_int("default_timeout_seconds")' in src
-        assert "timeout_seconds = min(timeout_seconds, _ws_timeout)" in src
+        assert "_resolve_timeout_seconds" in src
 
 
 class TestWorkspaceSpendCap:

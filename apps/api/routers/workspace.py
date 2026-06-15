@@ -1050,6 +1050,15 @@ def put_workspace_setting(
     _require_workspace_write(auth)
     if not key or len(key) > 64:
         raise HTTPException(status_code=422, detail="invalid setting key")
+    # #1127/#1314: validate default_timeout_seconds on write so the DB never
+    # holds an out-of-range value that silently breaks run dispatch.
+    if key == "default_timeout_seconds":
+        from runtime_limits import validate_default_timeout_seconds
+
+        try:
+            validate_default_timeout_seconds(int(float(body.value)))
+        except (ValueError, TypeError) as exc:
+            raise HTTPException(status_code=422, detail=str(exc))
     ws = _active_workspace_id(request)
     with get_db() as conn:
         conn.execute(
