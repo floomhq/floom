@@ -91,18 +91,44 @@ function OutputTab({ r }: { r: RunSummary }) {
 
 // SPEC §4 Trace: steps + logs. Transcript carries no per-step timestamps (no
 // structured field), so durations come from the run-level timeline, not faked.
+
+/** #1275: read token count from every location the backend might put it. */
+function resolveTokenCount(d: import("@/lib/types").RunDetail): number | null {
+  if (d.total_tokens != null) return d.total_tokens;
+  // Some workers surface usage in the output object under common key names.
+  const out = d.output ?? {};
+  for (const key of ["total_tokens", "tokens", "token_count"]) {
+    const v = out[key];
+    if (typeof v === "number") return v;
+  }
+  // Nested usage object (e.g. { usage: { total_tokens: N } })
+  const usage = out["usage"];
+  if (usage && typeof usage === "object" && !Array.isArray(usage)) {
+    const u = usage as Record<string, unknown>;
+    const t = u["total_tokens"] ?? u["tokens"];
+    if (typeof t === "number") return t;
+    const i = typeof u["input_tokens"] === "number" ? (u["input_tokens"] as number) : 0;
+    const o = typeof u["output_tokens"] === "number" ? (u["output_tokens"] as number) : 0;
+    if (i + o > 0) return i + o;
+  }
+  return null;
+}
+
 function TraceTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id);
   if (!d) return <LoadingState rows={4} />;
   const steps = traceSteps(d.transcript);
   const logs = d.logs ?? [];
+  const tokenCount = resolveTokenCount(d);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={kv}>
         <span style={kvK}>Duration</span>
         <span>{formatDuration(d.duration_ms)}</span>
         <span style={kvK}>Tokens</span>
-        <span style={{ fontFamily: "var(--font-mono)" }}>{d.total_tokens ?? "—"}</span>
+        <span style={{ fontFamily: "var(--font-mono)" }}>
+          {tokenCount != null ? tokenCount.toLocaleString() : "—"}
+        </span>
       </div>
       <div>
         <h4 style={h4}>Steps</h4>
@@ -409,11 +435,15 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
             >
               Share
             </button>
+            {/* #1274: confirm before replaying — avoids accidental duplicate runs. */}
             <button
               type="button"
               className="c-vpill"
               style={{ padding: "6px 11px" }}
-              onClick={() => void replay(r)}
+              onClick={() => {
+                if (!window.confirm("Re-run this worker with the same inputs?")) return;
+                void replay(r);
+              }}
             >
               Replay
             </button>
