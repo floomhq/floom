@@ -19,6 +19,10 @@ data/artifacts/*
 !data/artifacts/.gitkeep
 data/blobs/
 data/run-bundles/
+# The API runs from apps/api/, so its local SQLite DB + run bundles live at
+# apps/api/data/ — the repo-root data/ rules above don't reach it. This dir
+# holds OAuth tokens, secrets, sessions and PATs; never commit it.
+apps/api/data/
 contexts/*
 !contexts/.gitkeep
 # worker-author-style is a platform-managed context (seeded at install)
