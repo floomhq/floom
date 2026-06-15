@@ -40,7 +40,14 @@ export interface ChatStreamState {
   loadConversation: (id: string) => void;
 }
 
-export function useChatStream(): ChatStreamState {
+/**
+ * @param options.ephemeral When true the conversation is NOT persisted to the
+ *   shared localStorage key and is NOT rehydrated on mount. Used by the
+ *   create-worker flow (#1141): a create-mode chat must not bleed into the
+ *   Overview Emily dock, which rehydrates from that same shared key on mount.
+ */
+export function useChatStream(options?: { ephemeral?: boolean }): ChatStreamState {
+  const ephemeral = options?.ephemeral ?? false;
   const [messages, setMessages] = useState<ChatMessage[]>([]);
   const [conversationId, setConversationId] = useState<string | null>(null);
   const [isStreaming, setIsStreaming] = useState(false);
@@ -51,15 +58,17 @@ export function useChatStream(): ChatStreamState {
   // Keep localStorage in sync whenever the active conversation id changes so the
   // id survives modal close/open, fullscreen toggle, navigation, and reload.
   useEffect(() => {
+    if (ephemeral) return;
     if (conversationId) {
       writeStoredConversationId(conversationId);
     }
-  }, [conversationId]);
+  }, [conversationId, ephemeral]);
 
   // On mount: if a conversation id was persisted, fetch it from the server and
   // rehydrate messages + tool cards into the live stream shape. This is what
   // makes the dock/full-page survive unmount and a browser reload.
   useEffect(() => {
+    if (ephemeral) return;
     const storedId = readStoredConversationId();
     if (!storedId) return;
 
@@ -84,12 +93,13 @@ export function useChatStream(): ChatStreamState {
     return () => {
       cancelled = true;
     };
-  }, []);
+  }, [ephemeral]);
 
   // Cross-tab / cross-instance sync: if another mounted instance (e.g. the dock
   // while another chat surface is open, or a second tab) starts a new session or
   // switches conversation, mirror it here.
   useEffect(() => {
+    if (ephemeral) return;
     function onStorage(e: StorageEvent) {
       if (e.key !== CONVERSATION_STORAGE_KEY) return;
       const next = e.newValue;
@@ -113,7 +123,7 @@ export function useChatStream(): ChatStreamState {
     }
     window.addEventListener("storage", onStorage);
     return () => window.removeEventListener("storage", onStorage);
-  }, [conversationId]);
+  }, [conversationId, ephemeral]);
 
   // Abort any in-flight stream on unmount
   useEffect(() => {
@@ -242,7 +252,7 @@ export function useChatStream(): ChatStreamState {
           const hydrated = rehydrateConversation(detail);
           setMessages(hydrated);
           setConversationId(id);
-          writeStoredConversationId(id);
+          if (!ephemeral) writeStoredConversationId(id);
         } catch {
           setError("Could not load that conversation.");
         } finally {
@@ -250,7 +260,7 @@ export function useChatStream(): ChatStreamState {
         }
       })();
     },
-    [conversationId],
+    [conversationId, ephemeral],
   );
 
   const sendMessage = useCallback(
