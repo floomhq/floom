@@ -792,6 +792,12 @@ html.dark .grain {
 .c-cell.m { color:var(--muted-foreground); }
 .c-menu { color:var(--muted-foreground); text-align:right; }
 .c-daygrp .dh { display:flex; align-items:center; padding:16px 4px 8px; font-size:11px; text-transform:uppercase; letter-spacing:.05em; color:var(--muted-foreground); font-weight:600; }
+/* #1225: day-grouped list is a variant of the shared Collection grammar — it
+   carries the same column-header row as the flat list. The header bar gets the
+   same list-table border/radius so it reads as the head of the list, and the
+   first day group's label tucks under it without a doubled top gap. */
+.c-grouped > .c-lhead { border:var(--bd-list); border-radius:var(--radius-card) var(--radius-card) 0 0; }
+.c-grouped > .c-daygrp:first-of-type .dh { padding-top:12px; }
 
 /* status pill — outlined/tinted + leading dot (SPEC §2a). D-08: subtle pill —
    smaller font + tighter padding so "ok" / "missing secret" read as a quiet
