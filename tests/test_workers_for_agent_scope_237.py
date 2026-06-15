@@ -248,3 +248,75 @@ def test_get_for_agent_returns_own_workspace_worker():
         )
     assert result is not None
     assert result["id"] == OWN_WORKER
+
+
+# --- #224: dashboard list() must AGREE with Emily list_for_agent() ---
+# Example/stock workers belonging to another workspace must not surface in the
+# cloud dashboard worker list (the old "6 examples counted as own + cross-tenant"
+# bug) while Emily showed 0. Both surfaces now route through the same
+# workspace-scoped repo, so they must return the identical id set.
+
+EXAMPLE_WORKER = "example-foreign-worker"
+EXAMPLE_SKILL = "sv_example"
+
+
+def _client_with_foreign_example() -> _FakeClient:
+    client = _two_tenant_client()
+    now_iso = _now_iso()
+    client.rows_by_table["workers"].append(
+        {
+            "id": EXAMPLE_WORKER,
+            "user_id": FOREIGN_USER,
+            "workspace_id": FOREIGN_WS,
+            "skill_version_id": EXAMPLE_SKILL,
+            "name": "Starter Example Worker",
+            "trigger_type": "manual",
+            "visibility": "private",
+            "is_example": True,
+            "grants_json": {},
+            "input_values_json": {},
+            "triggers_json": [],
+            "enabled": True,
+            "created_at": now_iso,
+        }
+    )
+    client.rows_by_table["skill_versions"].append(
+        {
+            "id": EXAMPLE_SKILL,
+            "user_id": FOREIGN_USER,
+            "name": EXAMPLE_WORKER,
+            "version": "0.1.0",
+            "manifest_json": _manifest(EXAMPLE_WORKER, "Starter Example Worker"),
+            "bundle_path": f"workers/{EXAMPLE_WORKER}",
+            "created_at": now_iso,
+        }
+    )
+    return client
+
+
+def test_dashboard_list_excludes_foreign_example_worker():
+    client = _client_with_foreign_example()
+    with active_workspace(CALLER_WS, "member"):
+        rows = SupabaseWorkerRepository(client=client).list(
+            user_id=CALLER_USER, role="member"
+        )
+    ids = {row["id"] for row in rows}
+    assert OWN_WORKER in ids  # the caller's real worker still shows
+    assert EXAMPLE_WORKER not in ids  # foreign example is NOT counted as own
+    assert FOREIGN_WORKER not in ids
+
+
+def test_dashboard_list_agrees_with_emily_list_for_agent():
+    # The #224 symptom was dashboard(6) vs Emily(0). Both must now match.
+    client = _client_with_foreign_example()
+    with active_workspace(CALLER_WS, "member"):
+        repo = SupabaseWorkerRepository(client=client)
+        dashboard_ids = {row["id"] for row in repo.list(user_id=CALLER_USER, role="member")}
+    client2 = _client_with_foreign_example()
+    with active_workspace(CALLER_WS, "member"):
+        emily_ids = {
+            row["id"]
+            for row in SupabaseWorkerRepository(client=client2).list_for_agent(user_id=CALLER_USER)
+        }
+    assert dashboard_ids == emily_ids
+    assert EXAMPLE_WORKER not in dashboard_ids

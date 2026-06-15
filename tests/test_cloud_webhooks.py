@@ -107,3 +107,150 @@ def test_supabase_webhook_secret_hash_matches_engine_str_contract():
     )
 
     assert repo.get_webhook_secret_hash(worker_id="worker-1") == stored.hex()
+
+
+# ---------------------------------------------------------------------------
+# #277 — SupabaseWebhookDeliveryStore: durable + atomic inbound-webhook dedup.
+# claim() returns True the first time a (source, delivery_id) is seen (process)
+# and False on a redelivery (drop), backed by the composite-PK table instead of
+# the engine's ephemeral SQLite. Fails OPEN (True) on a missing table / transient
+# DB error so a Supabase hiccup never silently drops a legit webhook.
+# ---------------------------------------------------------------------------
+
+from apps.api.cloud_webhooks import SupabaseWebhookDeliveryStore
+
+
+class _Resp:
+    def __init__(self, data):
+        self.data = data
+
+
+class _FakePKTable:
+    """Models a table with a composite PK on (source, delivery_id)."""
+
+    def __init__(self, rows):
+        self.rows = rows
+        self._op = None
+        self._values = None
+        self._eq = []
+        self._lte = []
+
+    def insert(self, values):
+        self._op, self._values = "insert", values
+        return self
+
+    def delete(self):
+        self._op = "delete"
+        return self
+
+    def select(self, *_a, **_k):
+        self._op = "select"
+        return self
+
+    def eq(self, key, value):
+        self._eq.append((key, value))
+        return self
+
+    def lte(self, key, value):
+        self._lte.append((key, value))
+        return self
+
+    def limit(self, _n):
+        return self
+
+    def _key(self, row):
+        return (row["source"], row["delivery_id"])
+
+    def execute(self):
+        if self._op == "insert":
+            if any(self._key(r) == self._key(self._values) for r in self.rows):
+                raise Exception("duplicate key value violates unique constraint \"webhook_delivery_receipts_pkey\"")
+            self.rows.append(dict(self._values))
+            return _Resp([dict(self._values)])
+        if self._op == "delete":
+            keep = []
+            for r in self.rows:
+                eq_ok = all(r.get(k) == v for k, v in self._eq)
+                lte_ok = all(str(r.get(k)) <= v for k, v in self._lte)
+                if not (eq_ok and lte_ok):
+                    keep.append(r)
+            removed = len(self.rows) - len(keep)
+            self.rows[:] = keep
+            return _Resp([None] * removed)
+        # select
+        matched = [r for r in self.rows if all(r.get(k) == v for k, v in self._eq)]
+        return _Resp(matched[:1])
+
+
+class _FakeClient:
+    def __init__(self, rows=None):
+        self.rows = rows if rows is not None else []
+
+    def table(self, _name):
+        return _FakePKTable(self.rows)
+
+
+class _RaisingClient:
+    """insert() raises a non-conflict, non-missing-table error; select() is clean
+    and returns no existing row -> store must fail OPEN (process, no dedup)."""
+
+    def __init__(self):
+        self.rows = []
+
+    def table(self, _name):
+        return _RaisingTable()
+
+
+class _RaisingTable(_FakePKTable):
+    def __init__(self):
+        super().__init__([])
+
+    def execute(self):
+        if self._op == "insert":
+            raise Exception("connection reset by peer")
+        if self._op == "select":
+            return _Resp([])  # no existing receipt
+        return _Resp([])
+
+
+class _MissingTableClient:
+    def table(self, _name):
+        return _MissingTable()
+
+
+class _MissingTable(_FakePKTable):
+    def __init__(self):
+        super().__init__([])
+
+    def execute(self):
+        raise Exception('relation "webhook_delivery_receipts" does not exist')
+
+
+def test_delivery_store_first_seen_then_duplicate():
+    store = SupabaseWebhookDeliveryStore(client=_FakeClient())
+    assert store.claim("webhook:worker-1", "evt-1") is True   # first -> process
+    assert store.claim("webhook:worker-1", "evt-1") is False  # redelivery -> drop
+
+
+def test_delivery_store_distinct_ids_both_processed():
+    store = SupabaseWebhookDeliveryStore(client=_FakeClient())
+    assert store.claim("webhook:worker-1", "evt-1") is True
+    assert store.claim("webhook:worker-1", "evt-2") is True
+
+
+def test_delivery_store_same_id_distinct_sources_both_processed():
+    store = SupabaseWebhookDeliveryStore(client=_FakeClient())
+    assert store.claim("webhook:worker-1", "dup") is True
+    assert store.claim("composio:worker-1", "dup") is True
+
+
+def test_delivery_store_fails_open_when_table_missing():
+    store = SupabaseWebhookDeliveryStore(client=_MissingTableClient())
+    # Missing table must NOT drop the webhook (#277 part A): process it.
+    assert store.claim("webhook:worker-1", "evt-1") is True
+
+
+def test_delivery_store_fails_open_on_transient_error():
+    store = SupabaseWebhookDeliveryStore(client=_RaisingClient())
+    # Transient DB error with no recorded receipt -> process, do not drop.
+    assert store.claim("webhook:worker-1", "evt-1") is True
