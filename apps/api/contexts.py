@@ -310,6 +310,12 @@ def normalize_context_file_path(raw_path: str) -> str:
     lowered = (raw_path or "").lower()
     if "%2f" in lowered or "%5c" in lowered:
         raise ValueError(f"invalid context file path: {raw_path!r}")
+    # #1077 — reject NUL and other ASCII control characters. A %00 in the URL
+    # decodes to a literal null byte that later reached Path.is_file()/lstat and
+    # raised an uncaught "embedded null character in path" (raw OS error -> 500).
+    # Reject it here so every context-file route returns a clean 400 instead.
+    if any(ord(ch) < 0x20 for ch in (raw_path or "")):
+        raise ValueError(f"invalid context file path: {raw_path!r}")
     text = (raw_path or "").replace("\\", "/").strip("/")
     path = PurePosixPath(text)
     if not text or str(path) == ".":

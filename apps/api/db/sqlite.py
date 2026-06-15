@@ -1844,6 +1844,38 @@ class SqliteRunRepository:
         run = self.get(user_id=user_id, run_id=run_id)
         if run is None:
             raise ValueError(f"run {run_id} not found for {user_id}")
+        # #1074 — persistence-boundary honesty guard. Every status write funnels
+        # through here, so this is the one place that can keep the persisted
+        # (status, error, output) triple self-consistent for ALL drivers and for
+        # OSS/local + cloud alike. A COMPLETED run must never carry an error:
+        #   - If a runner error leaked through to a COMPLETED finalize (error
+        #     passed now OR already stored on the row), that "success" is really a
+        #     failure. Coerce to FAILED, keep the error, and drop any output — a
+        #     failed run has no real result, and the smoke/gate harness must not
+        #     leave its output_json (e.g. {"result":"HELLO WORLD"}) on the run.
+        #   - Otherwise the completion is genuine, but an earlier write may have
+        #     left a stale error column behind (update() only writes non-None
+        #     fields, so a None error never clears it). Explicitly NULL it so the
+        #     completed row is honest.
+        clear_error_on_complete = False
+        drop_output_on_failure = False
+        if status == RunStatus.COMPLETED.value:
+            effective_error = error if error is not None else run.get("error")
+            effective_error_code = (
+                error_code if error_code is not None else run.get("error_code")
+            )
+            if (effective_error and str(effective_error).strip()) or (
+                effective_error_code and str(effective_error_code).strip()
+            ):
+                status = RunStatus.FAILED.value
+                error = effective_error
+                error_code = effective_error_code
+                # Wipe any output (leaked smoke/gate result OR a stale one already
+                # on the row) — a failed run has no real result.
+                output_json = None
+                drop_output_on_failure = True
+            else:
+                clear_error_on_complete = True
         if status == RunStatus.FAILED.value:
             error, error_code = _normalize_failed_error_fields(
                 run_id=run_id,
@@ -1859,6 +1891,15 @@ class SqliteRunRepository:
             updates["error"] = error
         if error_code is not None:
             updates["error_code"] = error_code
+        if clear_error_on_complete:
+            # Genuine completion: NULL any stale error/error_code so a COMPLETED
+            # run never carries a contradictory error (#1074).
+            updates["error"] = None
+            updates["error_code"] = None
+        if drop_output_on_failure:
+            # #1074: explicitly NULL the stored output so a coerced-failed run
+            # does not keep leaked smoke/gate output (update() skips None args).
+            updates["output_json"] = None
         if status == RunStatus.RUNNING.value:
             updates["started_at"] = now_iso()
         # PENDING_APPROVAL marks the END of execution: the worker ran, emitted a
