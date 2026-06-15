@@ -167,5 +167,10 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
 }
 
 export const config = {
-  matcher: ["/", "/((?!_next/static|_next/image|favicon.ico|approvals/review).*)"],
+  // #305: do NOT exclude approvals/review from the matcher — it bypassed the
+  // middleware entirely, so the public approval review page got none of the
+  // per-request nonce CSP / X-Frame-Options / noindex / no-store headers.
+  // isPublicPath() already returns true for /approvals/review, so running the
+  // middleware adds the headers WITHOUT auth-gating the public page.
+  matcher: ["/", "/((?!_next/static|_next/image|favicon.ico).*)"],
 };
