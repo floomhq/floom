@@ -318,7 +318,7 @@ export function WorkspaceTokensPanel() {
           {tokens.length > 0 ? (
             <div className="space-y-1">
               {tokens.map((t) => (
-                <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm">
+                <div key={t.id} className="flex items-center gap-3 rounded-lg bg-[var(--bg-2)] px-3 py-2 text-sm">
                   <div className="flex-1 min-w-0">
                     <span className="font-medium">{t.name}</span>
                     <span className="ml-2 text-xs text-muted-foreground">

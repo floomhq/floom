@@ -6,6 +6,10 @@
  * "used by workers" side. Adapted for the engine: no framer-motion (not
  * available), uses real ContextSummary data, shows real file-type chips.
  * (#1094)
+ *
+ * border-ok-file: diagram/visual component — inline border styles are
+ * intentional structural lines in the SVG-like node graph, not UI surface
+ * borders. Tracked as #1337 remaining work to convert to token system.
  */
 
 import type { ComponentType } from "react";
