@@ -39,54 +39,62 @@ function PATForm({ onConnected }: { onConnected: (username: string) => void }) {
         Connect a GitHub token so Floom can back up your workspace (workers, contexts, and instructions) to a private repo. Every save becomes a commit. Two steps:
       </p>
 
-      {/* Step 1 — generate a scoped token. The link pre-selects the exact
-          scope (repo) and pre-fills a name, so the user lands on GitHub's
-          token page with everything chosen and only has to click Generate. */}
-      <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/40 px-4 py-3.5 space-y-2.5">
-        <div className="flex items-start gap-2.5">
-          <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-foreground/10 text-[11px] font-semibold text-foreground">1</span>
-          <div className="space-y-1.5">
-            <p className="text-sm font-medium text-foreground">Create a token on GitHub</p>
-            <p className="text-xs text-muted-foreground">
-              The button below opens GitHub with the right scope already selected
-              (<code className="font-mono text-foreground">repo</code>, for private repos).
-              Pick an expiry, scroll down, and click <span className="font-medium text-foreground">Generate token</span>. Copy the value; it starts with <code className="font-mono text-foreground">ghp_</code> and is shown only once.
-            </p>
-            <a
-              href="https://github.com/settings/tokens/new?scopes=repo&description=Floom+Workspace"
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
-            >
-              Open GitHub token page <ExternalLink className="size-3" />
-            </a>
+      {/*
+        #1118 (A4 + A5): side-by-side layout so the step-1 instructions card
+        stretches to match the height of step-2 input (border extends to bottom).
+        On narrow viewports both steps stack vertically (flex-col sm:flex-row).
+      */}
+      <div className="flex flex-col sm:flex-row gap-4 items-stretch">
+        {/* Step 1 — generate a scoped token. The link pre-selects the exact
+            scope (repo) and pre-fills a name, so the user lands on GitHub's
+            token page with everything chosen and only has to click Generate. */}
+        <div className="flex-1 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/40 px-4 py-3.5 space-y-2.5">
+          <div className="flex items-start gap-2.5">
+            <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-foreground/10 text-[11px] font-semibold text-foreground">1</span>
+            <div className="space-y-1.5">
+              <p className="text-sm font-medium text-foreground">Create a token on GitHub</p>
+              <p className="text-xs text-muted-foreground">
+                The button below opens GitHub with the right scope already selected
+                (<code className="font-mono text-foreground">repo</code>, for private repos).
+                Pick an expiry, scroll down, and click <span className="font-medium text-foreground">Generate token</span>. Copy the value — it starts with <code className="font-mono text-foreground">ghp_</code> and is shown only once.
+              </p>
+              <a
+                href="https://github.com/settings/tokens/new?scopes=repo&description=Floom+Workspace"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-background px-2.5 py-1.5 text-xs font-medium text-foreground transition-colors hover:bg-muted"
+              >
+                Open GitHub token page <ExternalLink className="size-3" />
+              </a>
+            </div>
           </div>
         </div>
-      </div>
 
-      {/* Step 2 — paste it back. */}
-      <div className="space-y-2">
-        <div className="flex items-center gap-2.5">
-          <span className="grid size-5 shrink-0 place-items-center rounded-full bg-foreground/10 text-[11px] font-semibold text-foreground">2</span>
-          <p className="text-sm font-medium text-foreground">Paste the token here</p>
+        {/* Step 2 — paste it back. Wrapped in a matching bordered card so it
+            has the same visual weight as step 1 and the two cards align. */}
+        <div className="flex-1 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/40 px-4 py-3.5 space-y-3">
+          <div className="flex items-center gap-2.5">
+            <span className="grid size-5 shrink-0 place-items-center rounded-full bg-foreground/10 text-[11px] font-semibold text-foreground">2</span>
+            <p className="text-sm font-medium text-foreground">Paste the token here</p>
+          </div>
+          <div className="flex gap-2">
+            <Input
+              type="password"
+              placeholder="Paste ghp_… token"
+              value={pat}
+              onChange={(e) => setPat(e.target.value)}
+              onKeyDown={(e) => { if (e.key === "Enter") void handleConnect(); }}
+              className="font-mono text-sm"
+              aria-label="GitHub personal access token"
+            />
+            <Button onClick={() => void handleConnect()} disabled={!pat.trim() || loading} className="shrink-0">
+              {loading ? <Loader2 className="size-4 animate-spin" /> : "Connect"}
+            </Button>
+          </div>
+          <p className="text-xs text-muted-foreground">
+            Your token is stored encrypted and used only to push to the repo you choose next.
+          </p>
         </div>
-        <div className="flex gap-2 pl-[30px]">
-          <Input
-            type="password"
-            placeholder="Paste ghp_… token"
-            value={pat}
-            onChange={(e) => setPat(e.target.value)}
-            onKeyDown={(e) => { if (e.key === "Enter") void handleConnect(); }}
-            className="font-mono text-sm"
-            aria-label="GitHub personal access token"
-          />
-          <Button onClick={() => void handleConnect()} disabled={!pat.trim() || loading} className="shrink-0">
-            {loading ? <Loader2 className="size-4 animate-spin" /> : "Connect"}
-          </Button>
-        </div>
-        <p className="pl-[30px] text-xs text-muted-foreground">
-          Your token is stored encrypted and used only to push to the repo you choose next.
-        </p>
       </div>
     </div>
   );
