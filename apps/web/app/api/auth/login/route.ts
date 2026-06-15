@@ -112,7 +112,10 @@ export async function POST(req: NextRequest) {
   res.headers.set("cache-control", "private, no-store, max-age=0"); // #941
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    secure: true,
+    // Secure cookies are dropped by browsers over plain http, so local dev
+    // (http://localhost or a LAN IP) would set a cookie the browser discards →
+    // login loops back to /login. Only force Secure in production (HTTPS).
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
     maxAge: MAX_AGE_SECONDS,

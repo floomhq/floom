@@ -64,6 +64,18 @@ from fastapi.responses import PlainTextResponse
 from pydantic import BaseModel, ConfigDict, Field, ValidationError
 from dotenv import load_dotenv
 
+# Frictionless local first-run: load `.env` from the cwd in LOCAL mode (the
+# default) HERE — before any module below (contexts, worker_registry, auth)
+# resolves FLOOM_*_DIR / credentials at import time. A fresh `uvicorn main:app`
+# then Just Works: copy .env.example -> .env, add a key, run. No WORKEROS_DEV.
+# #997 security: NEVER auto-load a cwd .env in production — set WORKEROS_DEPLOY to
+# anything other than 'local' and a stale/attacker-dropped .env is ignored (prod
+# supplies env via the orchestrator). WORKEROS_DEV=1 forces the cwd load on.
+if os.environ.get("WORKEROS_DEV") == "1" or (
+    os.environ.get("WORKEROS_DEPLOY") or "local"
+).strip().lower() == "local":
+    load_dotenv()
+
 from auth import AuthContext, get_auth_context, get_auth_provider
 from auth.context import current_auth_context, current_auth_user_id, set_current_auth_context
 from auth.guards import _require_admin, _require_workspace_write
@@ -339,15 +351,11 @@ from run_service import (
 )
 from run_service import register_sse_publisher, register_part_publisher
 
-# #997: do NOT load a `.env` from the process cwd in production — a stale dev
-# .env (or one an attacker drops in the cwd) would silently inject config/
-# secrets. The explicit fixed-location loader below (WORKEROS_API_ENV_FILE /
-# ~/.config/workeros/api.env) is the supported path; production sets env vars
-# via the orchestrator. The cwd convenience load is gated to dev mode only.
-if os.environ.get("WORKEROS_DEV") == "1":
-    import sys as _sys
-    load_dotenv()
-    print("[workeros] WORKEROS_DEV=1: loaded .env from cwd (dev only)", file=_sys.stderr)
+# The cwd `.env` is loaded EARLY (top of this module, before any import that
+# resolves paths/credentials) in LOCAL mode — see the load_dotenv() block above.
+# #997: it is NEVER auto-loaded in production. The fixed-location loader below
+# (WORKEROS_API_ENV_FILE / ~/.config/workeros/api.env) is the supported production
+# path and runs in every mode; override=False so it never clobbers a set var.
 try:
     api_env_override = os.environ.get("WORKEROS_API_ENV_FILE") or os.environ.get("FLOOM_API_ENV_FILE")
     api_env_path = (

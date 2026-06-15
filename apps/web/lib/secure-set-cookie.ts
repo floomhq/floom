@@ -15,8 +15,11 @@ export function getSetCookies(upstream: Response): string[] {
   return single ? [single] : [];
 }
 
-/** Appends `; Secure` to any Set-Cookie value that does not already have it. */
+/** Appends `; Secure` to any Set-Cookie value that does not already have it.
+ * Skipped in non-production (plain-http local dev) so the browser stores the
+ * forwarded backend session cookie over http://localhost instead of dropping it. */
 export function withSecureFlag(setCookie: string): string {
+  if (process.env.NODE_ENV !== "production") return setCookie;
   if (/(^|;)\s*secure\s*(;|$)/i.test(setCookie)) return setCookie;
   return `${setCookie}; Secure`;
 }
