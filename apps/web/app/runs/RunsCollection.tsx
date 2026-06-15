@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import Papa from "papaparse";
@@ -159,28 +159,73 @@ const RUN_TAB_COMPONENT: Record<RunDetailTab, (props: { r: RunSummary }) => Reac
   Raw: RawTab,
 };
 
+const PAGE_SIZE = 50;
+
 export default function RunsCollection({ initialRuns }: { initialRuns: RunSummary[] }) {
   const [runs, setRuns] = useState<RunSummary[]>(initialRuns);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [loading, setLoading] = useState(initialRuns.length === 0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(initialRuns.length === 0); // unknown until first fetch
+  const [offset, setOffset] = useState(0);
   const [now] = useState(() => Date.now());
 
-  const refresh = async (initial = false) => {
+  // Initial load: fetch first page and set hasMore based on whether a full page was returned.
+  const loadInitial = useCallback(async () => {
     try {
-      const rows = await api.runs.list({ limit: 200 });
-      setRuns([...rows].sort((a, b) => runSortTime(b) - runSortTime(a)));
+      const rows = await api.runs.list({ limit: PAGE_SIZE, offset: 0 });
+      const sorted = [...rows].sort((a, b) => runSortTime(b) - runSortTime(a));
+      setRuns(sorted);
+      setOffset(PAGE_SIZE);
+      setHasMore(rows.length === PAGE_SIZE);
     } catch {
       // leave existing state intact on refresh errors
     } finally {
-      if (initial) setLoading(false);
+      setLoading(false);
+    }
+  }, []);
+
+  // Append the next page of runs (B37 — "Load more" pattern).
+  const loadMore = async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
+    try {
+      const rows = await api.runs.list({ limit: PAGE_SIZE, offset });
+      const sorted = [...rows].sort((a, b) => runSortTime(b) - runSortTime(a));
+      setRuns((prev) => {
+        // Deduplicate by id in case a new run appeared between pages.
+        const seen = new Set(prev.map((r) => r.id));
+        const novel = sorted.filter((r) => !seen.has(r.id));
+        return [...prev, ...novel].sort((a, b) => runSortTime(b) - runSortTime(a));
+      });
+      setOffset((o) => o + PAGE_SIZE);
+      setHasMore(rows.length === PAGE_SIZE);
+    } catch {
+      // leave existing rows intact
+    } finally {
+      setLoadingMore(false);
+    }
+  };
+
+  const refresh = async (initial = false) => {
+    if (initial) {
+      await loadInitial();
+    } else {
+      // Non-initial refresh re-fetches the current window size (keeps existing offset).
+      try {
+        const rows = await api.runs.list({ limit: Math.max(offset, PAGE_SIZE) });
+        setRuns([...rows].sort((a, b) => runSortTime(b) - runSortTime(a)));
+      } catch {
+        // leave existing state intact on refresh errors
+      }
     }
   };
 
   useEffect(() => {
-    void refresh(true);
+    void loadInitial();
     // Content tags are inherited from the parent worker (SPEC §11).
     api.workers.list().then(setWorkers).catch(() => {});
-  }, []);
+  }, [loadInitial]);
 
   // worker_id → its content tags, for tag filtering + the shared vocabulary.
   const workerTags = useMemo(() => {
@@ -387,6 +432,20 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     states: {
       empty: { title: "No runs yet", help: "Runs appear here when your workers execute." },
     },
+    // B37: "Load more" append footer — replaces numeric pagination.
+    footer: hasMore ? (
+      <div style={{ display: "flex", justifyContent: "center", paddingTop: 14 }}>
+        <button
+          type="button"
+          className="c-vpill"
+          style={{ padding: "8px 18px", fontSize: 13 }}
+          disabled={loadingMore}
+          onClick={() => void loadMore()}
+        >
+          {loadingMore ? "Loading…" : "Load more"}
+        </button>
+      </div>
+    ) : undefined,
   };
 
   return <Collection config={config} />;
