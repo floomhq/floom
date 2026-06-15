@@ -140,8 +140,10 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
 
   const header = config.hideTitle ? null : (
     <div style={{ padding: `22px ${PAGE_X}px 0` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-        <div>
+      {/* #1266: min-w-0 + overflow:hidden keeps the row from spilling on narrow
+          viewports. c-counts is horizontally scrollable at ≤389px. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 18, minWidth: 0, overflow: "hidden" }}>
+        <div style={{ minWidth: 0, flexShrink: 1 }}>
           <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-0.02em" }}>
             {config.title}
           </div>
@@ -150,7 +152,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           )}
         </div>
         {config.counts && config.counts.length > 0 && (
-          <div className="c-counts" style={{ marginLeft: "auto" }}>
+          <div className="c-counts" style={{ marginLeft: "auto", flexShrink: 0 }}>
             {config.counts.map((c, i) => (
               <span className="ct" key={i}>
                 <b>{c.value}</b> {c.label}
