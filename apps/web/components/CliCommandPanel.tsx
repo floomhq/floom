@@ -10,7 +10,18 @@ import { getPublicApiBase, getPublicApiHost } from "@/lib/api-base";
 import { getActiveWorkspaceId } from "@/lib/api";
 import { buildMcpJson } from "@/lib/mcp-config";
 
-const SECRET_STORAGE_KEYS = ["floom_secret", "FLOOM_SECRET", "workeros_api_secret"];
+// SECURITY: the API secret must NOT be persisted to localStorage — it is
+// exfiltrable by any XSS payload or browser extension running on this origin.
+// sessionStorage is cleared when the tab closes and is not accessible to other
+// tabs, which limits the blast radius substantially. We also wipe on unload so
+// the value does not outlive the session in memory-swapped tabs.
+//
+// Legacy keys (floom_secret / FLOOM_SECRET / workeros_api_secret) were
+// previously written to localStorage. We proactively clear them on mount so
+// any secrets that survived from an earlier build are evicted. (#1185)
+const SECRET_SESSION_KEY = "workeros_oss_secret";
+const SECRET_LEGACY_LOCALSTORAGE_KEYS = ["floom_secret", "FLOOM_SECRET", "workeros_api_secret"];
+
 const API_BASE = getPublicApiBase();
 const PROXY_BASE = "/api/proxy";
 
@@ -25,11 +36,28 @@ const MCP_TARGETS: { value: McpTarget; label: string; hint: string }[] = [
   { value: "generic",  label: "Generic",  hint: "prints snippet — paste manually" },
 ];
 
+/**
+ * Evict any secret that a previous build left in localStorage.
+ * Called once on mount; safe to call multiple times.
+ */
+function evictLegacyLocalStorage(): void {
+  if (typeof window === "undefined") return;
+  try {
+    for (const key of SECRET_LEGACY_LOCALSTORAGE_KEYS) {
+      window.localStorage.removeItem(key);
+    }
+  } catch {
+    // localStorage may be unavailable (private browsing, restricted iframe)
+  }
+}
+
 function readStoredSecret(): string {
   if (typeof window === "undefined") return "";
-  for (const key of SECRET_STORAGE_KEYS) {
-    const value = window.localStorage.getItem(key);
+  try {
+    const value = window.sessionStorage.getItem(SECRET_SESSION_KEY);
     if (value && value.trim()) return value.trim();
+  } catch {
+    // sessionStorage unavailable
   }
   return "";
 }
@@ -164,19 +192,40 @@ export function CliCommandPanel() {
   const [activeWorkspace, setActiveWorkspace] = useState<string | null>(null);
 
   useEffect(() => {
-    // The generated OSS token is cached in this browser so setup snippets can
-    // show the same credential the CLI receives from the device-flow endpoint.
+    // Evict any secret that a previous build left in localStorage (#1185).
+    evictLegacyLocalStorage();
+
+    // The generated OSS token is cached in sessionStorage so setup snippets can
+    // show the same credential the CLI receives from the device-flow endpoint
+    // for the duration of this browser session. It is NOT persisted to
+    // localStorage — see the security note on SECRET_SESSION_KEY above.
     const stored = readStoredSecret();
     if (stored) setStoredSecret(stored);
+
+    // Clear the session-stored secret when the tab closes so it does not linger
+    // in memory-swapped tab state or session-restore.
+    function clearOnUnload() {
+      try {
+        window.sessionStorage.removeItem(SECRET_SESSION_KEY);
+      } catch {}
+    }
+    window.addEventListener("beforeunload", clearOnUnload);
+
     // Pin the active workspace (if non-default) into the MCP/curl snippets so
     // they target the workspace the user is currently viewing.
     setActiveWorkspace(getActiveWorkspaceId());
+
+    return () => {
+      window.removeEventListener("beforeunload", clearOnUnload);
+    };
   }, []);
 
   function storeSecret(value: string) {
     try {
-      window.localStorage.setItem("floom_secret", value);
-    } catch {}
+      window.sessionStorage.setItem(SECRET_SESSION_KEY, value);
+    } catch {
+      // sessionStorage unavailable; value lives only in React state this session
+    }
     setStoredSecret(value);
   }
 
@@ -230,7 +279,7 @@ export function CliCommandPanel() {
 
   function clearSecret() {
     try {
-      for (const key of SECRET_STORAGE_KEYS) window.localStorage.removeItem(key);
+      window.sessionStorage.removeItem(SECRET_SESSION_KEY);
     } catch {}
     setStoredSecret("");
     setRevealed(false);
