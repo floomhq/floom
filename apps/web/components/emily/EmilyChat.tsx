@@ -335,7 +335,7 @@ function ChatEmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
       <div>
         <p className="text-sm font-medium">I am Emily, your Chief of Staff</p>
         <p className="text-xs text-muted-foreground mt-1">
-          Ask me to create workers, check runs, or manage connections.
+          Ask me to create workers, check runs, or connect your apps.
         </p>
       </div>
       <div className="flex flex-wrap gap-1.5 justify-center">
