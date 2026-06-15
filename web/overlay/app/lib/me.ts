@@ -74,11 +74,22 @@ export function parseCurrentUser(rawCookieValue: string | undefined | null): Cur
     jwt.full_name,
   ) ?? email;
 
-  // The engine's CurrentUser has no avatar field — the engine renders initials.
-  // Cloud matches that (no fork): return the engine-shaped user, initials only.
+  // #1306: Google/GitHub OAuth carries the profile photo in user_metadata
+  // (`picture` for Google, `avatar_url` for GitHub). The engine's CurrentUser
+  // has no avatar field (the engine renders initials only), so this is a
+  // Cloud-only seam: attach `picture` here and let the overlay-owned
+  // CloudAccountFooter render the real photo, falling back to initials.
+  const picture = firstString(
+    userMetadata.picture,
+    userMetadata.avatar_url,
+    jwt.picture,
+  );
+
   return {
     user_id: userId,
     email,
     display_name: displayName,
-  };
+    // `picture` is not on the engine CurrentUser type; widen for the Cloud seam.
+    ...(picture ? { picture } : {}),
+  } as CurrentUser & { picture?: string | null };
 }

@@ -44,6 +44,11 @@ function profileInitials(value: string) {
   );
 }
 
+// #1306: Google/GitHub login attaches a profile photo via the Cloud /me seam
+// (see overlay/app/lib/me.ts). The engine CurrentUser type has no avatar field,
+// so widen it locally here.
+type CloudUser = CurrentUser & { picture?: string | null };
+
 export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
   const pathname = usePathname();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
@@ -52,7 +57,9 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
     pathname.startsWith("/login/") ||
     pathname === "/app/login" ||
     pathname.startsWith("/app/login/");
-  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [user, setUser] = useState<CloudUser | null>(null);
+  // #1306: when the photo URL 404s/expires, fall back to initials.
+  const [avatarFailed, setAvatarFailed] = useState(false);
 
   useEffect(() => {
     if (isLoginPath) return;
@@ -61,8 +68,9 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
       .then((response) => response.json())
       .then((data) => {
         if (!cancelled && data?.user?.email) {
-          const currentUser = data.user as CurrentUser;
+          const currentUser = data.user as CloudUser;
           setUser(currentUser);
+          setAvatarFailed(false);
           identifyPostHogUser(currentUser);
           fetch("/app/api/proxy/auth/tokens/bootstrap", {
             method: "POST",
@@ -89,6 +97,9 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
       ? "Signed in"
       : "Floom";
   const initial = profileInitials(primary);
+  // #1306: show the real Google/GitHub photo when present and still loading;
+  // fall back to squared initials on error or when no picture is provided.
+  const avatarUrl = user?.picture && !avatarFailed ? user.picture : null;
 
   async function logout() {
     try {
@@ -114,9 +125,22 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
           )}
           aria-label="Profile menu"
         >
-          <div className="grid size-7 shrink-0 place-items-center rounded-full border border-[var(--border-soft)] bg-muted text-[11px] font-medium text-foreground">
-            {initial}
-          </div>
+          {/* #1306: squared avatar (radius-button / 9px), NO border — matches
+              the worker/employee card mark. Photo for Google/GitHub logins,
+              initials otherwise (and on photo load error). */}
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt="Profile avatar"
+              referrerPolicy="no-referrer"
+              onError={() => setAvatarFailed(true)}
+              className="size-7 shrink-0 rounded-[var(--radius-button)] object-cover"
+            />
+          ) : (
+            <div className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-button)] bg-muted text-[11px] font-medium text-foreground">
+              {initial}
+            </div>
+          )}
           <div className="min-w-0 leading-tight text-left">
             <p className="truncate text-xs font-medium text-foreground">{primary}</p>
             <p className="truncate text-[10px] text-muted-foreground">{secondary}</p>
