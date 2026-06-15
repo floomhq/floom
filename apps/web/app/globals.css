@@ -711,6 +711,10 @@ html.dark .grain {
   .c-toolbar .c-srch { flex:1 0 100%; max-width:none; }
   .c-toolbar .c-vtog { order:2; }
   .c-toolbar > div:last-child { order:3; margin-left:auto !important; }
+  /* #1156: on mobile the tagbar wrapper carries 28px horizontal padding which eats
+     into the 40px fade, leaving only 12px of gradient over actual content. Widen
+     the fade to 68px so it clearly overlaps content rather than padding-only. */
+  .c-tagbar-wrap::after { width:68px; }
 }
 .c-addbtn { display:flex; align-items:center; gap:6px; background:var(--primary); color:var(--primary-text); border-radius:var(--radius-ui); padding:9px 14px; font-weight:500; font-size:13px; white-space:nowrap; }
 

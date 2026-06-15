@@ -1280,7 +1280,9 @@ export default function WorkersCollection({
       })
       .catch(() => {})
       .finally(() => {
-        if (alive) setLoading(false);
+        // Always clear loading regardless of mount state so a zero-workers
+        // workspace never gets stuck on the skeleton (loading=true forever).
+        setLoading(false);
       });
     return () => {
       alive = false;
