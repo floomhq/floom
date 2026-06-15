@@ -38,7 +38,6 @@ import sys
 import time
 import collections
 import threading
-import tempfile
 import secrets as pysecrets
 import subprocess
 import uuid as _uuid_mod
@@ -70,9 +69,9 @@ from dotenv import load_dotenv
 # .env there too — otherwise `python main.py` / scripts/dev.* get no FLOOM_DB and
 # no provider creds, and auth collapses EVERY session to the 'federico' dev
 # default (db/__init__ + auth/dependency._is_local_dev_mode both key off FLOOM_DB).
-if os.environ.get("WORKEROS_DEV") == "1" or (
-    os.environ.get("WORKEROS_DEPLOY") or "local"
-).strip().lower() == "local":
+if os.environ.get("WORKEROS_DEV") == "1":
+    load_dotenv()
+elif (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower() == "local":
     load_dotenv()
 
 from auth import AuthContext, get_auth_context, get_auth_provider
@@ -1953,46 +1952,10 @@ def _workspace_base_persona_asset_id(request: Request | None = None) -> str:
 
 
 def rematerialize_worker_from_db(worker_id: str) -> bool:
-    """Write worker files from manifest_json._files back to WORKERS_DIR.
+    """Backward-compatible wrapper for tests and legacy call sites."""
+    from services.worker_materialization import rematerialize_worker_from_db as _rematerialize
 
-    Returns True if files were written, False if no _files stored in DB.
-    Uses an atomic temp-dir swap so a partial failure never leaves a corrupt dir.
-    """
-    import shutil as _shutil
-    from worker_registry import WORKERS_DIR
-    with get_db() as conn:
-        row = conn.execute(
-            "SELECT sv.manifest_json FROM skill_versions sv "
-            "JOIN workers w ON w.skill_version_id = sv.id WHERE w.id = ?",
-            (worker_id,),
-        ).fetchone()
-    if not row:
-        return False
-    manifest = json.loads(row["manifest_json"] or "{}")
-    files = manifest.get("_files")
-    if not files:
-        return False
-    worker_dir = WORKERS_DIR / worker_id
-    tmp_dir = Path(tempfile.mkdtemp(prefix=f".rmat.{worker_id}.", dir=str(WORKERS_DIR)))
-    try:
-        resolved_tmp = tmp_dir.resolve()
-        for rel_path, content in files.items():
-            dest = (tmp_dir / rel_path).resolve()
-            try:
-                dest.relative_to(resolved_tmp)
-            except ValueError:
-                logger.warning("Skipping path traversal in _files for worker %s: %s", worker_id, rel_path)
-                continue
-            dest.parent.mkdir(parents=True, exist_ok=True)
-            dest.write_text(content, encoding="utf-8")
-        if worker_dir.exists():
-            _shutil.rmtree(worker_dir)
-        tmp_dir.rename(worker_dir)
-    except Exception:
-        _shutil.rmtree(tmp_dir, ignore_errors=True)
-        raise
-    logger.info("Re-materialized %d files for worker %s from DB", len(files), worker_id)
-    return True
+    return _rematerialize(worker_id)
 
 
 

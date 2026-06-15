@@ -1,7 +1,10 @@
 from __future__ import annotations
 
+import contextlib
+import json
 import os
 import shutil
+import sqlite3
 import subprocess
 import sys
 import types
@@ -114,6 +117,114 @@ def _install_fake_e2b(monkeypatch, tmp_path) -> None:
     _Sandbox.instances = []
     _Sandbox.last_create_kwargs = {}
     _Sandbox.host_root = tmp_path / "sandbox"
+
+
+def test_e2b_run_materializes_missing_worker_dir_from_db_files(tmp_path, monkeypatch):
+    _install_fake_e2b(monkeypatch, tmp_path)
+
+    worker_id = "fresh-cloud-worker"
+    workers_root = tmp_path / "workers"
+    worker_dir = workers_root / worker_id
+
+    db_path = tmp_path / "workers.db"
+    conn = sqlite3.connect(db_path)
+    conn.row_factory = sqlite3.Row
+    conn.executescript(
+        """
+        CREATE TABLE skill_versions (
+            id TEXT PRIMARY KEY,
+            manifest_json TEXT
+        );
+        CREATE TABLE workers (
+            id TEXT PRIMARY KEY,
+            skill_version_id TEXT
+        );
+        """
+    )
+    conn.execute(
+        "INSERT INTO skill_versions (id, manifest_json) VALUES (?, ?)",
+        (
+            "sv-fresh-cloud-worker",
+            json.dumps(
+                {
+                    "_files": {
+                        "worker.yml": (
+                            "id: fresh-cloud-worker\n"
+                            "name: Fresh Cloud Worker\n"
+                            "runtime:\n"
+                            "  type: python311\n"
+                            "  command: python3 run.py\n"
+                            "trigger:\n"
+                            "  type: manual\n"
+                        ),
+                        "run.py": (
+                            "import json\n"
+                            "from pathlib import Path\n"
+                            "Path('result.json').write_text(json.dumps({"
+                            "'status': 'success', "
+                            "'outputs': {'materialized': True}, "
+                            "'artifacts': []"
+                            "}))\n"
+                        ),
+                        "requirements.txt": "",
+                    }
+                }
+            ),
+        ),
+    )
+    conn.execute(
+        "INSERT INTO workers (id, skill_version_id) VALUES (?, ?)",
+        (worker_id, "sv-fresh-cloud-worker"),
+    )
+    conn.commit()
+
+    @contextlib.contextmanager
+    def _get_db():
+        yield conn
+        conn.commit()
+
+    import db
+    from services import worker_materialization
+
+    monkeypatch.setattr(db, "get_db", _get_db)
+    monkeypatch.setattr(worker_materialization, "WORKERS_DIR", workers_root)
+
+    config = WorkerConfig(
+        id=worker_id,
+        name="Fresh Cloud Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python3 run.py",
+            mode="pure-script",
+        ),
+        secrets=[],
+        outputs=[],
+    )
+    logs: list[tuple[str, str]] = []
+
+    assert not worker_dir.exists()
+    result = E2BSandboxDriver().run(
+        worker_id=worker_id,
+        run_id="run-fresh-cloud-worker",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+        trace_id="trace-fresh-cloud-worker",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    assert result.status == "success"
+    assert result.outputs == {"materialized": True}
+    assert (worker_dir / "run.py").is_file()
+    assert (worker_dir / "worker.yml").is_file()
+    assert any("Re-materialized worker files from DB" in msg for msg, _level in logs)
+    assert all("Worker directory not found" not in msg for msg, _level in logs)
+
+    if _Sandbox.host_root:
+        shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
+    conn.close()
 
 
 def test_e2b_run_py_gets_declared_secrets_for_concurrent_provider_calls(tmp_path, monkeypatch):

@@ -107,11 +107,17 @@ def test_e2b_network_policy_and_sandbox_create_kwargs(monkeypatch):
             )
         ),
     )
+    monkeypatch.delenv("WORKEROS_E2B_RESTRICT_EGRESS", raising=False)
     policy = e2b_driver._e2b_network_policy(config, api_url="https://workeros-api.example.test")
     assert policy["allow_public_traffic"] is True
-    assert "workeros-api.example.test" in policy["allow_out"]
-    assert "api.partner.test" in policy["allow_out"]
+    assert "allow_out" not in policy
     assert "169.254.0.0/16" in policy["deny_out"]
+
+    monkeypatch.setenv("WORKEROS_E2B_RESTRICT_EGRESS", "1")
+    strict_policy = e2b_driver._e2b_network_policy(config, api_url="https://workeros-api.example.test")
+    assert "workeros-api.example.test" in strict_policy["allow_out"]
+    assert "api.partner.test" in strict_policy["allow_out"]
+    assert "0.0.0.0/0" in strict_policy["deny_out"]
 
     captured = {}
 
