@@ -57,6 +57,28 @@ function metricTrend(current: number, previous: number) {
   return Math.round(((current - previous) / previous) * 100);
 }
 
+export function workerStatusMetric(
+  stats:
+    | Pick<SystemOverview["stats"], "active_workers_count" | "paused_workers_count">
+    | null
+    | undefined,
+) {
+  const active = stats?.active_workers_count ?? 0;
+  const paused = stats?.paused_workers_count ?? 0;
+  if (active === 0 && paused > 0) {
+    return {
+      value: paused,
+      label: "Workers paused",
+      context: "All workers paused",
+    };
+  }
+  return {
+    value: active,
+    label: "Workers active",
+    context: `${paused} paused`,
+  };
+}
+
 function humanizeSlug(value: string | null | undefined, fallback: string) {
   if (!value) return fallback;
   const normalized = value.replace(/[_-]+/g, " ").trim();
@@ -548,6 +570,8 @@ export function OverviewDashboard({
     () => data?.stats.runs_7d_sparkline ?? [],
     [data?.stats.runs_7d_sparkline],
   );
+  const overviewStats = data?.stats;
+  const workerMetric = useMemo(() => workerStatusMetric(overviewStats), [overviewStats]);
 
   const metrics = useMemo(
     () => [
@@ -578,18 +602,13 @@ export function OverviewDashboard({
         warning: Boolean(failedToday),
         sparkline: runs7dSparkline,
       },
-      (() => {
-        const activeCount = data?.stats.active_workers_count ?? 0;
-        const pausedCount = data?.stats.paused_workers_count ?? 0;
-        const allPaused = activeCount === 0 && pausedCount > 0;
-        return {
-          value: allPaused ? pausedCount : activeCount,
-          label: allPaused ? "Workers paused" : "Workers active",
-          href: "/workers",
-          context: allPaused ? "All workers paused" : `${pausedCount} paused`,
-          sparkline: runs7dSparkline,
-        };
-      })(),
+      {
+        value: workerMetric.value,
+        label: workerMetric.label,
+        href: "/workers",
+        context: workerMetric.context,
+        sparkline: runs7dSparkline,
+      },
       {
         value: data?.stats.scheduled_24h_count ?? data?.scheduled_today?.length ?? 0,
         label: "Coming up today",
@@ -598,7 +617,18 @@ export function OverviewDashboard({
         sparkline: runs7dSparkline,
       },
     ],
-    [completedThisWeek, completedToday, data, failedToday, hasRunBreakdown, nextScheduled, runsToday, workTrend, runs7dSparkline],
+    [
+      completedThisWeek,
+      completedToday,
+      data,
+      failedToday,
+      hasRunBreakdown,
+      nextScheduled,
+      runsToday,
+      workTrend,
+      runs7dSparkline,
+      workerMetric,
+    ],
   );
 
   return (
