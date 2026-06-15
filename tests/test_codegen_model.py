@@ -135,6 +135,42 @@ def test_retries_without_temperature_when_model_rejects_non_default_temperature(
     assert calls[1]["max_completion_tokens"] == 700
 
 
+def test_provider_prefixed_model_routes_through_llm_even_with_direct_client(monkeypatch):
+    bedrock_model = "bedrock/us.anthropic.claude-sonnet-4-6"
+    captured = {}
+
+    class _FailingCompletions:
+        def create(self, **kwargs):
+            raise AssertionError("direct OpenAI client was called")
+
+    class _FakeClient:
+        def __init__(self):
+            self.chat = type("C", (), {"completions": _FailingCompletions()})()
+
+    def fake_completion(**kwargs):
+        captured.update(kwargs)
+        return "bedrock-response"
+
+    import llm
+
+    monkeypatch.setattr(llm, "completion", fake_completion)
+
+    out = cm.chat_completion_codegen(
+        _FakeClient(),
+        messages=[{"role": "system", "content": "S"}],
+        max_output_tokens=321,
+        model=bedrock_model,
+        response_format={"type": "json_object"},
+    )
+
+    assert out == "bedrock-response"
+    assert captured["model"] == bedrock_model
+    assert captured["max_tokens"] == 321
+    assert captured["cache_prompt"] is True
+    assert captured["response_format"] == {"type": "json_object"}
+    assert captured["temperature"] == 0.2
+
+
 def test_non_param_error_propagates():
     class _FakeCompletions:
         def create(self, **kwargs):
