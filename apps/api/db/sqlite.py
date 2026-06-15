@@ -557,10 +557,34 @@ class SqliteWorkerRepository:
             if role == "admin":
                 rows = conn.execute(_worker_select_sql()).fetchall()
             elif role == "member":
-                rows = conn.execute(
-                    _worker_select_sql("WHERE w.owner_id = ? OR w.visibility = 'workspace'"),
-                    (user_id,),
-                ).fetchall()
+                # #1080 cross-workspace isolation: workspace-visible workers must
+                # be scoped to workspaces the member actually belongs to. Without
+                # the workspace_members join this returned EVERY workspace-shared
+                # worker globally, so a member saw (and the grid/overview that use
+                # this method counted) workspace-shared workers from OTHER
+                # workspaces — a cross-workspace leak. Mirrors list_for_agent.
+                try:
+                    has_members_table = bool(conn.execute(
+                        "SELECT 1 FROM sqlite_master WHERE type='table' AND name='workspace_members' LIMIT 1"
+                    ).fetchone())
+                except Exception:
+                    has_members_table = False
+                if has_members_table:
+                    rows = conn.execute(
+                        _worker_select_sql(
+                            "LEFT JOIN workspace_members wm "
+                            "  ON wm.workspace_id = COALESCE(w.workspace_id, 'local-default') "
+                            "  AND wm.user_id = ? AND wm.status = 'active' "
+                            "WHERE w.owner_id = ? "
+                            "OR (w.visibility = 'workspace' AND wm.user_id IS NOT NULL)"
+                        ),
+                        (user_id, user_id),
+                    ).fetchall()
+                else:
+                    rows = conn.execute(
+                        _worker_select_sql("WHERE w.owner_id = ? OR w.visibility = 'workspace'"),
+                        (user_id,),
+                    ).fetchall()
             else:
                 rows = conn.execute(
                     _worker_select_sql("WHERE w.owner_id = ?"),
