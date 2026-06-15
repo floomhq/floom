@@ -52,6 +52,22 @@ def _load_api(monkeypatch, tmp_path, *, deploy: str = "local"):
         start_scheduler=lambda: None, stop_scheduler=lambda: None,
     )
     main = importlib.import_module("main")
+    # #237: the run-resolver (_resolve_runnable_worker -> _list_viewable_workers
+    # / _worker_can_view) now routes through get_repositories() (the same
+    # workspace-scoped repo path as the #1027 list/get tools) instead of a raw
+    # get_db() read. The engine standalone test env cannot register the cloud
+    # Supabase repo, so register the built-in SQLite repos under the 'cloud'
+    # deploy key too. This keeps the test's only reason for deploy='cloud'
+    # (strict _worker_can_view: no dev filesystem fallback, driven by the env
+    # flag) while letting the repo-routed resolver resolve the seeded workers.
+    if deploy != "local":
+        import db.factory as _factory
+        # Use monkeypatch.setitem so the registration auto-reverts at teardown
+        # (test_db_factory.py asserts deploy='cloud' raises when unregistered).
+        monkeypatch.setitem(
+            _factory._repositories_factories, deploy, _factory._local_repositories
+        )
+        _factory.get_repositories.cache_clear()
     return main
 
 
