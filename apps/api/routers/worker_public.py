@@ -1,11 +1,18 @@
 """Public/shared worker + brain routes: signed-link projection, short-links,
-share-link mint/revoke, standalone-share resolution, and share import.
+share-link mint/revoke, standalone-share resolution, share import, and the
+shareable-link run path (run-meta, public run trigger, public SSE stream).
 
 GET /workers/public/{id} (HMAC-token public projection), POST/GET worker
 short-links, POST /workers/import-from-share, the /contexts/{name}[/files/...]
 share-link mint/revoke pairs, and the /s/{token} standalone-share resolver +
 file download. Extracted verbatim from main.py (only contexts imports made
 lazy-in-handler per the purged-module convention).
+
+NEW (#1338 #1329): two endpoints for the /run/[id] shareable-link page:
+  GET  /workers/public/{id}/run-meta?token=<hmac>  — identity + schema (no secrets)
+  POST /workers/public/{id}/runs                   — body {inputs, token}, runs as owner
+The public SSE path is GET /runs/{run_id}/stream?token=<fls_token> wired in
+routers/runs.py so it shares the existing stream implementation.
 
 All domain logic comes from services (public_worker / share_links /
 context_access / public_view / worker_access / worker_registry_ops / run_access);
@@ -16,14 +23,15 @@ is purged in lockstep with main by the worker/context test fixtures.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Response
 from fastapi.responses import FileResponse, JSONResponse
+from pydantic import BaseModel, Field
 
 from auth import AuthContext, get_auth_context
 from db import Repositories, get_repos
-from models import PublicWorker, WorkerConfig, _ImportFromShareRequest
+from models import ActionResponse, PublicWorker, PublicWorkerInput, PublicWorkerOutput, RunCreate, WorkerConfig, _ImportFromShareRequest
 from services.context_access import (
     _assert_context_file_shareable,
     _assert_context_pack_shareable,
@@ -242,3 +250,130 @@ def get_standalone_share(
     repos: Repositories = Depends(get_repos),
 ) -> JSONResponse:
     return _json_noindex(_standalone_share_payload(token, repos))
+
+
+# ---------------------------------------------------------------------------
+# Shareable-link run path (#1338 #1329)
+#
+# The /run/[id] frontend page lets a colleague (no account) trigger a worker
+# and watch its output via a share link.  Three endpoints back this flow:
+#
+#   1. GET /workers/public/{id}/run-meta?token=<hmac>
+#      Worker identity + input/output schema for unauthenticated callers.
+#      The token is the SAME HMAC already used by /workers/public/{id}
+#      (``_worker_public_token``), so no new token scheme is needed.
+#
+#   2. POST /workers/public/{id}/runs
+#      body {inputs: {...}, token: "<hmac>"}
+#      Runs the worker AS THE WORKSPACE OWNER; returns {run_id}.
+#      Scoped strictly to this one worker (token is bound to worker+owner).
+#
+#   3. GET /runs/{run_id}/stream?token=<fls_share_token>
+#      Public subscriber to the existing SSE part stream, authed by the
+#      standalone run share token (entity_type='run').  The route sits on
+#      runs_router but is registered here so the three endpoints travel
+#      together; see `worker_public_router` inclusion in main.
+# ---------------------------------------------------------------------------
+
+
+class _PublicRunMeta(BaseModel):
+    """Minimal worker identity + schema returned to unauthenticated /run/[id] callers."""
+    id: str
+    name: str
+    description: Optional[str] = None
+    trigger_type: str
+    inputs: List[PublicWorkerInput] = Field(default_factory=list)
+    outputs: List[PublicWorkerOutput] = Field(default_factory=list)
+
+
+@worker_public_router.get("/workers/public/{worker_id}/run-meta", response_model=_PublicRunMeta)
+def get_public_worker_run_meta(
+    worker_id: str,
+    token: str = Query(..., min_length=16),
+    repos: Repositories = Depends(get_repos),
+) -> _PublicRunMeta:
+    """Return worker identity + input/output schema for an unauthenticated share-link caller.
+
+    Authenticated solely by the HMAC ``token`` (same scheme as
+    GET /workers/public/{id}).  No secrets, source, run history, or internals
+    are returned — only what the /run/[id] page needs to render an input form.
+    """
+    worker = _load_public_worker(worker_id, token, repos)
+    config_dict = worker.get("config", {})
+    try:
+        config = WorkerConfig(**config_dict)
+    except Exception:
+        config = WorkerConfig(
+            id=str(worker.get("id") or worker_id),
+            name=str(worker.get("name") or worker_id),
+            trigger={"type": "manual"},
+            runtime={"type": "python", "entrypoint": "run.py"},
+        )
+    return _PublicRunMeta(
+        id=str(worker.get("id") or config.id),
+        name=str(worker.get("name") or config.name),
+        description=worker.get("description"),
+        trigger_type=str(worker.get("trigger_type") or "manual"),
+        inputs=[
+            PublicWorkerInput(
+                name=inp.name,
+                label=inp.label,
+                type=inp.type,
+                required=inp.required,
+                description=inp.description,
+                options=inp.options,
+            )
+            for inp in (config.inputs or [])
+        ],
+        outputs=[
+            PublicWorkerOutput(name=out.name, label=out.label, type=out.type)
+            for out in (config.outputs or [])
+        ],
+    )
+
+
+class _PublicRunRequest(BaseModel):
+    """Body for POST /workers/public/{id}/runs."""
+    inputs: Dict[str, Any] = Field(default_factory=dict)
+    token: str = Field(..., min_length=16)
+
+
+@worker_public_router.post("/workers/public/{worker_id}/runs", response_model=ActionResponse)
+def create_public_worker_run(
+    worker_id: str,
+    body: _PublicRunRequest,
+    repos: Repositories = Depends(get_repos),
+) -> ActionResponse:
+    """Trigger a worker AS THE WORKSPACE OWNER via a public share-link token.
+
+    The token must be the HMAC signed by ``_worker_public_token``, which binds
+    it to both the worker id and its owner — a forged or cross-worker token is
+    rejected with 401.  The run executes entirely under the workspace owner's
+    identity (secrets, connections, quota) and the caller receives a ``run_id``
+    they can poll with GET /runs/public/{run_id}?token= or subscribe to via
+    GET /runs/{run_id}/stream?token=.
+
+    Scoped strictly: one endpoint, one worker.  The caller cannot list workers,
+    read secrets, or trigger any other worker via this path.
+    """
+    worker = _load_public_worker(worker_id, body.token, repos)
+    owner_id = str(worker.get("owner_id") or "")
+    if not owner_id:
+        raise HTTPException(status_code=503, detail="Worker owner not found")
+
+    # Run as the workspace owner so all secrets and connections resolve.
+    owner_auth = AuthContext(user_id=owner_id, email=None, scopes=("run_share",))
+    run_payload = RunCreate(inputs=body.inputs, trigger_source="share_link")
+
+    # Delegate to the standard create-run path inside main (imported lazily to
+    # keep the purged-module convention; the fixture already purges main).
+    from main import create_worker_run as _create_worker_run
+    return _create_worker_run(
+        worker_id=worker_id,
+        payload=run_payload,
+        request=None,
+        auth=owner_auth,
+        repos=repos,
+    )
+
+

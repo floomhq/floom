@@ -38,7 +38,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 import auth
-from auth import AuthContext, get_auth_context
+from auth import AuthContext, get_auth_context, get_optional_auth_context
 from core import hot_cache
 from core.utils import _parse_iso8601, row_to_dict
 from db import DB_PATH, Repositories, get_repos
@@ -822,32 +822,56 @@ def get_public_run(
 async def stream_run_parts(
     run_id: str,
     request: Request,
-    auth: AuthContext = Depends(get_auth_context),
+    token: Optional[str] = Query(None, min_length=10),
+    auth: Optional[AuthContext] = Depends(get_optional_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
-    """Server-Sent Events stream of AI SDK parts for a single run."""
-    row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
-    if not row:
+    """Server-Sent Events stream of AI SDK parts for a single run.
+
+    Authentication:
+    - Operator (authed): normal ``auth`` dependency, no ``token`` param.
+    - Share-link viewer (#1338 #1329): pass ``?token=<fls_share_token>`` where
+      the token was minted by POST /runs/{id}/share-link.  The token must resolve
+      to a 'run' row for THIS run_id; when it does, the run is streamed under the
+      owner's identity.  The ``token`` path intentionally skips the per-user SSE
+      cap bucket (no user_id) and uses a fixed ``__public_share__`` bucket.
+    """
+    if token is not None:
+        # Public share-link path (#1338 #1329): validate token, then stream.
+        row = _load_standalone_share_row(token)
+        if not row or str(row.get("entity_type")) != "run" or str(row.get("entity_id")) != run_id:
+            raise HTTPException(status_code=404, detail="Run not found")
+        effective_user_id = str(row.get("owner_id") or "")
+        stream_slot_key = "__public_share__"
+    elif auth is not None:
+        # Normal authenticated path.
+        effective_user_id = auth.user_id
+        stream_slot_key = auth.user_id
+    else:
+        raise HTTPException(status_code=401, detail="Unauthorized")
+
+    run_row = _get_run_by_explicit_id(run_id, user_id=effective_user_id, repos=repos)
+    if not run_row:
         raise HTTPException(status_code=404, detail="Run not found")
 
     last_seen = _parse_last_event_id(request.headers.get("last-event-id"))
 
     # Per-user concurrent-stream cap (Round 16 DoS finding). Acquire
     # synchronously so the 429 is returned before the StreamingResponse.
-    stream_slot = _sse_stream_acquire(auth.user_id)
+    stream_slot = _sse_stream_acquire(stream_slot_key)
 
     async def event_generator():
         try:
             snapshot = _run_part_snapshot(run_id)
             if snapshot is None:
-                final_part = _finish_part_from_run_row(row)
+                final_part = _finish_part_from_run_row(run_row)
                 if final_part is not None:
                     # #188: the in-memory part buffer is gone (terminal run past its
                     # TTL, or a fresh server process). Replay persisted log rows so
                     # the client reconstructs the transcript instead of receiving a
                     # bare finish event.
                     event_id = 0
-                    for log_part in _log_replay_parts(repos, auth.user_id, run_id):
+                    for log_part in _log_replay_parts(repos, effective_user_id, run_id):
                         if event_id > last_seen:
                             yield _format_run_part_sse(event_id, log_part)
                         event_id += 1

@@ -45,3 +45,21 @@ async def get_auth_context(request: Request) -> AuthContext:
     ctx = scope_local_auth_context(request, ctx)
     set_current_auth_context(ctx)
     return ctx
+
+
+async def get_optional_auth_context(request: Request) -> "AuthContext | None":
+    """Like get_auth_context but returns None instead of raising 401/403.
+
+    Used by endpoints that accept EITHER a user auth credential OR a public
+    share token (e.g. GET /runs/{id}/stream?token=<fls_share_token>). The
+    endpoint is responsible for rejecting unauthenticated requests that don't
+    provide an alternative token.
+    """
+    from fastapi import HTTPException as _HTTPException
+
+    try:
+        return await get_auth_context(request)
+    except _HTTPException as exc:
+        if exc.status_code in (401, 403):
+            return None
+        raise
