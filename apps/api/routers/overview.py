@@ -51,6 +51,13 @@ overview_router = APIRouter()
 logger = logging.getLogger("floom.api")
 
 
+def _hot_cache_scope() -> tuple[str, str]:
+    return (
+        os.environ.get("WORKEROS_DB") or os.environ.get("FLOOM_DB") or "",
+        os.environ.get("FLOOM_WORKERS_DIR") or "",
+    )
+
+
 class OverviewStats(BaseModel):
     runs_24h: int
     runs_24h_sparkline: List[int]
@@ -286,7 +293,7 @@ def system_overview(
         request.headers.get("x-workeros-workspace")
         or request.query_params.get("workspace_id")
     )
-    cache_key = ("overview", auth.user_id, auth.role, workspace_key)
+    cache_key = ("overview", _hot_cache_scope(), auth.user_id, auth.role, workspace_key)
     cached = hot_cache.get(cache_key)
     if cached is not None:
         duration_ms = (time.perf_counter() - started) * 1000

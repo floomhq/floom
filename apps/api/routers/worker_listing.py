@@ -14,6 +14,7 @@ from __future__ import annotations
 from typing import Annotated, List, Optional
 
 import logging
+import os
 import time
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
@@ -49,6 +50,13 @@ from services.worker_serialize import (
 
 worker_listing_router = APIRouter()
 logger = logging.getLogger("floom.api")
+
+
+def _hot_cache_scope() -> tuple[str, str]:
+    return (
+        os.environ.get("WORKEROS_DB") or os.environ.get("FLOOM_DB") or "",
+        os.environ.get("FLOOM_WORKERS_DIR") or "",
+    )
 
 
 @worker_listing_router.get("/workers", response_model=List[WorkerListSummary])
@@ -89,6 +97,7 @@ def list_workers(
         )
     cache_key = (
         "workers",
+        _hot_cache_scope(),
         auth.user_id,
         auth.role,
         workspace_key,

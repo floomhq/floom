@@ -104,6 +104,13 @@ logger = logging.getLogger("floom.api")
 runs_router = APIRouter()
 
 
+def _hot_cache_scope() -> tuple[str, str]:
+    return (
+        os.environ.get("WORKEROS_DB") or os.environ.get("FLOOM_DB") or "",
+        os.environ.get("FLOOM_WORKERS_DIR") or "",
+    )
+
+
 @runs_router.get("/runs", response_model=List[RunSummary])
 def list_runs(
     request: Request,
@@ -138,6 +145,7 @@ def list_runs(
     )
     cache_key = (
         "runs",
+        _hot_cache_scope(),
         auth.user_id,
         auth.role,
         workspace_key,

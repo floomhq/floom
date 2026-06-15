@@ -1661,7 +1661,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
         approvals=contract.approvals,
-        capabilities=contract.capabilities,
+        capabilities=_model_data(contract.capabilities),
         calls=list(contract.calls),
     )
 
