@@ -1,5 +1,6 @@
 "use client";
 
+import { useRouter } from "next/navigation";
 import { RefreshCw, Trash2, Zap, MoreHorizontal, ChevronRight, ExternalLink } from "lucide-react";
 import { Skeleton } from "@/components/ui/skeleton";
 import { Button } from "@/components/ui/button";
@@ -137,6 +138,7 @@ export function ConnectionRow({
   /** Called when the row header is clicked to toggle expansion */
   onToggle?: () => void;
 }) {
+  const router = useRouter();
   const isConnecting = connection.status === "initiated";
 
   return (
@@ -343,7 +345,7 @@ export function ConnectionRow({
               variant="outline"
               size="sm"
               className="h-7 px-3 text-xs"
-              onClick={() => { window.location.href = `/connections/${connection.id}`; }}
+              onClick={() => { router.push(`/connections/${connection.id}`); }}
             >
               <ExternalLink className="size-3" />
               Open
