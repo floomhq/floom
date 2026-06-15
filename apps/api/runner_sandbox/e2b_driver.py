@@ -24,11 +24,18 @@ from models import WorkerConfig, WorkerResult
 import contexts as _contexts_module
 from contexts import CONTEXTS_DIR, context_scope_for_user, normalize_context_mount, use_context_scope
 from runner_utils import ARTIFACTS_DIR
+from runtime_limits import (
+    DEFAULT_RUN_TIMEOUT_SECONDS,
+    E2B_MAX_SANDBOX_LIFETIME_SECONDS,
+    MAX_RUN_TIMEOUT_SECONDS,
+    MIN_INSTALL_TIMEOUT_SECONDS,
+    SANDBOX_LIFETIME_BUFFER_SECONDS,
+)
 from worker_registry import WORKERS_DIR
 
 logger = logging.getLogger("floom.runner_sandbox.e2b")
 
-MAX_E2B_SANDBOX_LIFETIME_SECONDS = 3600
+MAX_E2B_SANDBOX_LIFETIME_SECONDS = E2B_MAX_SANDBOX_LIFETIME_SECONDS
 # Hard cap on the raw result.json the worker writes. Read + json.loads +
 # persist into the run `output_json` DB column all happen on this blob, so an
 # unbounded multi-MB output bloats the DB row and the run-detail response.
@@ -475,13 +482,44 @@ def _safe_path(base: Path, *parts: str) -> Path:
 
 def _install_timeout_for_run(timeout_seconds: int) -> int:
     """Give large real-engine bundles enough time to install dependencies."""
-    return max(180, min(int(timeout_seconds), 900))
+    return max(MIN_INSTALL_TIMEOUT_SECONDS, min(int(timeout_seconds), MAX_RUN_TIMEOUT_SECONDS))
 
 
 def _sandbox_lifetime_timeout(timeout_seconds: int, install_timeout: int) -> int:
     """Sandbox lifetime must cover dependency install plus worker execution."""
-    requested_timeout = max(int(timeout_seconds) + int(install_timeout) + 60, 180)
+    requested_timeout = max(
+        int(timeout_seconds) + int(install_timeout) + SANDBOX_LIFETIME_BUFFER_SECONDS,
+        MIN_INSTALL_TIMEOUT_SECONDS,
+    )
     return min(requested_timeout, MAX_E2B_SANDBOX_LIFETIME_SECONDS)
+
+
+def _effective_run_timeout(timeout_seconds: int) -> int:
+    """Enforce the runtime ceiling for direct driver callers as a final guard."""
+    return max(1, min(int(timeout_seconds), MAX_RUN_TIMEOUT_SECONDS))
+
+
+def _refresh_sandbox_lifetime(
+    sandbox: Any,
+    *,
+    timeout: int,
+    log_fn: Callable[[str, str], None],
+) -> None:
+    set_timeout = getattr(sandbox, "set_timeout", None)
+    if not callable(set_timeout):
+        logger.debug("E2B sandbox object does not expose set_timeout(); skipping lifetime refresh")
+        return
+    try:
+        set_timeout(timeout)
+        log_fn(f"[e2b] Refreshed sandbox lifetime to {timeout}s before worker command", "debug")
+    except Exception as exc:
+        log_fn(
+            "[e2b] Failed to refresh sandbox lifetime to "
+            f"{timeout}s before worker command: {exc}. "
+            "E2B may enforce a lower maximum for this account or plan.",
+            "error",
+        )
+        raise
 
 
 def _sandbox_api_url() -> str:
@@ -701,16 +739,23 @@ class E2BSandboxDriver(SandboxDriver):
         secrets: Dict[str, str],
         log_fn: Callable[[str, str], None],
         trace_id: str,
-        timeout_seconds: int = 300,
+        timeout_seconds: int = DEFAULT_RUN_TIMEOUT_SECONDS,
         config: Optional[WorkerConfig] = None,
         connection_ids: Optional[Dict[str, str]] = None,
         user_id: str | None = None,
     ) -> WorkerResult:
         started_monotonic = time.monotonic()
+        effective_timeout_seconds = _effective_run_timeout(timeout_seconds)
+        if effective_timeout_seconds < int(timeout_seconds):
+            log_fn(
+                "[e2b] Capping worker command timeout at "
+                f"{effective_timeout_seconds}s (WORKEROS_MAX_RUN_TIMEOUT)",
+                "warning",
+            )
         try:
             return self._run_in_sandbox(
                 worker_id, run_id, inputs, secrets, log_fn, trace_id,
-                timeout_seconds, config, connection_ids or {}, user_id,
+                effective_timeout_seconds, config, connection_ids or {}, user_id,
             )
         except E2BKeyExhaustedError as exc:
             logger.warning(
@@ -769,7 +814,7 @@ class E2BSandboxDriver(SandboxDriver):
             result = _sandbox_exception_result(
                 exc,
                 elapsed_seconds=elapsed_seconds,
-                timeout_seconds=timeout_seconds,
+                timeout_seconds=effective_timeout_seconds,
             )
             log_fn(f"E2B sandbox error after {elapsed_seconds:.3f}s: {result.error}", "error")
             return result
@@ -811,15 +856,27 @@ class E2BSandboxDriver(SandboxDriver):
                 error_code="worker_not_found",
             )
 
+        effective_timeout_seconds = _effective_run_timeout(timeout_seconds)
+        if effective_timeout_seconds < int(timeout_seconds):
+            log_fn(
+                "[e2b] Capping worker command timeout at "
+                f"{effective_timeout_seconds}s (WORKEROS_MAX_RUN_TIMEOUT)",
+                "warning",
+            )
+
         log_fn(f"[e2b] Spawning sandbox for run {run_id}", "info")
-        install_timeout = _install_timeout_for_run(timeout_seconds)
-        sandbox_timeout = _sandbox_lifetime_timeout(timeout_seconds, install_timeout)
-        requested_sandbox_timeout = max(timeout_seconds + install_timeout + 60, 180)
+        install_timeout = _install_timeout_for_run(effective_timeout_seconds)
+        sandbox_timeout = _sandbox_lifetime_timeout(effective_timeout_seconds, install_timeout)
+        requested_sandbox_timeout = max(
+            effective_timeout_seconds + install_timeout + SANDBOX_LIFETIME_BUFFER_SECONDS,
+            MIN_INSTALL_TIMEOUT_SECONDS,
+        )
         if sandbox_timeout < requested_sandbox_timeout:
             log_fn(
                 "[e2b] Capping sandbox lifetime at "
-                f"{sandbox_timeout}s, the E2B API maximum; worker command "
-                f"timeout remains {timeout_seconds}s",
+                f"{sandbox_timeout}s, the configured E2B maximum; worker command "
+                f"timeout remains {effective_timeout_seconds}s and the lifetime "
+                "will be refreshed before execution",
                 "warning",
             )
 
@@ -1037,6 +1094,12 @@ class E2BSandboxDriver(SandboxDriver):
                     )
                 log_fn("[e2b] npm install complete", "info")
 
+            _refresh_sandbox_lifetime(
+                sandbox,
+                timeout=sandbox_timeout,
+                log_fn=log_fn,
+            )
+
             # Run the worker — commands.run() is sync, returns CommandResult directly
             command = "python run.py"
             if config and config.runtime and config.runtime.command:
@@ -1071,7 +1134,7 @@ class E2BSandboxDriver(SandboxDriver):
                 envs=_cmd_envs,
                 on_stdout=on_stdout,
                 on_stderr=on_stderr,
-                timeout=float(timeout_seconds),
+                timeout=float(effective_timeout_seconds),
             )
 
             # E2B streams stdout/stderr through callbacks while the process is
