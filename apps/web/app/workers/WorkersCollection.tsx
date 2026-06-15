@@ -37,6 +37,7 @@ import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { FileText, Lock, MoreHorizontal } from "lucide-react";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
+import { Sparkline } from "@/components/Sparkline";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
 import { CodeBlock } from "@/components/file-viewer/code-block";
 import {
@@ -1158,6 +1159,11 @@ export default function WorkersCollection({
       status: workerStatusPill(w),
       toolLogos: <WorkerIconPills worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
       star: { on: favorites.has(w.id), onToggle: () => toggleStar(w.id) },
+      // #1117: mini run-history sparkline (hover only). Uses timeseries if the
+      // API returned it; falls back to undefined (sparkline hidden) if absent.
+      sparkline: w.timeseries && w.timeseries.length > 0
+        ? <Sparkline data={w.timeseries} width={56} height={22} tone="status" variant="bars" />
+        : undefined,
     }),
     detail: (w) => {
       const viewOnly = !canManageWorkers && isViewOnly(w);

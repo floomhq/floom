@@ -170,4 +170,10 @@ export interface CardSpec {
   toolLogos?: ReactNode;
   /** Star toggle (hover only). Omit to hide. */
   star?: { on: boolean; onToggle: () => void };
+  /**
+   * Optional mini sparkline showing recent run history.
+   * Shown on hover in the card footer (#1117).
+   * Accepts TimeseriesDay[] (success/fail split) or number[] (totals only).
+   */
+  sparkline?: ReactNode;
 }

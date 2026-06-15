@@ -62,6 +62,9 @@ export function CollectionGrid<T>({
             <div className="c-gfoot">
               {spec.status ? <StatusPill spec={spec.status} /> : null}
               {spec.toolLogos && <div className="c-gtools">{spec.toolLogos}</div>}
+              {spec.sparkline && (
+                <div className="c-gsparkline">{spec.sparkline}</div>
+              )}
             </div>
           </div>
         );
