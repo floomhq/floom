@@ -17,6 +17,26 @@ You pay only for sandbox execution time (E2B bills per second of run time), with
 
 ## Quick Start
 
+**Fastest path** — two terminals, an OpenAI key and an E2B key ([e2b.dev](https://e2b.dev)):
+
+```bash
+# Terminal 1 — backend  →  http://localhost:8000
+cd apps/api
+python3.11 -m venv venv && source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env          # then add OPENAI_API_KEY and E2B_API_KEY
+python main.py
+
+# Terminal 2 — frontend  →  http://localhost:3000
+cd apps/web
+npm install
+npm run dev
+```
+
+Open [http://localhost:3000](http://localhost:3000) and sign in. That's the whole setup — no auth secret required for local dev, and the example workers are seeded on first boot. Everything below is **optional**: other model providers (Bedrock/Claude, Gemini, …), an operator secret, git-backed version history, and integrations. Windows commands are in step 1 and step 3.
+
+---
+
 ### 1. Install backend dependencies
 
 **Linux / macOS**
