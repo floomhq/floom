@@ -292,6 +292,16 @@ def _parse_worker_payload(
     if len(worker_id) > 64:
         raise HTTPException(status_code=422, detail=f"Worker ID must be 64 characters or fewer (got {len(worker_id)})")
     if user_id:
+        from models import default_worker_memory_context_name
+        # #1387: the per-worker memory context is created eagerly at worker-create
+        # time (not before). Skip the existence check for it so workers whose
+        # manifest carries the auto-injected memory mount (enabled by default) are
+        # not rejected because the folder doesn't exist yet at parse time.
+        _auto_memory_name = (
+            (config.memory.context or default_worker_memory_context_name(worker_id))
+            if getattr(getattr(config, "memory", None), "enabled", False)
+            else None
+        )
         with use_context_scope(context_scope_for_user(user_id)):
             metadata = load_context_metadata()
             for raw_context in config.contexts or []:
@@ -302,6 +312,10 @@ def _parse_worker_payload(
                 if context["source"] != "local":
                     continue
                 context_name = context["name"]
+                # Skip existence check for the auto-injected memory context: it is
+                # created by ensure_memory_context_pack immediately after this parse.
+                if context_name == _auto_memory_name:
+                    continue
                 context_is_mountable = _is_system_context_pack(
                     context_name,
                     metadata,
