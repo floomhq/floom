@@ -3,7 +3,6 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { capture } from "@/lib/analytics/capture";
 
 export default function MagicLinkPage() {
   const params = useParams<{ token: string }>();
@@ -14,7 +13,6 @@ export default function MagicLinkPage() {
     void (async () => {
       try {
         const result = await api.auth.consumeMagicLink(params.token);
-        capture("logged_in", { source: "magic_link" });
         router.replace(result.redirect_to ?? "/overview");
       } catch (err: unknown) {
         setError(err instanceof Error ? err.message : "Invalid or expired sign-in link.");

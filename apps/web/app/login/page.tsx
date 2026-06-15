@@ -8,7 +8,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FloomMark } from "@/components/layout/sidebar";
-import { capture } from "@/lib/analytics/capture";
 
 type LoginMode = "loading" | "setup" | "username" | "secret";
 
@@ -94,10 +93,6 @@ function LoginContent() {
           setError(body.detail || "Setup failed.");
           return;
         }
-        capture("signed_up", { source: "oss_setup" });
-        capture("logged_in", { source: "oss_setup" });
-        capture("onboarding_step_completed", { step: "workspace_created" });
-        capture("onboarding_completed", { source: "oss_setup" });
       } else if (effectiveMode === "username") {
         const res = await fetch("/api/auth/login", {
           method: "POST",
@@ -109,7 +104,6 @@ function LoginContent() {
           setError(body.detail || "Invalid credentials.");
           return;
         }
-        capture("logged_in", { source: "username_password" });
       } else {
         const res = await fetch("/api/auth/login", {
           method: "POST",
@@ -121,7 +115,6 @@ function LoginContent() {
           setError(body.detail || "Invalid credentials.");
           return;
         }
-        capture("logged_in", { source: "access_secret" });
       }
 
       router.replace(next);
