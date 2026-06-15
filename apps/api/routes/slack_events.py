@@ -162,6 +162,15 @@ async def slack_events(request: Request, background_tasks: BackgroundTasks) -> R
         return JSONResponse({"ok": True, "status": "context_updated"})
 
     if event_type == "app_mention":
+        # SECURITY (#1170): in cloud, app mentions MUST route through a workspace
+        # channel binding. Without a binding the engine would fall back to the
+        # bootstrap/legacy user, which runs agent code under a default identity
+        # without tenant isolation. Fail closed so unbound channels cannot trigger
+        # agent runs.  The channel for app_mention is in event["channel"].
+        channel_id_for_mention = str(event.get("channel") or "")
+        binding = resolve_slack_event_binding(team_id=team_id, channel_id=channel_id_for_mention)
+        if not binding:
+            return JSONResponse({"ok": True, "ignored": "no_workspace_binding"})
         slack_sender_id = str(event.get("user") or "").strip()
         background_tasks.add_task(
             engine_main._handle_slack_app_mention,

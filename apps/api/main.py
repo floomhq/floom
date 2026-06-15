@@ -486,6 +486,85 @@ async def cloud_security_headers_middleware(request: Request, call_next):
     return response
 
 
+# Body-size constants mirrored from the engine so the cloud overlay routes that
+# are mounted BEFORE the engine sub-app (and therefore bypass the engine's own
+# request_body_size_middleware) are protected by the same limits (#1166).
+_CLOUD_DEFAULT_JSON_BODY_LIMIT = engine_main.DEFAULT_JSON_BODY_LIMIT_BYTES
+_CLOUD_BUNDLE_BODY_LIMIT = engine_main.FROM_BUNDLE_BODY_LIMIT_BYTES
+
+
+def _cloud_body_limit_for_request(request: Request) -> int | None:
+    """Return the body size cap for cloud-owned override routes, or None to skip.
+
+    Cloud override routes shadow the engine at the same paths (/workers/…,
+    /mcp/…, /api/webhooks/…). They parse the request body directly with
+    FastAPI/Starlette BEFORE the mounted engine sub-app (and its
+    request_body_size_middleware) ever runs. This function mirrors the engine
+    constant logic so the cloud middleware can apply the same caps early.
+    """
+    method = request.method.upper()
+    if method not in {"POST", "PUT", "PATCH"}:
+        return None
+    path = request.url.path.rstrip("/") or "/"
+    # Webhook bodies use the same 1 MB Slack limit (re-used for general webhooks).
+    if _re.match(r"^/api/webhooks/[^/]+$", path):
+        from apps.api._engine import import_engine_module as _ie
+        try:
+            return _ie("channels.common")._MAX_WEBHOOK_BODY_BYTES
+        except Exception:
+            return _CLOUD_DEFAULT_JSON_BODY_LIMIT
+    # MCP JSON-RPC bodies: cap at the default JSON limit.
+    if _re.match(r"^/mcp/[^/]+$", path):
+        return _CLOUD_DEFAULT_JSON_BODY_LIMIT
+    # Cloud worker override paths.
+    if path in ("/workers/draft-and-create", "/api/workers/draft-and-create"):
+        return _CLOUD_DEFAULT_JSON_BODY_LIMIT
+    if _re.match(r"^(?:/api)?/workers/[^/]+/files$", path):
+        return _CLOUD_DEFAULT_JSON_BODY_LIMIT
+    if _re.match(r"^(?:/api)?/workers/[^/]+/visibility$", path):
+        return _CLOUD_DEFAULT_JSON_BODY_LIMIT
+    return None
+
+
+@app.middleware("http")
+async def cloud_body_size_middleware(request: Request, call_next):
+    """Cap request bodies on cloud-owned routes that bypass the engine middleware (#1166).
+
+    Cloud override routes are registered on the *cloud* FastAPI app BEFORE the
+    engine sub-app is mounted, so the engine's request_body_size_middleware never
+    fires for them. This middleware re-applies the same caps at the cloud layer.
+
+    Reject early on Content-Length; fall back to streaming read + cap when the
+    header is absent (chunked transfer / no header).
+    """
+    from fastapi.responses import JSONResponse as _JSONResponse
+
+    max_bytes = _cloud_body_limit_for_request(request)
+    if max_bytes is None:
+        return await call_next(request)
+
+    content_length = request.headers.get("content-length")
+    if content_length:
+        try:
+            if int(content_length) > max_bytes:
+                return _JSONResponse(
+                    status_code=413,
+                    content={"detail": "Request body is too large. Reduce the payload size and try again."},
+                )
+        except ValueError:
+            return _JSONResponse(status_code=400, content={"detail": "Invalid Content-Length"})
+
+    # No Content-Length: read and cap the body, then re-inject it so the
+    # downstream handler can still consume it via request.body() / request.json().
+    body = await request.body()
+    if len(body) > max_bytes:
+        return _JSONResponse(
+            status_code=413,
+            content={"detail": "Request body is too large. Reduce the payload size and try again."},
+        )
+    return await call_next(request)
+
+
 app.include_router(auth_router)
 # Mount workspaces + cli-auth/devices under /api BEFORE the engine sub-app
 # mount; otherwise FastAPI's path matching dispatches /api/workspaces (and
@@ -704,11 +783,28 @@ async def cloud_update_worker_files(worker_id: str, request: Request) -> Any:
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
+    # SECURITY (#1168): reject non-dict top-level bodies early; body.get() on a
+    # list/string/null raises AttributeError which surfaces as a 500 otherwise.
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=422,
+            detail="Request body must be a JSON object, e.g. {\"files\": [...]}",
+        )
+
     files_list = body.get("files") or []
+    # #1168: files must be a list; a valid JSON value of wrong type (e.g. a
+    # string or dict) would pass the truthiness guard above but fail at indexing.
+    if not isinstance(files_list, list):
+        raise HTTPException(
+            status_code=422,
+            detail="\"files\" must be a JSON array of file objects",
+        )
     if not files_list:
         raise HTTPException(status_code=400, detail="files list must not be empty")
+    # Filter to dict items with required keys before indexing (non-dict items
+    # would raise TypeError at f["path"] even if they have a truthy value).
     files = _sanitize_cloud_worker_files(
-        {f["path"]: f["content"] for f in files_list if "path" in f and "content" in f}
+        {f["path"]: f["content"] for f in files_list if isinstance(f, dict) and "path" in f and "content" in f}
     )
 
     # #272: only validate worker.yml when this edit actually includes it.
@@ -909,6 +1005,14 @@ async def cloud_set_worker_visibility(worker_id: str, request: Request) -> Any:
     except Exception:
         raise HTTPException(status_code=400, detail="Invalid JSON")
 
+    # SECURITY (#1168): reject non-dict top-level bodies; body.get() raises
+    # AttributeError on arrays/strings/null, surfacing as an opaque 500.
+    if not isinstance(body, dict):
+        raise HTTPException(
+            status_code=422,
+            detail="Request body must be a JSON object, e.g. {\"visibility\": \"shared\"}",
+        )
+
     visibility = body.get("visibility")
     if visibility not in ("private", "shared"):
         raise HTTPException(status_code=422, detail="visibility must be 'private' or 'shared'")
@@ -934,11 +1038,17 @@ async def _cloud_set_worker_archived(worker_id: str, request: Request, *, archiv
 
     The engine archive route edits worker.yml first, but Cloud-created workers
     can be DB-only because Supabase manifest_json is the source of truth.
+
+    SECURITY (#1165): only the worker owner or a workspace admin may archive/
+    restore. Regular members can READ shared workers (repos.workers.get returns
+    them) but must not be allowed to mutate their availability state. Defense-in-
+    depth check here mirrors the member_write_guard middleware.
     """
     import asyncio as _asyncio
     from datetime import datetime, timezone
 
     from apps.api.auth.supabase_provider import SupabaseAuthProvider
+    from apps.api.auth.workspace_context import get_active_member_role
 
     provider = SupabaseAuthProvider()
     try:
@@ -950,9 +1060,24 @@ async def _cloud_set_worker_archived(worker_id: str, request: Request, *, archiv
 
     engine_main._raise_if_protected_worker_mutation(worker_id)
     repos = engine_main.get_repositories()
-    worker = repos.workers.get(user_id=auth.user_id, worker_id=worker_id)
+    # Use get_any (unscoped by user) to look up the worker, then explicitly
+    # check ownership so that non-owner members cannot archive shared workers.
+    worker = repos.workers.get_any(worker_id=worker_id)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
+
+    # SECURITY (#1165): enforce owner-or-admin. The worker owner may always
+    # archive/restore their own worker. A workspace admin (role=='admin') may
+    # archive/restore any worker in the workspace. Regular members get 403.
+    owner_id = str(worker.get("owner_id") or worker.get("user_id") or "")
+    is_owner = owner_id and owner_id == str(auth.user_id)
+    caller_role = get_active_member_role()
+    is_admin = caller_role == "admin"
+    if not is_owner and not is_admin:
+        raise HTTPException(
+            status_code=403,
+            detail="Only the worker owner or a workspace admin can archive or restore this worker.",
+        )
 
     manifest = dict(worker.get("manifest") or worker.get("manifest_json") or {})
     if archived:
@@ -961,7 +1086,7 @@ async def _cloud_set_worker_archived(worker_id: str, request: Request, *, archiv
     else:
         manifest.pop("archived", None)
         manifest.pop("archive_reason", None)
-    repos.workers.update(user_id=auth.user_id, worker_id=worker_id, manifest_json=manifest)
+    repos.workers.update(user_id=owner_id or auth.user_id, worker_id=worker_id, manifest_json=manifest)
 
     return await _asyncio.to_thread(
         engine_main._build_worker_detail,

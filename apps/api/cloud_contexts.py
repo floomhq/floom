@@ -23,7 +23,7 @@ from __future__ import annotations
 
 import logging
 from pathlib import Path
-from typing import Optional
+from typing import Any, Optional
 
 logger = logging.getLogger(__name__)
 
@@ -121,6 +121,42 @@ def _safe_upload_context(workspace_id: str, context_name: str, context_dir: Path
 # Download / hydration helpers
 # ---------------------------------------------------------------------------
 
+def _list_storage_objects_recursive(svc: Any, prefix: str) -> list[str]:
+    """Return all leaf object paths under ``prefix`` in Supabase Storage.
+
+    Supabase Storage's ``list(prefix)`` only returns the immediate children of
+    ``prefix``.  Nested sub-directories appear as folder entries (objects with
+    a ``metadata`` value of ``None`` or an ``id`` of ``None`` depending on the
+    SDK version).  This helper recurses into those sub-prefixes to collect every
+    leaf object's full path (#1169).
+
+    Returns a list of full storage paths (e.g. ``ws/ctx/reports/q1.md``).
+    """
+    leaf_paths: list[str] = []
+    try:
+        entries = svc.storage.from_(_BUCKET).list(prefix) or []
+    except Exception as exc:
+        logger.debug("_list_storage_objects_recursive: list %s failed: %s", prefix, exc)
+        return leaf_paths
+
+    for obj in entries:
+        name = obj.get("name") if isinstance(obj, dict) else getattr(obj, "name", None)
+        if not name or name.startswith("."):
+            continue
+        # A folder placeholder has no meaningful id or its metadata is None.
+        obj_id = obj.get("id") if isinstance(obj, dict) else getattr(obj, "id", None)
+        metadata = obj.get("metadata") if isinstance(obj, dict) else getattr(obj, "metadata", None)
+        is_folder = obj_id is None or metadata is None
+        full_path = f"{prefix}/{name}"
+        if is_folder:
+            # Recurse into the sub-prefix.
+            leaf_paths.extend(_list_storage_objects_recursive(svc, full_path))
+        else:
+            leaf_paths.append(full_path)
+
+    return leaf_paths
+
+
 def download_context(
     workspace_id: str,
     context_name: str,
@@ -128,36 +164,37 @@ def download_context(
 ) -> int:
     """Download all files for a context from Storage to dest_dir.
 
-    Returns the number of files written. dest_dir is created if needed.
+    Recurses into sub-prefixes so nested files such as ``reports/q1.md`` are
+    included (#1169).  Returns the number of files written. dest_dir is created
+    if needed.
     """
     from apps.api.config import get_supabase_service_client
     svc = get_supabase_service_client()
     prefix = f"{workspace_id}/{context_name}"
 
-    try:
-        objects = svc.storage.from_(_BUCKET).list(prefix)
-    except Exception as exc:
-        logger.debug("download_context: list %s failed: %s", prefix, exc)
-        return 0
-
-    if not objects:
+    leaf_paths = _list_storage_objects_recursive(svc, prefix)
+    if not leaf_paths:
         return 0
 
     dest_dir.mkdir(parents=True, exist_ok=True)
     written = 0
-    for obj in objects:
-        name = obj.get("name") if isinstance(obj, dict) else getattr(obj, "name", None)
-        if not name or name.startswith("."):
+    prefix_slash = prefix.rstrip("/") + "/"
+    for storage_path in leaf_paths:
+        # Derive the relative path inside the context directory.
+        if storage_path.startswith(prefix_slash):
+            rel = storage_path[len(prefix_slash):]
+        else:
+            rel = storage_path.split("/", 2)[-1] if storage_path.count("/") >= 2 else storage_path
+        if not rel or rel.startswith("."):
             continue
-        storage_path = f"{prefix}/{name}"
         try:
             content = svc.storage.from_(_BUCKET).download(storage_path)
-            fpath = dest_dir / name
+            fpath = dest_dir / rel
             fpath.parent.mkdir(parents=True, exist_ok=True)
             fpath.write_bytes(content)
             written += 1
         except Exception as exc:
-            logger.debug("download_context: skipped %s: %s", name, exc)
+            logger.debug("download_context: skipped %s: %s", storage_path, exc)
 
     return written
 
@@ -251,17 +288,17 @@ def _hydrate_from_github(
 # ---------------------------------------------------------------------------
 
 def delete_context_from_storage(workspace_id: str, context_name: str) -> None:
-    """Remove all Storage objects for a context (called on context delete)."""
+    """Remove all Storage objects for a context (called on context delete).
+
+    Recurses into sub-prefixes so nested files (e.g. ``reports/q1.md``) are
+    also removed and do not linger in the bucket after the context is deleted
+    (#1169).
+    """
     from apps.api.config import get_supabase_service_client
     svc = get_supabase_service_client()
     prefix = f"{workspace_id}/{context_name}"
     try:
-        objects = svc.storage.from_(_BUCKET).list(prefix) or []
-        paths = [
-            f"{prefix}/{obj.get('name') if isinstance(obj, dict) else obj.name}"
-            for obj in objects
-            if (obj.get("name") if isinstance(obj, dict) else getattr(obj, "name", ""))
-        ]
+        paths = _list_storage_objects_recursive(svc, prefix)
         if paths:
             svc.storage.from_(_BUCKET).remove(paths)
     except Exception as exc:

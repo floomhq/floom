@@ -48,6 +48,12 @@ def test_cloud_slack_events_routes_app_mentions_to_bound_workspace(monkeypatch, 
     monkeypatch.setattr(slack_events.engine_main, "_slack_allowed_team_ids", lambda: set())
     monkeypatch.setattr(slack_events.engine_main, "_claim_webhook_delivery", lambda *_args: True)
     monkeypatch.setattr(slack_events.slack_db, "bot_token_for_team", lambda team_id: "xoxb-test-token")
+    # #1170: app_mention now requires a workspace binding. Simulate the channel C123 being bound.
+    monkeypatch.setattr(
+        slack_events,
+        "resolve_slack_event_binding",
+        lambda *, team_id, channel_id: {"workspace_id": "ws-test", "owner_user_id": "owner-u"},
+    )
 
     calls: list[dict[str, object]] = []
 
