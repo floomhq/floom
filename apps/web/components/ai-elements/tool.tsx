@@ -45,7 +45,6 @@ export function Tool({
             )}
             <div className="min-w-0">
               <p className="truncate text-sm font-medium">{name}</p>
-              {callId && <p className="truncate font-mono text-[11px] text-muted-foreground">{callId}</p>}
             </div>
           </div>
           <div className="flex shrink-0 items-center gap-2">
