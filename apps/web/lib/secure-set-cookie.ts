@@ -15,18 +15,29 @@ export function getSetCookies(upstream: Response): string[] {
   return single ? [single] : [];
 }
 
-/** Appends `; Secure` to any Set-Cookie value that does not already have it.
- * Skipped in non-production (plain-http local dev) so the browser stores the
- * forwarded backend session cookie over http://localhost instead of dropping it. */
+/** True when a response cookie must carry Secure. */
+export function secureCookiesForUrl(requestUrl: string): boolean {
+  if (process.env.NODE_ENV === "production") return true;
+  try {
+    return new URL(requestUrl).protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+/** Appends `; Secure` to any Set-Cookie value that does not already have it. */
 export function withSecureFlag(setCookie: string): string {
-  if (process.env.NODE_ENV !== "production") return setCookie;
   if (/(^|;)\s*secure\s*(;|$)/i.test(setCookie)) return setCookie;
   return `${setCookie}; Secure`;
 }
 
-/** Forward all upstream Set-Cookie headers onto `headers`, forcing Secure. */
-export function forwardSecureSetCookies(upstream: Response, headers: Headers): void {
+/** Forward all upstream Set-Cookie headers onto `headers`, forcing Secure when required. */
+export function forwardSecureSetCookies(
+  upstream: Response,
+  headers: Headers,
+  secureCookies = true,
+): void {
   for (const cookie of getSetCookies(upstream)) {
-    headers.append("set-cookie", withSecureFlag(cookie));
+    headers.append("set-cookie", secureCookies ? withSecureFlag(cookie) : cookie);
   }
 }

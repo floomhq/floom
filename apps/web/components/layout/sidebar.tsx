@@ -476,6 +476,8 @@ export function UserProfileFooter({
         >
           {/* M36: show Google avatar when avatarUrl is provided, else initials. */}
           {avatarUrl ? (
+            // External OAuth avatar URLs are not known to the Next image loader.
+            // eslint-disable-next-line @next/next/no-img-element
             <img
               src={avatarUrl}
               alt="Profile avatar"
