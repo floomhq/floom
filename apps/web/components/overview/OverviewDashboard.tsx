@@ -3,7 +3,7 @@
 // S44: accepts server-fetched initialData to eliminate client-side fetch round-trip.
 // S45: sparklines on metric tiles, alerts moved to AlertsBell in header.
 // W8: worker icons in activity + upcoming list rows.
-import { useCallback, useEffect, useMemo, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import {
   ArrowUp,
@@ -40,18 +40,6 @@ const cardClass =
 const listClass =
   "overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-list)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
 
-const providerNameAliases: Record<string, string> = {
-  github: "GitHub",
-  googlecalendar: "Google Calendar",
-  "google-calendar": "Google Calendar",
-  googledrive: "Google Drive",
-  "google-drive": "Google Drive",
-  hubspot: "HubSpot",
-  notion: "Notion",
-  salesforce: "Salesforce",
-  slack: "Slack",
-};
-
 function metricTrend(current: number, previous: number) {
   if (previous <= 0) return null;
   return Math.round(((current - previous) / previous) * 100);
@@ -86,11 +74,6 @@ function humanizeSlug(value: string | null | undefined, fallback: string) {
   return normalized.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
 }
 
-function formatProviderName(value: string | null | undefined) {
-  if (!value) return "Connection";
-  const key = value.toLowerCase().replace(/[\s_]+/g, "-");
-  return providerNameAliases[key] ?? providerNameAliases[key.replace(/-/g, "")] ?? humanizeSlug(value, "Connection");
-}
 
 function formatTriggerSource(value: string | null | undefined) {
   if (!value) return "schedule";
@@ -489,66 +472,14 @@ function ComingUp({
 
 export function OverviewDashboard({
   initialData = null,
-  onAttentionItems,
-  onReloadRef,
 }: {
   initialData?: import("@/lib/types").SystemOverview | null;
-  /** Called after each data load so parent (header) can update the bell count */
-  onAttentionItems?: (items: SystemOverviewAttentionItem[]) => void;
-  /** Mutable ref that receives the reload fn so parent (bell) can trigger refresh */
-  onReloadRef?: React.MutableRefObject<(() => void) | null>;
 }) {
-  const { data, loading, reload } = useOverview(initialData);
+  // #1292: the needs-attention surface is now owned by the global AlertsBell
+  // (rendered in AppShell), which self-fetches the overview. The dashboard no
+  // longer derives/bubbles attention items or exposes a reload ref for the bell.
+  const { data, loading } = useOverview(initialData);
   const visibleRows = useOverviewVisibleRows();
-  const workerNames = useMemo(() => {
-    const names = new Map<string, string>();
-    for (const run of data?.recent_runs ?? []) {
-      if (run.worker_id && run.worker_name) names.set(run.worker_id, run.worker_name);
-    }
-    for (const item of data?.scheduled_today ?? []) {
-      if (item.worker_id && item.worker_name) names.set(item.worker_id, item.worker_name);
-    }
-    for (const outcome of data?.outcomes ?? []) {
-      if (outcome.worker_id && outcome.worker_name) names.set(outcome.worker_id, outcome.worker_name);
-    }
-    return names;
-  }, [data]);
-  const attentionItems = useMemo(
-    () =>
-      (data?.needs_attention ?? []).map((item) => ({
-        ...item,
-        worker_name:
-          item.worker_name ||
-          (item.worker_id ? workerNames.get(item.worker_id) || humanizeSlug(item.worker_id, "Worker") : undefined),
-        provider_display_name: item.provider_display_name
-          ? formatProviderName(item.provider_display_name)
-          : item.provider_slug
-            ? formatProviderName(item.provider_slug)
-            : item.provider_display_name,
-      })),
-    [data?.needs_attention, workerNames],
-  );
-
-  // S45: bubble attention items up so the AlertsBell in the header can show a badge.
-  // Use a serialized comparison so we only call onAttentionItems when the *value*
-  // actually changed — not just when the memo produced a new array reference after
-  // an unrelated re-render (e.g. workerNames map rebuilt with identical entries).
-  // Without this guard the parent's setAttentionItems fires every render cycle,
-  // causing an infinite loop: setAttentionItems → re-render → new attentionItems
-  // ref → effect fires again → repeat.
-  const prevAttentionJson = useRef<string>("");
-  useEffect(() => {
-    if (!onAttentionItems) return;
-    const json = JSON.stringify(attentionItems);
-    if (json === prevAttentionJson.current) return;
-    prevAttentionJson.current = json;
-    onAttentionItems(attentionItems);
-  }, [attentionItems, onAttentionItems]);
-
-  // S45: expose reload to parent via ref so bell buttons can trigger a refresh
-  useEffect(() => {
-    if (onReloadRef) onReloadRef.current = reload;
-  }, [reload, onReloadRef]);
 
   const completedThisWeek =
     data?.stats.work_shipped_7d ??

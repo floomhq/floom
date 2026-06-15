@@ -3,15 +3,23 @@
 // S45: Notifications bell. Moves "Needs your attention" out of /overview body
 // into a header-anchored popover. Same row format as S43 NeedsAttention, but
 // inside a compact 380px dropdown — no colored left borders, no warm-tint bg.
+//
+// #1292: globalised. The bell now lives in the app chrome (AppShell, top-right)
+// so it aggregates needs-attention across the whole app, not just /overview.
+// When mounted without `items` it self-fetches the system overview (with
+// polling + focus revalidation) and resolves worker names / provider labels
+// internally — the same derivation OverviewDashboard used to do before bubbling
+// items up. When `items` IS passed (legacy /overview embed) it stays a pure
+// presentational component driven by the parent.
 
-import { useCallback, useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { AlertTriangle, Bell, CheckCircle, KeyRound, Plug } from "lucide-react";
 import { toast } from "sonner";
 import yaml from "js-yaml";
 
 import { api } from "@/lib/api";
-import type { SystemOverviewAttentionItem } from "@/lib/types";
+import type { SystemOverview, SystemOverviewAttentionItem } from "@/lib/types";
 import { cn } from "@/lib/utils";
 
 const providerNameAliases: Record<string, string> = {
@@ -61,13 +69,98 @@ function setYamlPaused(content: string) {
   return `paused: true\n${content}`;
 }
 
+// #1292: when the bell is mounted in the global chrome it owns its own data.
+// Fetches the system overview, derives the same enriched attention items the
+// OverviewDashboard used to bubble up (resolved worker names + provider
+// labels), polls every 30s, and revalidates on tab focus. Returns a `reload`
+// so the in-dropdown retry/disable actions can refresh after acting.
+function useSelfOverviewItems(enabled: boolean) {
+  const [data, setData] = useState<SystemOverview | null>(null);
+
+  const reload = useCallback(async () => {
+    if (!enabled) return;
+    try {
+      const result = await api.system.overview();
+      setData(result);
+    } catch {
+      // Silently stale: a transient overview fetch failure must not blank the
+      // bell or spam the operator. The next poll/focus retries.
+    }
+  }, [enabled]);
+
+  useEffect(() => {
+    if (!enabled) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const result = await api.system.overview();
+        if (!cancelled) setData(result);
+      } catch {
+        // ignore — see reload()
+      }
+    };
+    load();
+    const interval = setInterval(load, 30000);
+    const onFocus = () => void load();
+    window.addEventListener("focus", onFocus);
+    return () => {
+      cancelled = true;
+      clearInterval(interval);
+      window.removeEventListener("focus", onFocus);
+    };
+  }, [enabled]);
+
+  const items = useMemo<SystemOverviewAttentionItem[]>(() => {
+    if (!data) return [];
+    const workerNames = new Map<string, string>();
+    for (const run of data.recent_runs ?? []) {
+      if (run.worker_id && run.worker_name) workerNames.set(run.worker_id, run.worker_name);
+    }
+    for (const item of data.scheduled_today ?? []) {
+      if (item.worker_id && item.worker_name) workerNames.set(item.worker_id, item.worker_name);
+    }
+    for (const outcome of data.outcomes ?? []) {
+      if (outcome.worker_id && outcome.worker_name) workerNames.set(outcome.worker_id, outcome.worker_name);
+    }
+    return (data.needs_attention ?? []).map((item) => ({
+      ...item,
+      worker_name:
+        item.worker_name ||
+        (item.worker_id
+          ? workerNames.get(item.worker_id) || humanizeSlug(item.worker_id, "Worker")
+          : undefined),
+      provider_display_name: item.provider_display_name
+        ? formatProviderName(item.provider_display_name)
+        : item.provider_slug
+          ? formatProviderName(item.provider_slug)
+          : item.provider_display_name,
+    }));
+  }, [data]);
+
+  return { items, reload };
+}
+
 interface AlertsBellProps {
-  /** Items from the /overview endpoint — pass directly from parent. */
-  items: SystemOverviewAttentionItem[];
+  /**
+   * Items from the /overview endpoint. Pass directly when embedding the bell
+   * in a page that already fetches the overview (legacy). Omit to let the bell
+   * self-fetch — the mode used by the global chrome (#1292).
+   */
+  items?: SystemOverviewAttentionItem[];
   onRefresh?: () => void;
 }
 
-export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
+export function AlertsBell({ items: itemsProp, onRefresh }: AlertsBellProps) {
+  const selfFetch = itemsProp === undefined;
+  const { items: selfItems, reload: selfReload } = useSelfOverviewItems(selfFetch);
+  const items = selfFetch ? selfItems : itemsProp;
+  // In self-fetch mode the bell refreshes its own data after an action; in
+  // prop mode it defers to the parent's onRefresh.
+  const refresh = useCallback(() => {
+    if (selfFetch) void selfReload();
+    onRefresh?.();
+  }, [selfFetch, selfReload, onRefresh]);
+
   const [open, setOpen] = useState(false);
   const [busy, setBusy] = useState<string | null>(null);
   const [pendingApprovals, setPendingApprovals] = useState(0);
@@ -134,14 +227,14 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
       try {
         await api.workers.run(workerId, {});
         toast.success("Run queued");
-        onRefresh?.();
+        refresh();
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Retry failed");
       } finally {
         setBusy(null);
       }
     },
-    [onRefresh],
+    [refresh],
   );
 
   const disable = useCallback(
@@ -166,14 +259,14 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
         }
         await api.workers.updateFiles(workerId, files);
         toast.success("Worker disabled");
-        onRefresh?.();
+        refresh();
       } catch (error) {
         toast.error(error instanceof Error ? error.message : "Disable failed");
       } finally {
         setBusy(null);
       }
     },
-    [onRefresh],
+    [refresh],
   );
 
   return (
