@@ -113,7 +113,7 @@ def chat_completion_codegen(
     accept the default.
     """
     chosen = model or codegen_model()
-    if client is not None:
+    if client is not None and "/" not in chosen:
         return _chat_completion_codegen_direct(
             client,
             messages=messages,
