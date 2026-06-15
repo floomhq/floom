@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/layout/AppShell";
+import { headers } from "next/headers";
 
 // PR S20 polish: Geist Sans + Geist Mono (openchat-v2). Replaces the previous
 // Google-Fonts @import of Inter; loaded via next/font for proper inlining
@@ -33,11 +34,15 @@ export const metadata: Metadata = {
   },
 };
 
-export default function RootLayout({
+export default async function RootLayout({
   children,
 }: Readonly<{
   children: React.ReactNode;
 }>) {
+  // #926/#1357: the per-request CSP nonce (minted in middleware.ts, threaded as
+  // the x-nonce request header) must be stamped onto the inline theme script
+  // below, or script-src 'self' 'nonce-…' 'strict-dynamic' blocks it.
+  const nonce = (await headers()).get("x-nonce") ?? undefined;
   return (
     <html
       lang="en"
@@ -62,6 +67,7 @@ export default function RootLayout({
           subsequent navigations.
         */}
         <script
+          nonce={nonce}
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var m=localStorage.getItem('floom-theme');var d=window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches;var isDark=m==='night'||(m!=='day'&&m==='system'&&d)||(!m&&false);document.documentElement.classList.toggle('dark',isDark);document.documentElement.setAttribute('data-theme',m||'day');}catch(e){}})();`,
           }}
