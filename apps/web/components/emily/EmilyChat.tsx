@@ -741,7 +741,12 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
         onScroll={handleScroll}
       >
         {!hasMessages ? (
-          isHydrating ? (
+          // Only show the "Loading conversation…" spinner on the full-page chat
+          // where the user explicitly navigated to Emily. In the dock the panel
+          // is present on every page (Approvals, Connections, etc.) so showing a
+          // loading status there is confusing — keep the empty/invite state instead
+          // and let messages appear once hydration finishes (#1273).
+          isHydrating && fullPage ? (
             <div className="flex h-full items-center justify-center px-6 text-center">
               <p className="text-xs text-muted-foreground">Loading conversation...</p>
             </div>
