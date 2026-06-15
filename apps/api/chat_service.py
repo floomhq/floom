@@ -401,6 +401,23 @@ def _effective_worker_visibility_user_id(user_id: str) -> str:
         if candidate and candidate not in seen:
             seen.add(candidate)
             unique_candidates.append(candidate)
+    # #748/#1139: if the caller is an active workspace member, keep the real
+    # actor id for visibility checks. Falling back to the bootstrap owner here
+    # breaks member access to workspace-visible workers because the repository
+    # evaluates membership against the supplied user id.
+    try:
+        from db import get_db
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM workspace_members "
+                "WHERE user_id = ? AND status = 'active' LIMIT 1",
+                (raw,),
+            ).fetchone()
+            if row is not None:
+                return raw
+    except Exception:
+        pass
     try:
         from db import get_db
 
