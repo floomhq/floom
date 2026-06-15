@@ -8,9 +8,15 @@ name: Release
 # Requires repo/org setting: Settings -> Actions -> General ->
 # "Allow GitHub Actions to create and approve pull requests".
 
+# DORMANT until we're ready to start releasing. Today this only runs when
+# triggered by hand (Actions tab -> Release -> Run workflow). When stabilized
+# and ready to cut releases, switch back to:
+#   on:
+#     push:
+#       branches: [main]
+# and merging the auto-opened "release PR" will tag + publish each release.
 on:
-  push:
-    branches: [main]
+  workflow_dispatch:
 
 permissions:
   contents: write
