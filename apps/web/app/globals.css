@@ -726,11 +726,17 @@ html.dark .grain {
    ========================================================================== */
 
 /* count strip — inline on the right of the title row (SPEC §11) */
-.c-counts { display:flex; align-items:center; color:var(--muted-foreground); font-size:12.5px; flex-wrap:wrap; }
-.c-counts .ct { display:flex; align-items:baseline; gap:5px; padding:0 14px; border-right:var(--bd-div); }
+.c-counts { display:flex; align-items:center; color:var(--muted-foreground); font-size:12.5px; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+.c-counts::-webkit-scrollbar { display:none; }
+.c-counts .ct { display:flex; align-items:baseline; gap:5px; padding:0 14px; border-right:var(--bd-div); white-space:nowrap; flex:0 0 auto; }
 .c-counts .ct:first-child { padding-left:0; }
 .c-counts .ct:last-child { border-right:0; }
 .c-counts .ct b { color:var(--ink); font-weight:600; font-size:14px; }
+/* #1266: on very small screens (<390px) hide secondary counts (active/attention)
+   to keep the header single-line — primary "X workers" count always shows. */
+@media (max-width:389px) {
+  .c-counts .ct:not(:first-child) { display:none; }
+}
 
 /* control bar */
 .c-toolbar { display:flex; align-items:center; gap:10px; }
@@ -858,7 +864,9 @@ html.dark .grain {
 .c-split .c-listcol .c-lhead { display:none; }
 .c-split .c-listcol .c-lrow { grid-template-columns:1fr !important; min-height:58px; padding:13px 14px; }
 .c-split .c-listcol .c-lrow .c-cell, .c-split .c-listcol .c-lrow .c-pill, .c-split .c-listcol .c-lrow .c-menu { display:none; }
-.c-split .c-listcol .c-lrow.sel { background:var(--bg-2); box-shadow:none; }
+/* #1317: unified selected state — same accent-soft tint as the resting list so the
+   active row reads consistently whether the list is compact or full. */
+.c-split .c-listcol .c-lrow.sel { background:var(--accent-soft); box-shadow:inset 2px 0 0 var(--accent); }
 .c-split .c-listcol .c-daygrp .dh { display:none; }
 
 /* detail header + tabs (SPEC §3)
