@@ -754,6 +754,9 @@ html.dark .grain {
 .c-tagbar-wrap { position:relative; overflow:hidden; }
 .c-tagbar-wrap::after { content:''; position:absolute; top:0; right:0; bottom:0; width:40px; pointer-events:none; background:linear-gradient(to right, transparent, var(--bg-app)); }
 .dark .c-tagbar-wrap::after { background:linear-gradient(to right, transparent, var(--bg-app)); }
+.c-tagbar-stack { display:flex; flex-direction:column; gap:9px; min-width:0; }
+.c-filterbar { display:flex; gap:7px; align-items:center; min-width:0; }
+.c-filter-toggle { padding-right:10px; }
 .c-tagbar { display:flex; flex-wrap:nowrap; gap:10px; align-items:center; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
 .c-tagbar::-webkit-scrollbar { height:0; display:none; }
 .c-tgroup { display:flex; gap:5px; align-items:center; flex:0 0 auto; }
