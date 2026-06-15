@@ -2053,6 +2053,34 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_worker_triggers_schedule_due
         ON worker_triggers(type, enabled, next_run_at);
     """,
+    # -- migration 81: one-pending-approval-per-run invariant (#280). The HITL
+    # approval decision was racy because a single run could accumulate 2-3
+    # `pending` approval rows (finalize/writeback re-runs on e2b retry), so
+    # `get_by_run_id` (newest-first) left older pendings as zombies that
+    # compounded the approve/reject TOCTOU. Collapse any existing duplicates to
+    # a single pending row per run (newest wins; older pendings -> 'superseded')
+    # then enforce the invariant with a UNIQUE partial index so a second pending
+    # row can never be created for the same run again.
+    """
+    UPDATE approvals
+       SET status = 'superseded'
+     WHERE status = 'pending'
+       AND id NOT IN (
+           SELECT id FROM (
+               SELECT id,
+                      ROW_NUMBER() OVER (
+                          PARTITION BY run_id
+                          ORDER BY created_at DESC, id DESC
+                      ) AS rn
+                 FROM approvals
+                WHERE status = 'pending'
+           )
+           WHERE rn = 1
+       );
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_approvals_one_pending_per_run
+        ON approvals(run_id)
+        WHERE status = 'pending';
+    """,
 ]
 
 

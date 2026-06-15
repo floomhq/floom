@@ -651,8 +651,42 @@ def approve_run(
         "approved_output": edited_output,
     }
 
-    # Create the follow-up run
     worker_id = run_data["worker_id"]
+
+    # #280: CLAIM THE DECISION ATOMICALLY *BEFORE* spawning any side effect.
+    # The earlier get-then-spawn-then-update ordering was a check-then-act
+    # TOCTOU: two concurrent approve calls (or an approve racing a reject) both
+    # passed the get_by_run_id "is it pending?" check and both spawned a
+    # follow-up run (double-spend), and an approve could still spawn a run after
+    # a reject had already flipped the row. The conditional UPDATE inside
+    # approve() is the only atomic gate; we now require it to flip exactly one
+    # pending row (returns None otherwise) and only proceed if we won.
+    decided_at = now_iso()
+    edited_output_json = json.dumps(edited_output) if body.edited_output is not None else None
+    annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
+    claimed = repos.approvals.approve(
+        owner_id=auth.user_id,
+        run_id=run_id,
+        decided_at=decided_at,
+        edited_output_json=edited_output_json,
+        follow_up_run_id=None,  # attached after the run is spawned below
+        annotations_json=annotations_json,
+        reason=getattr(body, "reason", None),  # #769
+    )
+    if claimed is None:
+        # A concurrent approve/reject already decided this approval.
+        raise HTTPException(status_code=409, detail="Approval already decided")
+
+    # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
+    # state. Without this the original run is stuck at pending_approval forever
+    # (zombie approval); the decision is recorded in the approvals table.
+    repos.runs.update_status(
+        user_id=auth.user_id,
+        run_id=run_id,
+        status=RunStatus.COMPLETED.value,
+    )
+
+    # We won the claim — now (and only now) spawn the single follow-up run.
     try:
         follow_up_run_id = create_run(
             worker_id,
@@ -664,27 +698,15 @@ def approve_run(
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to spawn follow-up run: {exc}") from exc
 
-    decided_at = now_iso()
-    edited_output_json = json.dumps(edited_output) if body.edited_output is not None else None
-    annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
-    repos.approvals.approve(
-        owner_id=auth.user_id,
-        run_id=run_id,
-        decided_at=decided_at,
-        edited_output_json=edited_output_json,
-        follow_up_run_id=follow_up_run_id,
-        annotations_json=annotations_json,
-        reason=getattr(body, "reason", None),  # #769
-    )
-
-    # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
-    # state. Without this the original run is stuck at pending_approval forever
-    # (zombie approval); the decision is recorded in the approvals table.
-    repos.runs.update_status(
-        user_id=auth.user_id,
-        run_id=run_id,
-        status=RunStatus.COMPLETED.value,
-    )
+    # Attach the follow-up run id to the (already-approved) approval row.
+    attach = getattr(repos.approvals, "attach_follow_up", None)
+    if callable(attach):
+        attach(
+            owner_id=auth.user_id,
+            run_id=run_id,
+            follow_up_run_id=follow_up_run_id,
+            edited_output_json=edited_output_json,
+        )
 
     # Kick off the follow-up run
     start_run(follow_up_run_id, worker_id, follow_up_inputs, user_id=auth.user_id, repos=repos)
@@ -739,15 +761,21 @@ def reject_run(
             detail="This approval was created by request_approval(). Use POST /approvals/{approval_id}/reject instead.",
         )
 
+    # #280: claim the decision atomically — reject() flips pending->rejected and
+    # returns None if a concurrent approve/reject already won, so we never race
+    # an in-flight approve (which would otherwise still spawn an execution run
+    # for a run the operator rejected).
     decided_at = now_iso()
     annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
-    repos.approvals.reject(
+    claimed = repos.approvals.reject(
         owner_id=auth.user_id,
         run_id=run_id,
         decided_at=decided_at,
         reason=body.reason,
         annotations_json=annotations_json,
     )
+    if claimed is None:
+        raise HTTPException(status_code=409, detail="Approval already decided")
 
     # 1.5.1: transition the ORIGINAL run off pending_approval to a terminal
     # state so it is not stuck forever (zombie approval). The rejection itself
