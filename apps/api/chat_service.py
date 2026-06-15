@@ -125,6 +125,26 @@ WORKSPACE_AGENT_ID = "workspace-agent"
 DEFAULT_WORKSPACE_AGENT_MODEL = "gpt-5.4-mini"
 CHAT_EVENT_PROTOCOL_VERSION = "emily.chat.v1"
 CHAT_EVENT_VERSION = 2
+
+
+def _default_chat_model() -> str:
+    """Emily's model id, resolved lazily from the live env (env may be injected
+    after import via the cloud dotenv path — see models.py).
+
+    Resolution order:
+      1. WORKEROS_CHAT_MODEL — explicit chat override.
+      2. WORKEROS_WORKER_AGENT_MODEL — so a single provider config (e.g.
+         ``bedrock/us.anthropic.claude-sonnet-4-6``) wires BOTH worker runs and
+         Emily. Without this, setting only the worker model left Emily on the
+         OpenAI default (dead/quota'd on a Bedrock-only deploy) -> "Chat failed
+         upstream".
+      3. DEFAULT_WORKSPACE_AGENT_MODEL — OpenAI zero-config fallback for OSS.
+    """
+    return (
+        os.environ.get("WORKEROS_CHAT_MODEL")
+        or os.environ.get("WORKEROS_WORKER_AGENT_MODEL")
+        or DEFAULT_WORKSPACE_AGENT_MODEL
+    )
 def _workspace_root() -> Path:
     custom = os.environ.get("WORKEROS_WORKSPACE_DIR", "").strip()
     if custom:
@@ -1820,7 +1840,7 @@ def workspace_agent_info(user_id: str) -> Dict[str, Any]:
     settings = get_workspace_agent_settings(user_id)
     return {
         "agent_id": WORKSPACE_AGENT_ID,
-        "model": os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL,
+        "model": _default_chat_model(),
         "base_persona": get_workspace_base_persona(),
         "worker_authoring_rules": WORKER_AUTHORING_RULES,
         # build_system_prompt_for_source is what /chat actually runs (#844:
@@ -2101,7 +2121,7 @@ async def stream_chat(
 
         import llm as _llm
 
-        _emily_model = _llm.agent_model(os.environ.get("WORKEROS_CHAT_MODEL") or DEFAULT_WORKSPACE_AGENT_MODEL)
+        _emily_model = _llm.agent_model(_default_chat_model())
         agent = Agent(
             name=WORKSPACE_AGENT_ID,
             instructions=system_prompt,
