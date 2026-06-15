@@ -930,13 +930,18 @@ def _drain_one_batch() -> None:
 
         try:
             # Claim the run before spawning a worker thread so subsequent drain
-            # passes cannot dispatch the same queued row twice.
-            repos_obj.runs.update(
+            # passes cannot dispatch the same queued row twice. The repository
+            # performs this as a conditional update so separate API replicas
+            # cannot both win the same queued run.
+            claimed = repos_obj.runs.claim_queued(
                 user_id=user_id,
                 run_id=run_id,
-                status=RunStatus.RUNNING.value,
                 started_at=_now_iso(),
             )
+            if claimed is None:
+                logger.info("Queue drain: skipped run %s because another drainer claimed it", run_id)
+                _get_semaphore().release()
+                continue
 
             # Slot acquired — dispatch the run in a thread.
             # The semaphore is released inside _run_thread_entry_with_semaphore.
