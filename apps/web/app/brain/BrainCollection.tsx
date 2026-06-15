@@ -13,6 +13,7 @@ import { LoadingState } from "@/components/collection/CollectionStates";
 import { InlineFileOpen, type InlineDragItem } from "@/components/file-viewer/InlineFileOpen";
 import { visibilityLabel } from "@/lib/permissions";
 import { formatBytes, writeKey } from "@/lib/brain/format";
+import { BrainVisual } from "@/components/brain/BrainVisual";
 
 const detailCache = new Map<string, ContextDetail>();
 const FOLDER_PLACEHOLDER_FILE = ".workeros-folder";
@@ -431,6 +432,12 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     subtitle: "Reusable folders of files your workers can read before they act.",
     items: folders,
     loading,
+    // #1094: radial Company Brain visual (ported from landing) above the list.
+    banner: (
+      <div style={{ marginBottom: 20 }}>
+        <BrainVisual folders={folders} />
+      </div>
+    ),
     idOf: (c) => c.name,
     searchOf: (c) => `${c.name} ${c.description ?? ""} ${c.category ?? ""}`,
     tagsOf: (c) =>
