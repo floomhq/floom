@@ -134,7 +134,7 @@ function MetricCard({
         {loading ? (
           <Skeleton className="h-7 w-16 rounded-[var(--radius-button)]" />
         ) : (
-          <div className="text-[26px] font-semibold leading-tight text-[var(--text-primary)]">{value}</div>
+          <div className="text-[26px] font-semibold leading-tight text-[var(--ink)]">{value}</div>
         )}
         <div className="mt-1 flex items-center gap-1.5">
           {warning ? (
