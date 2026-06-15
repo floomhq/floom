@@ -5,7 +5,8 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Callable, Optional
 
-from contexts import context_dir, set_context_metadata
+import contexts as _contexts_module
+from contexts import set_context_metadata
 from models import default_worker_memory_context_name
 
 
@@ -32,7 +33,7 @@ def ensure_memory_context_pack(
         return None
 
     name = memory_context_name(config)
-    root = context_dir(name)
+    root = _contexts_module.context_dir(name)
     root.mkdir(parents=True, exist_ok=True)
     memory_file = Path(root) / "MEMORY.md"
     if not memory_file.exists():
