@@ -817,7 +817,7 @@ function ReviewContent() {
         await api.approvals.approveAction(approval.id, annotationsPayload);
       } else if (isAgentTool) {
         await api.approvals.approveAgentTool(approval.id);
-        toast.success("Approved — run will resume");
+        toast.success("Approved: run will resume");
       } else {
         await api.runs.approve(approval.run_id, undefined, annotationsPayload);
         toast.success("Approved");

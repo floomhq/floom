@@ -125,6 +125,9 @@ jobs:
       - name: Lint
         run: npm run lint
 
+      - name: Em-dash guard (no U+2014 in copy strings)
+        run: npm run lint:emdash
+
       - name: Unit tests (vitest)
         run: npm test
 

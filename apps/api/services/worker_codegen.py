@@ -328,7 +328,11 @@ Worked run.py examples (copy the matching shape):
   #     "artifacts":[{"name":"out/counts.json","relative_path":"out/counts.json","type":"application/json"}],"error":None}), encoding='utf-8')
 
 Only include files that are needed. Omit run.py for agent-only (A), omit SKILL.md for pure-script (B).
-The `requirements` array is the authoritative source. `required_connections` = oauth slugs only. `required_secrets` = API_KEY names only."""
+The `requirements` array is the authoritative source. `required_connections` = oauth slugs only. `required_secrets` = API_KEY names only.
+
+=== STYLE ===
+
+Never use em dashes (U+2014 —) in any output: worker titles, descriptions, SKILL.md prose, comments, or user-facing strings. Use commas, colons, semicolons, or parentheses instead."""
 
 
 _BOTH_METHODS: frozenset = frozenset({
