@@ -826,6 +826,11 @@ html.dark .grain {
 .c-gd { color:var(--muted-foreground); font-size:12.5px; line-height:1.45; margin-top:6px; display:-webkit-box; -webkit-line-clamp:1; -webkit-box-orient:vertical; overflow:hidden; }
 .c-gfoot { margin-top:auto; padding-top:12px; display:flex; align-items:center; gap:8px; color:var(--muted-foreground); font-size:12px; }
 .c-gtools { margin-left:auto; display:flex; gap:4px; }
+/* #1117: hover sparkline — hidden at rest, fades in on card hover.
+   Sits flush after toolLogos (c-gtools already has margin-left:auto so
+   toolLogos+sparkline together occupy the right side of the footer). */
+.c-gsparkline { display:flex; align-items:flex-end; margin-left:4px; opacity:0; transition:opacity .15s; }
+.c-gcard:hover .c-gsparkline { opacity:1; }
 
 /* split detail (SPEC §3, §8c) */
 .c-body { flex:1; min-height:0; display:flex; overflow:hidden; }
