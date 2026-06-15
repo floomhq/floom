@@ -322,7 +322,9 @@ function WorkerActivity({
   // Dedupe consecutive repeated failures/outcomes, then cap to visibleRows.
   const grouped = groupRuns(runs).slice(0, visibleRows);
   return (
-    <section className="flex min-h-0 flex-col">
+    // #1336/#1230: flex-1 min-h-0 so this section grows to fill the flex-row
+    // parent and the list card stretches to the bottom without dead whitespace.
+    <section className="flex min-h-0 flex-1 flex-col">
       <div className="mb-3 flex items-center justify-between shrink-0">
         <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Recent activity</h2>
         <Link href="/runs" className="text-[12.5px] text-[var(--accent)] hover:underline">
@@ -398,7 +400,8 @@ function ComingUp({
 }) {
   const visibleItems = items.slice(0, Math.max(3, visibleRows - 1));
   return (
-    <section className="flex min-h-0 flex-col">
+    // #1336/#1230: flex-1 min-h-0 so this section grows alongside WorkerActivity.
+    <section className="flex min-h-0 flex-1 flex-col">
       <div className="mb-3 flex items-center justify-between shrink-0">
         <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Coming up today</h2>
         <Link href="/runs" className="text-[12.5px] text-[var(--accent)] hover:underline">
@@ -563,9 +566,13 @@ export function OverviewDashboard({
   );
 
   return (
-    <div className="flex flex-col flex-1 pb-6 pt-1 lg:min-h-[620px] lg:overflow-hidden">
+    // #1336/#1230: flex-1 min-h-0 lets the dashboard fill the available height
+    // in the standard scrollable AppShell layout (min-h-full wrapper). Removing
+    // lg:min-h-[620px] (replaced by proper flex-fill) and lg:overflow-hidden
+    // (was a no-op inside the overflow-y-auto main; scroll is internal per-list).
+    <div className="flex flex-col flex-1 min-h-0 pb-6 pt-1">
       {/* Hero — compact */}
-      <section className="pb-4">
+      <section className="pb-4 shrink-0">
         <h1 className="text-[23px] font-semibold leading-tight tracking-normal text-[var(--text-primary)]">Work done</h1>
         <p className="mt-1 text-sm text-[var(--text-muted)]">
           {completedThisWeek} {completedThisWeek === 1 ? "run" : "runs"} completed in the last 7 days.
@@ -575,15 +582,19 @@ export function OverviewDashboard({
       {/* Metric tiles with sparklines — S45 */}
       {/* Spec §5c: 2×2 grid at <880px, 4-col at xl. Using `sm:` (640px) as the
           first breakpoint keeps the 2×2 layout on all mobile/tablet sizes. */}
-      <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+      <div className="grid shrink-0 grid-cols-2 gap-4 xl:grid-cols-4">
         {metrics.map((metric) => (
           <MetricCard key={metric.label} {...metric} loading={loading} />
         ))}
       </div>
 
-      {/* Activity + Coming up — 2-col; grows to fill remaining viewport height
-          so the page doesn't leave a whitespace band at the bottom. */}
-      <div className="mt-7 grid grid-cols-1 gap-7 lg:grid-cols-[1.4fr_1fr] lg:flex-1 lg:min-h-0">
+      {/* Activity + Coming up — 2-col flex row; flex-1 min-h-0 so this band
+          grows to fill all remaining height and the cards stretch to the bottom.
+          #1336/#1230: switching from grid to flex so child sections can use
+          flex-1 directly (grid items need grid-rows-1 + h-full to propagate
+          height; flex children simply grow). Internal overflow-y-auto per list
+          handles content that exceeds the available height. */}
+      <div className="mt-7 flex min-h-0 flex-1 flex-col gap-7 lg:flex-row">
         <WorkerActivity runs={data?.recent_runs ?? []} loading={loading} visibleRows={visibleRows} />
         <ComingUp items={data?.scheduled_today ?? []} loading={loading} visibleRows={visibleRows} />
       </div>
