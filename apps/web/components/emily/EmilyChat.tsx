@@ -18,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { EmilyAvatar } from "./EmilyAvatar";
 import { MarkdownText } from "./MarkdownText";
 import { PromptInput } from "./PromptInput";
+import { PromptChips } from "@/components/PromptChips";
 import { CreateSourcePills } from "@/components/CreateSourcePills";
 import { FileChip } from "./FileChip";
 import { ToolCardRenderer } from "./cards/ToolCardRenderer";
@@ -363,7 +364,7 @@ function CreateWorkerHeroState({
         <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)] p-5 space-y-4">
           <textarea
             autoFocus
-            placeholder="Summarise my Granola meetings and post action items to HubSpot CRM daily"
+            placeholder="Create me: a worker that…"
             value={input}
             onChange={(e) => onInput(e.target.value)}
             onKeyDown={(e) => {
@@ -976,14 +977,6 @@ export function EmilyMobileSheet() {
 }
 
 // ── Full-page chat (used by /chat route) ──────────────────────────────────────
-
-// Hero example workflows for create mode — same set the /workers/new page used.
-const CREATE_EXAMPLES = [
-  { label: "Granola → HubSpot daily",   prompt: "Summarise my Granola meetings and post action items to HubSpot CRM daily" },
-  { label: "GitHub PR digest 9am",       prompt: "Every morning at 9am, send me a digest of my unread GitHub PRs and open issues" },
-  { label: "Invoice → Sheets",           prompt: "Process any new email in label 'invoices', extract total amount, and add a row to Google Sheets" },
-  { label: "HubSpot deal → Slack",       prompt: "When a new deal is created in HubSpot, send a Slack message to #sales-channel" },
-] as const;
 
 export function EmilyChatPage({
   createMode = false,
