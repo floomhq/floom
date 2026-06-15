@@ -9,6 +9,7 @@ import {
   setContextWriteable,
   toggleContext,
 } from "@/lib/worker-manifest";
+import { ChipPreviewDialog, type ChipPreviewTarget } from "@/components/worker/ChipPreviewDialog";
 
 interface WorkerBrainEditorProps {
   contexts: WorkerContextSpec[];
@@ -44,6 +45,8 @@ export function WorkerBrainEditor({
 }: WorkerBrainEditorProps) {
   const [attach, setAttach] = useState("");
   const [open, setOpen] = useState(false);
+  // #1303: read-only preview popup for a clicked brain-folder chip.
+  const [preview, setPreview] = useState<ChipPreviewTarget | null>(null);
   const listboxId = useId();
   const attachedNames = new Set(contexts.map(contextSpecName));
   const unattached = availablePacks.filter((p) => !attachedNames.has(p.name));
@@ -79,14 +82,20 @@ export function WorkerBrainEditor({
           const writeable = contextSpecWritable(spec);
           return (
             <div key={name} className="c-lrow" style={{ gridTemplateColumns: "1fr auto auto", gap: 12 }}>
-              <div className="c-lprimary">
+              <button
+                type="button"
+                className="c-lprimary"
+                style={{ background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}
+                title={`Preview ${name}`}
+                onClick={() => setPreview({ kind: "brain", name })}
+              >
                 <span className="c-logo">
                   <Folder size={15} />
                 </span>
                 <div className="c-lp-tx">
-                  <div className="nm">{name}</div>
+                  <div className="nm" style={{ textDecoration: "underline", textUnderlineOffset: 2, textDecorationColor: "var(--border)" }}>{name}</div>
                 </div>
-              </div>
+              </button>
               {editable ? (
                 <div className="c-vtog" role="group" aria-label={`${name} access`}>
                   <button
@@ -187,6 +196,8 @@ export function WorkerBrainEditor({
           </button>
         </div>
       )}
+
+      <ChipPreviewDialog target={preview} onOpenChange={(o) => !o && setPreview(null)} />
     </div>
   );
 }
