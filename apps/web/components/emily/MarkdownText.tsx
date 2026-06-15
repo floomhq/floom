@@ -1,8 +1,11 @@
+"use client";
+
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { sanitizeHref } from "@/lib/safe-url";
+import { useTextStream } from "@/lib/useTextStream";
 
 /**
  * MarkdownText -- renders assistant message text as real markdown.
@@ -12,14 +15,20 @@ import { sanitizeHref } from "@/lib/safe-url";
 export function MarkdownText({
   text,
   className,
+  streaming = false,
 }: {
   text: string;
   className?: string;
+  /** When true, animates token reveal with a typewriter effect. */
+  streaming?: boolean;
 }) {
+  const displayed = useTextStream(text, streaming, "typewriter");
   return (
     <div className={cn("text-sm leading-relaxed", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        // Use `displayed` (animated) instead of `text` so streaming feels smooth
+        key={streaming ? undefined : text}
         components={{
           p: ({ children }) => (
             <p className="mb-1.5 last:mb-0">{children}</p>
@@ -79,7 +88,7 @@ export function MarkdownText({
           ),
         }}
       >
-        {text}
+        {displayed}
       </ReactMarkdown>
     </div>
   );
