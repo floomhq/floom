@@ -781,7 +781,7 @@ html.dark .grain {
 .c-lrow { display:grid; gap:14px; align-items:center; padding:0 18px; min-height:64px; border-bottom:var(--bd-div); cursor:pointer; text-align:left; width:100%; background:none; }
 .c-lrow:last-child { border-bottom:0; }
 .c-lrow:hover { background:var(--bg-2); }
-.c-lrow.sel { background:var(--accent-soft); box-shadow:inset 3px 0 0 var(--accent); }
+.c-lrow.sel { background:var(--accent-soft); }
 .c-brain-hint { display:flex; align-items:center; gap:7px; color:var(--muted-foreground); font-size:11.5px; margin-bottom:9px; }
 .c-brain-row .c-row-grip { opacity:0; }
 .c-brain-row:hover .c-row-grip, .c-brain-row:focus-within .c-row-grip, .c-brain-row:focus .c-row-grip, .c-row-grip:hover { opacity:.6; }
@@ -886,8 +886,8 @@ html.dark .grain {
 .c-split .c-listcol .c-lrow { grid-template-columns:1fr !important; min-height:58px; padding:13px 14px; }
 .c-split .c-listcol .c-lrow .c-cell, .c-split .c-listcol .c-lrow .c-pill, .c-split .c-listcol .c-lrow .c-menu { display:none; }
 /* #1317: unified selected state — same accent-soft tint as the resting list so the
-   active row reads consistently whether the list is compact or full. */
-.c-split .c-listcol .c-lrow.sel { background:var(--accent-soft); box-shadow:inset 2px 0 0 var(--accent); }
+   active row reads consistently whether the list is compact or full. No left bar (#1267). */
+.c-split .c-listcol .c-lrow.sel { background:var(--accent-soft); }
 .c-split .c-listcol .c-daygrp .dh { display:none; }
 
 /* detail header + tabs (SPEC §3)
