@@ -9,8 +9,7 @@ import { cn } from "@/lib/utils";
  * consistency. The blue (#3E6FE0 light / #5B8DEF dark) is the Floom
  * accent, tokenized via --emily-mark.
  *
- * No letter monogram, no sparkle.
- */
+ * No letter monogram, no sparkle. */
 export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
   const isSmall = size === "sm";
   const sz = isSmall ? "size-6" : "size-8";
@@ -29,7 +28,6 @@ export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
         strokeWidth={1.5}
         fill="currentColor"
         className="text-white"        aria-hidden="true"
-      />
-    </span>
+      />    </span>
   );
 }
