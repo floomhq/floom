@@ -1594,8 +1594,13 @@ class AgentDriver(SandboxDriver):
             return {"ok": False, "error": "E2B_API_KEY is not configured"}
 
         from e2b import Sandbox
+        from runner_sandbox.e2b_driver import _e2b_network_policy
 
-        sandbox = Sandbox.create(api_key=api_key, timeout=max(timeout + 60, 180))
+        sandbox = Sandbox.create(
+            api_key=api_key,
+            timeout=max(timeout + 60, 180),
+            network=_e2b_network_policy(None, api_url=os.environ.get("WORKEROS_API_URL")),
+        )
         try:
             remote_bundle = "/home/user/worker"
             remote_inputs = "/home/user/inputs"
