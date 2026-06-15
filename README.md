@@ -49,6 +49,10 @@ floomhq/workeros-cloud      (private, hosted)         Supabase auth, RLS multi-t
 └───────────────────────────────────────────────────────────┘
 ```
 
+## Persistence & durability
+
+Supabase (Postgres + Storage) is the source of truth; API servers are **stateless** and hydrate workers, git history (versioning/rollback), and contexts from Supabase on demand. Point a new server at the same Supabase — with a writable workers/git dir and the usual creds — and it reconstructs everything as if nothing changed. Sensitive contexts are deliberately kept out of git but still backed up to the `contexts` Storage bucket. Full model: [`docs/GIT-WORKSPACE-CLOUD.md`](docs/GIT-WORKSPACE-CLOUD.md).
+
 ## CLI login (mirrors skills-neo pattern)
 
 ```bash
