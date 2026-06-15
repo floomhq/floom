@@ -10,6 +10,7 @@ import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
+import { AlertsBell } from "@/components/overview/AlertsBell";
 import { api } from "@/lib/api";
 import type { CurrentUser } from "@/lib/types";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
@@ -220,6 +221,10 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
           >
             <Search className="w-5 h-5" />
           </button>
+          {/* #1292: global alerts bell on mobile (AppShell's pane-anchored bell
+              is desktop-only). Self-fetches needs-attention; dropdown opens
+              below-right of the trigger. */}
+          <AlertsBell />
           <ThemeModeButton className="theme-mode-button-compact" />
           <button
             type="button"
