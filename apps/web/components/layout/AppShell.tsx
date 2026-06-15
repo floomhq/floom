@@ -32,7 +32,8 @@ function useIsDesktop(): boolean {
 const standalonePrefixes = ["/approvals/review", "/w", "/s", "/login"];
 
 // The full-page /chat route renders its own Emily header; no dock needed there.
-const noDockPrefixes = ["/chat"];
+// /workers/new is the hero hire flow — it needs full-width, no dock cramping it.
+const noDockPrefixes = ["/chat", "/workers/new"];
 
 export type AppShellProps = {
   children: React.ReactNode;

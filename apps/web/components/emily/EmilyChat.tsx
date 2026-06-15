@@ -297,46 +297,128 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
   );
 }
 
-// ── Empty state ───────────────────────────────────────────────────────────────
+// ── Empty state (general chat) ────────────────────────────────────────────────
 
-function EmptyState({
-  onSuggest,
-  createMode = false,
-  onAddSource,
-}: {
-  onSuggest: (text: string) => void;
-  createMode?: boolean;
-  onAddSource?: (source: string) => void;
-}) {
+function ChatEmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 px-6 text-center">
       <EmilyAvatar size="md" />
       <div>
-        <p className="text-sm font-medium">
-          {createMode ? "Describe the worker you want" : "I am Emily, your Chief of Staff"}
-        </p>
+        <p className="text-sm font-medium">I am Emily, your Chief of Staff</p>
         <p className="text-xs text-muted-foreground mt-1">
-          {createMode
-            ? "Tell me what it should do, then add the sources it can draw on."
-            : "Ask me to create workers, check runs, or manage connections."}
+          Ask me to create workers, check runs, or manage connections.
         </p>
       </div>
-      {createMode ? (
-        onAddSource ? <CreateSourcePills onPick={onAddSource} /> : null
-      ) : (
-        <div className="flex flex-wrap gap-1.5 justify-center">
-          {SUGGESTIONS.map((s) => (
+      <div className="flex flex-wrap gap-1.5 justify-center">
+        {SUGGESTIONS.map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => onSuggest(s)}
+            className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Create-worker hero (full-width hero for create mode, no messages) ─────────
+
+const CREATE_EXAMPLES = [
+  { label: "Granola → HubSpot daily",   prompt: "Summarise my Granola meetings and post action items to HubSpot CRM daily" },
+  { label: "GitHub PR digest 9am",       prompt: "Every morning at 9am, send me a digest of my unread GitHub PRs and open issues" },
+  { label: "Invoice → Sheets",           prompt: "Process any new email in label 'invoices', extract total amount, and add a row to Google Sheets" },
+  { label: "HubSpot deal → Slack",       prompt: "When a new deal is created in HubSpot, send a Slack message to #sales-channel" },
+] as const;
+
+function CreateWorkerHeroState({
+  input,
+  onInput,
+  onSubmit,
+  onAddSource,
+}: {
+  input: string;
+  onInput: (v: string) => void;
+  onSubmit: () => void;
+  onAddSource: (source: string) => void;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-full w-full px-6 py-12 gap-8">
+      {/* Headline */}
+      <div className="text-center space-y-2 max-w-xl">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground leading-tight">
+          Hire a new AI worker
+        </h1>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          Describe the job in plain English. Emily drafts the worker, picks the right
+          integrations, and opens the editor so you can review before running.
+        </p>
+      </div>
+
+      {/* Composer card — wide and prominent */}
+      <div className="w-full max-w-2xl">
+        <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)] p-5 space-y-4">
+          <textarea
+            autoFocus
+            placeholder="Summarise my Granola meetings and post action items to HubSpot CRM daily"
+            value={input}
+            onChange={(e) => onInput(e.target.value)}
+            onKeyDown={(e) => {
+              if ((e.metaKey || e.ctrlKey) && e.key === "Enter") {
+                e.preventDefault();
+                onSubmit();
+              }
+            }}
+            rows={5}
+            className="w-full resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60"
+          />
+          <PromptChips prompt={input} />
+          <div className="h-px bg-[var(--border-default)]" />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CreateSourcePills onPick={onAddSource} />
+            <div className="flex items-center gap-2 shrink-0 ml-auto">
+              <Button
+                onClick={onSubmit}
+                disabled={!input.trim()}
+                className="h-9 px-5 text-sm"
+              >
+                Hire worker
+              </Button>
+              <kbd
+                className="hidden sm:inline-flex items-center gap-0.5 rounded [border:var(--bd-card)] bg-[var(--bg-2)] px-1.5 py-1 text-[10px] font-mono text-[var(--ink-mute)]"
+                aria-hidden="true"
+              >
+                <span style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</span>
+                <span>↵</span>
+              </kbd>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Example cards */}
+      <div className="w-full max-w-2xl space-y-3">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Or start from a template
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {CREATE_EXAMPLES.map((ex) => (
             <button
-              key={s}
+              key={ex.label}
               type="button"
-              onClick={() => onSuggest(s)}
-              className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              onClick={() => onInput(ex.prompt)}
+              className="flex flex-col items-start gap-1.5 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] px-4 py-3 text-left transition-colors hover:bg-[var(--active-nav-bg)]"
             >
-              {s}
+              <span className="text-sm font-medium text-foreground">{ex.label}</span>
+              <span className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{ex.prompt}</span>
+              <PromptChips prompt={ex.prompt} className="mt-0.5" />
             </button>
           ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -555,6 +637,22 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
       )
   );
 
+  // In full-page create mode with no messages, show the wide hero instead of the
+  // narrow chat thread. The hero shares the same input/submit path so sending
+  // from the hero immediately starts the conversation and reveals the thread.
+  if (fullPage && createMode && !hasMessages && !isHydrating) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <CreateWorkerHeroState
+          input={input}
+          onInput={setInput}
+          onSubmit={handleSubmit}
+          onAddSource={handleAddSource}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={cn("flex flex-col h-full", fullPage && "max-w-2xl mx-auto w-full")}>
       {/* Controls: New chat + Export — shown on full-page; dock header renders them when hideControls */}
@@ -595,11 +693,7 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
               <p className="text-xs text-muted-foreground">Loading conversation...</p>
             </div>
           ) : (
-            <EmptyState
-              onSuggest={(text) => { setInput(text); }}
-              createMode={createMode}
-              onAddSource={handleAddSource}
-            />
+            <ChatEmptyState onSuggest={(text) => { setInput(text); }} />
           )
         ) : (
           <div className={cn("py-5 space-y-5", fullPage ? "px-6" : "px-4")}>
@@ -883,6 +977,14 @@ export function EmilyMobileSheet() {
 
 // ── Full-page chat (used by /chat route) ──────────────────────────────────────
 
+// Hero example workflows for create mode — same set the /workers/new page used.
+const CREATE_EXAMPLES = [
+  { label: "Granola → HubSpot daily",   prompt: "Summarise my Granola meetings and post action items to HubSpot CRM daily" },
+  { label: "GitHub PR digest 9am",       prompt: "Every morning at 9am, send me a digest of my unread GitHub PRs and open issues" },
+  { label: "Invoice → Sheets",           prompt: "Process any new email in label 'invoices', extract total amount, and add a row to Google Sheets" },
+  { label: "HubSpot deal → Slack",       prompt: "When a new deal is created in HubSpot, send a Slack message to #sales-channel" },
+] as const;
+
 export function EmilyChatPage({
   createMode = false,
   primeInput,
@@ -895,8 +997,12 @@ export function EmilyChatPage({
       <div className="flex h-14 shrink-0 items-center gap-2 [border-bottom:var(--bd-div)] px-4">
         <EmilyAvatar size="sm" />
         <div className="flex-1 min-w-0 flex items-center gap-1.5">
-          <p className="text-sm font-semibold leading-none">Emily</p>
-          <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
+          <p className="text-sm font-semibold leading-none">
+            {createMode ? "Hire a worker" : "Emily"}
+          </p>
+          {!createMode && (
+            <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
+          )}
         </div>
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
