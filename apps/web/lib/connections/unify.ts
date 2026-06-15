@@ -50,7 +50,7 @@ const APP_NAME_OVERRIDES: Record<string, string> = {
 };
 
 /** Capitalise the first letter and replace underscores/hyphens with spaces. */
-function humaniseAppName(s: string): string {
+export function humaniseAppName(s: string): string {
   if (!s) return s;
   const key = s.toLowerCase().replace(/[_\-\s]+/g, "");
   if (APP_NAME_OVERRIDES[key]) return APP_NAME_OVERRIDES[key];
