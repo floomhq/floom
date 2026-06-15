@@ -812,7 +812,7 @@ html.dark .grain {
 .c-gcard.sel { background:var(--accent-soft); box-shadow:none; }
 .c-gcard .star { position:absolute; top:13px; right:13px; color:var(--muted-foreground); opacity:0; transition:opacity .12s; }
 .c-gcard:hover .star { opacity:1; }
-.c-gcard .star.on { opacity:1; color:var(--pending); }
+.c-gcard .star.on { opacity:1; color:var(--accent); }
 /* D-05: reserve space at top-right for the absolute star/lock cluster so a long
    worker name never collides with the star button. */
 .c-gtop { display:flex; align-items:center; gap:11px; padding-right:26px; min-width:0; }
