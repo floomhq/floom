@@ -518,7 +518,12 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       },
     },
     states: {
-      empty: { title: "No folders yet", help: "Create a folder of files your workers can read." },
+      // #1366 — improved help text; action falls back to the existing addButton
+      // ("New folder" panel trigger) so no dead /brain/new route is needed.
+      empty: {
+        title: "No folders yet",
+        help: "Brain folders give your workers long-term memory — upload docs, PDFs, or notes they read before acting.",
+      },
     },
   };
 
