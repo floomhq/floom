@@ -16,6 +16,8 @@ from runner_sandbox import e2b_driver
 from runner_sandbox.e2b_driver import (
     E2BSandboxDriver,
     _configured_e2b_api_keys,
+    _e2b_command_request_timeout,
+    _e2b_install_request_timeout,
     _extract_context_tar,
     _install_timeout_for_run,
     _is_e2b_quota_or_rate_limit_error,
@@ -335,9 +337,66 @@ def test_e2b_driver_streams_command_output_callbacks(tmp_path, monkeypatch):
     assert kwargs["envs"]["WORKEROS_API_URL"] == "https://origin-api.internal"
     assert callable(kwargs["on_stdout"])
     assert callable(kwargs["on_stderr"])
+    assert kwargs["timeout"] == 300.0
+    assert kwargs["request_timeout"] == _e2b_command_request_timeout(300)
+    assert kwargs["request_timeout"] > 60
     assert logs.count(("info", "[e2b] live stdout")) == 1
     assert logs.count(("warning", "[e2b] stderr: live stderr")) == 1
     assert not any("stdout after exit" in message for _level, message in logs)
+
+
+def test_e2b_driver_sets_request_timeouts_for_dependency_installs(tmp_path, monkeypatch):
+    monkeypatch.setenv("E2B_API_KEY", "e2b-test")
+    monkeypatch.setitem(sys.modules, "e2b", types.SimpleNamespace(Sandbox=FakeFullSandbox))
+    monkeypatch.setattr(e2b_driver, "WORKERS_DIR", tmp_path / "workers")
+    FakeFullSandbox.instances = []
+    FakeFullSandbox.last_create_kwargs = {}
+    worker_dir = tmp_path / "worker-with-deps"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('unused')\n")
+    (worker_dir / "requirements.txt").write_text("requests==2.32.3\n")
+    (worker_dir / "package.json").write_text('{"dependencies":{"left-pad":"1.3.0"}}\n')
+    config = WorkerConfig(
+        id="install-timeout-test",
+        name="Install Timeout Test",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        outputs=[],
+    )
+
+    result = E2BSandboxDriver().run(
+        worker_id="install-timeout-test",
+        run_id="run_install_timeouts",
+        inputs={},
+        secrets={},
+        log_fn=lambda *_args, **_kwargs: None,
+        trace_id="trace_install_timeouts",
+        timeout_seconds=120,
+        config=config,
+    )
+
+    assert result.status == "success"
+    sandbox = FakeFullSandbox.instances[-1]
+    pip_command, pip_kwargs = sandbox.commands.run_calls[0]
+    npm_command, npm_kwargs = sandbox.commands.run_calls[1]
+    worker_command, worker_kwargs = sandbox.commands.run_calls[2]
+    install_timeout = _install_timeout_for_run(120)
+    assert pip_command.startswith("pip install")
+    assert npm_command.startswith("cd /home/user/worker && npm install")
+    assert "python run.py" in worker_command
+    assert pip_kwargs["timeout"] == install_timeout
+    assert npm_kwargs["timeout"] == install_timeout
+    assert pip_kwargs["request_timeout"] == _e2b_install_request_timeout(install_timeout)
+    assert npm_kwargs["request_timeout"] == _e2b_install_request_timeout(install_timeout)
+    assert pip_kwargs["request_timeout"] >= 300
+    assert npm_kwargs["request_timeout"] >= 300
+    assert worker_kwargs["request_timeout"] == _e2b_command_request_timeout(120)
+    assert worker_kwargs["timeout"] == 120.0
 
 
 def test_e2b_driver_falls_back_to_next_key_on_quota_error(tmp_path, monkeypatch):
