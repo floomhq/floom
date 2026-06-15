@@ -3231,7 +3231,7 @@ class SqliteApprovalRepository:
             *((approval_id,) if approval_id is not None else ()),
         )
         with get_db() as conn:
-            conn.execute(
+            cur = conn.execute(
                 f"""
                 UPDATE approvals
                 SET status = 'approved',
@@ -3245,8 +3245,38 @@ class SqliteApprovalRepository:
                 """,
                 params,
             )
+            # #280: the conditional UPDATE is the only atomic gate. If it flipped
+            # zero rows the approval was already decided (a concurrent caller won
+            # the race) — return None so the route can 409 instead of spawning a
+            # duplicate / rejected-but-executed follow-up run.
+            flipped = cur.rowcount
+        if flipped == 0:
+            return None
         if approval_id is not None:
             return self.get(owner_id=owner_id, approval_id=approval_id)
+        return self.get_by_run_id(run_id=run_id)
+
+    def attach_follow_up(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        follow_up_run_id: str,
+        edited_output_json: str | None = None,
+    ) -> dict[str, Any] | None:
+        # #280: the approve() claim flips pending->approved atomically *before*
+        # the follow-up run is spawned, so the follow-up id is attached here in a
+        # second step. Scoped to the row this owner just approved.
+        with get_db() as conn:
+            conn.execute(
+                """
+                UPDATE approvals
+                SET follow_up_run_id = ?,
+                    edited_output_json = COALESCE(?, edited_output_json)
+                WHERE run_id = ? AND owner_id = ? AND status = 'approved'
+                """,
+                (follow_up_run_id, edited_output_json, run_id, owner_id),
+            )
         return self.get_by_run_id(run_id=run_id)
 
     def reject(
@@ -3266,7 +3296,7 @@ class SqliteApprovalRepository:
             *((approval_id,) if approval_id is not None else ()),
         )
         with get_db() as conn:
-            conn.execute(
+            cur = conn.execute(
                 f"""
                 UPDATE approvals
                 SET status = 'rejected',
@@ -3278,6 +3308,10 @@ class SqliteApprovalRepository:
                 """,
                 params,
             )
+            # #280: zero rows flipped => already decided by a concurrent caller.
+            flipped = cur.rowcount
+        if flipped == 0:
+            return None
         if approval_id is not None:
             return self.get(owner_id=owner_id, approval_id=approval_id)
         return self.get_by_run_id(run_id=run_id)
