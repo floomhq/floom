@@ -47,10 +47,11 @@ class _FakeClient:
 def test_worker_author_codegen_retries_without_temperature_for_gpt5(monkeypatch):
     module = _load_worker_author_module()
     monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", "gpt-5.1")
+    monkeypatch.setenv("OPENAI_API_KEY", "test-key")
     client = _FakeClient()
+    monkeypatch.setitem(sys.modules, "openai", SimpleNamespace(OpenAI=lambda **_kwargs: client))
 
     out = module._codegen_chat(
-        client,
         messages=[],
         max_output_tokens=8000,
         temperature=0.2,
