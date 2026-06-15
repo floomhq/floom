@@ -1,0 +1,26 @@
+name: Release
+
+# release-please watches conventional commits on main. On each push it maintains
+# a "release vX.Y.Z" PR (changelog + version bump); merging that PR tags the
+# commit and creates the GitHub Release. SemVer is derived from commit types
+# (fix -> patch, feat -> minor; pre-1.0 keeps breaking changes as minor).
+#
+# Requires repo/org setting: Settings -> Actions -> General ->
+# "Allow GitHub Actions to create and approve pull requests".
+
+on:
+  push:
+    branches: [main]
+
+permissions:
+  contents: write
+  pull-requests: write
+
+jobs:
+  release-please:
+    runs-on: [self-hosted, linux, x64, workeros-ci]
+    steps:
+      - uses: googleapis/release-please-action@v4
+        with:
+          config-file: release-please-config.json
+          manifest-file: .release-please-manifest.json
