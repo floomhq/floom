@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import { AppShell } from "@/components/layout/AppShell";
-import { PostHogProvider } from "@/lib/analytics/posthog-provider";
 
 // PR S20 polish: Geist Sans + Geist Mono (openchat-v2). Replaces the previous
 // Google-Fonts @import of Inter; loaded via next/font for proper inlining
@@ -46,9 +45,7 @@ export default function RootLayout({
       suppressHydrationWarning
     >
       <body className="flex h-screen overflow-hidden flex-col bg-transparent text-foreground md:flex-row">
-        <PostHogProvider>
-          <AppShell>{children}</AppShell>
-        </PostHogProvider>
+        <AppShell>{children}</AppShell>
       </body>
     </html>
   );

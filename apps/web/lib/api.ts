@@ -3,8 +3,6 @@
 // fetch() calls are NOT auto-prefixed by basePath, so Cloud sets
 // NEXT_PUBLIC_API_PROXY_BASE="/app/api/proxy". Keeping this an env seam lets the
 // Downstream host consume this file unmodified (no fork).
-import { capture, captureException, type AnalyticsProperties } from "@/lib/analytics/capture";
-
 export const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 const WEB_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
@@ -77,113 +75,8 @@ export function apiProxyPath(path: string, includeWorkspaceQuery = false): strin
   return `${API_BASE}${includeWorkspaceQuery ? withWorkspaceQuery(path) : path}`;
 }
 
-function apiRouteTemplate(path: string): string {
-  const clean = path.split("?")[0] || "/";
-  const segments = clean.split("/").filter(Boolean);
-  const templated: string[] = [];
-  for (let i = 0; i < segments.length; i += 1) {
-    const segment = segments[i];
-    const previous = segments[i - 1];
-    if (segment === "public") {
-      templated.push(segment);
-      continue;
-    }
-    if (previous === "files" || previous === "sqlite" || previous === "bundle") {
-      templated.push(":path");
-      break;
-    }
-    if (
-      previous === "workers" ||
-      previous === "runs" ||
-      previous === "contexts" ||
-      previous === "connections" ||
-      previous === "approvals" ||
-      previous === "workspaces" ||
-      previous === "members" ||
-      previous === "tokens" ||
-      previous === "versions" ||
-      previous === "artifacts" ||
-      previous === "magic" ||
-      previous === "secrets" ||
-      previous === "users"
-    ) {
-      templated.push(":id");
-      continue;
-    }
-    templated.push(segment);
-  }
-  return `/${templated.join("/")}`;
-}
-
-function captureApiError(path: string, status: number, errorType = "http") {
-  capture("api_error", {
-    route: apiRouteTemplate(path),
-    status,
-    error_type: errorType,
-  });
-}
-
 async function fetchApi(path: string, input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
-  try {
-    return await fetch(input, init);
-  } catch (error) {
-    captureApiError(path, 0, "network");
-    captureException(error, { route: apiRouteTemplate(path), status: 0 });
-    throw error;
-  }
-}
-
-function workerTools(worker: import("./types").WorkerDetail | import("./types").WorkerSummary): string[] {
-  const explicitConnections = "connections" in worker && Array.isArray(worker.connections)
-    ? worker.connections
-    : [];
-  const configConnections = "config" in worker ? worker.config?.connections ?? [] : [];
-  const tools = new Set<string>();
-  for (const app of explicitConnections) tools.add(app);
-  for (const item of configConnections) {
-    if (typeof item === "string") tools.add(item);
-    else if ("app" in item && typeof item.app === "string") tools.add(item.app);
-    else if ("composio" in item && typeof item.composio.app === "string") tools.add(item.composio.app);
-    else if ("mcp" in item) tools.add("mcp");
-  }
-  return Array.from(tools).sort();
-}
-
-function workerTriggerType(worker: Pick<import("./types").WorkerDetail, "trigger_type" | "config"> | import("./types").WorkerSummary): string {
-  if ("config" in worker && worker.config?.trigger?.type) return worker.config.trigger.type;
-  return worker.trigger_type || "unknown";
-}
-
-function captureOnce(key: string, event: string, props: AnalyticsProperties) {
-  if (typeof window === "undefined") return;
-  const storageKey = `workeros.analytics.${key}`;
-  try {
-    if (window.sessionStorage.getItem(storageKey)) return;
-    window.sessionStorage.setItem(storageKey, "1");
-  } catch {
-    // Storage can be disabled; analytics must not block product flows.
-  }
-  capture(event, props);
-}
-
-function captureRunTerminal(run: import("./types").RunDetail | import("./types").RunSummary) {
-  if (run.status !== "completed" && run.status !== "failed" && run.status !== "cancelled") return;
-  const base = {
-    run_id: run.id,
-    worker_id: run.worker_id,
-    status: run.status,
-    duration_ms: run.duration_ms ?? null,
-    tokens: "total_tokens" in run ? run.total_tokens ?? null : null,
-    cost_usd: null,
-  };
-  if (run.status === "failed") {
-    captureOnce(`run_failed.${run.id}`, "worker_run_failed", {
-      ...base,
-      error_type: run.error ? "worker_error" : "unknown",
-    });
-    return;
-  }
-  captureOnce(`run_completed.${run.id}`, "worker_run_completed", base);
+  return fetch(input, init);
 }
 
 function isSignedApprovalProxyPath(path: string): boolean {
@@ -240,7 +133,6 @@ async function fetchJson<T>(path: string, options?: RequestInit): Promise<T> {
     headers,
   });
   if (!res.ok) {
-    captureApiError(path, res.status);
     handleUnauthorizedResponse(res.status, path);
     throw new Error(await apiErrorFromResponse(res));
   }
@@ -266,7 +158,6 @@ async function fetchText(path: string, options?: RequestInit): Promise<string> {
     headers,
   });
   if (!res.ok) {
-    captureApiError(path, res.status);
     handleUnauthorizedResponse(res.status, path);
     throw new Error(await apiErrorFromResponse(res));
   }
@@ -280,7 +171,6 @@ async function fetchRaw(path: string, options?: RequestInit): Promise<Response> 
     headers: withWorkspaceHeaders(options?.headers),
   });
   if (!res.ok) {
-    captureApiError(path, res.status);
     handleUnauthorizedResponse(res.status, path);
     throw new Error(await apiErrorFromResponse(res));
   }
@@ -312,7 +202,6 @@ export const api = {
       headers: withWorkspaceHeaders(),
     });
     if (!res.ok) {
-      captureApiError("/me", res.status);
       handleUnauthorizedResponse(res.status, "/me");
       throw new Error(await apiErrorFromResponse(res));
     }
@@ -330,7 +219,6 @@ export const api = {
         body: fd,
       });
       if (!res.ok) {
-        captureApiError("/chat/attachments", res.status);
         throw new Error(await apiErrorFromResponse(res));
       }
       return res.json();
@@ -363,11 +251,6 @@ export const api = {
     restore: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
     archive: async (id: string) => {
       const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}/archive`, { method: "POST" });
-      capture("worker_archived", {
-        worker_id: id,
-        trigger_type: workerTriggerType(worker),
-        tools: workerTools(worker),
-      });
       return worker;
     },
     setVisibility: async (id: string, visibility: import("./types").AssetVisibility) => {
@@ -375,19 +258,12 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ visibility }),
       });
-      if (visibility === "workspace") {
-        capture("worker_shared", {
-          worker_id: id,
-          share_type: "workspace",
-        });
-      }
       return worker;
     },
     shareLink: async (id: string) => {
       const link = await fetchJson<import("./types").StandaloneShareLink>(`/workers/${encodeURIComponent(id)}/share-link`, {
         method: "POST",
       });
-      capture("worker_shared", { worker_id: id, share_type: "link" });
       return link;
     },
     importFromShare: (token: string) =>
@@ -402,25 +278,12 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ inputs, trigger_source: "manual" }),
       });
-      capture("worker_run_started", {
-        worker_id: id,
-        run_id: result.run_id ?? null,
-        trigger: "manual",
-      });
       return result;
     },
     create: async (worker_yml: string, run_py: string, skill_md?: string) => {
       const worker = await fetchJson<import("./types").WorkerDetail>("/workers", {
         method: "POST",
         body: JSON.stringify({ worker_yml, run_py, ...(skill_md !== undefined ? { skill_md } : {}) }),
-      });
-      capture("worker_created", {
-        worker_id: worker.id,
-        source: "manual",
-        trigger_type: workerTriggerType(worker),
-        tools: workerTools(worker),
-      }, {
-        setOnce: { first_worker_created_at: new Date().toISOString() },
       });
       return worker;
     },
@@ -434,15 +297,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify(params),
       });
-      capture("worker_created", {
-        worker_id: result.worker_id,
-        source: "prompt",
-      }, {
-        setOnce: { first_worker_created_at: new Date().toISOString() },
-      });
-      capture("emily_worker_created_from_prompt", {
-        worker_id: result.worker_id,
-      });
       return result;
     },
     newFromPrompt: async (params: { prompt: string; mode?: "draft" | "create"; parent_worker_id?: string }) => {
@@ -450,19 +304,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify(params),
       });
-      if (params.mode === "create") {
-        capture("worker_created", {
-          worker_id: result.worker_id,
-          run_id: result.run_id,
-          source: "prompt",
-        }, {
-          setOnce: { first_worker_created_at: new Date().toISOString() },
-        });
-        capture("emily_worker_created_from_prompt", {
-          worker_id: result.worker_id,
-          run_id: result.run_id,
-        });
-      }
       return result;
     },
     createFromBundle: async (zipBlob: Blob): Promise<import("./types").WorkerDetail> => {
@@ -474,7 +315,6 @@ export const api = {
         body: form,
       });
       if (!res.ok) {
-        captureApiError("/workers/from-bundle", res.status);
         let err: string;
         try {
           const body = await res.json();
@@ -485,27 +325,12 @@ export const api = {
         throw new Error(err);
       }
       const worker = await res.json() as import("./types").WorkerDetail;
-      capture("worker_created", {
-        worker_id: worker.id,
-        source: "manual",
-        import_type: "bundle",
-        trigger_type: workerTriggerType(worker),
-        tools: workerTools(worker),
-      }, {
-        setOnce: { first_worker_created_at: new Date().toISOString() },
-      });
       return worker;
     },
     update: async (id: string, worker_yml: string, run_py: string, skill_md?: string) => {
       const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}`, {
         method: "PUT",
         body: JSON.stringify({ worker_yml, run_py, ...(skill_md !== undefined ? { skill_md } : {}) }),
-      });
-      capture("worker_edited", {
-        worker_id: id,
-        edit_surface: "worker_update",
-        trigger_type: workerTriggerType(worker),
-        tools: workerTools(worker),
       });
       return worker;
     },
@@ -519,18 +344,10 @@ export const api = {
         method: "PUT",
         body: JSON.stringify({ files }),
       });
-      capture("worker_edited", {
-        worker_id: id,
-        edit_surface: "files",
-        file_count: files.length,
-        trigger_type: workerTriggerType(worker),
-        tools: workerTools(worker),
-      });
       return worker;
     },
     delete: async (id: string) => {
       const result = await fetchJson<{ status: string }>(`/workers/${id}`, { method: "DELETE" });
-      capture("worker_deleted", { worker_id: id });
       return result;
     },
     listVersions: (id: string, limit = 50) =>
@@ -569,12 +386,10 @@ export const api = {
       if (params?.limit) qs.append("limit", String(params.limit));
       if (params?.offset) qs.append("offset", String(params.offset));
       const rows = await fetchJson<import("./types").RunSummary[]>(`/runs?${qs.toString()}`);
-      rows.forEach(captureRunTerminal);
       return rows;
     },
     get: async (id: string) => {
       const run = await fetchJson<import("./types").RunDetail>(`/runs/${id}`);
-      captureRunTerminal(run);
       return run;
     },
     logs: (id: string) => fetchJson<import("./types").LogEntry[]>(`/runs/${id}/logs`),
@@ -591,11 +406,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ edited_output: editedOutput ?? null, annotations: annotations ?? null }),
       });
-      capture("approval_approved", {
-        run_id: id,
-        approval_type: "run",
-        has_annotations: Boolean(annotations),
-      });
       return result;
     },
     reject: async (
@@ -607,12 +417,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ reason: reason ?? null, annotations: annotations ?? null }),
       });
-      capture("approval_rejected", {
-        run_id: id,
-        approval_type: "run",
-        has_reason: Boolean(reason),
-        has_annotations: Boolean(annotations),
-      });
       return result;
     },
     replay: async (workerId: string, runId: string) => {
@@ -620,11 +424,6 @@ export const api = {
         `/workers/${encodeURIComponent(workerId)}/runs/${encodeURIComponent(runId)}/replay`,
         { method: "POST" }
       );
-      capture("worker_run_started", {
-        worker_id: workerId,
-        run_id: result.run_id,
-        trigger: "replay",
-      });
       return result;
     },
     // #796: bulk-export the given runs as one ZIP blob.
@@ -636,7 +435,6 @@ export const api = {
         body: JSON.stringify({ run_ids: runIds }),
       });
       if (!res.ok) {
-        captureApiError("/runs/export", res.status);
         throw new Error(await apiErrorFromResponse(res));
       }
       return res.blob();
@@ -652,16 +450,6 @@ export const api = {
     list: async (status?: string) => {
       const qs = status ? `?status=${encodeURIComponent(status)}` : "";
       const rows = await fetchJson<import("./types").ApprovalRow[]>(`/approvals${qs}`);
-      for (const approval of rows) {
-        if (approval.status === "pending") {
-          captureOnce(`approval_requested.${approval.id}`, "approval_requested", {
-            approval_id: approval.id,
-            run_id: approval.run_id,
-            worker_id: approval.worker_id,
-            approval_type: "pending",
-          });
-        }
-      }
       return rows;
     },
     count: () => fetchJson<{ pending: number }>("/approvals/count"),
@@ -676,11 +464,6 @@ export const api = {
           body: JSON.stringify({ annotations: annotations ?? null }),
         }
       );
-      capture("approval_approved", {
-        approval_id: approvalId,
-        approval_type: "destructive_delete",
-        has_annotations: Boolean(annotations),
-      });
       return result;
     },
     rejectAction: async (
@@ -695,12 +478,6 @@ export const api = {
           body: JSON.stringify({ reason, annotations: annotations ?? null }),
         }
       );
-      capture("approval_rejected", {
-        approval_id: approvalId,
-        approval_type: "destructive_delete",
-        has_reason: Boolean(reason),
-        has_annotations: Boolean(annotations),
-      });
       return result;
     },
     approveAgentTool: async (approvalId: string, editedOutput?: Record<string, unknown>) => {
@@ -711,10 +488,6 @@ export const api = {
           body: JSON.stringify({ edited_output: editedOutput ?? null }),
         }
       );
-      capture("approval_approved", {
-        approval_id: approvalId,
-        approval_type: "agent_tool",
-      });
       return result;
     },
     rejectAgentTool: async (approvalId: string, reason?: string) => {
@@ -725,11 +498,6 @@ export const api = {
           body: JSON.stringify({ reason: reason ?? null }),
         }
       );
-      capture("approval_rejected", {
-        approval_id: approvalId,
-        approval_type: "agent_tool",
-        has_reason: Boolean(reason),
-      });
       return result;
     },
     publicGet: (approvalId: string, token: string) =>
@@ -749,11 +517,6 @@ export const api = {
           body: JSON.stringify({ edited_output: editedOutput ?? null, annotations: annotations ?? null }),
         }
       );
-      capture("approval_approved", {
-        approval_id: approvalId,
-        approval_type: "public",
-        has_annotations: Boolean(annotations),
-      });
       return result;
     },
     publicReject: async (
@@ -769,12 +532,6 @@ export const api = {
           body: JSON.stringify({ reason: reason ?? null, annotations: annotations ?? null }),
         }
       );
-      capture("approval_rejected", {
-        approval_id: approvalId,
-        approval_type: "public",
-        has_reason: Boolean(reason),
-        has_annotations: Boolean(annotations),
-      });
       return result;
     },
     publicArtifactUrl: (approvalId: string, artifactId: string, token: string) =>
@@ -796,7 +553,6 @@ export const api = {
         { method: "POST", headers: withWorkspaceHeaders(), body: form }
       );
       if (!res.ok) {
-        captureApiError(uploadPath, res.status);
         handleUnauthorizedResponse(res.status, `/approvals/${approvalId}/uploads`);
         throw new Error(await apiErrorFromResponse(res));
       }
@@ -817,7 +573,6 @@ export const api = {
         { method: "POST", body: form }
       );
       if (!res.ok) {
-        captureApiError(uploadPath, res.status);
         handleUnauthorizedResponse(res.status, `/approvals/public/${approvalId}/uploads`);
         throw new Error(await apiErrorFromResponse(res));
       }
@@ -849,9 +604,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify({ writeable }),
       });
-      capture("brain_folder_created", {
-        writeable,
-      });
       return folder;
     },
     // Members STEP 4: Private <-> Shared with workspace.
@@ -860,11 +612,6 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}/visibility`,
         { method: "PUT", body: JSON.stringify({ visibility }) }
       );
-      if (visibility === "workspace") {
-        capture("brain_shared", {
-          share_type: "workspace",
-        });
-      }
       return folder;
     },
     setSensitive: (name: string, sensitive: boolean) =>
@@ -877,9 +624,6 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}/share-link`,
         { method: "POST" }
       );
-      capture("brain_shared", {
-        share_type: "link",
-      });
       return link;
     },
     delete: (name: string, force = false) =>
@@ -892,13 +636,6 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
         { method: "PUT", body: JSON.stringify(tags ? { content, tags } : { content }) } // #780
       );
-      capture("brain_file_added", {
-        file_type: path.split(".").pop()?.toLowerCase() || "unknown",
-        tag_count: tags?.length ?? 0,
-        size_bytes: content.length,
-      }, {
-        setOnce: { first_brain_file_added_at: new Date().toISOString() },
-      });
       return file;
     },
     deleteFile: (name: string, path: string) =>
@@ -911,10 +648,6 @@ export const api = {
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/share-link`,
         { method: "POST" }
       );
-      capture("brain_shared", {
-        share_type: "file_link",
-        file_type: path.split(".").pop()?.toLowerCase() || "unknown",
-      });
       return link;
     },
     // #777: inspect a brain .db file — tables list, or a table's rows.
@@ -953,7 +686,6 @@ export const api = {
         body: form,
       });
       if (!res.ok) {
-        captureApiError(uploadPath, res.status);
         let err = "";
         try {
           const body = await res.json();
@@ -964,13 +696,6 @@ export const api = {
         throw new Error(err);
       }
       const result = await res.json() as { files: import("./types").ContextFileItem[]; total_size_bytes: number };
-      capture("brain_file_added", {
-        file_count: result.files?.length ?? 0,
-        size_bytes: result.total_size_bytes ?? 0,
-        created_folder: Boolean(options?.createIfMissing),
-      }, options?.createIfMissing ? {
-        setOnce: { first_brain_file_added_at: new Date().toISOString() },
-      } : undefined);
       return result;
     },
     fetchFileBlob: async (name: string, path: string) => {
@@ -981,7 +706,6 @@ export const api = {
         { headers: withWorkspaceHeaders() }
       );
       if (!res.ok) {
-        captureApiError(filePath, res.status);
         throw new Error(`Download failed (${res.status})`);
       }
       return res.blob();
@@ -1090,33 +814,13 @@ export const api = {
   connections: {
     list: async () => {
       const rows = await fetchJson<import("./types").ConnectionItem[]>("/connections");
-      for (const connection of rows) {
-        if (String(connection.status) === "reauth" || connection.status === "expired") {
-          captureOnce(`connection_reauth.${connection.id}`, "connection_reauth", {
-            connection_id: connection.id,
-            app: connection.app_name,
-          });
-        }
-      }
       return rows;
     },
     initiate: async (app_name: string) => {
-      capture("channel_install_started", {
-        channel: app_name,
+      return fetchJson<import("./types").ConnectionInitResponse>("/connections", {
+        method: "POST",
+        body: JSON.stringify({ app_name }),
       });
-      try {
-        const result = await fetchJson<import("./types").ConnectionInitResponse>("/connections", {
-          method: "POST",
-          body: JSON.stringify({ app_name }),
-        });
-        return result;
-      } catch (error) {
-        capture("channel_install_failed", {
-          channel: app_name,
-          error_type: error instanceof Error ? "api_error" : "unknown",
-        });
-        throw error;
-      }
     },
     createMcp: async (payload: {
       label: string;
@@ -1133,12 +837,6 @@ export const api = {
         method: "POST",
         body: JSON.stringify(payload),
       });
-      capture("connection_added", {
-        connection_id: connection.id,
-        app: "mcp",
-        connection_type: "mcp",
-        tool_count: payload.allowed_tools?.length ?? 0,
-      });
       return connection;
     },
     byApp: (app_name: string) =>
@@ -1150,7 +848,6 @@ export const api = {
       fetchJson<import("./types").ConnectionItem>(`/connections/${id}/status`),
     delete: async (id: string) => {
       const result = await fetchJson<{ status: string }>(`/connections/${id}`, { method: "DELETE" });
-      capture("connection_removed", { connection_id: id });
       return result;
     },
     test: (id: string) =>
@@ -1182,41 +879,21 @@ export const api = {
         cache: "no-store",
       }),
     installUrl: async (return_to = "/settings#channels") => {
-      capture("channel_install_started", { channel: "slack" });
-      try {
-        const result = await fetchJson<import("./types").SlackInstallUrlResponse>("/slack/oauth/install", {
-          method: "POST",
-          body: JSON.stringify({ return_to }),
-        });
-        return result;
-      } catch (error) {
-        capture("channel_install_failed", {
-          channel: "slack",
-          error_type: error instanceof Error ? "api_error" : "unknown",
-        });
-        throw error;
-      }
+      return fetchJson<import("./types").SlackInstallUrlResponse>("/slack/oauth/install", {
+        method: "POST",
+        body: JSON.stringify({ return_to }),
+      });
     },
     // Consume a Slack claim token (from ?slack_claim=) and bind the Slack
     // sender identity to the authenticated Floom user.
     claim: async (token: string) => {
-      try {
-        const result = await fetchJson<{ ok: boolean; slack_team_id: string; slack_user_id: string; user_id: string }>(
-          "/slack/bindings/claim",
-          {
-            method: "POST",
-            body: JSON.stringify({ token }),
-          }
-        );
-        capture("channel_installed", { channel: "slack" });
-        return result;
-      } catch (error) {
-        capture("channel_install_failed", {
-          channel: "slack",
-          error_type: error instanceof Error ? "api_error" : "unknown",
-        });
-        throw error;
-      }
+      return fetchJson<{ ok: boolean; slack_team_id: string; slack_user_id: string; user_id: string }>(
+        "/slack/bindings/claim",
+        {
+          method: "POST",
+          body: JSON.stringify({ token }),
+        }
+      );
     },
     // My binding status (linked as which Slack user) and unlink.
     bindingMe: () =>
@@ -1227,20 +904,10 @@ export const api = {
   // My WhatsApp binding status and unlink.
   whatsapp: {
     claim: async (token: string) => {
-      try {
-        const result = await fetchJson<{ ok: boolean; wa_id: string; user_id: string; workspace_id: string }>(
-          "/whatsapp/bindings/claim",
-          { method: "POST", body: JSON.stringify({ token }) }
-        );
-        capture("channel_installed", { channel: "whatsapp" });
-        return result;
-      } catch (error) {
-        capture("channel_install_failed", {
-          channel: "whatsapp",
-          error_type: error instanceof Error ? "api_error" : "unknown",
-        });
-        throw error;
-      }
+      return fetchJson<{ ok: boolean; wa_id: string; user_id: string; workspace_id: string }>(
+        "/whatsapp/bindings/claim",
+        { method: "POST", body: JSON.stringify({ token }) }
+      );
     },
     bindingMe: () =>
       fetchJson<import("./types").WhatsAppBindingMe>("/whatsapp/bindings/me"),
@@ -1270,7 +937,6 @@ export const api = {
         body: form,
       });
       if (!res.ok) {
-        captureApiError("/workspace/import", res.status);
         let err = "";
         try {
           const body = await res.json();
@@ -1298,10 +964,6 @@ export const api = {
       const result = await fetchJson<null>(`/workspace/settings/${encodeURIComponent(key)}`, {
         method: "PUT",
         body: JSON.stringify({ value }),
-      });
-      capture("setting_changed", {
-        key,
-        value_type: value === "true" || value === "false" ? "boolean" : value === "" ? "empty" : "string",
       });
       return result;
     },
