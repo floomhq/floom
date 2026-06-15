@@ -121,6 +121,12 @@ export interface CollectionStates {
 export interface CollectionConfig<T> {
   title: string;
   subtitle?: string;
+  /**
+   * When true the Collection suppresses its own title/subtitle header row.
+   * Use this when the parent renders its own heading (e.g. the WorkersCollection
+   * tab switcher already labels the "Workers" tab — a second H1 is redundant).
+   */
+  hideTitle?: boolean;
   items: T[];
   loading?: boolean;
   error?: string | null;
