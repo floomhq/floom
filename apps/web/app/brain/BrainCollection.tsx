@@ -10,11 +10,12 @@ import type { ContextSummary, ContextDetail } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { InlineFileOpen } from "@/components/file-viewer/InlineFileOpen";
+import { InlineFileOpen, type InlineDragItem } from "@/components/file-viewer/InlineFileOpen";
 import { visibilityLabel } from "@/lib/permissions";
 import { formatBytes, writeKey } from "@/lib/brain/format";
 
 const detailCache = new Map<string, ContextDetail>();
+const FOLDER_PLACEHOLDER_FILE = ".workeros-folder";
 
 function useContextDetail(name: string): [ContextDetail | undefined, () => Promise<void>] {
   const [d, setD] = useState<ContextDetail | undefined>(detailCache.get(name));
@@ -55,6 +56,7 @@ function useContextDetail(name: string): [ContextDetail | undefined, () => Promi
 function FilesTab({ folder }: { folder: ContextSummary }) {
   const [d, reload] = useContextDetail(folder.name);
   if (!d) return <LoadingState rows={4} />;
+  const contextFiles = (d.files ?? []).filter((f) => !f.deleted);
   const files = (d.files ?? [])
     .filter((f) => !f.deleted)
     .map((f) => ({
@@ -68,6 +70,29 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
   // Drag-and-drop upload is only offered when the operator may write to the
   // folder (read-only/system packs stay read-only).
   const canWrite = !folder.read_only && folder.writeable !== false;
+  const moveItem = async (item: InlineDragItem, targetDir: string) => {
+    if (!canWrite) return;
+    try {
+      if (item.kind === "file") {
+        await api.contexts.moveFile(folder.name, item.path, `${targetDir}${item.name}`);
+      } else {
+        const sourcePrefix = item.path;
+        const targetPrefix = `${targetDir}${item.name}/`;
+        const children = contextFiles
+          .filter((file) => file.path.startsWith(sourcePrefix))
+          .sort((a, b) => a.path.localeCompare(b.path));
+        for (const child of children) {
+          const rest = child.path.slice(sourcePrefix.length);
+          await api.contexts.moveFile(folder.name, child.path, `${targetPrefix}${rest}`);
+        }
+      }
+      toast.success(item.kind === "file" ? `Moved ${item.name}` : `Moved ${item.name}/`);
+      await reload();
+    } catch (e) {
+      toast.error(e instanceof Error ? e.message : "Could not move row.");
+    }
+  };
+
   return (
     <InlineFileOpen
       files={files}
@@ -82,6 +107,38 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
         await api.contexts.moveFile(folder.name, file.id, `${dir}${newName}`);
         await reload();
       }}
+      onMoveItem={canWrite ? moveItem : undefined}
+      onCreateSubfolder={
+        canWrite
+          ? async (dirPrefix, folderName) => {
+              try {
+                await api.contexts.saveTextFile(
+                  folder.name,
+                  `${dirPrefix}${folderName}/${FOLDER_PLACEHOLDER_FILE}`,
+                  "",
+                );
+                toast.success(`Created ${folderName}/`);
+                await reload();
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : "Could not create subfolder.");
+              }
+            }
+          : undefined
+      }
+      onSaveText={
+        canWrite
+          ? async (file, content) => {
+              try {
+                await api.contexts.saveTextFile(folder.name, file.id, content, file.tags);
+                toast.success(`Saved ${file.name}`);
+                await reload();
+              } catch (e) {
+                toast.error(e instanceof Error ? e.message : "Could not save file.");
+                throw e;
+              }
+            }
+          : undefined
+      }
       // Drag-and-drop / Browse upload into the brain folder (#issue-6a).
       onUpload={
         canWrite
