@@ -113,6 +113,7 @@ from apps.api.db._secret_crypto import (
 
 ensure_engine_api_path()
 
+from db.interface import RowDict  # noqa: E402
 from models import (  # noqa: E402
     RecentStats,
     RunStatus,
@@ -1704,6 +1705,300 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
 
 
 class SupabaseRunRepository(_BaseSupabaseRepository):
+    _COMPLETED_STATUSES = ("completed", "approved", "success", "succeeded")
+    _FAILED_STATUSES = ("failed", "error", "cancelled", "rejected", "timeout")
+    _OUTCOME_STATUSES = ("completed", "approved", "success")
+    _TERMINAL_STATUSES = _COMPLETED_STATUSES + _FAILED_STATUSES
+    _OVERVIEW_PAGE_SIZE = 1000
+
+    @staticmethod
+    def _parse_run_dt(value: Any) -> datetime | None:
+        if not value:
+            return None
+        try:
+            return _as_aware_utc(datetime.fromisoformat(str(value).replace("Z", "+00:00")))
+        except (TypeError, ValueError):
+            return None
+
+    def _overview_run_rows(
+        self,
+        *,
+        user_id: str,
+        columns: str,
+        since: str | None = None,
+        until: str | None = None,
+        statuses: Iterable[str] | None = None,
+        worker_ids: Iterable[str] | None = None,
+        order_created_desc: bool = False,
+        limit: int | None = None,
+    ) -> list[dict[str, Any]]:
+        status_values = [str(status) for status in statuses or () if str(status)]
+        worker_values = [str(worker_id) for worker_id in worker_ids or () if str(worker_id)]
+        if statuses is not None and not status_values:
+            return []
+        if worker_ids is not None and not worker_values:
+            return []
+
+        rows: list[dict[str, Any]] = []
+        offset = 0
+        while limit is None or len(rows) < limit:
+            page_size = self._OVERVIEW_PAGE_SIZE
+            if limit is not None:
+                page_size = min(page_size, max(0, limit - len(rows)))
+            if page_size <= 0:
+                break
+
+            builder = self._client.table("runs").select(columns)
+            builder = _scope_by_workspace(builder, user_id=user_id)
+            if since:
+                builder = builder.gte("created_at", since)
+            if until:
+                builder = builder.lte("created_at", until)
+            if status_values:
+                builder = builder.in_("status", status_values)
+            if worker_values:
+                builder = builder.in_("worker_id", worker_values)
+            if order_created_desc:
+                builder = builder.order("created_at", desc=True)
+
+            page = _response_rows(builder.range(offset, offset + page_size - 1).execute())
+            rows.extend(page)
+            if len(page) < page_size:
+                break
+            offset += page_size
+        return rows
+
+    def overview_status_rollup(
+        self,
+        *,
+        user_id: str,
+        since: str,
+        window_7d: str,
+        today_start: str,
+    ) -> list[RowDict]:
+        window_7d_dt = self._parse_run_dt(window_7d)
+        today_start_dt = self._parse_run_dt(today_start)
+        grouped: dict[tuple[str, Any], dict[str, Any]] = {}
+        rows = self._overview_run_rows(
+            user_id=user_id,
+            columns="worker_id,status,created_at",
+            since=since,
+        )
+        for row in rows:
+            worker_id = str(row.get("worker_id") or "")
+            if not worker_id:
+                continue
+            status = row.get("status")
+            created_at = self._parse_run_dt(row.get("created_at"))
+            if created_at is None:
+                continue
+            key = (worker_id, status)
+            bucket = grouped.setdefault(
+                key,
+                {
+                    "worker_id": worker_id,
+                    "status": status,
+                    "count_7d": 0,
+                    "count_previous_7d": 0,
+                    "count_today": 0,
+                },
+            )
+            if window_7d_dt is not None and created_at >= window_7d_dt:
+                bucket["count_7d"] += 1
+            elif window_7d_dt is not None:
+                bucket["count_previous_7d"] += 1
+            if today_start_dt is not None and created_at >= today_start_dt:
+                bucket["count_today"] += 1
+        return list(grouped.values())
+
+    def overview_sparkline_buckets(
+        self,
+        *,
+        user_id: str,
+        since: str,
+        until: str,
+        bucket_seconds: int,
+    ) -> list[RowDict]:
+        bucket_seconds = max(1, int(bucket_seconds))
+        since_dt = self._parse_run_dt(since)
+        if since_dt is None:
+            return []
+        grouped: dict[tuple[int, Any], dict[str, Any]] = {}
+        rows = self._overview_run_rows(
+            user_id=user_id,
+            columns="status,created_at",
+            since=since,
+            until=until,
+        )
+        for row in rows:
+            created_at = self._parse_run_dt(row.get("created_at"))
+            if created_at is None:
+                continue
+            bucket_index = int((created_at - since_dt).total_seconds() // bucket_seconds)
+            key = (bucket_index, row.get("status"))
+            bucket = grouped.setdefault(
+                key,
+                {"bucket": bucket_index, "status": row.get("status"), "total": 0},
+            )
+            bucket["total"] += 1
+        return list(grouped.values())
+
+    def overview_current_counts(
+        self,
+        *,
+        user_id: str,
+        statuses: list[str],
+    ) -> dict[str, int]:
+        if not statuses:
+            return {}
+        counts: dict[str, int] = {str(status): 0 for status in statuses}
+        rows = self._overview_run_rows(
+            user_id=user_id,
+            columns="status",
+            statuses=statuses,
+        )
+        for row in rows:
+            status = str(row.get("status") or "")
+            if status in counts:
+                counts[status] += 1
+        return {status: total for status, total in counts.items() if total}
+
+    def overview_top_completed_by_worker(
+        self,
+        *,
+        user_id: str,
+        since: str,
+        limit: int,
+    ) -> list[RowDict]:
+        rows = self._overview_run_rows(
+            user_id=user_id,
+            columns="worker_id,status,created_at",
+            since=since,
+            statuses=self._OUTCOME_STATUSES,
+        )
+        grouped: dict[str, dict[str, Any]] = {}
+        for row in rows:
+            worker_id = str(row.get("worker_id") or "")
+            if not worker_id:
+                continue
+            bucket = grouped.setdefault(
+                worker_id,
+                {"worker_id": worker_id, "count": 0, "latest_created_at": ""},
+            )
+            bucket["count"] += 1
+            created_at = str(row.get("created_at") or "")
+            if created_at > str(bucket.get("latest_created_at") or ""):
+                bucket["latest_created_at"] = created_at
+
+        def _top_sort_key(item: dict[str, Any]) -> tuple[int, float, str]:
+            latest = self._parse_run_dt(item.get("latest_created_at"))
+            latest_ts = latest.timestamp() if latest is not None else 0.0
+            return -int(item["count"] or 0), -latest_ts, str(item["worker_id"])
+
+        ordered = sorted(grouped.values(), key=_top_sort_key)
+        return [
+            {"worker_id": row["worker_id"], "count": row["count"]}
+            for row in ordered[: max(0, int(limit))]
+        ]
+
+    def overview_recent_visible_runs(
+        self,
+        *,
+        user_id: str,
+        worker_ids: list[str],
+        limit: int,
+    ) -> list[RowDict]:
+        if not worker_ids:
+            return []
+        rows = self._overview_run_rows(
+            user_id=user_id,
+            columns="id,worker_id,status,trigger_source,created_at,started_at,completed_at,duration_ms,error,error_code",
+            worker_ids=worker_ids,
+            order_created_desc=True,
+            limit=max(0, int(limit)),
+        )
+        worker_name_map = SupabaseWorkerRepository(self._client)._worker_name_map(
+            row["worker_id"] for row in rows if row.get("worker_id")
+        )
+        for row in rows:
+            worker_id = str(row.get("worker_id") or "")
+            row["worker_name"] = worker_name_map.get(worker_id)
+        return rows
+
+    def overview_latest_failures_by_worker(
+        self,
+        *,
+        user_id: str,
+        worker_ids: list[str],
+        since: str,
+        limit: int,
+    ) -> list[RowDict]:
+        if not worker_ids:
+            return []
+        rows = self._overview_run_rows(
+            user_id=user_id,
+            columns="id,worker_id,status,trigger_source,created_at,started_at,completed_at,duration_ms,error,error_code",
+            worker_ids=worker_ids,
+            statuses=[RunStatus.FAILED.value],
+            since=since,
+        )
+        grouped: dict[str, list[dict[str, Any]]] = defaultdict(list)
+        for row in rows:
+            worker_id = str(row.get("worker_id") or "")
+            if worker_id:
+                grouped[worker_id].append(row)
+
+        def _failure_sort_key(item: dict[str, Any]) -> tuple[datetime, datetime, str]:
+            effective = (
+                self._parse_run_dt(item.get("started_at"))
+                or self._parse_run_dt(item.get("completed_at"))
+                or self._parse_run_dt(item.get("created_at"))
+                or datetime.min.replace(tzinfo=timezone.utc)
+            )
+            created = self._parse_run_dt(item.get("created_at")) or datetime.min.replace(tzinfo=timezone.utc)
+            return effective, created, str(item.get("id") or "")
+
+        selected: list[dict[str, Any]] = []
+        for worker_id, worker_rows in grouped.items():
+            latest = max(worker_rows, key=_failure_sort_key)
+            latest = dict(latest)
+            latest["failure_count"] = len(worker_rows)
+            latest["row_number"] = 1
+            selected.append(latest)
+
+        def _selected_sort_key(item: dict[str, Any]) -> tuple[int, float, str]:
+            effective = (
+                self._parse_run_dt(item.get("started_at"))
+                or self._parse_run_dt(item.get("completed_at"))
+                or self._parse_run_dt(item.get("created_at"))
+                or datetime.min.replace(tzinfo=timezone.utc)
+            )
+            return (
+                -int(item.get("failure_count") or 0),
+                -effective.timestamp(),
+                str(item.get("worker_id") or ""),
+            )
+
+        return sorted(selected, key=_selected_sort_key)[: max(0, int(limit))]
+
+    def overview_terminal_runs(
+        self,
+        *,
+        user_id: str,
+        worker_ids: list[str],
+        since: str,
+    ) -> list[RowDict]:
+        if not worker_ids:
+            return []
+        return self._overview_run_rows(
+            user_id=user_id,
+            columns="id,worker_id,status,trigger_source,created_at,started_at,completed_at,duration_ms,error,error_code",
+            worker_ids=worker_ids,
+            statuses=self._TERMINAL_STATUSES,
+            since=since,
+            order_created_desc=True,
+        )
+
     def _resolve_trigger_member_emails(self, user_ids: list[str]) -> dict[str, str]:
         """Batch-look up emails for trigger_member_id values. Never raises."""
         if not user_ids:
