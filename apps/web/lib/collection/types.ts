@@ -105,7 +105,12 @@ export interface DetailHeader {
 }
 
 export interface CollectionStates {
-  empty?: { title: string; help?: string; icon?: import("react").ComponentType<{ size?: number }> };
+  empty?: {
+    title: string;
+    help?: string;
+    icon?: import("react").ComponentType<{ size?: number }>;
+    action?: ReactNode;
+  };
   errorRetry?: () => void;
 }
 

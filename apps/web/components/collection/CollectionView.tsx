@@ -217,7 +217,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           title={config.states?.empty?.title ?? `No ${config.title.toLowerCase()} yet`}
           help={config.states?.empty?.help}
           icon={config.states?.empty?.icon}
-          action={addButton}
+          action={config.states?.empty?.action ?? addButton}
         />
       );
     }
