@@ -165,8 +165,15 @@ function TriggerRowSummary({ row, onEdit, onRemove }: TriggerRowSummaryProps) {
   const summary = triggerSummaryLine(row);
 
   return (
-    <div className="flex items-center gap-3 py-2.5 px-3 rounded-[var(--radius-ui)] bg-card hover:bg-muted/30 transition-colors group">      <Icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
-      <div className="flex-1 min-w-0 flex items-center gap-2 overflow-hidden">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onEdit}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(); } }}
+      className="flex items-center gap-3 py-2.5 px-3 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card hover:bg-muted/30 transition-colors group cursor-pointer" // ds-allow-round ds-allow-border
+      title="Click to edit trigger"
+    >
+      <Icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />      <div className="flex-1 min-w-0 flex items-center gap-2 overflow-hidden">
         <span className="text-xs font-medium text-foreground shrink-0">{meta.label}</span>
         <span className="text-muted-foreground text-xs select-none">·</span>
         <span className="text-xs text-muted-foreground truncate" title={summary.title}>{summary.text}</span>

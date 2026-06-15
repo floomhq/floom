@@ -444,8 +444,7 @@ export function AlertsBell({ items: itemsProp, onRefresh }: AlertsBellProps) {
                                 key={item.worker_id}
                                 href={`/connections?worker=${encodeURIComponent(item.worker_id ?? "")}`}
                                 onClick={() => setOpen(false)}
-                                className="inline-flex h-6 items-center rounded-[var(--radius-ui)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"                              >
-                                <span className="truncate text-[var(--ink-soft)]">{workerLabel}</span>
+                                className="inline-flex h-6 items-center rounded-[var(--radius-ui)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"                              >                                <span className="truncate text-[var(--ink-soft)]">{workerLabel}</span>
                                 <span className="shrink-0">Add connection →</span>
                               </Link>
                             ) : (
@@ -453,8 +452,7 @@ export function AlertsBell({ items: itemsProp, onRefresh }: AlertsBellProps) {
                                 key={item.worker_id}
                                 href={`/connections/secrets?return_to=${encodeURIComponent(`/workers?sel=${item.worker_id ?? ""}`)}`}
                                 onClick={() => setOpen(false)}
-                                className="inline-flex h-6 items-center rounded-[var(--radius-ui)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"                              >
-                                <span className="truncate text-[var(--ink-soft)]">{workerLabel}</span>
+                                className="inline-flex h-6 items-center rounded-[var(--radius-ui)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"                              >                                <span className="truncate text-[var(--ink-soft)]">{workerLabel}</span>
                                 <span className="shrink-0">Add secret →</span>
                               </Link>
                             );

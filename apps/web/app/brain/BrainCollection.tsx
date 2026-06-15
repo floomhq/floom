@@ -311,8 +311,8 @@ function DropCreateFolderOverlay({
       <div
         style={{
           background: "var(--bg-card)",
-          border: "var(--bd-card)",
-          borderRadius: "var(--radius-card)",
+          border: "var(--bd-card)", // ds-allow-border
+          borderRadius: "var(--radius-card)", // ds-allow-round
           padding: 24,
           minWidth: 340,
           maxWidth: 440,
@@ -546,8 +546,8 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
             inset: 0,
             zIndex: 10,
             pointerEvents: "none",
-            borderRadius: "var(--radius-card)",
-            outline: "2px dashed var(--ink-soft)",
+            borderRadius: "var(--radius-card)", // ds-allow-round
+            outline: "2px dashed var(--ink-soft)", // ds-allow-border — drag-drop visual indicator
             outlineOffset: 4,
             display: "flex",
             alignItems: "center",

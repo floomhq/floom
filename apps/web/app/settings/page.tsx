@@ -973,8 +973,7 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
           Copy
         </Button>
       </div>
-      <pre className="overflow-auto rounded-[var(--radius-ui)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]">        {value}
-      </pre>
+      <pre className="overflow-auto rounded-[var(--radius-ui)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]">        {value}      </pre>
     </div>
   );
 }
@@ -1125,7 +1124,7 @@ function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser |
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-muted-foreground">Profile</h2>
         <div className="flex items-center gap-4">
-          <div className="size-14 shrink-0 rounded-full bg-muted text-foreground grid place-items-center text-lg font-medium">
+          <div className="size-14 shrink-0 rounded-full bg-muted text-foreground grid place-items-center text-lg font-medium"> {/* ds-allow-round — avatar circle */}
             {initials}
           </div>
           <div className="min-w-0">

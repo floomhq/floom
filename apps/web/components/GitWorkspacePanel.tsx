@@ -66,8 +66,7 @@ function PATForm({ onConnected }: { onConnected: (username: string) => void }) {
       <div className="space-y-2">
         <div className="flex items-center gap-2.5">
           <span className="grid size-5 shrink-0 place-items-center rounded-[var(--radius-ui)] bg-foreground/10 text-[11px] font-semibold text-foreground">2</span>
-          <p className="text-sm font-medium text-foreground">Paste the token here</p>        </div>
-      </div>
+          <p className="text-sm font-medium text-foreground">Paste the token here</p>        </div>      </div>
     </div>
   );
 }

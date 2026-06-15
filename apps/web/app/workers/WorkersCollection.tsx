@@ -897,8 +897,7 @@ function WorkerDetailActions({
           className="c-addbtn"
           style={pillBtn}
           onClick={() => setRunOpen(true)}
-          title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused; it may not run as expected" : undefined}
-        >
+          title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused; it may not run as expected" : undefined}        >
           Run
         </button>
       )}
@@ -948,8 +947,8 @@ function WorkerDetailActions({
               <DialogTitle>Run {w.name}</DialogTitle>
               <DialogDescription>Provide inputs for this manual run.</DialogDescription>
             </DialogHeader>
-            {w.enabled === false && (
-              <div className="rounded-[var(--radius-card)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
+            {(w as WorkerSummary & { enabled?: boolean }).enabled === false && (
+              <div className="rounded-[var(--radius-card)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-[var(--warning)]"> {/* ds-allow-round — warning banner */}
                 This worker is paused. Running it manually may not behave as expected.
               </div>
             )}
