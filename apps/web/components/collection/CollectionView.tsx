@@ -129,7 +129,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
   };
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  const header = (
+  const header = config.hideTitle ? null : (
     <div style={{ padding: `22px ${PAGE_X}px 0` }}>
       <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
         <div>

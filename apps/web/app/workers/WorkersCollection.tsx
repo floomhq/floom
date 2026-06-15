@@ -1229,6 +1229,9 @@ export default function WorkersCollection({
 
   // Host path (cloud): a top-level switcher between the workers Collection and
   // each injected view. Reuses the app's tab styling (c-dtabs / c-dtab).
+  // The "Workers" tab label already names this view, so we suppress the
+  // Collection's own "Workers" H1 header to avoid the duplicated heading.
+  const tabSwitcherConfig = { ...config, hideTitle: true };
   const activeExtra = extraViews.find((v) => v.key === activeView);
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -1256,7 +1259,7 @@ export default function WorkersCollection({
         ))}
       </div>
       <div className="min-h-0 flex-1">
-        {activeExtra ? activeExtra.render() : <Collection config={config} />}
+        {activeExtra ? activeExtra.render() : <Collection config={tabSwitcherConfig} />}
       </div>
     </div>
   );
