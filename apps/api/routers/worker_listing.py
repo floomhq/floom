@@ -11,7 +11,7 @@ run_service; db via Depends(get_repos). Purged in lockstep with main.
 
 from __future__ import annotations
 
-from typing import List, Optional
+from typing import Annotated, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 
@@ -54,8 +54,13 @@ def list_workers(
     visibility: Optional[str] = None,
     q: Optional[str] = None,
     starred: Optional[bool] = None,
-    limit: Optional[int] = Query(None, ge=1, le=500),
-    offset: int = Query(0, ge=0),
+    # Annotated form (not `= Query(...)`) so the defaults are REAL values (None/0)
+    # when list_workers is called directly in-process (e.g. the MCP workers.list
+    # handler), while HTTP requests still get the ge/le validation. A bare
+    # `= Query(0, ...)` default leaks the FieldInfo object into direct callers
+    # and breaks the slice below (#1077 follow-up).
+    limit: Annotated[Optional[int], Query(ge=1, le=500)] = None,
+    offset: Annotated[int, Query(ge=0)] = 0,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[WorkerListSummary]:
