@@ -29,7 +29,7 @@ function useIsDesktop(): boolean {
 // sidebar / command palette. /w and /s are standalone public share pages.
 // /login is the access gate -- it must render without sidebar chrome (and is
 // the one page reachable while logged out, see middleware.ts).
-const standalonePrefixes = ["/approvals/review", "/w", "/s", "/login"];
+const standalonePrefixes = ["/approvals/review", "/w", "/s", "/login", "/run"];
 
 // The full-page /chat route renders its own Emily header; no dock needed there.
 // /workers/new is the hero hire flow — it needs full-width, no dock cramping it.
