@@ -83,6 +83,22 @@ def _shared_filesystem_fallback_allowed() -> bool:
     return not _is_cloud_deploy() and not _user_scoped_local_mode()
 
 
+def _stock_filesystem_workers_allowed() -> bool:
+    """True when the on-disk PUBLIC_STOCK_WORKER_IDS bypass may surface workers.
+
+    SECURITY (#264): in cloud mode the shared filesystem WORKERS_DIR holds
+    bundles from MANY tenants (the vendored engine checkout's localtest tenant).
+    The PUBLIC_STOCK_WORKER_IDS bypass exists for OSS single-tenant installs that
+    ship example templates on disk and have an empty DB on first run. On cloud,
+    every worker — including any shipped example — lives in workspace-scoped
+    Supabase, so reading stock workers off the shared disk leaks another tenant's
+    worker (existence + full source) to a caller in an unrelated workspace.
+    Disable the FS stock bypass on cloud; cloud stock workers come from the
+    workspace-scoped repos like everything else.
+    """
+    return not _is_cloud_deploy()
+
+
 @lru_cache(maxsize=1)
 def _tracked_worker_ids() -> frozenset[str]:
     # This file lives at apps/api/services/worker_access.py, so the repo root
@@ -129,7 +145,11 @@ def _worker_hidden_from_api(
     if worker_id in tracked_ids:
         if worker_id in _SYSTEM_WORKER_IDS:
             return True
-        if worker_id in PUBLIC_STOCK_WORKER_IDS:
+        # #264: the stock-id FS bypass only applies off-cloud. On cloud the
+        # tracked worker on disk belongs to the vendored engine's tenant, not the
+        # caller's workspace; fall through to the DB-owner check below so it stays
+        # hidden unless a workspace-scoped row makes it legitimately visible.
+        if worker_id in PUBLIC_STOCK_WORKER_IDS and _stock_filesystem_workers_allowed():
             return False
         # Git-tracked workers that have a DB owner are user workers — always visible.
         # Only pure engine/stock workers (no DB owner) are hidden from the user API.
@@ -326,7 +346,10 @@ def _get_visible_worker(
         if archived is not None:
             return archived
         return None
-    if worker_id in PUBLIC_STOCK_WORKER_IDS:
+    # #264: the on-disk stock bypass is off-cloud only. On cloud get_worker reads
+    # the vendored engine tenant's bundle off the shared WORKERS_DIR, leaking
+    # another tenant's worker detail + full source to an unrelated workspace.
+    if worker_id in PUBLIC_STOCK_WORKER_IDS and _stock_filesystem_workers_allowed():
         return get_worker(worker_id)
     # #767/#768 enforcement: a viewer explicitly granted this worker can fetch it
     # even when visibility (private/specific_people) hides it from the owner-scoped
@@ -519,7 +542,9 @@ def _worker_source_visible_to_api(worker_id: str) -> bool:
     # from and fork them. These are git-tracked, so the generic
     # "not tracked" rule below would hide them (R3: /workers/<stock>#code was
     # empty for every example worker). Make stock source explicitly visible.
-    if worker_id in PUBLIC_STOCK_WORKER_IDS:
+    # #264: off-cloud only — on cloud the on-disk source belongs to the vendored
+    # engine tenant, never the caller's workspace, so it must not be exposed.
+    if worker_id in PUBLIC_STOCK_WORKER_IDS and _stock_filesystem_workers_allowed():
         return True
     return worker_id not in _tracked_worker_ids()
 
@@ -527,6 +552,10 @@ def _worker_source_visible_to_api(worker_id: str) -> bool:
 def _stock_workers_from_filesystem(*, use_cache: bool = True) -> List[Dict[str, Any]]:
     from worker_registry import discover_workers
 
+    # #264: never enumerate on-disk stock workers on cloud — the shared
+    # WORKERS_DIR holds other tenants' bundles.
+    if not _stock_filesystem_workers_allowed():
+        return []
     return [
         worker
         for worker in discover_workers(use_cache=use_cache)
