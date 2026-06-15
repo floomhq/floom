@@ -32,7 +32,7 @@ import { V3Composer } from "./V3Composer";
 import { ChannelActions } from "./ChannelActions";
 import { V3TemplateCard } from "./V3TemplateCard";
 import { getTemplate } from "@/components/landing-ref/data";
-import { Hl, V3Shell } from "./V3Shell";
+import { V3Shell } from "./V3Shell";
 import "./theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -322,7 +322,7 @@ export function V3Body() {
             transition={{ duration: 0.6, ease: EASE }}
             className="text-[42px] font-semibold leading-[1.02] tracking-[-0.034em] sm:text-[64px]"
           >
-            <Hl>Hire</Hl> AI workers.
+            Hire AI workers.
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 12 }}
