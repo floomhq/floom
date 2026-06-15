@@ -91,7 +91,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
       <Sidebar />
       {/* Main content between sidebar and Emily dock.
           fullBleed pages (collection pages) own their own internal layout and
-          must fill the full viewport height — they skip the max-w-7xl wrapper.
+          must fill the full viewport height (they skip the max-w-7xl wrapper).
           Standard pages scroll in the overflow-y-auto container. (#1101) */}
       {fullBleed ? (
         <main className="relative z-10 flex-1 min-w-0 h-full overflow-hidden flex flex-col">
