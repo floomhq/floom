@@ -1528,6 +1528,13 @@ async def auth_middleware(request: Request, call_next):
             or path.startswith("/approvals/public/")
             or path.startswith("/workers/public/")
             or path.startswith("/runs/public/")  # #765: token-gated read-only run view
+            # #1338 #1329: public SSE stream for share-link viewers — token is a
+            # standalone run share token validated inside the route handler.
+            or (
+                path.endswith("/stream")
+                and path.startswith("/runs/")
+                and "token=fls_" in str(request.url.query)
+            )
             or path.startswith("/workers/short-links/")
             or path.startswith("/s/")
             or path.startswith("/c/")
