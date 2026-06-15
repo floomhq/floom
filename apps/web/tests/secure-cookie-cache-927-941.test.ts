@@ -1,8 +1,22 @@
 // #927 — wos_session forwarded without Secure; #941 — authenticated responses
 // must never carry a cacheable policy through the proxy.
-import { afterEach, describe, expect, it, vi } from "vitest";
+import { afterAll, afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 import { getSetCookies, withSecureFlag } from "@/lib/secure-set-cookie";
+
+const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
+
+beforeEach(() => {
+  process.env.NODE_ENV = "production";
+});
+
+afterAll(() => {
+  if (ORIGINAL_NODE_ENV === undefined) {
+    delete process.env.NODE_ENV;
+  } else {
+    process.env.NODE_ENV = ORIGINAL_NODE_ENV;
+  }
+});
 
 describe("#927 withSecureFlag", () => {
   it("appends Secure when missing", () => {
