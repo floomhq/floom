@@ -290,6 +290,8 @@ export interface WorkerSummary {
   system?: boolean;
   archived?: boolean;
   archive_reason?: string;
+  /** false when the worker is paused/disabled — UI disables/warns on the Run button (#788). */
+  enabled?: boolean;
   tags: string[];
   folder?: string;
   status: WorkerStatus;
