@@ -776,6 +776,11 @@ export interface CurrentUser {
   role?: string;
   is_admin?: boolean;
   username?: string | null;
+  // #1306: profile photo from Google/GitHub OAuth. Populated by the Cloud
+  // wrapper's /me (the OSS engine /me has no OAuth picture). When present, the
+  // sidebar profile chip shows the real photo instead of initials.
+  picture?: string | null;
+  avatar_url?: string | null;
 }
 
 export interface WorkspaceShareLink {

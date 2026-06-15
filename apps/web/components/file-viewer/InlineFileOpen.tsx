@@ -116,6 +116,9 @@ export function InlineFileOpen({
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [draggingRow, setDraggingRow] = useState<InlineDragItem | null>(null);
   const [orderedIds, setOrderedIds] = useState<string[]>([]);
+  // When an image fails to load (e.g. transient proxy error), fall back to the
+  // download affordance instead of leaving a broken-image icon.
+  const [imageError, setImageError] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [subfolderName, setSubfolderName] = useState("");
@@ -240,6 +243,10 @@ export function InlineFileOpen({
 
   const canLoadText = !!loadText && !!open && !open.binary && !isImageFile(open.name);
   const canEditText = !!onSaveText && canLoadText;
+  // Reset the per-file image-error flag whenever a different file is opened.
+  useEffect(() => {
+    setImageError(false);
+  }, [openId]);
   useEffect(() => {
     setText(null);
     setEditing(false);
@@ -361,12 +368,16 @@ export function InlineFileOpen({
             <Download size={13} /> Download
           </a>
         </div>
-        {isImageFile(open.name) ? (
+        {isImageFile(open.name) && !imageError ? (
+          // Images render inline (clicking an image file shows the image, not a
+          // download-only fallback). The src is the same-origin proxy URL, so
+          // auth is injected server-side and the <img> loads directly.
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={open.url}
             alt={open.name}
-            style={{ maxWidth: "100%", borderRadius: "var(--r-card, 16px)", display: "block" }}
+            onError={() => setImageError(true)}
+            style={{ maxWidth: "100%", height: "auto", borderRadius: "var(--r-card, 16px)", display: "block" }}
           />
         ) : canLoadText ? (
           loading ? (
