@@ -5,14 +5,17 @@
 import type { RunSummary, RunStatus } from "@/lib/types";
 import type { PillTone } from "@/lib/collection/types";
 
-// #1130: cap duration display — anything beyond 24h is a zombie/timed-out run.
-const ZOMBIE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
-
 export function formatDuration(ms?: number): string {
   if (ms == null) return "—";
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  if (ms >= ZOMBIE_THRESHOLD_MS) return "Timed out";
+  // #1252: "Timed out" is a status label — it must not appear in the Duration
+  // column. Show the real elapsed time regardless of how long the run took.
+  if (ms >= 60 * 60 * 1000) {
+    const h = Math.floor(ms / 3600000);
+    const m = Math.round((ms % 3600000) / 60000);
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
   const m = Math.floor(ms / 60000);
   const s = Math.round((ms % 60000) / 1000);
   return `${m}m ${s}s`;
