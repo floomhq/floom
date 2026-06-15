@@ -359,7 +359,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                             ) : (
                               <Link
                                 key={item.worker_id}
-                                href={`/secrets?worker=${encodeURIComponent(item.worker_id ?? "")}`}
+                                href={`/connections/secrets?return_to=${encodeURIComponent(`/workers?sel=${item.worker_id ?? ""}`)}`}
                                 onClick={() => setOpen(false)}
                                 className="inline-flex h-7 items-center justify-between gap-2 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                               >
