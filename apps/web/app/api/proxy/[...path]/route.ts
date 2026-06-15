@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { forwardSecureSetCookies } from "@/lib/secure-set-cookie";
+import { forwardSecureSetCookies, secureCookiesForUrl } from "@/lib/secure-set-cookie";
 
 // PR S19 (I-1, I-6): draft-and-create makes up to 3 OpenAI calls with
 // YAML retry. On hard prompts that's 30-60s. Default 10s Vercel timeout
@@ -166,7 +166,7 @@ async function handler(
     if (safeLocation) responseHeaders.set("location", safeLocation);
   }
   // #927: force Secure on any backend cookie we hand to the browser
-  forwardSecureSetCookies(upstream, responseHeaders);
+  forwardSecureSetCookies(upstream, responseHeaders, secureCookiesForUrl(req.url));
 
   return new NextResponse(upstream.body, {
     status: upstream.status,

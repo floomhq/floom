@@ -208,10 +208,11 @@ export function useChatStream(): ChatStreamState {
       }
     }
 
+    const subscribedIds = subscribedCardIds.current;
     return () => {
       for (const { cardId, source } of newSources) {
         source.close();
-        subscribedCardIds.current.delete(cardId);
+        subscribedIds.delete(cardId);
       }
     };
   }, [messages]);

@@ -333,7 +333,7 @@ function defaultSourceMode(path: string, _hasForm: boolean, binary?: boolean): S
   return "raw";
 }
 
-function sourceModeLabel(mode: SourceMode, _isWorkerYaml = false): string {
+function sourceModeLabel(mode: SourceMode): string {
   if (mode === "raw") return "Raw";
   if (mode === "form") return "Form";
   // All rendered views use "Preview" — consistent with Brain file viewer.

@@ -1,5 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
-import { forwardSecureSetCookies } from "@/lib/secure-set-cookie";
+import { forwardSecureSetCookies, secureCookiesForUrl } from "@/lib/secure-set-cookie";
 
 const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
 
@@ -10,7 +10,7 @@ const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
  * Proxies to the backend /auth/setup endpoint. On success, the backend sets a
  * wos_session cookie that the middleware accepts as valid auth.
  */
-export async function GET(_req: NextRequest) {
+export async function GET() {
   // Proxy GET /auth/setup-required to the backend
   const upstream = await fetch(`${API_BASE}/auth/setup-required`, {
     headers: { "x-floom-secret": process.env.FLOOM_API_SECRET || "" },
@@ -43,6 +43,6 @@ export async function POST(req: NextRequest) {
 
   // Forward the wos_session cookie from the backend to the browser
   // (#927: force Secure on everything we hand to the browser)
-  forwardSecureSetCookies(upstream, res.headers);
+  forwardSecureSetCookies(upstream, res.headers, secureCookiesForUrl(req.url));
   return res;
 }

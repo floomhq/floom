@@ -114,7 +114,6 @@ export function ConnectionRow({
   usedByCount,
   onDelete,
   onReconnect,
-  onRefresh,
   onTest,
   onToggle,
 }: {

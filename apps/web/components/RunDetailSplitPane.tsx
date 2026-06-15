@@ -51,7 +51,6 @@ export function RunDetailSplitPane({
   onRefresh,
   inline = false,
   initialTab = "output",
-  onBack,
   onReplay,
   onCancel,
 }: Props) {
