@@ -16,7 +16,7 @@
     {"source":"/approvals/:path*","destination":"/app/approvals/:path*","permanent":false}
   ],
   "rewrites": [
-    {"source":"/app","destination":"https://workeros-cloud-dashboard.vercel.app/app"},
-    {"source":"/app/:path*","destination":"https://workeros-cloud-dashboard.vercel.app/app/:path*"}
+    {"source":"/app","destination":"https://workeros-cloud-dashboard-floomhq.vercel.app/app"},
+    {"source":"/app/:path*","destination":"https://workeros-cloud-dashboard-floomhq.vercel.app/app/:path*"}
   ]
 }
