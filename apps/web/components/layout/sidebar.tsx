@@ -45,6 +45,93 @@ export function FloomMark({ size = 28 }: { size?: number }) {
   );
 }
 
+// #1305: the app is WHITE-LABELED — the workspace IS the brand. The top-left
+// mark must be the WORKSPACE logo/avatar, never the Floom play-triangle.
+// Shows the workspace's derived company logo when available, else a clean
+// neutral squared monogram (first letters of the workspace name). Squared
+// (rounded-square via the app radius token), not round.
+function workspaceMonogram(name: string): string {
+  const display = resolveWorkspaceName(name).trim();
+  if (!display) return "W";
+  return display.slice(0, 2).toUpperCase();
+}
+
+/** Active workspace name, resolved once from the workspace list (shared shape
+ *  with UserProfileFooter so the mark + footer stay in sync). */
+function useActiveWorkspaceName(): string {
+  const [name, setName] = useState("");
+  useEffect(() => {
+    let active = true;
+    api.workspace
+      .list()
+      .then((data) => {
+        const current =
+          data.workspaces.find((workspace) => workspace.id === data.active_id) ?? data.workspaces[0];
+        if (active && current) setName(current.name);
+      })
+      .catch(() => {
+        if (active) setName("");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  return name;
+}
+
+export function WorkspaceMark({
+  size = 22,
+  name,
+  logoUrl,
+}: {
+  size?: number;
+  name?: string;
+  /** Real workspace logo (e.g. from the Cloud wrapper). When omitted, the OSS
+   *  engine has no per-workspace logo, so a neutral monogram is shown. */
+  logoUrl?: string | null;
+}) {
+  const fetched = useActiveWorkspaceName();
+  const workspaceName = name ?? fetched;
+  const [imgOk, setImgOk] = useState(true);
+  const dim = { width: size, height: size } as const;
+
+  if (logoUrl && imgOk) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={logoUrl}
+        alt={resolveWorkspaceName(workspaceName)}
+        width={size}
+        height={size}
+        className="shrink-0 rounded-[var(--radius-button)] object-cover"
+        style={dim}
+        onError={() => setImgOk(false)}
+      />
+    );
+  }
+  // Neutral squared monogram placeholder (matches the WorkspaceSwitcher mark).
+  // NOT round, NOT the Floom play-triangle.
+  return (
+    <div
+      aria-label={resolveWorkspaceName(workspaceName) || "Workspace"}
+      className="shrink-0 grid place-items-center rounded-[var(--radius-button)] bg-[color-mix(in_srgb,var(--accent)_22%,transparent)] text-[var(--accent)] font-semibold uppercase tracking-wide"
+      style={{ ...dim, fontSize: Math.max(9, Math.round(size * 0.42)) }}
+    >
+      {workspaceMonogram(workspaceName)}
+    </div>
+  );
+}
+
+/** Mobile top-bar workspace name (white-label — replaces the "Floom" wordmark). */
+function MobileWorkspaceName() {
+  const name = useActiveWorkspaceName();
+  return (
+    <span className="font-semibold text-base tracking-tight truncate">
+      {resolveWorkspaceName(name)}
+    </span>
+  );
+}
+
 // #1403: Secrets removed from top-level nav; reachable as a third tab on
 // /connections ("Connected" / "Browse" / "Secrets"). Connections + secrets
 // are the same mental model (credentials a worker can read) so they share
@@ -211,9 +298,10 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
     <>
       {/* ── Mobile top bar ─────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between [border-bottom:var(--bd-div)] bg-[var(--bg-app)] px-4 md:hidden">
-        <Link href="/overview" className="flex items-center gap-2">
-          <FloomMark size={22} />
-          <span className="font-semibold text-base tracking-tight">Floom</span>
+        {/* #1305: white-label — workspace mark + name, not the Floom brand. */}
+        <Link href="/overview" className="flex items-center gap-2 min-w-0">
+          <WorkspaceMark size={22} />
+          <MobileWorkspaceName />
         </Link>
         <div className="flex items-center gap-2">
           <button
@@ -262,20 +350,15 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                 onClick={toggleCollapse}
                 className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
               >
-              <FloomMark size={22} />
+              {/* #1305: white-label — workspace mark, not the Floom brand. */}
+              <WorkspaceMark size={22} />
             </button>
           ) : (
             <>
-              {/* D-04: brand mark anchors the sidebar top. Without it the area
-                  above "New worker" reads as an empty/skeleton spot while the
-                  workspace switcher loads. */}
-              <Link
-                href="/overview"
-                aria-label="Floom home"
-                className="inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-button)] hover:bg-[var(--active-nav-bg)] transition-colors"
-              >
-                <FloomMark size={22} />
-              </Link>
+              {/* #1305: white-label — the WorkspaceSwitcher already renders the
+                  workspace mark + name as the top-left identity, so no separate
+                  Floom brand mark here (it would be a redundant second mark and
+                  leaks the Floom brand into a white-labeled app). */}
               <div className="min-w-0 flex-1">
                 <WorkspaceSwitcher />
               </div>
@@ -459,6 +542,14 @@ export function UserProfileFooter({
     || user?.email || user?.display_name || "Local user";
   const secondary = workspaceName;
   const initials = profileInitials(primary);
+  // #1306: prefer the explicit prop, else the OAuth photo off the fetched user
+  // (Google/GitHub `picture` / `avatar_url`). OSS /me returns neither, so this
+  // gracefully falls back to initials; the Cloud wrapper's /me supplies it.
+  const photoUrl =
+    avatarUrl
+    ?? (user as (CurrentUser & { picture?: string | null; avatar_url?: string | null }) | null)?.picture
+    ?? user?.avatar_url
+    ?? null;
 
   async function logout() {
     try {
@@ -482,16 +573,19 @@ export function UserProfileFooter({
           )}
           aria-label="Profile menu"
         >
-          {/* M36: show Google avatar when avatarUrl is provided, else initials. */}
-          {avatarUrl ? (
+          {/* #1306 / M36: profile photo (Google/GitHub) when available, else
+              initials. Squared (rounded-square via the app radius token), no
+              border. */}
+          {photoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={avatarUrl}
+              src={photoUrl}
               alt="Profile avatar"
-              className="size-7 shrink-0 rounded-[var(--radius-button)] object-cover"
+              className="size-7 shrink-0 rounded-[var(--radius-button)] border-0 object-cover"
               referrerPolicy="no-referrer"
             />
           ) : (
-            <div className="size-7 shrink-0 rounded-[var(--radius-button)] bg-muted text-foreground grid place-items-center text-[11px] font-medium">
+            <div className="size-7 shrink-0 rounded-[var(--radius-button)] border-0 bg-muted text-foreground grid place-items-center text-[11px] font-medium">
               {initials}
             </div>
           )}

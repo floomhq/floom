@@ -813,6 +813,13 @@ html.dark .grain {
 .c-pill.run  { background:color-mix(in srgb, var(--info) 8%, transparent); color:color-mix(in srgb, var(--info) 78%, var(--ink)); }
 .c-pill.idle { background:var(--bg-2); color:var(--muted-foreground); }
 
+/* #1211: Brain .bdrop — v4 dashed drop-zone (matches final.html .bdrop). */
+/* #1316: nowrap keeps the one-line "Drag files here, or + New folder" prompt
+   from breaking to 2-3 lines in a narrow column. */
+.bdrop { margin-top:12px; display:flex; flex-wrap:nowrap; align-items:center; justify-content:center; gap:8px; padding:18px; border:1.5px dashed var(--line); border-radius:12px; color:var(--muted-foreground); font-size:12.5px; white-space:nowrap; transition:background .12s,border-color .12s; }
+.bdrop.over { border-color:var(--accent); background:var(--sel); color:var(--accent); }
+.bdrop .bdlink { color:var(--accent); font-weight:500; background:none; border:0; cursor:pointer; padding:0; }
+
 /* grid cards (SPEC §2b — calm: avatar+name, desc, one status line) */
 .c-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:14px; }
 /* §3 + rule #10: flat by token, uniform 148px, hover = bg lift (no border/shadow). */
