@@ -22,12 +22,12 @@ describe("Settings nav groups (§4)", () => {
     ]);
   });
 
-  it("Account group is Developer·Appearance", () => {
-    expect(settingsGroup("account").map((i) => i.label)).toEqual(["Developer", "Appearance"]);
+  it("Account group is Profile·Developer·Appearance", () => {
+    expect(settingsGroup("account").map((i) => i.label)).toEqual(["Profile", "Developer", "Appearance"]);
   });
 
   it("count strip reflects the live groups", () => {
-    expect(settingsCounts()).toBe("7 workspace · 2 account");
+    expect(settingsCounts()).toBe("7 workspace · 3 account");
   });
 
   it("group labels carry the name when known", () => {

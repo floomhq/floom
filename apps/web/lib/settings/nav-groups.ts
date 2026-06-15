@@ -14,7 +14,8 @@ export interface SettingsNavItem {
     | "workspace_tokens"
     | "danger"
     | "developer"
-    | "appearance";
+    | "appearance"
+    | "profile";
   label: string;
   scope: SettingsScope;
   description: string;
@@ -30,8 +31,9 @@ export const SETTINGS_NAV: SettingsNavItem[] = [
   { key: "workspace_tokens", label: "Workspace token", scope: "workspace", description: "API access to shared workers" },
   { key: "danger", label: "Danger", scope: "workspace", description: "Irreversible actions" },
   // Account · {user}
+  { key: "profile", label: "Profile", scope: "account", description: "Display name & avatar" },
   { key: "developer", label: "Developer", scope: "account", description: "Your API, CLI & MCP access" },
-  { key: "appearance", label: "Appearance", scope: "account", description: "Theme & accent" },
+  { key: "appearance", label: "Appearance", scope: "account", description: "Theme (light, dark, system)" },
 ];
 
 export function settingsGroup(scope: SettingsScope): SettingsNavItem[] {

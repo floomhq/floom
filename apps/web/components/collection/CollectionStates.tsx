@@ -1,4 +1,4 @@
-import type { ReactNode } from "react";
+import type { ComponentType, ReactNode } from "react";
 import { Inbox } from "lucide-react";
 
 /** Empty / loading / error share one slot (SPEC §7). */
@@ -7,15 +7,17 @@ export function EmptyState({
   title,
   help,
   action,
+  icon: Icon = Inbox,
 }: {
   title: string;
   help?: string;
   action?: ReactNode;
+  icon?: ComponentType<{ size?: number }>;
 }) {
   return (
     <div className="c-statebox" role="status">
       <span className="g">
-        <Inbox size={24} />
+        <Icon size={24} />
       </span>
       <h3>{title}</h3>
       {help && <p style={{ margin: 0, maxWidth: 360 }}>{help}</p>}

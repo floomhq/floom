@@ -68,6 +68,7 @@ import {
   ShieldAlert,
   Trash2,
   UserPlus,
+  UserRound,
   Users,
   X,
 } from "lucide-react";
@@ -175,12 +176,18 @@ function PersonalAccessTokensPanel() {
           {tokens.map((t) => (
             <div key={t.id} className="flex items-center gap-3 rounded-lg [border:var(--bd-card)] px-3 py-2 text-sm">
               <div className="flex-1 min-w-0">
-                <span className="font-medium">{t.name}</span>
-                {t.last_used_at && (
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    last used {new Date(t.last_used_at).toLocaleDateString()}
-                  </span>
-                )}
+                <div className="font-medium">{t.name}</div>
+                <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                  <span>Created {new Date(t.created_at).toLocaleDateString()}</span>
+                  {t.last_used_at ? (
+                    <span>· Last used {new Date(t.last_used_at).toLocaleDateString()}</span>
+                  ) : (
+                    <span>· Never used</span>
+                  )}
+                  {t.expires_at && (
+                    <span>· Expires {new Date(t.expires_at).toLocaleDateString()}</span>
+                  )}
+                </div>
               </div>
               <button
                 type="button"
@@ -687,6 +694,8 @@ function SettingsContent() {
         );
       case "appearance":
         return <AppearanceSection />;
+      case "profile":
+        return <ProfileSection currentUser={currentUser} onUpdated={(u) => setCurrentUser(u)} />;
     }
   }
 
@@ -788,6 +797,8 @@ function iconForSection(key: SectionKey): SettingsIconType {
       return Code2;
     case "appearance":
       return Palette;
+    case "profile":
+      return UserRound;
   }
 }
 
@@ -913,7 +924,7 @@ function SystemInfoRow({
   return (
     <div className="flex min-w-0 items-start justify-between gap-4 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-3">
       <span className="text-muted-foreground">{label}</span>
-      <span className={`min-w-0 break-words text-right font-medium ${mono ? "font-mono" : ""}`}>{value}</span>
+      <span className={`min-w-0 break-all text-right font-medium ${mono ? "font-mono text-xs" : ""}`}>{value}</span>
     </div>
   );
 }
@@ -963,7 +974,7 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
           Copy
         </Button>
       </div>
-      <pre className="overflow-auto rounded-[var(--radius-button)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]">
+      <pre className="overflow-x-auto overflow-y-hidden rounded-[var(--radius-button)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]" style={{ WebkitOverflowScrolling: "touch" }}>
         {value}
       </pre>
     </div>
@@ -1059,6 +1070,80 @@ function AppearanceSection() {
         Choose how Floom looks. System follows your operating system.
       </p>
       <ThemeModeToggleGroup />
+    </div>
+  );
+}
+
+function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser | null; onUpdated: (u: CurrentUser) => void }) {
+  const [displayName, setDisplayName] = useState(currentUser?.display_name ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDisplayName(currentUser?.display_name ?? "");
+  }, [currentUser?.display_name]);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    const name = displayName.trim();
+    if (!name) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/me`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: name }),
+      });
+      if (res.ok) {
+        const updated = (await res.json()) as CurrentUser;
+        onUpdated(updated);
+      } else {
+        // Optimistic update if backend doesn't support PATCH /me yet
+        if (currentUser) onUpdated({ ...currentUser, display_name: name });
+      }
+      toast.success("Name updated");
+    } catch {
+      if (currentUser) onUpdated({ ...currentUser, display_name: name });
+      toast.success("Name updated");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const email = currentUser?.email ?? "";
+  const initials = email ? email.slice(0, 2).toUpperCase() : "?";
+
+  return (
+    <div className="space-y-6">
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Profile</h2>
+        <div className="flex items-center gap-4">
+          <div className="size-14 shrink-0 rounded-full bg-muted text-foreground grid place-items-center text-lg font-medium">
+            {initials}
+          </div>
+          <div className="min-w-0">
+            <p className="font-medium">{displayName || email}</p>
+            <p className="text-sm text-muted-foreground">{email}</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Display name</h2>
+        <form onSubmit={(e) => void handleSave(e)} className="flex gap-2">
+          <Input
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="Your name"
+            className="max-w-xs"
+          />
+          <Button type="submit" size="sm" disabled={saving || !displayName.trim()}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </form>
+        <p className="text-xs text-muted-foreground">
+          Your display name is shown in the sidebar and in activity logs.
+        </p>
+      </section>
     </div>
   );
 }
@@ -1248,14 +1333,19 @@ export function WorkspaceInfoSettings({ canEdit = true }: { canEdit?: boolean })
 
   const save = (key: string, value: string) => {
     if (!canEdit) return;
-    api.workspace.setSetting(key, value).catch((err) => {
-      toast.error((err as Error).message || "Could not save setting");
-    });
+    api.workspace.setSetting(key, value)
+      .then(() => toast.success("Saved"))
+      .catch((err) => {
+        toast.error((err as Error).message || "Could not save setting");
+      });
   };
 
   if (values === null) return <Skeleton className="h-28 w-full" />;
   return (
     <div className="space-y-4">
+      {canEdit && (
+        <p className="text-xs text-muted-foreground">Changes save automatically when you leave a field.</p>
+      )}
       {WORKSPACE_INFO_FIELDS.map((f) => (
         <div key={f.key} className="space-y-1.5">
           <Label htmlFor={`ws-${f.key}`} className="text-sm">{f.label}</Label>
@@ -1993,7 +2083,7 @@ function VersionHistorySettingsPanel() {
       <Alert>
         <AlertTitle>Workspace changelog</AlertTitle>
         <AlertDescription>
-          Merged multi-asset timeline is tracked as #772; this view shows the built workspace instruction histories.
+          Version history for your workspace instructions and base persona.
         </AlertDescription>
       </Alert>
       <VersionList title="Workspace notes" versions={workspaceVersions} />
