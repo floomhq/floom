@@ -252,6 +252,7 @@ export default function ConnectionsCollection({
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [loading, setLoading] = useState(initialConnections.length === 0);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = async (initial = false) => {
     const [c, s, w] = await Promise.allSettled([
@@ -267,6 +268,17 @@ export default function ConnectionsCollection({
 
   useEffect(() => {
     void refresh(true);
+    // Safety timeout: if the API proxy is unreachable and the request hangs,
+    // stop showing the skeleton after 10 s so users see an error + retry.
+    const timeout = setTimeout(() => {
+      setLoading((prev) => {
+        if (prev) {
+          setError("Could not load connections. Check your connection and try again.");
+        }
+        return false;
+      });
+    }, 10_000);
+    return () => clearTimeout(timeout);
   }, []);
 
   const items = useMemo(() => toUnified(connections, secrets), [connections, secrets]);
@@ -309,6 +321,7 @@ export default function ConnectionsCollection({
     subtitle: "Apps, MCP servers and secrets your workers can use.",
     items,
     loading,
+    error,
     idOf: (i) => i.id,
     searchOf: (i) => `${i.name} ${i.account} ${TYPE_LABEL[i.kind]}`,
     tagsOf: (i) =>
@@ -585,6 +598,11 @@ export default function ConnectionsCollection({
       empty: {
         title: "No connections yet",
         help: "Connect an app, add an MCP server, or store a secret your workers can use.",
+      },
+      errorRetry: () => {
+        setError(null);
+        setLoading(true);
+        void refresh(true);
       },
     },
   };

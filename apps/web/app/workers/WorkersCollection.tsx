@@ -1256,6 +1256,7 @@ export default function WorkersCollection({
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [loading, setLoading] = useState(initialWorkers.length === 0);
+  const [error, setError] = useState<string | null>(null);
   const [canManageWorkers, setCanManageWorkers] = useState(false);
   const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
 
@@ -1277,12 +1278,23 @@ export default function WorkersCollection({
       .then((all) => {
         if (alive) setWorkers(all.filter((w) => !isSystemWorker(w)));
       })
-      .catch(() => {})
+      .catch(() => {
+        if (alive) setError("Could not load workers. Check your connection and try again.");
+      })
       .finally(() => {
         if (alive) setLoading(false);
       });
+    // Safety timeout: if the API proxy is unreachable and the request hangs,
+    // stop showing the skeleton after 10 s so users see an error + retry.
+    const timeout = setTimeout(() => {
+      if (alive) {
+        setLoading(false);
+        setError("Could not load workers. Check your connection and try again.");
+      }
+    }, 10_000);
     return () => {
       alive = false;
+      clearTimeout(timeout);
     };
   }, []);
 
@@ -1305,6 +1317,7 @@ export default function WorkersCollection({
     subtitle: "Your AI workers.",
     items: sortWorkersByRecentActivity(visible),
     loading,
+    error,
     idOf: (w) => w.id,
     searchPlaceholder: "Search workers or tags…",
     searchOf: (w) => `${w.name} ${displayBrandCopy(w.description)} ${(w.tags ?? []).join(" ")}`,
@@ -1450,6 +1463,15 @@ export default function WorkersCollection({
             onSubmit={(prompt) => router.push(`/chat?mode=create&q=${encodeURIComponent(prompt)}`)}
           />
         ),
+      },
+      errorRetry: () => {
+        setError(null);
+        setLoading(true);
+        api.workers
+          .list({ include_archived: true })
+          .then((all) => setWorkers(all.filter((w) => !isSystemWorker(w))))
+          .catch(() => setError("Could not load workers. Check your connection and try again."))
+          .finally(() => setLoading(false));
       },
     },
   };

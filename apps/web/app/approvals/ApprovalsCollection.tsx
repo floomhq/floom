@@ -86,6 +86,17 @@ export default function ApprovalsCollection() {
     void refresh();
     // Content tags are inherited from the parent worker (SPEC §11).
     api.workers.list().then(setWorkers).catch(() => {});
+    // Safety timeout: if the API proxy is unreachable and the request hangs,
+    // stop showing the skeleton after 10 s so users see an error + retry.
+    const timeout = setTimeout(() => {
+      setLoading((prev) => {
+        if (prev) {
+          setError("Could not load approvals. Check your connection and try again.");
+        }
+        return false;
+      });
+    }, 10_000);
+    return () => clearTimeout(timeout);
   }, [refresh]);
 
   // Keep the sidebar badge + other tabs in sync (preserves legacy behavior).

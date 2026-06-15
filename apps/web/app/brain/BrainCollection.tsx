@@ -373,6 +373,7 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
   // Show a loading skeleton until the first fetch completes so we never flash
   // "No folders yet" before the real data arrives (14a: empty-initial-state bug).
   const [loading, setLoading] = useState(initialFolders.length === 0);
+  const [error, setError] = useState<string | null>(null);
   // #1112: dropped files pending folder creation
   const [pendingDropFiles, setPendingDropFiles] = useState<File[] | null>(null);
   const [listDragOver, setListDragOver] = useState(false);
@@ -381,8 +382,10 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     try {
       const data = await api.contexts.list();
       setFolders(data);
+      if (initial) setError(null);
     } catch {
       // leave existing state intact on error
+      if (initial) setError("Could not load brain folders. Check your connection and try again.");
     } finally {
       if (initial) setLoading(false);
     }
@@ -390,6 +393,17 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
 
   useEffect(() => {
     void refresh(true);
+    // Safety timeout: if the API proxy is unreachable and the request hangs,
+    // stop showing the skeleton after 10 s so users see an error + retry.
+    const timeout = setTimeout(() => {
+      setLoading((prev) => {
+        if (prev) {
+          setError("Could not load brain folders. Check your connection and try again.");
+        }
+        return false;
+      });
+    }, 10_000);
+    return () => clearTimeout(timeout);
   }, []);
 
   const remove = async (c: ContextSummary) => {
@@ -432,6 +446,7 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     subtitle: "Reusable folders of files your workers can read before they act.",
     items: folders,
     loading,
+    error,
     // #1094: radial Company Brain visual (ported from landing) above the list.
     banner: (
       <div style={{ marginBottom: 20 }}>
@@ -519,6 +534,11 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     },
     states: {
       empty: { title: "No folders yet", help: "Create a folder of files your workers can read." },
+      errorRetry: () => {
+        setError(null);
+        setLoading(true);
+        void refresh(true);
+      },
     },
   };
 
