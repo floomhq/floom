@@ -25,11 +25,25 @@ logger = logging.getLogger("floom.api")
 # the same real tree (mirrors run_token.set_worker_call_secret_resolver). Pass
 # None to clear (OSS mode). Receives the active workspace_id (or None).
 _git_workspace_resolver: "Optional[Callable[[Optional[str]], Optional[Path | str]]]" = None
+_workspace_git_bundle_restore_resolver: "Optional[Callable[[Optional[str], Path], bool | None]]" = None
 
 
 def set_git_workspace_resolver(resolver: "Optional[Callable[[Optional[str]], Optional[Path | str]]]") -> None:
     global _git_workspace_resolver
     _git_workspace_resolver = resolver
+
+
+def set_workspace_git_bundle_restore_resolver(
+    resolver: "Optional[Callable[[Optional[str], Path], bool | None]]",
+) -> None:
+    """Register a host restore hook for ephemeral per-workspace git repos.
+
+    Cloud registers a resolver that restores ``repo.bundle`` from Supabase
+    Storage before an export push when the materialized workspace repo is absent.
+    OSS keeps this unset and falls back to local git initialization.
+    """
+    global _workspace_git_bundle_restore_resolver
+    _workspace_git_bundle_restore_resolver = resolver
 
 
 def _git_workspace() -> Path:
@@ -64,6 +78,26 @@ def _git_workspace() -> Path:
         return (WORKERS_DIR / workspace_id).resolve()
     # OSS: single workspace at WORKERS_DIR.parent
     return WORKERS_DIR.parent.resolve()
+
+
+def _restore_workspace_git_bundle_if_missing(workspace: Path) -> bool:
+    """Restore the active workspace git repo via the host hook when .git is gone.
+
+    Returns True when the hook reports a restore. The hook is intentionally
+    dependency-free here; workeros-cloud owns the Supabase Storage implementation
+    and registers it at startup.
+    """
+    if (workspace / ".git").exists():
+        return False
+    if _workspace_git_bundle_restore_resolver is None:
+        return False
+    import git_ops as _git_ops
+
+    workspace_id = _git_ops.get_active_workspace_id()
+    restored = bool(_workspace_git_bundle_restore_resolver(workspace_id, workspace))
+    if restored and not (workspace / ".git").exists():
+        raise RuntimeError("Workspace git bundle restore completed without a .git directory")
+    return restored
 
 
 def _git_author(auth: "AuthContext") -> tuple[str, str]:

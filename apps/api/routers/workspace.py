@@ -19,6 +19,7 @@ import collections
 import hmac
 import io
 import json
+import re
 import urllib.parse
 import zipfile
 from typing import Any, Dict, List, Optional
@@ -63,6 +64,7 @@ from models import (
 from routers.contexts import list_contexts
 from services.context_access import _contexts_git_prefix, _write_context_file
 from services.git_service import _git_author, _git_workspace, _workers_git_prefix
+from services import git_service as _git_service
 from services.worker_access import (
     _active_local_workspace_id,
     _list_visible_workers,
@@ -84,10 +86,143 @@ from services.workspace_ops import (
 
 _WORKSPACE_INSTRUCTIONS_ASSET_TYPE = "workspace_instructions"
 _WORKSPACE_BASE_PERSONA_ASSET_TYPE = "workspace_base_persona"
+_GITHUB_PAT_SECRET_NAMES = ("GITHUB_TOKEN", "GH_TOKEN", "GITHUB_PAT")
+_GITHUB_REMOTE_SCHEME = "https://"
+_GITHUB_REMOTE_USERNAME = "x-access" "-token"
+_GITHUB_REMOTE_HOST = "@github.com"
+_REPO_FULL_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 logger = logging.getLogger("floom.api")
 
 workspace_router = APIRouter()
+
+
+class WorkspaceGitHubExportRequest(BaseModel):
+    repo_name: Optional[str] = None
+    repo_full_name: Optional[str] = None
+
+
+class WorkspaceGitHubExportResponse(BaseModel):
+    repo_full_name: str
+    html_url: str
+    pushed_ref: Optional[str] = None
+    restored_from_bundle: bool = False
+
+
+def _active_workspace_git_key(auth: AuthContext) -> str:
+    import git_ops as _git_ops
+
+    return _git_ops.get_active_workspace_id() or _active_local_workspace_id(auth)
+
+
+def _workspace_owner_user_id(auth: AuthContext, repos: Repositories) -> str:
+    """Return the active workspace owner for owner-scoped PAT/secret lookup."""
+    workspace_id = _active_workspace_git_key(auth)
+    try:
+        members = _require_members_repo(repos)
+        for row in members.list(workspace_id=workspace_id):
+            if row.get("role") == "owner" and row.get("status") == "active":
+                owner_id = str(row.get("user_id") or "").strip()
+                if owner_id:
+                    return owner_id
+    except Exception:
+        logger.debug("Could not resolve workspace owner for GitHub export", exc_info=True)
+    return auth.user_id
+
+
+def _read_owner_secret(repos: Repositories, owner_id: str, name: str) -> Optional[str]:
+    try:
+        value = repos.secrets.read_value(user_id=owner_id, name=name)
+    except Exception:
+        return None
+    value = (value or "").strip()
+    return value or None
+
+
+def _as_mapping(value: Any) -> Dict[str, Any]:
+    if isinstance(value, dict):
+        return value
+    if isinstance(value, str) and value.strip():
+        try:
+            parsed = json.loads(value)
+        except Exception:
+            return {}
+        return parsed if isinstance(parsed, dict) else {}
+    return {}
+
+
+def _secret_reference(value: str) -> str:
+    text = value.strip()
+    if text.startswith("${") and text.endswith("}"):
+        return text[2:-1].strip()
+    if text.startswith("$"):
+        return text[1:].strip()
+    return text
+
+
+def _pat_from_github_connections(repos: Repositories, owner_id: str) -> Optional[str]:
+    try:
+        rows = repos.connections.list(user_id=owner_id)
+    except Exception:
+        return None
+    for row in rows:
+        labels = " ".join(
+            str(row.get(key) or "")
+            for key in ("app_name", "display_name", "mcp_label", "label")
+        ).lower()
+        if "github" not in labels:
+            continue
+
+        auth_secret = str(row.get("mcp_auth_secret") or row.get("auth_secret") or "").strip()
+        if auth_secret:
+            value = _read_owner_secret(repos, owner_id, auth_secret)
+            if value:
+                return value
+
+        env = _as_mapping(row.get("mcp_env") or row.get("mcp_env_json"))
+        for name in _GITHUB_PAT_SECRET_NAMES:
+            raw = env.get(name)
+            if not isinstance(raw, str) or not raw.strip():
+                continue
+            ref = _secret_reference(raw)
+            value = _read_owner_secret(repos, owner_id, ref)
+            if value:
+                return value
+            return raw.strip()
+    return None
+
+
+def _resolve_owner_github_pat(
+    auth: AuthContext,
+    repos: Repositories,
+) -> tuple[Optional[str], str, dict]:
+    from services.git_service import _git_cfg_get
+
+    owner_id = _workspace_owner_user_id(auth, repos)
+    cfg = _git_cfg_get(owner_id) or {}
+    pat = str(cfg.get("github_pat") or "").strip()
+    if pat:
+        return pat, owner_id, cfg
+
+    for name in _GITHUB_PAT_SECRET_NAMES:
+        value = _read_owner_secret(repos, owner_id, name)
+        if value:
+            return value, owner_id, cfg
+
+    value = _pat_from_github_connections(repos, owner_id)
+    if value:
+        return value, owner_id, cfg
+    return None, owner_id, cfg
+
+
+def _repo_html_url(full_name: str) -> str:
+    return f"https://github.com/{full_name}"
+
+
+def _default_export_repo_name(auth: AuthContext) -> str:
+    key = _active_workspace_git_key(auth)
+    safe = re.sub(r"[^A-Za-z0-9_.-]+", "-", key).strip("-.")
+    return safe or "workspace"
 
 
 @workspace_router.get("/workspace/members", response_model=WorkspaceMembersResponse)
@@ -257,6 +392,123 @@ def export_workspace(
         user_id=auth.user_id, repos=repos, exported_at=exported_at
     )
     return _workspace_template_response(payload)
+
+
+@workspace_router.post("/workspace/export-to-github", response_model=WorkspaceGitHubExportResponse)
+def export_workspace_to_github(
+    payload: WorkspaceGitHubExportRequest,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkspaceGitHubExportResponse:
+    """One-way export of the active workspace git repo to GitHub."""
+    import git_ops as _git_ops
+    import github_api as _gh
+    from db import now_iso
+    from routers.system_git import _github_api_safe_detail, _git_safe_http_detail
+    from services.git_service import _git_cfg_upsert
+
+    _require_admin(auth)
+    pat, owner_id, cfg = _resolve_owner_github_pat(auth, repos)
+    if not pat:
+        raise HTTPException(status_code=400, detail="Connect GitHub first before exporting this workspace")
+
+    try:
+        user_info = _gh.validate_pat(pat)
+    except _gh.GitHubAPIError as exc:
+        status = getattr(exc, "status", 0)
+        if status == 401:
+            raise HTTPException(
+                status_code=400,
+                detail="GitHub connection is invalid; reconnect GitHub first",
+            ) from exc
+        raise HTTPException(status_code=400, detail=_github_api_safe_detail(exc)) from exc
+
+    workspace = _git_workspace()
+    restored_from_bundle = False
+    try:
+        missing_repo = not (workspace / ".git").exists()
+        if missing_repo:
+            restored_from_bundle = _git_service._restore_workspace_git_bundle_if_missing(workspace)
+            if (
+                not restored_from_bundle
+                and _git_ops.get_active_workspace_id()
+                and not (workspace / ".git").exists()
+            ):
+                raise HTTPException(
+                    status_code=503,
+                    detail="Workspace repository is not materialized; retry after Git bundle restore is available",
+                )
+        _git_ops.ensure_repo(workspace)
+    except HTTPException:
+        raise
+    except Exception as exc:
+        logger.exception("Workspace GitHub export could not materialize git workspace")
+        raise HTTPException(
+            status_code=503,
+            detail="Workspace repository could not be restored for export",
+        ) from exc
+
+    repo_full_name = (payload.repo_full_name or "").strip()
+    repo_url = _repo_html_url(repo_full_name) if repo_full_name else ""
+    if repo_full_name and not _REPO_FULL_NAME_RE.fullmatch(repo_full_name):
+        raise HTTPException(status_code=400, detail="repo_full_name must look like owner/repo")
+
+    if not repo_full_name:
+        repo_full_name = str(cfg.get("repo_full_name") or "").strip()
+        repo_url = str(cfg.get("repo_url") or "").strip()
+
+    if not repo_full_name:
+        repo_name = (payload.repo_name or "").strip() or _default_export_repo_name(auth)
+        try:
+            repo = _gh.create_workeros_repo(pat, repo_name)
+        except _gh.GitHubAPIError as exc:
+            raise HTTPException(status_code=400, detail=_github_api_safe_detail(exc)) from exc
+        repo_full_name = str(repo.get("full_name") or "").strip()
+        repo_url = str(repo.get("html_url") or repo.get("url") or "").strip()
+        if not repo_full_name:
+            raise HTTPException(status_code=502, detail="GitHub did not return a repository name")
+
+    if not repo_url:
+        repo_url = _repo_html_url(repo_full_name)
+
+    remote_url = (
+        f"{_GITHUB_REMOTE_SCHEME}{_GITHUB_REMOTE_USERNAME}:"
+        f"{pat}{_GITHUB_REMOTE_HOST}/{repo_full_name}.git"
+    )
+    author_name, author_email = _git_author(auth)
+    try:
+        pushed_ref = _git_ops.commit_paths(
+            workspace,
+            ["."],
+            "chore: export workspace snapshot",
+            author_name=author_name,
+            author_email=author_email,
+        )
+        _git_ops.configure_remote(workspace, remote_url)
+        _git_ops.push(workspace)
+    except _git_ops.GitOpsError as exc:
+        raise HTTPException(
+            status_code=500,
+            detail=_git_safe_http_detail(exc, "workspace-export-to-github"),
+        ) from exc
+
+    pushed_at = now_iso()
+    _git_cfg_upsert(
+        owner_id,
+        github_pat=pat,
+        github_username=str(user_info.get("login") or cfg.get("github_username") or ""),
+        repo_full_name=repo_full_name,
+        repo_url=repo_url,
+        remote_url=remote_url,
+        connected_at=str(cfg.get("connected_at") or pushed_at),
+        last_pushed_at=pushed_at,
+    )
+    return WorkspaceGitHubExportResponse(
+        repo_full_name=repo_full_name,
+        html_url=repo_url,
+        pushed_ref=pushed_ref,
+        restored_from_bundle=restored_from_bundle,
+    )
 
 
 @workspace_router.get("/workspace/export/audit")
