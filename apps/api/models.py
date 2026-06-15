@@ -956,6 +956,7 @@ class WorkerConfig(BaseModel):
     outputs: List[WorkerOutput] = []
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
+    capabilities: Optional["WorkerContractCapabilities"] = None
     retry: Optional["RetryConfig"] = None
     notify: Optional["NotifyConfig"] = None
     calls: List[str] = Field(default_factory=list)  # worker IDs this worker is allowed to invoke
@@ -1255,6 +1256,8 @@ class WorkerContractExec(BaseModel):
 
 class WorkerContractNetworkCapabilities(BaseModel):
     egress: bool = False
+    allow_out: List[str] = Field(default_factory=list)
+    deny_out: List[str] = Field(default_factory=list)
 
 
 class WorkerContractCapabilities(BaseModel):
@@ -1658,6 +1661,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
         approvals=contract.approvals,
+        capabilities=contract.capabilities,
         calls=list(contract.calls),
     )
 

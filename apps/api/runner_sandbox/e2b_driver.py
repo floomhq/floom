@@ -17,6 +17,7 @@ import time
 from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any, Callable, Dict, Optional
+from urllib.parse import urlsplit
 
 from .base import SandboxDriver
 from .memory_context import ensure_memory_context_pack
@@ -61,6 +62,20 @@ _OOM_MARKERS = (
 )
 _active_sandboxes: dict[str, Any] = {}
 _active_sandboxes_lock = threading.Lock()
+_DEFAULT_E2B_DENY_OUT = (
+    "0.0.0.0/8",
+    "10.0.0.0/8",
+    "100.64.0.0/10",
+    "127.0.0.0/8",
+    "169.254.0.0/16",
+    "172.16.0.0/12",
+    "192.168.0.0/16",
+    "::1/128",
+    "fc00::/7",
+    "fe80::/10",
+    "localhost",
+    "metadata.google.internal",
+)
 
 
 class E2BKeyExhaustedError(RuntimeError):
@@ -124,6 +139,66 @@ def _worker_author_platform_env() -> dict[str, str]:
         if value:
             env[name] = value
     return env
+
+
+def _csv_env(name: str) -> list[str]:
+    return [part.strip() for part in (os.environ.get(name) or "").split(",") if part.strip()]
+
+
+def _host_from_url(value: str | None) -> str | None:
+    raw = (value or "").strip()
+    if not raw:
+        return None
+    try:
+        parsed = urlsplit(raw if "://" in raw else f"https://{raw}")
+    except Exception:
+        return None
+    return parsed.hostname or None
+
+
+def _platform_egress_hosts(api_url: str | None = None) -> list[str]:
+    hosts = [
+        _host_from_url(api_url),
+        _host_from_url(os.environ.get("WORKEROS_E2B_API_URL")),
+        _host_from_url(os.environ.get("WORKEROS_API_URL")),
+        _host_from_url(os.environ.get("WORKEROS_API_BASE")),
+        _host_from_url(os.environ.get("COMPOSIO_API_BASE") or "https://backend.composio.dev"),
+        "api.openai.com",
+        "api.anthropic.com",
+        "generativelanguage.googleapis.com",
+        "*.bedrock-runtime.amazonaws.com",
+        *_csv_env("WORKEROS_E2B_ALLOW_OUT"),
+    ]
+    deduped: list[str] = []
+    for host in hosts:
+        if host and host not in deduped:
+            deduped.append(host)
+    return deduped
+
+
+def _worker_network_caps(config: WorkerConfig | None) -> tuple[bool, list[str], list[str]]:
+    network = getattr(getattr(config, "capabilities", None), "network", None)
+    egress = bool(getattr(network, "egress", False))
+    allow_out = list(getattr(network, "allow_out", []) or [])
+    deny_out = list(getattr(network, "deny_out", []) or [])
+    return egress, allow_out, deny_out
+
+
+def _e2b_network_policy(config: WorkerConfig | None, *, api_url: str | None = None) -> dict[str, Any]:
+    egress, declared_allow, declared_deny = _worker_network_caps(config)
+    deny_out = list(dict.fromkeys([*_DEFAULT_E2B_DENY_OUT, *_csv_env("WORKEROS_E2B_DENY_OUT"), *declared_deny]))
+    allow_out = list(dict.fromkeys([*_platform_egress_hosts(api_url), *declared_allow]))
+    strict_public = (os.environ.get("WORKEROS_E2B_RESTRICT_EGRESS") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
+    return {
+        "allow_public_traffic": bool(egress and not strict_public),
+        "allow_out": allow_out,
+        "deny_out": deny_out,
+    }
 
 
 def _split_env_values(raw_value: str | None) -> list[str]:
@@ -285,6 +360,7 @@ def _create_sandbox_with_key_fallback(
     api_keys: list[str],
     timeout: int,
     envs: dict[str, str],
+    network: dict[str, Any] | None = None,
     log_fn: Callable[[str, str], None],
 ) -> Any:
     last_quota_error: Exception | None = None
@@ -296,6 +372,7 @@ def _create_sandbox_with_key_fallback(
                 api_key=api_key,
                 timeout=timeout,
                 envs=envs,
+                network=network,
             )
         except Exception as exc:
             if not _is_e2b_quota_or_rate_limit_error(exc):
@@ -952,6 +1029,7 @@ class E2BSandboxDriver(SandboxDriver):
             api_keys=api_keys,
             timeout=sandbox_timeout,
             envs=_sandbox_envs,
+            network=_e2b_network_policy(config, api_url=_sandbox_api_url_val),
             log_fn=log_fn,
         )
         _register_sandbox(run_id, sandbox)

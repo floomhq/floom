@@ -12,6 +12,7 @@ except ImportError:
     _LOCK_EX = 1
     _LOCK_UN = 8
 import contextvars
+import hashlib
 import json
 import logging
 import os
@@ -262,6 +263,14 @@ def _user_secret_key(user_id: str, name: str) -> str:
         return name
     safe_user = re.sub(r"[^A-Za-z0-9_]", "_", user_id).upper()
     return f"{_SECRET_PREFIX}_{safe_user}_{name}"
+
+
+def _session_hash(session_id: str) -> str:
+    return hashlib.sha256(session_id.encode("utf-8")).hexdigest()
+
+
+def _looks_like_session_hash(value: str | None) -> bool:
+    return bool(value and re.fullmatch(r"[0-9a-f]{64}", value))
 
 
 def _read_env_lines(path: Path | None = None) -> list[str]:
@@ -4143,19 +4152,21 @@ class SqliteUserSessionRepository:
         # INSERT on the user being enabled in the same statement, making the
         # check and the insert atomic. Raises ValueError when no row inserted.
         created_at = now_iso()
+        stored_session_id = _session_hash(session_id)
         with get_db() as conn:
             cursor = conn.execute(
                 """
                 INSERT INTO user_sessions (id, user_id, expires_at, created_at)
                 SELECT ?, id, ?, ? FROM users WHERE id = ? AND disabled = 0
                 """,
-                (session_id, expires_at, created_at, user_id),
+                (stored_session_id, expires_at, created_at, user_id),
             )
             if cursor.rowcount == 0:
                 raise ValueError("cannot create session: user is disabled or does not exist")
         return {"id": session_id, "user_id": user_id, "expires_at": expires_at, "created_at": created_at}
 
     def get(self, *, session_id: str) -> dict[str, Any] | None:
+        stored_session_id = session_id if _looks_like_session_hash(session_id) else _session_hash(session_id)
         with get_db() as conn:
             row = conn.execute(
                 """
@@ -4165,13 +4176,30 @@ class SqliteUserSessionRepository:
                 JOIN users u ON u.id = s.user_id
                 WHERE s.id = ? LIMIT 1
                 """,
-                (session_id,),
+                (stored_session_id,),
             ).fetchone()
+            if row is None and stored_session_id != session_id:
+                row = conn.execute(
+                    """
+                    SELECT s.id, s.user_id, s.expires_at, s.created_at,
+                           u.username, u.role, u.disabled
+                    FROM user_sessions s
+                    JOIN users u ON u.id = s.user_id
+                    WHERE s.id = ? LIMIT 1
+                    """,
+                    (session_id,),
+                ).fetchone()
+                if row is not None:
+                    conn.execute(
+                        "UPDATE user_sessions SET id = ? WHERE id = ?",
+                        (stored_session_id, session_id),
+                    )
         return _row_dict(row) if row else None
 
     def delete(self, *, session_id: str) -> bool:
+        stored_session_id = session_id if _looks_like_session_hash(session_id) else _session_hash(session_id)
         with get_db() as conn:
-            cursor = conn.execute("DELETE FROM user_sessions WHERE id = ?", (session_id,))
+            cursor = conn.execute("DELETE FROM user_sessions WHERE id IN (?, ?)", (stored_session_id, session_id))
         return cursor.rowcount > 0
 
     def prune_expired(self, *, now_iso: str) -> int:

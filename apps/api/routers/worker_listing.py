@@ -13,9 +13,13 @@ from __future__ import annotations
 
 from typing import Annotated, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query
+import logging
+import time
+
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 
 from auth import AuthContext, get_auth_context
+from core import hot_cache
 from db import Repositories, get_repos
 from models import WorkerInput, WorkerListSummary, WorkerSummaryInput
 from run_service import get_worker_config_for_run
@@ -44,10 +48,13 @@ from services.worker_serialize import (
 )
 
 worker_listing_router = APIRouter()
+logger = logging.getLogger("floom.api")
 
 
 @worker_listing_router.get("/workers", response_model=List[WorkerListSummary])
 def list_workers(
+    request: Request = None,
+    response: Response = None,
     include_system: bool = False,
     include_archived: bool = False,
     shape: str = "full",
@@ -73,6 +80,40 @@ def list_workers(
     ?include_archived=true — include archived workers (archived:true in worker.yml).
                              Default: excluded from All/Starred/Recent; shown only in Archived view.
     """
+    started = time.perf_counter()
+    workspace_key = None
+    if request is not None:
+        workspace_key = (
+            request.headers.get("x-workeros-workspace")
+            or request.query_params.get("workspace_id")
+        )
+    cache_key = (
+        "workers",
+        auth.user_id,
+        auth.role,
+        workspace_key,
+        include_system,
+        include_archived,
+        shape,
+        visibility,
+        q,
+        starred,
+        limit,
+        offset,
+    )
+    cached = hot_cache.get(cache_key)
+    if cached is not None:
+        duration_ms = (time.perf_counter() - started) * 1000
+        if response is not None:
+            response.headers["Server-Timing"] = f"workers;dur={duration_ms:.1f};desc=\"hit\""
+        logger.info(
+            "workers list cache=hit user_id=%s count=%s duration_ms=%.1f",
+            auth.user_id,
+            len(cached),
+            duration_ms,
+        )
+        return cached
+
     worker_user_id = _worker_access_user_id(auth)
     workers = _list_visible_workers(
         user_id=worker_user_id,
@@ -238,4 +279,14 @@ def list_workers(
                 ),
             )
         )
+    hot_cache.set(cache_key, result)
+    duration_ms = (time.perf_counter() - started) * 1000
+    if response is not None:
+        response.headers["Server-Timing"] = f"workers;dur={duration_ms:.1f};desc=\"miss\""
+    logger.info(
+        "workers list cache=miss user_id=%s count=%s duration_ms=%.1f",
+        auth.user_id,
+        len(result),
+        duration_ms,
+    )
     return result
