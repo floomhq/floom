@@ -255,11 +255,11 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
 
   const config: CollectionConfig<RunSummary> = {
     title: "Run history",
-    subtitle: "Worker executions.",
+    subtitle: "Worker executions grouped by day.",
     items: sorted,
     loading,
     idOf: (r) => r.id,
-    view: { default: "grid", grid: true },
+    view: { default: "list", grid: true },
     searchOf: (r) => `${r.worker_name ?? r.worker_id} ${r.id} ${r.trigger_source}`,
     tagsOf: (r) =>
       ({
@@ -320,6 +320,9 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     row: (r) => ({
       // V4 SPEC rule 3: no avatar for runs — non-person entity.
       primary: r.worker_name ?? r.worker_id,
+      // secondary shows status + relative time in compact (split-left) mode where
+      // c-cell children are hidden (#1132).
+      secondary: `${runStatusPill(r.status).label} · ${formatRelative(r.created_at ?? r.started_at ?? "")}`,
       cols: [
         formatTrigger(r.trigger_source),
         formatDuration(r.duration_ms),
@@ -337,7 +340,11 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       header: {
         // V4 SPEC rule 3: no avatar in detail header for runs.
         leading: undefined,
-        title: `Run · ${r.worker_name ?? r.worker_id}`,
+        title: (
+          <span title={`Run · ${r.worker_name ?? r.worker_id}`}>
+            {`Run · ${r.worker_name ?? r.worker_id}`}
+          </span>
+        ),
         sub: (
           <span className="c-dh-sub" style={{ margin: 0 }}>
             {formatTrigger(r.trigger_source)} · {formatDuration(r.duration_ms)} ·{" "}
