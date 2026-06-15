@@ -1936,6 +1936,38 @@ def workspace_agent_info(user_id: str) -> Dict[str, Any]:
 # Chat streaming
 # ---------------------------------------------------------------------------
 
+def _fallback_reply_from_successful_tools(tool_results: List[tuple[str, Any]]) -> Optional[str]:
+    """Build a deterministic assistant reply when the LLM fails after a tool succeeds."""
+    for tool_name, result in reversed(tool_results):
+        if tool_name != "workers__list_all" or not isinstance(result, dict) or result.get("ok") is not True:
+            continue
+        workers = [
+            worker
+            for worker in result.get("workers", [])
+            if isinstance(worker, dict) and not worker.get("truncated")
+        ]
+        try:
+            count = int(result.get("count") or len(workers))
+        except (TypeError, ValueError):
+            count = len(workers)
+        if count <= 0:
+            return "I found no workers in this workspace."
+        names = [
+            str(worker.get("title") or worker.get("name") or worker.get("id"))
+            for worker in workers[:6]
+            if worker.get("title") or worker.get("name") or worker.get("id")
+        ]
+        if not names:
+            return f"You have {count} {'worker' if count == 1 else 'workers'} in this workspace."
+        remaining = max(0, count - len(names))
+        suffix = f", and {remaining} more" if remaining else ""
+        return (
+            f"You have {count} {'worker' if count == 1 else 'workers'} in this workspace. "
+            f"Here are the first {len(names)}: {', '.join(names)}{suffix}."
+        )
+    return None
+
+
 async def stream_chat(
     message: str,
     user_id: str,
@@ -2149,6 +2181,7 @@ async def stream_chat(
     stream_text_sanitizer = _StreamingTextSanitizer()
     pending_tool_calls: Dict[str, Dict[str, Any]] = {}  # call_id -> {name, args}
     card_summaries: Dict[str, Dict[str, Any]] = {}
+    successful_tool_results: List[tuple[str, Any]] = []
     received_text_delta = False
 
     # Wire finish tool to emit the reply as a text part
@@ -2388,6 +2421,8 @@ async def stream_chat(
                         "resource": metadata["resource"],
                         "actions": metadata["actions"],
                     })
+                if not decoded.is_error and isinstance(safe_result, dict) and safe_result.get("ok") is True:
+                    successful_tool_results.append((tool_name, safe_result))
                 # Persist tool message
                 content_str = json.dumps(safe_result, default=str) if not isinstance(safe_result, str) else safe_result
                 insert_message(conversation_id, "tool", content_str, tool_call_id=call_id)
@@ -2438,7 +2473,35 @@ async def stream_chat(
         logger.exception("stream_chat failed for conversation %s", conversation_id)
         # #951/#870: full detail is in the log above; the client gets a safe
         # message (degraded-mode wording + ops alert on provider quota/auth).
-        from llm import safe_llm_error_message
+        from llm import is_llm_provider_outage, safe_llm_error_message
+
+        fallback_reply = (
+            _fallback_reply_from_successful_tools(successful_tool_results)
+            if not assistant_text_parts and is_llm_provider_outage(exc)
+            else None
+        )
+        if fallback_reply:
+            fallback_reply = _ensure_bare_greeting_identity(
+                message,
+                _sanitize_preview_text(strip_em_dashes(fallback_reply)),
+            )
+            final_message_id = insert_message(conversation_id, "assistant", fallback_reply)
+            await part_queue.put({
+                "type": "text",
+                "version": CHAT_EVENT_VERSION,
+                "conversation_id": conversation_id,
+                "message_id": assistant_message_id,
+                "text": fallback_reply,
+            })
+            await part_queue.put({
+                "type": "finish",
+                "version": CHAT_EVENT_VERSION,
+                "conversation_id": conversation_id,
+                "message_id": final_message_id,
+                "assistant_message_id": assistant_message_id,
+                "cards": list(card_summaries.values()) if "card_summaries" in locals() else [],
+            })
+            return
 
         await part_queue.put({
             "type": "error",
