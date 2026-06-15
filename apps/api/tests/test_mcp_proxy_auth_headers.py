@@ -79,3 +79,43 @@ def test_api_call_forwards_x_api_key_end_to_end(monkeypatch, tmp_path):
     assert seen["x-api-key"] == "key-123"
     # non-auth headers must NOT be forwarded
     assert seen["x-unrelated"] is None
+
+
+def test_api_call_does_not_inject_local_workspace_header_on_cloud(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp-tools/serve",
+        "query_string": b"",
+        "headers": [
+            (b"x-api-key", b"key-123"),
+        ],
+    }
+    outer = Request(scope)
+
+    headers = main._api_call_auth_headers(outer)
+
+    assert headers["x-api-key"] == "key-123"
+    assert "x-workeros-workspace" not in headers
+
+
+def test_api_call_keeps_default_workspace_header_on_local(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+
+    scope = {
+        "type": "http",
+        "method": "POST",
+        "path": "/mcp-tools/serve",
+        "query_string": b"",
+        "headers": [
+            (b"x-api-key", b"key-123"),
+        ],
+    }
+    outer = Request(scope)
+
+    headers = main._api_call_auth_headers(outer)
+
+    assert headers["x-workeros-workspace"] == main.DEFAULT_WORKSPACE_ID
