@@ -204,9 +204,9 @@ asyncio.run(main())
         shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
 
 
-def test_e2b_honors_3600_second_worker_timeout_without_900_clamp(tmp_path, monkeypatch):
+def test_e2b_honors_3600_second_worker_command_timeout_with_capped_install(tmp_path, monkeypatch):
     _install_fake_e2b(monkeypatch, tmp_path)
-    assert e2b_driver._install_timeout_for_run(3600) == 3600
+    assert e2b_driver._install_timeout_for_run(3600) == 900
 
     worker_dir = tmp_path / "worker"
     worker_dir.mkdir()

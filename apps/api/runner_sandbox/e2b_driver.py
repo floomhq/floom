@@ -511,7 +511,7 @@ def _safe_path(base: Path, *parts: str) -> Path:
 
 def _install_timeout_for_run(timeout_seconds: int) -> int:
     """Give large real-engine bundles enough time to install dependencies."""
-    return max(MIN_INSTALL_TIMEOUT_SECONDS, min(int(timeout_seconds), MAX_RUN_TIMEOUT_SECONDS))
+    return max(MIN_INSTALL_TIMEOUT_SECONDS, min(int(timeout_seconds), 900))
 
 
 def _sandbox_lifetime_timeout(timeout_seconds: int, install_timeout: int) -> int:

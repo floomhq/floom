@@ -44,7 +44,7 @@ except ImportError:
 # the platform only configured Emily's provider.
 # ---------------------------------------------------------------------------
 
-_DEFAULT_CODEGEN_MODEL = "gpt-5.1"
+_DEFAULT_CODEGEN_MODEL = "gpt-5.5"
 
 
 def _codegen_model() -> str:
@@ -108,6 +108,7 @@ def _provider_credentials_error(model: str) -> Optional[str]:
 
 
 def _codegen_chat(
+    client: Any = None,
     *,
     messages: list,
     max_output_tokens: int,
@@ -116,9 +117,10 @@ def _codegen_chat(
 ) -> Any:
     """Provider-routed chat completion with an OpenAI-shaped response."""
     model = _codegen_model()
-    credentials_error = _provider_credentials_error(model)
-    if credentials_error:
-        raise RuntimeError(credentials_error)
+    if client is None:
+        credentials_error = _provider_credentials_error(model)
+        if credentials_error:
+            raise RuntimeError(credentials_error)
 
     if _is_litellm_model(model):
         import litellm  # type: ignore
@@ -143,9 +145,10 @@ def _codegen_chat(
         if ml.startswith(("gpt-5", "o1", "o3", "o4"))
         else "max_tokens"
     )
-    from openai import OpenAI  # type: ignore
+    if client is None:
+        from openai import OpenAI  # type: ignore
 
-    client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY") or os.environ.get("PLATFORM_OPENAI_API_KEY"))
+        client = OpenAI(api_key=os.environ.get("OPENAI_API_KEY") or os.environ.get("PLATFORM_OPENAI_API_KEY"))
 
     def _create(token_param: str, *, include_temperature: bool = True) -> Any:
         kwargs: Dict[str, Any] = {
