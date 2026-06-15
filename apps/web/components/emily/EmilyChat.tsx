@@ -440,7 +440,7 @@ className="hidden sm:inline-flex items-center gap-0.5 rounded [border:var(--bd-c
             <button
               key={ex.label}
               type="button"
-              onClick={() => onSuggest(s)}
+              onClick={() => onInput(ex.prompt)}
               className="rounded-[var(--radius-ui)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"            >
               <span className="text-sm font-medium text-foreground">{ex.label}</span>
               <span className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{ex.prompt}</span>

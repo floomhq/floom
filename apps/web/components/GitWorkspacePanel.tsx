@@ -191,8 +191,7 @@ function RepoSelector({
           <Loader2 className="size-4 animate-spin" /> Loading repos…
         </div>
       ) : (
-        {/* ds-allow-border */}
-        <div className="[&>*+*]:[border-top:var(--bd-div)] rounded-[var(--radius-ui)] [border:var(--bd-card)] overflow-hidden">
+        <div className="[&>*+*]:[border-top:var(--bd-div)] rounded-[var(--radius-ui)] [border:var(--bd-card)] overflow-hidden" /* ds-allow-border */>
           {repos.map((r) => (
             <div key={r.full_name} className="flex items-center justify-between gap-3 px-4 py-3">
               <div className="min-w-0">

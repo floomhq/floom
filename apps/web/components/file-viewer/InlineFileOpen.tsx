@@ -113,6 +113,7 @@ export function InlineFileOpen({
   const [renameBusy, setRenameBusy] = useState(false);
   const [dir, setDir] = useState(""); // #783: current folder prefix ("" = root)
   const [uploadDragOver, setUploadDragOver] = useState(false);
+  const [dragOver, setDragOver] = useState(false);
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [draggingRow, setDraggingRow] = useState<InlineDragItem | null>(null);
   const [orderedIds, setOrderedIds] = useState<string[]>([]);
