@@ -117,7 +117,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
     openCommandPalette();
   };
   return (
-    <div className="px-3 pb-3 space-y-1.5">
+    <div className="px-3 pt-3 pb-3 space-y-1.5">
       {/* #902 (wireframe newbtn): creating a worker = a conversation with
           Emily — full-page chat in create mode, not a form. */}
       <Link

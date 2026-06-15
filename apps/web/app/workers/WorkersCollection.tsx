@@ -506,7 +506,7 @@ function SourceTab({ w }: { w: WorkerSummary }) {
             </button>
           )}
         </div>
-        <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} surface="flat" />
+        <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} />
       </div>
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-h-[90vh] max-w-6xl overflow-y-auto">
