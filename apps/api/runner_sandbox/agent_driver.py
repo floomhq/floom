@@ -13,7 +13,6 @@ import json
 import logging
 import os
 import re
-import sqlite3
 import subprocess
 import threading
 import time as _time
@@ -42,6 +41,7 @@ from worker_registry import WORKERS_DIR
 from . import agent_capabilities
 from .agent_capabilities import WORKER_POLICY, MCPConnectionError
 from .base import SandboxDriver
+from .cancellation import cancel_flag_db_read_errors_total, run_cancel_requested
 from .memory_context import memory_context_name, memory_enabled
 
 logger = logging.getLogger("floom.runner_sandbox.agent")
@@ -74,16 +74,9 @@ def _ws_default_int(key: str) -> "Optional[int]":
 
 
 _CWD_LOCK = threading.Lock()
-_CANCEL_FLAG_DB_READ_ERRORS_LOCK = threading.Lock()
-_CANCEL_FLAG_DB_READ_ERRORS_TOTAL = 0
 _STDOUT_CAP = 12000
 _STDERR_CAP = 12000
 _PATH_VALUE_RE = re.compile(r"^(?:\.?/)?(?:out|outputs|output|artifacts|inputs)/[A-Za-z0-9._/@ -]+$")
-
-
-def cancel_flag_db_read_errors_total() -> int:
-    with _CANCEL_FLAG_DB_READ_ERRORS_LOCK:
-        return _CANCEL_FLAG_DB_READ_ERRORS_TOTAL
 
 
 def _safe_path(base: Path, *parts: str) -> Path:
@@ -713,35 +706,8 @@ class AgentDriver(SandboxDriver):
         return None, False
 
     def _cancel_requested(self, run_id: str) -> bool:
-        """Check if the run's cancel_requested flag is set in the DB."""
-        global _CANCEL_FLAG_DB_READ_ERRORS_TOTAL
-        try:
-            from db import get_db
-            with get_db() as conn:
-                row = conn.execute(
-                    "SELECT cancel_requested FROM runs WHERE id = ?", (run_id,)
-                ).fetchone()
-            return bool(row and row["cancel_requested"])
-        except sqlite3.OperationalError as exc:
-            if "no such table: runs" in str(exc).lower():
-                return False
-            with _CANCEL_FLAG_DB_READ_ERRORS_LOCK:
-                _CANCEL_FLAG_DB_READ_ERRORS_TOTAL += 1
-            logger.warning(
-                "Cancel flag read failed for run %s; treating as cancelled",
-                run_id,
-                exc_info=True,
-            )
-            return True
-        except Exception:
-            with _CANCEL_FLAG_DB_READ_ERRORS_LOCK:
-                _CANCEL_FLAG_DB_READ_ERRORS_TOTAL += 1
-            logger.warning(
-                "Cancel flag read failed for run %s; treating as cancelled",
-                run_id,
-                exc_info=True,
-            )
-            return True
+        """Check if the run's cancel_requested flag is set."""
+        return run_cancel_requested(run_id)
 
     def _stage_contexts(
         self,

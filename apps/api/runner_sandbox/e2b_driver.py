@@ -19,6 +19,7 @@ from pathlib import PurePosixPath
 from typing import Any, Callable, Dict, Optional
 
 from .base import SandboxDriver
+from .cancellation import run_cancel_requested
 from .memory_context import ensure_memory_context_pack
 from models import WorkerConfig, WorkerResult
 import contexts as _contexts_module
@@ -817,24 +818,17 @@ class E2BSandboxDriver(SandboxDriver):
         except Exception as exc:
             # #607: if the sandbox was killed because the user clicked cancel,
             # surface "cancelled" instead of "error" so the UI shows the right
-            # terminal state. check_requested is the canonical flag; read it
-            # before logging so we don't misclassify a real crash.
-            try:
-                from db import get_db
-                with get_db() as _conn:
-                    _row = _conn.execute(
-                        "SELECT cancel_requested FROM runs WHERE id = ?", (run_id,)
-                    ).fetchone()
-                if _row and _row["cancel_requested"]:
-                    logger.info("E2B sandbox terminated by user cancel for run %s", run_id)
-                    log_fn("[e2b] Sandbox terminated — run cancelled by user", "info")
-                    return WorkerResult(
-                        status="cancelled",
-                        error="Cancelled by user",
-                        error_code="user_cancel",
-                    )
-            except Exception:
-                pass  # DB unavailable — fall through to generic error handling
+            # terminal state. cancel_requested is the canonical flag; read it
+            # through the active repository before logging so cloud Supabase
+            # runs are classified correctly.
+            if run_cancel_requested(run_id):
+                logger.info("E2B sandbox terminated by user cancel for run %s", run_id)
+                log_fn("[e2b] Sandbox terminated - run cancelled by user", "info")
+                return WorkerResult(
+                    status="cancelled",
+                    error="Cancelled by user",
+                    error_code="user_cancel",
+                )
 
             exc_stdout = getattr(exc, "stdout", None)
             exc_stderr = getattr(exc, "stderr", None)
