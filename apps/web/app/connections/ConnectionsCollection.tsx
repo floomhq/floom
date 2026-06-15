@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import Link from "next/link";
 import { AlertTriangle, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
@@ -248,6 +249,7 @@ export default function ConnectionsCollection({
 }: {
   initialConnections: ConnectionItem[];
 }) {
+  const router = useRouter();
   const [connections, setConnections] = useState<ConnectionItem[]>(initialConnections);
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
@@ -346,28 +348,58 @@ export default function ConnectionsCollection({
       headers: ["Connects to", "Type", "Detail", "Status", ""],
       headerTransparent: true,
     },
-    row: (i) => ({
-      leading: <Logo item={i} />,
-      primary: i.name,
-      secondary: i.account,
-      cols: [
-        <span key="t" className="c-vpill">
-          {TYPE_LABEL[i.kind]}
-        </span>,
-        i.detail,
-      ],
-      status: STATUS_PILL[i.statusKey],
-      menu: [
-        { label: "Test", onSelect: () => void test(i) },
-        { label: "Remove", onSelect: () => void remove(i), danger: true },
-      ],
-    }),
-    card: (i) => ({
-      leading: <Logo item={i} />,
-      name: i.name,
-      description: i.account,
-      status: STATUS_PILL[i.statusKey],
-    }),
+    row: (i) => {
+      const reconnectHref =
+        i.kind === "connection" && i.connection
+          ? `/connections/connect/${encodeURIComponent(i.connection.app_name)}?return_to=${encodeURIComponent("/connections")}`
+          : null;
+      return {
+        leading: <Logo item={i} />,
+        primary: i.name,
+        secondary: i.account,
+        cols: [
+          <span key="t" className="c-vpill">
+            {TYPE_LABEL[i.kind]}
+          </span>,
+          i.detail,
+        ],
+        status: STATUS_PILL[i.statusKey],
+        menu: [
+          // #1371 — Reconnect CTA surfaces on the row for reauth/expired connections.
+          ...(i.statusKey === "reauth" && reconnectHref
+            ? [{ label: "Reconnect", onSelect: () => router.push(reconnectHref) }]
+            : []),
+          { label: "Test", onSelect: () => void test(i) },
+          { label: "Remove", onSelect: () => void remove(i), danger: true },
+        ],
+      };
+    },
+    card: (i) => {
+      const reconnectHref =
+        i.kind === "connection" && i.connection
+          ? `/connections/connect/${encodeURIComponent(i.connection.app_name)}?return_to=${encodeURIComponent("/connections")}`
+          : null;
+      return {
+        leading: <Logo item={i} />,
+        name: i.name,
+        description: i.account,
+        status: STATUS_PILL[i.statusKey],
+        // #1371 — quick-action Reconnect for reauth cards (visible on hover).
+        ...(i.statusKey === "reauth" && reconnectHref
+          ? {
+              quickActions: [
+                {
+                  label: "Reconnect",
+                  onClick: (e: React.MouseEvent) => {
+                    e.stopPropagation();
+                    router.push(reconnectHref);
+                  },
+                },
+              ],
+            }
+          : {}),
+      };
+    },
     detail: (i) => {
       const actions = (
         <>
