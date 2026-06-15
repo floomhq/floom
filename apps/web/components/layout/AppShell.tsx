@@ -35,6 +35,12 @@ const standalonePrefixes = ["/approvals/review", "/w", "/s", "/login"];
 // /workers/new is the hero hire flow — it needs full-width, no dock cramping it.
 const noDockPrefixes = ["/chat", "/workers/new"];
 
+// Collection pages manage their own internal layout (header + split detail that
+// must reach the bottom of the viewport). They render inside the standard
+// sidebar shell but WITHOUT the max-w-7xl/padding content wrapper so the
+// Collection's flex-column can fill the available height correctly. (#1101)
+const fullBleedCollectionPaths = ["/brain", "/workers", "/runs", "/connections", "/approvals"];
+
 export type AppShellProps = {
   children: React.ReactNode;
   noSidebarPaths?: string[];
@@ -50,6 +56,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
   const standalone = pathMatchesPrefixes(pathname, standalonePrefixes)
     || pathMatchesPrefixes(pathname, noSidebarPaths);
   const noDock = pathMatchesPrefixes(pathname, noDockPrefixes);
+  const fullBleed = pathMatchesPrefixes(pathname, fullBleedCollectionPaths);
 
   if (standalone) {
     return (
@@ -83,10 +90,19 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
       <Ambient />
       <DeepLinkRouter />
       <Sidebar />
-      {/* Main content between sidebar and Emily dock — scrolls in its own container */}
-      <main className="relative z-10 flex-1 min-w-0 h-full overflow-y-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex flex-col min-h-full">{children}</div>
-      </main>
+      {/* Main content between sidebar and Emily dock.
+          fullBleed pages (collection pages) own their own internal layout and
+          must fill the full viewport height (they skip the max-w-7xl wrapper).
+          Standard pages scroll in the overflow-y-auto container. (#1101) */}
+      {fullBleed ? (
+        <main className="relative z-10 flex-1 min-w-0 h-full overflow-hidden flex flex-col">
+          {children}
+        </main>
+      ) : (
+        <main className="relative z-10 flex-1 min-w-0 h-full overflow-y-auto">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex flex-col min-h-full">{children}</div>
+        </main>
+      )}
       {/* Emily dock: fixed-height right rail — scrolls internally, never bleeds to body */}
       {isDesktop ? <EmilyDock /> : <EmilyMobileSheet />}
       <CommandPalette />
