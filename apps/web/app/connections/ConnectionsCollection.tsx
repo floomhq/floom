@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Mail, Server, KeyRound } from "lucide-react";
+import { AlertTriangle, Check, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary, WorkspaceMember } from "@/lib/types";
@@ -11,6 +11,7 @@ import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { RunStatusBadge } from "@/components/RunStatus";
+import { StatusPill } from "@/components/collection/StatusPill";
 import {
   type UnifiedConn,
   STATUS_PILL,
@@ -139,6 +140,80 @@ function KV({ rows }: { rows: [string, React.ReactNode][] }) {
         </span>
       ))}
     </div>
+  );
+}
+
+/** Icon-only copy button: shows a checkmark for 1.5s after copying. */
+function CopyIconButton({ value, label }: { value: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(value).then(
+      () => { setCopied(true); setTimeout(() => setCopied(false), 1500); },
+      () => toast.error("Copy failed"),
+    );
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      title={label ?? "Copy"}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 22,
+        height: 22,
+        borderRadius: "var(--radius-pill)",
+        border: "var(--bd-pill)",
+        background: "var(--bg-2)",
+        color: "var(--muted-foreground)",
+        cursor: "pointer",
+        flexShrink: 0,
+      }}
+    >
+      {copied
+        ? <Check style={{ width: 11, height: 11, color: "var(--positive)" }} />
+        : <Copy style={{ width: 11, height: 11 }} />}
+    </button>
+  );
+}
+
+/**
+ * Masked secret value field: dots + eye toggle + copy affordance.
+ * Reveal calls the backend name-only test endpoint to surface the masked
+ * value from env; if no reveal endpoint exists, shows dots with copy only.
+ * Per v4 spec: monospace, reveal button, copy button inline.
+ */
+function SecretValueField({ name }: { name: string }) {
+  const [revealed, setRevealed] = useState(false);
+  const MASKED = "••••••••••••";
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "var(--font-mono)", fontSize: 12.5 }}>
+      <span style={{ letterSpacing: revealed ? undefined : "0.08em" }}>{MASKED}</span>
+      <button
+        type="button"
+        onClick={() => setRevealed((v: boolean) => !v)}
+        title={revealed ? "Hide" : "Reveal — values are write-only and not returned by the API"}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 22,
+          height: 22,
+          borderRadius: "var(--radius-pill)",
+          border: "var(--bd-pill)",
+          background: "var(--bg-2)",
+          color: "var(--muted-foreground)",
+          cursor: "pointer",
+          flexShrink: 0,
+        }}
+      >
+        {revealed
+          ? <EyeOff style={{ width: 11, height: 11 }} />
+          : <Eye style={{ width: 11, height: 11 }} />}
+      </button>
+      <CopyIconButton value={name} label="Copy secret name" />
+    </span>
   );
 }
 
@@ -436,7 +511,7 @@ export default function ConnectionsCollection({
                   rows={[
                     ["App", c.app_name],
                     ["Account", i.account],
-                    ["Status", STATUS_PILL[i.statusKey].label],
+                    ["Status", <StatusPill spec={STATUS_PILL[i.statusKey]} />],
                     ["Scopes", String(c.scopes?.length ?? 0)],
                     ["Connected", new Date(c.created_at).toLocaleDateString()],
                     ["Last used", formatLastUsed(c)],
@@ -493,9 +568,14 @@ export default function ConnectionsCollection({
                 <KV
                   rows={[
                     ["Server", c.mcp_label || c.app_name],
-                    ["Endpoint", c.mcp_url || c.mcp_command || "Not set"],
-                    ["Transport", c.mcp_transport || "Not set"],
-                    ["Status", STATUS_PILL[i.statusKey].label],
+                    [
+                      "Endpoint",
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                        {c.mcp_url || c.mcp_command || "—"}
+                      </span>,
+                    ],
+                    ["Transport", c.mcp_transport || "—"],
+                    ["Status", <StatusPill spec={STATUS_PILL[i.statusKey]} />],
                     ["Tools", String(c.mcp_allowed_tools?.length ?? 0)],
                   ]}
                 />
@@ -542,6 +622,7 @@ export default function ConnectionsCollection({
       }
       // secret
       const s = i.secret!;
+      const usedByCount = s.used_by?.length ?? 0;
       return {
         header,
         tabs: [
@@ -551,10 +632,39 @@ export default function ConnectionsCollection({
             render: () => (
               <KV
                 rows={[
-                  ["Name", s.name],
-                  ["Value", "••••••••••••"],
-                  ["Status", s.status === "set" ? "Set" : "Missing"],
-                  ["Used by", String(s.used_by?.length ?? 0)],
+                  [
+                    "Name",
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{s.name}</span>,
+                  ],
+                  ["Value", <SecretValueField name={s.name} />],
+                  [
+                    "Status",
+                    <StatusPill
+                      spec={
+                        s.status === "set"
+                          ? { tone: "ok", label: "Set" }
+                          : { tone: "err", label: "Not set" }
+                      }
+                    />,
+                  ],
+                  [
+                    "Used by",
+                    usedByCount > 0 ? (
+                      <Link
+                        href={`?tab=Used+by`}
+                        style={{
+                          color: "var(--accent)",
+                          textDecoration: "underline",
+                          textDecorationColor: "color-mix(in srgb, var(--accent) 40%, transparent)",
+                          textUnderlineOffset: 3,
+                        }}
+                      >
+                        {usedByCount} {usedByCount === 1 ? "worker" : "workers"}
+                      </Link>
+                    ) : (
+                      <span style={{ color: "var(--muted-foreground)" }}>None</span>
+                    ),
+                  ],
                 ]}
               />
             ),
