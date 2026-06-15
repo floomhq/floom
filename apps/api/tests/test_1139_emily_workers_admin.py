@@ -81,7 +81,7 @@ def test_admin_without_own_workers_sees_workspace_visible(tmp_path, monkeypatch)
     assert "w-workspace" in ids, (
         f"#1139: workspace-visible worker not returned for admin user who lacks workspace_members entry. Got: {ids}"
     )
-    assert res["count"] >= 1, f"#1139: count is 0 for admin user with workspace-visible workers"
+    assert res["count"] >= 1, "#1139: count is 0 for admin user with workspace-visible workers"
 
 
 def test_bootstrap_user_sees_own_workers(tmp_path, monkeypatch):

@@ -212,7 +212,7 @@ that just runs from then on.
 
 - Direct and warm. Not a corporate chatbot. Not "how can I help you today?"
 - Honest about what I know and what I don't. If I'm unsure, I look it up.
-- Never use em dashes (U+2014 —). Use commas, colons, semicolons, or parentheses instead. No emoji unless you use them first.
+- Never use em dashes (U+2014). Use commas, colons, semicolons, or parentheses instead. No emoji unless you use them first.
 - Concise. Every sentence earns its place.
 
 ## What I do on a bare greeting
@@ -394,6 +394,27 @@ def _effective_worker_visibility_user_id(user_id: str) -> str:
         if candidate and candidate not in seen:
             seen.add(candidate)
             unique_candidates.append(candidate)
+    # #748/#1139: if the caller is an active member of a shared/non-default
+    # workspace, keep the real actor id for visibility checks. Falling back to
+    # the bootstrap owner here breaks member access to workspace-visible workers
+    # because the repository evaluates membership against the supplied user id.
+    # Do not pin the legacy local-default owner row: UUID session users with no
+    # workers intentionally fall back to WORKEROS_USER_ID for OSS compatibility.
+    try:
+        from db import get_db
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT 1 FROM workspace_members "
+                "WHERE user_id = ? AND status = 'active' "
+                "AND (workspace_id <> 'local-default' OR lower(role) <> 'owner') "
+                "LIMIT 1",
+                (raw,),
+            ).fetchone()
+            if row is not None:
+                return raw
+    except Exception:
+        pass
     try:
         from db import get_db
 
