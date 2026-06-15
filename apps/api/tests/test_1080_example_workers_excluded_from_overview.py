@@ -1,11 +1,17 @@
-"""#1080 — example workers must not inflate the dashboard headline.
+"""#1080 (REVERSED, seed-all model) — example workers ARE real, owned workers
+and DO count toward the dashboard headline + needs-attention.
 
-A brand-new operator with 0 real workers previously saw the dashboard report
-active/needs-attention counts sourced from `is_example` workers (often owned by
-other workspaces), while Emily (#841) reported zero. The two surfaces must
-agree: example/stock workers are shipped templates, not the operator's own
-workers, so they are excluded from the active/paused headline counts and from
-the needs-attention inbox.
+Original #1080 excluded `is_example` workers from the active/paused headline
+and the needs-attention inbox to keep them from inflating a brand-new
+operator's dashboard. That has been reversed: example/"starter" workers are
+seeded as real, owned, runnable workers — exactly as the dashboard worker grid
+already showed them — so they are counted in the headline and surfaced in
+needs-attention like any other worker. `is_example` is now a cosmetic label
+only. The dashboard and Emily (#841) agree because BOTH now show examples.
+
+The real #1080 fix (cloud) is per-workspace scoping of the visible set, NOT
+hiding examples: only GENUINE system/internal workers (system_worker: true or
+_worker_hidden_from_api) are excluded from the counts.
 """
 
 from __future__ import annotations
@@ -70,6 +76,12 @@ def client_and_main(monkeypatch, tmp_path):
         (wdir / "requirements.txt").write_text("", encoding="utf-8")
 
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    # Pin the secret-auth identity to the same user the fixture persists workers
+    # under, so the overview request (authenticated via x-floom-secret) resolves
+    # to "federico" and sees the seeded workers. Without this the dev .env loaded
+    # by WORKEROS_DEV=1 supplies a different default user id and the overview
+    # would see zero workers regardless of the example/system reversal.
+    monkeypatch.setenv("WORKEROS_USER_ID", "federico")
     monkeypatch.setenv("FLOOM_SECRET", "test-secret-1080")
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
@@ -109,18 +121,20 @@ def client_and_main(monkeypatch, tmp_path):
     db.get_repositories.cache_clear()
 
 
-def test_example_worker_excluded_from_counts_and_attention(client_and_main):
+def test_example_worker_counted_and_surfaced(client_and_main):
     client, main, _repos = client_and_main
 
     resp = client.get("/system/overview")
     assert resp.status_code == 200, resp.text
     body = resp.json()
 
-    # Only the real worker counts toward the active headline; the example does not.
-    assert body["stats"]["active_workers_count"] == 1, body["stats"]
+    # Seed-all model: BOTH the real worker and the example worker are real,
+    # owned, active workers — they both count toward the active headline.
+    assert body["stats"]["active_workers_count"] == 2, body["stats"]
 
-    # The example worker (which also declares a missing secret) must NOT appear
-    # in the needs-attention inbox; the real worker, missing its secret, may.
+    # Both workers declare a missing secret, so BOTH must surface in the
+    # needs-attention inbox (the example is no longer treated as a template that
+    # is excluded from setup-incomplete prompts).
     attention_workers = {item.get("worker_id") for item in body["needs_attention"]}
-    assert "example-probe" not in attention_workers, body["needs_attention"]
+    assert "example-probe" in attention_workers, body["needs_attention"]
     assert "real-probe" in attention_workers, body["needs_attention"]

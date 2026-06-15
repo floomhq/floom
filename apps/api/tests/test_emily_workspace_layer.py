@@ -195,7 +195,12 @@ class TestCapabilitiesSnapshot:
         snap = chat._build_capabilities_snapshot("federico")
         assert "My Worker" in snap
 
-    def test_snapshot_excludes_example_workers_from_notable(self, db_env):
+    def test_snapshot_includes_example_workers_in_notable(self, db_env):
+        # Seed-all model (reverses #841/#1080): example/"starter" workers are
+        # real, owned, runnable workers — they belong in the notable-workers
+        # list exactly like any other enabled worker. is_example is a cosmetic
+        # label only, never a hiding signal. Only genuine system/internal
+        # workers (system_worker: true or _worker_hidden_from_api) are excluded.
         import json as _json
         db = db_env["db"]
         chat = db_env["chat"]
@@ -221,7 +226,8 @@ class TestCapabilitiesSnapshot:
             conn.execute("UPDATE workers SET enabled = 1 WHERE id = 'ex-w'")
         snap = chat._build_capabilities_snapshot("federico")
         assert "Real Worker" in snap
-        assert "Example Worker" not in snap
+        # The example worker is now a real worker — it must appear in the snapshot.
+        assert "Example Worker" in snap
 
     def test_snapshot_owner_role(self, db_env):
         chat = db_env["chat"]

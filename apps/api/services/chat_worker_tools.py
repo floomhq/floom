@@ -32,11 +32,16 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
         include_all_users=include_all_users,
         stock_worker_ids=all_stock_ids,
     )
-    # #841 RCA: every row was returned, so "what workers do I have?" dumped
-    # system and example workers into the chat card with no distinction. The
-    # flags were already computed but never used to filter. Hidden rows are
-    # surfaced as a count (plus include_system=true to opt back in) so Emily
-    # can mention they exist without listing them.
+    # Seed-all model: shipped example/starter workers ARE real, owned, runnable
+    # workers — Emily lists and runs them like any other. She hides EXACTLY what
+    # the operator worker grid hides (single source of truth): canonical
+    # system/internal workers (_worker_hidden_from_api — workspace-agent,
+    # worker-author, slack/whatsapp listeners, ".", _mcp_/smoke- prefixes) plus
+    # manifest system_worker:true (e.g. node-smoke-test). is_example is NO LONGER
+    # a hiding signal — reverses #841/#1080 (it's label-only now). include_system
+    # opts the hidden set back in.
+    from services.worker_access import _worker_hidden_from_api, _build_owned_tracked_ids
+    _owned_tracked = _build_owned_tracked_ids()
     include_system = bool(args.get("include_system"))
     hidden_system = 0
     result = []
@@ -54,7 +59,8 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
             "system_worker": manifest.get("system_worker", False),
             "is_example": manifest.get("is_example", False),
         }
-        if (entry["system_worker"] or entry["is_example"]) and not include_system:
+        is_hidden = _worker_hidden_from_api(str(row["id"]), _owned_tracked) or entry["system_worker"]
+        if is_hidden and not include_system:
             hidden_system += 1
             continue
         result.append(entry)

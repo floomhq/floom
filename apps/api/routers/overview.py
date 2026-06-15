@@ -401,21 +401,19 @@ def system_overview(
         )
         if w.get("id")
     ]
-    # #1080: example/stock workers are shipped templates, not the operator's own
-    # workers. Emily already reports zero of them for a fresh user (#841); the
-    # dashboard headline must agree. Exclude examples from the active/paused
-    # counts AND from the needs-attention inbox below so the two surfaces stay
-    # consistent (a brand-new user with 0 real workers must not see "3 active /
-    # 3 needs attention" sourced entirely from other workspaces' examples).
-    def _is_example_worker(row: Dict[str, Any]) -> bool:
-        if row.get("is_example") is True:
-            return True
+    # Seed-all model: example/starter workers are real, owned workers — counted
+    # in the headline just like the worker grid and Emily now show them. Only
+    # genuine engine internals (system_worker) are excluded, and
+    # _list_operator_workers already drops those, so this is a defensive guard.
+    # NOTE (cloud #1080): the headline must never count ANOTHER workspace's
+    # seeded starters. OSS sqlite scopes the visible set via workspace_members;
+    # the cloud Supabase repo MUST do the same (verify before bumping the engine
+    # there) — the fix for #1080 is per-workspace scoping, not hiding examples.
+    def _is_hidden_worker(row: Dict[str, Any]) -> bool:
         manifest = row.get("manifest")
-        if isinstance(manifest, dict) and manifest.get("is_example") is True:
-            return True
-        return row.get("id") in PUBLIC_STOCK_WORKER_IDS or row.get("id") in PROTECTED_STOCK_WORKER_IDS
+        return bool(isinstance(manifest, dict) and manifest.get("system_worker"))
 
-    _real_workers = [row for row in workers if not _is_example_worker(row)]
+    _real_workers = [row for row in workers if not _is_hidden_worker(row)]
     active_workers_count = sum(1 for row in _real_workers if not _overview_worker_paused(row))
     paused_workers_count = max(0, len(_real_workers) - active_workers_count)
     worker_names = {row["id"]: row.get("name") or row["id"] for row in workers if row.get("id")}
@@ -434,7 +432,7 @@ def system_overview(
         for row in workers
         if row.get("id")
         and not _overview_worker_paused(row)
-        and not _is_example_worker(row)
+        and not _is_hidden_worker(row)
     }
 
     outcome_counts: Dict[str, int] = collections.Counter(
