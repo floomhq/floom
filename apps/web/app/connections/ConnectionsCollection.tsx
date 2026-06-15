@@ -277,6 +277,15 @@ export default function ConnectionsCollection({
     [workers, connections],
   );
 
+  // #1226: secret `used_by` is a list of worker NAMES; resolve each to its id so
+  // the "Used by" rows link to the worker detail. Falls back to plain text when
+  // a name can't be matched (e.g. the worker was deleted/renamed).
+  const workerIdByName = useMemo(() => {
+    const map = new Map<string, string>();
+    for (const w of workers) map.set(w.name, w.id);
+    return map;
+  }, [workers]);
+
   const remove = async (item: UnifiedConn) => {
     try {
       if (item.kind === "secret" && item.secret) await api.secrets.delete(item.secret.name);
@@ -535,15 +544,30 @@ export default function ConnectionsCollection({
             count: s.used_by?.length,
             render: () => (
               <div className="c-ltable">
-                {(s.used_by ?? []).map((w) => (
-                  <div key={w} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
+                {(s.used_by ?? []).map((w) => {
+                  const id = workerIdByName.get(w);
+                  const inner = (
                     <div className="c-lprimary">
                       <div className="c-lp-tx">
                         <div className="nm">{w}</div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                  );
+                  return id ? (
+                    <Link
+                      key={w}
+                      href={`/workers?sel=${encodeURIComponent(id)}`}
+                      className="c-lrow"
+                      style={{ gridTemplateColumns: "1fr", textDecoration: "none", color: "inherit" }}
+                    >
+                      {inner}
+                    </Link>
+                  ) : (
+                    <div key={w} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
+                      {inner}
+                    </div>
+                  );
+                })}
                 {(s.used_by?.length ?? 0) === 0 && <div style={pad}>Not used by any worker yet.</div>}
               </div>
             ),
