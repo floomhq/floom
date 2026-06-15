@@ -8,9 +8,9 @@ Releases are managed automatically by [release-please](https://github.com/google
 from [Conventional Commits](https://www.conventionalcommits.org/) — entries below 0.1.0
 are seeded by hand.
 
-## [0.1.0] - 2026-06-15
+## [Unreleased]
 
-First tagged release of the open-source WorkerOS engine (FastAPI API + Next.js web + MCP server, E2B-sandboxed worker execution).
+Pending changes for the first release (release-please will assign the version + date when releasing is turned on). Highlights so far — the open-source WorkerOS engine (FastAPI API + Next.js web + MCP server, E2B-sandboxed worker execution):
 
 ### Security
 - Sanitize markdown links in the FilesEditor and contexts renderers — block `javascript:`/`data:`/`vbscript:` (#1043, #1045).
@@ -28,4 +28,4 @@ First tagged release of the open-source WorkerOS engine (FastAPI API + Next.js w
 - API port is configurable via `WORKEROS_API_PORT` (default `8000`).
 - Adopted a `ruff` lint gate in CI; added `CODE_OF_CONDUCT.md`, issue/PR templates, `CODEOWNERS`, and repository metadata.
 
-[0.1.0]: https://github.com/floomhq/workeros/releases/tag/v0.1.0
+[Unreleased]: https://github.com/floomhq/workeros/commits/main

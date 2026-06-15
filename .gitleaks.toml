@@ -1,0 +1,25 @@
+# gitleaks config for the secret-scan CI gate.
+# Extends the default ruleset and allowlists the known-benign findings in the
+# tree (dummy test fixtures, example constants, and a CI-only test key) so the
+# gate stays green while still catching any NEW real secret.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Benign test fixtures, example constants, and CI-only test keys."
+
+# Test fixtures legitimately contain fake/sample credentials.
+paths = [
+  '''(^|/)tests?/''',
+  '''.*\.test\.[a-z]+$''',
+]
+
+# Specific non-test constants confirmed benign (see git history / code review):
+regexes = [
+  # CLI device-code alphabet (routers/cli_auth.py, main.py) — a charset, not a key.
+  '''ABCDEFGHJKLMNPQRSTUVWXYZ23456789''',
+  # CI-only Fernet test key in cloud-engine-autosync.yml — base64 of
+  # "workeros-cloud-ci-test-key-32byt"; documented as CI-only, never a real secret.
+  '''d29ya2Vyb3MtY2xvdWQtY2ktdGVzdC1rZXktMzJieXQ=''',
+]
