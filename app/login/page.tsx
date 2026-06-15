@@ -1,5 +1,4 @@
 import Link from "next/link";
-import Image from "next/image";
 import { OAUTH_LOGIN_URL, OAUTH_LOGIN_URL_GITHUB } from "@/lib/api";
 import { LoginEmailPanel } from "@/components/LoginEmailPanel";
 import { V3Shell } from "@/app/v3/V3Shell";
@@ -7,6 +6,21 @@ import { V3Shell } from "@/app/v3/V3Shell";
 export const metadata = {
   title: "Sign in · Floom Workers",
 };
+
+// Illustrative activity data shown pre-auth to demonstrate worker runs.
+// No real user data — purely a proof-of-concept showcase.
+const ACTIVITY_ROWS: {
+  initials: string;
+  name: string;
+  result: string;
+  status: "done" | "running";
+  time: string;
+}[] = [
+  { initials: "LR", name: "Lead research", result: "14 qualified leads", status: "done", time: "4m ago" },
+  { initials: "PF", name: "Post-call follow-up", result: "Sent to 3 contacts", status: "done", time: "11m ago" },
+  { initials: "PR", name: "Pipeline report", result: "Gathering data", status: "running", time: "now" },
+  { initials: "GD", name: "GitHub Digest", result: "14 PRs summarized", status: "done", time: "22m ago" },
+];
 
 export default async function LoginPage({
   searchParams,
@@ -18,17 +32,148 @@ export default async function LoginPage({
 
   return (
     <V3Shell active="login">
-      <main className="mx-auto grid w-full max-w-[820px] items-center gap-10 pb-20 pt-16 md:grid-cols-[1fr_360px] md:pt-24">
-        <section className="max-w-[430px]">
-          <Image src="/floom-mark.svg" alt="" width={34} height={34} />
-          <h1 className="mt-6 text-[36px] font-semibold leading-[1.04] tracking-[-0.032em] sm:text-[46px]">
-            Sign in to Floom Workers.
+      {/* Keyframes for the Running pill dot pulse — scoped to login page */}
+      <style>{`
+        @keyframes login-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.3; }
+        }
+      `}</style>
+      <main className="mx-auto grid w-full max-w-[900px] items-center gap-12 pb-20 pt-12 md:grid-cols-[1fr_360px] md:pt-20">
+        {/* LEFT — Option B: activity-stream proof panel */}
+        <section className="hidden max-w-[460px] md:block">
+          {/* Headline */}
+          <h1
+            className="text-[40px] font-semibold leading-[1.04] tracking-[-0.034em]"
+            style={{ color: "var(--text-primary)" }}
+          >
+            Workers that{" "}
+            <span
+              style={{
+                color: "#3e6fe0",
+                background: "#eef3fe",
+                borderRadius: 4,
+                padding: "0 4px",
+              }}
+            >
+              actually run
+            </span>
+            .
           </h1>
-          <p className="mt-4 text-[15px] leading-relaxed text-muted-foreground">
+          <p
+            className="mt-4 max-w-[380px] text-[14px] leading-relaxed"
+            style={{ color: "var(--text-muted)" }}
+          >
             Review drafts, connect tools, and keep every worker run on the record.
           </p>
+
+          {/* Activity card — white, flat, no border/shadow per design spec */}
+          <div
+            className="mt-7"
+            style={{
+              background: "var(--bg-card)",
+              borderRadius: 18,
+              padding: 8,
+            }}
+          >
+            {/* Card header */}
+            <div
+              className="flex items-center justify-between"
+              style={{ padding: "10px 12px 11px" }}
+            >
+              <span
+                className="text-[11px] font-medium uppercase tracking-[0.06em]"
+                style={{ color: "var(--text-muted)" }}
+              >
+                Today
+              </span>
+              <StatusPill status="done" label="6 active" />
+            </div>
+
+            {/* Activity rows */}
+            {ACTIVITY_ROWS.map((row, i) => (
+              <div
+                key={row.initials}
+                className="flex items-center gap-3"
+                style={{
+                  padding: 12,
+                  borderTop: i > 0 ? "1px solid rgba(16,17,20,.055)" : undefined,
+                }}
+              >
+                {/* Worker avatar squircle: 40px, radius 9, black bg, white initials */}
+                <span
+                  className="flex shrink-0 items-center justify-center text-[13px] font-semibold text-white"
+                  style={{
+                    width: 40,
+                    height: 40,
+                    borderRadius: 9,
+                    background: "#181818",
+                    letterSpacing: "0.01em",
+                  }}
+                >
+                  {row.initials}
+                </span>
+
+                {/* Name + result */}
+                <div className="min-w-0 flex-1">
+                  <div
+                    className="text-[15px] font-semibold"
+                    style={{ color: "var(--text-primary)" }}
+                  >
+                    {row.name}
+                  </div>
+                  <div
+                    className="mt-0.5 text-[13px]"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {row.result}
+                  </div>
+                </div>
+
+                {/* Status pill + timestamp */}
+                <div className="flex shrink-0 flex-col items-end gap-1.5">
+                  <StatusPill status={row.status} />
+                  <span
+                    className="text-[11px]"
+                    style={{ color: "var(--text-muted)" }}
+                  >
+                    {row.time}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Stat footer */}
+          <div
+            className="mt-4 flex items-center gap-2 text-[13px]"
+            style={{ color: "var(--text-muted)" }}
+          >
+            142 runs today
+            <span
+              style={{
+                width: 3,
+                height: 3,
+                borderRadius: "50%",
+                background: "#cfc8ba",
+                display: "inline-block",
+              }}
+            />
+            0 need attention
+            <span
+              style={{
+                width: 3,
+                height: 3,
+                borderRadius: "50%",
+                background: "#cfc8ba",
+                display: "inline-block",
+              }}
+            />
+            avg 38s
+          </div>
         </section>
 
+        {/* RIGHT — auth card (unchanged) */}
         <section className="rounded-[18px] bg-card p-6">
           <div className="mb-6 text-center">
             <h2 className="text-[21px] font-semibold tracking-[-0.02em]">Welcome back</h2>
@@ -66,6 +211,44 @@ export default async function LoginPage({
         </section>
       </main>
     </V3Shell>
+  );
+}
+
+// Status pill: Done (green tint) or Running (blue tint + pulse dot)
+function StatusPill({
+  status,
+  label,
+}: {
+  status: "done" | "running";
+  label?: string;
+}) {
+  const isDone = status === "done";
+  return (
+    <span
+      className="inline-flex items-center gap-1.5 text-[11px] font-medium"
+      style={{
+        borderRadius: 9999,
+        padding: "4px 10px",
+        background: isDone ? "rgba(47,143,91,.12)" : "#eef3fe",
+        color: isDone ? "#2f8f5b" : "#3e6fe0",
+      }}
+    >
+      <span
+        style={{
+          width: 6,
+          height: 6,
+          borderRadius: "50%",
+          background: isDone ? "#2f8f5b" : "#3e6fe0",
+          display: "inline-block",
+          ...(isDone
+            ? {}
+            : {
+                animation: "login-pulse 1.5s ease-in-out infinite",
+              }),
+        }}
+      />
+      {label ?? (isDone ? "Done" : "Running")}
+    </span>
   );
 }
 
