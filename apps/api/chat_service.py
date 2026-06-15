@@ -1654,10 +1654,19 @@ def _build_capabilities_snapshot(user_id: str) -> str:
         notable_workers: list[str] = []
         try:
             all_workers = repos.workers.list(user_id=user_id)
+            # Seed-all: example/starter workers are real workers Emily owns and
+            # acts on. Exclude only what the worker grid hides — canonical
+            # system/internal workers (_worker_hidden_from_api) + manifest
+            # system_worker — so this count matches workers.list_all.
+            from services.worker_access import (
+                _worker_hidden_from_api,
+                _build_owned_tracked_ids,
+            )
+            _owned_tracked = _build_owned_tracked_ids()
             non_system = [
                 w for w in all_workers
-                if not (w.get("manifest") or {}).get("system_worker")
-                and not (w.get("manifest") or {}).get("is_example")
+                if not _worker_hidden_from_api(str(w.get("id") or ""), _owned_tracked)
+                and not (w.get("manifest") or {}).get("system_worker")
             ]
             worker_count = len(non_system)
             enabled = [w for w in non_system if w.get("enabled")]
