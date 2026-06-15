@@ -4,7 +4,7 @@ import {
   deriveSessionToken,
   isCorrectSecret,
 } from "@/lib/web-session";
-import { forwardSecureSetCookies } from "@/lib/secure-set-cookie";
+import { forwardSecureSetCookies, secureCookiesForUrl } from "@/lib/secure-set-cookie";
 
 const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
 const MAX_AGE_SECONDS = 60 * 60 * 24 * 30;
@@ -87,7 +87,7 @@ export async function POST(req: NextRequest) {
       },
     });
     // Forward the wos_session cookie from the backend (#927: force Secure)
-    forwardSecureSetCookies(upstream, res.headers);
+    forwardSecureSetCookies(upstream, res.headers, secureCookiesForUrl(req.url));
     return res;
   }
 
@@ -112,10 +112,7 @@ export async function POST(req: NextRequest) {
   res.headers.set("cache-control", "private, no-store, max-age=0"); // #941
   res.cookies.set(SESSION_COOKIE, token, {
     httpOnly: true,
-    // Secure cookies are dropped by browsers over plain http, so local dev
-    // (http://localhost or a LAN IP) would set a cookie the browser discards →
-    // login loops back to /login. Only force Secure in production (HTTPS).
-    secure: process.env.NODE_ENV === "production",
+    secure: secureCookiesForUrl(req.url),
     sameSite: "lax",
     path: "/",
     maxAge: MAX_AGE_SECONDS,

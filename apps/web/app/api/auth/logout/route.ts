@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { secureCookiesForUrl } from "@/lib/secure-set-cookie";
 import { SESSION_COOKIE } from "@/lib/web-session";
 
 const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
@@ -23,10 +24,11 @@ export async function POST(req: NextRequest) {
 
   const res = NextResponse.json({ ok: true });
   res.headers.set("cache-control", "private, no-store, max-age=0"); // #941
+  const secureCookies = secureCookiesForUrl(req.url);
   // Clear the Next.js web session cookie
   res.cookies.set(SESSION_COOKIE, "", {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: secureCookies,
     sameSite: "lax",
     path: "/",
     maxAge: 0,
@@ -34,7 +36,7 @@ export async function POST(req: NextRequest) {
   // Clear the backend session cookie (#927: Secure matches how it is set)
   res.cookies.set("wos_session", "", {
     httpOnly: true,
-    secure: process.env.NODE_ENV === "production",
+    secure: secureCookies,
     sameSite: "lax",
     path: "/",
     maxAge: 0,
