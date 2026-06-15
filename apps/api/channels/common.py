@@ -131,6 +131,550 @@ def notify_pending_approval_via_whatsapp(
         )
 
 
+# ---------------------------------------------------------------------------
+# Slack approval notification (outbound fan-out hook — mirrors WhatsApp above)
+# ---------------------------------------------------------------------------
+
+def notify_pending_approval_via_slack(
+    *,
+    owner_id: str,
+    run_id: str,
+    worker_name: str,
+    label: str,
+    approval_id: str,
+) -> None:
+    """Send a Slack DM to the run owner when a run enters pending-approval state.
+
+    Reverse-looks up the owner's active Slack binding (slack_user_id + team_id)
+    by user_id, then opens a DM channel and posts a Block Kit message with
+    Approve / Reject buttons — identical to the interactive approval flow already
+    in channels/slack.py.  Does nothing when the owner has no active Slack binding
+    or when Slack is not configured.  Always best-effort — never raises.
+    """
+    try:
+        from db import get_db
+        import requests as _requests
+
+        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+        candidate_ids = [owner_id]
+        slack_user_id: Optional[str] = None
+        team_id: Optional[str] = None
+
+        try:
+            with get_db() as conn:
+                if owner_id == bootstrap_id:
+                    try:
+                        admin_rows = conn.execute(
+                            "SELECT id FROM users WHERE role = 'admin'"
+                        ).fetchall()
+                        candidate_ids += [str(r["id"]) for r in admin_rows]
+                    except Exception:
+                        pass
+                else:
+                    candidate_ids.append(bootstrap_id)
+                seen: set[str] = set()
+                candidate_ids = [c for c in candidate_ids if c and not (c in seen or seen.add(c))]
+                placeholders = ",".join("?" * len(candidate_ids))
+                row = conn.execute(
+                    f"""
+                    SELECT slack_user_id, slack_team_id FROM slack_sender_bindings
+                    WHERE user_id IN ({placeholders}) AND status = 'active'
+                    LIMIT 1
+                    """,
+                    tuple(candidate_ids),
+                ).fetchone()
+            if row:
+                slack_user_id = str(row["slack_user_id"])
+                team_id = str(row["slack_team_id"])
+        except Exception:
+            logger.exception(
+                "Slack approval notify: binding lookup failed for owner %s", owner_id
+            )
+            return
+
+        if not slack_user_id or not team_id:
+            return
+
+        try:
+            from channels.slack import _slack_bot_token_for_team, _approval_action_value
+        except Exception:
+            logger.exception("Slack approval notify: could not import Slack helpers")
+            return
+
+        bot_token = _slack_bot_token_for_team(team_id)
+        if not bot_token:
+            return
+
+        short_id = approval_id[-6:] if len(approval_id) >= 6 else approval_id
+        fallback_text = (
+            f"Approval needed for \"{worker_name}\": {label} — ref {short_id}"
+        )
+        blocks = [
+            {
+                "type": "section",
+                "text": {
+                    "type": "mrkdwn",
+                    "text": f"*Approval needed* — *{worker_name}*: {label}\n`{run_id}`",
+                },
+            },
+            {
+                "type": "actions",
+                "elements": [
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Approve", "emoji": False},
+                        "style": "primary",
+                        "action_id": "workeros_approval_approve",
+                        "value": _approval_action_value(run_id),
+                    },
+                    {
+                        "type": "button",
+                        "text": {"type": "plain_text", "text": "Reject", "emoji": False},
+                        "style": "danger",
+                        "action_id": "workeros_approval_reject",
+                        "value": _approval_action_value(run_id),
+                    },
+                ],
+            },
+        ]
+
+        try:
+            resp = _requests.post(
+                "https://slack.com/api/conversations.open",
+                headers={
+                    "Authorization": f"Bearer {bot_token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                json={"users": slack_user_id},
+                timeout=10,
+            )
+            dm_channel = (resp.json() or {}).get("channel", {}).get("id") if resp.ok else None
+            if not dm_channel:
+                return
+            _requests.post(
+                "https://slack.com/api/chat.postMessage",
+                headers={
+                    "Authorization": f"Bearer {bot_token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                json={
+                    "channel": dm_channel,
+                    "text": fallback_text,
+                    "blocks": blocks,
+                    "unfurl_links": False,
+                },
+                timeout=10,
+            )
+        except Exception:
+            logger.exception(
+                "Slack approval notify: DM send failed for slack_user %s (run %s)",
+                slack_user_id,
+                run_id,
+            )
+    except Exception:
+        logger.exception(
+            "Slack approval notify: unexpected error for owner %s run %s", owner_id, run_id
+        )
+
+
+# ---------------------------------------------------------------------------
+# Run-completion DM notifications (Feature #1382)
+# ---------------------------------------------------------------------------
+
+def _run_frontend_url() -> str:
+    return (os.environ.get("WORKERS_FRONTEND_URL") or "http://localhost:3000").rstrip("/")
+
+
+def notify_run_complete_via_slack(
+    *,
+    owner_id: str,
+    run_id: str,
+    worker_name: str,
+    status: str,
+    result_summary: Optional[str] = None,
+) -> None:
+    """Send a short Slack DM when a run reaches completed or failed status.
+
+    Reverse-looks up the owner's active Slack binding and posts a concise
+    outcome DM: "Done — <summary>" on success, "<worker> failed — <reason>" on
+    failure.  Includes a link to the run page.  Always best-effort — never
+    raises.
+    """
+    try:
+        from db import get_db
+        import requests as _requests
+
+        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+        candidate_ids = [owner_id]
+        slack_user_id: Optional[str] = None
+        team_id: Optional[str] = None
+
+        try:
+            with get_db() as conn:
+                if owner_id == bootstrap_id:
+                    try:
+                        admin_rows = conn.execute(
+                            "SELECT id FROM users WHERE role = 'admin'"
+                        ).fetchall()
+                        candidate_ids += [str(r["id"]) for r in admin_rows]
+                    except Exception:
+                        pass
+                else:
+                    candidate_ids.append(bootstrap_id)
+                seen: set[str] = set()
+                candidate_ids = [c for c in candidate_ids if c and not (c in seen or seen.add(c))]
+                placeholders = ",".join("?" * len(candidate_ids))
+                row = conn.execute(
+                    f"""
+                    SELECT slack_user_id, slack_team_id FROM slack_sender_bindings
+                    WHERE user_id IN ({placeholders}) AND status = 'active'
+                    LIMIT 1
+                    """,
+                    tuple(candidate_ids),
+                ).fetchone()
+            if row:
+                slack_user_id = str(row["slack_user_id"])
+                team_id = str(row["slack_team_id"])
+        except Exception:
+            logger.exception(
+                "Slack run-complete notify: binding lookup failed for owner %s", owner_id
+            )
+            return
+
+        if not slack_user_id or not team_id:
+            return
+
+        try:
+            from channels.slack import _slack_bot_token_for_team
+        except Exception:
+            logger.exception("Slack run-complete notify: could not import Slack helpers")
+            return
+
+        bot_token = _slack_bot_token_for_team(team_id)
+        if not bot_token:
+            return
+
+        run_url = f"{_run_frontend_url()}/runs/{run_id}"
+        is_success = status == "completed"
+        summary = (result_summary or "").strip()[:200]
+        if is_success:
+            body = f"Done — {summary}" if summary else "Done."
+        else:
+            body = f"{worker_name} failed — {summary}" if summary else f"{worker_name} failed."
+
+        text = f"{body}\n<{run_url}|View run>"
+
+        try:
+            resp = _requests.post(
+                "https://slack.com/api/conversations.open",
+                headers={
+                    "Authorization": f"Bearer {bot_token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                json={"users": slack_user_id},
+                timeout=10,
+            )
+            dm_channel = (resp.json() or {}).get("channel", {}).get("id") if resp.ok else None
+            if not dm_channel:
+                return
+            _requests.post(
+                "https://slack.com/api/chat.postMessage",
+                headers={
+                    "Authorization": f"Bearer {bot_token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                json={
+                    "channel": dm_channel,
+                    "text": text,
+                    "unfurl_links": False,
+                },
+                timeout=10,
+            )
+        except Exception:
+            logger.exception(
+                "Slack run-complete notify: DM send failed for slack_user %s (run %s)",
+                slack_user_id,
+                run_id,
+            )
+    except Exception:
+        logger.exception(
+            "Slack run-complete notify: unexpected error for owner %s run %s", owner_id, run_id
+        )
+
+
+def notify_run_complete_via_whatsapp(
+    *,
+    owner_id: str,
+    run_id: str,
+    worker_name: str,
+    status: str,
+    result_summary: Optional[str] = None,
+) -> None:
+    """Send a short WhatsApp message when a run reaches completed or failed status.
+
+    Reverse-looks up the owner's active WhatsApp binding and sends a concise
+    text: "Done — <summary>" on success, "<worker> failed — <reason>" on
+    failure, with a link to the run page.  Always best-effort — never raises.
+    """
+    try:
+        from db import get_db
+        from channels.whatsapp import (
+            send_whatsapp_text,
+            _whatsapp_configured,
+        )
+
+        if not _whatsapp_configured():
+            return
+
+        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+        candidate_ids = [owner_id]
+        wa_id: Optional[str] = None
+        try:
+            with get_db() as conn:
+                if owner_id == bootstrap_id:
+                    try:
+                        admin_rows = conn.execute(
+                            "SELECT id FROM users WHERE role = 'admin'"
+                        ).fetchall()
+                        candidate_ids += [str(r["id"]) for r in admin_rows]
+                    except Exception:
+                        pass
+                else:
+                    candidate_ids.append(bootstrap_id)
+                seen: set[str] = set()
+                candidate_ids = [c for c in candidate_ids if c and not (c in seen or seen.add(c))]
+                placeholders = ",".join("?" * len(candidate_ids))
+                row = conn.execute(
+                    f"""
+                    SELECT wa_id FROM whatsapp_sender_bindings
+                    WHERE user_id IN ({placeholders}) AND status = 'active'
+                    LIMIT 1
+                    """,
+                    tuple(candidate_ids),
+                ).fetchone()
+            if row:
+                wa_id = str(row["wa_id"])
+        except Exception:
+            logger.exception(
+                "WhatsApp run-complete notify: binding lookup failed for owner %s", owner_id
+            )
+            return
+
+        if not wa_id:
+            return
+
+        run_url = f"{_run_frontend_url()}/runs/{run_id}"
+        is_success = status == "completed"
+        summary = (result_summary or "").strip()[:200]
+        if is_success:
+            body = f"Done — {summary}" if summary else "Done."
+        else:
+            body = f"{worker_name} failed — {summary}" if summary else f"{worker_name} failed."
+
+        msg = f"{body}\n{run_url}"
+        try:
+            send_whatsapp_text(wa_id, msg)
+        except Exception:
+            logger.exception(
+                "WhatsApp run-complete notify: send failed for wa_id %s (run %s)", wa_id, run_id
+            )
+    except Exception:
+        logger.exception(
+            "WhatsApp run-complete notify: unexpected error for owner %s run %s", owner_id, run_id
+        )
+
+
+# ---------------------------------------------------------------------------
+# Worker-created artifact card (#1386)
+# ---------------------------------------------------------------------------
+
+def notify_worker_created_via_slack(
+    *,
+    owner_id: str,
+    worker_id: str,
+    worker_name: str,
+) -> None:
+    """Send a Slack Block Kit DM when Emily creates a worker via chat (#1386).
+
+    Reverse-looks up the owner's active Slack binding and posts a rich card
+    with Review / Run / Disable buttons — reusing the Block Kit helpers in
+    channels/slack.py.  Always best-effort — never raises.
+    """
+    try:
+        from db import get_db
+        import requests as _requests
+
+        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+        candidate_ids = [owner_id]
+        slack_user_id: Optional[str] = None
+        team_id: Optional[str] = None
+
+        try:
+            with get_db() as conn:
+                if owner_id == bootstrap_id:
+                    try:
+                        admin_rows = conn.execute(
+                            "SELECT id FROM users WHERE role = 'admin'"
+                        ).fetchall()
+                        candidate_ids += [str(r["id"]) for r in admin_rows]
+                    except Exception:
+                        pass
+                else:
+                    candidate_ids.append(bootstrap_id)
+                seen: set[str] = set()
+                candidate_ids = [c for c in candidate_ids if c and not (c in seen or seen.add(c))]
+                placeholders = ",".join("?" * len(candidate_ids))
+                row = conn.execute(
+                    f"""
+                    SELECT slack_user_id, slack_team_id FROM slack_sender_bindings
+                    WHERE user_id IN ({placeholders}) AND status = 'active'
+                    LIMIT 1
+                    """,
+                    tuple(candidate_ids),
+                ).fetchone()
+            if row:
+                slack_user_id = str(row["slack_user_id"])
+                team_id = str(row["slack_team_id"])
+        except Exception:
+            logger.exception(
+                "Slack worker-created notify: binding lookup failed for owner %s", owner_id
+            )
+            return
+
+        if not slack_user_id or not team_id:
+            return
+
+        try:
+            from channels.slack import _slack_bot_token_for_team, _slack_worker_created_blocks
+        except Exception:
+            logger.exception("Slack worker-created notify: could not import Slack helpers")
+            return
+
+        bot_token = _slack_bot_token_for_team(team_id)
+        if not bot_token:
+            return
+
+        fallback_text, blocks = _slack_worker_created_blocks(
+            worker_name=worker_name,
+            worker_id=worker_id,
+        )
+
+        try:
+            resp = _requests.post(
+                "https://slack.com/api/conversations.open",
+                headers={
+                    "Authorization": f"Bearer {bot_token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                json={"users": slack_user_id},
+                timeout=10,
+            )
+            dm_channel = (resp.json() or {}).get("channel", {}).get("id") if resp.ok else None
+            if not dm_channel:
+                return
+            _requests.post(
+                "https://slack.com/api/chat.postMessage",
+                headers={
+                    "Authorization": f"Bearer {bot_token}",
+                    "Content-Type": "application/json; charset=utf-8",
+                },
+                json={
+                    "channel": dm_channel,
+                    "text": fallback_text,
+                    "blocks": blocks,
+                    "unfurl_links": False,
+                },
+                timeout=10,
+            )
+        except Exception:
+            logger.exception(
+                "Slack worker-created notify: DM send failed for slack_user %s (worker %s)",
+                slack_user_id,
+                worker_id,
+            )
+    except Exception:
+        logger.exception(
+            "Slack worker-created notify: unexpected error for owner %s worker %s", owner_id, worker_id
+        )
+
+
+def notify_worker_created_via_whatsapp(
+    *,
+    owner_id: str,
+    worker_id: str,
+    worker_name: str,
+) -> None:
+    """Send a formatted WhatsApp message when Emily creates a worker via chat (#1386).
+
+    Reverse-looks up the owner's active WhatsApp binding and sends a short
+    text describing the new worker with a link and basic action grammar.
+    Always best-effort — never raises.
+    """
+    try:
+        from db import get_db
+        from channels.whatsapp import (
+            send_whatsapp_text,
+            _whatsapp_configured,
+        )
+
+        if not _whatsapp_configured():
+            return
+
+        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+        candidate_ids = [owner_id]
+        wa_id: Optional[str] = None
+        try:
+            with get_db() as conn:
+                if owner_id == bootstrap_id:
+                    try:
+                        admin_rows = conn.execute(
+                            "SELECT id FROM users WHERE role = 'admin'"
+                        ).fetchall()
+                        candidate_ids += [str(r["id"]) for r in admin_rows]
+                    except Exception:
+                        pass
+                else:
+                    candidate_ids.append(bootstrap_id)
+                seen: set[str] = set()
+                candidate_ids = [c for c in candidate_ids if c and not (c in seen or seen.add(c))]
+                placeholders = ",".join("?" * len(candidate_ids))
+                row = conn.execute(
+                    f"""
+                    SELECT wa_id FROM whatsapp_sender_bindings
+                    WHERE user_id IN ({placeholders}) AND status = 'active'
+                    LIMIT 1
+                    """,
+                    tuple(candidate_ids),
+                ).fetchone()
+            if row:
+                wa_id = str(row["wa_id"])
+        except Exception:
+            logger.exception(
+                "WhatsApp worker-created notify: binding lookup failed for owner %s", owner_id
+            )
+            return
+
+        if not wa_id:
+            return
+
+        worker_url = f"{_run_frontend_url()}/workers/{worker_id}"
+        msg = (
+            f"Worker created: *{worker_name}*\n"
+            f"ID: {worker_id}\n\n"
+            f"Send 'run {worker_id[:8]}' to trigger it, or visit:\n{worker_url}"
+        )
+        try:
+            send_whatsapp_text(wa_id, msg)
+        except Exception:
+            logger.exception(
+                "WhatsApp worker-created notify: send failed for wa_id %s (worker %s)", wa_id, worker_id
+            )
+    except Exception:
+        logger.exception(
+            "WhatsApp worker-created notify: unexpected error for owner %s worker %s", owner_id, worker_id
+        )
+
+
 def _auth_is_configured() -> bool:
     """True when this deployment has real auth configured (NOT legacy/dev mode).
 

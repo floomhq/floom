@@ -461,6 +461,29 @@ def _dispatch_terminal_run_alerts(
     if status not in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
         return
 
+    # Resolve worker name once for channel DMs.
+    try:
+        _w_row_alert = repos.workers.get_any(worker_id=worker_id)
+        _worker_name_for_alert = (_w_row_alert or {}).get("name") or worker_id
+    except Exception:
+        _worker_name_for_alert = worker_id
+
+    # Resolve a one-line result summary for the completion DM.
+    _result_summary: str | None = None
+    try:
+        _run_row_alert = repos.runs.get(user_id=user_id, run_id=run_id) if user_id else None
+        if _run_row_alert:
+            _output = (_run_row_alert.get("output") or {}) if isinstance(
+                _run_row_alert.get("output"), dict
+            ) else {}
+            # Try common summary keys; fall back to error text for failures.
+            _result_summary = (
+                str(_output.get("summary") or _output.get("result") or "").strip()[:200]
+                or (str(error or "").strip()[:200] if status == RunStatus.FAILED.value else None)
+            ) or None
+    except Exception:
+        pass
+
     def _deliver() -> None:
         _fire_alert_webhooks(
             run_id=run_id,
@@ -469,6 +492,36 @@ def _dispatch_terminal_run_alerts(
             error=error,
             repos=repos,
         )
+
+        # Feature #1382: DM the run owner on Slack and WhatsApp when a run
+        # reaches a terminal status.  Best-effort — never blocks finalization.
+        try:
+            from channels.common import notify_run_complete_via_slack
+            notify_run_complete_via_slack(
+                owner_id=user_id or "",
+                run_id=run_id,
+                worker_name=_worker_name_for_alert,
+                status=status,
+                result_summary=_result_summary,
+            )
+        except Exception:
+            logger.debug(
+                "Slack run-complete DM failed for run %s", run_id, exc_info=True
+            )
+        try:
+            from channels.common import notify_run_complete_via_whatsapp
+            notify_run_complete_via_whatsapp(
+                owner_id=user_id or "",
+                run_id=run_id,
+                worker_name=_worker_name_for_alert,
+                status=status,
+                result_summary=_result_summary,
+            )
+        except Exception:
+            logger.debug(
+                "WhatsApp run-complete DM failed for run %s", run_id, exc_info=True
+            )
+
         if status != RunStatus.FAILED.value:
             return
         # #794: workspace 'failure_email_enabled' toggle — email the workspace's
