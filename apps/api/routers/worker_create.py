@@ -258,6 +258,19 @@ async def create_worker_from_bundle(
     except Exception:
         logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
 
+    # #1387: eagerly materialise the per-worker memory context (same as the
+    # standard create path). Non-fatal if setup fails.
+    if getattr(getattr(config, "memory", None), "enabled", False):
+        try:
+            from runner_sandbox.memory_context import ensure_memory_context_pack
+            ensure_memory_context_pack(
+                config=config,
+                user_id=auth.user_id,
+                log_fn=lambda msg, level="info": logger.debug(msg),
+            )
+        except Exception:
+            logger.warning("Memory context setup failed for worker %s (from-bundle)", worker_id, exc_info=True)
+
     return _build_worker_detail(
         worker_id,
         user_id=auth.user_id,

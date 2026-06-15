@@ -253,6 +253,22 @@ def _create_worker_from_parsed_payload(
                 author_name=author_name,
                 author_email=author_email,
             )
+            # #1387: eagerly materialise the per-worker memory context so the
+            # MEMORY.md folder + metadata exist immediately after creation (not
+            # lazily on first run). Only fires when config.memory.enabled is True
+            # (the new default). Never fails the create if memory setup errors.
+            if getattr(getattr(config, "memory", None), "enabled", False):
+                try:
+                    from runner_sandbox.memory_context import ensure_memory_context_pack
+                    ensure_memory_context_pack(
+                        config=config,
+                        user_id=auth.user_id,
+                        log_fn=lambda msg, level="info": logger.debug(msg),
+                    )
+                except Exception:
+                    logger.warning(
+                        "Memory context setup failed for worker %s — non-fatal", worker_id, exc_info=True
+                    )
             create_complete = True
             return detail
         except sqlite3.IntegrityError as exc:
