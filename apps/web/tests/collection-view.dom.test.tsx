@@ -89,6 +89,29 @@ describe("CollectionView — list & grid (§8e)", () => {
   });
 });
 
+describe("CollectionView — grouped (day-section) list variant (#1225)", () => {
+  it("renders the SHARED column header above day groups, same as the flat list", () => {
+    // Day-grouping is a variant WITHIN the shared Collection grammar: it must
+    // still carry the column-header row (Worker/Status) the other Collection
+    // pages show, with the group labels layered as an in-list option.
+    const { container } = render(
+      <Harness
+        config={makeConfig({ group: (i) => (i.status === "failing" ? "Today" : "Yesterday") })}
+        initial={emptyState("list")}
+      />,
+    );
+    // Shared header chrome is present (the grammar) ...
+    const head = container.querySelector(".c-grouped > .c-lhead");
+    expect(head).toBeInTheDocument();
+    expect(screen.getByText("Worker")).toBeInTheDocument();
+    expect(screen.getByText("Status")).toBeInTheDocument();
+    // ... AND the day-group labels render as the variant (not a bespoke layout).
+    expect(container.querySelectorAll(".c-grouped > .c-daygrp").length).toBe(2);
+    expect(screen.getByText("Today")).toBeInTheDocument();
+    expect(screen.getByText("Yesterday")).toBeInTheDocument();
+  });
+});
+
 describe("CollectionView — tag filtering (§8e)", () => {
   it("filters by a single status tag", async () => {
     const user = userEvent.setup();
