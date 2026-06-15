@@ -5,6 +5,7 @@
 // W8: worker icons in activity + upcoming list rows.
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
+import { useEmilyDockMode } from "@/components/layout/AppShell";
 import {
   ArrowUp,
   CalendarClock,
@@ -500,6 +501,10 @@ export function OverviewDashboard({
 }) {
   const { data, loading, reload } = useOverview(initialData);
   const visibleRows = useOverviewVisibleRows();
+  // #1231/#1309: when Emily dock is wide or full, the overview has less
+  // horizontal space. Show only 4 items max in lists and use 2-col tiles.
+  const dockMode = useEmilyDockMode();
+  const dockIsExpanded = dockMode === "wide" || dockMode === "full";
   const workerNames = useMemo(() => {
     const names = new Map<string, string>();
     for (const run of data?.recent_runs ?? []) {
@@ -642,19 +647,32 @@ export function OverviewDashboard({
       </section>
 
       {/* Metric tiles with sparklines — S45 */}
-      {/* Spec §5c: 2×2 grid at <880px, 4-col at xl. Using `sm:` (640px) as the
-          first breakpoint keeps the 2×2 layout on all mobile/tablet sizes. */}
-      <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
+      {/* Spec §5c: 2×2 grid at <880px, 4-col at xl.
+          #1231/#1309: force 2-col when Emily dock is wide/full to avoid ugly wrapping. */}
+      <div className={cn("grid grid-cols-2 gap-4", !dockIsExpanded && "xl:grid-cols-4")}>
         {metrics.map((metric) => (
           <MetricCard key={metric.label} {...metric} loading={loading} />
         ))}
       </div>
 
       {/* Activity + Coming up — 2-col; grows to fill remaining viewport height
-          so the page doesn't leave a whitespace band at the bottom. */}
-      <div className="mt-7 grid grid-cols-1 gap-7 lg:grid-cols-[1.4fr_1fr] lg:flex-1 lg:min-h-0">
-        <WorkerActivity runs={data?.recent_runs ?? []} loading={loading} visibleRows={visibleRows} />
-        <ComingUp items={data?.scheduled_today ?? []} loading={loading} visibleRows={visibleRows} />
+          so the page doesn't leave a whitespace band at the bottom.
+          #1231/#1309: stack to 1-col when dock is wide/full (not enough horizontal room). */}
+      <div className={cn(
+        "mt-7 grid grid-cols-1 gap-7 lg:flex-1 lg:min-h-0",
+        !dockIsExpanded && "lg:grid-cols-[1.4fr_1fr]",
+      )}>
+        <WorkerActivity
+          runs={data?.recent_runs ?? []}
+          loading={loading}
+          // #1309: fewer items when dock is wide to avoid squeeze
+          visibleRows={dockIsExpanded ? Math.min(visibleRows, 4) : visibleRows}
+        />
+        <ComingUp
+          items={data?.scheduled_today ?? []}
+          loading={loading}
+          visibleRows={dockIsExpanded ? Math.min(visibleRows, 4) : visibleRows}
+        />
       </div>
     </div>
   );

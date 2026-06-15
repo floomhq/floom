@@ -783,7 +783,8 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
 
 // Emily dock width progression (SPEC §12): collapsed ↔ rail ↔ wide ↔ full-screen
 // overlay, via the expand control + collapse button.
-type DockMode = "collapsed" | "rail" | "wide" | "full";
+// Exported so AppShell can thread the mode into context for layout-aware pages.
+export type DockMode = "collapsed" | "rail" | "wide" | "full";
 
 // Widths per APP-UI-V4-SPEC §2: rail 330px (collapse 46px), widen 560px, full.
 const DOCK_WIDTH: Record<DockMode, string> = {
@@ -793,12 +794,18 @@ const DOCK_WIDTH: Record<DockMode, string> = {
   full: "fixed inset-0 z-50 w-full", // full-screen overlay
 };
 
-export function EmilyDock({ className }: { className?: string }) {
+export function EmilyDock({ className, onModeChange }: { className?: string; onModeChange?: (mode: DockMode) => void }) {
   const [mode, setMode] = useState<DockMode>("rail");
   const open = mode !== "collapsed";
+  // Wrap setMode so every mode change also notifies the AppShell context.
+  // useCallback so collapseForRunDetails (and other usages) get a stable ref.
+  const setModeAndNotify = useCallback((m: DockMode) => {
+    setMode(m);
+    onModeChange?.(m);
+  }, [onModeChange]); // eslint-disable-line react-hooks/exhaustive-deps
   const cycleExpand = () =>
-    setMode((m) => (m === "rail" ? "wide" : m === "wide" ? "full" : "rail"));
-  const collapseForRunDetails = useCallback(() => setMode("collapsed"), []);
+    setModeAndNotify(mode === "rail" ? "wide" : mode === "wide" ? "full" : "rail");
+  const collapseForRunDetails = useCallback(() => setModeAndNotify("collapsed"), [setModeAndNotify]);
   // actionsRef lets the dock header drive new/export/recent without prop-drilling
   const coreActionsRef = useRef<ChatCoreActions | null>(null);
   // hasMessages as state so the Export menu item disables correctly (can't read ref in render)
@@ -834,7 +841,7 @@ export function EmilyDock({ className }: { className?: string }) {
         <div className="flex flex-col items-center justify-start pt-4 gap-3">
           <button
             type="button"
-            onClick={() => setMode("rail")}
+            onClick={() => setModeAndNotify("rail")}
             className="flex flex-col items-center gap-1.5 group"
             title="Open Emily"
             aria-label="Open Emily"
@@ -930,7 +937,7 @@ export function EmilyDock({ className }: { className?: string }) {
             size="sm"
             variant="ghost"
             className="size-7 p-0 text-muted-foreground hover:text-foreground"
-            onClick={() => setMode("collapsed")}
+            onClick={() => setModeAndNotify("collapsed")}
             title="Collapse Emily"
             aria-label="Collapse Emily"
           >
@@ -959,12 +966,16 @@ export function EmilyMobileSheet() {
   const [open, setOpen] = useState(false);
   return (
     <>
+      {/* #1265: mobile Emily FAB — fixed z-40, safe-area-aware bottom offset.
+          On very small screens (<390px) the button was covered by browser chrome.
+          Use `pb-safe` so it clears the bottom safe-area inset on iOS, and
+          always show a visible border+shadow so it reads on any background. */}
       {!open && (
         <button
           type="button"
           onClick={() => setOpen(true)}
           aria-label="Open Emily"
-          className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-[var(--radius-pill)] bg-background shadow-lg [border:var(--bd-card)]"
+          className="fixed bottom-[max(1rem,env(safe-area-inset-bottom,1rem))] right-4 z-40 flex size-12 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)] [border:1px_solid_var(--border-default)]"
         >
           <EmilyAvatar size="sm" />
         </button>
