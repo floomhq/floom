@@ -329,6 +329,14 @@ class RunRepository(Protocol):
 
     def get_queued(self, *, limit: int = 50) -> list[RowDict]: ...
 
+    def claim_queued(
+        self,
+        *,
+        user_id: str,
+        run_id: str,
+        started_at: str,
+    ) -> RowDict | None: ...
+
     def count_queued(self) -> int: ...
 
     def fail_running(self, *, user_id: str, error: str, error_code: str | None = None) -> list[str]: ...

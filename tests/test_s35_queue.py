@@ -231,6 +231,57 @@ class TestQueueDB:
         assert "run_keep" in run_ids
         assert "run_cancel" not in run_ids
 
+    def test_claim_queued_is_compare_and_set(self, tmp_path, monkeypatch):
+        monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
+        for name in list(sys.modules):
+            if name in ("db", "db.sqlite") or name.startswith("db."):
+                sys.modules.pop(name, None)
+
+        import db
+        db.init_db()
+        from db.factory import get_repositories
+        repos = get_repositories()
+
+        import json as _json
+        from db._legacy_sqlite import get_db, now_iso
+        now = now_iso()
+        worker_id = "claim-cas-worker"
+        manifest = {"name": worker_id, "title": worker_id, "version": "0.1.0", "runtime": {"runner": "e2b"}, "inputs": [], "outputs": [], "trigger": {"type": "manual"}}
+        with get_db() as conn:
+            conn.execute(
+                "INSERT INTO skill_versions (id, name, version, manifest_json, created_at) VALUES (?, ?, ?, ?, ?)",
+                ("sv-claim-cas", "claim-cas", "0.1.0", _json.dumps(manifest), now),
+            )
+            conn.execute(
+                "INSERT INTO workers (id, skill_version_id, name, trigger_type, grants_json, input_values_json, enabled, created_at, owner_id) VALUES (?, ?, ?, 'manual', '{}', '{}', 1, ?, 'local')",
+                (worker_id, "sv-claim-cas", worker_id, now),
+            )
+
+        repos.runs.create(
+            user_id="local",
+            run_id="run_claim_once",
+            worker_id=worker_id,
+            status="queued",
+            trigger_source="test",
+            runner="e2b",
+            input_json={},
+        )
+
+        first = repos.runs.claim_queued(
+            user_id="local",
+            run_id="run_claim_once",
+            started_at=now,
+        )
+        second = repos.runs.claim_queued(
+            user_id="local",
+            run_id="run_claim_once",
+            started_at=now,
+        )
+
+        assert first is not None
+        assert first["status"] == "running"
+        assert second is None
+
     def test_count_queued(self, tmp_path, monkeypatch):
         monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
         for name in list(sys.modules):
@@ -339,6 +390,85 @@ class TestDrainLoopDbMethods:
             sem.release()
 
     def test_drain_loop_claims_run_before_thread_start(self, tmp_path, monkeypatch):
+        main = _load_api(monkeypatch, tmp_path, max_concurrent=2)
+        _insert_minimal_worker(main, "claim-worker")
+
+        run_service = sys.modules.get("run_service")
+        assert run_service is not None
+        repos = main.get_repositories()
+        run_id = run_service.create_run(
+            "claim-worker",
+            {},
+            user_id="federico",
+            repos=repos,
+        )
+        stale_queue_row = repos.runs.get_queued(limit=1)[0]
+        dispatched: list[str] = []
+
+        class DummyThread:
+            def __init__(self, *args, **kwargs):
+                self._args = kwargs.get("args", ())
+
+            def start(self):
+                dispatched.append(self._args[0])
+
+        with patch.object(repos.runs, "get_queued", lambda *, limit=50: [stale_queue_row]):
+            with patch.object(run_service.threading, "Thread", DummyThread):
+                run_service._drain_one_batch()
+                run_service._drain_one_batch()
+
+        assert dispatched == [run_id]
+
+        row = repos.runs.get(user_id="federico", run_id=run_id)
+        assert row is not None
+        assert row["status"] == "running"
+
+        with run_service._active_runs_lock:
+            run_service._active_runs.clear()
+        run_service._get_semaphore().release()
+
+    def test_drain_loop_releases_slot_when_claim_lost(self, tmp_path, monkeypatch):
+        main = _load_api(monkeypatch, tmp_path, max_concurrent=1)
+        _insert_minimal_worker(main, "lost-claim-worker")
+
+        run_service = sys.modules.get("run_service")
+        assert run_service is not None
+        repos = main.get_repositories()
+        run_id = run_service.create_run(
+            "lost-claim-worker",
+            {},
+            user_id="federico",
+            repos=repos,
+        )
+        stale_queue_row = repos.runs.get_queued(limit=1)[0]
+        repos.runs.claim_queued(
+            user_id="federico",
+            run_id=run_id,
+            started_at=main.now_iso(),
+        )
+        dispatched: list[str] = []
+
+        class DummyThread:
+            def __init__(self, *args, **kwargs):
+                self._args = kwargs.get("args", ())
+
+            def start(self):
+                dispatched.append(self._args[0])
+
+        with patch.object(repos.runs, "get_queued", lambda *, limit=50: [stale_queue_row]):
+            with patch.object(run_service.threading, "Thread", DummyThread):
+                run_service._drain_one_batch()
+
+        assert dispatched == []
+        sem = run_service._get_semaphore()
+        assert sem.acquire(blocking=False) is True
+        sem.release()
+
+        row = repos.runs.get(user_id="federico", run_id=run_id)
+        assert row is not None
+        assert row["status"] == "running"
+
+    def test_drain_loop_legacy_single_process_claims_run_once(self, tmp_path, monkeypatch):
         main = _load_api(monkeypatch, tmp_path, max_concurrent=2)
         _insert_minimal_worker(main, "claim-worker")
 
