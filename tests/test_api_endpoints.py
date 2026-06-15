@@ -1167,6 +1167,23 @@ class TestHealthz(unittest.TestCase):
         self.assertEqual(r.status_code, 200)
         self.assertEqual(r.json()["status"], "ok")
 
+    def test_healthz_reports_instance_label(self):
+        # `instance` distinguishes deployments (dev mirror vs prod) so the two
+        # are never confused when verifying "on the cloud".
+        os.environ["WORKEROS_INSTANCE"] = "test-instance"
+        try:
+            r = client.get("/healthz")
+            self.assertEqual(r.status_code, 200)
+            self.assertEqual(r.json()["instance"], "test-instance")
+        finally:
+            os.environ.pop("WORKEROS_INSTANCE", None)
+
+    def test_healthz_instance_defaults_to_unknown(self):
+        os.environ.pop("WORKEROS_INSTANCE", None)
+        r = client.get("/healthz")
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.json()["instance"], "unknown")
+
     def test_healthz_no_secret_required_even_when_secret_set(self):
         os.environ["FLOOM_SECRET"] = "some-secret"
         try:
