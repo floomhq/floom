@@ -340,9 +340,16 @@ def restore_worker(
 
     worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    worker = _get_visible_worker(
+        worker_id,
+        user_id=auth.user_id,
+        repos=repos,
+        role=_worker_repo_role(auth),
+    )
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
+    if not auth.is_admin and str(worker.get("owner_id") or "") != str(auth.user_id):
+        raise HTTPException(status_code=403, detail="You cannot restore this worker")
 
     worker_yml_path = _WORKERS_DIR / worker_id / "worker.yml"
     if not worker_yml_path.exists():
@@ -361,7 +368,8 @@ def restore_worker(
         raise HTTPException(status_code=500, detail=f"Failed to update worker.yml: {exc}") from exc
     # Mirror the cleared archived flag into the DB manifest (see archive_worker:
     # the API reads `archived` from the DB, not disk).
-    _set_db_manifest_archived(worker_id, archived=False, user_id=auth.user_id, repos=repos)
+    mutation_user_id = str(worker.get("owner_id") or auth.user_id) if auth.is_admin else auth.user_id
+    _set_db_manifest_archived(worker_id, archived=False, user_id=mutation_user_id, repos=repos)
     invalidate_worker_cache()
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
@@ -384,9 +392,16 @@ def archive_worker(
 
     worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    worker = _get_visible_worker(
+        worker_id,
+        user_id=auth.user_id,
+        repos=repos,
+        role=_worker_repo_role(auth),
+    )
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
+    if not auth.is_admin and str(worker.get("owner_id") or "") != str(auth.user_id):
+        raise HTTPException(status_code=403, detail="You cannot archive this worker")
 
     worker_yml_path = _WORKERS_DIR / worker_id / "worker.yml"
     if not worker_yml_path.exists():
@@ -409,7 +424,8 @@ def archive_worker(
     # writing worker.yml alone left the detail response, the Archived view, and
     # the Restore button stale (archived:false) for DB-tracked workers, because
     # invalidate_worker_cache() only clears the filesystem discovery cache.
-    _set_db_manifest_archived(worker_id, archived=True, user_id=auth.user_id, repos=repos)
+    mutation_user_id = str(worker.get("owner_id") or auth.user_id) if auth.is_admin else auth.user_id
+    _set_db_manifest_archived(worker_id, archived=True, user_id=mutation_user_id, repos=repos)
     invalidate_worker_cache()
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 
