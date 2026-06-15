@@ -99,6 +99,7 @@ export const OVERLAY_FILES = [
   "app/workspace/share/[token]/page.tsx",
   "components/CloudAppChrome.tsx",
   "components/CloudAccountFooter.tsx",
+  "components/PostHogProvider.tsx",
   "components/VersionHistoryMenu.tsx",
   "components/TelemetryProvider.tsx",
   "components/worker-form/FilesEditor.tsx",
@@ -111,7 +112,9 @@ export const OVERLAY_FILES = [
   "tests/cloud-invite-install.test.ts",
   "tests/fl-batch-6.test.ts",
   "tests/login-secrets-render-987-988.dom.test.tsx",
+  "lib/api.ts",
   "lib/server-api.ts",
+  "lib/posthog.ts",
   // lib/api.ts de-forked 2026-06-12: the engine version consumes the cloud env
   // seams (NEXT_PUBLIC_API_PROXY_BASE / NEXT_PUBLIC_BASE_PATH) directly; the
   // overlay copy had silently fallen behind (missing workspace.getSettings,

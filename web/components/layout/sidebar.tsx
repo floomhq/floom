@@ -11,6 +11,7 @@ import { openCommandPalette } from "@/components/CommandPalette";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
 import { api } from "@/lib/api";
+import { identifyPostHogUser, resetPostHogUser } from "@/lib/posthog";
 import type { CurrentUser } from "@/lib/types";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import {
@@ -420,7 +421,10 @@ export function UserProfileFooter({
     let active = true;
     api.me()
       .then((currentUser) => {
-        if (active) setUser(currentUser);
+        if (active) {
+          setUser(currentUser);
+          identifyPostHogUser(currentUser);
+        }
       })
       .catch(() => {
         if (active) setUser(null);
@@ -458,6 +462,7 @@ export function UserProfileFooter({
     } catch {
       // Clearing the cookie is best-effort; navigate regardless.
     }
+    resetPostHogUser();
     onNavigate?.();
     router.replace("/login");
     router.refresh();

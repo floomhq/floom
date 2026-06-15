@@ -3,6 +3,7 @@ import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import "./cloud-shell.css";
 import { CloudAppChrome } from "@/components/CloudAppChrome";
+import { PostHogProvider } from "@/components/PostHogProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -39,7 +40,9 @@ export default function RootLayout({
         {/* Cloud overlay: keep the engine app shell, but use explicit CSS for
             the desktop flex direction so the hosted Cloud build cannot stack
             the sidebar above the app body through Tailwind utility ordering. */}
-        <CloudAppChrome>{children}</CloudAppChrome>
+        <PostHogProvider>
+          <CloudAppChrome>{children}</CloudAppChrome>
+        </PostHogProvider>
       </body>
     </html>
   );

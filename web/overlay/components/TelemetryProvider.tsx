@@ -3,6 +3,8 @@
 import { useEffect, useRef } from "react";
 import { usePathname } from "next/navigation";
 
+import { api } from "@/lib/api";
+import { identifyPostHogUser } from "@/lib/posthog";
 import { safeHrefPath, trackTelemetry } from "@/lib/telemetry";
 
 function targetProperties(target: Element): Record<string, unknown> {
@@ -41,6 +43,19 @@ export function TelemetryProvider() {
         viewport_height: window.innerHeight,
       });
     }
+  }, [telemetryDisabled]);
+
+  useEffect(() => {
+    if (telemetryDisabled) return;
+    let active = true;
+    api.me()
+      .then((user) => {
+        if (active) identifyPostHogUser(user);
+      })
+      .catch(() => {});
+    return () => {
+      active = false;
+    };
   }, [telemetryDisabled]);
 
   useEffect(() => {

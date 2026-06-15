@@ -57,6 +57,12 @@ def test_record_events_hashes_session_and_sanitizes_payload(monkeypatch):
     client = _Client()
     monkeypatch.setattr(telemetry, "telemetry_enabled", lambda workspace_id: True)
     monkeypatch.setattr(telemetry, "get_supabase_service_client", lambda: client)
+    captured: list[dict] = []
+    monkeypatch.setattr(
+        telemetry,
+        "capture_posthog_event",
+        lambda **kwargs: captured.append(dict(kwargs)),
+    )
 
     stored = telemetry.record_events(
         user_id="00000000-0000-0000-0000-000000000001",
@@ -84,6 +90,75 @@ def test_record_events_hashes_session_and_sanitizes_payload(monkeypatch):
         "secret": "[redacted]",
         "owner": "[redacted-email]",
     }
+    assert captured == [
+        {
+            "distinct_id": "00000000-0000-0000-0000-000000000001",
+            "event_name": "worker.created",
+            "timestamp": row["occurred_at"],
+            "properties": {
+                "route": "/workers/new",
+                "secret": "[redacted]",
+                "owner": "[redacted-email]",
+                "workspace_id": "ws_1",
+                "source": "web",
+            },
+        }
+    ]
+
+
+def test_capture_posthog_event_posts_sanitized_payload(monkeypatch):
+    posted: dict = {}
+
+    class _Response:
+        def raise_for_status(self):
+            return None
+
+    def _post(url, json, timeout):
+        posted["url"] = url
+        posted["json"] = json
+        posted["timeout"] = timeout
+        return _Response()
+
+    monkeypatch.setenv("POSTHOG_KEY", "phc_test")
+    monkeypatch.setenv("POSTHOG_HOST", "https://posthog.example")
+    monkeypatch.setattr(telemetry.httpx, "post", _post)
+
+    telemetry.capture_posthog_event(
+        distinct_id="user-1",
+        event_name="worker_created",
+        properties={"email": "user@example.com", "safe": "ok"},
+        timestamp="2026-06-15T07:05:00+00:00",
+    )
+
+    assert posted["url"] == "https://posthog.example/capture/"
+    assert posted["timeout"] == 2.0
+    assert posted["json"] == {
+        "api_key": "phc_test",
+        "event": "worker_created",
+        "distinct_id": "user-1",
+        "properties": {"email": "[redacted-email]", "safe": "ok"},
+        "timestamp": "2026-06-15T07:05:00+00:00",
+    }
+
+
+def test_capture_posthog_event_is_noop_without_key(monkeypatch):
+    called = False
+
+    def _post(*_args, **_kwargs):
+        nonlocal called
+        called = True
+
+    monkeypatch.delenv("POSTHOG_KEY", raising=False)
+    monkeypatch.delenv("NEXT_PUBLIC_POSTHOG_KEY", raising=False)
+    monkeypatch.setattr(telemetry.httpx, "post", _post)
+
+    telemetry.capture_posthog_event(
+        distinct_id="user-1",
+        event_name="worker_created",
+        properties={},
+    )
+
+    assert called is False
 
 
 def test_record_events_respects_workspace_opt_out(monkeypatch):

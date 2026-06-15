@@ -214,11 +214,11 @@ export const api = {
       handleUnauthorizedResponse(res.status, "/me");
       throw new Error(await apiErrorFromResponse(res));
     }
-    return res.json() as Promise<import("./types").CurrentUser>;
+    return res.json() as Promise<import("@/lib/types").CurrentUser>;
   },
   // #778: Emily chat attachments — upload to extract text for the next message.
   chat: {
-    uploadAttachments: async (files: File[]): Promise<import("./types").ChatAttachment[]> => {
+    uploadAttachments: async (files: File[]): Promise<import("@/lib/types").ChatAttachment[]> => {
       const fd = new FormData();
       for (const f of files) fd.append("files", f);
       const uploadPath = withWorkspaceQuery("/chat/attachments");
@@ -236,11 +236,11 @@ export const api = {
   // #767/#768: specific-people share grants.
   share: {
     listGrants: (assetType: string, assetId: string) =>
-      fetchJson<import("./types").ShareGrant[]>(
+      fetchJson<import("@/lib/types").ShareGrant[]>(
         `/share/grants?asset_type=${encodeURIComponent(assetType)}&asset_id=${encodeURIComponent(assetId)}`
       ),
     addGrant: (assetType: string, assetId: string, email: string) =>
-      fetchJson<import("./types").ShareGrant>("/share/grants", {
+      fetchJson<import("@/lib/types").ShareGrant>("/share/grants", {
         method: "POST",
         body: JSON.stringify({ asset_type: assetType, asset_id: assetId, email }),
       }),
@@ -253,24 +253,24 @@ export const api = {
     list: (opts?: { include_archived?: boolean }) => {
       const qs = new URLSearchParams({ shape: "list" });
       if (opts?.include_archived) qs.set("include_archived", "true");
-      return fetchJson<import("./types").WorkerSummary[]>(`/workers?${qs.toString()}`);
+      return fetchJson<import("@/lib/types").WorkerSummary[]>(`/workers?${qs.toString()}`);
     },
-    get: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}`),
+    get: (id: string) => fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}`),
     sampleInput: (id: string) => fetchJson<Record<string, unknown>>(`/workers/${id}/sample-input`),
-    restore: (id: string) => fetchJson<import("./types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
+    restore: (id: string) => fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/restore`, { method: "POST" }),
     archive: async (id: string) => {
-      const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}/archive`, { method: "POST" });
+      const worker = await fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/archive`, { method: "POST" });
       return worker;
     },
-    setVisibility: async (id: string, visibility: import("./types").AssetVisibility) => {
-      const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}/visibility`, {
+    setVisibility: async (id: string, visibility: import("@/lib/types").AssetVisibility) => {
+      const worker = await fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/visibility`, {
         method: "PUT",
         body: JSON.stringify({ visibility }),
       });
       return worker;
     },
     shareLink: async (id: string) => {
-      const link = await fetchJson<import("./types").StandaloneShareLink>(`/workers/${encodeURIComponent(id)}/share-link`, {
+      const link = await fetchJson<import("@/lib/types").StandaloneShareLink>(`/workers/${encodeURIComponent(id)}/share-link`, {
         method: "POST",
       });
       return link;
@@ -281,9 +281,9 @@ export const api = {
         body: JSON.stringify({ token }),
       }),
     reload: () =>
-      fetchJson<import("./types").ReloadResponse>("/workers/reload", { method: "POST" }),
+      fetchJson<import("@/lib/types").ReloadResponse>("/workers/reload", { method: "POST" }),
     run: async (id: string, inputs: Record<string, unknown>) => {
-      const result = await fetchJson<import("./types").ActionResponse>(`/workers/${id}/runs`, {
+      const result = await fetchJson<import("@/lib/types").ActionResponse>(`/workers/${id}/runs`, {
         method: "POST",
         body: JSON.stringify({ inputs, trigger_source: "manual" }),
       });
@@ -295,7 +295,7 @@ export const api = {
       return result;
     },
     create: async (worker_yml: string, run_py: string, skill_md?: string) => {
-      const worker = await fetchJson<import("./types").WorkerDetail>("/workers", {
+      const worker = await fetchJson<import("@/lib/types").WorkerDetail>("/workers", {
         method: "POST",
         body: JSON.stringify({ worker_yml, run_py, ...(skill_md !== undefined ? { skill_md } : {}) }),
       });
@@ -306,7 +306,7 @@ export const api = {
       return worker;
     },
     draftFromPrompt: (prompt: string) =>
-      fetchJson<import("./types").DraftFromPromptResponse>("/workers/draft-from-prompt", {
+      fetchJson<import("@/lib/types").DraftFromPromptResponse>("/workers/draft-from-prompt", {
         method: "POST",
         body: JSON.stringify({ prompt }),
       }),
@@ -342,7 +342,7 @@ export const api = {
       });
       return result;
     },
-    createFromBundle: async (zipBlob: Blob): Promise<import("./types").WorkerDetail> => {
+    createFromBundle: async (zipBlob: Blob): Promise<import("@/lib/types").WorkerDetail> => {
       const form = new FormData();
       form.append("bundle", zipBlob, "bundle.zip");
       const res = await fetchApi("/workers/from-bundle", `${API_BASE}/workers/from-bundle`, {
@@ -360,7 +360,7 @@ export const api = {
         }
         throw new Error(err);
       }
-      const worker = await res.json() as import("./types").WorkerDetail;
+      const worker = await res.json() as import("@/lib/types").WorkerDetail;
       captureProductEvent("worker_created", {
         worker_id: worker.id,
         creation_method: "bundle",
@@ -368,19 +368,19 @@ export const api = {
       return worker;
     },
     update: async (id: string, worker_yml: string, run_py: string, skill_md?: string) => {
-      const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}`, {
+      const worker = await fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}`, {
         method: "PUT",
         body: JSON.stringify({ worker_yml, run_py, ...(skill_md !== undefined ? { skill_md } : {}) }),
       });
       return worker;
     },
     suggest: (id: string, newDescription: string) =>
-      fetchJson<import("./types").WorkerSuggestResponse>(`/workers/${id}/suggest`, {
+      fetchJson<import("@/lib/types").WorkerSuggestResponse>(`/workers/${id}/suggest`, {
         method: "POST",
         body: JSON.stringify({ new_description: newDescription }),
       }),
     updateFiles: async (id: string, files: { path: string; content: string }[]) => {
-      const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}/files`, {
+      const worker = await fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/files`, {
         method: "PUT",
         body: JSON.stringify({ files }),
       });
@@ -391,17 +391,17 @@ export const api = {
       return result;
     },
     listVersions: (id: string, limit = 50) =>
-      fetchJson<import("./types").VersionSummary[]>(`/workers/${id}/versions?limit=${limit}`),
+      fetchJson<import("@/lib/types").VersionSummary[]>(`/workers/${id}/versions?limit=${limit}`),
     getVersion: (id: string, versionId: string) =>
-      fetchJson<import("./types").VersionDetail>(`/workers/${id}/versions/${versionId}`),
+      fetchJson<import("@/lib/types").VersionDetail>(`/workers/${id}/versions/${versionId}`),
     rollback: (id: string, versionId: string) =>
-      fetchJson<import("./types").WorkerDetail>(`/workers/${id}/rollback/${versionId}`, { method: "POST" }),
+      fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/rollback/${versionId}`, { method: "POST" }),
     // Worker feedback (SPEC §12) — anyone who can see the worker can comment.
     feedback: {
       list: (id: string) =>
-        fetchJson<import("./types").WorkerFeedback[]>(`/workers/${id}/feedback`),
+        fetchJson<import("@/lib/types").WorkerFeedback[]>(`/workers/${id}/feedback`),
       create: (id: string, content: string) =>
-        fetchJson<import("./types").WorkerFeedback>(`/workers/${id}/feedback`, {
+        fetchJson<import("@/lib/types").WorkerFeedback>(`/workers/${id}/feedback`, {
           method: "POST",
           body: JSON.stringify({ content }),
         }),
@@ -425,24 +425,24 @@ export const api = {
       if (params?.until) qs.append("until", params.until);
       if (params?.limit) qs.append("limit", String(params.limit));
       if (params?.offset) qs.append("offset", String(params.offset));
-      const rows = await fetchJson<import("./types").RunSummary[]>(`/runs?${qs.toString()}`);
+      const rows = await fetchJson<import("@/lib/types").RunSummary[]>(`/runs?${qs.toString()}`);
       return rows;
     },
     get: async (id: string) => {
-      const run = await fetchJson<import("./types").RunDetail>(`/runs/${id}`);
+      const run = await fetchJson<import("@/lib/types").RunDetail>(`/runs/${id}`);
       return run;
     },
-    logs: (id: string) => fetchJson<import("./types").LogEntry[]>(`/runs/${id}/logs`),
+    logs: (id: string) => fetchJson<import("@/lib/types").LogEntry[]>(`/runs/${id}/logs`),
     cancel: (id: string) =>
-      fetchJson<import("./types").ActionResponse>(`/runs/${id}/cancel`, {
+      fetchJson<import("@/lib/types").ActionResponse>(`/runs/${id}/cancel`, {
         method: "POST",
       }),
     approve: async (
       id: string,
       editedOutput?: Record<string, unknown>,
-      annotations?: import("./types").ApprovalAnnotations | null
+      annotations?: import("@/lib/types").ApprovalAnnotations | null
     ) => {
-      const result = await fetchJson<import("./types").ActionResponse>(`/runs/${id}/approve`, {
+      const result = await fetchJson<import("@/lib/types").ActionResponse>(`/runs/${id}/approve`, {
         method: "POST",
         body: JSON.stringify({ edited_output: editedOutput ?? null, annotations: annotations ?? null }),
       });
@@ -451,9 +451,9 @@ export const api = {
     reject: async (
       id: string,
       reason?: string,
-      annotations?: import("./types").ApprovalAnnotations | null
+      annotations?: import("@/lib/types").ApprovalAnnotations | null
     ) => {
-      const result = await fetchJson<import("./types").ActionResponse>(`/runs/${id}/reject`, {
+      const result = await fetchJson<import("@/lib/types").ActionResponse>(`/runs/${id}/reject`, {
         method: "POST",
         body: JSON.stringify({ reason: reason ?? null, annotations: annotations ?? null }),
       });
@@ -489,13 +489,13 @@ export const api = {
   approvals: {
     list: async (status?: string) => {
       const qs = status ? `?status=${encodeURIComponent(status)}` : "";
-      const rows = await fetchJson<import("./types").ApprovalRow[]>(`/approvals${qs}`);
+      const rows = await fetchJson<import("@/lib/types").ApprovalRow[]>(`/approvals${qs}`);
       return rows;
     },
     count: () => fetchJson<{ pending: number }>("/approvals/count"),
     approveAction: async (
       approvalId: string,
-      annotations?: import("./types").ApprovalAnnotations | null
+      annotations?: import("@/lib/types").ApprovalAnnotations | null
     ) => {
       const result = await fetchJson<{ status: string; executed: string; detail: string }>(
         `/approvals/${approvalId}/approve-action`,
@@ -509,7 +509,7 @@ export const api = {
     rejectAction: async (
       approvalId: string,
       reason?: string,
-      annotations?: import("./types").ApprovalAnnotations | null
+      annotations?: import("@/lib/types").ApprovalAnnotations | null
     ) => {
       const result = await fetchJson<{ status: string; path: string; reason?: string }>(
         `/approvals/${approvalId}/reject-action`,
@@ -521,7 +521,7 @@ export const api = {
       return result;
     },
     approveAgentTool: async (approvalId: string, editedOutput?: Record<string, unknown>) => {
-      const result = await fetchJson<import("./types").ActionResponse>(
+      const result = await fetchJson<import("@/lib/types").ActionResponse>(
         `/approvals/${approvalId}/approve`,
         {
           method: "POST",
@@ -531,7 +531,7 @@ export const api = {
       return result;
     },
     rejectAgentTool: async (approvalId: string, reason?: string) => {
-      const result = await fetchJson<import("./types").ActionResponse>(
+      const result = await fetchJson<import("@/lib/types").ActionResponse>(
         `/approvals/${approvalId}/reject`,
         {
           method: "POST",
@@ -541,16 +541,16 @@ export const api = {
       return result;
     },
     publicGet: (approvalId: string, token: string) =>
-      fetchJson<import("./types").ApprovalRow>(
+      fetchJson<import("@/lib/types").ApprovalRow>(
         `/approvals/public/${encodeURIComponent(approvalId)}?token=${encodeURIComponent(token)}`
       ),
     publicApprove: async (
       approvalId: string,
       token: string,
       editedOutput?: Record<string, unknown>,
-      annotations?: import("./types").ApprovalAnnotations | null
+      annotations?: import("@/lib/types").ApprovalAnnotations | null
     ) => {
-      const result = await fetchJson<import("./types").ActionResponse>(
+      const result = await fetchJson<import("@/lib/types").ActionResponse>(
         `/approvals/public/${encodeURIComponent(approvalId)}/approve?token=${encodeURIComponent(token)}`,
         {
           method: "POST",
@@ -563,9 +563,9 @@ export const api = {
       approvalId: string,
       token: string,
       reason?: string,
-      annotations?: import("./types").ApprovalAnnotations | null
+      annotations?: import("@/lib/types").ApprovalAnnotations | null
     ) => {
-      const result = await fetchJson<import("./types").ActionResponse>(
+      const result = await fetchJson<import("@/lib/types").ActionResponse>(
         `/approvals/public/${encodeURIComponent(approvalId)}/reject?token=${encodeURIComponent(token)}`,
         {
           method: "POST",
@@ -583,7 +583,7 @@ export const api = {
       approvalId: string,
       fileBlob: Blob,
       filename: string
-    ): Promise<import("./types").ApprovalUploadResponse> => {
+    ): Promise<import("@/lib/types").ApprovalUploadResponse> => {
       const form = new FormData();
       form.append("file", fileBlob, filename);
       const uploadPath = `/approvals/${encodeURIComponent(approvalId)}/uploads`;
@@ -596,14 +596,14 @@ export const api = {
         handleUnauthorizedResponse(res.status, `/approvals/${approvalId}/uploads`);
         throw new Error(await apiErrorFromResponse(res));
       }
-      return res.json() as Promise<import("./types").ApprovalUploadResponse>;
+      return res.json() as Promise<import("@/lib/types").ApprovalUploadResponse>;
     },
     uploadScreenshotPublic: async (
       approvalId: string,
       token: string,
       fileBlob: Blob,
       filename: string
-    ): Promise<import("./types").ApprovalUploadResponse> => {
+    ): Promise<import("@/lib/types").ApprovalUploadResponse> => {
       const form = new FormData();
       form.append("file", fileBlob, filename);
       const uploadPath = `/approvals/public/${encodeURIComponent(approvalId)}/uploads`;
@@ -616,11 +616,11 @@ export const api = {
         handleUnauthorizedResponse(res.status, `/approvals/public/${approvalId}/uploads`);
         throw new Error(await apiErrorFromResponse(res));
       }
-      return res.json() as Promise<import("./types").ApprovalUploadResponse>;
+      return res.json() as Promise<import("@/lib/types").ApprovalUploadResponse>;
     },
   },
   secrets: {
-    list: () => fetchJson<import("./types").SecretItem[]>("/secrets"),
+    list: () => fetchJson<import("@/lib/types").SecretItem[]>("/secrets"),
     upsert: (name: string, value: string) =>
       fetchJson<{ status: string; reason?: string }>(`/secrets/${name}`, {
         method: "POST",
@@ -636,19 +636,19 @@ export const api = {
       }),
   },
   contexts: {
-    list: () => fetchJson<import("./types").ContextSummary[]>("/contexts"),
+    list: () => fetchJson<import("@/lib/types").ContextSummary[]>("/contexts"),
     get: (name: string) =>
-      fetchJson<import("./types").ContextDetail>(`/contexts/${encodeURIComponent(name)}`),
+      fetchJson<import("@/lib/types").ContextDetail>(`/contexts/${encodeURIComponent(name)}`),
     create: async (name: string, writeable = false) => {
-      const folder = await fetchJson<import("./types").ContextDetail>(`/contexts/${encodeURIComponent(name)}`, {
+      const folder = await fetchJson<import("@/lib/types").ContextDetail>(`/contexts/${encodeURIComponent(name)}`, {
         method: "POST",
         body: JSON.stringify({ writeable }),
       });
       return folder;
     },
     // Members STEP 4: Private <-> Shared with workspace.
-    setVisibility: async (name: string, visibility: import("./types").AssetVisibility) => {
-      const folder = await fetchJson<import("./types").ContextDetail>(
+    setVisibility: async (name: string, visibility: import("@/lib/types").AssetVisibility) => {
+      const folder = await fetchJson<import("@/lib/types").ContextDetail>(
         `/contexts/${encodeURIComponent(name)}/visibility`,
         { method: "PUT", body: JSON.stringify({ visibility }) }
       );
@@ -660,7 +660,7 @@ export const api = {
         { method: "PATCH", body: JSON.stringify({ sensitive }) }
       ),
     sharePackLink: async (name: string) => {
-      const link = await fetchJson<import("./types").StandaloneShareLink>(
+      const link = await fetchJson<import("@/lib/types").StandaloneShareLink>(
         `/contexts/${encodeURIComponent(name)}/share-link`,
         { method: "POST" }
       );
@@ -672,19 +672,19 @@ export const api = {
         { method: "DELETE" }
       ),
     saveTextFile: async (name: string, path: string, content: string, tags?: string[]) => {
-      const file = await fetchJson<import("./types").ContextFileItem>(
+      const file = await fetchJson<import("@/lib/types").ContextFileItem>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
         { method: "PUT", body: JSON.stringify(tags ? { content, tags } : { content }) } // #780
       );
       return file;
     },
     deleteFile: (name: string, path: string) =>
-      fetchJson<import("./types").ContextDetail>(
+      fetchJson<import("@/lib/types").ContextDetail>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}`,
         { method: "DELETE" }
       ),
     shareFileLink: async (name: string, path: string) => {
-      const link = await fetchJson<import("./types").StandaloneShareLink>(
+      const link = await fetchJson<import("@/lib/types").StandaloneShareLink>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/share-link`,
         { method: "POST" }
       );
@@ -693,13 +693,13 @@ export const api = {
     // #777: inspect a brain .db file — tables list, or a table's rows.
     sqlite: (name: string, path: string, table?: string) => {
       const qs = table ? `?table=${encodeURIComponent(table)}` : "";
-      return fetchJson<import("./types").SqliteView>(
+      return fetchJson<import("@/lib/types").SqliteView>(
         `/contexts/${encodeURIComponent(name)}/sqlite/${path.split("/").map(encodeURIComponent).join("/")}${qs}`
       );
     },
     // #770: move/rename a brain file (matches the backend's {new_path} contract).
     moveFile: (name: string, path: string, newPath: string) =>
-      fetchJson<import("./types").ContextFileItem>(
+      fetchJson<import("@/lib/types").ContextFileItem>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/move`,
         { method: "POST", body: JSON.stringify({ new_path: newPath }) }
       ),
@@ -735,7 +735,7 @@ export const api = {
         }
         throw new Error(err);
       }
-      const result = await res.json() as { files: import("./types").ContextFileItem[]; total_size_bytes: number };
+      const result = await res.json() as { files: import("@/lib/types").ContextFileItem[]; total_size_bytes: number };
       return result;
     },
     fetchFileBlob: async (name: string, path: string) => {
@@ -755,44 +755,44 @@ export const api = {
     // Audit a pack's CURRENT files for stored live credentials (masked findings
     // only). This is what catches secrets already sitting in a Brain pack.
     secretScan: (name: string) =>
-      fetchJson<import("./types").ContextSecretScanResponse>(
+      fetchJson<import("@/lib/types").ContextSecretScanResponse>(
         `/contexts/${encodeURIComponent(name)}/secret-scan`
       ),
     listVersions: (name: string, limit = 50) =>
-      fetchJson<import("./types").VersionSummary[]>(`/contexts/${encodeURIComponent(name)}/versions?limit=${limit}`),
+      fetchJson<import("@/lib/types").VersionSummary[]>(`/contexts/${encodeURIComponent(name)}/versions?limit=${limit}`),
     getVersion: (name: string, versionId: string) =>
-      fetchJson<import("./types").VersionDetail>(`/contexts/${encodeURIComponent(name)}/versions/${versionId}`),
+      fetchJson<import("@/lib/types").VersionDetail>(`/contexts/${encodeURIComponent(name)}/versions/${versionId}`),
     rollback: (name: string, versionId: string) =>
-      fetchJson<import("./types").ContextDetail>(`/contexts/${encodeURIComponent(name)}/rollback/${versionId}`, {
+      fetchJson<import("@/lib/types").ContextDetail>(`/contexts/${encodeURIComponent(name)}/rollback/${versionId}`, {
         method: "POST",
       }),
     // Per-file version history. The backend snapshots each brain-pack file on
     // every save/delete/upload under the `brain_file` asset type, so these list
     // and read the revisions of ONE file (not the whole pack).
     listFileVersions: (name: string, path: string, limit = 50) =>
-      fetchJson<import("./types").VersionSummary[]>(
+      fetchJson<import("@/lib/types").VersionSummary[]>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/versions?limit=${limit}`
       ),
     getFileVersion: (name: string, path: string, versionId: string) =>
-      fetchJson<import("./types").VersionFileDetail>(
+      fetchJson<import("@/lib/types").VersionFileDetail>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/versions/${versionId}`
       ),
     restoreFileVersion: (name: string, path: string, sha: string) =>
-      fetchJson<import("./types").ContextFileItem>(
+      fetchJson<import("@/lib/types").ContextFileItem>(
         `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/restore/${sha}`,
         { method: "POST" }
       ),
   },
   system: {
-    info: () => fetchJson<import("./types").SystemInfo>("/system/info"),
-    platformConfig: () => fetchJson<import("./types").PlatformConfig>("/system/platform-config"),
-    overview: () => fetchJson<import("./types").SystemOverview>("/system/overview"),
-    clearRuns: () => fetchJson<import("./types").ActionResponse>("/runs/clear", { method: "POST" }),
+    info: () => fetchJson<import("@/lib/types").SystemInfo>("/system/info"),
+    platformConfig: () => fetchJson<import("@/lib/types").PlatformConfig>("/system/platform-config"),
+    overview: () => fetchJson<import("@/lib/types").SystemOverview>("/system/overview"),
+    clearRuns: () => fetchJson<import("@/lib/types").ActionResponse>("/runs/clear", { method: "POST" }),
     workspaceAgent: () =>
-      fetchJson<import("./types").WorkspaceAgentInfo>("/system/workspace-agent"),
+      fetchJson<import("@/lib/types").WorkspaceAgentInfo>("/system/workspace-agent"),
     // Members STEP 5: assistant Private <-> Shared with workspace.
-    setAssistantVisibility: (visibility: import("./types").AssetVisibility) =>
-      fetchJson<import("./types").WorkspaceAgentInfo>(
+    setAssistantVisibility: (visibility: import("@/lib/types").AssetVisibility) =>
+      fetchJson<import("@/lib/types").WorkspaceAgentInfo>(
         "/system/workspace-agent/visibility",
         { method: "PUT", body: JSON.stringify({ visibility }) }
       ),
@@ -805,7 +805,7 @@ export const api = {
         body: content,
       }),
     listWorkspaceVersions: (limit = 50) =>
-      fetchJson<import("./types").VersionSummary[]>(`/workspace/versions?limit=${limit}`),
+      fetchJson<import("@/lib/types").VersionSummary[]>(`/workspace/versions?limit=${limit}`),
     getWorkspaceVersion: (versionId: string) =>
       fetchJson<{ content: string }>(`/workspace/versions/${encodeURIComponent(versionId)}`),
     rollbackWorkspaceInstructions: (versionId: string) =>
@@ -824,40 +824,40 @@ export const api = {
     resetWorkspaceBasePersona: () =>
       fetchRaw("/workspace/base", { method: "DELETE" }).then(() => undefined),
     listWorkspaceBaseVersions: (limit = 50) =>
-      fetchJson<import("./types").VersionSummary[]>(`/workspace/base/versions?limit=${limit}`),
+      fetchJson<import("@/lib/types").VersionSummary[]>(`/workspace/base/versions?limit=${limit}`),
     rollbackWorkspaceBasePersona: (versionId: string) =>
       fetchText(`/workspace/base/rollback/${versionId}`, { method: "POST" }),
     gitStatus: () =>
-      fetchJson<import("./types").GitWorkspaceStatus>("/system/git"),
+      fetchJson<import("@/lib/types").GitWorkspaceStatus>("/system/git"),
     gitConnect: (pat: string) =>
       fetchJson<{ username: string }>("/system/git/connect", {
         method: "POST",
         body: JSON.stringify({ pat }),
       }),
     gitListRepos: () =>
-      fetchJson<import("./types").GitRepoItem[]>("/system/git/repos"),
+      fetchJson<import("@/lib/types").GitRepoItem[]>("/system/git/repos"),
     gitCreateRepo: (name: string) =>
-      fetchJson<import("./types").GitRepoItem>("/system/git/repos", {
+      fetchJson<import("@/lib/types").GitRepoItem>("/system/git/repos", {
         method: "POST",
         body: JSON.stringify({ name }),
       }),
     gitLink: (repo_full_name: string) =>
-      fetchJson<import("./types").GitWorkspaceStatus>("/system/git/link", {
+      fetchJson<import("@/lib/types").GitWorkspaceStatus>("/system/git/link", {
         method: "POST",
         body: JSON.stringify({ repo_full_name }),
       }),
     gitPush: () =>
-      fetchJson<import("./types").GitWorkspaceStatus>("/system/git/push", { method: "POST" }),
+      fetchJson<import("@/lib/types").GitWorkspaceStatus>("/system/git/push", { method: "POST" }),
     gitDisconnect: () =>
       fetchRaw("/system/git", { method: "DELETE" }).then(() => undefined),
   },
   connections: {
     list: async () => {
-      const rows = await fetchJson<import("./types").ConnectionItem[]>("/connections");
+      const rows = await fetchJson<import("@/lib/types").ConnectionItem[]>("/connections");
       return rows;
     },
     initiate: async (app_name: string) => {
-      const result = await fetchJson<import("./types").ConnectionInitResponse>("/connections", {
+      const result = await fetchJson<import("@/lib/types").ConnectionInitResponse>("/connections", {
         method: "POST",
         body: JSON.stringify({ app_name }),
       });
@@ -880,7 +880,7 @@ export const api = {
       auth_secret?: string | null;
       allowed_tools?: string[];
     }) => {
-      const connection = await fetchJson<import("./types").ConnectionItem>("/connections/mcp", {
+      const connection = await fetchJson<import("@/lib/types").ConnectionItem>("/connections/mcp", {
         method: "POST",
         body: JSON.stringify(payload),
       });
@@ -893,27 +893,27 @@ export const api = {
       return connection;
     },
     byApp: (app_name: string) =>
-      fetchJson<import("./types").AppConnectionState>(
+      fetchJson<import("@/lib/types").AppConnectionState>(
         `/connections/by-app/${encodeURIComponent(app_name)}`,
         { cache: "no-store" }
       ),
     status: (id: string) =>
-      fetchJson<import("./types").ConnectionItem>(`/connections/${id}/status`),
+      fetchJson<import("@/lib/types").ConnectionItem>(`/connections/${id}/status`),
     delete: async (id: string) => {
       const result = await fetchJson<{ status: string }>(`/connections/${id}`, { method: "DELETE" });
       return result;
     },
     test: (id: string) =>
-      fetchJson<import("./types").ConnectionTestResult>(`/connections/${id}/test`, {
+      fetchJson<import("@/lib/types").ConnectionTestResult>(`/connections/${id}/test`, {
         method: "POST",
       }),
     accountInfo: (id: string) =>
-      fetchJson<import("./types").ConnectedAccountMetadata>(
+      fetchJson<import("@/lib/types").ConnectedAccountMetadata>(
         `/connections/${encodeURIComponent(id)}/account-info`,
         { cache: "no-store" }
       ),
     activity: (id: string, limit = 50) =>
-      fetchJson<import("./types").RunSummary[]>(
+      fetchJson<import("@/lib/types").RunSummary[]>(
         `/connections/${encodeURIComponent(id)}/activity?limit=${limit}`,
         { cache: "no-store" }
       ),
@@ -928,11 +928,11 @@ export const api = {
     // app credentials are platform env, not user-entered; the only install path
     // is "Add to Slack" (one-app OAuth) surfaced on the Assistant page.
     setupStatus: () =>
-      fetchJson<import("./types").SlackSetupStatus>("/slack/setup/status", {
+      fetchJson<import("@/lib/types").SlackSetupStatus>("/slack/setup/status", {
         cache: "no-store",
       }),
     installUrl: async (return_to = "/settings#channels") => {
-      return fetchJson<import("./types").SlackInstallUrlResponse>("/slack/oauth/install", {
+      return fetchJson<import("@/lib/types").SlackInstallUrlResponse>("/slack/oauth/install", {
         method: "POST",
         body: JSON.stringify({ return_to }),
       });
@@ -950,7 +950,7 @@ export const api = {
     },
     // My binding status (linked as which Slack user) and unlink.
     bindingMe: () =>
-      fetchJson<import("./types").SlackBindingMe>("/slack/bindings/me"),
+      fetchJson<import("@/lib/types").SlackBindingMe>("/slack/bindings/me"),
     unlink: () =>
       fetchJson<{ ok: boolean; unlinked: number }>("/slack/bindings/me", { method: "DELETE" }),
   },
@@ -963,7 +963,7 @@ export const api = {
       );
     },
     bindingMe: () =>
-      fetchJson<import("./types").WhatsAppBindingMe>("/whatsapp/bindings/me"),
+      fetchJson<import("@/lib/types").WhatsAppBindingMe>("/whatsapp/bindings/me"),
     unlink: () =>
       fetchJson<{ ok: boolean; unlinked: number }>("/whatsapp/bindings/me", { method: "DELETE" }),
   },
@@ -981,7 +981,7 @@ export const api = {
     },
     importTemplate: async (
       zipBlob: Blob
-    ): Promise<import("./types").WorkspaceImportResult> => {
+    ): Promise<import("@/lib/types").WorkspaceImportResult> => {
       const form = new FormData();
       form.append("bundle", zipBlob, "workspace-template.zip");
       const res = await fetchApi("/workspace/import", `${API_BASE}/workspace/import`, {
@@ -999,16 +999,16 @@ export const api = {
         }
         throw new Error(err);
       }
-      return res.json() as Promise<import("./types").WorkspaceImportResult>;
+      return res.json() as Promise<import("@/lib/types").WorkspaceImportResult>;
     },
-    list: () => fetchJson<import("./types").LocalWorkspaceListResponse>("/workspaces"),
+    list: () => fetchJson<import("@/lib/types").LocalWorkspaceListResponse>("/workspaces"),
     create: (name: string) =>
-      fetchJson<import("./types").LocalWorkspace>("/workspaces", {
+      fetchJson<import("@/lib/types").LocalWorkspace>("/workspaces", {
         method: "POST",
         body: JSON.stringify({ name }),
       }),
     select: (id: string) =>
-      fetchJson<import("./types").LocalWorkspace>(`/workspaces/${encodeURIComponent(id)}/select`, {
+      fetchJson<import("@/lib/types").LocalWorkspace>(`/workspaces/${encodeURIComponent(id)}/select`, {
         method: "POST",
       }),
     // #794/#797: workspace behaviour toggles + model defaults (admin-only PUT).
@@ -1021,7 +1021,7 @@ export const api = {
       return result;
     },
     rename: (id: string, name: string) => // #791
-      fetchJson<import("./types").LocalWorkspace>(`/workspaces/${encodeURIComponent(id)}`, {
+      fetchJson<import("@/lib/types").LocalWorkspace>(`/workspaces/${encodeURIComponent(id)}`, {
         method: "PATCH",
         body: JSON.stringify({ name }),
       }),
@@ -1030,20 +1030,20 @@ export const api = {
     // this mints a new workspace that surfaces the same pool (use Export/Import
     // to move workers between instances).
     duplicate: (id: string) =>
-      fetchJson<import("./types").LocalWorkspace>(
+      fetchJson<import("@/lib/types").LocalWorkspace>(
         `/workspaces/${encodeURIComponent(id)}/duplicate`,
         { method: "POST" }
       ),
     // Mint a signed, login-free URL a recipient can open to download this
     // workspace as an importable template .zip (no secret values).
     shareLink: () =>
-      fetchJson<import("./types").WorkspaceShareLink>("/workspace/share-link"),
+      fetchJson<import("@/lib/types").WorkspaceShareLink>("/workspace/share-link"),
     // Workspace tokens (prefix wst_): API access to workspace-shared workers
     // only — no private workers. Admin-only; value is returned once on create.
     tokens: {
-      list: () => fetchJson<import("./types").WorkspaceToken[]>("/workspace/tokens"),
+      list: () => fetchJson<import("@/lib/types").WorkspaceToken[]>("/workspace/tokens"),
       create: (name: string, expiresAt?: string) =>
-        fetchJson<import("./types").WorkspaceTokenCreate>("/workspace/tokens", {
+        fetchJson<import("@/lib/types").WorkspaceTokenCreate>("/workspace/tokens", {
           method: "POST",
           body: JSON.stringify({ name, expires_at: expiresAt }),
         }),
@@ -1059,14 +1059,14 @@ export const api = {
   // affordances on `my_role`.
   members: {
     list: () =>
-      fetchJson<import("./types").WorkspaceMembersResponse>("/workspace/members"),
+      fetchJson<import("@/lib/types").WorkspaceMembersResponse>("/workspace/members"),
     invite: (email: string, role: "admin" | "member") =>
-      fetchJson<import("./types").WorkspaceMember>("/workspace/members", {
+      fetchJson<import("@/lib/types").WorkspaceMember>("/workspace/members", {
         method: "POST",
         body: JSON.stringify({ email, role }),
       }),
     setRole: (userId: string, role: "admin" | "member") =>
-      fetchJson<import("./types").WorkspaceMember>(
+      fetchJson<import("@/lib/types").WorkspaceMember>(
         `/workspace/members/${encodeURIComponent(userId)}`,
         { method: "PATCH", body: JSON.stringify({ role }) }
       ),
@@ -1075,24 +1075,24 @@ export const api = {
         method: "DELETE",
       }),
     transferOwner: (newOwnerId: string) =>
-      fetchJson<import("./types").WorkspaceMember>(
+      fetchJson<import("@/lib/types").WorkspaceMember>(
         "/workspace/members/transfer-owner",
         { method: "POST", body: JSON.stringify({ new_owner_id: newOwnerId }) }
       ),
   },
   conversations: {
     list: (limit = 50) =>
-      fetchJson<import("./types").ConversationSummary[]>(`/conversations?limit=${limit}`),
+      fetchJson<import("@/lib/types").ConversationSummary[]>(`/conversations?limit=${limit}`),
     get: (id: string) =>
-      fetchJson<import("./types").ConversationDetail>(`/conversations/${encodeURIComponent(id)}`),
+      fetchJson<import("@/lib/types").ConversationDetail>(`/conversations/${encodeURIComponent(id)}`),
   },
   // Multi-member: user management + personal access tokens
   users: {
-    list: () => fetchJson<import("./types").OssUser[]>("/users"),
+    list: () => fetchJson<import("@/lib/types").OssUser[]>("/users"),
     create: (data: { username: string; password: string; display_name?: string; role?: string }) =>
-      fetchJson<import("./types").OssUser>("/users", { method: "POST", body: JSON.stringify(data) }),
+      fetchJson<import("@/lib/types").OssUser>("/users", { method: "POST", body: JSON.stringify(data) }),
     update: (userId: string, data: Partial<{ display_name: string; role: string; disabled: boolean; password: string }>) =>
-      fetchJson<import("./types").OssUser>(`/users/${encodeURIComponent(userId)}`, {
+      fetchJson<import("@/lib/types").OssUser>(`/users/${encodeURIComponent(userId)}`, {
         method: "PATCH",
         body: JSON.stringify(data),
       }),
@@ -1100,21 +1100,21 @@ export const api = {
       fetchJson<null>(`/users/${encodeURIComponent(userId)}`, { method: "DELETE" }),
   },
   tokens: {
-    list: () => fetchJson<import("./types").PersonalAccessToken[]>("/auth/tokens"),
+    list: () => fetchJson<import("@/lib/types").PersonalAccessToken[]>("/auth/tokens"),
     create: (name: string, expiresAt?: string) =>
-      fetchJson<import("./types").PersonalAccessTokenCreate>("/auth/tokens", {
+      fetchJson<import("@/lib/types").PersonalAccessTokenCreate>("/auth/tokens", {
         method: "POST",
         body: JSON.stringify({ name, expires_at: expiresAt }),
       }),
     revoke: (tokenId: string) =>
       fetchJson<null>(`/auth/tokens/${encodeURIComponent(tokenId)}`, { method: "DELETE" }),
   },
-  authMe: () => fetchJson<import("./types").AuthMe>("/auth/me"),
+  authMe: () => fetchJson<import("@/lib/types").AuthMe>("/auth/me"),
   integrations: {
     triggers: () =>
-      fetchJson<{ items: import("./types").ComposioTriggerItem[] }>("/integrations/triggers"),
+      fetchJson<{ items: import("@/lib/types").ComposioTriggerItem[] }>("/integrations/triggers"),
     triggersForApp: (app: string) =>
-      fetchJson<{ items: import("./types").ComposioTriggerItem[] }>(
+      fetchJson<{ items: import("@/lib/types").ComposioTriggerItem[] }>(
         `/integrations/triggers?app=${encodeURIComponent(app)}`
       ),
     catalog: (params?: { page?: number; limit?: number; search?: string; category?: string }) => {
@@ -1123,14 +1123,14 @@ export const api = {
       qs.set("limit", String(params?.limit ?? 30));
       if (params?.search) qs.set("search", params.search);
       if (params?.category) qs.set("category", params.category);
-      return fetchJson<import("./types").IntegrationCatalogResponse>(
+      return fetchJson<import("@/lib/types").IntegrationCatalogResponse>(
         `/integrations/catalog?${qs.toString()}`
       );
     },
     catalogTools: (slug: string, limit = 100) => {
       const qs = new URLSearchParams();
       qs.set("limit", String(limit));
-      return fetchJson<import("./types").CatalogToolItem[]>(
+      return fetchJson<import("@/lib/types").CatalogToolItem[]>(
         `/integrations/catalog/${encodeURIComponent(slug)}/tools?${qs.toString()}`
       );
     },

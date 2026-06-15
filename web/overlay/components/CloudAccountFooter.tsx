@@ -14,6 +14,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import type { CurrentUser } from "@/lib/types";
+import { identifyPostHogUser, resetPostHogUser } from "@/lib/posthog";
 import { cn } from "@/lib/utils";
 
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
@@ -60,7 +61,9 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
       .then((response) => response.json())
       .then((data) => {
         if (!cancelled && data?.user?.email) {
-          setUser(data.user as CurrentUser);
+          const currentUser = data.user as CurrentUser;
+          setUser(currentUser);
+          identifyPostHogUser(currentUser);
           fetch("/app/api/proxy/auth/tokens/bootstrap", {
             method: "POST",
             headers: activeWorkspaceHeaders(),
@@ -93,6 +96,7 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
     } catch {
       // Cookie clearing is best effort; navigate regardless.
     }
+    resetPostHogUser();
     onNavigate?.();
     window.location.replace("/app/login?next=/app");
   }

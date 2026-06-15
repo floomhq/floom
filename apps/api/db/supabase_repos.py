@@ -101,6 +101,7 @@ from apps.api._engine import ensure_engine_api_path
 from apps.api.auth.workspace_context import get_active_member_role, get_active_workspace_id
 from apps.api.config import get_supabase_service_client
 from apps.api.db import workspaces as workspace_repo
+from apps.api.telemetry import capture_posthog_event
 from apps.api.db._secret_crypto import (
     decrypt_secret,
     encrypt_secret,
@@ -2343,6 +2344,19 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         builder = self._client.table("runs").update(updates).eq("id", run_id)
         builder = _scope_by_workspace(builder, user_id=user_id)
         builder.execute()
+        if status == RunStatus.COMPLETED.value:
+            updated_run = self.get(user_id=user_id, run_id=run_id) or {}
+            capture_posthog_event(
+                distinct_id=user_id,
+                event_name="run_completed",
+                properties={
+                    "workspace_id": updated_run.get("workspace_id") or get_active_workspace_id(),
+                    "run_id": run_id,
+                    "worker_id": run.get("worker_id"),
+                    "trigger_source": run.get("trigger_source"),
+                    "duration_ms": updates.get("duration_ms"),
+                },
+            )
 
     def add_log(
         self,

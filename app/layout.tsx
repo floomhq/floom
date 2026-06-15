@@ -3,6 +3,7 @@ import { Geist, Geist_Mono, Source_Serif_4 } from "next/font/google";
 import Script from "next/script";
 import "./globals.css";
 import { Ambient } from "@/components/Ambient";
+import { PostHogProvider } from "@/components/PostHogProvider";
 
 // Geist Sans + Geist Mono (openchat-v2 / dashboard parity). Loaded via
 // next/font for proper inlining and no FOUT. Matches web/app/layout.tsx.
@@ -76,8 +77,10 @@ export default function RootLayout({
         <Script id="floom-theme-init" strategy="beforeInteractive">
           {`try{var m=localStorage.getItem("floom-theme");document.documentElement.classList.toggle("floom-night",m==="night");document.documentElement.classList.toggle("floom-day",m==="day")}catch(e){}`}
         </Script>
-        <Ambient />
-        {children}
+        <PostHogProvider>
+          <Ambient />
+          {children}
+        </PostHogProvider>
       </body>
     </html>
   );

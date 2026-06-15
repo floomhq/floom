@@ -1,12 +1,18 @@
 from __future__ import annotations
 
 import hashlib
+import logging
+import os
 import re
 from datetime import datetime, timezone
 from typing import Any
 
+import httpx
+
 from apps.api.config import get_supabase_service_client
 
+
+logger = logging.getLogger(__name__)
 
 MAX_EVENTS_PER_REQUEST = 50
 MAX_PROPERTIES = 40
@@ -88,6 +94,52 @@ def _iso_timestamp(value: datetime | None = None) -> str:
     return ts.astimezone(timezone.utc).isoformat()
 
 
+def _posthog_config() -> tuple[str, str] | None:
+    key = (os.environ.get("POSTHOG_KEY") or os.environ.get("NEXT_PUBLIC_POSTHOG_KEY") or "").strip()
+    host = (os.environ.get("POSTHOG_HOST") or os.environ.get("NEXT_PUBLIC_POSTHOG_HOST") or "").strip()
+    if not key:
+        return None
+    return key, (host or "https://us.i.posthog.com").rstrip("/")
+
+
+def capture_posthog_event(
+    *,
+    distinct_id: str,
+    event_name: str,
+    properties: dict[str, Any] | None = None,
+    timestamp: str | None = None,
+) -> None:
+    config = _posthog_config()
+    if config is None:
+        return
+    key, host = config
+    try:
+        event = validate_event_name(event_name)
+    except TelemetryError:
+        logger.warning("invalid PostHog event skipped: %s", event_name)
+        return
+
+    try:
+        httpx.post(
+            f"{host}/capture/",
+            json={
+                "api_key": key,
+                "event": event,
+                "distinct_id": distinct_id,
+                "properties": sanitize_properties(properties or {}),
+                **({"timestamp": timestamp} if timestamp else {}),
+            },
+            timeout=2.0,
+        ).raise_for_status()
+    except Exception as exc:
+        logger.warning(
+            "PostHog capture failed for event %s: %s: %s",
+            event_name,
+            type(exc).__name__,
+            exc,
+        )
+
+
 def telemetry_enabled(*, workspace_id: str) -> bool:
     response = (
         get_supabase_service_client()
@@ -153,6 +205,17 @@ def record_events(
         return 0
     response = get_supabase_service_client().table("telemetry_events").insert(rows).execute()
     data = getattr(response, "data", None)
+    for row in rows:
+        capture_posthog_event(
+            distinct_id=user_id,
+            event_name=str(row["event_name"]),
+            timestamp=str(row["occurred_at"]),
+            properties={
+                **dict(row["properties"] or {}),
+                "workspace_id": workspace_id,
+                "source": row["source"],
+            },
+        )
     return len(data) if isinstance(data, list) else len(rows)
 
 
