@@ -213,6 +213,28 @@ class FakeRaisingOOMSandbox:
         self.killed = True
 
 
+class FakeCancelledCommandRunner:
+    def run(self, _command, **_kwargs):
+        raise RuntimeError("sandbox was killed")
+
+
+class FakeCancelledSandbox:
+    instances = []
+
+    def __init__(self):
+        self.files = FakeWritableFiles({})
+        self.commands = FakeCancelledCommandRunner()
+        self.killed = False
+        FakeCancelledSandbox.instances.append(self)
+
+    @classmethod
+    def create(cls, **_kwargs):
+        return cls()
+
+    def kill(self):
+        self.killed = True
+
+
 def test_collects_declared_sandbox_artifacts(tmp_path, monkeypatch):
     monkeypatch.setattr(e2b_driver, "ARTIFACTS_DIR", tmp_path)
     config = _config([
@@ -1012,6 +1034,46 @@ def test_e2b_driver_maps_oom_command_exception_to_sandbox_oom(tmp_path, monkeypa
     assert result.status == "error"
     assert result.error_code == "sandbox_oom"
     assert FakeRaisingOOMSandbox.instances[-1].killed is True
+    assert active_sandbox_count() == 0
+
+
+def test_e2b_cancelled_sandbox_exception_reads_active_repository(tmp_path, monkeypatch):
+    import db as db_module
+
+    monkeypatch.setenv("E2B_API_KEY", "e2b-test")
+    monkeypatch.setitem(sys.modules, "e2b", types.SimpleNamespace(Sandbox=FakeCancelledSandbox))
+    monkeypatch.setattr(e2b_driver, "WORKERS_DIR", tmp_path / "workers")
+    FakeCancelledSandbox.instances = []
+    with e2b_driver._active_sandboxes_lock:
+        e2b_driver._active_sandboxes.clear()
+
+    class Runs:
+        def get_any(self, *, run_id: str):
+            assert run_id == "run_cancelled"
+            return {"run_id": run_id, "cancel_requested": True}
+
+    class Repos:
+        runs = Runs()
+
+    monkeypatch.setattr(db_module, "get_repositories", lambda: Repos())
+    worker_dir = tmp_path / "workers" / "cancelled-worker"
+    worker_dir.mkdir(parents=True)
+    (worker_dir / "run.py").write_text("print('unused')\n")
+    logs = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="cancelled-worker",
+        run_id="run_cancelled",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((level, msg)),
+        trace_id="trace_cancelled",
+        timeout_seconds=30,
+    )
+
+    assert result.status == "cancelled"
+    assert result.error_code == "user_cancel"
+    assert ("info", "[e2b] Sandbox terminated - run cancelled by user") in logs
     assert active_sandbox_count() == 0
 
 

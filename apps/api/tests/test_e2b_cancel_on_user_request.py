@@ -32,6 +32,7 @@ def _load_app(monkeypatch, tmp_path):
         "worker_registry",
         "runner_utils",
         "runner_sandbox",
+        "runner_sandbox.cancellation",
         "runner_sandbox.e2b_driver",
         "run_service",
         "main",
@@ -171,8 +172,8 @@ def test_cancel_flag_db_read_failure_fails_closed_and_is_metrified(monkeypatch, 
 
     before = agent_driver.cancel_flag_db_read_errors_total()
 
-    with patch.object(db_module, "get_db", side_effect=RuntimeError("db unavailable")):
-        with caplog.at_level("WARNING", logger="floom.runner_sandbox.agent"):
+    with patch.object(db_module, "get_repositories", side_effect=RuntimeError("db unavailable")):
+        with caplog.at_level("WARNING", logger="floom.runner_sandbox.cancel"):
             result = agent_driver.AgentDriver()._cancel_requested("run-missing")
 
     assert result is True
@@ -187,4 +188,24 @@ def test_cancel_flag_db_read_failure_fails_closed_and_is_metrified(monkeypatch, 
     prom = client.get("/metrics", headers={"x-floom-secret": "test-secret"})
     assert prom.status_code == 200, prom.text
     assert f"workeros_cancel_flag_db_read_errors_total {before + 1}" in prom.text
+    db.get_repositories.cache_clear()
+
+
+def test_agent_cancel_flag_reads_active_repository(monkeypatch, tmp_path):
+    db, _main = _load_app(monkeypatch, tmp_path)
+    import db as db_module
+    import runner_sandbox.agent_driver as agent_driver
+    from unittest.mock import patch
+
+    class Runs:
+        def get_any(self, *, run_id: str):
+            assert run_id == "run-cloud"
+            return {"run_id": run_id, "cancel_requested": True}
+
+    class Repos:
+        runs = Runs()
+
+    with patch.object(db_module, "get_repositories", return_value=Repos()):
+        assert agent_driver.AgentDriver()._cancel_requested("run-cloud") is True
+
     db.get_repositories.cache_clear()
