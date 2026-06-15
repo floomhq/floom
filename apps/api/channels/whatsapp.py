@@ -486,13 +486,18 @@ def claim_whatsapp_sender(
             )
 
     # Welcome the newly bound sender from Emily (best-effort; never block the claim).
-    # Chief-of-staff persona, WhatsApp dialect: warm, 1-2 short lines, single *asterisk*
-    # emphasis only, no markdown headers/links, no feature list.
+    # Chief-of-staff persona, WhatsApp dialect: warm, concise, single *asterisk*
+    # emphasis only, no markdown headers/links.
+    # #1369 — include 3 concrete example commands so users know what to ask.
     try:
         send_whatsapp_text(
             wa_id,
             "Hi, it's *Emily*, your chief of staff. We're connected.\n"
-            "Tell me what you want handled and I'll take it from here.",
+            "Tell me what you want handled and I'll take it from here.\n\n"
+            "Try:\n"
+            "- _run my daily digest_\n"
+            "- _what ran today?_\n"
+            "- _approve the pending run_",
         )
     except Exception:
         logger.warning(
