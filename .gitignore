@@ -56,3 +56,4 @@ CODEX_BRIEF.md
 .gstack/
 .env.test
 tests/e2e/.auth/
+web/.vercel/
