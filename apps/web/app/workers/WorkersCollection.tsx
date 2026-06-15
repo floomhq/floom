@@ -36,7 +36,8 @@ import { Button } from "@/components/ui/button";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { ArrowRight, ChevronDown, ChevronUp, FileText, Lock, MoreHorizontal, UploadCloud } from "lucide-react";
+import { ArrowRight, Brain, ChevronDown, ChevronUp, FileText, Lock, MoreHorizontal, UploadCloud } from "lucide-react";
+import { BRAIN_FILE_META, inferBrainFileType } from "@/lib/brain/file-type-icon";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { Sparkline } from "@/components/Sparkline";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
@@ -59,6 +60,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  contextSpecName,
   patchBrainContexts,
   patchWorkerConnections,
   setContextWriteable,
@@ -258,8 +260,33 @@ function OverviewTab({ w }: { w: WorkerSummary }) {
   );
 }
 
+/** One file-type chip for a brain context folder. Reuses the shared icon mapping. */
+function BrainContextChip({ name }: { name: string }) {
+  const meta = BRAIN_FILE_META[inferBrainFileType(name)];
+  const Icon = meta.Icon;
+  return (
+    <span
+      className="inline-flex h-7 items-center gap-1.5 rounded-[9px] px-1.5 pr-2 text-[12px] [border:var(--bd-card)]"
+      style={{ background: "var(--bg-2)" }}
+    >
+      <span
+        aria-hidden="true"
+        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px]"
+        style={{
+          background: `color-mix(in srgb, ${meta.tint} 12%, transparent)`,
+          color: meta.tint,
+        }}
+      >
+        <Icon className="h-3 w-3" strokeWidth={2} />
+      </span>
+      <span className="max-w-[120px] truncate font-medium" style={{ color: "var(--ink)" }}>{name}</span>
+    </span>
+  );
+}
+
 function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
   const description = displayBrandCopy(w.long_description || w.description) || "No description yet.";
+  const contexts = d?.config?.contexts ?? [];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <WorkerAsciiDiagram
@@ -271,6 +298,20 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
         outputs={(d?.config?.outputs ?? []).map((o) => ({ name: o.name, label: o.label, type: o.type }))}
       />
       <p style={{ margin: 0 }}>{description}</p>
+      {contexts.length > 0 && (
+        <div>
+          <h4 style={h4}>
+            <Brain className="inline-block size-[11px] align-[-1px] mr-1" aria-hidden="true" />
+            Company brain it uses
+          </h4>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {contexts.map((spec) => {
+              const name = contextSpecName(spec);
+              return <BrainContextChip key={name} name={name} />;
+            })}
+          </div>
+        </div>
+      )}
       {d?.use_cases && d.use_cases.length > 0 && (
         <div>
           <h4 style={h4}>Use cases</h4>
