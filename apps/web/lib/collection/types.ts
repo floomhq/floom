@@ -157,6 +157,8 @@ export interface CollectionConfig<T> {
   toolbarActions?: ReactNode;
   /** Optional banner above the list (e.g. member-visibility note). */
   banner?: ReactNode;
+  /** Optional footer rendered below the list body (e.g. "Load more" button — B37). */
+  footer?: ReactNode;
 }
 
 /** Grid card (SPEC §2b — name, 2-line desc, status pill + tool logos). */
@@ -176,4 +178,15 @@ export interface CardSpec {
    * Accepts TimeseriesDay[] (success/fail split) or number[] (totals only).
    */
   sparkline?: ReactNode;
+  /**
+   * Optional muted metadata line shown between description and footer.
+   * E.g. "2h ago · 12 runs · 91%". (#1175)
+   */
+  meta?: ReactNode;
+  /**
+   * Optional quick-action buttons shown on hover in the card footer (#1174).
+   * Each item has a label and an onClick. Rendered as small text buttons.
+   * Use e.stopPropagation() is handled by CollectionGrid.
+   */
+  quickActions?: Array<{ label: string; onClick: (e: React.MouseEvent) => void }>;
 }

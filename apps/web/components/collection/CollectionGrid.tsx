@@ -59,6 +59,8 @@ export function CollectionGrid<T>({
               <div className="c-gnm">{spec.name}</div>
             </div>
             {spec.description != null && <div className="c-gd">{spec.description}</div>}
+            {/* B17: muted telemetry line (last-run · run count · success rate) */}
+            {spec.meta != null && <div className="c-gmeta">{spec.meta}</div>}
             <div className="c-gfoot">
               {spec.status ? <StatusPill spec={spec.status} /> : null}
               {spec.toolLogos && <div className="c-gtools">{spec.toolLogos}</div>}
@@ -66,6 +68,24 @@ export function CollectionGrid<T>({
                 <div className="c-gsparkline">{spec.sparkline}</div>
               )}
             </div>
+            {/* B15: hover-revealed quick-action row */}
+            {spec.quickActions && spec.quickActions.length > 0 && (
+              <div className="c-gactions">
+                {spec.quickActions.map((action) => (
+                  <button
+                    key={action.label}
+                    type="button"
+                    className="c-gaction-btn"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      action.onClick(e);
+                    }}
+                  >
+                    {action.label}
+                  </button>
+                ))}
+              </div>
+            )}
           </div>
         );
       })}
