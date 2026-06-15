@@ -29,6 +29,7 @@ from __future__ import annotations
 import os
 import tempfile
 import threading
+import sys
 from pathlib import Path
 
 import pytest
@@ -36,30 +37,55 @@ from fastapi.testclient import TestClient
 
 _TEST_DIR = Path(tempfile.mkdtemp(prefix="workeros-approval-toctou-280-"))
 _DB_PATH = str(_TEST_DIR / "workeros.db")
-os.environ["WORKEROS_DB"] = _DB_PATH
-os.environ["FLOOM_DB"] = _DB_PATH
-os.environ["WORKEROS_DEPLOY"] = "local"
-os.environ["WORKEROS_API_ENV_FILE"] = str(_TEST_DIR / "api.env")
-os.environ["FLOOM_BLOBS_DIR"] = str(_TEST_DIR / "blobs")
-os.environ["FLOOM_SECRET"] = "test-secret-toctou-280"
 
-import main  # noqa: E402
-import run_service  # noqa: E402
+main = None
+run_service = None
 
 _AUTH = {"x-floom-secret": "test-secret-toctou-280"}
 _OWNER = "federico"
 
 
+def _reset_api_modules() -> None:
+    try:
+        from auth.factory import get_auth_provider
+
+        get_auth_provider.cache_clear()
+    except Exception:
+        pass
+    for name in list(sys.modules):
+        if (
+            name in ("main", "run_service", "worker_registry", "runner_utils")
+            or name in ("auth", "db", "routers")
+            or name.startswith(("db.", "auth.", "routers."))
+        ):
+            sys.modules.pop(name, None)
+
+
 @pytest.fixture(autouse=True)
-def _pin_db_to_this_module():
-    os.environ["WORKEROS_DB"] = _DB_PATH
-    os.environ["FLOOM_DB"] = _DB_PATH
-    os.environ["FLOOM_SECRET"] = "test-secret-toctou-280"
+def _pin_db_to_this_module(monkeypatch):
+    monkeypatch.setenv("WORKEROS_DB", _DB_PATH)
+    monkeypatch.setenv("FLOOM_DB", _DB_PATH)
+    monkeypatch.setenv("WORKEROS_DEPLOY", "local")
+    monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(_TEST_DIR / "api.env"))
+    monkeypatch.setenv("FLOOM_BLOBS_DIR", str(_TEST_DIR / "blobs"))
+    monkeypatch.setenv("FLOOM_SECRET", "test-secret-toctou-280")
+    _reset_api_modules()
+    global main, run_service
+    import main as main_mod  # noqa: PLC0415
+    import run_service as run_service_mod  # noqa: PLC0415
+
+    main = main_mod
+    run_service = run_service_mod
+    main.init_db()
+    main.get_repositories.cache_clear()
     yield
+    main = None
+    run_service = None
+    _reset_api_modules()
 
 
 @pytest.fixture(autouse=True)
-def _stub_side_effect(monkeypatch):
+def _stub_side_effect(monkeypatch, _pin_db_to_this_module):
     """Stub the follow-up run spawn so the only thing under test is the gate.
 
     `create_run` records every spawn and returns a fake run id; `start_run` is a
