@@ -19,7 +19,7 @@ describe("InlineFileOpen rename (#770)", () => {
     );
 
     // #783: the file lives under "sub/" — descend into the folder first.
-    fireEvent.click(screen.getByText("sub"));
+    fireEvent.click(screen.getByText("sub/"));
     fireEvent.click(screen.getByRole("button", { name: "Rename" }));
     const input = screen.getByDisplayValue("notes.txt"); // base name, not the full path
     fireEvent.change(input, { target: { value: "renamed.txt" } });
