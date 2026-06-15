@@ -346,6 +346,9 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                         <div className="mt-2 flex flex-col gap-1">
                           {setupItems.map((item) => {
                             const workerLabel = item.worker_name || humanizeSlug(item.worker_id, "Worker");
+                            const workerReturnTo = item.worker_id
+                              ? `/workers?sel=${encodeURIComponent(item.worker_id)}`
+                              : "/workers";
                             return item.kind === "missing_connection" ? (
                               <Link
                                 key={item.worker_id}
@@ -359,7 +362,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
                             ) : (
                               <Link
                                 key={item.worker_id}
-                                href={`/secrets?worker=${encodeURIComponent(item.worker_id ?? "")}`}
+                                href={`/connections/secrets?worker=${encodeURIComponent(item.worker_id ?? "")}&return_to=${encodeURIComponent(workerReturnTo)}`}
                                 onClick={() => setOpen(false)}
                                 className="inline-flex h-7 items-center justify-between gap-2 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                               >
