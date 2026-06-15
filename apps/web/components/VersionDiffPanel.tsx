@@ -25,7 +25,7 @@ function LineDiff({ oldContent, newContent }: { oldContent: string; newContent: 
   if (changes.every((c) => !c.added && !c.removed)) {
     return (
       <p className="px-4 py-8 text-center text-xs text-muted-foreground italic">
-        No changes — this file is identical to the current version.
+        No changes; this file is identical to the current version.
       </p>
     );
   }

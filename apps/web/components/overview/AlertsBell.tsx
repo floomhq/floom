@@ -184,7 +184,7 @@ export function AlertsBell({ items, onRefresh }: AlertsBellProps) {
         aria-label={
           count > 0
             ? `${count} worker${count === 1 ? "" : "s"} need${count === 1 ? "s" : ""} attention`
-            : "Notifications — all clear"
+            : "Notifications: all clear"
         }
         aria-expanded={open}
         aria-haspopup="dialog"

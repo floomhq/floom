@@ -84,8 +84,6 @@ async function handler(
   // Preserve query string
   const search = req.nextUrl.search;
   const upstreamUrl = `${apiBase}${upstreamPath}${search}`;
-  const isConnectionCallback = upstreamPath === "/connections/callback";
-
   // Forward relevant request headers, injecting the secret
   const forwardHeaders: Record<string, string> = {
     "x-floom-secret": API_SECRET,
@@ -116,11 +114,15 @@ async function handler(
     body = isUpload ? req.body : await req.arrayBuffer();
   }
 
+  // #1182: always use redirect:"manual" so the proxy never server-side-fetches
+  // a backend-issued Location that points at an external/internal host (SSRF).
+  // safeProxyLocation() below filters the Location before forwarding it to the
+  // browser, which handles the redirect itself.
   const fetchOptions: RequestInit & { duplex?: "half" } = {
     method: req.method,
     headers: forwardHeaders,
     body: body ? body : undefined,
-    redirect: isConnectionCallback ? "manual" : "follow",
+    redirect: "manual",
   };
   if (isUpload && body) {
     fetchOptions.duplex = "half";

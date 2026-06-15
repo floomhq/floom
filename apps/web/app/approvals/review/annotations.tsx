@@ -111,7 +111,7 @@ export function TextHighlightAnnotator({
     const out: Array<{ text: string; highlighted: boolean }> = [];
     let cursor = 0;
     for (const [start, end] of ranges) {
-      if (start < cursor) continue; // overlap — skip
+      if (start < cursor) continue; // overlap: skip
       if (start > cursor) out.push({ text: text.slice(cursor, start), highlighted: false });
       out.push({ text: text.slice(start, end), highlighted: true });
       cursor = end;

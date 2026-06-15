@@ -2,8 +2,9 @@
 
 (1) limits in worker_yml were stored verbatim: author-set timeout_seconds /
     max_total_tokens / max_output_tokens / max_monthly_cost_usd had no server
-    ceiling. Now clamped to operator maxima (env-overridable) at model level,
-    so the clamp applies on every create/update path that builds WorkerLimits.
+    ceiling. Timeout is now rejected above the operator maximum at model level;
+    token and spend ceilings are clamped on every create/update path that
+    builds WorkerLimits.
 (2) cron had no minimum interval: every-minute and 6-field sub-minute crons
     were accepted. Now rejected (min 5-minute interval, 5-field only).
 """
@@ -11,6 +12,9 @@ from __future__ import annotations
 
 import sys
 from pathlib import Path
+
+import pytest
+from pydantic import ValidationError
 
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
@@ -22,9 +26,12 @@ from cron_utils import is_valid_cron_expr
 
 # --- (1) limit clamping -------------------------------------------------------
 
-def test_oversized_limits_are_clamped():
+def test_oversized_limits_reject_timeout_and_clamp_tokens():
+    with pytest.raises(ValidationError):
+        WorkerLimits(timeout_seconds=3601)
+
     lim = WorkerLimits(
-        timeout_seconds=999999,
+        timeout_seconds=3600,
         max_output_tokens=999999999,
         max_total_tokens=999999999,
         max_monthly_cost_usd=999999.0,
@@ -54,11 +61,6 @@ def test_defaults_unchanged():
     assert lim.max_output_tokens == 1_000_000
     assert lim.max_total_tokens == 1_000_000
     assert lim.max_monthly_cost_usd is None  # unlimited stays unlimited
-
-
-def test_ceilings_env_overridable(monkeypatch):
-    monkeypatch.setenv("FLOOM_MAX_TIMEOUT_SECONDS", "120")
-    assert WorkerLimits(timeout_seconds=999999).timeout_seconds == 120
 
 
 # --- (2) cron minimum interval / field count ---------------------------------

@@ -1445,6 +1445,24 @@ def test_connection(
                         return {}
                     return body if isinstance(body, dict) else {}
 
+                # #1180: re-validate at dial time to prevent SSRF via DNS
+                # rebinding or DB/admin URL mutation after creation.
+                try:
+                    mcp_url = assert_safe_outbound_mcp_url(mcp_url)
+                except Exception as _ssrf_exc:
+                    _write_connection_check(
+                        connection_id,
+                        "failed",
+                        str(_ssrf_exc),
+                        tested_at,
+                        status="failed",
+                        repos=repos,
+                    )
+                    return ConnectionTestResult(
+                        status="failed",
+                        reason=f"Connection URL is not permitted: {_ssrf_exc}",
+                        tested_at=tested_at,
+                    )
                 probe_url = mcp_url.rstrip("/")
                 init_payload = {
                     "jsonrpc": "2.0",

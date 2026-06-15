@@ -60,7 +60,7 @@ function SetupRequiredCallout({ missingBySlug }: { missingBySlug: Map<string, st
     >
       <AlertTriangle className="mt-0.5 size-4 shrink-0" />
       <div className="min-w-0">
-        <span className="font-medium">Setup required — </span>
+        <span className="font-medium">Setup required: </span>
         {totalWorkers} worker{totalWorkers !== 1 ? "s" : ""} need{totalWorkers === 1 ? "s" : ""}{" "}
         {slugs.length === 1 ? (
           <Link

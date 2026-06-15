@@ -126,6 +126,62 @@ def test_new_pack_defaults_private(client_and_main):
     assert body["owner_id"] == "federico"
 
 
+def test_new_pack_uses_active_workspace_for_brain_pack_row(client_and_main):
+    client, main = client_and_main
+    import git_ops
+
+    class _Workers:
+        def list(self, *, user_id: str):
+            return []
+
+    class _AssetAccess:
+        def __init__(self):
+            self.ensure_calls = []
+            self.permission_calls = []
+
+        def ensure_brain_pack(self, **kwargs):
+            self.ensure_calls.append(kwargs)
+            return {
+                "id": kwargs["pack_id"],
+                "owner_id": kwargs["owner_id"],
+                "workspace_id": kwargs["workspace_id"],
+                "visibility": "private",
+            }
+
+        def get_permissions(self, **kwargs):
+            self.permission_calls.append(kwargs)
+            return {
+                "is_owner": True,
+                "can_view": True,
+                "can_edit": True,
+                "can_run": True,
+                "can_delete": True,
+                "can_share": True,
+                "visibility": "private",
+            }
+
+    class _Repos:
+        def __init__(self, asset_access):
+            self.asset_access = asset_access
+            self.workers = _Workers()
+
+    asset_access = _AssetAccess()
+    repos = _Repos(asset_access)
+    main.app.dependency_overrides[main.get_repos] = lambda: repos
+    git_ops.set_workspace_id_resolver(lambda: "cloud-workspace-1")
+    try:
+        created = client.post("/contexts/cloudpack")
+    finally:
+        main.app.dependency_overrides.pop(main.get_repos, None)
+        git_ops.set_workspace_id_resolver(None)
+
+    assert created.status_code == 200, created.text
+    assert asset_access.ensure_calls
+    assert {call["workspace_id"] for call in asset_access.ensure_calls} == {"cloud-workspace-1"}
+    assert asset_access.permission_calls
+    assert {call["workspace_id"] for call in asset_access.permission_calls} == {"cloud-workspace-1"}
+
+
 def test_visibility_on_unknown_pack_404(client_and_main):
     client, _main = client_and_main
     resp = client.put("/contexts/nope/visibility", json={"visibility": "workspace"})

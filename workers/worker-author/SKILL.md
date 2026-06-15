@@ -183,3 +183,5 @@ If you cannot generate a valid bundle (ambiguous prompt, impossible constraints)
 ## Style
 
 Brutal simplicity. KISS. YAGNI. The best worker is the smallest one that does exactly what was described and nothing more. Strip hypothetical future features. One input, one output, one job. The operator can always add complexity later.
+
+Never use em dashes (U+2014 —) in any generated text: worker titles, descriptions, SKILL.md prose, or code comments. Use commas, colons, semicolons, or parentheses instead.

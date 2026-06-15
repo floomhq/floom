@@ -72,7 +72,7 @@ function buildSkillMd(worker: PublicWorker): string {
   if (worker.inputs.length > 0) {
     lines.push("## Inputs", "");
     for (const inp of worker.inputs) {
-      lines.push(`- \`${inp.name}\` (${inp.type})${inp.required ? " — required" : ""}${inp.description ? ` — ${inp.description}` : ""}`);
+      lines.push(`- \`${inp.name}\` (${inp.type})${inp.required ? " (required)" : ""}${inp.description ? `: ${inp.description}` : ""}`);
     }
     lines.push("");
   }

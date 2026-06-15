@@ -114,7 +114,7 @@ const TOOL_GROUPS: { group: string; tools: { name: string; description: string }
   {
     group: "System",
     tools: [
-      { name: "system.overview", description: "Full workspace dashboard — health, runs, pending approvals, alerts." },
+      { name: "system.overview", description: "Full workspace dashboard: health, runs, pending approvals, alerts." },
       { name: "system.stats", description: "7-day aggregate run statistics across the whole workspace." },
       { name: "system.info", description: "Platform version and configuration flags." },
       { name: "system.alerts", description: "Active system-wide alerts." },

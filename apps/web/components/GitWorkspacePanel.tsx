@@ -36,7 +36,7 @@ function PATForm({ onConnected }: { onConnected: (username: string) => void }) {
   return (
     <div className="space-y-4">
       <p className="text-sm text-muted-foreground">
-        Connect a GitHub token so Floom can back up your workspace — workers, contexts, and instructions — to a private repo. Every save becomes a commit. Two steps:
+        Connect a GitHub token so Floom can back up your workspace (workers, contexts, and instructions) to a private repo. Every save becomes a commit. Two steps:
       </p>
 
       {/* Step 1 — generate a scoped token. The link pre-selects the exact
@@ -50,7 +50,7 @@ function PATForm({ onConnected }: { onConnected: (username: string) => void }) {
             <p className="text-xs text-muted-foreground">
               The button below opens GitHub with the right scope already selected
               (<code className="font-mono text-foreground">repo</code>, for private repos).
-              Pick an expiry, scroll down, and click <span className="font-medium text-foreground">Generate token</span>. Copy the value — it starts with <code className="font-mono text-foreground">ghp_</code> and is shown only once.
+              Pick an expiry, scroll down, and click <span className="font-medium text-foreground">Generate token</span>. Copy the value; it starts with <code className="font-mono text-foreground">ghp_</code> and is shown only once.
             </p>
             <a
               href="https://github.com/settings/tokens/new?scopes=repo&description=Floom+Workspace"
@@ -130,9 +130,9 @@ function RepoSelector({
     try {
       const status = await api.system.gitLink(fullName);
       if (status.secrets_loaded && status.secrets_loaded > 0) {
-        toast.success(`Linked ${fullName} — ${status.secrets_loaded} secret${status.secrets_loaded !== 1 ? "s" : ""} restored from encrypted vault`);
+        toast.success(`Linked ${fullName}: ${status.secrets_loaded} secret${status.secrets_loaded !== 1 ? "s" : ""} restored from encrypted vault`);
       } else {
-        toast.success(`Linked ${fullName} — workspace pushed to GitHub`);
+        toast.success(`Linked ${fullName}: workspace pushed to GitHub`);
       }
       onLinked(status);
     } catch (e: unknown) {
@@ -150,7 +150,7 @@ function RepoSelector({
       toast.success(`Created ${repo.full_name}`);
       const status = await api.system.gitLink(repo.full_name);
       if (status.secrets_loaded && status.secrets_loaded > 0) {
-        toast.success(`Linked — ${status.secrets_loaded} secret${status.secrets_loaded !== 1 ? "s" : ""} restored from encrypted vault`);
+        toast.success(`Linked: ${status.secrets_loaded} secret${status.secrets_loaded !== 1 ? "s" : ""} restored from encrypted vault`);
       } else {
         toast.success("Workspace pushed to GitHub");
       }
@@ -168,7 +168,7 @@ function RepoSelector({
           Connected as <span className="font-medium text-foreground">@{username}</span>.
           {repos.length > 0
             ? " Pick an existing workspace repo or create a new one."
-            : " No workspace repos found — create one below."}
+            : " No workspace repos found; create one below."}
         </p>
         <Button variant="ghost" size="sm" onClick={() => void loadRepos()} disabled={loading}>
           <RefreshCw className={cn("size-3.5", loading && "animate-spin")} />
@@ -320,7 +320,7 @@ function ConnectedView({
       </div>
 
       <p className="text-xs text-muted-foreground">
-        Every worker save, context edit, and workspace update is automatically committed and pushed to this repo. Secrets are encrypted and stored in the repo — a fresh install with the same GitHub connection restores them automatically.
+        Every worker save, context edit, and workspace update is automatically committed and pushed to this repo. Secrets are encrypted and stored in the repo; a fresh install with the same GitHub connection restores them automatically.
       </p>
 
       <div className="flex items-center gap-2">

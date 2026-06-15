@@ -905,12 +905,12 @@ def create_workspace_token(
     return _WorkspaceTokenCreateResponse(id=token_id, name=name, token=raw, expires_at=expires_at)
 
 
-@workspace_router.delete("/workspace/tokens/{token_id}", status_code=204)
+@workspace_router.delete("/workspace/tokens/{token_id}", status_code=204, response_class=Response)
 def revoke_workspace_token(
     token_id: str,
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
-) -> None:
+) -> Response:
     from db import get_db, now_iso
 
     _require_workspace_admin(auth)
@@ -923,6 +923,7 @@ def revoke_workspace_token(
         ).rowcount
     if not updated:
         raise HTTPException(status_code=404, detail="token not found")
+    return Response(status_code=204)
 
 
 # ---------------------------------------------------------------------------
@@ -986,25 +987,26 @@ def set_workspace_secret(
     return {"ok": True, "name": name}
 
 
-@workspace_router.delete("/workspace/secrets/{name}", status_code=204)
+@workspace_router.delete("/workspace/secrets/{name}", status_code=204, response_class=Response)
 def delete_workspace_secret(
     name: str,
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
-) -> None:
+) -> Response:
     _require_workspace_admin(auth)
     workspace_id = _active_workspace_id(request)
     delete_ws = getattr(repos.secrets, "delete_workspace_secret", None)
     if delete_ws is not None:
         delete_ws(workspace_id=workspace_id, name=name)
-        return
+        return Response(status_code=204)
     from db.sqlite import workspace_actor_id
 
     delete = getattr(repos.secrets, "delete", None)
     if delete is None:
         raise HTTPException(status_code=501, detail="secret delete not available")
     delete(user_id=workspace_actor_id(workspace_id), name=name)
+    return Response(status_code=204)
 
 
 @workspace_router.get("/workspace/settings")
@@ -1034,13 +1036,13 @@ def get_workspace_settings(
     return out
 
 
-@workspace_router.put("/workspace/settings/{key}", status_code=204)
+@workspace_router.put("/workspace/settings/{key}", status_code=204, response_class=Response)
 def put_workspace_setting(
     key: str,
     body: _WorkspaceSettingValue,
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
-) -> None:
+) -> Response:
     """#794/#797: upsert a workspace setting. Admin-guarded (the #804 model:
     members must not change workspace behaviour, enforced server-side)."""
     from db import get_db, now_iso
@@ -1058,3 +1060,4 @@ def put_workspace_setting(
             """,
             (ws, key, body.value, now_iso()),
         )
+    return Response(status_code=204)
