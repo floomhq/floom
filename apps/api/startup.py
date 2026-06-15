@@ -717,7 +717,11 @@ def _override_git_rollback_for_cloud() -> None:
             raise engine_git_ops.GitOpsError("No workspace context for cloud rollback")
 
         # Try local git workspace first
-        from apps.api.cloud_git_local import ensure_workspace_repo, sync_checkout_to_workers
+        from apps.api.cloud_git_local import (
+            ensure_workspace_repo,
+            sync_checkout_to_contexts,
+            sync_checkout_to_workers,
+        )
         git_dir = ensure_workspace_repo(workspace_id)
         try:
             result = _sp.run(
@@ -730,6 +734,7 @@ def _override_git_rollback_for_cloud() -> None:
             )
             if result.returncode == 0:
                 sync_checkout_to_workers(workspace_id, git_dir, rel_path)
+                sync_checkout_to_contexts(workspace_id, git_dir, rel_path)  # #319
                 _logger.info("cloud_checkout_path: restored %s@%s from local git", rel_path, sha)
                 return
             _logger.debug("Local git checkout failed: %s", result.stderr)
@@ -947,6 +952,108 @@ def _override_git_ops_for_cloud() -> None:
         pass
 
 
+def _override_workers_git_prefix_for_cloud() -> None:
+    """#319: the engine's _workers_git_prefix() returns '' when a cloud workspace
+    is active, assuming worker dirs sit at the git root. But cloud_git_local
+    materializes them under 'workers/<id>/', so list_worker_versions / rollback
+    call git_ops.get_log(rel_path='/<id>') which never matches — /versions is
+    always empty and rollback can't resolve SHAs, even though commits exist
+    (the commit path's _dispatch_write writes 'workers/<id>' either way). Force
+    the correct 'workers' prefix whenever a cloud workspace is active.
+
+    TODO(engine): upstream to floomhq/workeros services/git_service.py.
+    """
+    from apps.api.auth.workspace_context import get_active_workspace_id
+    try:
+        gs = import_engine_module("services.git_service")
+    except Exception:
+        return
+    orig = getattr(gs, "_workers_git_prefix", None)
+    if orig is None or getattr(orig, "_workeros_cloud_patched", False):
+        return
+
+    def _cloud_workers_git_prefix() -> str:
+        if get_active_workspace_id():
+            return "workers"
+        return orig()
+
+    _cloud_workers_git_prefix._workeros_cloud_patched = True  # type: ignore[attr-defined]
+    gs._workers_git_prefix = _cloud_workers_git_prefix
+    # Rebind in every engine module that imported the symbol by name.
+    for modname in (
+        "main",
+        "routers.worker_versions",
+        "routers.workspace",
+        "services.worker_access",
+        "services.worker_registry_ops",
+    ):
+        try:
+            m = import_engine_module(modname)
+            if hasattr(m, "_workers_git_prefix"):
+                m._workers_git_prefix = _cloud_workers_git_prefix
+        except Exception:
+            logger.warning("git-prefix rebind failed for %s", modname, exc_info=True)
+    logger.info("Registered cloud _workers_git_prefix override (#319: 'workers')")
+
+
+def _override_git_commit_context_for_cloud() -> None:
+    """#319: sensitive contexts skip git (correct) but ALSO never reach Supabase
+    Storage — the cloud Storage upload lives inside _cloud_commit_paths, which
+    sensitive contexts bypass entirely. So they end up with NO durable backup and
+    are lost on a container recycle (and these are exactly the contexts that may
+    hold credentials). Wrap _git_commit_context so a sensitive context still
+    uploads to Storage on write; non-sensitive contexts keep the original path.
+
+    TODO(engine): upstream to floomhq/workeros (sensitive contexts should always
+    back up to the durable store).
+    """
+    from pathlib import Path as _Path
+
+    from apps.api.auth.workspace_context import get_active_workspace_id
+    try:
+        ca = import_engine_module("services.context_access")
+        engine_contexts = import_engine_module("contexts")
+    except Exception:
+        return
+    orig = getattr(ca, "_git_commit_context", None)
+    if orig is None or getattr(orig, "_workeros_cloud_patched", False):
+        return
+
+    def _cloud_git_commit_context(
+        name, rel_path=None, *, message, author_name="WorkerOS", author_email="workeros@local"
+    ):
+        try:
+            sensitive = bool(engine_contexts.is_context_sensitive(name))
+        except Exception:
+            sensitive = True
+        if not sensitive:
+            return orig(
+                name, rel_path, message=message,
+                author_name=author_name, author_email=author_email,
+            )
+        # Sensitive: skip git (as the engine does) but still back up to Storage.
+        workspace_id = get_active_workspace_id()
+        if not workspace_id:
+            return
+        try:
+            cdir = _Path(str(engine_contexts.context_dir(name)))
+            from apps.api.cloud_contexts import upload_context_background
+            upload_context_background(workspace_id, name, cdir)
+        except Exception:
+            logger.warning("sensitive context Storage backup failed for %s", name, exc_info=True)
+
+    _cloud_git_commit_context._workeros_cloud_patched = True  # type: ignore[attr-defined]
+    ca._git_commit_context = _cloud_git_commit_context
+    for modname in ("main", "routers.contexts"):
+        try:
+            m = import_engine_module(modname)
+            if hasattr(m, "_git_commit_context"):
+                m._git_commit_context = _cloud_git_commit_context
+        except Exception:
+            logger.warning("_git_commit_context rebind failed for %s", modname, exc_info=True)
+    logger.info("Registered cloud _git_commit_context override (#319: sensitive→Storage)")
+
+
 def _register_git_workspace_resolver() -> None:
     """Tell the engine's git_ops to scope the workspace git root per-request.
 
@@ -1097,6 +1204,8 @@ def register_cloud_components() -> None:
     _install_worker_call_signing_key()
     _register_contexts_scope_resolver()
     _register_git_workspace_resolver()
+    _override_workers_git_prefix_for_cloud()
+    _override_git_commit_context_for_cloud()
     _override_git_cfg_for_cloud()
     _override_git_ops_for_cloud()
     _override_git_rollback_for_cloud()

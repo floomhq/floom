@@ -17,6 +17,8 @@ venv
 .env.local
 .vercel
 engine/.git
+engine/apps/web
+engine/apps/mcp/node_modules
 supabase/.branches
 supabase/.temp
 # Backend image is Python-only (apps/ + engine/). The Next.js frontend in web/

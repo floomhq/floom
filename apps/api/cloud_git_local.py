@@ -749,3 +749,59 @@ def sync_checkout_to_workers(
             logger.info("sync_checkout_to_workers: updated skill_versions sv=%s", sv_id)
     except Exception as exc:
         logger.warning("sync_checkout_to_workers: Supabase update failed (non-fatal): %s", exc)
+
+
+def sync_checkout_to_contexts(
+    workspace_id: str,
+    git_dir: Path,
+    rel_path: str,
+) -> None:
+    """After 'git checkout sha -- contexts/<name>', mirror the restored files
+    into the live context dir (where reads + hydration serve from) AND re-upload
+    to Supabase Storage, so a context rollback actually takes effect (#319).
+
+    Without this, rollback_context checks out the git tree but nothing syncs it
+    back to context_dir()/Storage, so GET /contexts/files keeps serving the old
+    content. Mirrors sync_checkout_to_workers for the contexts/ path family.
+    """
+    if not rel_path.startswith("contexts/"):
+        return
+
+    parts = rel_path.split("/")
+    context_name = parts[1] if len(parts) > 1 else parts[-1]
+    src_dir = git_dir / "contexts" / context_name
+    if not src_dir.is_dir():
+        return
+
+    try:
+        from contexts import context_dir as _ctx_dir
+        dest_dir = Path(str(_ctx_dir(context_name)))
+    except Exception:
+        logger.warning("sync_checkout_to_contexts: context_dir failed for %s", context_name, exc_info=True)
+        return
+
+    dest_dir.mkdir(parents=True, exist_ok=True)
+    src_files = {p.relative_to(src_dir).as_posix() for p in src_dir.rglob("*") if p.is_file()}
+    for rel in src_files:
+        dp = dest_dir / rel
+        dp.parent.mkdir(parents=True, exist_ok=True)
+        try:
+            dp.write_bytes((src_dir / rel).read_bytes())
+        except Exception:
+            logger.warning("sync_checkout_to_contexts: copy failed for %s", rel, exc_info=True)
+
+    # Remove files that no longer exist at the rolled-back SHA (skip dotfiles).
+    for dp in list(dest_dir.rglob("*")):
+        if dp.is_file():
+            rel = dp.relative_to(dest_dir).as_posix()
+            if rel not in src_files and not dp.name.startswith("."):
+                try:
+                    dp.unlink()
+                except Exception:
+                    pass
+
+    try:
+        from apps.api.cloud_contexts import upload_context
+        upload_context(workspace_id, context_name, dest_dir)
+    except Exception:
+        logger.warning("sync_checkout_to_contexts: Storage re-upload failed for %s", context_name, exc_info=True)
