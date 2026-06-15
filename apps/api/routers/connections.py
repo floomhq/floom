@@ -1417,6 +1417,27 @@ def test_connection(
         allowed_tools = set(_parse_json_string_list(row.get("mcp_allowed_tools_json")))
         if mcp_url:
             try:
+                # #1180: Re-validate the stored URL at dial time to defeat DNS
+                # rebinding: a URL that passed creation-time checks may have been
+                # altered in the DB or may now resolve to an internal IP after a
+                # rebind.  Fail closed — return a failed result rather than probing.
+                try:
+                    assert_safe_outbound_mcp_url(mcp_url)
+                except UnsafeMCPUrlError as _ssrf_err:
+                    _write_connection_check(
+                        connection_id,
+                        "failed",
+                        str(_ssrf_err),
+                        tested_at,
+                        status="failed",
+                        repos=repos,
+                    )
+                    return ConnectionTestResult(
+                        status="failed",
+                        reason=f"Connection URL rejected by SSRF guard: {_ssrf_err}",
+                        tested_at=tested_at,
+                    )
+
                 import httpx as _httpx
                 headers = {}
                 if mcp_token:

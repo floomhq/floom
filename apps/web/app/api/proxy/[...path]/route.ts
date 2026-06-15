@@ -116,11 +116,18 @@ async function handler(
     body = isUpload ? req.body : await req.arrayBuffer();
   }
 
+  // #1182: always use redirect:"manual" so we inspect every Location header
+  // before following it.  With redirect:"follow" the runtime silently follows
+  // 3xx responses server-side and the final URL is never checked — an attacker-
+  // controlled backend redirect to an internal host becomes an SSRF.
+  // safeProxyLocation() (defined above) already strips or rewrites any Location
+  // that doesn't resolve to the app or api origin, so this is the correct place
+  // to enforce the policy for ALL requests (not just OAuth callbacks).
   const fetchOptions: RequestInit & { duplex?: "half" } = {
     method: req.method,
     headers: forwardHeaders,
     body: body ? body : undefined,
-    redirect: isConnectionCallback ? "manual" : "follow",
+    redirect: "manual",
   };
   if (isUpload && body) {
     fetchOptions.duplex = "half";

@@ -217,6 +217,89 @@ def test_create_mcp_connection_stdio_unaffected(monkeypatch, tmp_path):
 
 
 # ---------------------------------------------------------------------------
+# #1180 — /connections/{id}/test must re-validate mcp_url at dial time
+# ---------------------------------------------------------------------------
+
+def test_connection_test_endpoint_rejects_internal_url(monkeypatch, tmp_path):
+    """POST /connections/{id}/test must reject mcp_url that point at internal
+    addresses even if the URL passed at creation time (DNS-rebinding defense).
+    Before the fix this path called httpx.post(probe_url) without re-running
+    assert_safe_outbound_mcp_url — the exploit was trivially exploitable."""
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app, raise_server_exceptions=True)
+
+    # 1. Create a valid MCP connection (public IP passes registration).
+    with patch("models.socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")):
+        create_resp = client.post(
+            "/connections/mcp",
+            json={"label": "ssrf-test", "transport": "streamable_http", "url": "https://mcp.example.com"},
+            headers=AUTH_HEADERS,
+        )
+    assert create_resp.status_code == 200, create_resp.text
+    conn_id = create_resp.json()["id"]
+
+    # 2. Simulate DNS rebinding: the stored URL now resolves to the metadata IP.
+    #    The test endpoint must re-check and return status="failed" instead of
+    #    dialing 169.254.169.254.
+    with patch("models.socket.getaddrinfo", return_value=_addrinfo("169.254.169.254")):
+        test_resp = client.post(
+            f"/connections/{conn_id}/test",
+            headers=AUTH_HEADERS,
+        )
+    assert test_resp.status_code == 200, test_resp.text
+    body = test_resp.json()
+    assert body["status"] == "failed", (
+        "#1180: test_connection must return status=failed when the stored URL "
+        "now resolves to an internal address (DNS rebinding)."
+    )
+    assert "ssrf" in body.get("reason", "").lower() or "not allowed" in body.get("reason", "").lower(), (
+        "#1180: failure reason must mention the SSRF guard rejection"
+    )
+
+
+def test_connection_test_endpoint_rejects_metadata_literal(monkeypatch, tmp_path):
+    """POST /connections/{id}/test must reject a literal metadata IP in mcp_url.
+    This covers the case where the URL was tampered with directly in the DB."""
+    import sqlite3
+    from pathlib import Path
+
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app, raise_server_exceptions=True)
+
+    # Create a valid connection first.
+    with patch("models.socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")):
+        create_resp = client.post(
+            "/connections/mcp",
+            json={"label": "db-tamper", "transport": "streamable_http", "url": "https://mcp.example.com"},
+            headers=AUTH_HEADERS,
+        )
+    assert create_resp.status_code == 200, create_resp.text
+    conn_id = create_resp.json()["id"]
+
+    # Simulate DB tampering: overwrite mcp_url with a metadata IP.
+    # The table name used by this codebase is composio_connections.
+    db_path = tmp_path / "floom.db"
+    conn = sqlite3.connect(str(db_path))
+    conn.execute(
+        "UPDATE composio_connections SET mcp_url = ? WHERE id = ?",
+        ("http://169.254.169.254/latest/meta-data/", conn_id),
+    )
+    conn.commit()
+    conn.close()
+
+    # Test must be rejected before any HTTP dial is made.
+    test_resp = client.post(
+        f"/connections/{conn_id}/test",
+        headers=AUTH_HEADERS,
+    )
+    assert test_resp.status_code == 200, test_resp.text
+    body = test_resp.json()
+    assert body["status"] == "failed", (
+        "#1180: test_connection must reject metadata IP even after DB tampering"
+    )
+
+
+# ---------------------------------------------------------------------------
 # Dial-time re-check in the agent driver
 # ---------------------------------------------------------------------------
 
