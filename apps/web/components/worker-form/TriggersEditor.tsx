@@ -244,7 +244,7 @@ function TriggerRowEditor({
             size="sm"
             className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
             onClick={onCollapse}
-            title="Collapse — changes apply when you click Save triggers below"
+            title="Collapse (changes apply when you click Save triggers below)"
           >
             Collapse
           </Button>
