@@ -816,7 +816,7 @@ WorkerContextMountSpec = Union[str, WorkerContextMount]
 
 
 class WorkerMemoryConfig(BaseModel):
-    enabled: bool = False
+    enabled: bool = True  # #1387: memory on by default for every new worker
     context: Optional[str] = None
 
     @model_validator(mode="before")
