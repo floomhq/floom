@@ -198,44 +198,65 @@ def _worker_network_caps(config: WorkerConfig | None) -> tuple[bool, list[str], 
     return egress, allow_out, deny_out
 
 
+def _is_e2b_ip_cidr(value: str) -> bool:
+    """True if E2B will accept ``value`` in deny_out — an IPv4/IPv6 CIDR or bare IP.
+
+    E2B's deny_out validator rejects domains, the non-routable "0.0.0.0/8" range,
+    "::/0", and the "ALL_TRAFFIC" sentinel (all -> "400: invalid denied CIDR ...").
+    """
+    import ipaddress
+
+    try:
+        ipaddress.ip_network(value, strict=False)
+        return True
+    except ValueError:
+        return False
+
+
 def _e2b_network_policy(config: WorkerConfig | None, *, api_url: str | None = None) -> dict[str, Any]:
-    """Build the E2B sandbox network policy.
+    """Build the E2B sandbox network policy. Two modes, both verified live against
+    the e2b SDK + the E2B API:
 
-    E2B egress model, verified against the e2b SDK *and* a live API probe:
-      * ``deny_out`` accepts IP CIDRs ONLY. Domains, the non-routable "0.0.0.0/8"
-        range, and the "ALL_TRAFFIC" sentinel are ALL rejected with
-        ``400: invalid denied CIDR ...``.
-      * A DOMAIN in ``allow_out`` forces allowlist mode, which then demands
-        "ALL_TRAFFIC" in ``deny_out`` — but that's rejected too, so a domain
-        allowlist is simply unusable on this API version.
+    OPEN (default — single-tenant / OSS self-host, where you run your own workers):
+        allow all public egress, block only the private/internal CIDR ranges (SSRF).
+        ``{allow_public_traffic: True, deny_out: [private CIDRs]}``. Public platform
+        endpoints (OpenAI / Anthropic / Bedrock / Composio / API host) are reachable
+        because they're public — no allow_out needed.
 
-    The probe showed exactly one shape E2B accepts for an egress worker: allow all
-    public traffic and only BLOCK the private/internal ranges (SSRF protection).
-    Public platform endpoints (OpenAI / Anthropic / Bedrock / Composio / the API
-    host) need no explicit allow entry — they're public, so default-allow reaches
-    them. (The previous code sent platform *domains* in ``allow_out``, which is what
-    broke every egress worker, e.g. worker-author.)
+    STRICT ALLOWLIST (``WORKEROS_E2B_RESTRICT_EGRESS=1`` — multi-tenant cloud running
+    UNTRUSTED user workers): deny ALL egress, then allow only the platform egress
+    hosts + the worker's own declared allows. E2B expresses "deny everything else"
+    as the CIDR ``0.0.0.0/0`` (its error message says "ALL_TRAFFIC", but only
+    ``0.0.0.0/0`` is actually accepted; ``::/0`` is rejected, so this allowlist is
+    IPv4-only — IPv6 egress is not constrained).
+
+    Earlier code sent DOMAIN entries in allow_out *without* a deny-all, which E2B
+    rejects ("must include ALL_TRAFFIC ...") — that broke every egress worker
+    (e.g. worker-author). Both shapes below are what the API actually accepts.
     """
     _egress, declared_allow, declared_deny = _worker_network_caps(config)
+    strict = (os.environ.get("WORKEROS_E2B_RESTRICT_EGRESS") or "").strip().lower() in {
+        "1",
+        "true",
+        "yes",
+        "on",
+    }
 
-    import ipaddress as _ipaddress
+    if strict:
+        # Allowlist: deny all IPv4, permit only the platform hosts + declared allows
+        # (allow entries take precedence over the deny-all and may be domains/CIDRs).
+        allow_out = list(dict.fromkeys([*_platform_egress_hosts(api_url), *declared_allow]))
+        extra_deny = [d for d in dict.fromkeys(declared_deny) if _is_e2b_ip_cidr(d)]
+        return {"allow_out": allow_out, "deny_out": ["0.0.0.0/0", *extra_deny]}
 
-    def _is_ip_cidr(value: str) -> bool:
-        try:
-            _ipaddress.ip_network(value, strict=False)
-            return True
-        except ValueError:
-            return False
-
+    # Open: block private ranges, allow the rest. Only IP/CIDR allow-overrides are
+    # safe here — a domain allow entry would force allowlist mode (use strict for
+    # that), and public hosts are reachable anyway.
     deny_candidates = dict.fromkeys(
         [*_DEFAULT_E2B_DENY_OUT, *_csv_env("WORKEROS_E2B_DENY_OUT"), *declared_deny]
     )
-    deny_out = [d for d in deny_candidates if _is_ip_cidr(d)]
-    # Only IP/CIDR allow-overrides are safe; a domain allow entry would trip the
-    # allowlist mode E2B can't satisfy, so domains in declared allow_out are dropped
-    # (default-allow already reaches public hosts).
-    allow_out = [a for a in dict.fromkeys(declared_allow) if _is_ip_cidr(a)]
-
+    deny_out = [d for d in deny_candidates if _is_e2b_ip_cidr(d)]
+    allow_out = [a for a in dict.fromkeys(declared_allow) if _is_e2b_ip_cidr(a)]
     policy: dict[str, Any] = {"allow_public_traffic": True, "deny_out": deny_out}
     if allow_out:
         policy["allow_out"] = allow_out
