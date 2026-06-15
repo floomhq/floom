@@ -4,7 +4,13 @@ import { useState } from "react";
 import Link from "next/link";
 import { Check, Copy, ExternalLink, Slack, Terminal, X } from "lucide-react";
 import { QRCodeSVG } from "qrcode.react";
-import { WhatsAppLogo } from "@/components/landing-icons";
+import { ClaudeLogo, CodexLogo, CursorLogo, WhatsAppLogo } from "@/components/landing-icons";
+
+const MCP_CLIENTS: { name: string; logo: React.ReactNode }[] = [
+  { name: "Claude Code", logo: <ClaudeLogo /> },
+  { name: "Codex", logo: <CodexLogo /> },
+  { name: "Cursor", logo: <CursorLogo /> },
+];
 
 type Channel = "slack" | "whatsapp" | "mcp";
 type Modal = Exclude<Channel, "slack"> | null;
@@ -148,6 +154,19 @@ export function ChannelActions({ compact = false, only }: { compact?: boolean; o
           <p className="mt-4 text-[13px] leading-relaxed text-muted-foreground">
             Add this server block to Claude Code, Cursor, Codex, or any MCP client. Floom asks for a workspace token the first time it runs.
           </p>
+          <div className="mt-4 flex flex-wrap gap-2">
+            {MCP_CLIENTS.map((c) => (
+              <span
+                key={c.name}
+                className="inline-flex items-center gap-1.5 rounded-[10px] bg-secondary px-2.5 py-1.5 text-[12px] font-medium text-foreground"
+              >
+                <span className="flex h-3.5 w-3.5 items-center justify-center [&_svg]:h-3.5 [&_svg]:w-3.5">
+                  {c.logo}
+                </span>
+                {c.name}
+              </span>
+            ))}
+          </div>
           <pre className="mt-4 overflow-x-auto rounded-[14px] bg-secondary p-4 font-mono text-[11.5px] leading-relaxed text-foreground/85">
             {MCP_CONFIG}
           </pre>

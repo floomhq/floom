@@ -18,13 +18,14 @@
 import { useEffect, useRef, useState } from "react";
 import Link from "next/link";
 import { AnimatePresence, motion } from "motion/react";
-import { Check } from "lucide-react";
+import { Check, Clock } from "lucide-react";
 import {
   GCalLogo,
   GmailLogo,
   GranolaLogo,
   HubSpotLogo,
   NotionLogo,
+  OutlookLogo,
   SheetsLogo,
   SlackLogo,
 } from "@/components/landing-icons";
@@ -106,8 +107,14 @@ function BeatApprove() {
     <div className="w-full max-w-[460px] overflow-hidden rounded-[18px] bg-card">
       <div className="bg-secondary/60 px-5 py-3.5">
         <div className="flex items-center justify-between gap-3">
-          <div className="text-[10.5px] font-semibold uppercase tracking-[0.11em] text-muted-foreground">
-            Email draft
+          <div className="flex items-center gap-2">
+            <span className="flex items-center gap-1 [&_svg]:h-[13px] [&_svg]:w-[13px]" aria-label="Gmail or Outlook">
+              <GmailLogo />
+              <OutlookLogo />
+            </span>
+            <span className="text-[10.5px] font-semibold uppercase tracking-[0.11em] text-muted-foreground">
+              Email draft
+            </span>
           </div>
           <div className="rounded-full bg-secondary px-2.5 py-1 text-[10.5px] font-medium text-muted-foreground">
             To Sarah at Acme
@@ -183,9 +190,9 @@ function BeatRecord() {
             {done ? (
               <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
             ) : (
-              <span className="relative flex h-3 w-3 shrink-0 items-center justify-center">
-                <span className="absolute h-3 w-3 rounded-full opacity-15" style={{ background: "var(--v3-accent)" }} />
-                <span className="h-1.5 w-1.5 rounded-full" style={{ background: "var(--v3-accent)" }} />
+              <span className="relative flex h-4 w-4 shrink-0 items-center justify-center">
+                <span className="absolute h-4 w-4 rounded-full opacity-15" style={{ background: "var(--v3-accent)" }} />
+                <Clock className="relative h-3.5 w-3.5" style={{ color: "var(--v3-accent)" }} aria-hidden />
               </span>
             )}
           </motion.div>
