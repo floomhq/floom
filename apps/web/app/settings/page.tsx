@@ -72,7 +72,7 @@ import {
   X,
 } from "lucide-react";
 
-function PersonalAccessTokensPanel() {
+function PersonalAccessTokensPanel({ onTokenCreated }: { onTokenCreated?: (name: string) => void } = {}) {
   const [tokens, setTokens] = useState<PersonalAccessToken[] | null>(null);
   const [newTokenName, setNewTokenName] = useState("");
   const [creating, setCreating] = useState(false);
@@ -101,6 +101,7 @@ function PersonalAccessTokensPanel() {
       const result = await api.tokens.create(name);
       setCreatedToken(result.token);
       setNewTokenName("");
+      onTokenCreated?.(name);
       await load();
     } catch (err) {
       toast.error((err as Error).message || "Failed to create token");
@@ -147,6 +148,7 @@ function PersonalAccessTokensPanel() {
                 type="button"
                 onClick={() => void copyToken(createdToken)}
                 className="shrink-0 text-muted-foreground hover:text-foreground"
+                aria-label="Copy token value"
               >
                 <Copy className="size-3.5" />
               </button>
@@ -928,29 +930,9 @@ function SystemInfoRow({
   );
 }
 
-const MCP_INSTALL_SNIPPET = `{
-  "mcpServers": {
-    "floom": { "command": "npx", "args": ["-y", "@floomhq/workeros", "mcp"] }
-  }
-}`;
-
 const CLI_INSTALL_SNIPPET = `npm i -g @floomhq/workeros
 workeros login
 workeros run <worker>`;
-
-// API base comes from the same env seam lib/api uses (NEXT_PUBLIC_API_PROXY_BASE
-// → "/api/proxy" on OSS, "/app/api/proxy" on cloud) so the snippet is never a
-// hardcoded host. The token header (x-floom-secret) matches the CLI/MCP curl
-// examples in CliCommandPanel; create the token in the Tokens tab.
-const API_CALL_SNIPPET = `# List your workers
-curl -sS ${API_BASE}/workers?shape=list \\
-  -H "x-floom-secret: <your-token>"
-
-# Run a worker
-curl -sS -X POST ${API_BASE}/workers/<worker>/runs \\
-  -H "x-floom-secret: <your-token>" \\
-  -H "content-type: application/json" \\
-  -d '{"inputs": {}}'`;
 
 function CopyCodeCard({ title, description, value }: { title: string; description: string; value: string }) {
   async function copy() {
@@ -968,7 +950,7 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
           <h2 className="text-sm font-medium">{title}</h2>
           <p className="text-xs text-muted-foreground">{description}</p>
         </div>
-        <Button type="button" variant="outline" onClick={() => void copy()}>
+        <Button type="button" variant="outline" onClick={() => void copy()} aria-label={`Copy ${title}`}>
           <Copy className="size-3.5" />
           Copy
         </Button>
@@ -980,90 +962,159 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
   );
 }
 
-// DeveloperSection (#1088 MECE fix): one place for ALL access credentials —
-//   personal tokens (account-scoped), workspace token (admin-only, workspace-
-//   scoped), plus API/MCP/CLI reference and Git sync. Removed the standalone
-//   "Workspace token" nav item; tokens of both scopes live here to avoid the
-//   overlap between Channels (agent install) and Developer (API tokens).
+// #1232: API_BASE is a relative path ("/api/proxy" or "/app/api/proxy") from the
+// env seam. To show the full absolute URL we prepend window.location.origin at
+// runtime. Server-rendering returns "" so the hydrated client value is correct.
+function useAbsoluteApiBase(): string {
+  const [origin, setOrigin] = useState("");
+  useEffect(() => {
+    setOrigin(typeof window !== "undefined" ? window.location.origin : "");
+  }, []);
+  return origin + API_BASE;
+}
+
+// #1238: build an MCP snippet with the user's first active token pre-filled.
+// Falls back to the generic placeholder when no token exists yet.
+function buildMcpSnippet(token?: string | null): string {
+  const tokenValue = token ?? "<your-token>";
+  return `{
+  "mcpServers": {
+    "floom": {
+      "command": "npx",
+      "args": ["-y", "@floomhq/workeros", "mcp"],
+      "env": { "WORKEROS_TOKEN": "${tokenValue}" }
+    }
+  }
+}`;
+}
+
+// DeveloperSection (#1229 simplify): 6 tabs → 3 tabs.
+//   Tokens   — personal access tokens + workspace token (admin-only). One place
+//              for all credentials; replaces the old "My tokens" + "Workspace token"
+//              split that confused personal-vs-workspace scope.
+//   API & MCP — REST API base URL, curl examples, MCP snippet (with token
+//               pre-filled from the Tokens tab), and CLI install. Consolidates the
+//               old API / MCP / CLI trio into one reference tab.
+//   Git       — Git sync (unchanged).
+//
+// (#1088 MECE rule preserved: tokens live here, not in Channels.)
 function DeveloperSection() {
+  // Load tokens once so the MCP snippet can be pre-filled (#1238).
+  const [firstToken, setFirstToken] = useState<string | null>(null);
+  useEffect(() => {
+    api.tokens.list().then((list) => {
+      const active = list.find((t) => !t.expires_at || new Date(t.expires_at) > new Date());
+      if (active) setFirstToken(active.name);
+    }).catch(() => {});
+  }, []);
+
+  const absoluteApiBase = useAbsoluteApiBase();
+
+  const apiCallSnippet = `# List your workers
+curl -sS ${absoluteApiBase || API_BASE}/workers?shape=list \\
+  -H "x-floom-secret: <your-token>"
+
+# Run a worker
+curl -sS -X POST ${absoluteApiBase || API_BASE}/workers/<worker>/runs \\
+  -H "x-floom-secret: <your-token>" \\
+  -H "content-type: application/json" \\
+  -d '{"inputs": {}}'`;
+
   return (
-    <Tabs defaultValue="api">
+    <Tabs defaultValue="tokens">
       <TabsList>
-        <TabsTrigger value="api">API</TabsTrigger>
-        <TabsTrigger value="mcp">MCP</TabsTrigger>
-        <TabsTrigger value="cli">CLI</TabsTrigger>
-        <TabsTrigger value="tokens">My tokens</TabsTrigger>
-        <TabsTrigger value="workspace_token">Workspace token</TabsTrigger>
+        <TabsTrigger value="tokens">Tokens</TabsTrigger>
+        <TabsTrigger value="api">API &amp; MCP</TabsTrigger>
         <TabsTrigger value="git">Git</TabsTrigger>
       </TabsList>
-      <TabsContent value="api" className="space-y-4">
-        <div className="space-y-1">
-          <h2 className="text-sm font-medium">REST API</h2>
-          <p className="text-xs text-muted-foreground">
-            Call your workspace over HTTP. Authenticate every request with a
-            personal access token (My tokens tab) or a workspace token (admin only)
-            in the <code className="font-mono">x-floom-secret</code> header.
-          </p>
-        </div>
-        <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5">
-          <div className="min-w-0">
-            <p className="text-xs text-muted-foreground">Base URL</p>
-            <code className="break-all font-mono text-xs text-foreground">{API_BASE}</code>
-          </div>
-          <Button
-            type="button"
-            variant="outline"
-            size="sm"
-            className="shrink-0"
-            onClick={() => {
-              navigator.clipboard
-                .writeText(API_BASE)
-                .then(() => toast.success("Copied base URL"))
-                .catch(() => toast.error("Could not copy"));
-            }}
-          >
-            <Copy className="size-3.5" />
-            Copy
-          </Button>
-        </div>
-        <CopyCodeCard
-          title="Call the API"
-          description="Replace <your-token> with a personal access token from the My tokens tab."
-          value={API_CALL_SNIPPET}
-        />
-        <p className="text-xs text-muted-foreground">
-          Need a token? Open the{" "}
-          <span className="font-medium text-foreground">My tokens</span> tab.{" "}
-          <a
-            href="https://github.com/floomhq/workeros#api"
-            target="_blank"
-            rel="noopener noreferrer"
-            className="text-primary hover:underline"
-          >
-            API docs
-          </a>
-        </p>
-      </TabsContent>
-      <TabsContent value="mcp" className="space-y-4">
-        <CopyCodeCard
-          title="Agent install"
-          description="Copy this into Claude Desktop, Cursor, VS Code, Windsurf, Cline, or any MCP client."
-          value={MCP_INSTALL_SNIPPET}
-        />
-      </TabsContent>
-      <TabsContent value="cli" className="space-y-4">
-        <CopyCodeCard
-          title="CLI install"
-          description="Install the CLI, authenticate, and run a worker from your terminal."
-          value={CLI_INSTALL_SNIPPET}
-        />
-      </TabsContent>
-      <TabsContent value="tokens" className="space-y-4">
-        <PersonalAccessTokensPanel />
-      </TabsContent>
-      <TabsContent value="workspace_token" className="space-y-4">
+
+      {/* Tokens: personal (per-user) + workspace (admin-only, shared) */}
+      <TabsContent value="tokens" className="space-y-8">
+        <PersonalAccessTokensPanel onTokenCreated={setFirstToken} />
         <WorkspaceTokensPanel />
       </TabsContent>
+
+      {/* API & MCP: REST base URL, curl examples, MCP/CLI snippets */}
+      <TabsContent value="api" className="space-y-6">
+        <section className="space-y-3">
+          <div className="space-y-1">
+            <h2 className="text-sm font-medium">REST API</h2>
+            <p className="text-xs text-muted-foreground">
+              Authenticate every request with a token from the{" "}
+              <span className="font-medium text-foreground">Tokens</span> tab in the{" "}
+              <code className="font-mono">x-floom-secret</code> header.{" "}
+              <a
+                href="https://github.com/floomhq/workeros#api"
+                target="_blank"
+                rel="noopener noreferrer"
+                className="text-primary hover:underline"
+              >
+                API docs
+              </a>
+            </p>
+          </div>
+          {/* #1232: show absolute URL, not relative path */}
+          <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5">
+            <div className="min-w-0">
+              <p className="text-xs text-muted-foreground">Base URL</p>
+              <code className="break-all font-mono text-xs text-foreground">
+                {absoluteApiBase || API_BASE}
+              </code>
+            </div>
+            <Button
+              type="button"
+              variant="outline"
+              size="sm"
+              aria-label="Copy base URL"
+              className="shrink-0"
+              onClick={() => {
+                navigator.clipboard
+                  .writeText(absoluteApiBase || API_BASE)
+                  .then(() => toast.success("Copied base URL"))
+                  .catch(() => toast.error("Could not copy"));
+              }}
+            >
+              <Copy className="size-3.5" />
+              Copy
+            </Button>
+          </div>
+          <CopyCodeCard
+            title="Call the API"
+            description="Replace <your-token> with a personal access token from the Tokens tab."
+            value={apiCallSnippet}
+          />
+        </section>
+
+        <section className="space-y-3">
+          <div className="space-y-1">
+            <h2 className="text-sm font-medium">MCP</h2>
+            <p className="text-xs text-muted-foreground">
+              Add this to Claude Desktop, Cursor, VS Code, Windsurf, Cline, or any MCP client.
+              {!firstToken && (
+                <span> Create a token in the <span className="font-medium text-foreground">Tokens</span> tab first.</span>
+              )}
+            </p>
+          </div>
+          <CopyCodeCard
+            title="MCP config"
+            description={firstToken ? `Token "${firstToken}" is pre-filled.` : "Create a token in the Tokens tab to pre-fill."}
+            value={buildMcpSnippet(firstToken)}
+          />
+        </section>
+
+        <section className="space-y-3">
+          <div className="space-y-1">
+            <h2 className="text-sm font-medium">CLI</h2>
+            <p className="text-xs text-muted-foreground">Install and authenticate the CLI, then run any worker.</p>
+          </div>
+          <CopyCodeCard
+            title="CLI install"
+            description="Install the CLI, authenticate, and run a worker from your terminal."
+            value={CLI_INSTALL_SNIPPET}
+          />
+        </section>
+      </TabsContent>
+
       <TabsContent value="git" className="space-y-4">
         <GitWorkspacePanel />
       </TabsContent>
@@ -1397,25 +1448,21 @@ export function ModelDefaults({ canEdit = true }: { canEdit?: boolean }) {
   if (values === null) return <Skeleton className="h-28 w-full" />;
   return (
     <div className="space-y-4">
+      {canEdit && (
+        <p className="text-xs text-muted-foreground">Changes save automatically when you leave a field.</p>
+      )}
       {MODEL_DEFAULT_FIELDS.map((f) => (
-        f.key === "default_model" ? (
-          <div key={f.key} className="c-ltable">
-            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
-              <div className="c-lp-tx">
-                <div className="nm">{f.label}</div>
-                <div className="sub">{f.hint}</div>
-              </div>
-              <span className="c-vpill">{modelLabel(values[f.key])}</span>
-            </div>
-          </div>
-        ) : (
         <div key={f.key} className="space-y-1.5">
           <Label htmlFor={`md-${f.key}`} className="text-sm">{f.label}</Label>
+          {/* #1236: default_model was read-only (c-vpill) showing "Not set" with no
+              way to change it. Render it as a text input like the other fields so
+              admins can set or clear the model. Current value is shown in the
+              placeholder via modelLabel for discoverability. */}
           <Input
             id={`md-${f.key}`}
             type={f.type}
             defaultValue={values[f.key] ?? ""}
-            placeholder={f.placeholder}
+            placeholder={f.key === "default_model" ? modelLabel(values[f.key]) || f.placeholder : f.placeholder}
             className="max-w-xs"
             disabled={!canEdit}
             onBlur={(e) => {
@@ -1429,7 +1476,6 @@ export function ModelDefaults({ canEdit = true }: { canEdit?: boolean }) {
           />
           <p className="text-xs text-muted-foreground">{f.hint}</p>
         </div>
-        )
       ))}
     </div>
   );
@@ -2355,17 +2401,27 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
             <WhatsAppBindingStatus />
           </div>
         </TabsContent>
-        <TabsContent value="agent-install" className="space-y-5">
-          <CopyCodeCard
-            title="Agent install"
-            description="Copy this into Claude Desktop, Cursor, VS Code, Windsurf, Cline, or any MCP client."
-            value={MCP_INSTALL_SNIPPET}
-          />
-          <CopyCodeCard
-            title="CLI install"
-            description="Install the CLI, authenticate, and run a worker from your terminal."
-            value={CLI_INSTALL_SNIPPET}
-          />
+        {/* #1237: MCP/CLI snippets live in Developer > API & MCP. Link there to
+            avoid duplicating the same content in two places. */}
+        <TabsContent value="agent-install" className="space-y-4">
+          <div className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3 space-y-1.5">
+            <p className="text-sm font-medium">MCP &amp; CLI setup</p>
+            <p className="text-xs text-muted-foreground">
+              MCP config and CLI install snippets are in{" "}
+              <button
+                type="button"
+                className="font-medium text-foreground underline underline-offset-2 hover:opacity-80"
+                onClick={() => {
+                  const params = new URLSearchParams(window.location.search);
+                  params.set("sel", "developer");
+                  window.location.href = `/settings?${params.toString()}`;
+                }}
+              >
+                Developer &gt; API &amp; MCP
+              </button>
+              .
+            </p>
+          </div>
         </TabsContent>
       </Tabs>
       <Dialog open={qrOpen} onOpenChange={setQrOpen}>

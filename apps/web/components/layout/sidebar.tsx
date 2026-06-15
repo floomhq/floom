@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound } from "lucide-react";
+import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound, KeyRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -61,7 +61,7 @@ type NavItem = {
 };
 
 // V4 SPEC §2: nav order per wireframe — no Assistant item (config lives in
-// Settings per v4). Overview · Workers · Brain · Runs · Approvals · Connections.
+// Settings per v4). Overview · Workers · Brain · Runs · Approvals · Connections · Secrets.
 const nav: NavItem[] = [
   { href: "/overview", label: "Overview", icon: Activity },
   { href: "/workers", label: "Workers", icon: Box, hint: "Runs on triggers and schedules" },
@@ -69,6 +69,9 @@ const nav: NavItem[] = [
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
   { href: "/connections", label: "Connections", icon: Plug },
+  // #1248: Secrets was in the command palette but missing from the sidebar.
+  // Adding it here so the two surfaces stay consistent.
+  { href: "/connections/secrets", label: "Secrets", icon: KeyRound, hint: "Env vars and API keys for workers" },
 ];
 
 export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
