@@ -440,14 +440,27 @@ def _override_run_executor_workspace_context() -> None:
 
 
 def _bootstrap_contexts_storage() -> None:
-    """Ensure the Supabase Storage 'contexts' bucket exists and patch the engine's
-    context_dir() to lazy-hydrate from Storage when a context is missing on disk.
+    """Ensure the Supabase Storage 'contexts' bucket exists and register a
+    lazy-hydration hook so context_dir() pulls from Storage on a fresh executor.
 
     Without this, context files live only on the container's ephemeral FS and are
-    lost on every restart. With it:
+    lost on every restart (Railway). With it:
       - Write: upload to Storage after every context file save (via cloud_git)
       - Read:  if CONTEXTS_DIR/{workspace_id}/{name}/ is absent, download from
-               Storage before returning the path — transparent to the engine
+               Storage before returning the path — transparent to the engine.
+
+    We register hydration via TWO mechanisms so it fires regardless of whether
+    callers import ``context_dir`` by name (static capture at import time) or
+    access it through the module object at call time:
+
+    1. ``set_context_hydration_hook`` (engine hook added in fix/e2b-context-hydration):
+       The hook is called INSIDE ``context_dir()`` itself, so it runs even when a
+       caller did ``from contexts import context_dir`` at module load and therefore
+       holds the original function reference.  This is the primary fix.
+
+    2. Module-level monkeypatch of ``engine_contexts.context_dir`` (legacy):
+       Kept for backwards compatibility with callers that look up ``context_dir``
+       through the module at call time (e.g. routers, other cloud overrides).
     """
     from apps.api.cloud_contexts import ensure_bucket, hydrate_if_missing
 
@@ -458,15 +471,31 @@ def _bootstrap_contexts_storage() -> None:
         import logging
         logging.getLogger(__name__).warning("contexts bucket bootstrap failed: %s", exc)
 
-    # Patch engine_contexts.context_dir for lazy hydration
+    from apps.api.auth.workspace_context import get_active_workspace_id
+
+    # --- 1. Register the engine hydration hook (fires from inside context_dir) ---
+    if hasattr(engine_contexts, "set_context_hydration_hook"):
+        def _hydration_hook(scope: "str | None", name: str, dest_dir: "Path") -> None:
+            workspace_id = scope or get_active_workspace_id()
+            if workspace_id:
+                try:
+                    hydrate_if_missing(workspace_id, name, dest_dir)
+                except Exception as exc:
+                    import logging as _log
+                    _log.getLogger(__name__).debug(
+                        "context hydration hook failed for %s/%s: %s", workspace_id, name, exc
+                    )
+
+        engine_contexts.set_context_hydration_hook(_hydration_hook)
+        logger.info("Registered cloud context hydration hook (Storage lazy-fetch on fresh executor)")
+
+    # --- 2. Module-level monkeypatch for callers using the module at call time ---
     if not hasattr(engine_contexts, "context_dir"):
         return
 
     _original_context_dir = engine_contexts.context_dir
     if getattr(_original_context_dir, "_workeros_cloud_patched", False):
         return
-
-    from apps.api.auth.workspace_context import get_active_workspace_id
 
     def _cloud_context_dir(name: str) -> "Path":
         d = _original_context_dir(name)
