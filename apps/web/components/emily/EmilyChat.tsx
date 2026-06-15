@@ -171,13 +171,38 @@ const SUGGESTIONS = [
   "Show me yesterday's runs",
 ];
 
+/** Compact pill row — shown above the composer when chat is active (not streaming). */
+function SuggestionPills({
+  onSuggest,
+  hidden,
+}: {
+  onSuggest: (text: string) => void;
+  hidden: boolean;
+}) {
+  if (hidden) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 px-1 pb-1">
+      {SUGGESTIONS.map((s) => (
+        <button
+          key={s}
+          type="button"
+          onClick={() => onSuggest(s)}
+          className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-2.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        >
+          {s}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── Typing indicator ──────────────────────────────────────────────────────────
 
 function TypingIndicator() {
   return (
-    <div className="flex items-start gap-2.5">
+    <div className="flex items-start gap-2">
       <EmilyAvatar size="sm" />
-      <div className="flex gap-1 py-2 px-1">
+      <div className="flex gap-1 py-1.5 px-1">
         {[0, 1, 2].map((i) => (
           <div
             key={i}
@@ -242,16 +267,16 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
   if (msg.role === "user") {
     return (
       <Message from="user">
-        <div className="flex max-w-[85%] flex-col items-end gap-1.5">
+        <div className="flex max-w-[85%] flex-col items-end gap-1">
           {msg.text && (
-            <MessageContent className="rounded-[var(--radius-card)] bg-muted/60 px-3.5 py-2.5 text-foreground">
+            <MessageContent className="rounded-[var(--radius-button)] bg-muted/60 px-3 py-2 text-foreground">
               <MessageResponse className="whitespace-pre-wrap">
                 <p>{msg.text}</p>
               </MessageResponse>
             </MessageContent>
           )}
           {msg.files && msg.files.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 justify-end">
+            <div className="flex flex-wrap gap-1 justify-end">
               {msg.files.map((f) => (
                 <FileChip key={f.id} file={f} />
               ))}
@@ -271,16 +296,16 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
   // assistant
   const text = assistantMessageText(msg);
   return (
-    <Message from="assistant" className="flex-row items-start gap-2.5">
+    <Message from="assistant" className="flex-row items-start gap-2">
       <EmilyAvatar size="sm" />
       {/* min-w-0 + overflow-hidden prevent long URLs and code from blowing out the rail */}
-      <div className="flex-1 min-w-0 overflow-hidden space-y-2.5">
+      <div className="flex-1 min-w-0 overflow-hidden space-y-2">
         {msg.parts?.map((part, i) => {
           if (part.type === "text") {
             return (
               <MessageContent key={i}>
                 <MessageResponse>
-                  <MarkdownText text={part.text} />
+                  <MarkdownText text={part.text} streaming={!!part.streaming} />
                 </MessageResponse>
               </MessageContent>
             );
@@ -697,7 +722,7 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
             <ChatEmptyState onSuggest={(text) => { setInput(text); }} />
           )
         ) : (
-          <div className={cn("py-5 space-y-5", fullPage ? "px-6" : "px-4")}>
+          <div className={cn("py-4 space-y-4", fullPage ? "px-6" : "px-4")}>
             {messages.map((msg) => (
               <MessageRow key={msg.id} msg={msg} />
             ))}
@@ -731,7 +756,12 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
       {/* Input — error intentionally NOT repeated here; it already shows as an
           inline system note in the message thread (errorAlreadyVisible guard above). */}
       <div className={cn("shrink-0", fullPage ? "px-6 pb-6 pt-3" : "px-3 pb-3 pt-0")}>
-        <Separator className="mb-3" />
+        <Separator className="mb-2" />
+        {/* Suggestion pills: visible in active chat (not on empty state, not while streaming) */}
+        <SuggestionPills
+          onSuggest={(text) => { setInput(text); }}
+          hidden={!hasMessages || isStreaming}
+        />
         <PromptInput
           value={input}
           onChange={setInput}
@@ -741,7 +771,7 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
           disabled={isStreaming}
           placeholder={createMode ? "Create me: a worker that…" : "Message Emily..."}
         />
-        <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
+        <p className="mt-1 text-center text-[10px] text-muted-foreground">
           Emily can make mistakes. Verify important results.
         </p>
       </div>
