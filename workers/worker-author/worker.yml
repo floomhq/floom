@@ -50,13 +50,10 @@ exec:
   command: "python run.py"
   runtime: "python311"
   runner: "e2b"
-  # worker-author calls OpenAI from inside the sandbox to draft the bundle.
-  # Declaring the secret ships the owner's OPENAI_API_KEY into .env.local so
-  # run.py can authenticate. worker-author is a first-party system worker, not
-  # untrusted user code, so this is the same trust posture as csv_enricher /
-  # research_brief which also declare OPENAI_API_KEY.
-  secrets:
-    - "OPENAI_API_KEY"
+  # worker-author calls the platform-configured codegen provider from inside the
+  # sandbox to draft the bundle. The API runner passes first-party provider env
+  # only for this system worker, so fresh workspaces do not need a BYO AI key.
+  secrets: []
   inputs:
     - name: "prompt"
       kind: "scalar"

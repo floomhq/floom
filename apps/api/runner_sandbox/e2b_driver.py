@@ -60,6 +60,17 @@ class E2BKeyExhaustedError(RuntimeError):
 
 
 _WORKER_AUTHOR_ID = "worker-author"
+_WORKER_AUTHOR_PROVIDER_ENV_VARS = (
+    "AWS_ACCESS_KEY_ID",
+    "AWS_SECRET_ACCESS_KEY",
+    "AWS_SESSION_TOKEN",
+    "AWS_REGION_NAME",
+    "AWS_DEFAULT_REGION",
+    "AWS_BEARER_TOKEN_BEDROCK",
+    "ANTHROPIC_API_KEY",
+    "PLATFORM_OPENAI_API_KEY",
+    "OPENAI_API_KEY",
+)
 
 # #977: internal vars the WORKER process must never see. The worker-author
 # meta-worker legitimately needs the codegen model; everything else here is
@@ -87,6 +98,24 @@ def _scrub_internal_env_command(command: str, worker_id: str | None) -> str:
         to_unset.append("WORKEROS_CODEGEN_MODEL")
     unset_flags = " ".join(f"-u {name}" for name in to_unset)
     return f"env {unset_flags} sh -c {shlex.quote(command)}"
+
+
+def _worker_author_platform_env() -> dict[str, str]:
+    """Platform LLM env allowed only for the first-party worker-author."""
+    env: dict[str, str] = {}
+    try:
+        from codegen_model import codegen_model
+
+        model = codegen_model()
+    except Exception:
+        model = (os.environ.get("WORKEROS_CODEGEN_MODEL") or os.environ.get("WORKEROS_CHAT_MODEL") or "").strip()
+    if model:
+        env["WORKEROS_CODEGEN_MODEL"] = model
+    for name in _WORKER_AUTHOR_PROVIDER_ENV_VARS:
+        value = (os.environ.get(name) or "").strip()
+        if value:
+            env[name] = value
+    return env
 
 
 def _split_env_values(raw_value: str | None) -> list[str]:
@@ -855,15 +884,11 @@ class E2BSandboxDriver(SandboxDriver):
             "WORKEROS_RUN_TOKEN": _worker_call_token if _worker_call_token else make_run_token(run_id),
             **({"WORKEROS_CALL_DEPTH": str(_self_depth)} if _worker_call_token else {}),  # #994
         }
-        # Propagate the codegen model override so the worker-author meta-worker
-        # (which generates code from inside the sandbox) uses the same model the
-        # API-side draft/repair calls do. Falls back to its baked-in default.
-        # #977: only the worker-author meta-worker generates code inside the
-        # sandbox and needs the codegen model; injecting it for every worker
-        # leaked an internal architecture detail to untrusted worker code.
-        _codegen_model_override = (os.environ.get("WORKEROS_CODEGEN_MODEL") or "").strip()
-        if _codegen_model_override and worker_id == _WORKER_AUTHOR_ID:
-            _sandbox_envs["WORKEROS_CODEGEN_MODEL"] = _codegen_model_override
+        # #1137: worker-author is first-party code that generates the bundle
+        # inside E2B, so it needs the platform LLM provider env. Regular workers
+        # still receive only declared user secrets plus callback vars.
+        _worker_author_env = _worker_author_platform_env() if worker_id == _WORKER_AUTHOR_ID else {}
+        _sandbox_envs.update(_worker_author_env)
         sandbox = _create_sandbox_with_key_fallback(
             Sandbox,
             api_keys=api_keys,
@@ -1056,6 +1081,7 @@ class E2BSandboxDriver(SandboxDriver):
                 _emit_command_output(chunk, "warning", "[e2b] stderr: ", log_fn)
 
             _cmd_envs: dict[str, str] = {
+                **_worker_author_env,
                 **secrets,
                 "FLOOM_RUN_ID": run_id,
                 "FLOOM_TRACE_ID": trace_id,
