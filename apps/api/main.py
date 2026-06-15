@@ -909,6 +909,15 @@ async def lifespan(app: FastAPI):
                 exc_info=True,
             )
         fail_interrupted_runs_on_startup(user_id=bootstrap_user_id)
+        # #1130: sweep for zombie runs from previous deployments / server restarts.
+        # Unlike fail_interrupted_runs_on_startup (process-local tracking), this
+        # uses a very broad window (24h) to catch runs that were never cleaned up
+        # regardless of how many restarts occurred since.
+        try:
+            from run_service import reap_abandoned_runs as _reap
+            _reap(timeout_seconds=86400, grace_seconds=0)
+        except Exception as _reap_exc:
+            logger.warning("Startup zombie-run sweep failed (non-fatal): %s", _reap_exc)
         reap_abandoned_pending_approval_runs()
         re_enqueue_queued_runs_on_startup()
         start_drain_loop()
@@ -1330,7 +1339,34 @@ _rate_buckets: Dict[str, list[float]] = {}
 
 
 def _rate_caller_keys(request: Request, path: str) -> List[str]:
-    return [f"ip:{_client_ip(request)}:{path}"]
+    # #1184: add per-secret and per-session keys so NAT/shared-IP clients don't
+    # exhaust each other's buckets, and so attackers with many IPs can't bypass.
+    ip = _client_ip(request)
+    keys = [f"ip:{ip}:{path}"]
+    headers = {k.lower(): v for k, v in (
+        (h[0].decode("latin-1", errors="replace"), h[1].decode("latin-1", errors="replace"))
+        for h in request.scope.get("headers", [])
+    )}
+    raw_secret = headers.get("x-floom-secret", "").strip()
+    if raw_secret:
+        secret_key = hashlib.sha256(raw_secret.encode()).hexdigest()[:16]
+        keys.append(f"secret:{secret_key}:{path}")
+    # Session-cookie based auth (multi-member)
+    cookie_header = headers.get("cookie", "")
+    for part in cookie_header.split(";"):
+        part = part.strip()
+        if part.startswith("wos_session="):
+            session_val = part.split("=", 1)[1]
+            session_key = hashlib.sha256(session_val.encode()).hexdigest()[:16]
+            keys.append(f"session:{session_key}:{path}")
+            break
+    # Bearer PAT (wos_...)
+    auth_header = headers.get("authorization", "")
+    if auth_header.startswith("Bearer "):
+        bearer = auth_header[7:].strip()
+        bearer_key = hashlib.sha256(bearer.encode()).hexdigest()[:16]
+        keys.append(f"bearer:{bearer_key}:{path}")
+    return keys
 
 
 @app.middleware("http")
