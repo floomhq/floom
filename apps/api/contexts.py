@@ -53,6 +53,37 @@ _scope_override: ContextVar[object | str | None] = ContextVar(
 )
 _CONTEXT_METADATA_SAVE_LOCK = threading.Lock()
 
+# --- Context hydration hook (cloud Storage lazy-fetch) ----------------------
+#
+# In OSS single-tenant mode this hook is never set and context_dir() behaves
+# exactly as before — a pure filesystem path resolver with no side effects.
+#
+# In cloud mode, startup.py registers a callable via set_context_hydration_hook
+# so that context_dir() transparently pulls the context from Supabase Storage
+# when the directory is absent on a fresh ephemeral container (Railway).
+#
+# Signature: hydrate_hook(scope: str | None, name: str, dest_dir: Path) -> None
+# The hook MUST be idempotent and MUST NOT raise (errors are logged internally).
+_hydration_hook: Optional[Callable[[Optional[str], str, "Path"], None]] = None
+
+
+def set_context_hydration_hook(
+    hook: Optional[Callable[[Optional[str], str, "Path"], None]],
+) -> None:
+    """Register (or clear) a callable that lazily hydrates a context directory.
+
+    Called by the cloud startup to plug in Supabase Storage hydration.
+    Pass ``None`` to clear (OSS/test mode).
+
+    ``hook(scope, name, dest_dir)`` is called from ``context_dir()`` when the
+    target directory does not yet exist or is empty. ``scope`` is the active
+    workspace_id (may be ``None`` for unscoped deployments).
+    The hook MUST be idempotent and must not raise — failures are swallowed
+    so the OSS local-disk path is always the final fallback.
+    """
+    global _hydration_hook
+    _hydration_hook = hook
+
 
 def set_context_scope_resolver(resolver: Optional[Callable[[], Optional[str]]]) -> None:
     """Register a callable returning the active scope id (workspace_id) for
@@ -290,6 +321,17 @@ def context_dir(name: str) -> Path:
         target.relative_to(root)
     except ValueError as exc:
         raise ValueError(f"Path traversal attempt: {target}") from exc
+    # Cloud lazy-hydration: if the directory is absent or empty and a hydration
+    # hook is registered (cloud startup sets one), fetch the context pack from
+    # Supabase Storage before returning the path.  This is a no-op in OSS /
+    # single-tenant mode (_hydration_hook is None) and a no-op whenever the
+    # directory is already populated (idempotency guard is inside the hook).
+    hook = _hydration_hook
+    if hook is not None and (not target.exists() or not any(target.iterdir())):
+        try:
+            hook(_current_scope(), safe_name, target)
+        except Exception:
+            pass  # hydration failures must never block a run
     return target
 
 

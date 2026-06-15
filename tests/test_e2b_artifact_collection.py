@@ -988,3 +988,127 @@ def test_sandbox_lifetime_caps_at_e2b_one_hour_limit():
 
     assert install_timeout == 900
     assert _sandbox_lifetime_timeout(3600, install_timeout) == 3600
+
+
+# ---------------------------------------------------------------------------
+# Tests for fix/e2b-context-hydration
+# These prove that:
+# 1. context_dir() calls the registered hydration hook when the dir is missing.
+# 2. The driver uses _contexts_module.context_dir (module-level lookup) so any
+#    runtime hook/patch on the contexts module is honoured, even if the original
+#    function was imported by-name at module load.
+# ---------------------------------------------------------------------------
+
+def test_context_dir_calls_hydration_hook_when_dir_missing(tmp_path, monkeypatch):
+    """context_dir() must call the registered hydration hook for absent dirs."""
+    contexts_root = tmp_path / "contexts"
+    contexts_root.mkdir()
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+
+    hydration_calls = []
+
+    def _fake_hook(scope, name, dest_dir):
+        hydration_calls.append((scope, name, dest_dir))
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        (dest_dir / "seed.txt").write_text("hydrated")
+
+    # Register hook, call context_dir for an absent pack, check hook fired.
+    contexts_module.set_context_hydration_hook(_fake_hook)
+    try:
+        result = contexts_module.context_dir("my-brain")
+        assert result == contexts_root / "my-brain"
+        assert len(hydration_calls) == 1
+        scope, name, dest_dir = hydration_calls[0]
+        assert name == "my-brain"
+        assert dest_dir == result
+    finally:
+        contexts_module.set_context_hydration_hook(None)
+
+
+def test_context_dir_skips_hydration_hook_when_dir_populated(tmp_path, monkeypatch):
+    """context_dir() must NOT call the hook when the dir already has files."""
+    contexts_root = tmp_path / "contexts"
+    brain_dir = contexts_root / "my-brain"
+    brain_dir.mkdir(parents=True)
+    (brain_dir / "data.txt").write_text("already here")
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+
+    hydration_calls = []
+
+    def _fake_hook(scope, name, dest_dir):
+        hydration_calls.append((scope, name, dest_dir))
+
+    contexts_module.set_context_hydration_hook(_fake_hook)
+    try:
+        contexts_module.context_dir("my-brain")
+        assert hydration_calls == [], "hook must not fire when dir is already populated"
+    finally:
+        contexts_module.set_context_hydration_hook(None)
+
+
+def test_context_dir_hydration_hook_error_does_not_raise(tmp_path, monkeypatch):
+    """A failing hydration hook must not propagate — context_dir() returns the path."""
+    contexts_root = tmp_path / "contexts"
+    contexts_root.mkdir()
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+
+    def _exploding_hook(scope, name, dest_dir):
+        raise RuntimeError("Storage unavailable")
+
+    contexts_module.set_context_hydration_hook(_exploding_hook)
+    try:
+        result = contexts_module.context_dir("my-brain")
+        assert result == contexts_root / "my-brain"
+    finally:
+        contexts_module.set_context_hydration_hook(None)
+
+
+def test_driver_upload_contexts_uses_module_level_context_dir(tmp_path, monkeypatch):
+    """_upload_contexts_to_sandbox must resolve context_dir via the module
+    so a runtime hydration hook registered on contexts.context_dir is honoured
+    even though e2b_driver imported the function before the hook was set.
+    """
+    contexts_root = tmp_path / "contexts"
+    monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
+    monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
+
+    hydration_calls = []
+
+    def _fake_hook(scope, name, dest_dir):
+        hydration_calls.append(name)
+        # Simulate Storage hydration: write a file so the dir is populated.
+        dest_dir.mkdir(parents=True, exist_ok=True)
+        (dest_dir / "candidates.db").write_bytes(b"SQLITE_DATA")
+
+    contexts_module.set_context_hydration_hook(_fake_hook)
+    try:
+        sandbox = FakeFullSandbox()
+        config = WorkerConfig(
+            id="hydrate-test",
+            name="Hydrate Test",
+            trigger=WorkerTrigger(type="manual"),
+            runtime=WorkerRuntime(type="python311", command="python run.py", mode="pure-script"),
+            contexts=["novasearch-candidates"],
+            outputs=[],
+        )
+
+        err = E2BSandboxDriver()._upload_contexts_to_sandbox(
+            sandbox=sandbox,
+            workdir="/home/user/worker",
+            config=config,
+            made_dirs={"/home/user/worker"},
+            log_fn=lambda *_args, **_kwargs: None,
+        )
+
+        assert err is None
+        # Hydration hook must have been called because the dir did not exist.
+        assert "novasearch-candidates" in hydration_calls
+        # After hydration the file must be uploaded to the sandbox.
+        assert (
+            sandbox.files._files.get(
+                "/home/user/worker/context/novasearch-candidates/candidates.db"
+            )
+            == b"SQLITE_DATA"
+        )
+    finally:
+        contexts_module.set_context_hydration_hook(None)
