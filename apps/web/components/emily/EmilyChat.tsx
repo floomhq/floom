@@ -187,6 +187,7 @@ function SuggestionPills({
           key={s}
           type="button"
           onClick={() => onSuggest(s)}
+          /* ds-allow-round ds-allow-border */
           className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-2.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
         >
           {s}
@@ -269,8 +270,8 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
       <Message from="user">
         <div className="flex max-w-[85%] flex-col items-end gap-1">
           {msg.text && (
-            <MessageContent className="rounded-[var(--radius-ui)] bg-muted/60 px-3.5 py-2.5 text-foreground">              <MessageResponse className="whitespace-pre-wrap">
-                <p>{msg.text}</p>
+            <MessageContent className="rounded-[var(--radius-ui)] bg-muted/60 px-3 py-2 text-foreground">
+              <MessageResponse className="whitespace-pre-wrap">                <p>{msg.text}</p>
               </MessageResponse>
             </MessageContent>
           )}

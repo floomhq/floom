@@ -188,7 +188,7 @@ export function BrainVisual({ folders }: BrainVisualProps) {
         {/* Ambient glow */}
         <div
           aria-hidden="true"
-          className="pointer-events-none absolute left-1/2 top-1/2 z-0 size-[300px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl lg:size-[380px]"
+          className="pointer-events-none absolute left-1/2 top-1/2 z-0 size-[300px] -translate-x-1/2 -translate-y-1/2 rounded-full blur-3xl lg:size-[380px]" // ds-allow-round — ambient glow blob requires full circle
           style={{ background: "rgba(62, 111, 224, 0.08)" }}
         />
         {/* Ghost brain illustration */}
@@ -216,7 +216,7 @@ export function BrainVisual({ folders }: BrainVisualProps) {
               Company Brain
             </div>
             <span
-              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium" // ds-allow-round — status pill badge
               style={{
                 background: "color-mix(in srgb, #22c55e 12%, transparent)",
                 color: "#16a34a",

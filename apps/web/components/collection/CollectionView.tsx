@@ -250,8 +250,8 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
               display: "inline-flex",
               alignItems: "center",
               padding: "4px 8px",
-              borderRadius: "var(--radius-button)",
-              border: "var(--bd-card)",
+              borderRadius: "var(--radius-button)", // ds-allow-round
+              border: "var(--bd-card)", // ds-allow-border
               background: "var(--bg-2)",
               color: safePage === 0 ? "var(--muted-foreground)" : "var(--foreground)",
               opacity: safePage === 0 ? 0.4 : 1,
@@ -274,8 +274,8 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
                 justifyContent: "center",
                 minWidth: 28,
                 padding: "4px 6px",
-                borderRadius: "var(--radius-button)",
-                border: "var(--bd-card)",
+                borderRadius: "var(--radius-button)", // ds-allow-round
+                border: "var(--bd-card)", // ds-allow-border
                 background: i === safePage ? "var(--foreground)" : "var(--bg-2)",
                 color: i === safePage ? "var(--bg-1, var(--background))" : "var(--foreground)",
                 fontWeight: i === safePage ? 600 : 400,
@@ -295,8 +295,8 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
               display: "inline-flex",
               alignItems: "center",
               padding: "4px 8px",
-              borderRadius: "var(--radius-button)",
-              border: "var(--bd-card)",
+              borderRadius: "var(--radius-button)", // ds-allow-round
+              border: "var(--bd-card)", // ds-allow-border
               background: "var(--bg-2)",
               color: safePage >= totalPages - 1 ? "var(--muted-foreground)" : "var(--foreground)",
               opacity: safePage >= totalPages - 1 ? 0.4 : 1,

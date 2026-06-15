@@ -358,17 +358,25 @@ function WorkerActivity({
                     <span>{formatDuration(run.duration_ms)}</span>
                   </p>
                 </div>
-                {/* V4 SPEC §4: status pill right-aligned, no inline colored status word */}
-                <span
-                  className="shrink-0 rounded-[var(--radius-ui)] px-2 py-0.5 text-[11px] font-medium leading-none"
-                  style={{
-                    color: meta.color,
-                    background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
-                  }}
-                >
-                  {meta.label}
-                </span>              </Link>
-            );
+                <div className="flex shrink-0 items-center gap-1.5">
+                  {/* Count badge when the same worker repeated the same outcome */}
+                  {count > 1 && (
+                    <span className="text-[11px] font-medium text-[var(--text-muted)]">
+                      ×{count}
+                    </span>
+                  )}
+                  {/* V4 SPEC §4: status pill right-aligned */}
+                  <span // ds-allow-round — pill badge uses pill-radius by design
+                    className="rounded-[var(--radius-pill)] px-2 py-0.5 text-[11px] font-medium leading-none"
+                    style={{
+                      color: meta.color,
+                      background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
+                    }}
+                  >
+                    {meta.label}
+                  </span>
+                </div>
+              </Link>            );
           })}
         </div>
       )}

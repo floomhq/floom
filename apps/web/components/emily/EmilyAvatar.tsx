@@ -28,8 +28,7 @@ export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
         size={iconSize}
         strokeWidth={1.5}
         fill="currentColor"
-        className="text-white"
-        aria-hidden="true"
+        className="text-white"        aria-hidden="true"
       />
     </span>
   );

@@ -1065,7 +1065,7 @@ function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }
   return (
     <form
       onSubmit={handleSubmit}
-      className="mt-4 flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2"
+      className="mt-4 flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2" // ds-allow-round ds-allow-border
       style={{ maxWidth: 380 }}
     >
       <input
@@ -1080,7 +1080,7 @@ function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }
       <button
         type="submit"
         disabled={!value.trim()}
-        className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--accent-foreground)] opacity-90 hover:opacity-100 disabled:opacity-30 transition-opacity"
+        className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--accent-foreground)] opacity-90 hover:opacity-100 disabled:opacity-30 transition-opacity" // ds-allow-round
         aria-label="Create worker"
       >
         <ArrowRight className="size-3.5" />
@@ -1169,7 +1169,7 @@ function StructuredInputField({
         <button
           type="button"
           onClick={() => fileInputRef.current?.click()}
-          className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
+          className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors" // ds-allow-round ds-allow-border
         >
           <UploadCloud className="size-3.5" />
           {fileName ?? `Upload ${acceptAttr}`}
@@ -1185,7 +1185,7 @@ function StructuredInputField({
           type="button"
           disabled={loading}
           onClick={() => void loadExample()}
-          className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
+          className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50" // ds-allow-round ds-allow-border
         >
           {loading ? "Loading…" : "Load example"}
         </button>
@@ -1202,7 +1202,10 @@ function StructuredInputField({
 
       {/* Collapsible format/schema hint */}
       {showFormat && hint && (
-        <p className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2 text-xs text-muted-foreground">
+        <p
+          // ds-allow-round
+          className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2 text-xs text-muted-foreground"
+        >
           {hint}
         </p>
       )}

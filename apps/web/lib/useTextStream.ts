@@ -24,8 +24,14 @@ export function useTextStream(
   // posRef tracks how many characters of `target` we've already revealed.
   const posRef = useRef(target.length);
   const timerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  // Keep a ref to the latest target so the tick closure never captures a stale one.
+  const targetRef = useRef(target);
 
   useEffect(() => {
+    // Update the ref at the start of the effect so the tick closure always
+    // reads the current target without capturing a stale closure value.
+    targetRef.current = target;
+
     // Cancel any running timer first.
     if (timerRef.current) {
       clearTimeout(timerRef.current);

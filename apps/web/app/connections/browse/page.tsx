@@ -188,8 +188,8 @@ function ToolsModal({
       >
         {/* Header: logo + name */}
         <DialogHeader className="flex-row items-center gap-3 [border-bottom:var(--bd-div)] px-4 py-3">
-          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-2)]">            <img
-              src={item.logo_url}
+          <div className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-2)]">
+            <img              src={item.logo_url}
               alt={`${item.name} logo`}
               className="h-6 w-6 object-contain"
               loading="eager"
@@ -214,9 +214,9 @@ function ToolsModal({
               type="text"
               value={toolSearch}
               onChange={(e) => setToolSearch(e.target.value)}
-              placeholder="Filter tools..."
-              className="h-8 w-full rounded-[var(--radius-ui)] bg-[var(--bg-2)] pl-8 pr-3 text-xs text-ink placeholder:text-muted-foreground focus:outline-none"            />
-            {toolSearch ? (
+              placeholder="Filter actions..."
+              className="h-8 w-full rounded-[var(--radius-ui)] bg-[var(--bg-2)] pl-8 pr-3 text-xs text-ink placeholder:text-muted-foreground focus:outline-none"
+            />            {toolSearch ? (
               <button
                 type="button"
                 onClick={() => setToolSearch("")}
@@ -287,8 +287,7 @@ function CatalogSkeleton({ count = PAGE_SIZE }: { count?: number }) {
     <>
       {Array.from({ length: Math.min(count, 12) }).map((_, index) => (
         <div key={index} className="flex items-center gap-4 py-3.5">
-          <Skeleton className="h-10 w-10 shrink-0 rounded-xl" />
-          <div className="min-w-0 flex-1 space-y-2">
+          <Skeleton className="h-10 w-10 shrink-0 rounded-[var(--radius-ui)]" />          <div className="min-w-0 flex-1 space-y-2">
             <Skeleton className="h-3.5 w-32" />
             <Skeleton className="h-3 w-56" />
           </div>
@@ -315,21 +314,17 @@ function CatalogRow({
 
   return (
     <>
-      <article className="grid h-[172px] grid-rows-[auto_1fr_auto] rounded-[var(--radius-ui)] bg-[var(--bg-card)] p-4 shadow-[var(--shadow-card)] transition-[background-color,box-shadow] duration-150 ease-[var(--ease)] hover:bg-[var(--bg-2)]">
-        <div className="flex min-w-0 items-center gap-3">
-          <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-2)]">
-            <img
-              src={item.logo_url}
-              alt={`${item.name} logo`}
-              className="h-6 w-6 object-contain"
-              loading="eager"
-              decoding="async"
-            />
-          </div>
-          <div className="min-w-0 flex-1">
-            <h2 className="line-clamp-2 text-sm font-semibold text-ink">{item.name}</h2>
-          </div>        </div>
-
+      <article className="group flex min-h-[60px] items-center gap-4 rounded-[var(--radius-ui)] px-3 py-3 transition-colors duration-100 hover:bg-[var(--bg-2)]">
+        {/* Logo */}
+        <div className="flex h-10 w-10 shrink-0 items-center justify-center rounded-[var(--radius-ui)] bg-[var(--bg-2)] transition-colors group-hover:bg-[var(--bg-card)]">
+          <img
+            src={item.logo_url}
+            alt={`${item.name} logo`}
+            className="h-6 w-6 object-contain"
+            loading="lazy"
+            decoding="async"
+          />
+        </div>
         {/* Name + outcome text */}
         <div className="min-w-0 flex-1">
           <h2 className="truncate text-sm font-semibold text-ink">{item.name}</h2>
@@ -593,29 +588,30 @@ export default function ConnectionsBrowsePage() {
         </div>
       </section>
 
-      <section className="grid grid-cols-[repeat(auto-fill,minmax(176px,1fr))] gap-3">
-        {loading ? (
-          <CatalogSkeleton />
-        ) : loadError ? (
-          <div className="col-span-full space-y-3 rounded-[var(--radius-ui)] bg-[var(--bg-card)] px-4 py-12 text-center">
-            <p className="text-sm font-medium text-ink">Could not load integrations</p>
-            <p className="mt-1 text-sm text-[var(--ink-soft)]">{loadError}</p>
-            <button
-              type="button"
-              onClick={() => void loadCatalog()}
-              className="text-xs underline text-[var(--ink-soft)] hover:text-ink transition-colors"
-            >
-              Try again
-            </button>
-          </div>
-        ) : catalog?.items.length ? (
-          catalog.items.map((item) => (
-            <CatalogCard
-              key={item.slug}
-              item={item}
-              connecting={connecting === item.slug}
-              isConnected={connectedSlugs.has(item.slug.toLowerCase())}
-              onConnect={handleConnect}
+      {/* Main content */}
+      {loading ? (
+        <section className="space-y-0.5">
+          <CatalogSkeleton count={PAGE_SIZE} />
+        </section>
+      ) : loadError ? (
+        <div className="rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-4 py-12 text-center">
+          <p className="text-sm font-medium text-ink">Could not load integrations</p>
+          <p className="mt-1 text-sm text-muted-foreground">{loadError}</p>
+          <button
+            type="button"
+            onClick={() => void loadCatalog()}
+            className="mt-3 text-xs underline text-muted-foreground hover:text-ink transition-colors"
+          >
+            Try again
+          </button>
+        </div>
+      ) : catalog?.items.length ? (
+        <div className="space-y-8">
+          {/* Connected integrations — only show when not actively filtering */}
+          {!isFiltering && connectedItems.length > 0 ? (
+            <ConnectedSection
+              items={connectedItems}
+              connecting={connecting}              onConnect={handleConnect}
             />
           ))
         ) : (
@@ -675,7 +671,7 @@ export default function ConnectionsBrowsePage() {
         </div>
       ) : (
         // Empty state — bridge to secrets for apps not in Composio catalog
-        <div className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-6 py-12 text-center">
+        <div className="rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-6 py-12 text-center">
           <p className="text-sm font-medium text-ink">No integrations found</p>
           <p className="mt-1 text-sm text-muted-foreground">
             Clear filters or try a broader search.
@@ -687,7 +683,7 @@ export default function ConnectionsBrowsePage() {
               </p>
               <Link
                 href={`/connections/secrets?prefill=${encodeURIComponent(search.trim().toUpperCase().replace(/[^A-Z0-9_]+/g, "_") + "_API_KEY")}`}
-                className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--accent-soft)] px-3 text-xs font-medium text-[var(--accent)] transition-opacity hover:opacity-90"
+                className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-ui)] bg-[var(--accent-soft)] px-3 text-xs font-medium text-[var(--accent)] transition-opacity hover:opacity-90"
               >
                 Add {search.trim()} as a secret
               </Link>
