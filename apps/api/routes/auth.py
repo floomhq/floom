@@ -3,7 +3,6 @@ from __future__ import annotations
 import base64
 import hashlib
 import json
-import logging
 import os
 import re
 import secrets
@@ -21,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from apps.api import email_service
 from apps.api._engine import ensure_engine_api_path
+from apps.api.obs import get_logger
 from apps.api.auth.supabase_provider import ACTIVE_WORKSPACE_COOKIE, PAT_HEADER
 from apps.api.config import (
     get_cloud_settings,
@@ -37,7 +37,7 @@ from db.factory import get_repositories  # noqa: E402
 
 
 router = APIRouter(prefix="/auth", tags=["auth"])
-logger = logging.getLogger("workeros.cloud.auth")
+logger = get_logger("workeros.cloud.auth")
 
 _TOKEN_PREFIX = "floom_"
 
@@ -1259,8 +1259,11 @@ def logout(request: Request):
         try:
             client.auth.set_session(access_token, refresh_token)
             client.auth.sign_out()
-        except Exception:
-            pass
+        except Exception as exc:
+            # Best-effort server-side revoke; we still clear cookies below, so a
+            # failure here doesn't block logout. But it used to vanish — log a
+            # secret-safe summary so a chronically failing revoke is visible.
+            logger.warning("auth/logout server-side sign-out failed: %s", _gotrue_detail(exc))
 
     response = JSONResponse({"ok": True})
     _clear_cookie(response, _SESSION_COOKIE_NAME)

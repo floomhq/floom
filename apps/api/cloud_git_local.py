@@ -26,7 +26,6 @@ Git workspace layout (mirrors GitHub repo layout from cloud_git.py):
 """
 from __future__ import annotations
 
-import logging
 import os
 import subprocess
 import tempfile
@@ -35,8 +34,9 @@ from pathlib import Path
 from typing import Optional
 
 from apps.api.config import get_supabase_service_client
+from apps.api.obs import get_logger, log_failure
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 _BUNDLES_BUCKET = "workeros-git-bundles"
 
@@ -176,22 +176,35 @@ def _restore_from_bundle(workspace_id: str, git_dir: Path) -> bool:
             timeout=60,
         )
         if result.returncode != 0:
-            logger.warning(
-                "git clone from bundle failed for %s: %s", workspace_id, result.stderr
+            log_failure(
+                logger,
+                "bundle restore: git clone from bundle failed for workspace %s "
+                "(versioning/rollback history unavailable on this server) — %s",
+                workspace_id,
+                result.stderr.strip(),
+                exc_info=False,
             )
             return False
         _git(["config", "user.email", "workeros@local"], git_dir)
         _git(["config", "user.name", "WorkerOS"], git_dir)
         logger.info("Restored git workspace from bundle for %s", workspace_id)
         return True
-    except Exception as exc:
-        logger.warning("Bundle restore failed for %s: %s", workspace_id, exc)
+    except Exception:
+        log_failure(
+            logger,
+            "bundle restore failed for workspace %s "
+            "(versioning/rollback history unavailable on this server)",
+            workspace_id,
+        )
         return False
     finally:
         try:
             os.unlink(tmp_path)
         except Exception:
-            pass
+            logger.warning(
+                "bundle restore: failed to unlink temp bundle %s for workspace %s",
+                tmp_path, workspace_id, exc_info=True,
+            )
 
 
 def ensure_workspace_repo(workspace_id: str) -> Path:
@@ -284,7 +297,11 @@ def _backfill_worker_files_from_git(workspace_id: str, git_dir: Path) -> None:
                     try:
                         files[fpath.name] = fpath.read_text(encoding="utf-8")
                     except Exception:
-                        pass
+                        logger.warning(
+                            "backfill: could not read file %s for worker %s/%s "
+                            "(omitted from restored _files)",
+                            fpath.name, workspace_id, worker_id, exc_info=True,
+                        )
 
             if not files:
                 continue  # Nothing to backfill
@@ -345,9 +362,18 @@ def push_background(workspace_id: str) -> None:
             if result.returncode == 0:
                 _stamp_last_pushed(workspace_id)
             else:
-                logger.debug("git push failed for %s: %s", workspace_id, result.stderr.strip())
-        except Exception as exc:
-            logger.debug("push_background failed for %s: %s", workspace_id, exc)
+                logger.warning(
+                    "git push to remote failed for workspace %s "
+                    "(GitHub sync degraded; local git + bundle still authoritative): %s",
+                    workspace_id, result.stderr.strip(),
+                )
+        except Exception:
+            log_failure(
+                logger,
+                "push_background failed for workspace %s "
+                "(GitHub sync degraded; local git + bundle still authoritative)",
+                workspace_id,
+            )
 
     threading.Thread(
         target=_run, daemon=True, name=f"workeros-git-push-{workspace_id[:8]}"
@@ -361,8 +387,11 @@ def _stamp_last_pushed(workspace_id: str) -> None:
         svc.table("git_workspace_config").update(
             {"last_pushed_at": datetime.now(timezone.utc).isoformat()}
         ).eq("workspace_id", workspace_id).execute()
-    except Exception as exc:
-        logger.debug("_stamp_last_pushed failed: %s", exc)
+    except Exception:
+        logger.warning(
+            "_stamp_last_pushed failed for workspace %s (last_pushed_at not updated)",
+            workspace_id, exc_info=True,
+        )
 
 
 def commit_and_push_all(workspace_id: str) -> None:
@@ -381,8 +410,13 @@ def commit_and_push_all(workspace_id: str) -> None:
             for row in (rows.data or []):
                 try:
                     commit_workspace(workspace_id, [f"workers/{row['id']}"], msg)
-                except Exception as exc:
-                    logger.debug("commit_and_push_all: worker %s: %s", row["id"], exc)
+                except Exception:
+                    log_failure(
+                        logger,
+                        "commit_and_push_all: initial snapshot commit failed for "
+                        "worker %s in workspace %s (worker not in snapshot)",
+                        row["id"], workspace_id,
+                    )
 
             try:
                 commit_workspace(
@@ -390,12 +424,22 @@ def commit_and_push_all(workspace_id: str) -> None:
                     ["workspace-tools.yml", "workspace.md", "workspace.base.md"],
                     msg,
                 )
-            except Exception as exc:
-                logger.debug("commit_and_push_all: workspace files: %s", exc)
+            except Exception:
+                log_failure(
+                    logger,
+                    "commit_and_push_all: initial snapshot commit failed for "
+                    "workspace files in workspace %s",
+                    workspace_id,
+                )
 
             push_background(workspace_id)
-        except Exception as exc:
-            logger.warning("commit_and_push_all failed for %s: %s", workspace_id, exc)
+        except Exception:
+            log_failure(
+                logger,
+                "commit_and_push_all failed for workspace %s "
+                "(initial snapshot may be incomplete)",
+                workspace_id,
+            )
 
     threading.Thread(
         target=_run, daemon=True, name=f"workeros-git-push-all-{workspace_id[:8]}"
@@ -419,6 +463,7 @@ def _upload_bundle(workspace_id: str) -> None:
     with tempfile.NamedTemporaryFile(suffix=".bundle", delete=False) as f:
         tmp_path = f.name
 
+    bundle_data = b""
     try:
         _git(["bundle", "create", tmp_path, "--all"], git_dir, timeout=120)
         with open(tmp_path, "rb") as f:
@@ -432,17 +477,29 @@ def _upload_bundle(workspace_id: str) -> None:
                 file=bundle_data,
                 file_options={"upsert": "true", "content-type": "application/octet-stream"},
             )
-        except Exception:
+        except Exception as upload_exc:
+            # Object likely already exists — fall back to update (expected path).
+            logger.debug(
+                "Bundle upload for %s fell back to update: %s", workspace_id, upload_exc
+            )
             svc.storage.from_(_BUNDLES_BUCKET).update(storage_path, bundle_data)
 
         logger.debug("Uploaded git bundle for %s (%d bytes)", workspace_id, len(bundle_data))
-    except Exception as exc:
-        logger.warning("Bundle upload failed for %s: %s", workspace_id, exc)
+    except Exception:
+        log_failure(
+            logger,
+            "git bundle upload to Storage failed for workspace %s (%d bytes) — "
+            "disaster-recovery backup is stale for this write (#319)",
+            workspace_id, len(bundle_data),
+        )
     finally:
         try:
             os.unlink(tmp_path)
         except Exception:
-            pass
+            logger.warning(
+                "bundle upload: failed to unlink temp bundle %s for workspace %s",
+                tmp_path, workspace_id, exc_info=True,
+            )
 
 
 def upload_bundle_background(workspace_id: str) -> None:
@@ -519,7 +576,11 @@ def _write_worker(git_dir: Path, workspace_id: str, worker_id: str) -> bool:
                         try:
                             files[fpath.name] = fpath.read_text(encoding="utf-8")
                         except Exception:
-                            pass
+                            logger.warning(
+                                "_write_worker: could not read disk file %s for "
+                                "worker %s/%s (omitted from git commit)",
+                                fpath.name, workspace_id, worker_id, exc_info=True,
+                            )
 
     worker_dir = git_dir / "workers" / worker_id
     worker_dir.mkdir(parents=True, exist_ok=True)
@@ -543,6 +604,11 @@ def _write_context(git_dir: Path, workspace_id: str, context_name: str) -> bool:
             return False  # sensitive contexts never enter git
         src = current_contexts_root() / context_name
     except Exception:
+        logger.warning(
+            "_write_context: could not resolve context root for %s in workspace %s "
+            "(context not committed to git)",
+            context_name, workspace_id, exc_info=True,
+        )
         return False
 
     if not src.is_dir():
@@ -565,6 +631,11 @@ def _write_workspace_md(git_dir: Path) -> bool:
         import main as engine_main  # noqa: PLC0415
         workspace_dir = engine_main._git_workspace()
     except Exception:
+        logger.warning(
+            "_write_workspace_md: could not resolve engine workspace dir "
+            "(workspace.md/workspace.base.md not committed to git)",
+            exc_info=True,
+        )
         return False
 
     wrote = False
@@ -597,8 +668,12 @@ def _write_workspace_tools(git_dir: Path, workspace_id: str) -> bool:
         content = yaml.safe_dump(doc, sort_keys=False, allow_unicode=True)
         (git_dir / "workspace-tools.yml").write_text(content, encoding="utf-8")
         return True
-    except Exception as exc:
-        logger.debug("_write_workspace_tools failed: %s", exc)
+    except Exception:
+        logger.warning(
+            "_write_workspace_tools failed for workspace %s "
+            "(workspace-tools.yml not committed to git)",
+            workspace_id, exc_info=True,
+        )
         return False
 
 
@@ -798,7 +873,11 @@ def sync_checkout_to_contexts(
                 try:
                     dp.unlink()
                 except Exception:
-                    pass
+                    logger.warning(
+                        "sync_checkout_to_contexts: failed to remove stale file %s "
+                        "for context %s in workspace %s (rollback left it behind)",
+                        rel, context_name, workspace_id, exc_info=True,
+                    )
 
     try:
         from apps.api.cloud_contexts import upload_context

@@ -9,6 +9,7 @@ from uuid import UUID
 from cryptography.fernet import Fernet
 
 from apps.api._cloud_env import load_cloud_env_file
+from apps.api.obs import log_failure
 
 load_cloud_env_file()
 
@@ -120,8 +121,13 @@ def vault_delete_secret(client, vault_id: UUID) -> None:
             "workeros_vault_delete_secret",
             {"p_id": str(vault_id)},
         ).execute()
-    except Exception as exc:
-        logger.warning("vault_delete_secret %s failed (non-fatal): %s", vault_id, exc)
+    except Exception:
+        # Non-fatal for the caller, but a failed delete leaves an orphaned Vault
+        # secret behind (storage/audit leak), so surface it at ERROR with the
+        # vault id only — never the plaintext or ciphertext.
+        log_failure(
+            logger, "vault_delete_secret failed for vault_id %s (orphaned secret)", vault_id
+        )
 
 
 def vault_secret_name(workspace_id: str, secret_name: str) -> str:

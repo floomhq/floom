@@ -16,6 +16,9 @@ from fastapi import HTTPException
 from apps.api.config import get_supabase_service_client
 from apps.api.db._secret_crypto import vault_read_secret, vault_store_secret, vault_update_secret
 from apps.api.db import workspaces as workspace_repo
+from apps.api.obs import get_logger, log_failure
+
+logger = get_logger(__name__)
 
 
 INSTALL_STATUSES = {
@@ -209,6 +212,11 @@ def bot_token_for_team(team_id: str | None) -> str:
     try:
         install = get_installation(team_id)
     except Exception:
+        # Installation lookup failed unexpectedly — the bot silently loses its
+        # token and stops responding for this team. Surface it (team id only).
+        log_failure(
+            logger, "slack installation lookup failed for team %s; bot token unavailable", team_id
+        )
         return ""
     if not install:
         return ""
@@ -219,6 +227,12 @@ def bot_token_for_team(team_id: str | None) -> str:
     try:
         token = vault_read_secret(get_supabase_service_client(), UUID(str(vault_id)))
     except Exception:
+        # Vault read failed (infra/key issue, not an invalid Slack token). The
+        # team is marked token_invalid below, but log the underlying failure —
+        # never the token/vault contents — so the root cause is diagnosable.
+        log_failure(
+            logger, "vault read of slack bot token failed for team %s", team_id
+        )
         mark_token_invalid(team_id=team_id, error="vault_read_failed")
         return ""
     if not token:

@@ -43,6 +43,9 @@ from apps.api.auth.workspace_context import get_active_workspace_id
 from apps.api.config import get_supabase_service_client
 from apps.api.db import members as members_db
 from apps.api.db import workspaces as workspace_repo
+from apps.api.obs import get_logger
+
+logger = get_logger(__name__)
 
 
 def _scoped_workspace_id(workspace_id: str) -> str:
@@ -197,7 +200,15 @@ class SupabaseWorkspaceMemberRepository:
             )
             send_email(to=email, subject=msg["subject"], html=msg["html"])
         except Exception:
-            pass
+            # Invite row is already created; we deliberately don't block on send.
+            # But a silent send failure is exactly how invites "disappear" (e.g.
+            # WORKEROS_EMAIL_FROM mismatch), so log it (recipient + workspace).
+            logger.warning(
+                "workspace invite email send failed for %s in workspace %s; invite row created but not delivered",
+                email,
+                ws_id,
+                exc_info=True,
+            )
         # The invitee has no user_id until they accept; surface an invited row in
         # the shape the engine expects.
         return {

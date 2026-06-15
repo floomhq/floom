@@ -53,10 +53,14 @@ def evict_workspace_cache_for_user(user_id: str) -> None:
 import jwt
 from fastapi import HTTPException, Request
 
+from apps.api import obs
 from apps.api._engine import ensure_engine_api_path
 from apps.api.auth.workspace_context import set_active_member_role, set_active_workspace_id
 from apps.api.config import get_cloud_settings
 from apps.api.db import workspaces as workspace_repo
+from apps.api.obs import get_logger, log_failure
+
+logger = get_logger(__name__)
 
 ensure_engine_api_path()
 
@@ -119,6 +123,14 @@ def _fetch_jwks(supabase_url: str) -> dict[str, jwt.PyJWK]:
             kid = key_dict.get("kid") or pyjwk.key_id or "default"
             keys[kid] = pyjwk
         except Exception:
+            # A single malformed JWKS entry shouldn't sink the whole key set,
+            # but skipping it silently hides why a valid token later fails to
+            # verify. Log presence only (kid/kty) — never key material.
+            logger.warning(
+                "skipping unparseable JWKS key kid=%s kty=%s",
+                key_dict.get("kid"),
+                key_dict.get("kty"),
+            )
             continue
     return keys
 
@@ -179,6 +191,13 @@ def _verify_jwt(token: str, supabase_url: str) -> dict:
     except HTTPException:
         raise
     except Exception as exc:
+        # Fail closed to 401 (unchanged). But this branch also catches
+        # *unexpected* failures (JWKS fetch/network errors, key-selection bugs),
+        # not just routine bad/expired tokens — which previously vanished. Log
+        # the exception TYPE only (never the token) so a verify outage is
+        # visible without leaking credentials. WARNING, not ERROR: the dominant
+        # case is still a routine invalid-token 401.
+        logger.warning("JWT verification failed (%s)", type(exc).__name__)
         raise HTTPException(status_code=401, detail="unauthorized") from exc
     return claims
 
@@ -274,10 +293,20 @@ class SupabaseAuthProvider:
             else:
                 role = workspace_repo.get_member_role(workspace_id=workspace_id, user_id=user_id)
         except Exception:
+            # Workspace resolution failed for a worker-call token. Behavior is
+            # unchanged (fall back to user-scoped, no active workspace), but
+            # this used to vanish — surface it so a worker-to-worker call that
+            # silently loses its workspace scope is debuggable.
+            log_failure(
+                logger,
+                "worker-call-token workspace resolution failed; falling back to user scope",
+                user_id=user_id,
+            )
             workspace_id = None
         set_active_workspace_id(workspace_id)
         set_active_member_role(role)
 
+        obs.set_context(user_id=user_id)
         return AuthContext(
             user_id=user_id,
             role=role or "member",
@@ -354,6 +383,7 @@ class SupabaseAuthProvider:
             # engine AuthContext.role DEFAULTS to "admin", so omitting role here
             # silently grants every cloud member admin. Thread the resolved role
             # in, failing closed to "member" when role can't be proven.
+            obs.set_context(user_id=user_id)
             return AuthContext(
                 user_id=user_id,
                 email=None,
@@ -419,6 +449,14 @@ class SupabaseAuthProvider:
                 workspace_id = str(active["id"])
             except Exception:
                 # Transient Supabase error — fall back to user-scoped behavior.
+                # Behavior unchanged, but make the resolve failure visible: a
+                # request silently dropping to user scope (and thus seeing no
+                # workspace data) was previously a black hole.
+                log_failure(
+                    logger,
+                    "active workspace resolution failed; falling back to user scope",
+                    user_id=user_id,
+                )
                 workspace_id = None
 
             # Step 2: resolve role (separate try so workspace is not lost on failure).
@@ -431,6 +469,15 @@ class SupabaseAuthProvider:
                             workspace_id=workspace_id, user_id=user_id
                         )
                 except Exception:
+                    # Role lookup failed — fails closed to "member" downstream
+                    # (None). Surface it: a transient failure here silently
+                    # demotes an admin, which is otherwise invisible.
+                    log_failure(
+                        logger,
+                        "member role resolution failed; failing closed to member",
+                        user_id=user_id,
+                        workspace_id=workspace_id,
+                    )
                     role = None
 
             with _cache_lock:
@@ -445,6 +492,7 @@ class SupabaseAuthProvider:
         # grants every cloud member admin. Thread the resolved role in, failing
         # closed to "member" when role can't be proven (transient Supabase error,
         # unresolved workspace, or non-member).
+        obs.set_context(user_id=user_id)
         return AuthContext(
             user_id=user_id,
             email=email,

@@ -7,10 +7,11 @@ startup overrides and fallback paths.
 """
 from __future__ import annotations
 
-import logging
 from typing import Optional
 
-logger = logging.getLogger(__name__)
+from apps.api.obs import get_logger
+
+logger = get_logger(__name__)
 
 
 def get_git_cfg(workspace_id: str) -> Optional[dict]:
@@ -29,6 +30,10 @@ def get_git_cfg(workspace_id: str) -> Optional[dict]:
             .execute()
         )
         return rows.data[0] if rows.data else None
-    except Exception as exc:
-        logger.debug("get_git_cfg failed for %s: %s", workspace_id, exc)
+    except Exception:
+        logger.warning(
+            "get_git_cfg failed for workspace %s (git remote / GitHub sync config "
+            "unavailable for this request)",
+            workspace_id, exc_info=True,
+        )
         return None

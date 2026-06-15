@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 import threading
 import time
@@ -12,8 +11,9 @@ from supabase import Client, create_client
 from supabase.lib.client_options import SyncClientOptions
 
 from apps.api._cloud_env import load_cloud_env_file
+from apps.api.obs import get_logger
 
-logger = logging.getLogger(__name__)
+logger = get_logger(__name__)
 
 load_cloud_env_file()
 

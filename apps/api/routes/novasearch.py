@@ -20,11 +20,14 @@ from fastapi.responses import HTMLResponse
 from apps.api.auth.workspace_context import get_active_workspace_id
 from apps.api._engine import ensure_engine_api_path
 from apps.api.config import new_supabase_service_client
+from apps.api.obs import get_logger, log_failure
 
 ensure_engine_api_path()
 
 from auth import AuthContext, get_auth_context  # noqa: E402
 
+
+logger = get_logger(__name__)
 
 router = APIRouter(prefix="/novasearch", tags=["novasearch"])
 
@@ -294,7 +297,16 @@ def _mcp_find_sap_candidates(
             modules=modules,
         )
     except Exception:
-        pass
+        # Non-fatal: the match already ran and is returned to the caller; only
+        # the analytics/history row failed to persist. Make it visible at WARNING
+        # so a broken Supabase match-query log is noticeable.
+        logger.warning(
+            "novasearch match-query record failed (match returned, analytics "
+            "row not persisted) workspace_id=%s query_log_id=%s",
+            workspace_id,
+            result.get("query_log_id"),
+            exc_info=True,
+        )
     mcp_result = {
         "curated_matches": (result.get("curated_matches") or [])[:10],
         "total_scored": result.get("total_scored"),
@@ -674,7 +686,18 @@ def _run_background_match_job(
                 modules=modules,
             )
         except Exception:
-            pass
+            # Non-fatal: background match completed; only the analytics/history
+            # row failed to persist. Surface at WARNING so a broken Supabase
+            # match-query log is noticeable.
+            logger.warning(
+                "novasearch match-query record failed in background job "
+                "(match completed, analytics row not persisted) "
+                "workspace_id=%s job_id=%s query_log_id=%s",
+                workspace_id,
+                job_id,
+                result.get("query_log_id"),
+                exc_info=True,
+            )
         with _MATCH_JOBS_LOCK:
             if job_id in _MATCH_JOBS:
                 _MATCH_JOBS[job_id].update({"status": "done", "result": result, "error": None})
@@ -697,6 +720,15 @@ def _extract_from_text(raw_text: str) -> dict[str, Any]:
     try:
         result = _extract_with_llm(raw_text)
     except Exception:
+        # Recoverable: LLM extraction unavailable/failed, degrade to the keyword
+        # fallback. Visible at WARNING so a persistently-down LLM extractor (and
+        # the resulting quality drop) is noticeable rather than silent.
+        logger.warning(
+            "novasearch LLM extraction failed, falling back to keyword extractor "
+            "(degraded) text_len=%d",
+            len(raw_text),
+            exc_info=True,
+        )
         result = _extract_fallback(raw_text)
     if not (result.get("location") or "").strip():
         try:
@@ -705,7 +737,13 @@ def _extract_from_text(raw_text: str) -> dict[str, Any]:
             if city:
                 result["location"] = city["name"]
         except Exception:
-            pass
+            # Optional metadata enrichment: location stays unset, not fatal.
+            logger.warning(
+                "novasearch geo city resolution failed (location left unset) "
+                "text_len=%d",
+                len(raw_text),
+                exc_info=True,
+            )
     return clean_extracted_result(result, raw_text)
 
 
@@ -784,6 +822,16 @@ def _mcp_dispatch(
         else:
             return {"jsonrpc": "2.0", "id": rpc_id, "error": {"code": -32601, "message": f"Method not found: {method}"}}
     except Exception as exc:
+        # The caller only sees an opaque "Internal error: <ExcType>"; without
+        # this the real failure (e.g. a Supabase write failing inside a tool
+        # handler) would be invisible server-side. Log with traceback + context.
+        log_failure(
+            logger,
+            "novasearch MCP dispatch failed method=%s tool=%s workspace_id=%s",
+            method,
+            (params.get("name") if method == "tools/call" else None),
+            workspace_id,
+        )
         return {"jsonrpc": "2.0", "id": rpc_id, "error": {"code": -32603, "message": f"Internal error: {type(exc).__name__}"}}
     return {"jsonrpc": "2.0", "id": rpc_id, "result": result}
 
@@ -941,6 +989,14 @@ async def novasearch_refine(
         try:
             raw = _llm_refine(current_spec, message)
         except Exception:
+            # Recoverable: LLM refinement unavailable/failed, degrade to a canned
+            # reply. Visible at WARNING so a persistently-down refiner is noticeable.
+            logger.warning(
+                "novasearch LLM refine failed, returning canned fallback reply "
+                "(degraded) message_len=%d",
+                len(message),
+                exc_info=True,
+            )
             raw = {
                 "intent": "answer",
                 "updated_spec": None,
@@ -1079,7 +1135,16 @@ async def match_candidates(
             modules=modules,
         )
     except Exception:
-        pass
+        # Non-fatal: the match already ran and is returned to the caller; only
+        # the analytics/history row failed to persist. Surface at WARNING so a
+        # broken Supabase match-query log is noticeable.
+        logger.warning(
+            "novasearch match-query record failed (match returned, analytics "
+            "row not persisted) workspace_id=%s query_log_id=%s",
+            workspace_id,
+            result.get("query_log_id"),
+            exc_info=True,
+        )
     return result
 
 

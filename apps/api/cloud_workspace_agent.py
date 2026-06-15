@@ -1,6 +1,5 @@
 from __future__ import annotations
 
-import logging
 import os
 import uuid
 from pathlib import Path
@@ -10,8 +9,9 @@ from apps.api._engine import import_engine_module
 from apps.api.auth.workspace_context import get_active_workspace_id
 from apps.api.config import get_supabase_service_client
 from apps.api.db import workspaces as workspace_repo
+from apps.api.obs import get_logger
 
-logger = logging.getLogger("workeros.cloud.workspace_agent")
+logger = get_logger(__name__)
 
 chat_service = import_engine_module("chat_service")
 
@@ -60,8 +60,15 @@ def get_workspace_md() -> str:
             if isinstance(content, str) and content.strip():
                 return content
         return _template_workspace_md()
-    except Exception as exc:
-        logger.warning("workspace_agent_settings read failed; using file fallback: %s", exc)
+    except Exception:
+        # Degraded (recoverable): Supabase read failed, falling back to the local
+        # file copy of workspace.md. Visible so a persistent Supabase outage that
+        # silently serves stale/template instructions is noticed.
+        logger.warning(
+            "workspace_agent_settings read failed; using file fallback workspace_id=%s",
+            workspace_id,
+            exc_info=True,
+        )
         path = _fallback_path(workspace_id)
         if path.is_file():
             return path.read_text(encoding="utf-8")
@@ -82,8 +89,15 @@ def set_workspace_md(content: str) -> None:
             on_conflict="workspace_id",
         ).execute()
         return
-    except Exception as exc:
-        logger.warning("workspace_agent_settings write failed; using file fallback: %s", exc)
+    except Exception:
+        # Degraded (recoverable): Supabase write failed, persisting to the local
+        # file fallback instead. Visible so durable saves silently diverging from
+        # Supabase (file-only persistence) is noticed.
+        logger.warning(
+            "workspace_agent_settings write failed; using file fallback workspace_id=%s",
+            workspace_id,
+            exc_info=True,
+        )
         path = _fallback_path(workspace_id)
         path.parent.mkdir(parents=True, exist_ok=True)
         path.write_text(content, encoding="utf-8")
@@ -253,8 +267,15 @@ def workspace_agent_info(user_id: str) -> dict[str, Any]:
     slack = dict(channels.get("slack") or {})
     try:
         slack["binding"] = get_slack_binding()
-    except Exception as exc:
-        logger.warning("workspace_agent_channel_bindings read failed: %s", exc)
+    except Exception:
+        # Degraded (recoverable): Slack binding lookup failed, so the workspace
+        # agent info reports no binding. Visible so a Supabase error that makes a
+        # configured Slack channel appear unbound is noticed.
+        logger.warning(
+            "workspace_agent_channel_bindings read failed user_id=%s",
+            user_id,
+            exc_info=True,
+        )
         slack["binding"] = None
     channels["slack"] = slack
     info["channels"] = channels

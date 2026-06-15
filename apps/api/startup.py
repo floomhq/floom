@@ -57,7 +57,8 @@ import db as engine_db  # noqa: E402
 from db import factory as engine_db_factory  # noqa: E402
 from db.factory import Repositories, register_repositories  # noqa: E402
 
-logger = logging.getLogger("workeros.cloud.startup")
+from apps.api.obs import get_logger, log_failure  # noqa: E402
+logger = get_logger("workeros.cloud.startup")
 
 
 def _activate_cloud_deploy() -> None:
@@ -432,9 +433,20 @@ def _override_run_executor_workspace_context() -> None:
 
     def _cloud_run_execution_context(run_id: str):
         workspace_id = _run_workspace_id(run_id)
-        if workspace_id:
-            return active_workspace(workspace_id, "admin")
-        return contextlib.nullcontext()
+
+        @contextlib.contextmanager
+        def _ctx():
+            # Bind run_id + workspace_id so every log line for this run (incl.
+            # the executor thread) is correlatable end-to-end.
+            from apps.api import obs as _obs
+            with _obs.bound(run_id=run_id, workspace_id=workspace_id):
+                if workspace_id:
+                    with active_workspace(workspace_id, "admin"):
+                        yield
+                else:
+                    yield
+
+        return _ctx()
 
     run_service.set_run_execution_context_provider(_cloud_run_execution_context)
 
@@ -899,9 +911,11 @@ def _override_git_ops_for_cloud() -> None:
                             ctx_dir = current_contexts_root() / context_name
                             if ctx_dir.is_dir():
                                 upload_context_background(workspace_id, context_name, ctx_dir)
-                        except Exception as _exc:
-                            import logging as _log
-                            _log.getLogger(__name__).debug("context storage upload failed: %s", _exc)
+                        except Exception:
+                            logger.warning(
+                                "context storage upload failed for %s/%s (backup may be stale)",
+                                workspace_id, context_name, exc_info=True,
+                            )
         return None
 
     _cloud_commit_paths._workeros_cloud_patched = True
@@ -936,9 +950,11 @@ def _override_git_ops_for_cloud() -> None:
             from apps.api.cloud_git_local import ensure_workspace_repo
             try:
                 ensure_workspace_repo(workspace_id)
-            except Exception as exc:
-                import logging as _log
-                _log.getLogger(__name__).debug("ensure_workspace_repo failed: %s", exc)
+            except Exception:
+                logger.warning(
+                    "ensure_workspace_repo failed for %s (git workspace unavailable; "
+                    "versioning/rollback may be degraded)", workspace_id, exc_info=True,
+                )
         return True
 
     engine_git_ops.ensure_repo = _cloud_ensure_repo

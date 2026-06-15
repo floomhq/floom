@@ -24,7 +24,6 @@ old OSS-shaped client into pointing at /auth/cli-exchange.
 
 from __future__ import annotations
 
-import logging
 import secrets
 import time
 from typing import Any
@@ -34,13 +33,14 @@ from pydantic import BaseModel, Field
 
 from apps.api._engine import ensure_engine_api_path
 from apps.api.config import get_cloud_settings
+from apps.api.obs import get_logger
 
 ensure_engine_api_path()
 
 from db.factory import get_repositories  # noqa: E402
 
 
-logger = logging.getLogger("workeros.cloud.cli_auth_devices")
+logger = get_logger("workeros.cloud.cli_auth_devices")
 
 router = APIRouter(prefix="/cli-auth", tags=["cli-auth"])
 

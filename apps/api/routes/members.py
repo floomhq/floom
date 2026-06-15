@@ -22,13 +22,23 @@ from apps.api._engine import ensure_engine_api_path
 from apps.api.db import members as members_db
 from apps.api.db import workspaces as workspace_repo
 from apps.api.email_service import build_workspace_invite_email, send_email
+from apps.api.obs import get_logger, log_failure
 
 ensure_engine_api_path()
 
 from auth import AuthContext, get_auth_context  # noqa: E402
 
 
+logger = get_logger(__name__)
+
 router = APIRouter(tags=["members"])
+
+
+def _email_domain(email: str | None) -> str:
+    """Return only the domain of an email for logging (avoid logging the
+    full address / local-part as PII)."""
+    addr = str(email or "")
+    return addr.rsplit("@", 1)[-1] if "@" in addr else "unknown"
 
 
 # ---------------------------------------------------------------------------
@@ -116,7 +126,17 @@ async def invite_member(
         )
         send_email(to=str(payload.email), subject=msg["subject"], html=msg["html"])
     except Exception:
-        pass  # log if needed; never block invite creation
+        # Non-fatal: the invite row is already created so the invitee can still
+        # join via a link, but the email did not go out — make that visible so a
+        # broken Resend/SMTP path is noticeable. Log domain only, never the token.
+        logger.warning(
+            "workspace invite email failed to send (invite row created, "
+            "delivery skipped) workspace_id=%s invite_id=%s recipient_domain=%s",
+            workspace_id,
+            invite.get("id"),
+            _email_domain(str(payload.email)),
+            exc_info=True,
+        )
     return {
         "id": invite.get("id"),
         "email": invite.get("email"),

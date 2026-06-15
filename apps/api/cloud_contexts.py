@@ -21,11 +21,12 @@ The disk path mirrors this:
 """
 from __future__ import annotations
 
-import logging
 from pathlib import Path
 from typing import Any, Optional
 
-logger = logging.getLogger(__name__)
+from apps.api.obs import get_logger, log_failure
+
+logger = get_logger(__name__)
 
 _BUCKET = "contexts"
 
@@ -91,8 +92,13 @@ def upload_context(workspace_id: str, context_name: str, context_dir: Path) -> N
         rel = fpath.relative_to(context_dir).as_posix()
         try:
             upload_file(workspace_id, context_name, rel, fpath.read_bytes())
-        except Exception as exc:
-            logger.debug("upload_context: skipped %s/%s: %s", context_name, rel, exc)
+        except Exception:
+            log_failure(
+                logger,
+                "upload_context: failed to upload file %s for context %s in "
+                "workspace %s (file not backed to Storage; lost on container restart)",
+                rel, context_name, workspace_id,
+            )
 
 
 def upload_context_background(
@@ -113,8 +119,13 @@ def upload_context_background(
 def _safe_upload_context(workspace_id: str, context_name: str, context_dir: Path) -> None:
     try:
         upload_context(workspace_id, context_name, context_dir)
-    except Exception as exc:
-        logger.debug("_safe_upload_context failed: %s", exc)
+    except Exception:
+        log_failure(
+            logger,
+            "background context upload failed for context %s in workspace %s "
+            "(context not synced to Storage)",
+            context_name, workspace_id,
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -135,8 +146,12 @@ def _list_storage_objects_recursive(svc: Any, prefix: str) -> list[str]:
     leaf_paths: list[str] = []
     try:
         entries = svc.storage.from_(_BUCKET).list(prefix) or []
-    except Exception as exc:
-        logger.debug("_list_storage_objects_recursive: list %s failed: %s", prefix, exc)
+    except Exception:
+        logger.warning(
+            "_list_storage_objects_recursive: Storage list failed for prefix %s "
+            "(objects under it will be treated as absent — may appear empty)",
+            prefix, exc_info=True,
+        )
         return leaf_paths
 
     for obj in entries:
@@ -193,8 +208,13 @@ def download_context(
             fpath.parent.mkdir(parents=True, exist_ok=True)
             fpath.write_bytes(content)
             written += 1
-        except Exception as exc:
-            logger.debug("download_context: skipped %s: %s", storage_path, exc)
+        except Exception:
+            log_failure(
+                logger,
+                "download_context: failed to download Storage object %s for "
+                "context %s in workspace %s (file missing after hydration)",
+                storage_path, context_name, workspace_id,
+            )
 
     return written
 
@@ -210,8 +230,12 @@ def list_context_names(workspace_id: str) -> list[str]:
             for obj in (objects or [])
             if (obj.get("name") if isinstance(obj, dict) else getattr(obj, "name", ""))
         ]
-    except Exception as exc:
-        logger.debug("list_context_names failed for %s: %s", workspace_id, exc)
+    except Exception:
+        logger.warning(
+            "list_context_names failed for workspace %s "
+            "(context list may appear empty)",
+            workspace_id, exc_info=True,
+        )
         return []
 
 
@@ -269,7 +293,12 @@ def _hydrate_from_github(
                 try:
                     upload_file(workspace_id, context_name, rel, content.encode("utf-8"))
                 except Exception:
-                    pass
+                    logger.warning(
+                        "_hydrate_from_github: Storage backfill of %s for context "
+                        "%s in workspace %s failed (next restart will re-fetch from "
+                        "GitHub)",
+                        rel, context_name, workspace_id, exc_info=True,
+                    )
 
         count = sum(1 for _ in dest_dir.rglob("*") if _.is_file())
         if count:
@@ -278,8 +307,12 @@ def _hydrate_from_github(
                 context_name, count,
             )
             return True
-    except Exception as exc:
-        logger.debug("_hydrate_from_github for %s/%s failed: %s", workspace_id, context_name, exc)
+    except Exception:
+        logger.warning(
+            "_hydrate_from_github failed for context %s in workspace %s "
+            "(GitHub disaster-recovery fallback unavailable for this hydration)",
+            context_name, workspace_id, exc_info=True,
+        )
     return False
 
 
@@ -301,8 +334,13 @@ def delete_context_from_storage(workspace_id: str, context_name: str) -> None:
         paths = _list_storage_objects_recursive(svc, prefix)
         if paths:
             svc.storage.from_(_BUCKET).remove(paths)
-    except Exception as exc:
-        logger.debug("delete_context_from_storage %s/%s failed: %s", workspace_id, context_name, exc)
+    except Exception:
+        log_failure(
+            logger,
+            "delete_context_from_storage failed for context %s in workspace %s "
+            "(Storage objects orphaned; context delete not fully propagated)",
+            context_name, workspace_id,
+        )
 
 
 # ---------------------------------------------------------------------------

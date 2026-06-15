@@ -21,6 +21,9 @@ from datetime import datetime, timedelta, timezone
 from typing import Any
 
 from apps.api.config import get_supabase_service_client
+from apps.api.obs import get_logger
+
+logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -366,7 +369,14 @@ def _evict_ws_cache(user_id: str) -> None:
         from apps.api.auth.supabase_provider import evict_workspace_cache_for_user
         evict_workspace_cache_for_user(user_id)
     except Exception:
-        pass
+        # #275: eviction is a best-effort latency optimization (a stale role
+        # self-heals within _WS_TTL ~30s), but a recurring failure means
+        # role/removal changes appear not to take effect — surface it.
+        logger.warning(
+            "workspace cache eviction failed for user %s; role change may lag ~30s",
+            user_id,
+            exc_info=True,
+        )
 
 
 def change_role(*, workspace_id: str, user_id: str, new_role: str) -> dict[str, Any] | None:
@@ -394,7 +404,9 @@ def resolve_member_emails(user_ids: list[str]) -> dict[str, str]:
             if resp and resp.user and resp.user.email:
                 result[uid] = resp.user.email
         except Exception:
-            pass
+            # Missing/deleted user is expected here; email is cosmetic. Keep at
+            # debug so a transient auth-admin error is traceable without noise.
+            logger.debug("member email lookup failed for user %s", uid, exc_info=True)
     return result
 
 

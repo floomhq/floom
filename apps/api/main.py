@@ -42,6 +42,10 @@ from apps.api.cloud_scheduler import start_cloud_scheduler, stop_cloud_scheduler
 from apps.api.cloud_webhooks import verify_webhook_token
 from apps.api._engine import import_engine_module
 import apps.api.startup as cloud_startup
+from apps.api import obs as _obs
+
+# Configure structured, secret-redacting logging before engine imports emit logs.
+_obs.setup_logging()
 
 engine_run_service = import_engine_module("run_service")
 from apps.api.routes.auth import router as auth_router
@@ -123,6 +127,21 @@ app = FastAPI(
     redoc_url="/redoc" if _docs_enabled else None,
     openapi_url="/openapi.json" if _docs_enabled else None,
 )
+
+
+@app.middleware("http")
+async def _obs_request_context(request: Request, call_next):
+    """Bind request_id + workspace_id so every log line for this request is
+    correlatable end-to-end. user_id is bound by the auth provider once verified."""
+    import uuid as _uuid
+    rid = request.headers.get("x-request-id") or _uuid.uuid4().hex[:12]
+    _obs.set_context(
+        request_id=rid,
+        workspace_id=request.headers.get("x-workeros-workspace"),
+    )
+    response = await call_next(request)
+    response.headers["x-request-id"] = rid
+    return response
 
 
 import re as _re

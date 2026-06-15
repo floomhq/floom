@@ -15,16 +15,16 @@ used by cloud_webhooks.py (apply_engine_overrides) and cloud_workspace_agent.py
 
 from __future__ import annotations
 
-import logging
 from datetime import datetime, timezone
 from typing import Any, Dict, Optional, Tuple
 
 from apps.api._engine import ensure_engine_api_path, import_engine_module
 from apps.api.config import get_supabase_service_client
+from apps.api.obs import get_logger, log_failure
 
 ensure_engine_api_path()
 
-logger = logging.getLogger("workeros.cloud.whatsapp")
+logger = get_logger(__name__)
 
 
 # ---------------------------------------------------------------------------
@@ -140,7 +140,13 @@ def _cloud_binding_info(wa_id: str) -> Optional[Tuple[str, str]]:
             try:
                 return orig(normalized)
             except Exception:
-                logger.exception("SQLite WhatsApp binding fallback also failed for %s", normalized)
+                # Both Supabase AND the SQLite fallback failed: the inbound
+                # WhatsApp message cannot be resolved to a user and is dropped.
+                log_failure(
+                    logger,
+                    "WhatsApp binding lookup failed on both Supabase and SQLite for wa_id=%s",
+                    normalized,
+                )
     return None
 
 

@@ -6,6 +6,10 @@ from email.utils import parseaddr
 from html import escape
 from typing import Any
 
+from apps.api.obs import get_logger, log_failure
+
+logger = get_logger(__name__)
+
 # Floom email logo (dark rounded-square play-arrow mark + "Floom" wordmark),
 # served as a stable absolute https asset from the Floom OS marketing surface.
 # Gmail and other clients require an absolute https URL for <img> in email; data
@@ -253,6 +257,17 @@ def send_transactional_email(message: TransactionalEmail) -> EmailSendResult:
     try:
         response = resend.Emails.send(params)
     except Exception as exc:
+        # Real failure: a transactional email (welcome / workspace invite) was
+        # not delivered. Previously this returned status="failed" with no log, so
+        # invite/welcome drops vanished silently. Log the recipient + subject +
+        # tags (never the api_key or full payload) so the drop is actionable.
+        log_failure(
+            logger,
+            "Transactional email send failed: to=%s subject=%r",
+            to_email,
+            message.subject,
+            tags=(sorted(message.tags) if message.tags else None),
+        )
         return EmailSendResult(
             status="failed",
             provider="resend",

@@ -28,6 +28,8 @@ _recipe_cache: contextvars.ContextVar[dict[str, tuple[dict, dict | None]] | None
     "_workeros_recipe_cache", default=None
 )
 
+from apps.api.obs import log_failure
+
 _repo_logger = logging.getLogger("workeros.cloud.supabase_repos")
 
 _SYSTEM_RUN_WORKER_IDS = frozenset({"worker-author"})
@@ -1152,7 +1154,17 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
                     batch.setdefault(wid, None)
                 _last_run_batch.set(batch)
             except Exception:
-                pass  # cache miss is fine — get_last_run falls back to per-worker queries
+                # Cache miss is non-fatal — get_last_run falls back to per-worker
+                # queries — but the RPC failing means a slow degraded path (and a
+                # likely-broken get_last_run_per_worker RPC / migration), so make
+                # it visible rather than silent.
+                _repo_logger.warning(
+                    "get_last_run_per_worker RPC failed for workspace %s (%d workers); "
+                    "falling back to per-worker queries",
+                    workspace_id,
+                    len(worker_ids),
+                    exc_info=True,
+                )
 
         return result
 
@@ -1658,9 +1670,20 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
                     if resp and resp.user and resp.user.email:
                         result[uid] = resp.user.email
                 except Exception:
-                    pass
+                    # A single user lookup miss (deleted user, no email) is
+                    # expected; attribution email is cosmetic. Keep at debug.
+                    _repo_logger.debug(
+                        "trigger member email lookup failed for user %s", uid, exc_info=True
+                    )
         except Exception:
-            pass
+            # The whole batch failed (e.g. the service client / auth admin is
+            # unavailable) — attribution degrades to blank, but that is a real
+            # unexpected failure worth surfacing.
+            _repo_logger.warning(
+                "trigger member email batch resolution failed for %d user(s)",
+                len(user_ids),
+                exc_info=True,
+            )
         return result
 
     def _decorate_run_rows(self, rows: list[dict[str, Any]]) -> list[dict[str, Any]]:
@@ -1760,7 +1783,15 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
                 }
                 _recipe_cache.set(vis_cache)
             except Exception:
-                pass
+                # Prefill is a perf optimization; a failure only costs an extra
+                # per-run DB round-trip later. Non-fatal, but log so a recurring
+                # prefill failure (broken worker/skill read) is not invisible.
+                _repo_logger.warning(
+                    "run-list worker visibility prefill failed for user %s (%d workers)",
+                    user_id,
+                    len(unique_worker_ids),
+                    exc_info=True,
+                )
 
         rows = self._decorate_run_rows(raw_rows)
         total = int(getattr(response, "count", 0) or 0)
@@ -2583,6 +2614,16 @@ class SupabaseSecretRepository(_BaseSupabaseRepository):
             try:
                 row["value"] = decrypt_secret(ciphertext)
             except Exception:
+                # Legacy Fernet decrypt failed (e.g. rotated/missing
+                # WORKEROS_CLOUD_SECRETS_ENCRYPTION_KEY): the secret silently
+                # reads back empty, so a worker that depends on it fails with a
+                # confusing "missing credential". Surface it (name only — never
+                # the ciphertext or plaintext).
+                log_failure(
+                    _repo_logger,
+                    "legacy Fernet decrypt failed for secret %s; value unreadable",
+                    row.get("name"),
+                )
                 row["value"] = None
         else:
             row["value"] = None
