@@ -296,6 +296,8 @@ def apply_cloud_slack_overrides() -> None:
     """Route engine Slack persistence through Supabase in cloud mode."""
     import json as _json
 
+    from fastapi import HTTPException
+
     from apps.api.db import slack_installations as slack_db
 
     try:
@@ -377,6 +379,26 @@ def apply_cloud_slack_overrides() -> None:
         claim["claim_url"] = engine_slack._slack_claim_url(claim["claim_token"])
         return claim
 
+    preserved_slack_state_secret = (
+        os.environ.get("FLOOM_SECRET")
+        or os.environ.get("WORKEROS_SLACK_STATE_SECRET")
+        or ""
+    ).strip()
+
+    def _cloud_slack_state_secret() -> str:
+        secret = (
+            preserved_slack_state_secret
+            or os.environ.get("WORKEROS_SLACK_STATE_SECRET")
+            or os.environ.get("SLACK_CLIENT_SECRET")
+            or ""
+        ).strip()
+        if not secret:
+            raise HTTPException(
+                status_code=503,
+                detail="FLOOM_SECRET or SLACK_CLIENT_SECRET is required for Slack OAuth state",
+            )
+        return secret
+
     patches = {
         "_slack_allowed_team_ids": _cloud_allowed_team_ids,
         "_get_slack_installation": _cloud_get_installation,
@@ -385,6 +407,7 @@ def apply_cloud_slack_overrides() -> None:
         "_append_slack_allowed_team_id": _cloud_append_allowed_team_id,
         "_slack_binding_user_id": _cloud_sender_user_id,
         "_slack_create_claim": _cloud_create_claim,
+        "_slack_state_secret": _cloud_slack_state_secret,
     }
     for name, fn in patches.items():
         if hasattr(engine_main_mod, name):

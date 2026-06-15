@@ -15,7 +15,9 @@ def _load_cloud_app(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DEV", "1")
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(tmp_path / "workers"))
-    monkeypatch.setenv("FLOOM_SECRET", "test-secret-that-cloud-must-strip")
+    slack_state_secret = "test-secret-that-cloud-must-strip"
+    monkeypatch.setenv("FLOOM_SECRET", slack_state_secret)
+    monkeypatch.setenv("WORKEROS_SLACK_STATE_SECRET", slack_state_secret)
     monkeypatch.delenv("WORKEROS_RATE_LIMIT_DEV", raising=False)
 
     psycopg = types.ModuleType("psycopg")
@@ -62,6 +64,17 @@ def test_cloud_enables_engine_rate_limiter_without_floom_secret(monkeypatch, tmp
     assert main.os.environ["WORKEROS_RATE_LIMIT_DEV"] == "1"
     assert "FLOOM_SECRET" not in main.os.environ
     assert Counter(codes) == Counter({401: 20, 429: 5})
+
+
+def test_cloud_slack_state_uses_preserved_secret_without_auth_gate(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+
+    state, expires_at = main.engine_main._issue_slack_oauth_state(user_id="user-1")
+
+    assert state
+    assert expires_at
+    assert "FLOOM_SECRET" not in main.os.environ
+    assert main.engine_main._slack_state_secret() == "test-secret-that-cloud-must-strip"
 
 
 def test_cloud_versioned_api_prefixes_reach_engine_routes(monkeypatch, tmp_path):
