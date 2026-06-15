@@ -131,7 +131,7 @@ async function getAccessToken(
     // Refresh failed (revoked token, network error, …).  If the existing
     // access token is still structurally present but expired, return null so
     // the proxy returns 401 and the UI routes the user to /login.
-    if (session.expires_at <= nowSeconds) {
+    if (session.expires_at !== undefined && session.expires_at <= nowSeconds) {
       return { token: null, refreshedCookies: [] };
     }
     // Refresh failed but token not yet expired — let the backend validate it.

@@ -28,16 +28,116 @@ function decodeBase64Url(value: string): string {
   return Buffer.from(normalized, "base64").toString("utf-8");
 }
 
-async function getAccessToken(): Promise<string | null> {
-  const cookieStore = await cookies();
-  const raw = cookieStore.get(SESSION_COOKIE)?.value;
-  if (!raw) return null;
+// How many seconds before access_token expiry we proactively refresh.
+const REFRESH_GRACE_SECONDS = 60;
+
+/**
+ * Decode the session cookie and return the parsed payload, or null on any
+ * error.  Does NOT verify the JWT signature — that is the backend's job;
+ * the proxy just needs the `expires_at` to know when to refresh.
+ */
+function parseSessionCookie(
+  raw: string,
+): { access_token: string; refresh_token?: string; expires_at?: number } | null {
   try {
-    const payload = JSON.parse(decodeBase64Url(raw)) as { access_token?: string };
-    return payload.access_token ?? null;
+    const payload = JSON.parse(decodeBase64Url(raw)) as {
+      access_token?: string;
+      refresh_token?: string;
+      expires_at?: number;
+    };
+    if (typeof payload.access_token !== "string" || !payload.access_token) return null;
+    return {
+      access_token: payload.access_token,
+      refresh_token: payload.refresh_token,
+      expires_at: typeof payload.expires_at === "number" ? payload.expires_at : undefined,
+    };
   } catch {
     return null;
   }
+}
+
+/**
+ * Call the backend's /auth/refresh endpoint to rotate the access+refresh
+ * token pair.  The backend reads the workeros_cloud_session cookie from the
+ * request and responds with a Set-Cookie carrying the new session.
+ * Returns the new set-cookie header values so the proxy can forward them
+ * to the browser, and the fresh access token for the proxied request.
+ */
+async function refreshSessionCookie(
+  req: NextRequest,
+): Promise<{ accessToken: string; setCookieHeaders: string[] } | null> {
+  const refreshUrl = `${API_BASE}/auth/refresh`;
+  // Forward the current cookie so the backend can read the refresh_token.
+  const cookieHeader = req.headers.get("cookie") ?? "";
+  try {
+    const res = await fetch(refreshUrl, {
+      method: "POST",
+      headers: { cookie: cookieHeader },
+    });
+    if (!res.ok) return null;
+    // Extract the new access_token from the Set-Cookie the backend returned.
+    const setCookieHeaders: string[] = [];
+    const getSetCookieFn = (res.headers as Headers & { getSetCookie?: () => string[] })
+      .getSetCookie;
+    const rawSetCookies =
+      typeof getSetCookieFn === "function"
+        ? getSetCookieFn.call(res.headers)
+        : [res.headers.get("set-cookie") ?? ""].filter(Boolean);
+    for (const h of rawSetCookies) {
+      if (h) setCookieHeaders.push(h);
+    }
+    // Parse the updated session cookie to get the fresh access_token.
+    const setCookieForSession = rawSetCookies.find((h) =>
+      h.startsWith(`${SESSION_COOKIE}=`),
+    );
+    if (!setCookieForSession) return null;
+    const rawValue = setCookieForSession.split(";")[0].slice(SESSION_COOKIE.length + 1);
+    const parsed = parseSessionCookie(rawValue);
+    if (!parsed) return null;
+    return { accessToken: parsed.access_token, setCookieHeaders };
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Return a valid access token for the proxied request, refreshing the
+ * Supabase session first if the stored access_token is expired or within
+ * REFRESH_GRACE_SECONDS of expiry.
+ *
+ * When a refresh is performed the caller receives the Set-Cookie headers
+ * that must be forwarded to the browser so the cookie jar stays in sync.
+ */
+async function getAccessToken(
+  req: NextRequest,
+): Promise<{ token: string | null; refreshedCookies: string[] }> {
+  const cookieStore = await cookies();
+  const raw = cookieStore.get(SESSION_COOKIE)?.value;
+  if (!raw) return { token: null, refreshedCookies: [] };
+
+  const session = parseSessionCookie(raw);
+  if (!session) return { token: null, refreshedCookies: [] };
+
+  const nowSeconds = Math.floor(Date.now() / 1000);
+  const needsRefresh =
+    session.expires_at !== undefined &&
+    session.expires_at - nowSeconds <= REFRESH_GRACE_SECONDS;
+
+  if (needsRefresh) {
+    const refreshed = await refreshSessionCookie(req);
+    if (refreshed) {
+      return { token: refreshed.accessToken, refreshedCookies: refreshed.setCookieHeaders };
+    }
+    // Refresh failed (revoked token, network error, …).  If the existing
+    // access token is still structurally present but expired, return null so
+    // the proxy returns 401 and the UI routes the user to /login.
+    if (session.expires_at !== undefined && session.expires_at <= nowSeconds) {
+      return { token: null, refreshedCookies: [] };
+    }
+    // Refresh failed but token not yet expired — let the backend validate it.
+  }
+
+  return { token: session.access_token, refreshedCookies: [] };
 }
 
 function safeProxyLocation(location: string | null, req: NextRequest): string | null {
@@ -98,9 +198,15 @@ async function handler(
   // workeros-cloud auth swap: replace shared-secret x-floom-secret with
   // a Supabase JWT extracted from the workeros_cloud_session cookie that
   // the backend's /auth/callback sets on .floom.dev (HttpOnly, Secure).
-  // If the cookie is missing, return 401 so the frontend can route to
-  // /login (the marketing project handles that).
-  const accessToken = await getAccessToken();
+  // If the cookie is missing or expired and refresh fails, return 401 so
+  // the frontend can route to /login.
+  //
+  // When the access_token is near/past expiry, getAccessToken() calls
+  // POST /auth/refresh (backend) to rotate both tokens and returns the fresh
+  // access_token together with the new Set-Cookie headers.  Those are
+  // forwarded to the browser at the end of the handler so the cookie jar
+  // stays in sync without a full redirect.
+  const { token: accessToken, refreshedCookies } = await getAccessToken(req);
   if (!isAuthPath && !isSignedApprovalPath && !accessToken) {
     return NextResponse.json({ detail: "unauthorized" }, { status: 401 });
   }
@@ -199,6 +305,16 @@ async function handler(
   } else {
     const cookie = upstream.headers.get("set-cookie");
     if (cookie) responseHeaders.append("set-cookie", cookie);
+  }
+
+  // If a token refresh happened, propagate the new session cookie to the
+  // browser.  These come from POST /auth/refresh and contain the rotated
+  // access_token + refresh_token; the browser replaces the old cookie so
+  // the next request uses the fresh pair without requiring a full login.
+  // Skip cookies already forwarded from the upstream response to avoid
+  // duplicates (the refresh endpoint is separate from the proxied endpoint).
+  for (const h of refreshedCookies) {
+    responseHeaders.append("set-cookie", h);
   }
 
   return new NextResponse(upstream.body, {
