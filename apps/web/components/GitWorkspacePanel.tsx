@@ -56,7 +56,7 @@ function PATForm({ onConnected }: { onConnected: (username: string) => void }) {
               <p className="text-xs text-muted-foreground">
                 The button below opens GitHub with the right scope already selected
                 (<code className="font-mono text-foreground">repo</code>, for private repos).
-                Pick an expiry, scroll down, and click <span className="font-medium text-foreground">Generate token</span>. Copy the value — it starts with <code className="font-mono text-foreground">ghp_</code> and is shown only once.
+                Pick an expiry, scroll down, and click <span className="font-medium text-foreground">Generate token</span>. Copy the value (it starts with <code className="font-mono text-foreground">ghp_</code> and is shown only once).
               </p>
               <a
                 href="https://github.com/settings/tokens/new?scopes=repo&description=Floom+Workspace"
