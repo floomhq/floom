@@ -313,7 +313,7 @@ export function InlineFileOpen({
           <div
             key={f.id}
             className="c-lrow"
-            style={{ gridTemplateColumns: "1fr auto", alignItems: "center", display: "grid" }}
+            style={{ gridTemplateColumns: "1fr auto", alignItems: "center", display: "grid", background: "var(--bg-2)" }}
           >
             <div className="c-lprimary">
               <div className="c-lp-tx" style={{ width: "100%" }}>
