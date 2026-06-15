@@ -1,9 +1,9 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Folder, Lock, Users } from "lucide-react";
+import { Folder, Lock, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatRelative } from "@/lib/formatters";
 import type { ContextSummary, ContextDetail } from "@/lib/types";
@@ -193,11 +193,131 @@ function UsedByTab({ folder }: { folder: ContextSummary }) {
   );
 }
 
+// #1112: When files are dropped on the brain list, prompt for a folder name,
+// create the folder, then upload the dropped files into it.
+function DropCreateFolderOverlay({
+  files,
+  onDone,
+  onCancel,
+}: {
+  files: File[];
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const firstFile = files[0];
+  const defaultName = firstFile
+    ? slugifyContextName(firstFile.name.replace(/\.[^/.]+$/, ""))
+    : "new-folder";
+  const [name, setName] = useState(defaultName);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    inputRef.current?.select();
+  }, []);
+
+  const slug = slugifyContextName(name);
+  const showSlugHint = name.trim() !== "" && name.trim() !== slug;
+
+  const submit = useCallback(async () => {
+    if (!slug || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api.contexts.create(slug);
+      await api.contexts.upload(slug, files, undefined);
+      toast.success(
+        files.length === 1
+          ? `Created "${slug}" and added 1 file`
+          : `Created "${slug}" and added ${files.length} files`,
+      );
+      onDone();
+    } catch (e) {
+      setError(e instanceof Error ? e.message : "Could not create folder.");
+      setBusy(false);
+    }
+  }, [slug, busy, files, onDone]);
+
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "rgba(0,0,0,.35)",
+      }}
+    >
+      <div
+        style={{
+          background: "var(--bg-card)",
+          border: "var(--bd-card)",
+          borderRadius: "var(--radius-card)",
+          padding: 24,
+          minWidth: 340,
+          maxWidth: 440,
+          boxShadow: "var(--shadow-pop)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Upload size={16} style={{ color: "var(--ink-soft)" }} />
+          <span style={{ fontWeight: 600, fontSize: 14 }}>
+            Create folder &amp; upload {files.length === 1 ? "1 file" : `${files.length} files`}
+          </span>
+        </div>
+        <div style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <label style={{ fontSize: 12, color: "var(--ink-soft)" }}>Folder name</label>
+          <input
+            ref={inputRef}
+            className="c-srch"
+            style={{ maxWidth: "none" }}
+            value={name}
+            onChange={(e) => { setName(e.target.value); setError(null); }}
+            onKeyDown={(e) => {
+              if (e.key === "Enter") void submit();
+              if (e.key === "Escape") onCancel();
+            }}
+            disabled={busy}
+          />
+          {showSlugHint && (
+            <div style={{ fontSize: 11, color: "var(--ink-soft)" }}>
+              Saved as:{" "}
+              <span style={{ fontFamily: "var(--font-mono)", color: "var(--ink)" }}>{slug}</span>
+            </div>
+          )}
+        </div>
+        {error && (
+          <div style={{ fontSize: 12, color: "var(--red, #c0392b)", background: "var(--bg-2)", borderRadius: 8, padding: "6px 10px" }}>
+            {error}
+          </div>
+        )}
+        <div style={{ display: "flex", gap: 8, justifyContent: "flex-end" }}>
+          <button type="button" className="c-vpill" style={{ padding: "6px 14px" }} onClick={onCancel} disabled={busy}>
+            Cancel
+          </button>
+          <button type="button" className="c-addbtn" disabled={busy || !slug} onClick={() => void submit()}>
+            {busy ? "Creating…" : "Create folder"}
+          </button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
 export default function BrainCollection({ initialFolders }: { initialFolders: ContextSummary[] }) {
   const [folders, setFolders] = useState<ContextSummary[]>(initialFolders);
   // Show a loading skeleton until the first fetch completes so we never flash
   // "No folders yet" before the real data arrives (14a: empty-initial-state bug).
   const [loading, setLoading] = useState(initialFolders.length === 0);
+  // #1112: dropped files pending folder creation
+  const [pendingDropFiles, setPendingDropFiles] = useState<File[] | null>(null);
+  const [listDragOver, setListDragOver] = useState(false);
 
   const refresh = async (initial = false) => {
     try {
@@ -338,7 +458,65 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     },
   };
 
-  return <Collection config={config} />;
+  return (
+    // #1112: Outer drop zone — dropping files on the brain list triggers folder
+    // creation instead of an upload error.
+    <div
+      style={{ position: "relative", flex: 1, minHeight: 0 }}
+      onDragOver={(e) => {
+        if (e.dataTransfer.types.includes("Files")) {
+          e.preventDefault();
+          if (!listDragOver) setListDragOver(true);
+        }
+      }}
+      onDragLeave={(e) => {
+        // Only clear when the pointer leaves the outer wrapper itself.
+        if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+          setListDragOver(false);
+        }
+      }}
+      onDrop={(e) => {
+        e.preventDefault();
+        setListDragOver(false);
+        const dropped = Array.from(e.dataTransfer.files);
+        if (dropped.length > 0) setPendingDropFiles(dropped);
+      }}
+    >
+      {listDragOver && (
+        <div
+          style={{
+            position: "absolute",
+            inset: 0,
+            zIndex: 10,
+            pointerEvents: "none",
+            borderRadius: "var(--radius-card)",
+            outline: "2px dashed var(--ink-soft)",
+            outlineOffset: 4,
+            display: "flex",
+            alignItems: "center",
+            justifyContent: "center",
+            background: "var(--bg-card)/80",
+          }}
+        >
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8 }}>
+            <Upload size={22} style={{ color: "var(--ink-soft)" }} />
+            <span style={{ fontSize: 13, color: "var(--ink-soft)" }}>Drop to create a new folder</span>
+          </div>
+        </div>
+      )}
+      <Collection config={config} />
+      {pendingDropFiles && (
+        <DropCreateFolderOverlay
+          files={pendingDropFiles}
+          onDone={async () => {
+            setPendingDropFiles(null);
+            await refresh();
+          }}
+          onCancel={() => setPendingDropFiles(null)}
+        />
+      )}
+    </div>
+  );
 }
 
 const muted: React.CSSProperties = { color: "var(--muted-foreground)" };
