@@ -174,8 +174,8 @@ export function InlineFileOpen({
         ) : (
           <div style={{ color: "var(--muted-foreground)", padding: 14 }}>
             {isDbFile(open.name)
-              ? "SQLite database — use Download to open this file."
-              : "Preview isn't available inline yet — use Download to open this file."}
+              ? "SQLite database; use Download to open this file."
+              : "Preview isn't available inline yet; use Download to open this file."}
             {/* TODO(#815): richer artifact preview. */}
           </div>
         )}

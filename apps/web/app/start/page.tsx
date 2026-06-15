@@ -17,7 +17,7 @@ const OPTIONS = [
   {
     href: "/login?install=whatsapp",
     title: "Start in WhatsApp",
-    desc: "Text Emily on WhatsApp — no dashboard required.",
+    desc: "Text Emily on WhatsApp; no dashboard required.",
     Icon: MessageCircle,
   },
   {
@@ -38,7 +38,7 @@ export default function StartPage() {
 
       <h1 className="text-2xl font-semibold tracking-tight">Start where you work.</h1>
       <p className="mt-1.5 text-sm text-muted-foreground">
-        Pick a channel and Emily comes to you — or open the full dashboard.
+        Pick a channel and Emily comes to you, or open the full dashboard.
       </p>
 
       <div className="mt-7 space-y-3">

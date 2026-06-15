@@ -25,7 +25,7 @@ export function ApprovalCard({ card }: { card: ApprovalCardType }) {
 
   const decide = async (decision: boolean) => {
     if (!card.approvalId) {
-      toast.error("This approval can't be resolved from chat — open the Approvals page.");
+      toast.error("This approval can't be resolved from chat; open the Approvals page.");
       return;
     }
     setBusy(true);

@@ -210,12 +210,14 @@ export function ConnectionRow({
             connection.lastCheckStatus === "expired" ||
             connection.lastCheckStatus === "failed" ? (
             // P2-6 (audit 2026-05-29): for expired/failed rows the inline
-            // refresh glyph read as a stuck loader ("— ↻") and could never load
+            // refresh glyph read as a stuck loader and could never load
             // scopes anyway (the connection is dead). Show a clean dash only;
             // the path back is Reconnect, not a scope re-check.
+            // em-dash-ok: null placeholder in table cell
             <span className="text-muted-foreground/50">—</span>
           ) : (
             <>
+              {/* em-dash-ok: null placeholder in table cell */}
               <span className="text-muted-foreground/50">—</span>
               <button
                 type="button"
@@ -249,7 +251,7 @@ export function ConnectionRow({
             as one primary action with secondary options behind a click.
             E1 fix: Reconnect appears ONLY when the connection is broken
             (expired / failed / needs-reauth / inactive). An active connection
-            never shows Reconnect — even when last_check_status is "active"
+            never shows Reconnect, even when last_check_status is "active"
             rather than "valid" (GitHub reports the former). Active = healthy;
             only the overflow menu is offered. */}
         <div

@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "Privacy — Floom",
+  title: "Privacy | Floom",
   description: "How Floom handles data.",
 };
 
@@ -24,27 +24,27 @@ export default function PrivacyPage() {
         <h2 className="text-base font-medium pt-2">What is stored</h2>
         <ul className="list-disc pl-5 space-y-1">
           <li>
-            <strong>Workers and runs</strong> — worker definitions, run inputs,
+            <strong>Workers and runs</strong>: worker definitions, run inputs,
             step logs, tool calls, outputs, errors, and cost, in a local SQLite
             database on the server.
           </li>
           <li>
-            <strong>Secrets</strong> — API keys and credentials you add are
+            <strong>Secrets</strong>: API keys and credentials you add are
             stored on the server so workers can use them. They are write-only
             through the API: values are never returned to the browser.
           </li>
           <li>
-            <strong>Connections</strong> — OAuth connections (via Composio) and
+            <strong>Connections</strong>: OAuth connections (via Composio) and
             MCP endpoints you authorize, referenced by internal identifiers.
             OAuth access tokens are held by the connection provider, not in this
             database.
           </li>
           <li>
-            <strong>Conversations and brain packs</strong> — workspace agent
+            <strong>Conversations and brain packs</strong>: workspace agent
             chat history and any brain-pack files you create.
           </li>
           <li>
-            <strong>Artifacts</strong> — files produced by runs, stored on the
+            <strong>Artifacts</strong>: files produced by runs, stored on the
             server filesystem.
           </li>
         </ul>
@@ -59,7 +59,7 @@ export default function PrivacyPage() {
         <h2 className="text-base font-medium pt-2">Third parties</h2>
         <p>
           To run workers, this instance may send data to the model and tool
-          providers you configure — for example OpenAI (LLM calls), E2B
+          providers you configure, for example OpenAI (LLM calls), E2B
           (sandbox execution), and Composio (connections). Data sent to those
           providers is governed by their own terms and privacy policies.
         </p>

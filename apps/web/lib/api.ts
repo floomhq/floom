@@ -215,7 +215,7 @@ export const api = {
       const uploadPath = withWorkspaceQuery("/chat/attachments");
       const res = await fetchApi("/chat/attachments", `${API_BASE}${uploadPath}`, {
         method: "POST",
-        headers: withWorkspaceHeaders(), // no Content-Type — browser sets the multipart boundary
+        headers: withWorkspaceHeaders(), // no Content-Type; browser sets the multipart boundary
         body: fd,
       });
       if (!res.ok) {

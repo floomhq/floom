@@ -27,7 +27,7 @@ const MCP_TARGETS: { value: McpTarget; label: string; hint: string }[] = [
   { value: "cursor",   label: "Cursor",   hint: "~/.cursor/mcp.json" },
   { value: "vscode",   label: "VS Code",  hint: ".vscode/mcp.json" },
   { value: "windsurf", label: "Windsurf", hint: "~/.codeium/windsurf/mcp_config.json" },
-  { value: "generic",  label: "Generic",  hint: "prints snippet — paste manually" },
+  { value: "generic",  label: "Generic",  hint: "prints snippet; paste manually" },
 ];
 
 function readStoredSecret(): string {
@@ -467,7 +467,7 @@ export function CliCommandPanel() {
           {/* API surface */}
           <TabsContent value="api" className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Call the HTTP API directly with your token. It is a full read+write API —
+              Call the HTTP API directly with your token. It is a full read+write API:
               create workers, start runs, approve, rotate secrets, and more.
             </p>
             <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2.5 space-y-1.5 text-sm">
@@ -574,7 +574,7 @@ function ApiEndpointList() {
         <h3 className="text-sm font-medium text-foreground">
           Endpoints{" "}
           <span className="font-normal text-muted-foreground">
-            ({API_ENDPOINT_COUNT} — {API_MUTATION_COUNT} write)
+            ({API_ENDPOINT_COUNT}, {API_MUTATION_COUNT} write)
           </span>
         </h3>
         <input

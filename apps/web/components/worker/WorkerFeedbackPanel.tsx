@@ -101,7 +101,7 @@ export function WorkerFeedbackPanel({ workerId, canLeave, canModerate }: WorkerF
             style={{ maxWidth: "none", minHeight: 72, padding: "10px 12px", resize: "vertical" }}
             value={text}
             onChange={(e) => setText(e.target.value)}
-            placeholder="Leave feedback for the owner — what's wrong or what to change…"
+            placeholder="Leave feedback for the owner: what's wrong or what to change…"
             disabled={busy}
           />
           <div>

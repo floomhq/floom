@@ -1,5 +1,5 @@
 export const metadata = {
-  title: "Terms — Floom",
+  title: "Terms | Floom",
   description: "Terms for using this Floom instance.",
 };
 

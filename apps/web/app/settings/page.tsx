@@ -133,7 +133,7 @@ function PersonalAccessTokensPanel() {
       <h2 className="text-sm font-medium text-muted-foreground">Personal access tokens</h2>
       <p className="text-sm text-muted-foreground">
         Use tokens to authenticate API and MCP requests without a shared secret.
-        Token values are shown once — store them securely.
+        Token values are shown once; store them securely.
       </p>
 
       {createdToken && (
@@ -269,8 +269,8 @@ export function WorkspaceTokensPanel() {
       ) : tokens === null ? null : (
         <>
           <p className="text-sm text-muted-foreground">
-            A workspace token gives API access to workspace-shared workers only — no
-            private workers. Admins only. Token values are shown once — store them
+            A workspace token gives API access to workspace-shared workers only, not
+            private workers. Admins only. Token values are shown once; store them
             securely.
           </p>
 
