@@ -241,6 +241,81 @@ def assert_safe_outbound_mcp_url(url: str) -> str:
     return assert_safe_outbound_url(url, label="MCP server URL")
 
 
+def pin_safe_outbound_url(url: str, *, label: str = "URL") -> tuple[str, str]:
+    """Validate a user-supplied outbound URL for SSRF safety AND pin the target IP.
+
+    Defends against DNS-rebinding TOCTOU: ``assert_safe_outbound_url`` validates
+    the current DNS resolution, but between that check and the actual HTTP dial the
+    DNS could flip from a public IP to a private one.  This function resolves the
+    hostname once, validates every resolved IP, then rewrites the URL to address
+    the first safe IPv4 IP directly (or the first IPv6 if only AAAA records
+    exist).  The caller should:
+
+      1. Use the returned ``pinned_url`` for the actual HTTP request.
+      2. Add ``Host: <original-host>`` to the request headers so TLS SNI and
+         vhost routing work correctly.
+
+    Returns ``(original_url_stripped, pinned_url)`` where ``pinned_url`` has
+    the hostname replaced with the pinned IP literal.  If the host is already
+    an IP literal (no DNS lookup needed), both values are identical (no rebind
+    risk). If WORKEROS_ALLOW_PRIVATE_MCP_URLS=1, returns the original URL for
+    both values (self-hoster opt-out of SSRF protection).
+
+    Raises UnsafeOutboundUrlError on any policy violation (same as
+    assert_safe_outbound_url).
+    """
+    stripped = assert_safe_outbound_url(url, label=label)
+
+    if _allow_private_mcp_urls():
+        return stripped, stripped
+
+    parts = urlsplit(stripped)
+    host = parts.hostname or ""
+
+    # If already an IP literal there is no DNS to rebind; return as-is.
+    try:
+        ipaddress.ip_address(host)
+        return stripped, stripped
+    except ValueError:
+        pass
+
+    # Resolve again (same timeout as assert_safe_outbound_url).  We know this
+    # succeeds (assert_safe_outbound_url already validated it), but a fresh
+    # lookup gives us the current mapping to pin.
+    try:
+        resolved = _resolve_host_ips(host)
+    except (socket.gaierror, socket.timeout, OSError) as exc:
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: host could not be resolved at dial time ({host})"
+        ) from exc
+
+    # Prefer IPv4 for broader httpx compat; fall back to IPv6.
+    safe_ip: ipaddress._BaseAddress | None = None
+    for ip in resolved:
+        if _ip_is_disallowed(ip):
+            raise UnsafeOutboundUrlError(
+                f"{label} is not allowed: DNS rebind detected — host resolved to "
+                f"internal/loopback/link-local address at dial time"
+            )
+        if safe_ip is None or (isinstance(ip, ipaddress.IPv4Address) and isinstance(safe_ip, ipaddress.IPv6Address)):
+            safe_ip = ip
+
+    if safe_ip is None:
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: no safe IP resolved for {host}"
+        )
+
+    # Reconstruct the URL with the IP literal, preserving port, path, and query.
+    ip_str = str(safe_ip)
+    # IPv6 literals need square brackets in URLs.
+    netloc_ip = f"[{ip_str}]" if ":" in ip_str else ip_str
+    if parts.port:
+        netloc_ip = f"{netloc_ip}:{parts.port}"
+    from urllib.parse import urlunsplit as _urlunsplit
+    pinned = _urlunsplit((parts.scheme, netloc_ip, parts.path, parts.query, parts.fragment))
+    return stripped, pinned
+
+
 # ---------------------------------------------------------------------------
 # Enums
 # ---------------------------------------------------------------------------
@@ -360,6 +435,22 @@ class WorkerTrigger(BaseModel):
 
         if not is_valid_cron_expr(value):
             raise ValueError(f"invalid cron expression: {value!r}")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: Optional[str]) -> Optional[str]:
+        """#1296: reject invalid IANA timezone names at parse time."""
+        if value is None or not value.strip():
+            return value
+        from cron_utils import is_valid_timezone
+
+        if not is_valid_timezone(value):
+            raise ValueError(
+                f"invalid timezone: {value!r}. "
+                "Use an IANA timezone name such as 'UTC', 'Europe/Berlin', "
+                "or 'America/New_York'."
+            )
         return value
 
 
@@ -1290,6 +1381,22 @@ class WorkerContractTrigger(BaseModel):
 
         if not is_valid_cron_expr(value):
             raise ValueError(f"invalid cron expression: {value!r}")
+        return value
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: Optional[str]) -> Optional[str]:
+        """#1296: reject invalid IANA timezone names at parse time."""
+        if value is None or not value.strip():
+            return value
+        from cron_utils import is_valid_timezone
+
+        if not is_valid_timezone(value):
+            raise ValueError(
+                f"invalid timezone: {value!r}. "
+                "Use an IANA timezone name such as 'UTC', 'Europe/Berlin', "
+                "or 'America/New_York'."
+            )
         return value
 
     @model_validator(mode="after")
