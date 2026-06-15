@@ -1,13 +1,12 @@
-import { Radar } from "lucide-react";
+import { Star } from "lucide-react";
 import { cn } from "@/lib/utils";
 
 /**
  * EmilyAvatar — the Floom Emily identity mark.
  *
- * Floom-blue accent circle with a Lucide Radar icon (white stroke).
- * Radar evokes active scanning/discovery — fitting for Emily as the NovaSearch
- * recruiting agent. Stays clean and symmetric at small (24px) sizes where
- * Telescope became muddy. The blue (#3E6FE0 light / #5B8DEF dark) is the Floom
+ * Floom-blue accent circle with a Lucide Star icon (white, filled).
+ * Matches the NovaSearch star iconography used across the app for
+ * consistency. The blue (#3E6FE0 light / #5B8DEF dark) is the Floom
  * accent, tokenized via --emily-mark.
  *
  * No letter monogram, no sparkle.
@@ -25,9 +24,10 @@ export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
       )}
       aria-label="Emily, Chief of Staff"
     >
-      <Radar
+      <Star
         size={iconSize}
-        strokeWidth={2}
+        strokeWidth={1.5}
+        fill="currentColor"
         className="text-white"
         aria-hidden="true"
       />
