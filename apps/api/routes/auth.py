@@ -52,6 +52,13 @@ def _hash_token(raw: str) -> str:
 _SESSION_COOKIE_NAME = "workeros_cloud_session"
 _OAUTH_VERIFIER_COOKIE_NAME = "workeros_cloud_pkce_verifier"
 _OAUTH_COOKIE_MAX_AGE = 600
+# The session cookie survives for the Supabase refresh-token lifetime (30 days)
+# regardless of the 1-hour access-token TTL.  The refresh endpoint (/auth/refresh)
+# mints a fresh access+refresh pair before the access token is used.  Previously
+# max_age was set to expires_in (≈3600 s), which caused the cookie — and therefore
+# the user's browser session — to expire every hour even though the refresh token
+# inside was valid for 30 days.
+_SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _CLI_APPROVE_DENY_RATE_LIMIT = 5
 _CLI_APPROVE_DENY_RATE_WINDOW_SECONDS = 60.0
@@ -677,7 +684,7 @@ def password_login(payload: PasswordLoginRequest):
         response,
         _SESSION_COOKIE_NAME,
         _encode_session_cookie(session),
-        max_age=max(int(getattr(session, "expires_in", 3600) or 3600), 60),
+        max_age=_SESSION_COOKIE_MAX_AGE,
     )
     _clear_cookie(response, _OAUTH_VERIFIER_COOKIE_NAME)
     return response
@@ -743,7 +750,7 @@ def password_signup(payload: PasswordSignupRequest):
         response,
         _SESSION_COOKIE_NAME,
         _encode_session_cookie(session),
-        max_age=max(int(getattr(session, "expires_in", 3600) or 3600), 60),
+        max_age=_SESSION_COOKIE_MAX_AGE,
     )
     _clear_cookie(response, _OAUTH_VERIFIER_COOKIE_NAME)
     return response
@@ -785,9 +792,54 @@ def fragment_session(payload: FragmentSessionRequest, request: Request):
         response,
         _SESSION_COOKIE_NAME,
         _encode_session_cookie(session),
-        max_age=max(int(getattr(session, "expires_in", 3600) or 3600), 60),
+        max_age=_SESSION_COOKIE_MAX_AGE,
     )
     _clear_cookie(response, _OAUTH_VERIFIER_COOKIE_NAME)
+    return response
+
+
+@router.post("/refresh")
+def refresh_session(request: Request):
+    """Exchange the stored refresh_token for a fresh Supabase session.
+
+    Called by the frontend proxy when the access_token in the
+    workeros_cloud_session cookie is expired or within a 60-second grace
+    window.  Returns a new session cookie via Set-Cookie so the browser
+    immediately picks up the rotated tokens.  The old refresh_token is
+    consumed by Supabase (refresh token rotation), so this is safe to call
+    on every near-expiry request.
+
+    Returns:
+      200 { "ok": true }  with updated Set-Cookie on success
+      401                  when the cookie is missing, malformed, or the
+                           refresh_token has been revoked/expired
+    """
+    session = _decode_session_cookie(request.cookies.get(_SESSION_COOKIE_NAME))
+    if not session:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    refresh_token = str(session.get("refresh_token") or "").strip()
+    if not refresh_token:
+        raise HTTPException(status_code=401, detail="Session cookie missing refresh_token")
+
+    client = new_supabase_anon_client()
+    try:
+        auth_response = client.auth.refresh_session(refresh_token)
+    except Exception as exc:
+        logger.warning("auth/refresh failed: %s", _gotrue_detail(exc))
+        raise HTTPException(status_code=401, detail="Session refresh failed — please sign in again") from exc
+
+    new_session = getattr(auth_response, "session", None)
+    user = getattr(auth_response, "user", None) or getattr(new_session, "user", None)
+    if new_session is None or user is None or not getattr(user, "id", None):
+        raise HTTPException(status_code=401, detail="Session refresh returned no session")
+
+    response = JSONResponse({"ok": True})
+    _set_cookie(
+        response,
+        _SESSION_COOKIE_NAME,
+        _encode_session_cookie(new_session),
+        max_age=_SESSION_COOKIE_MAX_AGE,
+    )
     return response
 
 
@@ -880,7 +932,7 @@ def callback(
         response,
         _SESSION_COOKIE_NAME,
         _encode_session_cookie(session),
-        max_age=max(int(getattr(session, "expires_in", 3600) or 3600), 60),
+        max_age=_SESSION_COOKIE_MAX_AGE,
     )
     _clear_cookie(response, _OAUTH_VERIFIER_COOKIE_NAME)
     return response
