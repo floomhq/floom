@@ -335,7 +335,9 @@ def test_secret_value_survives_deploy_directory_change(monkeypatch, tmp_path):
 
     # The value landed in the DB-anchored store, not a source-relative file.
     assert (db_dir / "secrets.env").is_file()
-    assert "NEWS_API_KEY=news-xyz" in (db_dir / "secrets.env").read_text()
+    env_text = (db_dir / "secrets.env").read_text()
+    assert "NEWS_API_KEY=enc:v1:" in env_text
+    assert "news-xyz" not in env_text
 
     # Simulate a restart from a *different* deploy directory: clear os.environ
     # of the loaded value and rebuild the db module objects (new __file__ would

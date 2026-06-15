@@ -105,9 +105,10 @@ class SlackSetupConfigResponse(BaseModel):
 def _public_api_base_url() -> str:
     raw = (
         os.environ.get("WORKEROS_PUBLIC_API_URL")
+        or os.environ.get("WORKEROS_API_BASE")
         or os.environ.get("WORKEROS_API_URL")
         or os.environ.get("WORKERS_API_URL")
-        or "http://localhost:8000"
+        or "https://workeros-api.floom.dev"
     )
     return raw.rstrip("/")
 
