@@ -831,6 +831,14 @@ html.dark .grain {
    toolLogos+sparkline together occupy the right side of the footer). */
 .c-gsparkline { display:flex; align-items:flex-end; margin-left:4px; opacity:0; transition:opacity .15s; }
 .c-gcard:hover .c-gsparkline { opacity:1; }
+/* #1175 (B17): muted telemetry line — last-run · run count · success rate. */
+.c-gmeta { color:var(--muted-foreground); font-size:11.5px; margin-top:5px; white-space:nowrap; overflow:hidden; text-overflow:ellipsis; }
+/* #1174 (B15): hover-revealed quick-action row at the card bottom.
+   Uses the same opacity fade as the star and sparkline. */
+.c-gactions { display:flex; gap:6px; margin-top:8px; opacity:0; transition:opacity .12s; }
+.c-gcard:hover .c-gactions { opacity:1; }
+.c-gaction-btn { font-size:11.5px; color:var(--muted-foreground); padding:3px 7px; border-radius:var(--radius-button); border:var(--bd-card); background:var(--bg-card); cursor:pointer; transition:color .1s,background .1s; white-space:nowrap; }
+.c-gaction-btn:hover { color:var(--ink); background:var(--bg-2); }
 
 /* split detail (SPEC §3, §8c) */
 .c-body { flex:1; min-height:0; display:flex; overflow:hidden; }

@@ -86,6 +86,19 @@ function rel(ts?: string | null): string {
   return `${Math.round(h / 24)}d ago`;
 }
 
+/** Build the muted telemetry string for B17 worker card meta line. */
+function workerCardMeta(w: WorkerSummary): string | null {
+  const s = w.recent_stats;
+  if (!s) return null;
+  const parts: string[] = [];
+  if (s.last_run_at) parts.push(rel(s.last_run_at));
+  if (typeof s.runs_7d === "number" && s.runs_7d > 0) parts.push(`${s.runs_7d} run${s.runs_7d === 1 ? "" : "s"}`);
+  if (typeof s.success_rate_7d === "number" && s.runs_7d > 0) {
+    parts.push(`${Math.round(s.success_rate_7d * 100)}%`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 function displayBrandCopy(value?: string | null): string {
   const legacyAllCapsSuffix = new RegExp(`\\bWorker${"OS"}\\b`, "g");
   const legacyTitle = new RegExp(`\\bWorker${"os"}\\b`, "g");
@@ -1149,22 +1162,40 @@ export default function WorkersCollection({
       status: workerStatusPill(w),
       menu: [{ label: "Open", onSelect: () => (window.location.href = `/workers?sel=${encodeURIComponent(w.id)}`) }],
     }),
-    card: (w) => ({
-      // V4 SPEC rule 3: no avatar monogram. Lock is small+muted inline after name.
-      leading: undefined,
-      name: w.visibility === "private"
-        ? <span className="inline-flex min-w-0 items-center gap-1.5"><span className="truncate">{w.name}</span><Lock className="size-3 shrink-0 text-[var(--muted-foreground)]" /></span>
-        : w.name,
-      description: displayBrandCopy(w.description),
-      status: workerStatusPill(w),
-      toolLogos: <WorkerIconPills worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
-      star: { on: favorites.has(w.id), onToggle: () => toggleStar(w.id) },
-      // #1117: mini run-history sparkline (hover only). Uses timeseries if the
-      // API returned it; falls back to undefined (sparkline hidden) if absent.
-      sparkline: w.timeseries && w.timeseries.length > 0
-        ? <Sparkline data={w.timeseries} width={56} height={22} tone="status" variant="bars" />
-        : undefined,
-    }),
+    card: (w) => {
+      const meta = workerCardMeta(w);
+      return {
+        // V4 SPEC rule 3: no avatar monogram. Lock is small+muted inline after name.
+        leading: undefined,
+        name: w.visibility === "private"
+          ? <span className="inline-flex min-w-0 items-center gap-1.5"><span className="truncate">{w.name}</span><Lock className="size-3 shrink-0 text-[var(--muted-foreground)]" /></span>
+          : w.name,
+        description: displayBrandCopy(w.description),
+        // B17: muted telemetry (last-run · run count · success rate) from recent_stats.
+        meta: meta ?? undefined,
+        status: workerStatusPill(w),
+        toolLogos: <WorkerIconPills worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
+        star: { on: favorites.has(w.id), onToggle: () => toggleStar(w.id) },
+        // #1117: mini run-history sparkline (hover only). Uses timeseries if the
+        // API returned it; falls back to undefined (sparkline hidden) if absent.
+        sparkline: w.timeseries && w.timeseries.length > 0
+          ? <Sparkline data={w.timeseries} width={56} height={22} tone="status" variant="bars" />
+          : undefined,
+        // B15: View + Edit quick actions on hover.
+        quickActions: [
+          {
+            label: "View",
+            onClick: () => { window.location.href = `/workers?sel=${encodeURIComponent(w.id)}`; },
+          },
+          ...(can("edit", w)
+            ? [{
+                label: "Edit",
+                onClick: () => { window.location.href = `/workers?sel=${encodeURIComponent(w.id)}&tab=Config`; },
+              }]
+            : []),
+        ],
+      };
+    },
     detail: (w) => {
       const viewOnly = !canManageWorkers && isViewOnly(w);
       const actions = (
