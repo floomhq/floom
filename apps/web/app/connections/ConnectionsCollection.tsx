@@ -390,10 +390,7 @@ export default function ConnectionsCollection({
               quickActions: [
                 {
                   label: "Reconnect",
-                  onClick: (e: React.MouseEvent) => {
-                    e.stopPropagation();
-                    router.push(reconnectHref);
-                  },
+                  onClick: () => router.push(reconnectHref),
                 },
               ],
             }
