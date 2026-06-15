@@ -57,14 +57,50 @@ def _get_lock(workspace_id: str) -> threading.Lock:
 # Path helpers
 # ---------------------------------------------------------------------------
 
+# #319: the container runs as the unprivileged user (uid 10001); only
+# /opt/workeros-cloud/var/* is created + chowned in the Dockerfile. A path like
+# /data/git-workspaces (not created/chowned/mounted) is not writable, so
+# _init_repo's mkdir raised PermissionError and commit_workspace swallowed it —
+# silently breaking versioning, rollback and the git-bundle backup. Fall back to
+# this guaranteed-writable root when the configured one isn't usable.
+_FALLBACK_WORKSPACES_ROOT = Path("/opt/workeros-cloud/var/git-workspaces")
+
+
+def _dir_is_usable(path: Path) -> bool:
+    """True if `path` exists writable or can be created (writable) by this user."""
+    try:
+        path.mkdir(parents=True, exist_ok=True)
+        return os.access(path, os.W_OK)
+    except Exception:
+        return False
+
+
 def get_workspaces_root() -> Path:
     """Root directory for all workspace git repos.
 
     Override with WORKEROS_GIT_WORKSPACES_DIR env var (useful for local dev).
-    Production default: /var/workeros-cloud/workspaces
+    Production default: /var/workeros-cloud/workspaces.
+
+    #319: if the configured root is not creatable/writable by the unprivileged
+    container user, fall back to a writable path under the chowned var dir so
+    git commits (and therefore versioning/rollback/bundle backup) keep working.
     """
     env = (os.environ.get("WORKEROS_GIT_WORKSPACES_DIR") or "").strip()
-    return Path(env) if env else Path("/var/workeros-cloud/workspaces")
+    configured = Path(env) if env else Path("/var/workeros-cloud/workspaces")
+    if _dir_is_usable(configured):
+        return configured
+    if _dir_is_usable(_FALLBACK_WORKSPACES_ROOT):
+        logger.error(
+            "git workspaces root %s is not writable by the container user; "
+            "falling back to %s. Set WORKEROS_GIT_WORKSPACES_DIR to a writable "
+            "path (e.g. /opt/workeros-cloud/var/git-workspaces). [#319]",
+            configured,
+            _FALLBACK_WORKSPACES_ROOT,
+        )
+        return _FALLBACK_WORKSPACES_ROOT
+    # Nothing usable — return the configured path and let the caller's mkdir
+    # surface the real error (now logged at ERROR by commit_workspace).
+    return configured
 
 
 def get_workspace_git_dir(workspace_id: str) -> Path:
@@ -637,14 +673,22 @@ def commit_workspace(workspace_id: str, rel_paths: list[str], message: str) -> O
                 if "nothing to commit" in stderr:
                     head = _git(["rev-parse", "HEAD"], git_dir, check=False)
                     return head.stdout.strip()[:7] if head.returncode == 0 else None
-                logger.warning("git commit failed: %s", result.stderr.strip())
+                logger.error("git commit failed for %s: %s", workspace_id, result.stderr.strip())
                 return None
 
             sha = _git(["rev-parse", "HEAD"], git_dir).stdout.strip()[:7]
             upload_bundle_background(workspace_id)
             return sha
         except Exception as exc:
-            logger.warning("commit_workspace: git operations failed: %s", exc)
+            # #319: log at ERROR — a swallowed git failure here silently breaks
+            # versioning, rollback and the git-bundle backup (it hid this bug for
+            # weeks). Worker code itself is safe (persisted to Supabase _files).
+            logger.error(
+                "commit_workspace: git operations failed for %s: %s — versioning/"
+                "rollback/bundle backup unavailable for this write (#319)",
+                workspace_id,
+                exc,
+            )
             return None
 
 
