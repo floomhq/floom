@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary } from "@/lib/types";
+import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary, WorkspaceMember } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
@@ -16,7 +16,24 @@ import {
   STATUS_PILL,
   TYPE_LABEL,
   toUnified,
+  humaniseAppName,
 } from "@/lib/connections/unify";
+
+// ---------------------------------------------------------------------------
+// #1233: Resolve owner_id to display name / email.
+// Works client-side from the workspace members list fetched on load.
+// If backend later populates owner_display_name on ConnectionItem, prefer that.
+// ---------------------------------------------------------------------------
+function resolveOwner(
+  ownerId: string | null | undefined,
+  members: WorkspaceMember[],
+): string {
+  if (!ownerId) return "Not set";
+  const member = members.find((m) => m.user_id === ownerId);
+  if (member) return member.display_name || member.email || ownerId;
+  // Fallback: truncate UUID so it's friendlier than the full 36-char string
+  return ownerId.length > 8 ? `${ownerId.slice(0, 8)}...` : ownerId;
+}
 
 // ---------------------------------------------------------------------------
 // #813 — Setup required callout
@@ -67,7 +84,7 @@ function SetupRequiredCallout({ missingBySlug }: { missingBySlug: Map<string, st
             href={`/connections/connect/${encodeURIComponent(slugs[0])}?return_to=${encodeURIComponent("/connections")}`}
             className="font-medium underline underline-offset-2"
           >
-            {slugs[0]}
+            {humaniseAppName(slugs[0])}
           </Link>
         ) : (
           <>
@@ -77,7 +94,7 @@ function SetupRequiredCallout({ missingBySlug }: { missingBySlug: Map<string, st
                   href={`/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent("/connections")}`}
                   className="font-medium underline underline-offset-2"
                 >
-                  {slug}
+                  {humaniseAppName(slug)}
                 </Link>
                 {i < slugs.length - 2 ? ", " : ""}
               </span>
@@ -87,7 +104,7 @@ function SetupRequiredCallout({ missingBySlug }: { missingBySlug: Map<string, st
               href={`/connections/connect/${encodeURIComponent(slugs[slugs.length - 1])}?return_to=${encodeURIComponent("/connections")}`}
               className="font-medium underline underline-offset-2"
             >
-              {slugs[slugs.length - 1]}
+              {humaniseAppName(slugs[slugs.length - 1])}
             </Link>
           </>
         )}
@@ -126,7 +143,7 @@ function KV({ rows }: { rows: [string, React.ReactNode][] }) {
 }
 
 function formatLastUsed(connection: ConnectionItem) {
-  if (!connection.last_used_at) return "—";
+  if (!connection.last_used_at) return "Never";
   const date = new Date(connection.last_used_at);
   const when = Number.isNaN(date.getTime())
     ? connection.last_used_at
@@ -251,17 +268,24 @@ export default function ConnectionsCollection({
   const [connections, setConnections] = useState<ConnectionItem[]>(initialConnections);
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
-  const [loading, setLoading] = useState(initialConnections.length === 0);
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  // #1234: always start loading so secrets render on first paint (not after SSR
+  // connections cause loading=false while secrets are still in-flight).
+  const [loading, setLoading] = useState(true);
 
   const refresh = async (initial = false) => {
-    const [c, s, w] = await Promise.allSettled([
+    const [c, s, w, m] = await Promise.allSettled([
       api.connections.list(),
       api.secrets.list(),
       api.workers.list(),
+      (api.members?.list?.() ?? Promise.resolve({ members: [] as WorkspaceMember[] }))
+        .then((r) => r.members)
+        .catch(() => [] as WorkspaceMember[]),
     ]);
     if (c.status === "fulfilled") setConnections(c.value);
     if (s.status === "fulfilled") setSecrets(s.value);
     if (w.status === "fulfilled") setWorkers(w.value);
+    if (m.status === "fulfilled") setMembers(m.value);
     if (initial) setLoading(false);
   };
 
@@ -277,14 +301,11 @@ export default function ConnectionsCollection({
     [workers, connections],
   );
 
-  // #1226: secret `used_by` is a list of worker NAMES; resolve each to its id so
-  // the "Used by" rows link to the worker detail. Falls back to plain text when
-  // a name can't be matched (e.g. the worker was deleted/renamed).
-  const workerIdByName = useMemo(() => {
-    const map = new Map<string, string>();
-    for (const w of workers) map.set(w.name, w.id);
-    return map;
-  }, [workers]);
+  // #1226: name -> worker id map for clickable used-by links
+  const workersByName = useMemo(
+    () => new Map(workers.map((w) => [w.name, w.id])),
+    [workers],
+  );
 
   const remove = async (item: UnifiedConn) => {
     try {
@@ -419,7 +440,7 @@ export default function ConnectionsCollection({
                     ["Scopes", String(c.scopes?.length ?? 0)],
                     ["Connected", new Date(c.created_at).toLocaleDateString()],
                     ["Last used", formatLastUsed(c)],
-                    ["Owner", c.owner_id || "—"],
+                    ["Owner", resolveOwner(c.owner_id, members)],
                   ]}
                 />
               ),
@@ -472,8 +493,8 @@ export default function ConnectionsCollection({
                 <KV
                   rows={[
                     ["Server", c.mcp_label || c.app_name],
-                    ["Endpoint", c.mcp_url || c.mcp_command || "—"],
-                    ["Transport", c.mcp_transport || "—"],
+                    ["Endpoint", c.mcp_url || c.mcp_command || "Not set"],
+                    ["Transport", c.mcp_transport || "Not set"],
                     ["Status", STATUS_PILL[i.statusKey].label],
                     ["Tools", String(c.mcp_allowed_tools?.length ?? 0)],
                   ]}
@@ -544,29 +565,30 @@ export default function ConnectionsCollection({
             count: s.used_by?.length,
             render: () => (
               <div className="c-ltable">
-                {(s.used_by ?? []).map((w) => {
-                  const id = workerIdByName.get(w);
-                  const inner = (
-                    <div className="c-lprimary">
-                      <div className="c-lp-tx">
-                        <div className="nm">{w}</div>
-                      </div>
-                    </div>
-                  );
-                  return id ? (
+                {(s.used_by ?? []).map((workerName) => {
+                  const workerId = workersByName.get(workerName);
+                  return workerId ? (
                     <Link
-                      key={w}
-                      href={`/workers?sel=${encodeURIComponent(id)}`}
+                      key={workerName}
+                      href={`/workers/${encodeURIComponent(workerId)}`}
                       className="c-lrow"
-                      style={{ gridTemplateColumns: "1fr", textDecoration: "none", color: "inherit" }}
+                      style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
                     >
-                      {inner}
+                      <div className="c-lprimary">
+                        <div className="c-lp-tx">
+                          <div className="nm">{workerName}</div>
+                        </div>
+                      </div>
                     </Link>
                   ) : (
-                    <div key={w} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
-                      {inner}
+                    <div key={workerName} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
+                      <div className="c-lprimary">
+                        <div className="c-lp-tx">
+                          <div className="nm">{workerName}</div>
+                        </div>
+                      </div>
                     </div>
-                  );
+                   );
                 })}
                 {(s.used_by?.length ?? 0) === 0 && <div style={pad}>Not used by any worker yet.</div>}
               </div>
