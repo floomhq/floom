@@ -427,7 +427,29 @@ class ApprovalRepository(Protocol):
         follow_up_run_id: str | None = None,
         annotations_json: str | None = None,
         reason: str | None = None,
-    ) -> RowDict | None: ...
+    ) -> RowDict | None:
+        """Atomically flip the pending approval to 'approved'.
+
+        #280: returns the flipped row, or ``None`` if no pending row was
+        flipped (a concurrent caller already decided this approval). Callers
+        that gate a side effect MUST check for ``None`` and abort.
+        """
+        ...
+
+    def attach_follow_up(
+        self,
+        *,
+        owner_id: str,
+        run_id: str,
+        follow_up_run_id: str,
+        edited_output_json: str | None = None,
+    ) -> RowDict | None:
+        """#280: attach the spawned follow-up run id to an already-approved row.
+
+        The approve route claims the decision atomically *before* spawning the
+        follow-up run, then records the run id in this second step.
+        """
+        ...
 
     def reject(
         self,
@@ -437,7 +459,13 @@ class ApprovalRepository(Protocol):
         decided_at: str,
         reason: str | None = None,
         annotations_json: str | None = None,
-    ) -> RowDict | None: ...
+    ) -> RowDict | None:
+        """Atomically flip the pending approval to 'rejected'.
+
+        #280: returns the flipped row, or ``None`` if a concurrent caller
+        already decided this approval. Callers MUST check for ``None``.
+        """
+        ...
 
 
 class CliAuthRepository(Protocol):
