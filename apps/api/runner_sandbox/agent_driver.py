@@ -383,6 +383,12 @@ class AgentDriver(SandboxDriver):
         # max_tokens when the worker explicitly set a value below the safe cap;
         # otherwise let the API use the model's own default.
         _OPENAI_MAX_OUTPUT_CAP = 16_384
+        # Bedrock Claude rejects max_tokens above the model limit (128k for
+        # Sonnet 4.6); the 1M "no limit" sentinel 400/429s before the first
+        # token. Cap well under it so skill workers run on Bedrock out of the box
+        # (no FLOOM_MAX_OUTPUT_TOKENS workaround needed) — see _agent_max_tokens
+        # in the loop below.
+        _BEDROCK_MAX_OUTPUT_CAP = 64_000
         _effective_max_tokens = (
             limits.max_output_tokens
             if limits.max_output_tokens <= _OPENAI_MAX_OUTPUT_CAP
@@ -434,6 +440,16 @@ class AgentDriver(SandboxDriver):
 
                 force_finish = corrective_retry_used
                 _agent_model = _llm.agent_model(config.runtime.model or _ws_default_model() or default_worker_agent_model())
+                # Clamp output tokens to the provider's hard limit (caps above):
+                # Bedrock -> 64k, OpenAI -> forward only when <=16k else None.
+                if "bedrock" in _agent_model.lower():
+                    _agent_max_tokens = min(int(limits.max_output_tokens), _BEDROCK_MAX_OUTPUT_CAP)
+                else:
+                    _agent_max_tokens = (
+                        int(limits.max_output_tokens)
+                        if int(limits.max_output_tokens) <= _OPENAI_MAX_OUTPUT_CAP
+                        else None
+                    )
                 agent = Agent(
                     name=worker_id,
                     instructions=system_prompt,
@@ -441,7 +457,7 @@ class AgentDriver(SandboxDriver):
                     mcp_servers=mcp_servers,
                     model=_agent_model,
                     model_settings=ModelSettings(
-                        max_tokens=limits.max_output_tokens,
+                        max_tokens=_agent_max_tokens,
                         include_usage=True,
                         tool_choice="finish_with_outputs" if force_finish else None,
                         extra_args=_llm.cache_control_extra_args(_agent_model),
