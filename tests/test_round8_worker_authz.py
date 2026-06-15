@@ -9,6 +9,7 @@ import types
 import uuid
 from pathlib import Path
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -1113,6 +1114,47 @@ def test_protected_stock_worker_direct_mutations_are_blocked(monkeypatch, tmp_pa
     for name, response in blocked_checks.items():
         assert response.status_code == 403, f"{name}: {response.status_code} {response.text}"
         assert response.json() == {"detail": "Stock workers cannot be modified through the API"}
+
+
+def test_member_cannot_archive_or_restore_shared_worker_owned_by_another_user():
+    from auth import AuthContext
+    from fastapi import HTTPException
+    from routers import worker_admin
+
+    class Workers:
+        def __init__(self):
+            self.updates = []
+
+        def get(self, *, user_id, worker_id, role=None):
+            assert user_id == "member-user"
+            assert worker_id == "shared-worker"
+            assert role == "member"
+            return {
+                "id": worker_id,
+                "owner_id": "admin-user",
+                "visibility": "workspace",
+                "manifest": {"name": worker_id, "archived": False},
+            }
+
+        def update(self, **kwargs):
+            self.updates.append(kwargs)
+            return None
+
+    class Repos:
+        def __init__(self):
+            self.workers = Workers()
+
+    auth = AuthContext(user_id="member-user", role="member", auth_method="session")
+    repos = Repos()
+
+    with pytest.raises(HTTPException) as archive_exc:
+        worker_admin.archive_worker("shared-worker", auth=auth, repos=repos)
+    with pytest.raises(HTTPException) as restore_exc:
+        worker_admin.restore_worker("shared-worker", auth=auth, repos=repos)
+
+    assert archive_exc.value.status_code == 403
+    assert restore_exc.value.status_code == 403
+    assert repos.workers.updates == []
 
 
 def test_973_private_cross_owner_not_in_list_or_bundle(monkeypatch, tmp_path):
