@@ -36,7 +36,7 @@ import { Button } from "@/components/ui/button";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { ArrowRight, ChevronDown, ChevronUp, FileText, Lock, MoreHorizontal, UploadCloud } from "lucide-react";
+import { ArrowRight, ChevronDown, ChevronUp, FileText, Lock, MoreHorizontal, Pause, Play, UploadCloud } from "lucide-react";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { Sparkline } from "@/components/Sparkline";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
@@ -767,7 +767,18 @@ function ConfigTab({ w }: { w: WorkerSummary }) {
           </button>
         ))}
       </div>
-      {activeTab === "Tools" && <ToolsTab w={w} />}
+      {/* #1256: Feedback only shown under Tools tab (not on every sub-tab). */}
+      {activeTab === "Tools" && (
+        <div className="flex flex-col gap-5">
+          <ToolsTab w={w} />
+          {FEEDBACK_BACKEND_AVAILABLE && (
+            <section>
+              <h4 style={h4}>Feedback</h4>
+              <WorkerFeedbackPanel workerId={w.id} canLeave={canLeaveFeedback(w)} canModerate={can("edit", w)} />
+            </section>
+          )}
+        </div>
+      )}
       {activeTab === "Brain" && <BrainTab w={w} />}
       {activeTab === "Triggers" && (
         <div className="flex flex-col gap-5">
@@ -785,12 +796,6 @@ function ConfigTab({ w }: { w: WorkerSummary }) {
           <ConfigInfoGrid rows={runtimeRows} />
           {/* TODO(#793): monthly spend cap field. */}
         </div>
-      )}
-      {FEEDBACK_BACKEND_AVAILABLE && (
-        <section>
-          <h4 style={h4}>Feedback</h4>
-          <WorkerFeedbackPanel workerId={w.id} canLeave={canLeaveFeedback(w)} canModerate={can("edit", w)} />
-        </section>
       )}
     </div>
   );
@@ -910,6 +915,29 @@ function WorkerDetailActions({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44 p-1">
             <DropdownMenuItem onClick={() => setEditOpen(true)}>Edit</DropdownMenuItem>
+            {/* #1263: Pause / Resume — toggles enabled:false via worker.yml PUT.
+                Shows a proper icon+label instead of "---". */}
+            <DropdownMenuItem
+              onClick={() => {
+                if (!d) return;
+                const isPaused = d.enabled === false;
+                const yaml = patchTopLevelScalar(workerYml(d), "enabled", isPaused ? "true" : "false");
+                persistYml(d, yaml)
+                  .then((updated) => {
+                    applyDetail(updated);
+                    onUpdated({ ...w, enabled: isPaused } as WorkerSummary);
+                    toast.success(isPaused ? "Worker resumed" : "Worker paused");
+                  })
+                  .catch((err: Error) => toast.error(err.message || "Could not update worker"));
+              }}
+            >
+              <span className="flex items-center gap-2">
+                {d?.enabled === false
+                  ? <><Play className="size-3.5" /> Resume</>
+                  : <><Pause className="size-3.5" /> Pause</>
+                }
+              </span>
+            </DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
                 const isArchived = (w as WorkerSummary & { archived?: boolean }).archived;
