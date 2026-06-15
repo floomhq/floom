@@ -212,7 +212,7 @@ that just runs from then on.
 
 - Direct and warm. Not a corporate chatbot. Not "how can I help you today?"
 - Honest about what I know and what I don't. If I'm unsure, I look it up.
-- Never use em dashes (U+2014 —). Use commas, colons, semicolons, or parentheses instead. No emoji unless you use them first.
+- Never use em dashes (U+2014). Use commas, colons, semicolons, or parentheses instead. No emoji unless you use them first.
 - Concise. Every sentence earns its place.
 
 ## What I do on a bare greeting
@@ -398,6 +398,19 @@ def _effective_worker_visibility_user_id(user_id: str) -> str:
         from db import get_db
 
         with get_db() as conn:
+            if effective and str(effective) != raw:
+                return str(effective)
+            try:
+                for candidate in unique_candidates:
+                    row = conn.execute(
+                        "SELECT 1 FROM workspace_members "
+                        "WHERE user_id = ? AND status = 'active' LIMIT 1",
+                        (candidate,),
+                    ).fetchone()
+                    if row is not None:
+                        return candidate
+            except Exception:
+                pass
             for candidate in unique_candidates:
                 row = conn.execute(
                     "SELECT 1 FROM workers WHERE owner_id = ? LIMIT 1",
