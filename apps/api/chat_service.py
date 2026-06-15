@@ -433,6 +433,14 @@ def _effective_worker_visibility_user_id(user_id: str) -> str:
                 ).fetchone()
                 if row is not None:
                     return candidate
+            for candidate in unique_candidates:
+                row = conn.execute(
+                    "SELECT 1 FROM workspace_members "
+                    "WHERE user_id = ? AND status = 'active' LIMIT 1",
+                    (candidate,),
+                ).fetchone()
+                if row is not None:
+                    return candidate
     except Exception:
         pass
     return unique_candidates[-1] if unique_candidates else raw

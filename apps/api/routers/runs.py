@@ -39,6 +39,7 @@ from pydantic import BaseModel, Field
 
 import auth
 from auth import AuthContext, get_auth_context
+from core import hot_cache
 from core.utils import _parse_iso8601, row_to_dict
 from db import DB_PATH, Repositories, get_repos
 from models import (
@@ -103,8 +104,16 @@ logger = logging.getLogger("floom.api")
 runs_router = APIRouter()
 
 
+def _hot_cache_scope() -> tuple[str, str]:
+    return (
+        os.environ.get("WORKEROS_DB") or os.environ.get("FLOOM_DB") or "",
+        os.environ.get("FLOOM_WORKERS_DIR") or "",
+    )
+
+
 @runs_router.get("/runs", response_model=List[RunSummary])
 def list_runs(
+    request: Request,
     response: Response,
     worker_id: Optional[str] = None,
     status: Optional[str] = None,
@@ -119,6 +128,7 @@ def list_runs(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[RunSummary]:
+    started = time.perf_counter()
     statuses = _resolve_run_status_filters(status)
     since_dt = _parse_iso8601(since) if since else None
     if since and since_dt is None:
@@ -129,8 +139,42 @@ def list_runs(
     if since_dt and until_dt and since_dt > until_dt:
         raise HTTPException(status_code=400, detail="since must be before until")
 
+    workspace_key = (
+        request.headers.get("x-workeros-workspace")
+        or request.query_params.get("workspace_id")
+    )
+    cache_key = (
+        "runs",
+        _hot_cache_scope(),
+        auth.user_id,
+        auth.role,
+        workspace_key,
+        worker_id,
+        tuple(statuses) if statuses else None,
+        since,
+        until,
+        limit,
+        offset,
+        include_system,
+    )
+    cached = hot_cache.get(cache_key)
+    if cached is not None:
+        visible_rows, visible_total = cached
+        response.headers["X-Total-Count"] = str(visible_total)
+        duration_ms = (time.perf_counter() - started) * 1000
+        response.headers["Server-Timing"] = f"runs;dur={duration_ms:.1f};desc=\"hit\""
+        logger.info(
+            "runs list cache=hit user_id=%s count=%s total=%s duration_ms=%.1f",
+            auth.user_id,
+            len(visible_rows),
+            visible_total,
+            duration_ms,
+        )
+        return visible_rows
+
     if worker_id and _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos) is None:
         response.headers["X-Total-Count"] = "0"
+        response.headers["Server-Timing"] = "runs;dur=0.0;desc=\"worker-miss\""
         return []
 
     visible_rows, visible_total = _list_visible_runs(
@@ -144,8 +188,19 @@ def list_runs(
         offset=offset,
         include_system=include_system,
     )
+    result = [_make_run_summary(r) for r in visible_rows]
+    hot_cache.set(cache_key, (result, visible_total))
     response.headers["X-Total-Count"] = str(visible_total)
-    return [_make_run_summary(r) for r in visible_rows]
+    duration_ms = (time.perf_counter() - started) * 1000
+    response.headers["Server-Timing"] = f"runs;dur={duration_ms:.1f};desc=\"miss\""
+    logger.info(
+        "runs list cache=miss user_id=%s count=%s total=%s duration_ms=%.1f",
+        auth.user_id,
+        len(result),
+        visible_total,
+        duration_ms,
+    )
+    return result
 
 
 @runs_router.get("/runs/export.csv")

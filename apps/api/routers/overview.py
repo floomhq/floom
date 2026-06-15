@@ -20,10 +20,11 @@ import time
 from datetime import datetime, timedelta, timezone
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, Response
+from fastapi import APIRouter, Depends, Request, Response
 from pydantic import BaseModel, Field
 
 from auth import AuthContext, get_auth_context
+from core import hot_cache
 from core.config import PROTECTED_STOCK_WORKER_IDS, PUBLIC_STOCK_WORKER_IDS
 from core.utils import _parse_iso8601
 from db import Repositories, get_repos
@@ -48,6 +49,13 @@ from services.worker_access import (
 
 overview_router = APIRouter()
 logger = logging.getLogger("floom.api")
+
+
+def _hot_cache_scope() -> tuple[str, str]:
+    return (
+        os.environ.get("WORKEROS_DB") or os.environ.get("FLOOM_DB") or "",
+        os.environ.get("FLOOM_WORKERS_DIR") or "",
+    )
 
 
 class OverviewStats(BaseModel):
@@ -275,11 +283,27 @@ def _overview_worker_paused(worker: Dict[str, Any], trigger: Optional[Dict[str, 
 
 @overview_router.get("/system/overview", response_model=OverviewResponse)
 def system_overview(
+    request: Request,
     response: Response,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> OverviewResponse:
     started = time.perf_counter()
+    workspace_key = (
+        request.headers.get("x-workeros-workspace")
+        or request.query_params.get("workspace_id")
+    )
+    cache_key = ("overview", _hot_cache_scope(), auth.user_id, auth.role, workspace_key)
+    cached = hot_cache.get(cache_key)
+    if cached is not None:
+        duration_ms = (time.perf_counter() - started) * 1000
+        response.headers["Server-Timing"] = f"overview;dur={duration_ms:.1f};desc=\"hit\""
+        logger.info(
+            "overview aggregation cache=hit user_id=%s duration_ms=%.1f",
+            auth.user_id,
+            duration_ms,
+        )
+        return cached
     now = datetime.now(timezone.utc)
     window_24h = now - timedelta(hours=24)
     window_7d = now - timedelta(days=7)
@@ -738,10 +762,11 @@ def system_overview(
         scheduled_today=scheduled_today[:5],
         needs_attention=attention_items,
     )
+    hot_cache.set(cache_key, payload)
     duration_ms = (time.perf_counter() - started) * 1000
-    response.headers["Server-Timing"] = f"overview;dur={duration_ms:.1f}"
+    response.headers["Server-Timing"] = f"overview;dur={duration_ms:.1f};desc=\"miss\""
     logger.info(
-        "overview aggregation user_id=%s runs_24h=%s workers=%s recent_runs=%s "
+        "overview aggregation cache=miss user_id=%s runs_24h=%s workers=%s recent_runs=%s "
         "scheduled=%s needs_attention=%s duration_ms=%.1f",
         auth.user_id,
         runs_24h,

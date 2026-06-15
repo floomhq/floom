@@ -985,6 +985,16 @@ async def versioned_api_alias_middleware(request: Request, call_next):
     return await call_next(request)
 
 
+@app.middleware("http")
+async def hot_get_cache_invalidation_middleware(request: Request, call_next):
+    response = await call_next(request)
+    if request.method.upper() not in {"GET", "HEAD", "OPTIONS"} and response.status_code < 500:
+        from core.hot_cache import clear as _clear_hot_cache
+
+        _clear_hot_cache()
+    return response
+
+
 @app.exception_handler(InsufficientDiskSpaceError)
 async def insufficient_disk_space_handler(_request: Request, exc: InsufficientDiskSpaceError):
     return JSONResponse(
