@@ -37,9 +37,15 @@ if (-not (Test-Path .env)) {
   Write-Host "==> backend: apps\api\.env already exists - left untouched"
 }
 
-# 3. Frontend dependencies.
-Write-Host "==> frontend: npm install"
+# 3. Frontend env + dependencies.
 Set-Location "$root\apps\web"
+if (-not (Test-Path .env)) {
+  Copy-Item .env.example .env
+  Write-Host "==> frontend: created apps\web\.env (points the web app at the local backend)"
+} else {
+  Write-Host "==> frontend: apps\web\.env already exists - left untouched"
+}
+Write-Host "==> frontend: npm install"
 Invoke-Step "npm.cmd" @("install")
 
 Write-Host ""
