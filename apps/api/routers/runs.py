@@ -110,6 +110,23 @@ def _hot_cache_scope() -> tuple[str, str]:
     )
 
 
+def _effective_runs_limit(request: Request, limit: int) -> int:
+    try:
+        current_limit = int(limit)
+    except (TypeError, ValueError):
+        current_limit = 50
+    if os.environ.get("WORKEROS_DEPLOY") != "cloud":
+        return current_limit
+    if "limit" in request.query_params:
+        return current_limit
+    try:
+        default_limit = int(os.environ.get("WORKEROS_CLOUD_RUNS_DEFAULT_LIMIT", "20"))
+    except ValueError:
+        default_limit = 20
+    default_limit = max(1, min(default_limit, 200))
+    return min(current_limit, default_limit)
+
+
 @runs_router.get("/runs", response_model=List[RunSummary])
 def list_runs(
     request: Request,
@@ -128,6 +145,7 @@ def list_runs(
     repos: Repositories = Depends(get_repos),
 ) -> List[RunSummary]:
     started = time.perf_counter()
+    limit = _effective_runs_limit(request, limit)
     statuses = _resolve_run_status_filters(status)
     since_dt = _parse_iso8601(since) if since else None
     if since and since_dt is None:
