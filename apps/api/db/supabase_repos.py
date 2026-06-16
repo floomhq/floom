@@ -2120,7 +2120,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         include_total: bool = True,
     ) -> tuple[list[dict[str, Any]], int]:
         builder = self._client.table("runs").select(
-            "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path,trigger_member_id",
+            "id,worker_id,status,trigger_source,input_json,error,started_at,completed_at,duration_ms,created_at,trigger_member_id",
             count="exact" if include_total else None,
         )
         builder = _scope_by_workspace(builder, user_id=user_id)
