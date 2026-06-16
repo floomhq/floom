@@ -31,6 +31,18 @@ function previewKind(name: string): "markdown" | "code" | "plain" {
 const ROW_DRAG_MIME = "application/x-workeros-brain-row";
 const FOLDER_PLACEHOLDER_FILE = ".workeros-folder";
 
+function safeInlineFileUrl(rawUrl: string): string | undefined {
+  const baseOrigin = typeof window !== "undefined" ? window.location.origin : "http://localhost";
+  try {
+    const parsed = new URL(rawUrl, baseOrigin);
+    if (!["http:", "https:"].includes(parsed.protocol)) return undefined;
+    if (parsed.origin !== baseOrigin) return undefined;
+    return rawUrl;
+  } catch {
+    return undefined;
+  }
+}
+
 export type InlineDragItem =
   | { kind: "file"; path: string; name: string; dir: string }
   | { kind: "folder"; path: string; name: string; dir: string };
@@ -127,6 +139,7 @@ export function InlineFileOpen({
   const [viewMode, setViewMode] = useState<"preview" | "raw">("preview");
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const open = files.find((f) => f.id === openId) ?? null;
+  const safeOpenUrl = open ? safeInlineFileUrl(open.url) : undefined;
   const brainDnD = Boolean(onMoveItem || onCreateSubfolder);
 
   useEffect(() => {
@@ -352,19 +365,21 @@ export function InlineFileOpen({
               </button>
             </>
           )}
-          <a
-            href={open.url}
-            download={open.name}
-            className="c-vpill"
-            style={{ marginLeft: canLoadText || canEditText || editing ? 0 : "auto", padding: "4px 9px", textDecoration: "none" }}
-          >
-            <Download size={13} /> Download
-          </a>
+          {safeOpenUrl && (
+            <a
+              href={safeOpenUrl}
+              download={open.name}
+              className="c-vpill"
+              style={{ marginLeft: canLoadText || canEditText || editing ? 0 : "auto", padding: "4px 9px", textDecoration: "none" }}
+            >
+              <Download size={13} /> Download
+            </a>
+          )}
         </div>
-        {isImageFile(open.name) ? (
+        {isImageFile(open.name) && safeOpenUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={open.url}
+            src={safeOpenUrl}
             alt={open.name}
             style={{ maxWidth: "100%", borderRadius: "var(--r-card, 16px)", display: "block" }}
           />
