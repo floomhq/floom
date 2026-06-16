@@ -1023,6 +1023,20 @@ class E2BSandboxDriver(SandboxDriver):
             )
 
         if not worker_dir.is_dir():
+            try:
+                from services.worker_materialization import rematerialize_worker_from_db
+
+                if rematerialize_worker_from_db(worker_id, target_dir=worker_dir):
+                    log_fn("[e2b] Re-materialized worker files from DB", "info")
+            except Exception as exc:
+                logger.warning(
+                    "Worker re-materialization failed for %s at %s: %s",
+                    worker_id,
+                    worker_dir,
+                    exc,
+                )
+
+        if not worker_dir.is_dir():
             return WorkerResult(
                 status="error",
                 error=f"Worker directory not found: {worker_dir}",
