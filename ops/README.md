@@ -2,6 +2,46 @@
 
 Operational scripts and systemd units for the production API.
 
+## API Autodeploy
+
+Files:
+- `autodeploy-api.sh` - deterministic wrapper for systemd/webhook autodeploys
+- `workeros-api-autodeploy.service` - OSS API oneshot unit
+- `workeros-cloud-api-autodeploy.service` - cloud API oneshot unit
+
+The wrapper never runs `git pull`. It fetches `origin/main`, rejects tracked
+changes, staged changes, untracked files, and local-only commits with an
+actionable error, then resets a clean deploy mirror to `origin/main` and invokes
+the configured deploy command.
+
+Install or refresh the OSS unit:
+
+```bash
+install -m 0755 ops/autodeploy-api.sh /root/workeros/ops/autodeploy-api.sh
+install -m 0644 ops/workeros-api-autodeploy.service /etc/systemd/system/workeros-api-autodeploy.service
+systemctl daemon-reload
+systemctl start workeros-api-autodeploy.service
+```
+
+Install or refresh the cloud unit:
+
+```bash
+install -m 0755 ops/autodeploy-api.sh /usr/local/bin/workeros-api-autodeploy
+install -m 0644 ops/workeros-cloud-api-autodeploy.service /etc/systemd/system/workeros-cloud-api-autodeploy.service
+systemctl daemon-reload
+systemctl start workeros-cloud-api-autodeploy.service
+```
+
+Optional failure alerting:
+
+```bash
+cat >/root/.config/workeros/autodeploy.env <<'EOF'
+WORKEROS_AUTODEPLOY_ALERT_WEBHOOK=https://example.invalid/webhook
+EOF
+```
+
+Cloud uses `/root/.config/workeros-cloud/autodeploy.env`.
+
 ## Hard Post-Deploy Smoke Gate
 
 After every production deploy and before relying on a production alias, run:
