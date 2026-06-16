@@ -190,6 +190,23 @@ def _reject_raw_local_runner_on_create(worker_yml: str) -> None:
         )
 
 
+def _ensure_worker_memory_pack(config: "WorkerConfig", user_id: str) -> None:
+    from contexts import context_scope_for_user, use_context_scope
+    from runner_sandbox.memory_context import ensure_memory_context_pack
+
+    def _log(message: str, level: str = "info") -> None:
+        if level == "warning":
+            logger.warning(message)
+        else:
+            logger.debug(message)
+
+    try:
+        with use_context_scope(context_scope_for_user(user_id)):
+            ensure_memory_context_pack(config=config, user_id=user_id, log_fn=_log)
+    except Exception:
+        logger.warning("Failed to materialize memory pack for worker %s", config.id, exc_info=True)
+
+
 def _create_worker_from_parsed_payload(
     *,
     worker_id: str,
@@ -242,6 +259,7 @@ def _create_worker_from_parsed_payload(
                 _embed_files_in_skill_version(worker_id, target_dir)
             except Exception:
                 logger.warning("Failed to embed files in DB for worker %s", worker_id, exc_info=True)
+            _ensure_worker_memory_pack(config, auth.user_id)
             invalidate_worker_cache()
             detail = _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
             # Commit new worker files to the workspace git repo.

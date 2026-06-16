@@ -923,7 +923,7 @@ WorkerContextMountSpec = Union[str, WorkerContextMount]
 
 
 class WorkerMemoryConfig(BaseModel):
-    enabled: bool = False
+    enabled: bool = True
     context: Optional[str] = None
 
     @model_validator(mode="before")
@@ -999,14 +999,14 @@ def _normalize_memory_contexts(
         if normalized.name != memory_name:
             continue
         if normalized.source == "local":
-            normalized_contexts[idx] = {
-                "name": memory_name,
-                "writeable": True,
-                "source": "local",
-            }
+            normalized_contexts[idx] = WorkerContextMount(
+                name=memory_name,
+                writeable=True,
+                source="local",
+            )
         return normalized_contexts
 
-    normalized_contexts.append(memory_mount)
+    normalized_contexts.append(WorkerContextMount(**memory_mount))
     return normalized_contexts
 
 
