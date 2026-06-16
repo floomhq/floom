@@ -241,8 +241,8 @@ def build_tool_event_metadata(
         CHAT_EVENT_PROTOCOL_VERSION,
         CHAT_EVENT_VERSION,
         _APPROVALS_BASE_URL,
-        _approval_public_token,
     )
+    from core.approval_signing import try_approval_public_token
     args_preview = build_args_preview(tool_name, args)
     status = "starting" if phase == "call" else "completed"
     if phase == "result" and isinstance(result, dict) and not result.get("ok", True):
@@ -276,7 +276,15 @@ def build_tool_event_metadata(
                     owner_id = str(approval.get("owner_id") or "").strip()
                     if not approval_id or not run_id or not owner_id:
                         continue
-                    token = _approval_public_token({"id": approval_id, "run_id": run_id, "owner_id": owner_id})
+                    # DEGRADE, never 503: omit the "Open review" deep-link action
+                    # when no signer secret is configured (e.g. cloud mode) instead
+                    # of crashing the card render. The card still shows the pending
+                    # approval; only the optional signed deep link is dropped.
+                    token = try_approval_public_token(
+                        {"id": approval_id, "run_id": run_id, "owner_id": owner_id}
+                    )
+                    if not token:
+                        continue
                     approval_actions.append(
                         {
                             "id": f"open_review_{approval_id}",
