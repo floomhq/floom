@@ -10,7 +10,7 @@ import {
   CalendarClock,
 } from "lucide-react";
 
-import { api } from "@/lib/api";
+import { useOverview as useOverviewQuery } from "@/lib/query/hooks";
 import type {
   OverviewSparklineBucket,
   SystemOverview,
@@ -182,68 +182,18 @@ function statusMeta(status: string) {
 }
 
 function useOverview(initialData: SystemOverview | null) {
-  // S44: start with server-fetched data — no loading flash on first render.
-  const [data, setData] = useState<SystemOverview | null>(initialData);
-  const [loading, setLoading] = useState(initialData === null);
-
-  // Explicit reload (e.g. triggered by the bell button): shows the skeleton so
-  // the user gets clear feedback that a refresh is in progress.
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await api.system.overview();
-      setData(result);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Silent revalidation: fetches fresh data but never flashes the skeleton
-  // because we already have something to paint (avoids a jarring blink when
-  // switching back to the tab).
-  const revalidate = useCallback(async () => {
-    try {
-      const result = await api.system.overview();
-      setData(result);
-    } catch {
-      // Ignore — silently stale is better than a skeleton on focus.
-    }
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadOnce() {
-      // Only show the skeleton when we have nothing to paint. With
-      // server-fetched initialData we revalidate silently in the background so
-      // the overview never strands a stale status (e.g. a run that finished
-      // after SSR still showing "Running" while /runs shows "Completed").
-      if (initialData === null) setLoading(true);
-      try {
-        const result = await api.system.overview();
-        if (!cancelled) setData(result);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    loadOnce();
-    return () => {
-      cancelled = true;
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Re-fetch silently when the tab regains focus so cross-view status stays
-  // consistent (navigating /runs → /overview, or returning to the tab, shows
-  // the latest run statuses) without flashing the skeleton on every tab switch.
-  useEffect(() => {
-    window.addEventListener("focus", revalidate);
-    return () => window.removeEventListener("focus", revalidate);
-  }, [revalidate]);
-
-  return { data, loading, reload };
+  // Cache-first via TanStack Query (QueryProvider config: staleTime 30s,
+  // refetchOnMount:false, refetchOnWindowFocus). Returning to /overview within
+  // the cache window renders instantly from cache with NO skeleton; focus
+  // triggers a silent background revalidate. initialData (server-fetched)
+  // seeds the cache so even the first paint has no skeleton.
+  const q = useOverviewQuery(initialData);
+  return {
+    data: q.data ?? null,
+    // Skeleton only on a true cold start (no cached or server data at all).
+    loading: q.isLoading && !q.data,
+    reload: () => q.refetch(),
+  };
 }
 
 function useOverviewVisibleRows() {
