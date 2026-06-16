@@ -1156,6 +1156,39 @@ class TestRound8ApprovalMisconfigDiagnostic(unittest.TestCase):
         self.assertIn("synthesising approval gate", messages)
         self.assertIn("Run awaiting approval", messages)
 
+    def test_approval_followup_does_not_synthesize_second_gate(self):
+        from models import WorkerResult
+        import run_service
+
+        worker = _create_approval_worker()
+        run_id = run_service.create_run(
+            worker["id"],
+            {"decision": "approved", "approved_output": {"message": "ready"}},
+            trigger_source="approval",
+        )
+
+        class FakeDriver:
+            def run(self, **_kwargs):
+                return WorkerResult(status="success", outputs={"message": "sent"})
+
+        with patch.object(run_service, "get_sandbox_driver", return_value=FakeDriver()):
+            run_service.execute_run(run_id, worker["id"], {"decision": "approved"})
+
+        run = client.get(f"/runs/{run_id}")
+        self.assertEqual(run.status_code, 200, run.text)
+        self.assertEqual(run.json()["status"], "completed")
+
+        with db.get_db() as conn:
+            approval_count = conn.execute(
+                "SELECT COUNT(*) FROM approvals WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()[0]
+        self.assertEqual(
+            approval_count,
+            0,
+            "approval follow-up run should not create another pending approval",
+        )
+
 
 # ===========================================================================
 # /healthz endpoint

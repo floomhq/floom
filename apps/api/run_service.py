@@ -1458,9 +1458,11 @@ def execute_run(
         worker_needs_approval = bool(
             config and getattr(config, "approvals", None) and config.approvals.required
         )
+        approval_follow_up = (current_run or {}).get("trigger_source") == "approval"
         _non_approval_terminal = {"error", "failed", "cancelled", "timeout", "rejected"}
         if (
             worker_needs_approval
+            and not approval_follow_up
             and not result.decision_required
             and result.status not in _non_approval_terminal
         ):
