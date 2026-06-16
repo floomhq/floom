@@ -1,6 +1,6 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
-import { createAuthenticatedClient } from "../lib/api.js";
+import { WorkerosApiClient, WorkerosApiError } from "../lib/api.js";
 import { readCredentials } from "../lib/credentials.js";
 import { log, printJson } from "../lib/output.js";
 
@@ -44,22 +44,17 @@ async function checkApiReachable(apiBase: string): Promise<Check> {
   }
 }
 
-async function checkAuth(apiBase: string, apiSecret: string): Promise<Check> {
+async function checkAuth(client: WorkerosApiClient): Promise<Check> {
   try {
-    const response = await fetch(`${apiBase}/system/info`, {
-      headers: {
-        accept: "application/json",
-        "x-floom-secret": apiSecret,
-      },
-    });
-    if (response.ok) {
-      return pass("auth", "Token valid");
-    }
-    if (response.status === 401 || response.status === 403) {
+    await client.requestJson("GET", "/system/info");
+    return pass("auth", "Token valid");
+  } catch (error) {
+    if (error instanceof WorkerosApiError && (error.status === 401 || error.status === 403)) {
       return fail("auth", "Token rejected by API", "Re-run: floom login");
     }
-    return fail("auth", `HTTP ${response.status}`, "Re-run: floom login");
-  } catch {
+    if (error instanceof WorkerosApiError && error.status) {
+      return fail("auth", `HTTP ${error.status}`, "Re-run: floom login");
+    }
     return fail("auth", "Could not reach API to validate token", "Re-run: floom login");
   }
 }
@@ -103,22 +98,17 @@ function checkMcpInstall(): Check {
   return warn("mcp_install", "Not found in any editor config", "Install: floom mcp install");
 }
 
-async function checkRecentRuns(apiBase: string, apiSecret: string): Promise<Check> {
+async function checkRecentRuns(client: WorkerosApiClient): Promise<Check> {
   try {
-    const response = await fetch(`${apiBase}/runs?limit=1`, {
-      headers: {
-        accept: "application/json",
-        "x-floom-secret": apiSecret,
-      },
-    });
-    if (response.ok) {
-      return pass("recent_runs", "API + auth + DB reachable");
-    }
-    if (response.status === 401 || response.status === 403) {
+    await client.requestJson("GET", "/runs", { query: { limit: 1 } });
+    return pass("recent_runs", "API + auth + DB reachable");
+  } catch (error) {
+    if (error instanceof WorkerosApiError && (error.status === 401 || error.status === 403)) {
       return fail("recent_runs", "Auth rejected", "Re-run: floom login");
     }
-    return fail("recent_runs", `HTTP ${response.status}`, "Check API status: https://github.com/floomhq/workeros/issues");
-  } catch {
+    if (error instanceof WorkerosApiError && error.status) {
+      return fail("recent_runs", `HTTP ${error.status}`, "Check API status: https://github.com/floomhq/workeros/issues");
+    }
     return fail("recent_runs", "Could not reach /runs endpoint", "Check your network connection");
   }
 }
@@ -126,7 +116,7 @@ async function checkRecentRuns(apiBase: string, apiSecret: string): Promise<Chec
 export async function doctorCommand(options: { json?: boolean } = {}): Promise<number> {
   const credentials = await readCredentials();
   const apiBase = credentials?.api_base || process.env.WORKEROS_API_BASE || API_DEFAULT;
-  const apiSecret = credentials?.api_secret || process.env.WORKEROS_API_SECRET || "";
+  const client = credentials ? new WorkerosApiClient(apiBase, credentials) : null;
 
   const checks: Check[] = [];
 
@@ -134,18 +124,18 @@ export async function doctorCommand(options: { json?: boolean } = {}): Promise<n
   checks.push(await checkApiReachable(apiBase));
 
   // Check 2: Auth valid
-  if (!apiSecret) {
+  if (!client) {
     checks.push(fail("auth", "No credentials found", "Run: floom login"));
   } else {
-    checks.push(await checkAuth(apiBase, apiSecret));
+    checks.push(await checkAuth(client));
   }
 
   // Check 3: MCP install
   checks.push(checkMcpInstall());
 
   // Check 4: Recent runs endpoint
-  if (apiSecret) {
-    checks.push(await checkRecentRuns(apiBase, apiSecret));
+  if (client) {
+    checks.push(await checkRecentRuns(client));
   } else {
     checks.push(fail("recent_runs", "Skipped — not authenticated", "Run: floom login"));
   }
