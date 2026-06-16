@@ -32,6 +32,19 @@ describe("InlineFileOpen", () => {
     expect(document.querySelector("img")).toBeNull(); // back to the list
   });
 
+  it("does not render API-provided unsafe file URLs", () => {
+    render(
+      <InlineFileOpen
+        files={[{ id: "evil.png", name: "evil.png", url: "javascript:alert(1)" }]}
+        rootLabel="Output"
+      />,
+    );
+
+    fireEvent.click(screen.getByText("evil.png"));
+    expect(screen.queryByRole("link", { name: /Download/i })).toBeNull();
+    expect(document.querySelector("img")).toBeNull();
+  });
+
   it("loads text content inline via loadText (markdown rendered in Preview)", async () => {
     const loadText = vi.fn().mockResolvedValue("# hello brain");
     render(<InlineFileOpen files={files} rootLabel="company-facts" loadText={loadText} />);

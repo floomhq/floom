@@ -112,7 +112,7 @@ input defaults, capabilities, and webhook secret rotation; it does not replace
 - Run outputs render according to `exec.outputs[].media_type`; markdown renders
   inline, JSON is pretty-printed, and other media types are downloadable.
 - Select input labels are humanized in the UI, but the raw enum value is what
-  reaches `run(inputs, context)`.
+  appears in `inputs.json`.
 
 ---
 
@@ -124,19 +124,36 @@ The shortest possible worker. Plain Python, OpenAI summarization, one input, one
 
 ```python
 # run.py
-def run(inputs, context):
-    text = inputs["text"]
-    client = context.openai()
-    response = client.chat.completions.create(
-        model="gpt-5-mini",
-        messages=[
-            {"role": "system", "content": "Summarize the user's text in 3 bullets."},
-            {"role": "user", "content": text},
-        ],
-    )
-    summary = response.choices[0].message.content
-    context.write_output("summary", summary)
-    return {"summary": summary}
+import json
+import os
+from pathlib import Path
+
+from openai import OpenAI
+
+inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+text = inputs["text"]
+
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+response = client.chat.completions.create(
+    model="gpt-5-mini",
+    messages=[
+        {"role": "system", "content": "Summarize the user's text in 3 bullets."},
+        {"role": "user", "content": text},
+    ],
+)
+summary = response.choices[0].message.content or ""
+
+Path("out").mkdir(exist_ok=True)
+Path("out/summary.md").write_text(summary, encoding="utf-8")
+Path("result.json").write_text(
+    json.dumps({
+        "status": "success",
+        "outputs": {"summary": "out/summary.md"},
+        "artifacts": [],
+        "error": None,
+    }),
+    encoding="utf-8",
+)
 ```
 
 ```yaml
@@ -313,11 +330,16 @@ trigger:
 In agent mode, the SKILL.md will receive the Gmail message payload in `inputs["event"]`. In script mode:
 
 ```python
-def run(inputs, context):
-    msg = inputs["event"]  # full Gmail message payload
-    gmail = context.connections["gmail"]
-    # Use gmail.<action>(...) — see Composio docs
-    ...
+import json
+from pathlib import Path
+
+inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+connections = json.loads(Path("connections.json").read_text(encoding="utf-8"))
+
+msg = inputs["event"]  # full Gmail message payload
+gmail_connection_id = connections["gmail"]
+# Use the Workeros API or Composio SDK with this connection id.
+...
 ```
 
 Live reference: [workers/gmail_intake_brief/](../workers/gmail_intake_brief/).
@@ -370,14 +392,32 @@ approvals:
   label: Review and approve before sending to client
 ```
 
-In agent mode, the runner inserts an approval step after the agent declares "done" but before writing outputs. In script mode:
+In script mode, use the two-run approval protocol: Run 1 writes
+`decision_required` to `result.json`; after approval, Run 2 receives
+`decision: "approved"` and `approved_output` in `inputs.json`.
 
 ```python
-def run(inputs, context):
-    draft = generate_draft(...)
-    context.approve(f"Send this draft? {draft[:200]}...")
-    # Execution pauses here until human approves via UI or API
-    send(draft)
+import json
+from pathlib import Path
+
+inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+
+if inputs.get("decision") == "approved":
+    send(inputs["approved_output"])
+    result = {"status": "success", "outputs": {"sent": True}, "artifacts": []}
+else:
+    draft = generate_draft(inputs)
+    result = {
+        "status": "success",
+        "outputs": {"message_draft": draft},
+        "decision_required": {
+            "label": "Review and approve before sending",
+            "preview": draft,
+        },
+        "artifacts": [],
+    }
+
+Path("result.json").write_text(json.dumps(result), encoding="utf-8")
 ```
 
 ---
@@ -456,7 +496,7 @@ workers.get({ id: "text-summarizer" })
 ```
 workers.create({
   worker_yml: "schema_version: '0.3'\nname: my-worker\n...",
-  run_py: "def run(inputs, context): ...",
+  run_py: "import json\nfrom pathlib import Path\ninputs=json.loads(Path('inputs.json').read_text())\nPath('result.json').write_text(json.dumps({'status':'success','outputs':{},'artifacts':[]}))",
 })
 ```
 

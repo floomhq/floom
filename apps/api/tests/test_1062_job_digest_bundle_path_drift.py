@@ -68,6 +68,31 @@ def test_relative_bundle_path_unchanged(tmp_path):
     assert resolved == (workers_dir / "job-digest").resolve()
 
 
+def test_bare_relative_bundle_path_resolves_under_workers_dir(tmp_path):
+    """Cloud can persist runtime.bundle_path as a bare worker id; it must resolve
+    under the configured WORKERS_DIR, not WORKERS_DIR.parent."""
+    workers_dir = _engine_workers(tmp_path)
+    (workers_dir / "job-digest").mkdir()
+    cfg = _Config("job-digest")
+    resolved = _resolve_worker_bundle_dir(workers_dir, "job-digest", cfg, _safe_path)
+    assert resolved == (workers_dir / "job-digest").resolve()
+    assert resolved != (workers_dir.parent / "job-digest").resolve()
+
+
+def test_e2b_worker_dir_uses_shared_bare_relative_resolution(tmp_path, monkeypatch):
+    """E2B must stay in parity with the shared worker bundle resolver."""
+    from runner_sandbox import e2b_driver
+
+    workers_dir = _engine_workers(tmp_path)
+    (workers_dir / "job-digest").mkdir()
+    monkeypatch.setattr(e2b_driver, "WORKERS_DIR", workers_dir)
+
+    cfg = _Config("job-digest")
+    resolved = e2b_driver._worker_dir_for_run("job-digest", cfg)
+    assert resolved == (workers_dir / "job-digest").resolve()
+    assert resolved != (workers_dir.parent / "job-digest").resolve()
+
+
 def test_absolute_bundle_path_inside_root_is_honoured(tmp_path):
     """A correct absolute bundle_path under the current root is returned as-is."""
     workers_dir = _engine_workers(tmp_path)
@@ -99,12 +124,13 @@ def test_basename_fallback_still_rejects_traversal_in_basename(tmp_path):
     escape because only its basename is joined under WORKERS_DIR via _safe_path."""
     workers_dir = _engine_workers(tmp_path)
     # absolute path outside root whose basename is benign
-    cfg = _Config("/etc/passwd")
+    outside = tmp_path / "outside" / "passwd"
+    cfg = _Config(str(outside))
     # basename "passwd" -> WORKERS_DIR/passwd (doesn't exist but resolves safely)
     resolved = _resolve_worker_bundle_dir(workers_dir, "job-digest", cfg, _safe_path)
     assert resolved == (workers_dir / "passwd").resolve()
     # crucially it did NOT return /etc/passwd
-    assert resolved != Path("/etc/passwd")
+    assert resolved != outside.resolve()
 
 
 def test_stale_absolute_resolves_under_extra_root_when_listed(tmp_path, monkeypatch):
@@ -175,7 +201,10 @@ def test_a05_absolute_symlink_escaping_extra_root_is_not_honoured(tmp_path, monk
     outside = tmp_path / "outside-secret"
     outside.mkdir()
     link = var_workers / "job-digest"
-    os.symlink(outside, link)  # <extra_root>/job-digest -> /.../outside-secret
+    try:
+        os.symlink(outside, link)  # <extra_root>/job-digest -> /.../outside-secret
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
 
     monkeypatch.setenv("FLOOM_EXTRA_WORKERS_DIRS", str(var_workers))
     cfg = _Config(str(link))
@@ -198,7 +227,10 @@ def test_a05_realpath_assert_helper_rejects_symlink_escape(tmp_path):
     outside = tmp_path / "outside"
     outside.mkdir()
     escape = root / "evil"
-    os.symlink(outside, escape)
+    try:
+        os.symlink(outside, escape)
+    except OSError as exc:
+        pytest.skip(f"symlink creation unavailable: {exc}")
 
     with pytest.raises(ValueError, match="symlink escape"):
         runner_utils._assert_realpath_contained(escape, root)

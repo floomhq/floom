@@ -1708,6 +1708,16 @@ class SqliteRunRepository:
     _OUTCOME_STATUSES = ("completed", "approved", "success")
     _TERMINAL_STATUSES = _COMPLETED_STATUSES + _FAILED_STATUSES
 
+    @staticmethod
+    def _has_actor_user_id_column(conn) -> bool:
+        try:
+            return any(
+                row["name"] == "actor_user_id"
+                for row in conn.execute("PRAGMA table_info(runs)").fetchall()
+            )
+        except Exception:
+            return False
+
     def list_for_worker(
         self,
         *,
@@ -1742,8 +1752,16 @@ class SqliteRunRepository:
         limit: int = 50,
         offset: int = 0,
     ) -> tuple[list[dict[str, Any]], int]:
-        where = ["w.owner_id = ?"]
-        params: list[Any] = [user_id]
+        with get_db() as conn:
+            has_actor_user_id = self._has_actor_user_id_column(conn)
+        if has_actor_user_id:
+            where = ["(COALESCE(r.actor_user_id, w.owner_id) = ? OR w.owner_id = ?)"]
+            params: list[Any] = [user_id, user_id]
+            actor_select = "r.actor_user_id,"
+        else:
+            where = ["w.owner_id = ?"]
+            params = [user_id]
+            actor_select = "NULL AS actor_user_id,"
         if worker_id:
             where.append("r.worker_id = ?")
             params.append(worker_id)
@@ -1760,6 +1778,7 @@ class SqliteRunRepository:
         select_sql = f"""
             SELECT r.id, r.worker_id,
                    COALESCE(JSON_EXTRACT(sv.manifest_json, '$.title'), w.name) AS worker_name,
+                   {actor_select}
                    r.status, r.trigger_source, r.input_json, r.created_at, r.started_at,
                    r.completed_at, r.duration_ms, r.error, r.error_code,
                    r.quality_warning
@@ -1906,7 +1925,7 @@ class SqliteRunRepository:
         with get_db() as conn:
             rows = conn.execute(
                 f"""
-                SELECT r.id, r.worker_id,
+                SELECT r.id, r.worker_id, r.actor_user_id,
                        COALESCE(JSON_EXTRACT(sv.manifest_json, '$.title'), w.name) AS worker_name,
                        r.status, r.trigger_source, r.created_at, r.started_at,
                        r.completed_at, r.duration_ms, r.error, r.error_code
@@ -1995,9 +2014,21 @@ class SqliteRunRepository:
 
     def get(self, *, user_id: str, run_id: str) -> dict[str, Any] | None:
         with get_db() as conn:
+            has_actor_user_id = self._has_actor_user_id_column(conn)
+            actor_select = "r.actor_user_id," if has_actor_user_id else "NULL AS actor_user_id,"
+            scope_sql = (
+                "r.id = ? AND (COALESCE(r.actor_user_id, w.owner_id) = ? OR w.owner_id = ?)"
+                if has_actor_user_id
+                else "w.owner_id = ? AND r.id = ?"
+            )
+            params = (
+                (run_id, user_id, user_id)
+                if has_actor_user_id
+                else (user_id, run_id)
+            )
             row = conn.execute(
-                """
-                SELECT r.id, r.worker_id,
+                f"""
+                SELECT r.id, r.worker_id, {actor_select}
                        COALESCE(JSON_EXTRACT(sv.manifest_json, '$.title'), w.name) AS worker_name,
                        r.status, r.trigger_source, r.runner, r.input_json, r.output_json,
                        r.error, r.error_code, r.started_at, r.completed_at, r.duration_ms, r.created_at,
@@ -2006,10 +2037,10 @@ class SqliteRunRepository:
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
                 LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
-                WHERE w.owner_id = ? AND r.id = ?
+                WHERE {scope_sql}
                 LIMIT 1
                 """,
-                (user_id, run_id),
+                params,
             ).fetchone()
         return _row_dict(row) if row else None
 
@@ -2066,32 +2097,50 @@ class SqliteRunRepository:
                 raise WorkerNotRunnableError(
                     f"worker {worker_id} does not belong to {user_id}"
                 )
+            has_actor_user_id = self._has_actor_user_id_column(conn)
+            columns = [
+                "id",
+                "worker_id",
+                "status",
+                "trigger_source",
+                "runner",
+                "input_json",
+                "output_json",
+                "approval_status",
+                "error",
+                "started_at",
+                "completed_at",
+                "duration_ms",
+                "created_at",
+                "bundle_snapshot_path",
+                "quality_warning",
+                "trigger_ref",
+            ]
+            values = [
+                run_id,
+                worker_id,
+                fields.get("status") or RunStatus.QUEUED.value,
+                fields.get("trigger_source") or "manual",
+                fields.get("runner") or "e2b",
+                _json_dump(fields.get("input_json") or fields.get("inputs") or {}),
+                _json_dump(fields.get("output_json") or {}),
+                fields.get("approval_status") or "not_required",
+                fields.get("error"),
+                fields.get("started_at"),
+                fields.get("completed_at"),
+                fields.get("duration_ms"),
+                fields.get("created_at") or now_iso(),
+                fields.get("bundle_snapshot_path"),
+                fields.get("quality_warning"),
+                fields.get("trigger_ref"),
+            ]
+            if has_actor_user_id:
+                columns.insert(2, "actor_user_id")
+                values.insert(2, fields.get("actor_user_id") or user_id)
+            placeholders = ", ".join("?" for _ in columns)
             conn.execute(
-                """
-                INSERT INTO runs
-                    (id, worker_id, status, trigger_source, runner, input_json, output_json,
-                     approval_status, error, started_at, completed_at, duration_ms,
-                     created_at, bundle_snapshot_path, quality_warning, trigger_ref)
-                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    run_id,
-                    worker_id,
-                    fields.get("status") or RunStatus.QUEUED.value,
-                    fields.get("trigger_source") or "manual",
-                    fields.get("runner") or "e2b",
-                    _json_dump(fields.get("input_json") or fields.get("inputs") or {}),
-                    _json_dump(fields.get("output_json") or {}),
-                    fields.get("approval_status") or "not_required",
-                    fields.get("error"),
-                    fields.get("started_at"),
-                    fields.get("completed_at"),
-                    fields.get("duration_ms"),
-                    fields.get("created_at") or now_iso(),
-                    fields.get("bundle_snapshot_path"),
-                    fields.get("quality_warning"),
-                    fields.get("trigger_ref"),
-                ),
+                f"INSERT INTO runs ({', '.join(columns)}) VALUES ({placeholders})",
+                tuple(values),
             )
         created = self.get(user_id=effective_user_id, run_id=run_id)
         if created is None:
@@ -2310,17 +2359,28 @@ class SqliteRunRepository:
             maximum=_DEFAULT_RUN_LOG_LIMIT,
         )
         with get_db() as conn:
+            has_actor_user_id = self._has_actor_user_id_column(conn)
+            scope_sql = (
+                "l.run_id = ? AND (COALESCE(r.actor_user_id, w.owner_id) = ? OR w.owner_id = ?)"
+                if has_actor_user_id
+                else "l.run_id = ? AND w.owner_id = ?"
+            )
+            params = (
+                (run_id, user_id, user_id, bounded_limit)
+                if has_actor_user_id
+                else (run_id, user_id, bounded_limit)
+            )
             rows = conn.execute(
-                """
+                f"""
                 SELECT l.level, l.message, l.timestamp, l.trace_id
                 FROM logs l
                 JOIN runs r ON r.id = l.run_id
                 JOIN workers w ON w.id = r.worker_id
-                WHERE l.run_id = ? AND w.owner_id = ?
+                WHERE {scope_sql}
                 ORDER BY l.timestamp
                 LIMIT ?
                 """,
-                (run_id, user_id, bounded_limit),
+                params,
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
@@ -2402,17 +2462,28 @@ class SqliteRunRepository:
             maximum=_DEFAULT_RUN_ARTIFACT_LIMIT,
         )
         with get_db() as conn:
+            has_actor_user_id = self._has_actor_user_id_column(conn)
+            scope_sql = (
+                "a.run_id = ? AND (COALESCE(r.actor_user_id, w.owner_id) = ? OR w.owner_id = ?)"
+                if has_actor_user_id
+                else "a.run_id = ? AND w.owner_id = ?"
+            )
+            params = (
+                (run_id, user_id, user_id, bounded_limit)
+                if has_actor_user_id
+                else (run_id, user_id, bounded_limit)
+            )
             rows = conn.execute(
-                """
+                f"""
                 SELECT a.*
                 FROM artifacts a
                 JOIN runs r ON r.id = a.run_id
                 JOIN workers w ON w.id = r.worker_id
-                WHERE a.run_id = ? AND w.owner_id = ?
+                WHERE {scope_sql}
                 ORDER BY a.created_at, a.name
                 LIMIT ?
                 """,
-                (run_id, user_id, bounded_limit),
+                params,
             ).fetchall()
         return [_row_dict(row) for row in rows]
 

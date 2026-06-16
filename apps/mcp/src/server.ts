@@ -61,7 +61,9 @@ function authHeader(): Record<string, string> {
 function jsonResult(data: unknown, summary?: string): CallToolResult {
   const safeData = redactSecrets(data);
   const structuredContent =
-    data && typeof data === "object" && !Array.isArray(data) ? (data as JsonObject) : { data };
+    safeData && typeof safeData === "object" && !Array.isArray(safeData)
+      ? (safeData as JsonObject)
+      : { data: safeData };
   return {
     content: [
       {
@@ -73,9 +75,12 @@ function jsonResult(data: unknown, summary?: string): CallToolResult {
   };
 }
 
-function redactSecrets(value: unknown): unknown {
+export function redactSecrets(value: unknown): unknown {
   if (Array.isArray(value)) {
     return value.map((item) => redactSecrets(item));
+  }
+  if (typeof value === "string") {
+    return redactSecretText(value);
   }
   if (!value || typeof value !== "object") {
     return value;
@@ -110,10 +115,14 @@ function errorResult(error: unknown): CallToolResult {
 }
 
 function redactSecretText(text: string): string {
-  return text.replace(
-    /((?:secret|token|password|api[_-]?key)["']?\s*[:=]\s*["']?)([^"',}\s]+)/gi,
-    "$1[redacted]",
-  );
+  return text
+    .replace(/\bBearer\s+[A-Za-z0-9._~+/=-]{8,}/gi, "Bearer [redacted]")
+    .replace(
+      /((?:secret|token|password|api[_-]?key|authorization)["']?\s*[:=]\s*["']?)([^"',}\s]+)/gi,
+      "$1[redacted]",
+    )
+    .replace(/([?&](?:token|key|secret|signature|sig|code|api[_-]?key)=)([^&\s]+)/gi, "$1[redacted]")
+    .replace(/\b(?:sk-[A-Za-z0-9_-]{12,}|gh[pousr]_[A-Za-z0-9_]{12,})\b/g, "[redacted]");
 }
 
 function renderErrorDetail(value: unknown): string {

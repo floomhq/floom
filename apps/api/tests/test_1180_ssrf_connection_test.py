@@ -14,9 +14,8 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 
-def test_connection_test_revalidates_url_before_dial():
-    """test_connection handler must call assert_safe_outbound_mcp_url before httpx.post."""
-    import ast
+def test_connection_test_pins_url_before_dial():
+    """test_connection handler must pin the URL before creating the httpx client."""
     import inspect
     import importlib
 
@@ -28,14 +27,12 @@ def test_connection_test_revalidates_url_before_dial():
 
     src = inspect.getsource(conn_mod.test_connection)
 
-    # assert_safe_outbound_mcp_url must be called inside test_connection
-    assert "assert_safe_outbound_mcp_url" in src, (
-        "#1180 regression: assert_safe_outbound_mcp_url not called in test_connection. "
-        "MCP URL is not re-validated before dial (SSRF)."
+    assert "pinned_safe_outbound_httpx_target" in src, (
+        "#1180/#1293 regression: MCP URL is not re-validated and DNS-pinned "
+        "before dial (SSRF)."
     )
-    # It must appear BEFORE httpx.post
-    ssrf_pos = src.find("assert_safe_outbound_mcp_url")
-    dial_pos = src.find("_httpx.post(probe_url")
-    assert ssrf_pos < dial_pos, (
-        "#1180: assert_safe_outbound_mcp_url must appear before httpx.post in test_connection."
+    pin_pos = src.find("pinned_safe_outbound_httpx_target")
+    dial_pos = src.find("_httpx.Client")
+    assert pin_pos < dial_pos, (
+        "#1293: pinned_safe_outbound_httpx_target must run before httpx connects."
     )

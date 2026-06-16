@@ -59,22 +59,34 @@ Contract:
 
 ```python
 # run.py
-def run(inputs, context):
-    """Single entry point. The runtime calls this with:
-       inputs   — dict of resolved input values (scalar values + file paths)
-       context  — object exposing:
-                    .secrets       (dict of declared secrets)
-                    .connections   (dict of Composio connections)
-                    .openai()      (preconfigured OpenAI client if OPENAI_API_KEY is declared)
-                    .write_output(name, content_or_path)
-                    .log(level, message)
-                    .approve(message)   # block until human approves (if exec.approvals.required)
-       Returns: dict of structured output (also writable via context.write_output)
-    """
-    ...
+import json
+from pathlib import Path
+
+inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+
+# Produce declared output files under out/.
+Path("out").mkdir(exist_ok=True)
+Path("out/summary.md").write_text("# Summary\n\n...", encoding="utf-8")
+
+# Always write result.json in the working directory. The runner reads this file
+# to decide status and map declared output names to files.
+Path("result.json").write_text(
+    json.dumps({
+        "status": "success",
+        "outputs": {"summary": "out/summary.md"},
+        "artifacts": [],
+        "error": None,
+    }),
+    encoding="utf-8",
+)
 ```
 
-You can also use `exec.command: python run.py` and write to argv-driven entry — both work, the `def run(...)` contract is just the recommended shape.
+Script mode is a process contract, not a callable shim: `exec.command` runs
+`python run.py`, the worker reads `inputs.json`, and the worker must write
+`result.json` in the working directory before exiting. Declared secrets are
+available as environment variables. Declared Composio connection identifiers are
+available in `connections.json` when the worker needs them. There is no
+runtime-provided `context` object for script workers.
 
 ### Agent mode (`SKILL.md`)
 
@@ -422,6 +434,10 @@ approvals:
 
 ```python
 # run.py
+import json
+from pathlib import Path
+
+inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
 decision = inputs.get("decision")
 if decision == "approved":
     # Phase 2: execute

@@ -60,6 +60,33 @@ def test_boundary_exactly_at_cap():
     assert effective == 16_384
 
 
+def test_agent_effective_max_tokens_clamps_bedrock_sentinel():
+    from runner_sandbox.agent_driver import (
+        _BEDROCK_MAX_OUTPUT_CAP,
+        _agent_effective_max_tokens,
+    )
+
+    assert (
+        _agent_effective_max_tokens(
+            "litellm/bedrock/us.anthropic.claude-sonnet-4-6",
+            1_000_000,
+        )
+        == _BEDROCK_MAX_OUTPUT_CAP
+    )
+
+
+def test_agent_effective_max_tokens_keeps_small_bedrock_limit():
+    from runner_sandbox.agent_driver import _agent_effective_max_tokens
+
+    assert _agent_effective_max_tokens("bedrock/us.anthropic.claude-sonnet-4-6", 8_000) == 8_000
+
+
+def test_agent_effective_max_tokens_keeps_openai_sentinel_as_provider_default():
+    from runner_sandbox.agent_driver import _agent_effective_max_tokens
+
+    assert _agent_effective_max_tokens("gpt-5.5", 1_000_000) is None
+
+
 # ---------------------------------------------------------------------------
 # Fix #2 — approve/reject SQL uses approval_id not run_id
 # ---------------------------------------------------------------------------

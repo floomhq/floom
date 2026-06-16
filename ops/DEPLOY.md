@@ -9,6 +9,14 @@ cd /root/workeros
 
 That is the complete command. It handles everything: DB backup, source sync, dependency install into the service venv, service restart, health gate, schema check.
 
+For unattended deploys, install `ops/autodeploy-api.sh` through the matching
+`workeros-api-autodeploy.service` or `managed-deployment-api-autodeploy.service`.
+The autodeploy wrapper is intentionally stricter than this manual command: it
+fetches `origin/main`, refuses dirty or locally-ahead deploy checkouts, resets a
+clean mirror to the remote SHA, and can notify `WORKEROS_AUTODEPLOY_ALERT_WEBHOOK`
+on failure. This prevents server-side hotfix drift from wedging `git pull` and
+silently leaving production behind.
+
 ### Dry-run first (recommended on first use)
 
 ```bash

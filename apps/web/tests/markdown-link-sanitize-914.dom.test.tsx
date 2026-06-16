@@ -57,6 +57,7 @@ describe("#914 sanitizeHref unit", () => {
     expect(sanitizeHref("JAVASCRIPT:alert(1)")).toBeUndefined();
     expect(sanitizeHref(" \tjavascript:alert(1)")).toBeUndefined();
     expect(sanitizeHref("java\nscript:alert(1)")).toBeUndefined();
+    expect(sanitizeHref("java\r\n\t\x7Fscript:alert(1)")).toBeUndefined();
     expect(sanitizeHref("vbscript:x")).toBeUndefined();
     expect(sanitizeHref("data:text/html,x")).toBeUndefined();
     expect(sanitizeHref("file:///etc/passwd")).toBeUndefined();

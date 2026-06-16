@@ -16,12 +16,15 @@ import sys
 import types
 from pathlib import Path
 
+import pytest
+
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 from models import WorkerConfig, WorkerRuntime, WorkerTrigger
 from runner_sandbox import agent_capabilities
+from runner_sandbox import e2b_driver
 from runner_sandbox.e2b_driver import E2BSandboxDriver
 
 
@@ -64,7 +67,8 @@ def _config(contexts):
     )
 
 
-def test_e2b_git_clone_failure_is_a_hard_error():
+def test_e2b_git_clone_failure_is_a_hard_error(monkeypatch):
+    monkeypatch.setattr(e2b_driver, "assert_safe_outbound_url", lambda url, *, label: url)
     sandbox = _Sandbox()
     err = E2BSandboxDriver()._upload_contexts_to_sandbox(
         sandbox=sandbox,
@@ -78,6 +82,32 @@ def test_e2b_git_clone_failure_is_a_hard_error():
     assert "exit 128" in err
     assert "not found" in err
     assert len(sandbox.commands.run_calls) == 1
+
+
+@pytest.mark.parametrize(
+    "source",
+    [
+        "git+file:///tmp/private-repo",
+        "git+ssh://github.com/example/private.git",
+        "git+/tmp/private-repo",
+        "git+http://169.254.169.254/latest/meta-data",
+        "git+https://169.254.169.254/latest/meta-data",
+    ],
+)
+def test_e2b_blocks_unsafe_git_context_sources_before_clone(source):
+    sandbox = _Sandbox()
+    err = E2BSandboxDriver()._upload_contexts_to_sandbox(
+        sandbox=sandbox,
+        workdir="/home/user/worker",
+        config=_config([{"name": "unsafe-pack", "source": source}]),
+        made_dirs={"/home/user/worker"},
+        log_fn=lambda *_a, **_k: None,
+    )
+
+    assert err is not None
+    assert "unsafe-pack" in err
+    assert "Git context URL" in err
+    assert sandbox.commands.run_calls == []
 
 
 def test_agent_path_skips_git_pack_and_stages_local(tmp_path, monkeypatch):
