@@ -279,6 +279,26 @@ def _split_env_values(raw_value: str | None) -> list[str]:
     return [item.strip() for item in raw_value.split(",") if item.strip()]
 
 
+def _env_truthy(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+def _runtime_kind(config: WorkerConfig | None) -> str:
+    runtime_type = (getattr(getattr(config, "runtime", None), "type", "") or "").strip().lower()
+    if runtime_type.startswith("node") or runtime_type in {"javascript", "typescript", "js", "ts"}:
+        return "node"
+    return "python"
+
+
+def _e2b_template_for_config(config: WorkerConfig | None) -> str | None:
+    kind = _runtime_kind(config)
+    if kind == "node":
+        value = os.environ.get("WORKEROS_E2B_NODE_TEMPLATE_ID")
+    else:
+        value = os.environ.get("WORKEROS_E2B_PYTHON_TEMPLATE_ID")
+    return (value or os.environ.get("WORKEROS_E2B_DEFAULT_TEMPLATE_ID") or "").strip() or None
+
+
 def _configured_e2b_api_keys() -> list[str]:
     """Return E2B keys in use order without logging or exposing values."""
     raw_keys: list[str] = []
@@ -432,6 +452,7 @@ def _create_sandbox_with_key_fallback(
     api_keys: list[str],
     timeout: int,
     envs: dict[str, str],
+    template: str | None = None,
     network: dict[str, Any] | None = None,
     log_fn: Callable[[str, str], None],
 ) -> Any:
@@ -440,12 +461,15 @@ def _create_sandbox_with_key_fallback(
 
     for index, api_key in enumerate(api_keys, start=1):
         try:
-            return sandbox_cls.create(
-                api_key=api_key,
-                timeout=timeout,
-                envs=envs,
-                network=network,
-            )
+            create_kwargs: dict[str, Any] = {
+                "api_key": api_key,
+                "timeout": timeout,
+                "envs": envs,
+                "network": network,
+            }
+            if template:
+                create_kwargs["template"] = template
+            return sandbox_cls.create(**create_kwargs)
         except Exception as exc:
             if not _is_e2b_quota_or_rate_limit_error(exc):
                 raise
@@ -1108,11 +1132,20 @@ class E2BSandboxDriver(SandboxDriver):
         # still receive only declared user secrets plus callback vars.
         _worker_author_env = _worker_author_platform_env() if worker_id == _WORKER_AUTHOR_ID else {}
         _sandbox_envs.update(_worker_author_env)
+        sandbox_template = _e2b_template_for_config(config)
+        python_template_deps_baked = _env_truthy("WORKEROS_E2B_PYTHON_DEPS_BAKED")
+        node_template_deps_baked = _env_truthy("WORKEROS_E2B_NODE_DEPS_BAKED")
+        if sandbox_template:
+            log_fn(
+                f"[e2b] Using configured {_runtime_kind(config)} template for sandbox startup",
+                "info",
+            )
         sandbox = _create_sandbox_with_key_fallback(
             Sandbox,
             api_keys=api_keys,
             timeout=sandbox_timeout,
             envs=_sandbox_envs,
+            template=sandbox_template,
             network=_e2b_network_policy(config, api_url=_sandbox_api_url_val),
             log_fn=log_fn,
         )
@@ -1225,45 +1258,57 @@ class E2BSandboxDriver(SandboxDriver):
             # install hook for non-Python bundles.
             req_path = worker_dir / "requirements.txt"
             if req_path.exists() and req_path.read_text().strip():
-                log_fn("[e2b] Installing requirements.txt...", "info")
-                install_result = sandbox.commands.run(
-                    f"pip install -q -r {workdir}/requirements.txt",
-                    timeout=install_timeout,
-                    request_timeout=_e2b_install_request_timeout(install_timeout),
-                )
-                if install_result.exit_code != 0:
-                    err = (
-                        f"pip install failed (exit {install_result.exit_code}): "
-                        f"{(install_result.stderr or '')[:500]}"
+                if python_template_deps_baked:
+                    log_fn(
+                        "[e2b] Skipping requirements.txt install; configured template marks Python deps as baked",
+                        "info",
                     )
-                    log_fn(f"[e2b] {err}", "error")
-                    return WorkerResult(
-                        status="error",
-                        error=err,
-                        error_code="install_failed",
+                else:
+                    log_fn("[e2b] Installing requirements.txt...", "info")
+                    install_result = sandbox.commands.run(
+                        f"pip install -q -r {workdir}/requirements.txt",
+                        timeout=install_timeout,
+                        request_timeout=_e2b_install_request_timeout(install_timeout),
                     )
-                log_fn("[e2b] Requirements installed", "info")
+                    if install_result.exit_code != 0:
+                        err = (
+                            f"pip install failed (exit {install_result.exit_code}): "
+                            f"{(install_result.stderr or '')[:500]}"
+                        )
+                        log_fn(f"[e2b] {err}", "error")
+                        return WorkerResult(
+                            status="error",
+                            error=err,
+                            error_code="install_failed",
+                        )
+                    log_fn("[e2b] Requirements installed", "info")
 
             pkg_path = worker_dir / "package.json"
             if pkg_path.exists() and pkg_path.read_text().strip():
-                log_fn("[e2b] Installing package.json (npm)...", "info")
-                npm_install_result = sandbox.commands.run(
-                    f"cd {workdir} && npm install --omit=dev --no-audit --no-fund --loglevel=error",
-                    timeout=install_timeout,
-                    request_timeout=_e2b_install_request_timeout(install_timeout),
-                )
-                if npm_install_result.exit_code != 0:
-                    err = (
-                        f"npm install failed (exit {npm_install_result.exit_code}): "
-                        f"{(npm_install_result.stderr or npm_install_result.stdout or '')[:500]}"
+                if node_template_deps_baked:
+                    log_fn(
+                        "[e2b] Skipping npm install; configured template marks Node deps as baked",
+                        "info",
                     )
-                    log_fn(f"[e2b] {err}", "error")
-                    return WorkerResult(
-                        status="error",
-                        error=err,
-                        error_code="install_failed",
+                else:
+                    log_fn("[e2b] Installing package.json (npm)...", "info")
+                    npm_install_result = sandbox.commands.run(
+                        f"cd {workdir} && npm install --omit=dev --no-audit --no-fund --loglevel=error",
+                        timeout=install_timeout,
+                        request_timeout=_e2b_install_request_timeout(install_timeout),
                     )
-                log_fn("[e2b] npm install complete", "info")
+                    if npm_install_result.exit_code != 0:
+                        err = (
+                            f"npm install failed (exit {npm_install_result.exit_code}): "
+                            f"{(npm_install_result.stderr or npm_install_result.stdout or '')[:500]}"
+                        )
+                        log_fn(f"[e2b] {err}", "error")
+                        return WorkerResult(
+                            status="error",
+                            error=err,
+                            error_code="install_failed",
+                        )
+                    log_fn("[e2b] npm install complete", "info")
 
             # Bedrock via litellm needs boto3, which the sandbox image doesn't ship.
             # Only the platform-privileged worker-author runs an LLM call *inside*
@@ -1272,21 +1317,27 @@ class E2BSandboxDriver(SandboxDriver):
             # so `litellm.APIConnectionError: No module named 'boto3'` can't bite.
             _author_model = _worker_author_env.get("WORKEROS_CODEGEN_MODEL", "")
             if "bedrock" in _author_model.lower():
-                log_fn("[e2b] Installing boto3 (Bedrock runtime dep)...", "info")
-                _boto_res = sandbox.commands.run(
-                    "pip install -q boto3",
-                    timeout=install_timeout,
-                )
-                if _boto_res.exit_code != 0:
-                    err = (
-                        f"boto3 install failed (exit {_boto_res.exit_code}): "
-                        f"{(_boto_res.stderr or '')[:300]}"
+                if python_template_deps_baked:
+                    log_fn(
+                        "[e2b] Skipping boto3 install; configured template marks Python deps as baked",
+                        "info",
                     )
-                    log_fn(f"[e2b] {err}", "error")
-                    return WorkerResult(
-                        status="error", error=err, error_code="install_failed"
+                else:
+                    log_fn("[e2b] Installing boto3 (Bedrock runtime dep)...", "info")
+                    _boto_res = sandbox.commands.run(
+                        "pip install -q boto3",
+                        timeout=install_timeout,
                     )
-                log_fn("[e2b] boto3 installed", "info")
+                    if _boto_res.exit_code != 0:
+                        err = (
+                            f"boto3 install failed (exit {_boto_res.exit_code}): "
+                            f"{(_boto_res.stderr or '')[:300]}"
+                        )
+                        log_fn(f"[e2b] {err}", "error")
+                        return WorkerResult(
+                            status="error", error=err, error_code="install_failed"
+                        )
+                    log_fn("[e2b] boto3 installed", "info")
 
             _refresh_sandbox_lifetime(
                 sandbox,

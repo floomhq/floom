@@ -374,3 +374,57 @@ with open("result.json", "w", encoding="utf-8") as handle:
 
     if _Sandbox.host_root:
         shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
+
+
+def test_e2b_python_template_skips_baked_requirements_install(tmp_path, monkeypatch):
+    _install_fake_e2b(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_ID", "tpl-python-fast")
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_DEPS_BAKED", "1")
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "requirements.txt").write_text("definitely-not-installed-per-run==0\n", encoding="utf-8")
+    (worker_dir / "run.py").write_text(
+        """
+import json
+
+with open("result.json", "w", encoding="utf-8") as handle:
+    json.dump({"status": "success", "outputs": {"ok": True}, "artifacts": []}, handle)
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    config = WorkerConfig(
+        id="templated-worker",
+        name="Templated Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python3 run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        secrets=[],
+        outputs=[],
+    )
+    logs: list[tuple[str, str]] = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="templated-worker",
+        run_id="run-templated-worker",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+        trace_id="trace-templated-worker",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    assert result.status == "success"
+    assert _Sandbox.last_create_kwargs["template"] == "tpl-python-fast"
+    commands = [command for command, _kwargs in _Sandbox.instances[-1].commands.run_calls]
+    assert not any("pip install -q -r" in command for command in commands)
+    assert any("template marks Python deps as baked" in msg for msg, _level in logs)
+
+    if _Sandbox.host_root:
+        shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
