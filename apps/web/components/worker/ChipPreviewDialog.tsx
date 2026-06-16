@@ -84,6 +84,7 @@ function BrainPreview({ name }: { name: string }) {
       emptyLabel="This folder has no files yet."
       loadText={(file) => api.contexts.readTextFile(name, file.id)}
       loadSqlite={(file, table) => api.contexts.sqlite(name, file.id, table)}
+      loadBlob={async (file) => (await api.contexts.fetchFileBlob(name, file.id)).arrayBuffer()}
     />
   );
 }
