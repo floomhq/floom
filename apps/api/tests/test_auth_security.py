@@ -77,11 +77,12 @@ def _isolated_empty_db(monkeypatch, tmp_path):
 # #594 — FLOOM_SECRET set: wrong/missing secret must return 401
 # ---------------------------------------------------------------------------
 
-def test_594_wrong_secret_returns_401_when_secret_configured(monkeypatch):
+def test_594_wrong_secret_returns_401_when_secret_configured(monkeypatch, tmp_path):
     """When FLOOM_SECRET is set, a wrong x-floom-secret must return 401.
     Previously, a wrong secret with 0 users in the DB fell through to dev-mode
     and returned HTTP 200 with role=admin — a P0 auth bypass."""
     monkeypatch.setenv("FLOOM_SECRET", "correct-secret")
+    _isolated_empty_db(monkeypatch, tmp_path)
     _clear_auth_cache()
     client = _client()
     r = client.get("/auth/me", headers={"x-floom-secret": "wrong-secret"})
@@ -90,9 +91,10 @@ def test_594_wrong_secret_returns_401_when_secret_configured(monkeypatch):
     )
 
 
-def test_594_missing_secret_returns_401_when_secret_configured(monkeypatch):
+def test_594_missing_secret_returns_401_when_secret_configured(monkeypatch, tmp_path):
     """When FLOOM_SECRET is set, a request with no x-floom-secret must return 401."""
     monkeypatch.setenv("FLOOM_SECRET", "correct-secret")
+    _isolated_empty_db(monkeypatch, tmp_path)
     _clear_auth_cache()
     client = _client()
     r = client.get("/auth/me")
@@ -101,9 +103,10 @@ def test_594_missing_secret_returns_401_when_secret_configured(monkeypatch):
     )
 
 
-def test_594_correct_secret_returns_200_when_secret_configured(monkeypatch):
+def test_594_correct_secret_returns_200_when_secret_configured(monkeypatch, tmp_path):
     """The correct secret must still work when FLOOM_SECRET is set."""
     monkeypatch.setenv("FLOOM_SECRET", "correct-secret")
+    _isolated_empty_db(monkeypatch, tmp_path)
     _clear_auth_cache()
     client = _client()
     r = client.get("/auth/me", headers={"x-floom-secret": "correct-secret"})
