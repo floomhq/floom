@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -61,7 +62,11 @@ class _Commands:
     def run(self, command: str, **kwargs):
         self.run_calls.append((command, kwargs))
         cwd = self.files._host_path(kwargs.get("cwd") or "/home/user/worker")
-        env = {**os.environ, **(kwargs.get("envs") or {})}
+        envs = kwargs.get("envs") or {}
+        env = {**os.environ, **envs}
+        if envs:
+            assignments = " ".join(f"{key}={shlex.quote(str(value))}" for key, value in envs.items())
+            command = f"{assignments} {command}"
         proc = subprocess.run(
             ["bash", "-lc", command],
             cwd=str(cwd),

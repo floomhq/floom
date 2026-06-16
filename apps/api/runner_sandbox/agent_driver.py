@@ -42,6 +42,7 @@ from . import agent_capabilities
 from .agent_capabilities import WORKER_POLICY, MCPConnectionError
 from .base import SandboxDriver
 from .cancellation import cancel_flag_db_read_errors_total, run_cancel_requested
+from .e2b_upload import upload_tree_tarball
 from .memory_context import memory_context_name, memory_enabled
 
 logger = logging.getLogger("floom.runner_sandbox.agent")
@@ -1668,19 +1669,15 @@ class AgentDriver(SandboxDriver):
     def _upload_tree(self, sandbox: Any, local_root: Path, remote_root: str) -> None:
         if not local_root.exists():
             return
-        for path in sorted(local_root.rglob("*")):
-            # #995: never follow symlinks into the sandbox — a planted link
-            # could exfiltrate host files (e.g. api.env, /etc/passwd).
-            if path.is_symlink():
-                logger.warning("Skipping symlink during tree upload: %s", path)
-                continue
-            rel = path.relative_to(local_root).as_posix()
-            remote_path = f"{remote_root}/{rel}"
-            if path.is_dir():
-                sandbox.files.make_dir(remote_path)
-            elif path.is_file():
-                sandbox.files.write(remote_path, path.read_bytes())
-
+        upload_tree_tarball(
+            sandbox,
+            local_root,
+            remote_root,
+            log_fn=lambda message, level: logger.warning(message)
+            if level == "warning"
+            else logger.debug(message),
+            label="agent tree",
+        )
     def _remote_cwd(
         self,
         cwd: Path,
