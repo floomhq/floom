@@ -21,7 +21,11 @@ export async function POST(req: NextRequest) {
   url.searchParams.set("email", email);
   url.searchParams.set("next", next);
 
-  const upstream = await fetch(url, { method: "GET", cache: "no-store" });
+  const upstream = await fetch(url, {
+    method: "GET",
+    headers: { "x-workeros-frontend-origin": req.nextUrl.origin },
+    cache: "no-store",
+  });
   const payload = await upstream.json().catch(() => ({}));
   return NextResponse.json(payload, { status: upstream.status, headers: NO_STORE_HEADERS });
 }

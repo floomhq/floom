@@ -14,7 +14,10 @@ export async function POST(req: NextRequest) {
   const path = mode === "signup" ? "/auth/password-signup" : "/auth/password-login";
   const upstream = await fetch(`${API_BASE}${path}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
+    headers: {
+      "content-type": "application/json",
+      "x-workeros-frontend-origin": req.nextUrl.origin,
+    },
     body: JSON.stringify(body),
     cache: "no-store",
   });

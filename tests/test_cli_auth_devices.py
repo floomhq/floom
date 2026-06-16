@@ -68,6 +68,8 @@ def test_create_device_persists_null_user_id(monkeypatch):
     assert fake.created[0]["user_id"] is None
     assert fake.created[0]["status"] == "pending"
     assert fake.created[0]["client_name"] == "floom-cli"
+    assert fake.created[0]["scopes"] == ["api"]
+    assert payload["scopes"] == ["api"]
 
 
 def test_create_device_returns_polling_info(monkeypatch):
@@ -82,6 +84,29 @@ def test_create_device_returns_polling_info(monkeypatch):
     assert payload["polling_interval_seconds"] > 0
     assert isinstance(payload["expires_in_seconds"], int)
     assert payload["expires_in_seconds"] > 60
+    assert payload["scopes"] == ["api"]
+
+
+def test_create_device_normalizes_supported_scopes(monkeypatch):
+    client, fake = _client(monkeypatch)
+    response = client.post(
+        "/api/cli-auth/devices",
+        json={"client_name": "floom-cli", "scopes": [" API ", "mcp", "api", ""]},
+    )
+    assert response.status_code == 200, response.text
+    assert response.json()["scopes"] == ["api", "mcp"]
+    assert fake.created[0]["scopes"] == ["api", "mcp"]
+
+
+def test_create_device_rejects_unsupported_scopes(monkeypatch):
+    client, fake = _client(monkeypatch)
+    response = client.post(
+        "/api/cli-auth/devices",
+        json={"client_name": "floom-cli", "scopes": ["api", "admin"]},
+    )
+    assert response.status_code == 400
+    assert "Unsupported CLI auth scope" in response.json()["detail"]
+    assert fake.created == []
 
 
 def test_poll_endpoint_returns_410_with_upgrade_hint(monkeypatch):

@@ -20,6 +20,7 @@ from pydantic import BaseModel, Field
 
 from apps.api import email_service
 from apps.api._engine import ensure_engine_api_path
+from apps.api.cli_auth_scopes import UnsupportedCliScope, normalize_cli_scopes
 from apps.api.obs import get_logger
 from apps.api.auth.supabase_provider import ACTIVE_WORKSPACE_COOKIE, PAT_HEADER
 from apps.api.config import (
@@ -205,11 +206,37 @@ def _frontend_redirect(next_path: str) -> str:
     return f"{settings.dashboard_origin}{next_path}"
 
 
+def _normalized_origin(value: str | None) -> str | None:
+    parsed = urlparse((value or "").strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.netloc:
+        return None
+    return f"{parsed.scheme}://{parsed.netloc}".rstrip("/")
+
+
+def _allowed_frontend_origins() -> set[str]:
+    settings = get_cloud_settings()
+    origins = {_normalized_origin(settings.dashboard_origin)}
+    configured = os.environ.get("WORKEROS_ALLOWED_FRONTEND_ORIGINS") or ""
+    for raw_origin in configured.split(","):
+        origins.add(_normalized_origin(raw_origin))
+    return {origin for origin in origins if origin}
+
+
+def _callback_base_from_request(request: Request | None) -> str | None:
+    if request is None:
+        return None
+    origin = _normalized_origin(request.headers.get("x-workeros-frontend-origin"))
+    if not origin or origin not in _allowed_frontend_origins():
+        return None
+    return f"{origin}/api/proxy"
+
+
 def _callback_url(
     *,
     next_path: str,
     device_code: str | None = None,
     user_code: str | None = None,
+    request: Request | None = None,
 ) -> str:
     settings = get_cloud_settings()
     params = {"next": next_path}
@@ -225,6 +252,7 @@ def _callback_url(
     # NOT change api_base (the CLI + webhooks still need the real backend host).
     callback_base = (
         (os.environ.get("WORKEROS_OAUTH_CALLBACK_BASE") or "").strip().rstrip("/")
+        or _callback_base_from_request(request)
         or settings.api_base
     )
     return f"{callback_base}/auth/callback?{urlencode(params)}"
@@ -563,12 +591,15 @@ def _store_cli_exchange(
             raise HTTPException(status_code=409, detail="CLI auth device code mismatch")
         repos.cli_auth.delete(device_code=device_code)
         client_name = str(existing.get("client_name") or "workeros-cli")
-        scopes = list(existing.get("scopes") or [])
+        try:
+            scopes = normalize_cli_scopes(existing.get("scopes"))
+        except UnsupportedCliScope as exc:
+            raise HTTPException(status_code=409, detail=str(exc)) from exc
         created_ip = existing.get("created_ip") or (request.client.host if request.client else None)
         created_at = float(existing.get("created_at", now_ts) or now_ts)
     else:
         client_name = "workeros-cli"
-        scopes = []
+        scopes = normalize_cli_scopes(None)
         created_ip = request.client.host if request.client else None
         created_at = now_ts
     repos.cli_auth.create_device(
@@ -588,6 +619,7 @@ def _store_cli_exchange(
 
 @router.get("/login")
 def login(
+    request: Request,
     provider: str,
     next: str = "/",
     email: str | None = None,
@@ -600,6 +632,7 @@ def login(
         next_path=next_path,
         device_code=device_code,
         user_code=user_code,
+        request=request,
     )
 
     if normalized_provider in {"google", "github"}:
@@ -695,10 +728,10 @@ _ACCOUNT_EXISTS_DETAIL = "An account with this email already exists. Please sign
 
 
 @router.post("/password-signup")
-def password_signup(payload: PasswordSignupRequest):
+def password_signup(payload: PasswordSignupRequest, request: Request = None):  # type: ignore[assignment]
     normalized_email = _normalize_email(payload.email)
     next_path = _safe_next(payload.next)
-    callback_url = _callback_url(next_path=next_path)
+    callback_url = _callback_url(next_path=next_path, request=request)
     client = new_supabase_anon_client()
     try:
         auth_response = client.auth.sign_up(
@@ -961,6 +994,10 @@ def cli_exchange(payload: CliExchangeRequest):
     refresh_token = str(consumed.get("secret") or "")
     if not refresh_token:
         raise HTTPException(status_code=500, detail="Approved device missing refresh token")
+    try:
+        scopes = normalize_cli_scopes(consumed.get("scopes"))
+    except UnsupportedCliScope as exc:
+        raise HTTPException(status_code=409, detail=str(exc)) from exc
     # Include supabase_url + supabase_anon_key + api_base in the response so
     # the CLI can refresh JWTs without a second round-trip. The anon key is a
     # public client key (already shipped in the dashboard JS bundle); not
@@ -969,6 +1006,9 @@ def cli_exchange(payload: CliExchangeRequest):
         "refresh_token": refresh_token,
         "expires_in_seconds": settings.cli_code_ttl_seconds,
         "user_id": consumed.get("user_id"),
+        "client_name": str(consumed.get("client_name") or "workeros-cli"),
+        "credential_type": "supabase_refresh_token",
+        "scopes": scopes,
         "supabase_url": settings.supabase_url,
         "supabase_anon_key": settings.supabase_anon_key,
         "api_base": settings.api_base,

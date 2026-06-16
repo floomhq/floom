@@ -157,6 +157,15 @@ _CLOUD_RATE_LIMIT_RULES: list[tuple[tuple[str, ...] | None, _re.Pattern[str], in
     (("POST", "DELETE"), _re.compile(r"^/auth/tokens(?:/.*)?$"), 20, 60.0),
     (("POST", "PATCH", "DELETE"), _re.compile(r"^/api/workspaces(?:/.*)?$"), 60, 60.0),
     (("POST",), _re.compile(r"^/api/novasearch(?:/.*)?$"), 30, 60.0),
+    # #288: exact list endpoints can enumerate tenant-owned resources. Keep
+    # normal dashboard refreshes roomy, but make list scraping finite per
+    # identity instead of unlimited.
+    (
+        ("GET",),
+        _re.compile(r"^(?:/api/v1|/v1|/api)?/(?:workers|runs|contexts|connections|workspaces|tokens|approvals)$"),
+        240,
+        60.0,
+    ),
     # #234: /chat is LLM-backed — each call costs Bedrock/LLM spend. Cap the
     # per-identity burst so an authenticated user can't loop it to run up the
     # bill (the clean 429 + Retry-After is emitted by the middleware below).

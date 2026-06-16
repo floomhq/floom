@@ -138,6 +138,41 @@ def test_password_signup_confirmation_required_is_not_signin_failure(monkeypatch
     )
 
 
+def test_password_signup_uses_allowed_frontend_origin_for_callback(monkeypatch):
+    monkeypatch.setenv("WORKEROS_ALLOWED_FRONTEND_ORIGINS", "https://preview.example")
+    user = SimpleNamespace(id="user-1", email="new@example.com")
+    auth_client = _AuthClient(user=user)
+    client = _app(monkeypatch, auth_client)
+
+    response = client.post(
+        "/auth/password-signup",
+        json={"email": "New@Example.com", "password": "passw0rd-long", "next": "/app/settings"},
+        headers={"x-workeros-frontend-origin": "https://preview.example"},
+    )
+
+    assert response.status_code == 200
+    redirect_to = auth_client.signup_payloads[0]["options"]["email_redirect_to"]
+    assert redirect_to.startswith("https://preview.example/api/proxy/auth/callback?")
+    assert "next=%2Fapp%2Fsettings" in redirect_to
+
+
+def test_password_signup_ignores_unallowed_frontend_origin(monkeypatch):
+    monkeypatch.setenv("WORKEROS_ALLOWED_FRONTEND_ORIGINS", "https://preview.example")
+    user = SimpleNamespace(id="user-1", email="new@example.com")
+    auth_client = _AuthClient(user=user)
+    client = _app(monkeypatch, auth_client)
+
+    response = client.post(
+        "/auth/password-signup",
+        json={"email": "New@Example.com", "password": "passw0rd-long", "next": "/app/settings"},
+        headers={"x-workeros-frontend-origin": "https://evil.example"},
+    )
+
+    assert response.status_code == 200
+    redirect_to = auth_client.signup_payloads[0]["options"]["email_redirect_to"]
+    assert redirect_to.startswith("https://workeros-api.floom.dev/auth/callback?")
+
+
 def test_auth_email_templates_use_qp_safe_token_query_separators():
     from scripts.configure_supabase_auth_emails import _payload
 

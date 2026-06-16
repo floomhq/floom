@@ -56,6 +56,15 @@ def test_chat_rule_present_and_scoped(monkeypatch, tmp_path):
     assert main._cloud_rate_limit_for_request(_fake("POST", "/api/novasearch/match")) == (30, 60.0)
 
 
+def test_list_endpoint_scraping_rules_are_exact_roots(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+    assert main._cloud_rate_limit_for_request(_fake("GET", "/api/workers")) == (240, 60.0)
+    assert main._cloud_rate_limit_for_request(_fake("GET", "/workers")) == (240, 60.0)
+    assert main._cloud_rate_limit_for_request(_fake("GET", "/api/connections")) == (240, 60.0)
+    assert main._cloud_rate_limit_for_request(_fake("GET", "/api/workers/worker-123")) is None
+    assert main._cloud_rate_limit_for_request(_fake("POST", "/api/workers")) is None
+
+
 def _request(method: str, path: str, token: bytes = b"tok-abc") -> Request:
     scope = {
         "type": "http",

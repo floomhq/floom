@@ -64,6 +64,8 @@ def test_cli_exchange_is_single_use(monkeypatch):
             "user_code": "ABCD-EFGH",
             "status": "approved",
             "secret": "refresh-123",
+            "client_name": "floom-cli",
+            "scopes": ["mcp", " API ", "mcp"],
             "expires_at": 9999999999.0,
         }
     }
@@ -73,8 +75,34 @@ def test_cli_exchange_is_single_use(monkeypatch):
     second = client.post("/auth/cli-exchange", json={"device_code": "device-1", "user_code": "ABCD-EFGH"})
 
     assert first.status_code == 200
-    assert first.json()["refresh_token"] == "refresh-123"
+    payload = first.json()
+    assert payload["refresh_token"] == "refresh-123"
+    assert payload["client_name"] == "floom-cli"
+    assert payload["credential_type"] == "supabase_refresh_token"
+    assert payload["scopes"] == ["mcp", "api"]
     assert second.status_code == 404
+
+
+def test_cli_exchange_defaults_legacy_rows_to_api_scope(monkeypatch):
+    rows = {
+        "device-legacy": {
+            "device_code": "device-legacy",
+            "user_id": "user-123",
+            "user_code": "ABCD-EFGH",
+            "status": "approved",
+            "secret": "refresh-legacy",
+            "expires_at": 9999999999.0,
+        }
+    }
+    client = _client(rows, monkeypatch)
+
+    response = client.post(
+        "/auth/cli-exchange",
+        json={"device_code": "device-legacy", "user_code": "ABCD-EFGH"},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["scopes"] == ["api"]
 
 
 def test_cli_exchange_rejects_expired_code(monkeypatch):

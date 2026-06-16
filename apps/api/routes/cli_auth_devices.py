@@ -32,6 +32,7 @@ from fastapi import APIRouter, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from apps.api._engine import ensure_engine_api_path
+from apps.api.cli_auth_scopes import UnsupportedCliScope, normalize_cli_scopes
 from apps.api.config import get_cloud_settings
 from apps.api.obs import get_logger
 
@@ -112,6 +113,10 @@ def create_cli_device(payload: _CliAuthDeviceCreateRequest, request: Request) ->
 
     device_code = _new_device_code()
     user_code = _new_user_code()
+    try:
+        scopes = normalize_cli_scopes(payload.scopes)
+    except UnsupportedCliScope as exc:
+        raise HTTPException(status_code=400, detail=str(exc)) from exc
 
     # The cloud SupabaseCliAuthRepository.create_device() takes user_id as
     # a kwarg; pass an empty string so the underlying INSERT writes NULL
@@ -126,7 +131,7 @@ def create_cli_device(payload: _CliAuthDeviceCreateRequest, request: Request) ->
             status="pending",
             secret=None,
             client_name=payload.client_name,
-            scopes=list(payload.scopes or []),
+            scopes=scopes,
             created_ip=created_ip,
             created_at=now_ts,
             expires_at=expires_at,
@@ -142,6 +147,7 @@ def create_cli_device(payload: _CliAuthDeviceCreateRequest, request: Request) ->
         "verification_url": verification_url,
         "polling_interval_seconds": _CLI_AUTH_POLL_INTERVAL_SECONDS,
         "expires_in_seconds": _CLI_AUTH_EXPIRES_SECONDS,
+        "scopes": scopes,
     }
 
 

@@ -24,7 +24,9 @@ describe("#357 email auth next validation", () => {
     );
 
     const url = new URL(String(fetchMock.mock.calls[0][0]));
+    const init = fetchMock.mock.calls[0][1] as RequestInit;
     expect(url.searchParams.get("next")).toBe("/app");
+    expect(new Headers(init.headers).get("x-workeros-frontend-origin")).toBe("https://workers.floom.dev");
     expect(res.headers.get("cache-control")).toBe("private, no-store, max-age=0");
   });
 
