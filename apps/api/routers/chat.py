@@ -138,7 +138,7 @@ async def post_chat(
     # /chat calls OpenAI per request; enforce a per-user quota so a single
     # caller cannot run up an unbounded LLM bill (the shared IP limiter is too
     # loose for a paid-LLM path).
-    _enforce_chat_quota(auth)
+    _enforce_chat_quota(auth, message=message)
 
     part_queue: asyncio.Queue = asyncio.Queue(maxsize=1024)
     loop = asyncio.get_running_loop()
