@@ -18,6 +18,7 @@ import {
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
+import { HIDDEN_CHANNEL_SLUGS } from "@/components/connections/connection-data";
 import { Button } from "@/components/ui/button";
 import {
   Dialog,
@@ -34,24 +35,27 @@ import type { CatalogToolItem, IntegrationCatalogItem, IntegrationCatalogRespons
 const PAGE_SIZE = 30;
 
 // Curated list of popular app slugs for the "Popular" filter.
-const POPULAR_APP_SLUGS = new Set([
-  "gmail",
-  "slack",
-  "notion",
-  "github",
-  "googlecalendar",
-  "hubspot",
-  "linear",
-  "googlesheets",
-  "salesforce",
-  "discord",
-  "linkedin",
-  "stripe",
-  "googledrive",
-  "airtable",
-  "jira",
-  "dropbox",
-]);
+// HIDDEN_CHANNEL_SLUGS are excluded so they don't surface in the popular tab.
+const POPULAR_APP_SLUGS = new Set(
+  [
+    "gmail",
+    "slack",
+    "notion",
+    "github",
+    "googlecalendar",
+    "hubspot",
+    "linear",
+    "googlesheets",
+    "salesforce",
+    "discord",
+    "linkedin",
+    "stripe",
+    "googledrive",
+    "airtable",
+    "jira",
+    "dropbox",
+  ].filter((slug) => !HIDDEN_CHANNEL_SLUGS.has(slug))
+);
 
 // Maps friendly UI labels to Composio category slugs.
 const CATEGORY_MAP: Record<string, string[]> = {
@@ -455,7 +459,8 @@ export default function ConnectionsBrowsePage() {
           category: "",
         });
         const filtered = nextCatalog.items.filter((item) =>
-          POPULAR_APP_SLUGS.has(item.slug.toLowerCase())
+          POPULAR_APP_SLUGS.has(item.slug.toLowerCase()) &&
+          !HIDDEN_CHANNEL_SLUGS.has(item.slug.toLowerCase())
         );
         setCatalog({
           ...nextCatalog,
@@ -472,7 +477,15 @@ export default function ConnectionsBrowsePage() {
           search: debouncedSearch,
           category,
         });
-        setCatalog(nextCatalog);
+        // Filter hidden channels from all catalog results regardless of category.
+        const visible = nextCatalog.items.filter(
+          (item) => !HIDDEN_CHANNEL_SLUGS.has(item.slug.toLowerCase())
+        );
+        setCatalog({
+          ...nextCatalog,
+          items: visible,
+          total_items: nextCatalog.total_items - (nextCatalog.items.length - visible.length),
+        });
       }
     } catch (error) {
       const msg = error instanceof Error ? error.message : "Failed to load integrations";
@@ -531,7 +544,7 @@ export default function ConnectionsBrowsePage() {
           <Input
             value={search}
             onChange={(event) => setSearch(event.target.value)}
-            placeholder="Search Gmail, Slack, Notion..."
+            placeholder="Search Gmail, Notion, GitHub..."
             className="h-11 pl-8 pr-8 sm:h-9"
             aria-label="Search integrations"
           />

@@ -1,9 +1,6 @@
-"use client";
+// /brain is the legacy route — redirect to /library.
+import { redirect } from "next/navigation";
 
-// Brain — migrated to the <Collection> model (SPEC §5). Folders are the items;
-// clicking a folder opens a split with Files + Used-by.
-import BrainCollection from "./BrainCollection";
-
-export default function BrainPage() {
-  return <BrainCollection initialFolders={[]} />;
+export default function BrainRedirectPage() {
+  redirect("/library");
 }

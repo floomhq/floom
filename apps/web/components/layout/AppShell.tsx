@@ -40,7 +40,7 @@ const noDockPrefixes = ["/chat", "/workers/new"];
 // must reach the bottom of the viewport). They render inside the standard
 // sidebar shell but WITHOUT the max-w-7xl/padding content wrapper so the
 // Collection's flex-column can fill the available height correctly. (#1101)
-const fullBleedCollectionPaths = ["/brain", "/workers", "/runs", "/connections", "/approvals"];
+const fullBleedCollectionPaths = ["/library", "/brain", "/workers", "/runs", "/connections", "/approvals"];
 
 export type AppShellProps = {
   children: React.ReactNode;
