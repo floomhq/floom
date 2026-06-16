@@ -123,16 +123,10 @@ export function V3Shell({
       </div>
 
       <footer>
-        <div className="mx-auto flex max-w-[1000px] flex-col gap-3 px-7 py-6 text-[12px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-col gap-1">
-            <span>Floom</span>
-            <span>Built in San Francisco · © 2026 Floom</span>
-          </div>
-          <span className="flex flex-wrap gap-4">
-            <Link href="/product" className="transition-colors hover:text-foreground">Product</Link>
-            <Link href="/templates" className="transition-colors hover:text-foreground">Templates</Link>
+        <div className="mx-auto flex max-w-[1000px] flex-col gap-2 px-7 py-6 text-[12px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <span>© 2026 Floom · Built in San Francisco</span>
+          <span className="flex flex-wrap gap-5">
             <Link href="/integrations" className="transition-colors hover:text-foreground">Integrations</Link>
-            <Link href="/docs" className="transition-colors hover:text-foreground">Docs</Link>
             <a href="https://github.com/floomhq/workeros" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">GitHub</a>
             <Link href="/privacy" className="transition-colors hover:text-foreground">Privacy</Link>
             <Link href="/terms" className="transition-colors hover:text-foreground">Terms</Link>
