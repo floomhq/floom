@@ -2,8 +2,8 @@
 
 Cloud override routes are registered on the cloud FastAPI app BEFORE the engine
 sub-app is mounted, so the engine's request_body_size_middleware never fires for
-them.  cloud_body_size_middleware must cap these routes at DEFAULT_JSON_BODY_LIMIT
-and return 413 before the handler reads the body.
+them.  cloud_body_size_middleware caps each route at the matching engine limit
+and returns 413 before the handler reads bodies that exceed that route's cap.
 """
 from __future__ import annotations
 
@@ -59,17 +59,17 @@ def test_cloud_draft_and_create_rejects_oversized_body(monkeypatch, tmp_path):
     assert resp.status_code == 413, f"Expected 413, got {resp.status_code}: {resp.text}"
 
 
-def test_cloud_worker_files_update_rejects_oversized_body(monkeypatch, tmp_path):
-    """PUT /api/workers/{id}/files must return 413 for bodies > 256 KiB (#1166)."""
+def test_cloud_worker_files_update_allows_worker_file_limit(monkeypatch, tmp_path):
+    """PUT /api/workers/{id}/files must allow data-bundled worker payloads."""
     main = _load_cloud_main(monkeypatch, tmp_path)
     client = TestClient(main.app)
-    body = _oversized_body(256 * 1024)
+    body = _oversized_body(1024 * 1024, extra=0)
     resp = client.put(
         "/api/workers/test-worker/files",
         content=body,
         headers={"Content-Type": "application/json", "x-floom-token": "test-token"},
     )
-    assert resp.status_code == 413, f"Expected 413, got {resp.status_code}: {resp.text}"
+    assert resp.status_code != 413, f"Worker file payload must not be rejected at 256 KiB: {resp.text}"
 
 
 def test_cloud_mcp_endpoint_rejects_oversized_body(monkeypatch, tmp_path):

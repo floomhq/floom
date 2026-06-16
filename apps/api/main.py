@@ -510,6 +510,7 @@ async def cloud_security_headers_middleware(request: Request, call_next):
 # request_body_size_middleware) are protected by the same limits (#1166).
 _CLOUD_DEFAULT_JSON_BODY_LIMIT = engine_main.DEFAULT_JSON_BODY_LIMIT_BYTES
 _CLOUD_BUNDLE_BODY_LIMIT = engine_main.FROM_BUNDLE_BODY_LIMIT_BYTES
+_CLOUD_WORKER_FILES_BODY_LIMIT = engine_main.WORKER_FILES_BODY_LIMIT_BYTES
 
 
 def _cloud_body_limit_for_request(request: Request) -> int | None:
@@ -539,7 +540,7 @@ def _cloud_body_limit_for_request(request: Request) -> int | None:
     if path in ("/workers/draft-and-create", "/api/workers/draft-and-create"):
         return _CLOUD_DEFAULT_JSON_BODY_LIMIT
     if _re.match(r"^(?:/api)?/workers/[^/]+/files$", path):
-        return _CLOUD_DEFAULT_JSON_BODY_LIMIT
+        return _CLOUD_WORKER_FILES_BODY_LIMIT
     if _re.match(r"^(?:/api)?/workers/[^/]+/visibility$", path):
         return _CLOUD_DEFAULT_JSON_BODY_LIMIT
     return None
