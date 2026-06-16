@@ -760,8 +760,13 @@ html.dark .grain {
 .c-srch input::placeholder { color:var(--muted-foreground); }
 /* Joined segmented control on bg-2 track — ONE visual unit, no gap between segments */
 .c-vtog { display:inline-flex; border:var(--bd-input); border-radius:var(--radius-button); padding:2px; background:var(--bg-2); }
-.c-vtog button { width:30px; height:26px; border-radius:8px; color:var(--muted-foreground); display:flex; align-items:center; justify-content:center; transition:background .1s,color .1s; }
-.c-vtog button.on { background:var(--bg-card,#fff); color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.07); }
+/* Segmented toggle button. min-width keeps icon-only toggles (list/grid) square
+   while text toggles (Preview/Raw — #1289 / run-output #1) size to their label
+   instead of clipping inside a fixed 30px box. */
+.c-vtog button { min-width:30px; height:26px; padding:0 10px; font-size:12px; border-radius:8px; color:var(--muted-foreground); display:flex; align-items:center; justify-content:center; transition:background .1s,color .1s; }
+/* FLAT (design system: --shadow-card none): active segment is a fill + ink, no
+   drop-shadow (run-output feedback #5). */
+.c-vtog button.on { background:var(--bg-card,#fff); color:var(--ink); }
 @media (max-width:640px) {
   .c-toolbar { flex-wrap:wrap; }
   .c-toolbar .c-srch { flex:1 0 100%; max-width:none; }
@@ -887,7 +892,12 @@ html.dark .grain {
 .c-split.lc .c-listcol { flex:0 0 46px; min-width:46px; }
 .c-split.lc .c-listcol > .lcin, .c-split.lc .c-listcol > .c-splitbar { display:none; }
 .c-sliver { display:none; }
-.c-split.lc .c-listcol .c-sliver { display:flex; flex-direction:column; align-items:center; gap:8px; padding-top:14px; color:var(--muted-foreground); }
+/* Collapsed-list rail. The expand chevron (») sits in a 56px band so it shares
+   the SAME vertical baseline as the detail header's collapse chevron («) and the
+   expanded-list splitbar chevron — all three centered in the 56px header band
+   (run-output feedback #6). */
+.c-split.lc .c-listcol .c-sliver { display:flex; flex-direction:column; align-items:center; color:var(--muted-foreground); }
+.c-split.lc .c-listcol .c-sliver > button:first-child { height:56px; display:flex; align-items:center; justify-content:center; }
 .c-split .c-listcol .lcin { flex:1; overflow:auto; padding:14px 16px; }
 .c-splitbar { display:none; }
 .c-split .c-splitbar { display:flex; align-items:center; min-height:56px; padding:8px 14px; border-bottom:var(--bd-div); flex:0 0 auto; }
