@@ -46,6 +46,11 @@ from .memory_context import memory_context_name, memory_enabled
 
 logger = logging.getLogger("floom.runner_sandbox.agent")
 
+
+_OPENAI_MAX_OUTPUT_CAP = 16_384
+_BEDROCK_MAX_OUTPUT_CAP = 64_000
+
+
 def _ws_setting(key: str) -> "Optional[str]":
     """#797: read a workspace setting (model/limit defaults) — lazy import to
     avoid a run_service <-> driver import cycle. None when unset."""
@@ -70,6 +75,20 @@ def _ws_default_int(key: str) -> "Optional[int]":
         return n if n > 0 else None
     except ValueError:
         return None
+
+
+def _agent_effective_max_tokens(model: str, requested: int) -> Optional[int]:
+    """Return provider-safe max_tokens for the Agents SDK.
+
+    ``WorkerLimits.max_output_tokens`` uses 1M as the "effectively unlimited"
+    sentinel. Providers reject that if forwarded literally. OpenAI is safest
+    with ``None`` above the known cap; Bedrock Claude requires a concrete value
+    below its service limit.
+    """
+    requested = max(1, int(requested))
+    if "bedrock" in str(model or "").lower():
+        return min(requested, _BEDROCK_MAX_OUTPUT_CAP)
+    return requested if requested <= _OPENAI_MAX_OUTPUT_CAP else None
 
 
 
@@ -389,17 +408,16 @@ class AgentDriver(SandboxDriver):
         # InvalidRequestError before the first token is generated. Only forward
         # max_tokens when the worker explicitly set a value below the safe cap;
         # otherwise let the API use the model's own default.
-        _OPENAI_MAX_OUTPUT_CAP = 16_384
         # Bedrock Claude rejects max_tokens above the model limit (128k for
         # Sonnet 4.6); the 1M "no limit" sentinel 400/429s before the first
         # token. Cap well under it so skill workers run on Bedrock out of the box
         # (no FLOOM_MAX_OUTPUT_TOKENS workaround needed) — see _agent_max_tokens
         # in the loop below.
-        _BEDROCK_MAX_OUTPUT_CAP = 64_000
         _effective_max_tokens = (
-            limits.max_output_tokens
-            if limits.max_output_tokens <= _OPENAI_MAX_OUTPUT_CAP
-            else None
+            _agent_effective_max_tokens(
+                default_worker_agent_model(),
+                int(limits.max_output_tokens),
+            )
         )
         model_settings = ModelSettings(
             max_tokens=_effective_max_tokens,
@@ -449,14 +467,10 @@ class AgentDriver(SandboxDriver):
                 _agent_model = _llm.agent_model(config.runtime.model or _ws_default_model() or default_worker_agent_model())
                 # Clamp output tokens to the provider's hard limit (caps above):
                 # Bedrock -> 64k, OpenAI -> forward only when <=16k else None.
-                if "bedrock" in _agent_model.lower():
-                    _agent_max_tokens = min(int(limits.max_output_tokens), _BEDROCK_MAX_OUTPUT_CAP)
-                else:
-                    _agent_max_tokens = (
-                        int(limits.max_output_tokens)
-                        if int(limits.max_output_tokens) <= _OPENAI_MAX_OUTPUT_CAP
-                        else None
-                    )
+                _agent_max_tokens = _agent_effective_max_tokens(
+                    _agent_model,
+                    int(limits.max_output_tokens),
+                )
                 agent = Agent(
                     name=worker_id,
                     instructions=system_prompt,
