@@ -67,7 +67,13 @@ def _load_api(monkeypatch, tmp_path, *, max_concurrent: int = 3):
     return main
 
 
-def _insert_minimal_worker(main, worker_id: str) -> None:
+def _insert_minimal_worker(
+    main,
+    worker_id: str,
+    *,
+    owner_id: str = "federico",
+    visibility: str = "private",
+) -> None:
     import json as _json
     now = main.now_iso()
     manifest = {
@@ -87,10 +93,10 @@ def _insert_minimal_worker(main, worker_id: str) -> None:
         conn.execute(
             """
             INSERT INTO workers (id, skill_version_id, name, trigger_type, grants_json,
-                                 input_values_json, enabled, created_at, owner_id)
-            VALUES (?, ?, ?, 'manual', '{}', '{}', 1, ?, 'federico')
+                                 input_values_json, enabled, created_at, owner_id, visibility)
+            VALUES (?, ?, ?, 'manual', '{}', '{}', 1, ?, ?, ?)
             """,
-            (worker_id, f"sv_{worker_id}", worker_id, now),
+            (worker_id, f"sv_{worker_id}", worker_id, now, owner_id, visibility),
         )
 
 
@@ -360,6 +366,74 @@ class TestCancelQueuedRun:
 
 class TestDrainLoopDbMethods:
     """get_queued and count_queued interact correctly with the semaphore logic."""
+
+    def test_manual_workspace_visible_non_owner_run_is_queued_and_drained(
+        self,
+        tmp_path,
+        monkeypatch,
+    ):
+        main = _load_api(monkeypatch, tmp_path, max_concurrent=2)
+        _insert_minimal_worker(
+            main,
+            "shared-owner-worker",
+            owner_id="worker-owner",
+            visibility="workspace",
+        )
+        from auth import AuthContext
+        from auth.context import set_current_auth_context
+
+        async def auth_override():
+            ctx = AuthContext(
+                user_id="workspace-admin",
+                email="admin@example.com",
+                scopes=("admin",),
+                role="admin",
+                auth_method="session",
+            )
+            set_current_auth_context(ctx)
+            return ctx
+
+        main.app.dependency_overrides[main.get_auth_context] = auth_override
+
+        client = _get_client(main)
+        resp = client.post(
+            "/workers/shared-owner-worker/runs",
+            json={"inputs": {}, "trigger_source": "manual"},
+            headers=AUTH_HEADER,
+        )
+        assert resp.status_code == 200, resp.text
+        run_id = resp.json()["run_id"]
+
+        repos = main.get_repositories()
+        owner_row = repos.runs.get(user_id="worker-owner", run_id=run_id)
+        assert owner_row is not None
+        assert owner_row["status"] == "queued"
+        assert owner_row["started_at"] is None
+        assert repos.runs.get(user_id="workspace-admin", run_id=run_id) is None
+
+        run_service = sys.modules.get("run_service")
+        assert run_service is not None
+        dispatched: list[str] = []
+
+        class DummyThread:
+            def __init__(self, *args, **kwargs):
+                self._args = kwargs.get("args", ())
+
+            def start(self):
+                dispatched.append(self._args[0])
+
+        with patch.object(run_service.threading, "Thread", DummyThread):
+            run_service._drain_one_batch()
+
+        drained = repos.runs.get(user_id="worker-owner", run_id=run_id)
+        assert drained is not None
+        assert drained["status"] == "running"
+        assert drained["started_at"] is not None
+        assert dispatched == [run_id]
+
+        with run_service._active_runs_lock:
+            run_service._active_runs.clear()
+        run_service._get_semaphore().release()
 
     def test_queued_run_has_position_info(self, tmp_path, monkeypatch):
         """Queued runs expose queue_position via GET /runs/:id."""
