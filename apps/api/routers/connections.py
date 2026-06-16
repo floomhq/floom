@@ -26,6 +26,7 @@ import time
 import urllib.parse
 import uuid as _uuid_mod
 from datetime import datetime, timedelta, timezone
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -347,6 +348,19 @@ def _normalize_mcp_connection_payload(payload: MCPConnectionCreateRequest) -> Di
     url = (payload.url or "").strip() or None
     command = (payload.command or "").strip() or None
     cwd = (payload.cwd or "").strip() or None
+    if cwd:
+        posix = PurePosixPath(cwd.replace("\\", "/"))
+        windows = PureWindowsPath(cwd)
+        if (
+            posix.is_absolute()
+            or windows.is_absolute()
+            or cwd.startswith("~")
+            or any(part in {"", ".", ".."} for part in posix.parts)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="MCP stdio cwd must be a workspace-relative path without '.' or '..'",
+            )
     if transport in {"streamable_http", "sse"}:
         if not url:
             raise HTTPException(status_code=400, detail="MCP URL is required for HTTP/SSE transports")
