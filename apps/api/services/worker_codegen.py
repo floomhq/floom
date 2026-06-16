@@ -499,7 +499,10 @@ def _call_draft_llm(
                 {"role": "user", "content": user_message},
             ],
             temperature=0.2,
-            max_output_tokens=8000,
+            # Output cap for worker codegen. Default raised 8k->24k for larger /
+            # multi-file workers; tune with WORKEROS_CODEGEN_MAX_TOKENS (stays well
+            # under model output ceilings, e.g. ~64k for Gemini 3.5).
+            max_output_tokens=int(os.environ.get("WORKEROS_CODEGEN_MAX_TOKENS") or "24000"),
             response_format={"type": "json_object"},
         )
     except Exception as exc:
