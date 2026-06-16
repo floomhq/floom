@@ -351,6 +351,19 @@ html.dark {
   100% { background-position: 200% 0; }
 }
 
+/* Cold-start boot splash: one calm pulse on the Floom mark (BootSplash.tsx).
+   Subtle, not a spinner. Respects reduced-motion. */
+@keyframes floom-boot-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.98); }
+  50%      { opacity: 1;    transform: scale(1); }
+}
+.floom-boot-pulse {
+  animation: floom-boot-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .floom-boot-pulse { animation: none; }
+}
+
 .skeleton-shimmer {
   background-color: var(--bg-2);
   background-image: linear-gradient(

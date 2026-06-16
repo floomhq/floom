@@ -10,6 +10,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { DeepLinkRouter } from "@/components/layout/DeepLinkRouter";
 import { EmilyDock, EmilyMobileSheet } from "@/components/emily/EmilyChat";
 import { AlertsBell } from "@/components/overview/AlertsBell";
+import { BootSplash } from "@/components/layout/BootSplash";
 
 // Render exactly one Emily surface so only one chat instance mounts: the
 // desktop dock (≥768px) or the mobile bottom-sheet (<768px). Defaults to
@@ -81,6 +82,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
   if (standalone) {
     return (
       <>
+        <BootSplash />
         <IconSprite />
         <Ambient />
         <main className="relative z-10 min-h-screen w-full">{children}</main>
@@ -93,6 +95,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
     // Full-page chat: sidebar + full-bleed main (no content padding, no dock)
     return (
       <>
+        <BootSplash />
         <IconSprite />
         <Ambient />
         <DeepLinkRouter />
@@ -109,6 +112,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
 
   return (
     <>
+      <BootSplash />
       <IconSprite />
       <Ambient />
       <DeepLinkRouter />
