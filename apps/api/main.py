@@ -6241,6 +6241,14 @@ _API_CALL_AUTH_HEADERS = frozenset({
 })
 
 
+def _api_call_auth_headers(request: Request) -> dict[str, str]:
+    auth_headers = {k.lower(): v for k, v in request.headers.items() if k.lower() in _API_CALL_AUTH_HEADERS}
+    deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    if deploy == "local" and "x-workeros-workspace" not in auth_headers:
+        auth_headers["x-workeros-workspace"] = DEFAULT_WORKSPACE_ID
+    return auth_headers
+
+
 async def _api_call(
     method: str,
     path: str,
@@ -6250,9 +6258,7 @@ async def _api_call(
     params: dict | None = None,
 ) -> tuple[Any, int]:
     import httpx
-    auth_headers = {k: v for k, v in request.headers.items() if k.lower() in _API_CALL_AUTH_HEADERS}
-    if "x-workeros-workspace" not in auth_headers:
-        auth_headers["x-workeros-workspace"] = DEFAULT_WORKSPACE_ID
+    auth_headers = _api_call_auth_headers(request)
     clean_params = {k: str(v) for k, v in (params or {}).items() if v is not None}
     async with httpx.AsyncClient(
         transport=httpx.ASGITransport(app=app),
