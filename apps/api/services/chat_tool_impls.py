@@ -584,7 +584,7 @@ def _tool_connections_list(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
             "last_check_status": c.get("last_check_status"),
             "mcp_label": c.get("mcp_label"),
             "mcp_url": c.get("mcp_url"),
-            "mcp_auth_secret": c.get("mcp_auth_secret"),
+            "mcp_auth_configured": bool(c.get("mcp_auth_secret")),
             "mcp_allowed_tools": [tool for tool in allowed_tools if isinstance(tool, str)],
         })
     return {"ok": True, "connections": result, "count": len(result)}
