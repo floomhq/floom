@@ -101,6 +101,8 @@ function FilesTab({ folder }: { folder: ContextSummary }) {
       loadText={(f) => api.contexts.readTextFile(folder.name, f.id)}
       // #777: inline SQLite viewer for .db files.
       loadSqlite={(f, table) => api.contexts.sqlite(folder.name, f.id, table)}
+      // .npz array viewer: fetch raw bytes, parsed header-only client-side.
+      loadBlob={async (f) => (await api.contexts.fetchFileBlob(folder.name, f.id)).arrayBuffer()}
       // #770: rename a file (move within the same directory), then refresh.
       onRename={async (file, newName) => {
         const dir = file.id.includes("/") ? file.id.slice(0, file.id.lastIndexOf("/") + 1) : "";

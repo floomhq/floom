@@ -9,6 +9,8 @@ import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
+import { useQueryClient } from "@tanstack/react-query";
+import { prefetchRouteData, prefetchIdleRoutes } from "@/lib/query/prefetch";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
 import { AlertsBell } from "@/components/overview/AlertsBell";
 import { api } from "@/lib/api";
@@ -189,6 +191,11 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
   // Shared source with /approvals: revalidates on focus + after any
   // approve/reject so the badge never drifts from the list (G5 P2).
   const pendingCount = useApprovalsCount();
+  // Data prefetch: warm the destination route's TanStack cache on hover/focus
+  // so the tab switch is instant. Link already prefetches the route's JS/RSC;
+  // this adds the DATA. Cache-first + idempotent (see prefetch.ts).
+  const queryClient = useQueryClient();
+  const warm = (href: string) => prefetchRouteData(queryClient, href);
 
   return (
     <nav className="flex-1 px-3 space-y-0.5">
@@ -202,6 +209,9 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
           <Link
             key={item.href}
             href={item.href}
+            prefetch
+            onMouseEnter={() => warm(item.href)}
+            onFocus={() => warm(item.href)}
             onClick={onNavigate}
             title={item.hint}
             className={cn(
@@ -319,6 +329,17 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
   }, [pathname]);
 
   const pendingCount = useApprovalsCount();
+  // Data prefetch (collapsed icon rail uses this `warm`; the expanded nav warms
+  // inside NavLinks). After first paint, warm the highest-value routes once on
+  // idle so the first tab switch is already instant.
+  const queryClient = useQueryClient();
+  const warm = (href: string) => prefetchRouteData(queryClient, href);
+  useEffect(() => {
+    prefetchIdleRoutes(queryClient, pathname);
+    // Run once after mount; pathname/queryClient are stable enough for a
+    // one-shot idle warm (re-running on every nav would be a refetch storm).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <>
@@ -425,6 +446,9 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                 <Link
                   key={item.href}
                   href={item.href}
+                  prefetch
+                  onMouseEnter={() => warm(item.href)}
+                  onFocus={() => warm(item.href)}
                   title={item.label}
                   className={cn(
                     "relative inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150",
