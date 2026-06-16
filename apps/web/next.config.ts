@@ -47,6 +47,7 @@ function cloudApexRedirects(): RedirectRule[] {
     "runs",
     "assistant",
     "brain",
+    "library",
     "contexts",
     "approvals",
     "connections",
@@ -89,6 +90,19 @@ const nextConfig: NextConfig = {
       {
         source: "/workers/:id/edit",
         destination: "/workers?sel=:id&tab=Config",
+        permanent: true,
+      },
+      // /brain renamed to /library (2026-06-16); the app/brain/page.tsx also
+      // calls redirect("/library") as a belt-and-suspenders fallback for client
+      // navigations (e.g. deep-links, internal hrefs that haven't been updated).
+      {
+        source: "/brain",
+        destination: "/library",
+        permanent: true,
+      },
+      {
+        source: "/brain/:path*",
+        destination: "/library/:path*",
         permanent: true,
       },
     ];

@@ -430,7 +430,7 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
   );
 
   const config: CollectionConfig<ContextSummary> = {
-    title: "Brain",
+    title: "Library",
     subtitle: "Reusable folders of files your workers can read before they act.",
     items: folders,
     loading,
@@ -526,7 +526,7 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       // Help text uses colon not em-dash (lint:emdash).
       empty: {
         title: "No folders yet",
-        help: "Brain folders give your workers long-term memory: upload docs, PDFs, or notes they read before acting.",
+        help: "Library folders give your workers long-term memory: upload docs, PDFs, or notes they read before acting.",
       },
     },
   };
