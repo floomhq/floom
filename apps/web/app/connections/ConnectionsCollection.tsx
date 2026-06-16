@@ -193,7 +193,7 @@ function SecretValueField({ name }: { name: string }) {
       <button
         type="button"
         onClick={() => setRevealed((v: boolean) => !v)}
-        title={revealed ? "Hide" : "Reveal — values are write-only and not returned by the API"}
+        title={revealed ? "Hide" : "Reveal: values are write-only and not returned by the API"}
         style={{
           display: "inline-flex",
           alignItems: "center",

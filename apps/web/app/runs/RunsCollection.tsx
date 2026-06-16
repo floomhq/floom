@@ -127,7 +127,7 @@ function TraceTab({ r }: { r: RunSummary }) {
         <span>{formatDuration(d.duration_ms)}</span>
         <span style={kvK}>Tokens</span>
         <span style={{ fontFamily: "var(--font-mono)" }}>
-          {tokenCount != null ? tokenCount.toLocaleString() : "—"}
+          {tokenCount != null ? tokenCount.toLocaleString() : "—" /* em-dash-ok: blank-value glyph */}
         </span>
       </div>
       <div>
