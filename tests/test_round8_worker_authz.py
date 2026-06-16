@@ -386,10 +386,9 @@ def test_runs_clear_only_deletes_owner_history(monkeypatch, tmp_path):
     body = clear_resp.json()
     assert body["deleted_runs"] == 1
     assert body["cleared_count"] == 1
-    # Hardening: a pre-wipe backup must have been written before deletion.
-    backup_path = Path(body["backup_path"])
-    assert backup_path.is_file()
-    assert backup_path.stat().st_size > 0
+    # Hardening: a pre-wipe backup must have been written before deletion, but
+    # the server filesystem path must not be exposed to the caller.
+    assert "backup_path" not in body
 
     owner_after = client.get("/runs", headers=_headers("user-a"))
     foreign_after = client.get("/runs", headers=_headers("user-b"))
