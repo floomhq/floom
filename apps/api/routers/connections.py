@@ -733,6 +733,8 @@ def list_connections(
     repos: Repositories = Depends(get_repos),
 ) -> List[ConnectionItem]:
     rows = repos.connections.list(user_id=auth.user_id)
+    if not rows:
+        return []
     now = datetime.now(timezone.utc)
     last_used = _connections_last_used(auth.user_id, repos)  # #802
 

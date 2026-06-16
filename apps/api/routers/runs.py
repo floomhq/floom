@@ -186,6 +186,7 @@ def list_runs(
         limit=limit,
         offset=offset,
         include_system=include_system,
+        exact_total=os.environ.get("WORKEROS_DEPLOY") != "cloud",
     )
     result = [_make_run_summary(r) for r in visible_rows]
     hot_cache.set(cache_key, (result, visible_total))

@@ -231,15 +231,20 @@ def _list_visible_runs(
     limit: int = 50,
     offset: int = 0,
     include_system: bool = False,
+    exact_total: bool = True,
 ) -> tuple[list[Any], int]:
     batch_size = max(limit, 100)
     raw_offset = 0
     raw_total_count: int | None = None
     visible_total = 0
     visible_rows: list[Any] = []
+    target_visible = offset + limit
+    # Fast mode only needs one extra visible row to tell callers there may be
+    # another page. It avoids scanning the full run table for exact counts.
+    stop_after_visible = None if exact_total else target_visible + 1
 
     while raw_total_count is None or raw_offset < raw_total_count:
-        rows, raw_total_count = repos.runs.list(
+        list_kwargs = dict(
             user_id=user_id,
             worker_id=worker_id,
             statuses=statuses,
@@ -248,6 +253,15 @@ def _list_visible_runs(
             limit=batch_size,
             offset=raw_offset,
         )
+        try:
+            rows, raw_total_count = repos.runs.list(
+                **list_kwargs,
+                include_total=exact_total,
+            )
+        except TypeError as exc:
+            if "include_total" not in str(exc):
+                raise
+            rows, raw_total_count = repos.runs.list(**list_kwargs)
         if not rows:
             break
         raw_offset += len(rows)
@@ -263,4 +277,8 @@ def _list_visible_runs(
                 continue
             if len(visible_rows) < limit:
                 visible_rows.append(row)
+            if stop_after_visible is not None and visible_total >= stop_after_visible:
+                return visible_rows, visible_total
+        if not exact_total and len(rows) < batch_size:
+            break
     return visible_rows, visible_total
