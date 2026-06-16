@@ -85,6 +85,7 @@ from services.sse_streaming import (
     _TERMINAL_STATUSES,
     _finish_part_from_run_row,
     _format_run_part_sse,
+    _log_replay_events,
     _log_replay_parts,
     _parse_last_event_id,
     _run_part_cleanup,
@@ -1109,3 +1110,104 @@ def get_run_logs(
         }
         for row in collapsed
     ]
+
+
+@runs_router.get("/runs/{run_id}/logs/stream")
+async def stream_run_logs(
+    run_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    """Server-Sent Events stream of log/trace lines for a single run.
+
+    Emits one ``data: <json>\\n\\n`` line per log event. Each event carries:
+      - ``type``: always ``"log"``
+      - ``level``: ``"info"`` | ``"warning"`` | ``"error"`` | ``"debug"``
+      - ``message``: redacted operator-safe log text
+      - ``timestamp``: ISO-8601 UTC string
+      - ``trace_id``: optional step/trace identifier (omitted when absent)
+
+    On connect, all existing log rows for the run are replayed immediately so
+    the client receives the full history without a separate REST call. New log
+    lines are then pushed in real-time as the run produces them.
+
+    When the run reaches a terminal state the stream emits a final
+    ``{"type": "done", "status": "<completed|failed>"}`` event and closes.
+
+    The stream uses the same per-user concurrent-stream cap as /runs/{id}/events
+    and /runs/{id}/stream. Returns 404 for unknown runs, 429 when the cap is
+    exceeded.
+    """
+    run_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
+    if not run_row:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    initial_status = run_row["status"]
+    already_terminal = initial_status in _TERMINAL_STATUSES
+
+    # Per-user concurrent-stream cap (same guard as /events and /stream).
+    stream_slot = _sse_stream_acquire(auth.user_id)
+
+    async def event_generator():
+        try:
+            # Always replay persisted log rows first so the client gets the
+            # full history on connect without a separate GET /runs/{id}/logs call.
+            for event in _log_replay_events(repos, auth.user_id, run_id):
+                yield f"data: {json.dumps(event)}\n\n"
+
+            # If the run is already terminal, emit a done event and close.
+            if already_terminal:
+                done_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
+                done_status = (done_row or {}).get("status", initial_status)
+                yield f"data: {json.dumps({'type': 'done', 'status': done_status})}\n\n"
+                return
+
+            # Subscribe to live SSE events for this run.
+            q: asyncio.Queue = asyncio.Queue(maxsize=512)
+            loop = asyncio.get_running_loop()
+            with _sse_lock:
+                _sse_queues.setdefault(run_id, []).append((q, loop))
+
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+
+                    try:
+                        event = await asyncio.wait_for(q.get(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+                        continue
+
+                    evt_type = event.get("type")
+
+                    if evt_type == "log":
+                        # Forward log events with trace_id when present.
+                        log_event: Dict[str, Any] = {
+                            "type": "log",
+                            "level": event.get("level") or "info",
+                            "message": event.get("message") or "",
+                            "timestamp": event.get("timestamp"),
+                        }
+                        if event.get("trace_id"):
+                            log_event["trace_id"] = event["trace_id"]
+                        yield f"data: {json.dumps(log_event)}\n\n"
+
+                    evt_status = event.get("status", "")
+                    if evt_type == "close" or evt_status in _TERMINAL_STATUSES:
+                        yield f"data: {json.dumps({'type': 'done', 'status': evt_status or 'unknown'})}\n\n"
+                        break
+            finally:
+                _sse_cleanup(run_id, q)
+        finally:
+            _sse_stream_release(stream_slot)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
