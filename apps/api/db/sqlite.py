@@ -1751,6 +1751,7 @@ class SqliteRunRepository:
         until: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        include_total: bool = True,
     ) -> tuple[list[dict[str, Any]], int]:
         with get_db() as conn:
             has_actor_user_id = self._has_actor_user_id_column(conn)
@@ -1788,14 +1789,17 @@ class SqliteRunRepository:
             WHERE {where_sql}
         """
         with get_db() as conn:
-            total = conn.execute(
-                f"SELECT COUNT(*) AS total FROM ({select_sql}) AS filtered_runs",
-                tuple(params),
-            ).fetchone()["total"]
             rows = conn.execute(
                 f"{select_sql} ORDER BY r.created_at DESC LIMIT ? OFFSET ?",
                 (*params, limit, offset),
             ).fetchall()
+            if include_total:
+                total = conn.execute(
+                    f"SELECT COUNT(*) AS total FROM ({select_sql}) AS filtered_runs",
+                    tuple(params),
+                ).fetchone()["total"]
+            else:
+                total = offset + len(rows) + (1 if len(rows) >= limit else 0)
         return [_row_dict(row) for row in rows], int(total or 0)
 
     @staticmethod

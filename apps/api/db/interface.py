@@ -176,6 +176,7 @@ class RunRepository(Protocol):
         until: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        include_total: bool = True,
     ) -> tuple[list[RowDict], int]: ...
 
     def overview_status_rollup(
