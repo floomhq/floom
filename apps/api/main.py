@@ -6774,15 +6774,31 @@ async def _mcp_dispatch(
 
 
 async def _mcp_handle_request(
-    body: dict,
+    body: Any,
     auth: AuthContext,
     repos: "Repositories",
     request: Request | None = None,
-) -> dict:
+) -> Any:
     """Core MCP JSON-RPC 2.0 dispatcher. Called by /mcp-tools/serve and by the cloud /mcp/{workspace_id}."""
+    if isinstance(body, list):
+        if not body:
+            return _mcp_err(None, -32600, "Invalid JSON-RPC request")
+        responses = []
+        for item in body:
+            if not isinstance(item, dict):
+                responses.append(_mcp_err(None, -32600, "Invalid JSON-RPC request"))
+                continue
+            responses.append(await _mcp_handle_request(item, auth, repos, request))
+        return responses
+
+    if not isinstance(body, dict):
+        return _mcp_err(None, -32600, "Invalid JSON-RPC request")
+
     rpc_id = body.get("id")
     method = body.get("method", "")
     params = body.get("params") or {}
+    if not isinstance(params, dict):
+        return _mcp_err(rpc_id, -32602, "Invalid params")
 
     if method == "initialize":
         return _mcp_ok(rpc_id, {
@@ -6808,6 +6824,12 @@ async def _mcp_handle_request(
         if request is None:
             return _mcp_err(rpc_id, -32603, "Internal error: request context unavailable")
         tool_name = params.get("name", "")
+        if not isinstance(tool_name, str) or not tool_name:
+            return _mcp_err(rpc_id, -32602, "Invalid params")
+        raw_arguments = params.get("arguments")
+        arguments = {} if raw_arguments is None else raw_arguments
+        if not isinstance(arguments, dict):
+            return _mcp_err(rpc_id, -32602, "Invalid params")
         # #833: audit trail for every MCP tool invocation.
         logger.info(
             "mcp tools/call: tool=%r user=%s role=%s auth_method=%s",
@@ -6816,13 +6838,14 @@ async def _mcp_handle_request(
         denied = _mcp_access_error(tool_name, auth)
         if denied is not None:
             return _mcp_ok(rpc_id, _mcp_content(denied, is_error=True))
-        result = await _mcp_dispatch(
-            tool_name,
-            params.get("arguments") or {},
-            auth,
-            repos,
-            request,
-        )
+        try:
+            result = await _mcp_dispatch(tool_name, arguments, auth, repos, request)
+        except KeyError as exc:
+            missing = str(exc).strip("'") or "required argument"
+            return _mcp_err(rpc_id, -32602, f"Invalid params: missing {missing}")
+        except Exception:
+            logger.exception("MCP serve tools/call failed: tool=%r", tool_name)
+            return _mcp_err(rpc_id, -32603, "Internal error")
         return _mcp_ok(rpc_id, result)
 
     return _mcp_err(rpc_id, -32601, f"Method not found: {method!r}")
