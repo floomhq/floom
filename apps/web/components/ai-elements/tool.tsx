@@ -35,43 +35,42 @@ export function Tool({
   const showState = Boolean(status) || state !== "done";
   return (
     <Collapsible defaultOpen={false}>
-      <div className={cn("rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card", className)}>
-        <CollapsibleTrigger className="group flex w-full items-center justify-between gap-3 px-3 py-2 text-left">
-          <div className="flex min-w-0 items-center gap-2">
-            {isError ? (
-              <XCircle className="size-4 shrink-0 text-error" />
-            ) : (
-              <Hammer className="size-4 shrink-0 text-muted-foreground" />
+      <div className={cn("rounded-[var(--radius-card)] bg-[var(--bg-2)] shadow-[var(--shadow-card)]", className)}>
+        <CollapsibleTrigger className="group flex w-full items-center gap-2.5 px-3 py-2 text-left">
+          {/* Status icon — error gets a red X, running gets a muted hammer, done gets nothing */}
+          {isError ? (
+            <XCircle className="size-3.5 shrink-0 text-destructive" />
+          ) : state === "called" ? (
+            <Hammer className="size-3.5 shrink-0 text-muted-foreground/60 animate-pulse" />
+          ) : (
+            <Hammer className="size-3.5 shrink-0 text-muted-foreground/40" />
+          )}
+          <span className="flex-1 min-w-0 truncate text-xs font-medium text-[var(--ink-soft)]">{name}</span>
+          <div className="flex shrink-0 items-center gap-1.5">
+            {duration && (
+              <span className="text-[10.5px] text-muted-foreground/60 tabular-nums">{duration}</span>
             )}
-            <div className="min-w-0">
-              <p className="truncate text-sm font-medium">{name}</p>
-            </div>
-          </div>
-          <div className="flex shrink-0 items-center gap-2">
-            {duration && <span className="text-[11px] text-muted-foreground">{duration}</span>}
-            {/* S29l (ChatGPT-audit): "done" pill is decoration once the
-                Hammer icon + (in failure case) XCircle already signal state.
-                Show it again only when callers pass an explicit status because
-                chat tool cards need status parity with run details. */}
+            {/* Status pill: only show when not silently "done" — error and in-flight states need a label */}
             {showState && (
               <span
                 className={cn(
-                  "rounded-[var(--radius-button)] [border:var(--bd-pill)] px-1.5 py-0.5 text-[11px] font-medium",
+                  "rounded-[var(--radius-pill)] px-1.5 py-0.5 text-[10.5px] font-medium leading-none",
                   state === "error"
-                    ? "bg-error/10 text-error"
+                    ? "bg-destructive/10 text-destructive"
                     : state === "done"
-                      ? "bg-muted/50 text-muted-foreground"
-                      : "bg-pending/10 text-pending",
+                      ? "bg-[var(--bg-3)] text-muted-foreground"
+                      : "bg-[var(--accent)]/10 text-[var(--accent)]",
                 )}
               >
                 {displayState}
               </span>
             )}
-            <ChevronDown className="size-4 text-muted-foreground transition-transform group-data-[panel-open]:rotate-180" />
+            <ChevronDown className="size-3.5 text-muted-foreground/50 transition-transform duration-150 group-data-[panel-open]:rotate-180" />
           </div>
         </CollapsibleTrigger>
         <CollapsibleContent>
-          <div className="space-y-3 [border-top:var(--bd-div)] p-3">
+          <div className="space-y-3 px-3 pb-3 pt-0">
+            <div className="h-px bg-[var(--border-default)] opacity-50" />
             {args !== undefined && <ToolBlock label="Args" value={args} />}
             {result !== undefined && <ToolBlock label={isError ? "Error" : "Result"} value={result} />}
             {children}
