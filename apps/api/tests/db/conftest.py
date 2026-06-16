@@ -29,16 +29,17 @@ def load_db(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
-    for name in [
-        "db",
-        "db._legacy_sqlite",
-        "db.sqlite",
-        "db.factory",
-        "db.dependency",
-        "db.interface",
-        "models",
-    ]:
-        sys.modules.pop(name, None)
+    for name in list(sys.modules):
+        if name in {
+            "db",
+            "db._legacy_sqlite",
+            "db.sqlite",
+            "db.factory",
+            "db.dependency",
+            "db.interface",
+            "models",
+        } or name.startswith("services."):
+            sys.modules.pop(name, None)
     db = importlib.import_module("db")
     db.init_db()
     db.get_repositories.cache_clear()
