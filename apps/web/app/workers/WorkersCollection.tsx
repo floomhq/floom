@@ -124,21 +124,27 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: Work
       return;
     }
     let alive = true;
-    api.workers
-      .get(id)
-      .then((d) => {
-        detailCache.set(id, d);
-        if (alive) setDetail(d);
-      })
-      .catch(() => {
-        // null signals "failed to load" so tabs show an error state instead of
-        // spinning forever (#1279).
-        if (alive) setDetail(null);
-      });
-    // Safety timeout: if the API proxy hangs, surface an error after 10 s.
+    // Retry once before surfacing an error — a transiently slow backend should
+    // not strand the detail tabs on "Could not load" (#1279 + round-03 source-load).
+    const load = (attempt: number) => {
+      api.workers
+        .get(id)
+        .then((d) => {
+          detailCache.set(id, d);
+          if (alive) setDetail(d);
+        })
+        .catch(() => {
+          if (!alive) return;
+          if (attempt < 1) setTimeout(() => load(attempt + 1), 1500);
+          else setDetail(null); // null = failed to load → tabs show error, not a spinner
+        });
+    };
+    load(0);
+    // Safety timeout: if the API proxy hangs entirely, surface an error after 25 s
+    // (long enough to cover the retry above).
     const timeout = setTimeout(() => {
       if (alive && detail === undefined) setDetail(null);
-    }, 10_000);
+    }, 25_000);
     return () => {
       alive = false;
       clearTimeout(timeout);
