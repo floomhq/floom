@@ -2320,7 +2320,7 @@ function PreviewUnavailable({
 }) {
   return (
     <div className="flex h-full min-h-[260px] items-center justify-center p-6">
-      <div className="max-w-lg rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-5 text-sm shadow-sm">
+      <div className="max-w-lg rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-5 text-sm">
         <p className="font-medium text-foreground">{title}</p>
         <p className="mt-2 leading-6 text-muted-foreground">{detail}</p>
         <div className="mt-4 flex flex-wrap items-center gap-2">

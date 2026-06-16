@@ -56,10 +56,13 @@ import { ActivationPanel } from "@/components/overview/ActivationPanel";
 
 export type { SystemOverviewAttentionItem };
 
-// Spec rule 2: flat-by-token: borders come from CSS variables (--bd-card is
-// `none`), so the computed border width is 0px. bg-step + soft shadow only.
+// FLAT: separation is bg-step only (a `--bg-card` panel on the `--bg-app`
+// page). Borders come from CSS variables (--bd-card is `none`) so the computed
+// border width is 0px, and there is NO drop-shadow/elevation — cards read as
+// flat panels, consistent with .c-gcard and the rest of the app. (Do not add a
+// shadow token here; the flat language is intentional.)
 const cardClass =
-  "rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
+  "rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]";
 
 function metricTrend(current: number, previous: number) {
   if (previous <= 0) return null;
@@ -228,19 +231,20 @@ function RecentWork({
   runs: SystemOverviewRunItem[];
   loading: boolean;
 }) {
-  const grouped = groupRuns(runs).slice(0, 6);
+  // High-level: only the 3 most recent outcomes. The rest live behind "See all".
+  const grouped = groupRuns(runs).slice(0, 3);
   return (
-    <section className={cn(cardClass, "px-[18px] py-1.5")}>
-      <div className="flex items-center justify-between py-3.5 pb-1 font-semibold">
+    <section className={cn(cardClass, "px-[22px] py-2")}>
+      <div className="flex items-center justify-between pt-4 pb-1 font-semibold">
         <h2 className="text-[15px] text-[var(--text-primary)]">Recent work</h2>
         <Link href="/runs" className="text-[12.5px] font-medium text-[var(--accent)] hover:underline">
           See all
         </Link>
       </div>
       {loading ? (
-        <div className="space-y-2 py-2">
-          {Array.from({ length: 4 }).map((_, index) => (
-            <Skeleton key={index} className="h-[52px] w-full rounded-[var(--radius-button)]" />
+        <div className="space-y-3 py-3">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <Skeleton key={index} className="h-[44px] w-full rounded-[var(--radius-button)]" />
           ))}
         </div>
       ) : grouped.length === 0 ? (
@@ -256,33 +260,26 @@ function RecentWork({
               <Link
                 key={run.run_id}
                 href={`/runs?sel=${run.run_id}`}
-                className="-mx-[18px] flex items-start gap-3 px-[18px] py-3 transition-colors hover:bg-[var(--active-nav-bg)]"
+                className="-mx-[22px] flex items-center gap-3 px-[22px] py-[18px] transition-colors hover:bg-[var(--active-nav-bg)]"
               >
                 <WorkerRowIcon workerId={run.worker_id} workerName={run.worker_name} />
-                <div className="min-w-0 flex-1">
-                  <div className="flex flex-wrap items-center gap-2">
-                    <span className="truncate text-sm font-semibold text-[var(--text-primary)]">
-                      {run.worker_name || humanizeSlug(run.worker_id, "Worker")}
-                    </span>
-                    <span
-                      className="rounded-[var(--radius-pill)] px-2 py-0.5 text-[11px] font-semibold leading-none"
-                      style={{
-                        color: meta.color,
-                        background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
-                      }}
-                    >
-                      {meta.label}
-                    </span>
-                    {count > 1 && (
-                      <span className="text-[11px] font-medium text-[var(--text-muted)]">
-                        x{count}
-                      </span>
-                    )}
-                  </div>
-                  <p className="mt-0.5 text-[12.5px] text-[var(--text-muted)]">
-                    {humanizeSlug(run.trigger_source, "Ran")} run
-                  </p>
-                </div>
+                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--text-primary)]">
+                  {run.worker_name || humanizeSlug(run.worker_id, "Worker")}
+                </span>
+                <span
+                  className="shrink-0 rounded-[var(--radius-pill)] px-2 py-0.5 text-[11px] font-semibold leading-none"
+                  style={{
+                    color: meta.color,
+                    background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
+                  }}
+                >
+                  {meta.label}
+                </span>
+                {count > 1 && (
+                  <span className="shrink-0 text-[11px] font-medium text-[var(--text-muted)]">
+                    x{count}
+                  </span>
+                )}
                 <span className="shrink-0 text-[12.5px] text-[var(--ink-faint)]">{when}</span>
               </Link>
             );
@@ -354,18 +351,20 @@ function WhatsNext({
   scheduled: SystemOverviewScheduledItem[];
   loading: boolean;
 }) {
-  const needs = attention.slice(0, 4);
-  const coming = scheduled.slice(0, 4);
+  // High-level: top items only. The most urgent needs-you (cap 3) then the next
+  // couple of coming-up runs (cap 2). The rest are a click away on /workers.
+  const needs = attention.slice(0, 3);
+  const coming = scheduled.slice(0, 2);
   const empty = !loading && needs.length === 0 && coming.length === 0;
   return (
-    <section className={cn(cardClass, "px-[18px] py-1.5")}>
-      <div className="py-3.5 pb-1 text-[15px] font-semibold text-[var(--text-primary)]">
+    <section className={cn(cardClass, "px-[22px] py-2")}>
+      <div className="pt-4 pb-1 text-[15px] font-semibold text-[var(--text-primary)]">
         What&rsquo;s next
       </div>
       {loading ? (
-        <div className="space-y-2 py-2">
+        <div className="space-y-3 py-3">
           {Array.from({ length: 3 }).map((_, index) => (
-            <Skeleton key={index} className="h-[48px] w-full rounded-[var(--radius-button)]" />
+            <Skeleton key={index} className="h-[44px] w-full rounded-[var(--radius-button)]" />
           ))}
         </div>
       ) : empty ? (
@@ -382,7 +381,7 @@ function WhatsNext({
         <>
           {needs.length > 0 && (
             <>
-              <div className="px-0 pt-3 pb-1 text-[11px] font-bold uppercase tracking-[0.04em] text-[var(--ink-faint)]">
+              <div className="px-0 pt-4 pb-1 text-[11px] font-bold uppercase tracking-[0.04em] text-[var(--ink-faint)]">
                 Needs you
               </div>
               <div className="[&>*+*]:[border-top:var(--bd-div)]">
@@ -391,7 +390,7 @@ function WhatsNext({
                   return (
                     <div
                       key={`needs-${item.worker_id ?? item.connection_id ?? idx}`}
-                      className="flex items-start gap-3 py-3"
+                      className="flex items-start gap-3 py-[18px]"
                     >
                       <span
                         className="mt-1.5 size-[7px] shrink-0 rounded-[var(--radius-pill)] bg-[var(--warning)]"
@@ -419,7 +418,7 @@ function WhatsNext({
           )}
           {coming.length > 0 && (
             <>
-              <div className="px-0 pt-3 pb-1 text-[11px] font-bold uppercase tracking-[0.04em] text-[var(--ink-faint)]">
+              <div className="px-0 pt-4 pb-1 text-[11px] font-bold uppercase tracking-[0.04em] text-[var(--ink-faint)]">
                 Coming up
               </div>
               <div className="[&>*+*]:[border-top:var(--bd-div)]">
@@ -427,7 +426,7 @@ function WhatsNext({
                   <Link
                     key={`${item.worker_id}-${item.next_fire_at}`}
                     href={`/workers?sel=${item.worker_id}`}
-                    className="-mx-[18px] flex items-start gap-3 px-[18px] py-3 transition-colors hover:bg-[var(--active-nav-bg)]"
+                    className="-mx-[22px] flex items-start gap-3 px-[22px] py-[18px] transition-colors hover:bg-[var(--active-nav-bg)]"
                   >
                     <span
                       className="mt-1.5 size-[7px] shrink-0 rounded-[var(--radius-pill)] bg-[var(--accent)]"
@@ -522,8 +521,9 @@ export function OverviewDashboard({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 pb-6 pt-1">
-      {/* Hero row: work-done block left, greeting right. */}
-      <section className="flex flex-col items-start justify-between gap-6 pb-5 sm:flex-row sm:items-start">
+      {/* Hero row: work-done block left, greeting right. Extra bottom air so the
+          hero number is clearly the first thing the eye lands on. */}
+      <section className="flex flex-col items-start justify-between gap-6 pb-9 sm:flex-row sm:items-start">
         <div>
           <div className="mb-1.5 text-[13px] text-[var(--text-muted)]">Work done this week</div>
           <div className="flex items-end gap-[18px]">
@@ -598,7 +598,7 @@ export function OverviewDashboard({
       </section>
 
       {/* Divider, then the two columns. */}
-      <div className="grid flex-1 grid-cols-1 gap-[18px] pt-[18px] [box-shadow:inset_0_1px_0_var(--line-soft)] lg:grid-cols-[1.35fr_1fr]">
+      <div className="grid flex-1 grid-cols-1 gap-6 pt-7 [box-shadow:inset_0_1px_0_var(--line-soft)] lg:grid-cols-[1.35fr_1fr]">
         <RecentWork runs={data?.recent_runs ?? []} loading={loading} />
         <WhatsNext
           attention={data?.needs_attention ?? []}
