@@ -1617,6 +1617,18 @@ def execute_run(
                 )
             except Exception:
                 logger.warning("WhatsApp approval notify failed for run %s", run_id, exc_info=True)
+            # Fan-out: notify the run owner over Slack if they have an active binding.
+            try:
+                from channels.common import notify_pending_approval_via_slack
+                notify_pending_approval_via_slack(
+                    owner_id=owner_id,
+                    run_id=run_id,
+                    worker_name=_worker_name_for_notify,
+                    label=label,
+                    approval_id=approval_id,
+                )
+            except Exception:
+                logger.warning("Slack approval notify failed for run %s", run_id, exc_info=True)
             return
 
         # Output-schema enforcement — the SINGLE convergence point for ALL
@@ -1715,6 +1727,36 @@ def execute_run(
                 outputs["worker_creation_failed"] = True
 
         update_run_status(run_id, RunStatus.COMPLETED.value, output=outputs, user_id=owner_id, repos=repos_obj)
+
+        # Feature #1386: fan-out a worker-created card to the owner's channel
+        # bindings (Slack Block Kit DM + WhatsApp formatted message) when the
+        # worker-author run completes with a real created_worker_id.
+        if worker_id == _WORKER_AUTHOR_WORKER_ID and isinstance(outputs, dict) and outputs.get("created_worker_id"):
+            _new_worker_id = str(outputs["created_worker_id"])
+            try:
+                _nw_row = repos_obj.workers.get_any(worker_id=_new_worker_id)
+                _new_worker_name = (_nw_row or {}).get("name") or _new_worker_id
+            except Exception:
+                _new_worker_name = _new_worker_id
+            try:
+                from channels.common import notify_worker_created_via_slack, notify_worker_created_via_whatsapp
+                notify_worker_created_via_slack(
+                    owner_id=owner_id,
+                    worker_id=_new_worker_id,
+                    worker_name=_new_worker_name,
+                )
+            except Exception:
+                logger.warning("Slack worker-created card failed for run %s", run_id, exc_info=True)
+            try:
+                from channels.common import notify_worker_created_via_whatsapp
+                notify_worker_created_via_whatsapp(
+                    owner_id=owner_id,
+                    worker_id=_new_worker_id,
+                    worker_name=_new_worker_name,
+                )
+            except Exception:
+                logger.warning("WhatsApp worker-created message failed for run %s", run_id, exc_info=True)
+
         # Broadcast the new worker id on the live stream so the create flow can
         # navigate straight to the editor without a follow-up fetch.
         if worker_id == _WORKER_AUTHOR_WORKER_ID and isinstance(outputs, dict) and outputs.get("created_worker_id"):
