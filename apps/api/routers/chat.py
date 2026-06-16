@@ -151,7 +151,7 @@ async def post_chat(
                 user_id=auth.user_id,
                 conversation_id=payload.conversation_id,
                 part_queue=part_queue,
-                source=payload.source,
+                source="web",
             )
         except Exception as exc:
             logger.exception("chat background task failed")
