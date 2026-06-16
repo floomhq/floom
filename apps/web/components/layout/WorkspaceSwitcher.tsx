@@ -40,11 +40,24 @@ type WorkspaceState = {
   activeId: string;
 };
 
-function shortInitial(name: string): string {
-  const display = resolveWorkspaceName(name);
-  const trimmed = display.trim();
-  if (!trimmed) return "?";
-  return trimmed.slice(0, 2).toUpperCase();
+/** DiceBear `shapes` avatar — deterministically seeded by workspace name/id.
+ *  Geometric, non-cartoonish, fits a serious B2B product.
+ *  Container uses var(--radius-button) (squircle), NOT a circle. */
+function WorkspaceAvatar({ name, size }: { name: string; size: number }) {
+  const seed = encodeURIComponent(resolveWorkspaceName(name) || name || "workspace");
+  const src = `https://api.dicebear.com/9.x/shapes/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf&backgroundType=gradientLinear&radius=0`;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      aria-hidden="true"
+      width={size}
+      height={size}
+      className="shrink-0 rounded-[var(--radius-button)] object-cover"
+      style={{ width: size, height: size }}
+    />
+  );
 }
 
 export function WorkspaceSwitcher() {
@@ -259,10 +272,8 @@ export function WorkspaceSwitcher() {
           aria-label="Switch workspace"
           onPointerDown={(e) => e.stopPropagation()}
         >
-          {/* Workspace mark: company logo if available, else colored initial */}
-          <div className="size-6 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_22%,transparent)] text-[var(--accent)] grid place-items-center text-[10px] font-semibold uppercase tracking-wide">
-            {shortInitial(active.name)}
-          </div>
+          {/* Workspace mark: DiceBear shapes avatar, seeded by workspace name */}
+          <WorkspaceAvatar name={active.name} size={24} />
           <span className="flex-1 truncate text-left">{resolveWorkspaceName(active.name)}</span>
           <ChevronsUpDown className="size-4 opacity-0 group-hover:opacity-60 transition-opacity duration-100" />
         </DropdownMenuTrigger>
@@ -292,9 +303,7 @@ export function WorkspaceSwitcher() {
                   className="flex items-center gap-2 focus:bg-[var(--active-nav-bg)] focus:text-ink"
                   disabled={isLoading}
                 >
-                  <div className="size-5 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)] grid place-items-center text-[9px] font-semibold uppercase">
-                    {shortInitial(w.name)}
-                  </div>
+                  <WorkspaceAvatar name={w.name} size={20} />
                   <span className="flex-1 truncate">{resolveWorkspaceName(w.name)}</span>
                   {isActive ? <Check className="size-4 opacity-80" /> : null}
                 </DropdownMenuItem>

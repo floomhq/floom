@@ -47,13 +47,24 @@ export function FloomMark({ size = 28 }: { size?: number }) {
 
 // #1305: the app is WHITE-LABELED — the workspace IS the brand. The top-left
 // mark must be the WORKSPACE logo/avatar, never the Floom play-triangle.
-// Shows the workspace's derived company logo when available, else a clean
-// neutral squared monogram (first letters of the workspace name). Squared
-// (rounded-square via the app radius token), not round.
-function workspaceMonogram(name: string): string {
-  const display = resolveWorkspaceName(name).trim();
-  if (!display) return "W";
-  return display.slice(0, 2).toUpperCase();
+// DiceBear `shapes` avatar deterministically seeded by workspace name —
+// geometric, non-cartoonish, fits a serious B2B product.
+// Container uses var(--radius-button) (squircle), NOT a circle.
+function WorkspaceDiceBearAvatar({ name, size }: { name: string; size: number }) {
+  const seed = encodeURIComponent(resolveWorkspaceName(name) || name || "workspace");
+  const src = `https://api.dicebear.com/9.x/shapes/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf&backgroundType=gradientLinear&radius=0`;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      aria-hidden="true"
+      width={size}
+      height={size}
+      className="shrink-0 rounded-[var(--radius-button)] object-cover"
+      style={{ width: size, height: size }}
+    />
+  );
 }
 
 /** Active workspace name, resolved once from the workspace list (shared shape
@@ -109,16 +120,13 @@ export function WorkspaceMark({
       />
     );
   }
-  // Neutral squared monogram placeholder (matches the WorkspaceSwitcher mark).
+  // DiceBear shapes avatar — consistent with WorkspaceSwitcher mark.
   // NOT round, NOT the Floom play-triangle.
   return (
-    <div
-      aria-label={resolveWorkspaceName(workspaceName) || "Workspace"}
-      className="shrink-0 grid place-items-center rounded-[var(--radius-button)] bg-[color-mix(in_srgb,var(--accent)_22%,transparent)] text-[var(--accent)] font-semibold uppercase tracking-wide"
-      style={{ ...dim, fontSize: Math.max(9, Math.round(size * 0.42)) }}
-    >
-      {workspaceMonogram(workspaceName)}
-    </div>
+    <WorkspaceDiceBearAvatar
+      name={workspaceName}
+      size={size}
+    />
   );
 }
 
