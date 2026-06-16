@@ -94,6 +94,33 @@ def test_fast_run_still_returns_output_inline(monkeypatch, tmp_path):
     assert json.loads(result["content"][0]["text"]) == {"answer": 42}
 
 
+def test_completed_run_redacts_secret_shaped_output(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+    leaked_token = "tok_live_1234567890abcdef"
+    leaked_bearer = "Bearer abcdefghijklmnop"
+
+    result = _dispatch(
+        main,
+        monkeypatch,
+        _fake_repos(
+            "completed",
+            output={
+                "message": f"done token={leaked_token} auth {leaked_bearer}",
+                "api_key": "sk-live-secret-value",
+                "url": f"https://example.com/callback?token={leaked_token}&ok=1",
+            },
+        ),
+    )
+    text = result["content"][0]["text"]
+
+    assert result["isError"] is False
+    assert leaked_token not in text
+    assert leaked_bearer not in text
+    assert "sk-live-secret-value" not in text
+    assert "token=[redacted]" in text
+    assert "Bearer [redacted]" in text
+
+
 def test_failed_run_is_error(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path)
 
@@ -101,3 +128,22 @@ def test_failed_run_is_error(monkeypatch, tmp_path):
 
     assert result["isError"] is True
     assert "boom" in result["content"][0]["text"]
+
+
+def test_failed_run_redacts_secret_shaped_error(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+    leaked_token = "errtok_1234567890abcdef"
+    leaked_bearer = "Bearer zyxwvutsrqponmlk"
+
+    result = _dispatch(
+        main,
+        monkeypatch,
+        _fake_repos("failed", error=f"failed api_key={leaked_token} {leaked_bearer}"),
+    )
+    text = result["content"][0]["text"]
+
+    assert result["isError"] is True
+    assert leaked_token not in text
+    assert leaked_bearer not in text
+    assert "api_key=[redacted]" in text
+    assert "Bearer [redacted]" in text
