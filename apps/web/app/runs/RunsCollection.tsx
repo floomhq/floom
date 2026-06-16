@@ -428,7 +428,20 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       }),
     }),
     states: {
-      empty: { title: "No runs yet", help: "Runs appear here when your workers execute." },
+      // #1365 — add action CTA to runs empty state
+      empty: {
+        title: "No runs yet",
+        help: "Runs appear here when your workers execute.",
+        action: (
+          <Link
+            href="/workers/new"
+            className="c-addbtn"
+            style={{ display: "inline-block", marginTop: 8, padding: "6px 16px", fontSize: 13 }}
+          >
+            Create your first worker →
+          </Link>
+        ),
+      },
     },
     // B37: "Load more" append footer — replaces numeric pagination.
     footer: hasMore ? (
