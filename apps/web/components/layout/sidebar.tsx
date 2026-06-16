@@ -160,7 +160,7 @@ type NavItem = {
 // Settings per v4). Overview · Workers · Brain · Runs · Approvals · Connections.
 const nav: NavItem[] = [
   { href: "/overview", label: "Overview", icon: Activity },
-  { href: "/workers", label: "Workers", icon: Box, hint: "Runs on triggers and schedules" },
+  { href: "/workers", label: "Workers", icon: Box, hint: "Your AI workers" },
   { href: "/brain", label: "Brain", icon: Brain },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
