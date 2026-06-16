@@ -19,6 +19,7 @@ import collections
 import hmac
 import io
 import json
+import re
 import urllib.parse
 import zipfile
 from typing import Any, Dict, List, Optional
@@ -1048,8 +1049,7 @@ def put_workspace_setting(
     from db import get_db, now_iso
 
     _require_workspace_write(auth)
-    if not key or len(key) > 64:
-        raise HTTPException(status_code=422, detail="invalid setting key")
+    value = _validate_workspace_setting(key, body.value)
     ws = _active_workspace_id(request)
     with get_db() as conn:
         conn.execute(
@@ -1058,6 +1058,115 @@ def put_workspace_setting(
             VALUES (?, ?, ?, ?)
             ON CONFLICT(workspace_id, key) DO UPDATE SET value = excluded.value, updated_at = excluded.updated_at
             """,
-            (ws, key, body.value, now_iso()),
+            (ws, key, value, now_iso()),
         )
     return Response(status_code=204)
+
+
+_WORKSPACE_SETTING_BOOL_KEYS = {
+    "auto_pause",
+    "auto_pause_enabled",
+    "failure_email_enabled",
+}
+_WORKSPACE_SETTING_ALLOWED_KEYS = _WORKSPACE_SETTING_BOOL_KEYS | {
+    "approval_default",
+    "failure_email_to",
+    "monthly_spend_cap_usd",
+    "default_model",
+    "default_timeout_seconds",
+    "max_output_tokens",
+    "region",
+    "timezone",
+    "company_domain",
+}
+_WORKSPACE_SETTING_READ_ONLY_KEYS = {"current_month_spend_usd"}
+_BOOL_SETTING_VALUES = {"true", "false", "1", "0", "yes", "no", "on", "off"}
+_EMAIL_RE = re.compile(r"^[^@\s,]+@[^@\s,]+\.[^@\s,]+$")
+_MODEL_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._:-]{0,127}$")
+_REGION_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$")
+_DOMAIN_RE = re.compile(
+    r"^(?=.{1,253}$)(?!-)(?:[A-Za-z0-9-]{1,63}\.)+[A-Za-z]{2,63}$"
+)
+
+
+def _setting_error(message: str) -> None:
+    raise HTTPException(status_code=422, detail=message)
+
+
+def _validate_workspace_setting(key: str, value: str) -> str:
+    if not key or len(key) > 64:
+        _setting_error("invalid setting key")
+    if key in _WORKSPACE_SETTING_READ_ONLY_KEYS:
+        _setting_error(f"workspace setting {key!r} is read-only")
+    if key not in _WORKSPACE_SETTING_ALLOWED_KEYS:
+        _setting_error(f"unknown workspace setting {key!r}")
+
+    raw = str(value or "").strip()
+    lowered = raw.lower()
+
+    if key in _WORKSPACE_SETTING_BOOL_KEYS:
+        if lowered not in _BOOL_SETTING_VALUES:
+            _setting_error(f"workspace setting {key!r} must be a boolean string")
+        return raw
+
+    if key == "approval_default":
+        if lowered not in {"always", "required", "never", "off"}:
+            _setting_error("approval_default must be one of always, required, never, off")
+        return raw
+
+    if key == "failure_email_to":
+        if not raw:
+            return raw
+        emails = [part.strip() for part in raw.split(",")]
+        if any(not part or not _EMAIL_RE.fullmatch(part) for part in emails):
+            _setting_error("failure_email_to must be a comma-separated email list")
+        return raw
+
+    if key == "monthly_spend_cap_usd":
+        try:
+            amount = float(raw)
+        except ValueError:
+            _setting_error("monthly_spend_cap_usd must be a non-negative number")
+        if amount < 0 or amount > 1_000_000:
+            _setting_error("monthly_spend_cap_usd must be between 0 and 1000000")
+        return raw
+
+    if key in {"default_timeout_seconds", "max_output_tokens"}:
+        try:
+            parsed = int(raw)
+        except ValueError:
+            _setting_error(f"{key} must be an integer")
+        upper = 86_400 if key == "default_timeout_seconds" else 1_000_000
+        if parsed < 1 or parsed > upper:
+            _setting_error(f"{key} must be between 1 and {upper}")
+        return raw
+
+    if key == "default_model":
+        if not raw:
+            return raw
+        if not _MODEL_ID_RE.fullmatch(raw) or "://" in raw or ".." in raw:
+            _setting_error("default_model must be a safe model id")
+        return raw
+
+    if key == "region":
+        if raw and not _REGION_RE.fullmatch(raw):
+            _setting_error("region must be a safe region id")
+        return raw
+
+    if key == "timezone":
+        if not raw:
+            return raw
+        try:
+            from zoneinfo import ZoneInfo
+
+            ZoneInfo(raw)
+        except Exception:
+            _setting_error("timezone must be a valid IANA timezone")
+        return raw
+
+    if key == "company_domain":
+        if raw and not _DOMAIN_RE.fullmatch(raw):
+            _setting_error("company_domain must be a valid domain")
+        return raw
+
+    _setting_error(f"unknown workspace setting {key!r}")
