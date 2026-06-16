@@ -59,6 +59,7 @@ import {
   DropdownMenu,
   DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
   DropdownMenuLabel,
   DropdownMenuTrigger,
@@ -947,23 +948,28 @@ function CustomizeTabsMenu({
         Customize
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48 p-1">
-        <DropdownMenuLabel>Pinned tabs</DropdownMenuLabel>
-        {ADVANCED_DETAIL_TABS.map((key) => (
-          <DropdownMenuCheckboxItem
-            key={key}
-            checked={pinned.has(key)}
-            // base-ui fires onClick before state churn; closeOnClick stays open so
-            // the user can pin several tabs without reopening the menu.
-            closeOnClick={false}
-            onCheckedChange={(checked) => {
-              onToggle(key);
-              // Pinning selects the tab so the user lands on what they just added.
-              if (checked) onSelectTab(workerId, key);
-            }}
-          >
-            {key}
-          </DropdownMenuCheckboxItem>
-        ))}
+        {/* base-ui MenuPrimitive.GroupLabel REQUIRES a Menu.Group ancestor —
+            rendering DropdownMenuLabel bare crashes the detail pane. Wrap the
+            label + items in DropdownMenuGroup. */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Pinned tabs</DropdownMenuLabel>
+          {ADVANCED_DETAIL_TABS.map((key) => (
+            <DropdownMenuCheckboxItem
+              key={key}
+              checked={pinned.has(key)}
+              // base-ui fires onClick before state churn; closeOnClick stays open so
+              // the user can pin several tabs without reopening the menu.
+              closeOnClick={false}
+              onCheckedChange={(checked) => {
+                onToggle(key);
+                // Pinning selects the tab so the user lands on what they just added.
+                if (checked) onSelectTab(workerId, key);
+              }}
+            >
+              {key}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuGroup>
       </DropdownMenuContent>
     </DropdownMenu>
   );
