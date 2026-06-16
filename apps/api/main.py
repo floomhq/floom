@@ -1191,6 +1191,7 @@ def _rate_limit_for_path(path: str) -> tuple[int, float]:
 
 # #1024: PUT /workers/{id}/files — atomic file replace, may carry bundled data.
 _WORKER_FILES_PATH_RE = re.compile(r"^/workers/[^/]+/files$")
+_WORKER_SOURCE_PATH_RE = re.compile(r"^/workers/[^/]+$")
 
 
 def _body_limit_for_request(request: Request) -> Optional[int]:
@@ -1202,8 +1203,14 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
         return FROM_BUNDLE_BODY_LIMIT_BYTES
     if path == "/workspace/import":
         return WORKSPACE_IMPORT_BODY_LIMIT_BYTES
-    # #1024: worker file deploys bundle datasets; exempt from the 256 KB JSON cap.
-    if _WORKER_FILES_PATH_RE.match(path):
+    # Worker source writes may carry data-bundled modules, so they need the same
+    # bounded headroom as atomic file deploys without broadening worker run/admin
+    # subpaths.
+    if (
+        (method == "POST" and path == "/workers")
+        or (method in {"PUT", "PATCH"} and _WORKER_SOURCE_PATH_RE.match(path))
+        or (method == "PUT" and _WORKER_FILES_PATH_RE.match(path))
+    ):
         return WORKER_FILES_BODY_LIMIT_BYTES
     if path.startswith("/uploads"):
         return None
