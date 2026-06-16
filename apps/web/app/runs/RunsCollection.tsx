@@ -27,7 +27,6 @@ import {
   formatTrigger,
   triggerKey,
   runStatusPill,
-  dayLabel,
   runSortTime,
   runsToCsvRows,
 } from "@/lib/runs/format";
@@ -324,7 +323,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
 
   const config: CollectionConfig<RunSummary> = {
     title: "Run history",
-    subtitle: "Worker executions grouped by day.",
     items: sorted,
     loading,
     idOf: (r) => r.id,
@@ -379,7 +377,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
         </DropdownMenuContent>
       </DropdownMenu>
     ),
-    group: (r) => dayLabel(r.created_at ?? r.started_at, now),
     columns: {
       template: "1.6fr 1fr .8fr 130px 1fr",
       headers: ["Worker", "Trigger", "Duration", "Status", "Started"],
