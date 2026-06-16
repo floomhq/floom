@@ -13,22 +13,41 @@ type LoginMode = "loading" | "setup" | "username" | "secret";
 
 function BrandPanel() {
   return (
-    <section className="order-2 flex min-h-[240px] flex-col justify-between gap-12 bg-[var(--bg-app)] px-6 py-8 text-[var(--ink)] sm:px-12 lg:order-1 lg:min-h-screen lg:px-14 lg:py-12">
-      <div className="flex items-center gap-2">
+    <section className="order-2 flex min-h-[220px] flex-col justify-between gap-12 bg-[var(--bg-app)] px-6 py-8 text-[var(--ink)] sm:px-12 lg:order-1 lg:min-h-screen lg:px-14 lg:py-12">
+      <div className="flex items-center gap-2.5">
         <FloomMark size={22} />
-        <span className="text-base font-semibold tracking-tight">Floom</span>
+        <span className="text-sm font-semibold tracking-tight">Floom</span>
       </div>
 
-      <div className="max-w-md space-y-4">
-        <h2 className="text-4xl font-semibold leading-tight tracking-tight sm:text-5xl">
-          Hire AI workers.
+      <div className="max-w-xs space-y-3">
+        <h2 className="text-3xl font-semibold leading-tight tracking-tight sm:text-4xl">
+          Hire AI workers for your company.
         </h2>
-        <p className="max-w-sm text-sm leading-6 text-[var(--muted-text)]">
-          Jobs that run themselves on a schedule, from a message, or on demand. You get the
-          output, not the mechanics.
+        <p className="text-sm leading-relaxed text-[var(--muted-text)]">
+          Jobs that run themselves on a schedule, from a message, or on demand. You get the output, not the mechanics.
         </p>
       </div>
     </section>
+  );
+}
+
+function FormSkeleton() {
+  return (
+    <div className="space-y-4 animate-pulse">
+      <div className="h-5 w-24 rounded-[var(--radius-button)] bg-[var(--bg-2)]" />
+      <div className="h-4 w-48 rounded-[var(--radius-button)] bg-[var(--bg-2)]" />
+      <div className="mt-6 space-y-4">
+        <div className="space-y-1.5">
+          <div className="h-3 w-16 rounded-[var(--radius-button)] bg-[var(--bg-2)]" />
+          <div className="h-8 w-full rounded-[var(--radius-input)] bg-[var(--bg-2)]" />
+        </div>
+        <div className="space-y-1.5">
+          <div className="h-3 w-14 rounded-[var(--radius-button)] bg-[var(--bg-2)]" />
+          <div className="h-8 w-full rounded-[var(--radius-input)] bg-[var(--bg-2)]" />
+        </div>
+        <div className="h-8 w-full rounded-[var(--radius-button)] bg-[var(--bg-2)]" />
+      </div>
+    </div>
   );
 }
 
@@ -69,7 +88,7 @@ function LoginContent() {
           return;
         }
       } catch {
-        // backend not reachable or no multi-member — fall back to secret mode
+        // backend not reachable or no multi-member -- fall back to secret mode
       }
       setMode("secret");
     })();
@@ -140,26 +159,29 @@ function LoginContent() {
       <BrandPanel />
 
       <section className="order-1 flex min-h-screen flex-col justify-center bg-[var(--bg-card)] px-6 py-10 sm:px-12 lg:order-2">
-        <div className="mx-auto w-full max-w-sm">
-          <div className="mb-8 flex items-center gap-2">
+        <div className="mx-auto w-full max-w-[340px]">
+          {/* Logo mark -- visible only on mobile (brand panel hidden on small screens) */}
+          <div className="mb-8 flex items-center gap-2.5 lg:hidden">
             <FloomMark size={22} />
-            <span className="text-base font-semibold tracking-tight">Floom</span>
+            <span className="text-sm font-semibold tracking-tight">Floom</span>
           </div>
 
           {mode === "loading" ? (
-            <p className="text-sm text-muted-foreground">Loading…</p>
+            <FormSkeleton />
           ) : (
             <>
               <h1 className="text-xl font-semibold tracking-tight">{heading}</h1>
-              <p className="mt-1 text-sm text-muted-foreground">{sub}</p>
-              <p className="mt-4 text-xs text-[var(--ink-faint)]">
-                Your first sign-in creates your workspace.
-              </p>
+              <p className="mt-1.5 text-sm text-[var(--muted-text)]">{sub}</p>
+              {effectiveMode === "setup" && (
+                <p className="mt-3 text-xs text-[var(--ink-faint)]">
+                  This creates the first admin account for your workspace.
+                </p>
+              )}
 
               <form onSubmit={handleSubmit} className="mt-6 space-y-4">
                 {effectiveMode === "secret" ? (
-                  <div className="space-y-2">
-                    <Label htmlFor="access-secret" className="text-xs font-medium text-muted-foreground">
+                  <div className="space-y-1.5">
+                    <Label htmlFor="access-secret" className="text-xs font-medium text-[var(--muted-text)]">
                       Access secret
                     </Label>
                     <Input
@@ -175,9 +197,10 @@ function LoginContent() {
                 ) : (
                   <>
                     {effectiveMode === "setup" && (
-                      <div className="space-y-2">
-                        <Label htmlFor="display-name" className="text-xs font-medium text-muted-foreground">
-                          Display name <span className="text-muted-foreground/60">(optional)</span>
+                      <div className="space-y-1.5">
+                        <Label htmlFor="display-name" className="text-xs font-medium text-[var(--muted-text)]">
+                          Display name{" "}
+                          <span className="text-[var(--ink-faint)]">(optional)</span>
                         </Label>
                         <Input
                           id="display-name"
@@ -190,8 +213,8 @@ function LoginContent() {
                         />
                       </div>
                     )}
-                    <div className="space-y-2">
-                      <Label htmlFor="username" className="text-xs font-medium text-muted-foreground">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="username" className="text-xs font-medium text-[var(--muted-text)]">
                         Username
                       </Label>
                       <Input
@@ -204,8 +227,8 @@ function LoginContent() {
                         onChange={(e) => setUsername(e.target.value)}
                       />
                     </div>
-                    <div className="space-y-2">
-                      <Label htmlFor="password" className="text-xs font-medium text-muted-foreground">
+                    <div className="space-y-1.5">
+                      <Label htmlFor="password" className="text-xs font-medium text-[var(--muted-text)]">
                         Password
                       </Label>
                       <Input
@@ -224,19 +247,22 @@ function LoginContent() {
 
                 <Button
                   type="submit"
+                  size="lg"
                   disabled={busy || (effectiveMode === "secret" ? !secret : (!username.trim() || !password))}
-                  className="w-full bg-[var(--accent)] text-white hover:bg-[color-mix(in_srgb,var(--accent)_88%,black_12%)] active:not-aria-[haspopup]:bg-[color-mix(in_srgb,var(--accent)_80%,black_20%)]"
+                  className="w-full"
                 >
-                  {busy ? (effectiveMode === "setup" ? "Creating…" : "Signing in…") : (effectiveMode === "setup" ? "Create workspace" : "Sign in")}
+                  {busy
+                    ? (effectiveMode === "setup" ? "Creating..." : "Signing in...")
+                    : (effectiveMode === "setup" ? "Create workspace" : "Sign in")}
                 </Button>
               </form>
 
               {/* Escape hatch: manual toggle for deployments that use secret-only auth. */}
               {(mode === "username" || mode === "setup") && (
-                <p className="mt-4 text-center text-xs text-muted-foreground/60">
+                <p className="mt-5 text-center text-xs text-[var(--ink-faint)]">
                   <button
                     type="button"
-                    className="underline-offset-2 hover:text-muted-foreground hover:underline"
+                    className="underline-offset-2 hover:text-[var(--muted-text)] hover:underline"
                     onClick={() => { setForceSecret((v) => !v); setError(""); }}
                   >
                     {forceSecret ? "Back to username sign-in" : "Sign in with admin secret"}
