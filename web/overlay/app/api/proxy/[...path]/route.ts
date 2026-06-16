@@ -1,5 +1,6 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
+import { getSetCookies, withSecureFlag } from "@/lib/secure-set-cookie";
 
 // PR S19 (I-1, I-6): draft-and-create makes up to 3 OpenAI calls with
 // YAML retry. On hard prompts that's 30-60s. Default 10s Vercel timeout
@@ -95,12 +96,7 @@ async function refreshSessionCookie(
     if (!res.ok) return null;
     // Extract the new access_token from the Set-Cookie the backend returned.
     const setCookieHeaders: string[] = [];
-    const getSetCookieFn = (res.headers as Headers & { getSetCookie?: () => string[] })
-      .getSetCookie;
-    const rawSetCookies =
-      typeof getSetCookieFn === "function"
-        ? getSetCookieFn.call(res.headers)
-        : [res.headers.get("set-cookie") ?? ""].filter(Boolean);
+    const rawSetCookies = getSetCookies(res);
     for (const h of rawSetCookies) {
       if (h) setCookieHeaders.push(h);
     }
@@ -321,16 +317,8 @@ async function handler(
   // Vercel's route runtime does not consistently expose the Node/undici
   // getSetCookie() extension on Headers, so guard it. Without this guard,
   // successful upstream API calls crashed here and returned a proxy 500.
-  const getSetCookie = (upstream.headers as Headers & {
-    getSetCookie?: () => string[];
-  }).getSetCookie;
-  if (typeof getSetCookie === "function") {
-    for (const cookie of getSetCookie.call(upstream.headers)) {
-      responseHeaders.append("set-cookie", cookie);
-    }
-  } else {
-    const cookie = upstream.headers.get("set-cookie");
-    if (cookie) responseHeaders.append("set-cookie", cookie);
+  for (const cookie of getSetCookies(upstream)) {
+    responseHeaders.append("set-cookie", withSecureFlag(cookie));
   }
 
   // If a token refresh happened, propagate the new session cookie to the
@@ -340,7 +328,7 @@ async function handler(
   // Skip cookies already forwarded from the upstream response to avoid
   // duplicates (the refresh endpoint is separate from the proxied endpoint).
   for (const h of refreshedCookies) {
-    responseHeaders.append("set-cookie", h);
+    responseHeaders.append("set-cookie", withSecureFlag(h));
   }
 
   return new NextResponse(upstream.body, {

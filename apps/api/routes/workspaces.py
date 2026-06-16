@@ -437,6 +437,13 @@ async def import_share(
     source_owner_id = str(source_workspace["owner_user_id"])
     if source_workspace_id == target_workspace_id:
         raise HTTPException(status_code=400, detail="cannot import a workspace into itself")
+    reserved = workspace_repo.increment_share_use(
+        link_id=str(link["id"]),
+        use_count=int(link.get("use_count") or 0),
+        max_uses=int(link["max_uses"]) if link.get("max_uses") is not None else None,
+    )
+    if not reserved:
+        raise HTTPException(status_code=410, detail="share link exhausted")
 
     import_engine = __import__("main")
     with active_workspace(source_workspace_id):
@@ -456,7 +463,6 @@ async def import_share(
             auth=auth,
             repos=import_engine.get_repositories(),
         )
-    workspace_repo.increment_share_use(link_id=str(link["id"]), use_count=int(link.get("use_count") or 0))
     return WorkspaceShareImportResponse(
         source_workspace_id=source_workspace_id,
         source_workspace_name=str(source_workspace["name"]),

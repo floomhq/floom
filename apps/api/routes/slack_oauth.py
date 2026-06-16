@@ -20,6 +20,13 @@ from auth import AuthContext, get_auth_context  # noqa: E402
 
 router = APIRouter(tags=["slack-oauth"])
 
+_ALLOWED_RETURN_PATHS = {
+    "/slack/installed",
+    "/settings",
+    "/assistant",
+    "/app/install/slack",
+}
+
 
 class SlackInstallClaimRequest(BaseModel):
     token: str = Field(..., min_length=16, max_length=256)
@@ -49,7 +56,12 @@ def _safe_return_path(path: str | None, fallback: str = "/slack/installed") -> s
     value = (path or fallback).strip() or fallback
     if not value.startswith("/") or value.startswith("//"):
         return fallback
-    return value
+    parsed = urllib.parse.urlsplit(value)
+    if parsed.scheme or parsed.netloc:
+        return fallback
+    if parsed.path not in _ALLOWED_RETURN_PATHS:
+        return fallback
+    return urllib.parse.urlunsplit(("", "", parsed.path, parsed.query, parsed.fragment))
 
 
 @router.get("/slack/install/start")

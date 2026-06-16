@@ -389,7 +389,7 @@ def test_import_share_uses_existing_engine_template_pipeline(monkeypatch):
     monkeypatch.setattr(
         workspace_routes.workspace_repo,
         "increment_share_use",
-        lambda **kwargs: calls.append(("increment", kwargs)),
+        lambda **kwargs: calls.append(("increment", kwargs)) or True,
     )
 
     def export_workspace(*, auth, repos):
@@ -426,13 +426,67 @@ def test_import_share_uses_existing_engine_template_pipeline(monkeypatch):
             )
         )
 
-    assert calls[0] == ("export", "owner-1")
-    assert calls[1] == ("import", "workspace-template.zip", "user-2")
-    assert calls[2] == ("increment", {"link_id": "wsl_1", "use_count": 0})
+    assert calls[0] == ("increment", {"link_id": "wsl_1", "use_count": 0, "max_uses": None})
+    assert calls[1] == ("export", "owner-1")
+    assert calls[2] == ("import", "workspace-template.zip", "user-2")
     assert result.source_workspace_id == "ws_source"
     assert result.target_workspace_id == "ws_target"
     assert result.workers_imported == ["worker-a"]
     assert result.required_connections == ["gmail"]
+
+
+def test_import_share_rejects_when_use_reservation_loses_race(monkeypatch):
+    monkeypatch.setattr(workspace_routes, "get_active_workspace_id", lambda: "ws_target")
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "resolve_share_token",
+        lambda token: {
+            "id": "wsl_1",
+            "workspace_id": "ws_source",
+            "created_by_user_id": "owner-1",
+            "created_at": "2026-01-01T00:00:00+00:00",
+            "use_count": 0,
+            "max_uses": 1,
+            "workspace": {
+                "id": "ws_source",
+                "name": "Shared",
+                "owner_user_id": "owner-1",
+                "created_at": "2026-01-01",
+            },
+        },
+    )
+    monkeypatch.setattr(workspace_routes.workspace_repo, "increment_share_use", lambda **_kwargs: False)
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            workspace_routes.import_share(
+                "wst_raw",
+                AuthContext(user_id="user-2", email="u2@example.com", scopes=()),
+            )
+        )
+
+    assert exc_info.value.status_code == 410
+    assert exc_info.value.detail == "share link exhausted"
+
+
+def test_increment_share_use_compares_current_count_and_max(monkeypatch):
+    client = _FakeSupabaseClient()
+    client.rows["workspace_share_links"] = [
+        {"id": "wsl_1", "workspace_id": "ws_a", "use_count": 0, "max_uses": 1},
+    ]
+    monkeypatch.setattr(workspace_routes.workspace_repo, "get_supabase_service_client", lambda: client)
+
+    assert workspace_routes.workspace_repo.increment_share_use(
+        link_id="wsl_1",
+        use_count=0,
+        max_uses=1,
+    ) is True
+    assert client.rows["workspace_share_links"][0]["use_count"] == 1
+    assert workspace_routes.workspace_repo.increment_share_use(
+        link_id="wsl_1",
+        use_count=0,
+        max_uses=1,
+    ) is False
 
 
 class _FakeResponse:
@@ -457,6 +511,10 @@ class _FakeTable:
         self.filters.append((key, value))
         return self
 
+    def lt(self, key, value):
+        self.filters.append((key, ("lt", value)))
+        return self
+
     def limit(self, count):
         self.limit_count = count
         return self
@@ -476,7 +534,14 @@ class _FakeTable:
         return self
 
     def _matches(self, row):
-        return all(str(row.get(key)) == str(value) for key, value in self.filters)
+        for key, value in self.filters:
+            if isinstance(value, tuple) and value[0] == "lt":
+                if not int(row.get(key) or 0) < int(value[1]):
+                    return False
+                continue
+            if str(row.get(key)) != str(value):
+                return False
+        return True
 
     def execute(self):
         rows = self.client.rows[self.table_name]

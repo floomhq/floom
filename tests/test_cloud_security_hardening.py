@@ -249,6 +249,36 @@ def test_cloud_rate_limits_by_bearer_token_before_ip(monkeypatch, tmp_path):
     assert second_token_status == 422
 
 
+def test_cloud_webhook_rate_limit_uses_trusted_edge_ip(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    keys: list[str] = []
+
+    class _Workers:
+        def get_any(self, *, worker_id):
+            return {"id": worker_id, "owner_id": "owner-1"}
+
+    class _Repos:
+        workers = _Workers()
+
+    monkeypatch.setattr(main.engine_main, "get_repositories", lambda: _Repos())
+    monkeypatch.setattr(main, "verify_webhook_token", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(main.engine_main, "_worker_has_webhook_trigger", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(main.engine_main, "get_worker_config_for_run", lambda _worker_id: {})
+    monkeypatch.setattr(main.engine_main, "create_run", lambda *_args, **_kwargs: "run-1")
+    monkeypatch.setattr(main.engine_main, "start_run", lambda *_args, **_kwargs: None)
+    monkeypatch.setattr(main.engine_main, "_check_webhook_rate_limit", lambda key: keys.append(key) or True)
+
+    response = client.post(
+        "/api/webhooks/worker-1?token=good",
+        headers={"cf-connecting-ip": "203.0.113.88", "x-forwarded-for": "198.51.100.9"},
+        json={"ok": True},
+    )
+
+    assert response.status_code == 200
+    assert keys == ["worker-1:203.0.113.88"]
+
+
 # ---------------------------------------------------------------------------
 # P2-A / P2-B: /metrics and /system/info must be admin-only
 # ---------------------------------------------------------------------------

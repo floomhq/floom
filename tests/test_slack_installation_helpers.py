@@ -168,3 +168,13 @@ def test_slack_install_ip_uses_cloudflare_header_not_x_forwarded_for():
         }
     )
     assert slack_oauth._client_ip(missing_cf) is None
+
+
+def test_slack_return_to_is_limited_to_install_destinations():
+    from apps.api.routes import slack_oauth
+
+    assert slack_oauth._safe_return_path("/settings?sel=channels#slack") == "/settings?sel=channels#slack"
+    assert slack_oauth._safe_return_path("/assistant?from_install=slack") == "/assistant?from_install=slack"
+    assert slack_oauth._safe_return_path("/admin/billing") == "/slack/installed"
+    assert slack_oauth._safe_return_path("https://evil.example/phish") == "/slack/installed"
+    assert slack_oauth._safe_return_path("//evil.example/phish") == "/slack/installed"

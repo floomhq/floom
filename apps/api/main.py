@@ -1436,7 +1436,7 @@ async def cloud_webhook_trigger(
     token: str | None = Query(None),
 ) -> Any:
     repos = engine_main.get_repositories()
-    client_ip = request.client.host if request.client else "unknown"
+    client_ip = _cloud_client_ip(request)
     rate_limit_key = f"{worker_id}:{client_ip}"
     if not engine_main._check_webhook_rate_limit(rate_limit_key):
         raise HTTPException(status_code=429, detail="Too many webhook requests")

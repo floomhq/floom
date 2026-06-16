@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { safeAppNext } from "@/lib/safe-next";
 
 const API_BASE =
   process.env.WORKEROS_API_BASE ||
@@ -8,7 +9,7 @@ const API_BASE =
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const email = typeof body.email === "string" ? body.email.trim() : "";
-  const next = typeof body.next === "string" ? body.next : "/app";
+  const next = safeAppNext(body.next);
   if (!email) {
     return NextResponse.json({ detail: "email is required" }, { status: 400 });
   }

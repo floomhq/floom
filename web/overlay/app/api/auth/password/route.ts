@@ -1,4 +1,5 @@
 import { NextRequest, NextResponse } from "next/server";
+import { forwardSecureSetCookies } from "@/lib/secure-set-cookie";
 
 const API_BASE =
   process.env.WORKEROS_API_BASE ||
@@ -18,16 +19,6 @@ export async function POST(req: NextRequest) {
 
   const payload = await upstream.json().catch(() => ({}));
   const response = NextResponse.json(payload, { status: upstream.status });
-  const getSetCookie = (upstream.headers as Headers & {
-    getSetCookie?: () => string[];
-  }).getSetCookie;
-  if (typeof getSetCookie === "function") {
-    for (const cookie of getSetCookie.call(upstream.headers)) {
-      response.headers.append("set-cookie", cookie);
-    }
-  } else {
-    const cookie = upstream.headers.get("set-cookie");
-    if (cookie) response.headers.append("set-cookie", cookie);
-  }
+  forwardSecureSetCookies(upstream, response.headers);
   return response;
 }

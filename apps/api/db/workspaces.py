@@ -325,10 +325,18 @@ def resolve_share_token(*, token: str) -> dict[str, Any] | None:
     return link
 
 
-def increment_share_use(*, link_id: str, use_count: int) -> None:
-    get_supabase_service_client().table("workspace_share_links").update(
-        {"use_count": int(use_count) + 1}
-    ).eq("id", link_id).execute()
+def increment_share_use(*, link_id: str, use_count: int, max_uses: int | None = None) -> bool:
+    builder = (
+        get_supabase_service_client()
+        .table("workspace_share_links")
+        .update({"use_count": int(use_count) + 1})
+        .eq("id", link_id)
+        .eq("use_count", int(use_count))
+    )
+    if max_uses is not None:
+        builder = builder.lt("use_count", int(max_uses))
+    response = builder.execute()
+    return bool(getattr(response, "data", None))
 
 
 def resolve_active_workspace(*, user_id: str, email: str | None, requested_id: str | None) -> dict[str, Any]:
