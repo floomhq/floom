@@ -51,6 +51,9 @@ def _run_visible_to_api(row: Any, *, user_id: str, repos: "Repositories") -> boo
         return False
     if _worker_hidden_from_api(worker_id):
         return False
+    actor_user_id = row_to_dict(row).get("actor_user_id")
+    if actor_user_id is not None and str(actor_user_id) == str(user_id):
+        return True
     # A run is visible if its worker is owned by the requesting user — regardless
     # of whether the worker is a stock/tracked worker. This closes the gap where
     # Emily (which bypasses the visibility filter) could see runs that /runs hid.
@@ -178,10 +181,21 @@ def _get_run_by_explicit_id(
     """
     row = repos.runs.get(user_id=user_id, run_id=run_id)
     if row is None:
+        try:
+            candidate = repos.runs.get_any(run_id=run_id)
+        except Exception:
+            candidate = None
+        candidate_data = row_to_dict(candidate) if candidate is not None else {}
+        if str(candidate_data.get("actor_user_id") or "") != str(user_id):
+            return None
+        row = candidate
+    data = row_to_dict(row)
+    actor_user_id = data.get("actor_user_id")
+    if actor_user_id is not None and str(actor_user_id) != str(user_id):
         return None
     if _run_visible_to_api(row, user_id=user_id, repos=repos):
         return row
-    worker_id = str(row_to_dict(row).get("worker_id") or "")
+    worker_id = str(data.get("worker_id") or "")
     if worker_id in _OPERATOR_REACHABLE_HIDDEN_WORKER_IDS:
         return row
     return None

@@ -3878,7 +3878,7 @@ def create_worker_run(
         trigger_source, trigger_ref = _worker_call_run_metadata(auth)
         trigger_source = trigger_source or "worker_call"
 
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     true_owner_id = _worker_owner_id(worker_id, repos) or str(worker.get("owner_id") or "")
@@ -4044,12 +4044,21 @@ def replay_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
     row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
     if not row:
+        try:
+            candidate = repos.runs.get_any(run_id=run_id)
+        except Exception:
+            candidate = None
+        if not candidate or str(candidate.get("actor_user_id") or "") != str(auth.user_id):
+            raise HTTPException(status_code=404, detail="Run not found")
+        row = candidate
+    actor_user_id = row.get("actor_user_id")
+    if actor_user_id is not None and str(actor_user_id) != str(auth.user_id):
         raise HTTPException(status_code=404, detail="Run not found")
     if row["worker_id"] != worker_id:
         raise HTTPException(status_code=404, detail="Run not found")
