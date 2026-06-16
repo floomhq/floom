@@ -283,6 +283,23 @@ def test_m06_mcp_serve_rejects_non_object_json_rpc_payload(monkeypatch, tmp_path
     assert body["error"]["message"] == "Invalid JSON-RPC request"
 
 
+@pytest.mark.parametrize("bad_value", [12345, False, 0])
+def test_m07_mcp_serve_rejects_non_string_secret_values(monkeypatch, tmp_path, bad_value):
+    monkeypatch.setenv("WORKEROS_MCP_ENABLE_DESTRUCTIVE", "1")
+    main = _load_api(monkeypatch, tmp_path)
+    payload = _rpc("tools/call", params={
+        "name": "secrets.set",
+        "arguments": {"key": "TEST_KEY", "value": bad_value},
+    })
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps(payload), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["error"]["code"] == -32602
+    assert body["error"]["message"] == "Invalid params: value must be a string"
+
+
 # M-04 - /api/mcp must not leak raw exception detail
 
 def test_m04_generic_error_no_internal_leak(monkeypatch, tmp_path):

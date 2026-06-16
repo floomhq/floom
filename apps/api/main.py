@@ -5234,6 +5234,38 @@ def _mcp_json_schema(properties: Dict[str, Any], required: Optional[List[str]] =
     }
 
 
+def _mcp_validate_arguments_against_schema(
+    tool_definitions: List[Dict[str, Any]],
+    tool_name: str,
+    arguments: Dict[str, Any],
+) -> Optional[str]:
+    tool = next((t for t in tool_definitions if t.get("name") == tool_name), None)
+    schema = tool.get("inputSchema") if isinstance(tool, dict) else None
+    if not isinstance(schema, dict):
+        return None
+    properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    required = schema.get("required") if isinstance(schema.get("required"), list) else []
+    for name in required:
+        if name not in arguments:
+            return f"Invalid params: missing {name}"
+    for name, value in arguments.items():
+        prop = properties.get(name)
+        if not isinstance(prop, dict):
+            continue
+        expected = prop.get("type")
+        if expected == "string" and not isinstance(value, str):
+            return f"Invalid params: {name} must be a string"
+        if expected == "boolean" and not isinstance(value, bool):
+            return f"Invalid params: {name} must be a boolean"
+        if expected == "integer" and (not isinstance(value, int) or isinstance(value, bool)):
+            return f"Invalid params: {name} must be an integer"
+        if expected == "object" and not isinstance(value, dict):
+            return f"Invalid params: {name} must be an object"
+        if expected == "array" and not isinstance(value, list):
+            return f"Invalid params: {name} must be an array"
+    return None
+
+
 def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
     worker_contract_yaml_description = (
         'WorkerContract YAML content. Required top-level fields: schema_version: "0.3", '
@@ -5559,7 +5591,13 @@ def _mcp_call_secrets_list(auth: AuthContext, repos: Repositories) -> Dict[str, 
 
 def _mcp_call_secrets_set(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
     key = _mcp_arg(arguments, "key").upper()
-    payload = SecretUpsertRequest(value=_mcp_arg(arguments, "value"))
+    value = arguments.get("value")
+    if not isinstance(value, str):
+        raise ValueError("Tool argument 'value' must be a string")
+    try:
+        payload = SecretUpsertRequest(value=value)
+    except ValidationError as exc:
+        raise ValueError(str(exc)) from exc
     data = upsert_secret(key, payload, auth=auth, repos=repos)
     return _mcp_call_result(data, "Secret saved.")
 
@@ -5770,6 +5808,13 @@ async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Option
     params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
     tool_name = str(params.get("name") or "")
     arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+    invalid_args = _mcp_validate_arguments_against_schema(
+        _workeros_remote_mcp_tool_definitions(),
+        tool_name,
+        arguments,
+    )
+    if invalid_args:
+        return _mcp_error(request_id, -32602, invalid_args)
     try:
         return _mcp_result(request_id, await _call_workeros_remote_mcp_tool(tool_name, arguments))
     except Exception as exc:
@@ -6830,6 +6875,9 @@ async def _mcp_handle_request(
         arguments = {} if raw_arguments is None else raw_arguments
         if not isinstance(arguments, dict):
             return _mcp_err(rpc_id, -32602, "Invalid params")
+        invalid_args = _mcp_validate_arguments_against_schema(_MCP_DEFAULT_TOOLS, tool_name, arguments)
+        if invalid_args:
+            return _mcp_err(rpc_id, -32602, invalid_args)
         # #833: audit trail for every MCP tool invocation.
         logger.info(
             "mcp tools/call: tool=%r user=%s role=%s auth_method=%s",
