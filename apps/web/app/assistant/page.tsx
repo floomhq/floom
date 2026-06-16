@@ -287,7 +287,7 @@ export default function AssistantPage() {
                     is a coworker who is around, not a config object. */}
                 <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
               </div>
-              <p className="text-xs text-muted-foreground">Chief of Staff</p>
+              <p className="text-xs text-muted-foreground">COO</p>
             </div>
           </div>
           <Link

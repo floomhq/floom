@@ -313,7 +313,7 @@ def test_claim_sends_emily_welcome_dm(monkeypatch, tmp_path):
     assert len(welcomes) == 1, f"expected one welcome DM, got {dms}"
     text = welcomes[0]["text"]
     assert "Emily" in text
-    assert "chief of staff" in text.lower()
+    assert "coo" in text.lower()
     assert "connected" in text.lower()
     assert "**" not in text
 

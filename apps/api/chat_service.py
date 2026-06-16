@@ -199,7 +199,7 @@ def _workspace_base_persona_path() -> Path:
 
 EMILY_BASE_PERSONA = """# Emily
 
-I'm Emily, your chief of staff. I get work done for you and your company.
+I'm Emily, your COO. I get work done for you and your company.
 
 I run a team of always-on AI workers and I have a memory for what matters to you,
 so I handle things end to end and only loop you in when I need a decision. I work
