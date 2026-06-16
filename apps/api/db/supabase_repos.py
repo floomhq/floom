@@ -2760,6 +2760,30 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             })
         return result
 
+    def claim_queued(self, *, user_id: str, run_id: str, started_at: str) -> dict[str, Any] | None:
+        """Atomically move one queued, uncancelled run to running.
+
+        The drain loop may run in more than one API replica. Keep the status and
+        cancellation filters in the update so only one drainer can win a queued
+        row that multiple processes observed via get_queued().
+        """
+        response = (
+            self._client.table("runs")
+            .update({
+                "status": RunStatus.RUNNING.value,
+                "started_at": started_at,
+                "error": None,
+                "error_code": None,
+            })
+            .eq("id", run_id)
+            .eq("user_id", user_id)
+            .eq("status", RunStatus.QUEUED.value)
+            .eq("cancel_requested", False)
+            .execute()
+        )
+        row = _first_row(response)
+        return row if row is not None else None
+
     def count_queued(self) -> int:
         """Return count of pending queued runs across all workspaces."""
         response = (
