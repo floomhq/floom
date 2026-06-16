@@ -434,50 +434,17 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     subtitle: "Reusable folders of files your workers can read before they act.",
     items: folders,
     loading,
-    // #1316: the brain drop affordance adapts to whether folders exist.
-    //   • Empty  → prominent dashed drop-zone ("Drag files here, or + New
-    //     folder"), the primary create + upload affordance.
-    //   • Populated → no permanent box: a slim right-aligned "+ New folder"
-    //     button; the whole container is the drop target (outer wrapper below)
-    //     with a dashed overlay only on drag-over.
-    // The banner is a function so CollectionView passes openAdd; this opens the
-    // unified "New folder" panel (no duplicate toolbar affordance).
+    // #1316: when folders exist, show a slim "+ New folder" button in the
+    // banner. When empty, the banner yields nothing — the single empty state
+    // below owns the whole affordance (drop zone + help + new-folder button).
     banner: (openAdd: () => void) =>
-      folders.length === 0 ? (
-        <div
-          className={`bdrop${listDragOver ? " over" : ""}`}
-          style={{ marginBottom: 2 }}
-          onDragOver={(e) => {
-            if (e.dataTransfer.types.includes("Files")) {
-              e.preventDefault();
-              if (!listDragOver) setListDragOver(true);
-            }
-          }}
-          onDragLeave={(e) => {
-            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
-              setListDragOver(false);
-            }
-          }}
-          onDrop={(e) => {
-            e.preventDefault();
-            setListDragOver(false);
-            const dropped = Array.from(e.dataTransfer.files);
-            if (dropped.length > 0) setPendingDropFiles(dropped);
-          }}
-        >
-          <Upload size={14} style={{ opacity: 0.6 }} />
-          <span>Drag files here, or</span>
-          <button type="button" className="bdlink" onClick={openAdd}>
-            + New folder
-          </button>
-        </div>
-      ) : (
+      folders.length > 0 ? (
         <div className="bdrop-slim">
           <button type="button" className="c-addbtn" onClick={openAdd}>
             <Plus size={14} /> New folder
           </button>
         </div>
-      ),
+      ) : null,
     idOf: (c) => c.name,
     searchOf: (c) => `${c.name} ${c.description ?? ""} ${c.category ?? ""}`,
     tagsOf: (c) =>
@@ -560,11 +527,14 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       },
     },
     states: {
-      // #1366 — improved help text; action falls back to the existing addButton
-      // ("New folder" panel trigger) so no dead /brain/new route is needed.
+      // design-polish: single empty state. Banner returns null when empty, so
+      // only the Collection EmptyState renders (no double-stacked boxes).
+      // Drop-and-drop still works: the outer wrapper handles dragOver/drop for
+      // all cases; the visual overlay fires regardless of whether folders exist.
+      // Help text uses colon not em-dash (lint:emdash).
       empty: {
         title: "No folders yet",
-        help: "Brain folders give your workers long-term memory — upload docs, PDFs, or notes they read before acting.",
+        help: "Brain folders give your workers long-term memory: upload docs, PDFs, or notes they read before acting.",
       },
     },
   };

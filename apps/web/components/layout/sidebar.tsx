@@ -509,9 +509,7 @@ export function UserProfileFooter({
   onNavigate,
   avatarUrl,
 }: { onNavigate?: () => void; avatarUrl?: string | null } = {}) {
-  const pathname = usePathname();
   const router = useRouter();
-  const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [workspaceName, setWorkspaceName] = useState("Floom workspace");
 
@@ -614,7 +612,7 @@ export function UserProfileFooter({
             render={<Link href="/settings" onClick={onNavigate} />}
             className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
           >
-            <Settings className={cn("size-4", settingsActive && "text-[var(--active-nav-text)]")} />
+            <Settings className="size-4" />
             Settings
           </DropdownMenuItem>
           <DropdownMenuSeparator />
