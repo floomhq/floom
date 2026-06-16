@@ -53,12 +53,15 @@ def _load_cloud_main(monkeypatch, tmp_path):
 class _FakeWorkers:
     """Minimal workers repo. get_any is global/unscoped, by design."""
 
-    def __init__(self, rows: dict[str, dict]):
+    def __init__(self, rows: dict[str, dict], *, fail_get_any: bool = False):
         self.rows = rows
         self.registered: list[dict] = []
         self.visibility_set: list[tuple[str, str]] = []
+        self.fail_get_any = fail_get_any
 
     def get_any(self, *, worker_id: str):
+        if self.fail_get_any:
+            raise AssertionError("cross-tenant source must not reach get_any")
         row = self.rows.get(worker_id)
         return dict(row) if row else None
 
@@ -160,7 +163,8 @@ def test_cross_tenant_share_blocked(monkeypatch, tmp_path):
                 "user_id": "victim_user",
                 "skill_version_id": "sv_secret",
             }
-        }
+        },
+        fail_get_any=True,
     )
     repos = SimpleNamespace(workers=workers)
 

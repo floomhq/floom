@@ -1226,23 +1226,19 @@ async def cloud_share_worker_to_workspace(worker_id: str, request: Request) -> A
     # The workspace copy is always owned by the workspace owner (admin).
     admin_user_id = str(ws["owner_user_id"])
 
-    # Read source worker. get_any() is a GLOBAL, UNSCOPED lookup by id, so the
-    # source worker MUST be authz-checked against the caller's active workspace
-    # before any of its files are read. Worker ids are guessable (slugified
-    # names); without this gate an admin could clone another tenant's
-    # worker.yml/run.py into their own workspace (cross-tenant IDOR).
+    # Source-workspace scoping: validate the source worker belongs to the
+    # caller's active workspace BEFORE any global worker row or source files are
+    # read. Worker ids are guessable; get_any() is a global unscoped lookup.
+    source_workspace_id = workspace_repo.workspace_id_for_worker(worker_id=worker_id)
+    if not source_workspace_id or str(source_workspace_id) != str(workspace_id):
+        raise HTTPException(status_code=404, detail="worker not found")
+
     repos = engine_main.get_repositories()
     source = repos.workers.get_any(worker_id=worker_id)
     if not source:
         raise HTTPException(status_code=404, detail="worker not found")
-
-    # Source-workspace scoping: the worker being shared must belong to the
-    # caller's active workspace. Mirrors the owner/workspace check that
-    # clone-link and the visibility endpoint enforce. Treat a missing/mismatched
-    # source workspace as not-found so we don't leak existence of other tenants'
-    # workers.
-    source_workspace_id = workspace_repo.workspace_id_for_worker(worker_id=worker_id)
-    if not source_workspace_id or str(source_workspace_id) != str(workspace_id):
+    row_workspace_id = str(source.get("workspace_id") or source_workspace_id)
+    if row_workspace_id != str(workspace_id):
         raise HTTPException(status_code=404, detail="worker not found")
 
     sv_id = (source.get("skill_version_id") or "").strip()
