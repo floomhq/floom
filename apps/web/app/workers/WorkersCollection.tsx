@@ -1374,19 +1374,9 @@ export default function WorkersCollection({
         sparkline: w.timeseries && w.timeseries.length > 0
           ? <Sparkline data={w.timeseries} width={56} height={22} tone="status" variant="bars" />
           : undefined,
-        // B15: View + Edit quick actions on hover.
-        quickActions: [
-          {
-            label: "View",
-            onClick: () => { window.location.href = `/workers?sel=${encodeURIComponent(w.id)}`; },
-          },
-          ...(can("edit", w)
-            ? [{
-                label: "Edit",
-                onClick: () => { window.location.href = `/workers?sel=${encodeURIComponent(w.id)}&tab=Config`; },
-              }]
-            : []),
-        ],
+        // #1308: removed View (redundant — clicking the card opens it) and
+        // Edit (opens the same split-pane; Config tab is one click away).
+        quickActions: [],
       };
     },
     detail: (w) => {
