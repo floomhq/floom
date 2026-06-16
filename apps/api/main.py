@@ -1541,6 +1541,7 @@ async def auth_middleware(request: Request, call_next):
             or path.startswith("/approvals/public/")
             or path.startswith("/workers/public/")
             or path.startswith("/runs/public/")  # #765: token-gated read-only run view
+            or _RE_RUN_STREAM.match(path)  # #1338: endpoint enforces auth OR worker share token
             or path.startswith("/workers/short-links/")
             or path.startswith("/s/")
             or path.startswith("/c/")
@@ -1591,6 +1592,7 @@ logger = logging.getLogger("floom.api")
 # auth is by X-Workeros-Run-Token, scoped to the run_id in the path).
 import re as _re
 _RE_RUN_COMPOSIO_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/composio-execute/[A-Z0-9_]+$")
+_RE_RUN_STREAM = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/stream$")
 _RE_WORKER_RUN_CREATE = _re.compile(r"^/workers/[^/]+/runs$")
 _RE_RUN_DETAIL = _re.compile(r"^/runs/([a-zA-Z0-9_-]+)$")
 
