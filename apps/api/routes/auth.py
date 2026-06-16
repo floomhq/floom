@@ -619,12 +619,12 @@ def _store_cli_exchange(
 
 @router.get("/login")
 def login(
-    request: Request,
     provider: str,
     next: str = "/",
     email: str | None = None,
     device_code: str | None = None,
     user_code: str | None = None,
+    request: Request = None,  # type: ignore[assignment]
 ):
     normalized_provider = (provider or "").strip().lower()
     next_path = _safe_next(next)
