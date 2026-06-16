@@ -312,6 +312,18 @@ All endpoints require the `x-floom-secret` header (set `FLOOM_SECRET` in `.env`)
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup,
 the repo layout, and PR guidelines.
 
+For quick local checks from the repo root:
+
+```bash
+npm run test:api
+npm run lint:web
+npm run test:web
+npm run test:mcp
+```
+
+The full GitHub Actions matrix currently runs on project self-hosted runners, so
+external contributors should include the local commands they ran in the PR.
+
 ## Security
 
 To report a vulnerability, please follow [SECURITY.md](SECURITY.md) and report it
