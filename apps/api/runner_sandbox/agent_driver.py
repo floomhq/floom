@@ -310,6 +310,20 @@ class AgentDriver(SandboxDriver):
         limits = config.runtime.limits
         bundle_dir = _worker_dir_for_run(worker_id, config)
         if not bundle_dir.is_dir():
+            try:
+                from services.worker_materialization import rematerialize_worker_from_db
+
+                if rematerialize_worker_from_db(worker_id, target_dir=bundle_dir):
+                    log_fn("[agent] Re-materialized worker files from DB", "info")
+            except Exception as exc:
+                logger.warning(
+                    "Worker re-materialization failed for %s at %s: %s",
+                    worker_id,
+                    bundle_dir,
+                    exc,
+                )
+
+        if not bundle_dir.is_dir():
             return WorkerResult(
                 status="error",
                 error=f"Worker directory not found: {bundle_dir}",
