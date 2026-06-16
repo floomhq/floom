@@ -819,6 +819,9 @@ html.dark .grain {
 .bdrop { margin-top:12px; display:flex; flex-wrap:nowrap; align-items:center; justify-content:center; gap:8px; padding:18px; border:1.5px dashed var(--line); border-radius:12px; color:var(--muted-foreground); font-size:12.5px; white-space:nowrap; transition:background .12s,border-color .12s; }
 .bdrop.over { border-color:var(--accent); background:var(--sel); color:var(--accent); }
 .bdrop .bdlink { color:var(--accent); font-weight:500; background:none; border:0; cursor:pointer; padding:0; }
+/* #1316: populated brain — slim right-aligned create action, no permanent box
+   (the whole container is the drop target with an on-drag overlay). */
+.bdrop-slim { display:flex; justify-content:flex-end; margin:0 0 12px; }
 
 /* grid cards (SPEC §2b — calm: avatar+name, desc, one status line) */
 .c-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:14px; }

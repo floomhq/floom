@@ -216,6 +216,20 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
     </button>
   );
 
+  // Opens the +Add panel (or runs onSelect) — shared by the toolbar add button
+  // and a function-form banner (e.g. Brain's "+ New folder" drop-zone link).
+  const openAdd = () => {
+    if (config.add?.panel) {
+      patch({ sel: null, tab: null });
+      setListCollapsed(false);
+      setCreating(true);
+    } else {
+      config.add?.onSelect?.();
+    }
+  };
+  const resolvedBanner =
+    typeof config.banner === "function" ? config.banner(openAdd) : config.banner;
+
   // ---- pagination (resting list only, not compact split-left) ----
   const totalPages = Math.ceil(filtered.length / LIST_PAGE_SIZE);
   const safePage = Math.min(page, Math.max(0, totalPages - 1));
@@ -386,7 +400,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           )}
           <div className="c-body" style={{ marginTop: 14 }}>
             <div className="c-listcol" ref={bodyRef} style={{ padding: `0 ${PAGE_X}px 26px` }}>
-              {config.banner}
+              {resolvedBanner}
               {listOrGrid(false)}
               {config.footer}
             </div>
@@ -409,7 +423,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
             </div>
             <div className="c-splitbar">{searchBox(true)}</div>
             <div className="lcin">
-              {config.banner}
+              {resolvedBanner}
               {listOrGrid(true)}
             </div>
           </div>
