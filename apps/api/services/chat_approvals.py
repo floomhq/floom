@@ -9,24 +9,22 @@ imported from chat_service (it is shared with the system-prompt builder there).
 """
 from __future__ import annotations
 
-import hashlib
-import hmac
 import json
 import logging
-import os
 from typing import Any, Dict, Optional
+
+from core.approval_signing import approval_public_token, try_approval_public_token
 
 logger = logging.getLogger("floom.chat")
 
 
 def _approval_public_token(row: Any) -> str:
-    # #998: fail closed — no signing with a public constant.
-    secret = (os.environ.get("FLOOM_SECRET") or "").strip()
-    if not secret:
-        from fastapi import HTTPException
-        raise HTTPException(status_code=503, detail="Server signing secret not configured")
-    payload = ".".join(str(row[key] or "") for key in ("id", "run_id", "owner_id"))
-    return hmac.new(secret.encode("utf-8"), payload.encode("utf-8"), hashlib.sha256).hexdigest()
+    # Backward-compat shim: the canonical fail-closed mint now lives in
+    # core.approval_signing (decoupled from FLOOM_SECRET via
+    # WORKEROS_APPROVAL_SIGNING_SECRET). Still fail-closed (503) when no signer —
+    # never sign a public share token with a public constant (#998). `row` is a
+    # sqlite3.Row or a dict-like supporting __getitem__ on these three keys.
+    return approval_public_token({key: row[key] for key in ("id", "run_id", "owner_id")})
 
 
 def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
@@ -51,12 +49,16 @@ def _tool_approvals_list_pending(args: Dict[str, Any], user_id: str) -> Dict[str
             approval_id = row["id"]
             # Authoritative, tokenised deep link on the configured public host so
             # Emily surfaces a working link instead of inventing a fake URL.
+            # DEGRADE, never raise: when no signer secret is configured (e.g.
+            # cloud mode), omit the link rather than 503 the whole pending-list
+            # tool — the operator still sees their pending approvals.
             review_url = None
             if approval_id and row["run_id"] and row["owner_id"]:
-                token = _approval_public_token(
+                token = try_approval_public_token(
                     {"id": approval_id, "run_id": row["run_id"], "owner_id": row["owner_id"]}
                 )
-                review_url = f"{_APPROVALS_BASE_URL}/approvals/review?id={approval_id}&token={token}"
+                if token:
+                    review_url = f"{_APPROVALS_BASE_URL}/approvals/review?id={approval_id}&token={token}"
             result.append({
                 "id": approval_id,
                 "owner_id": row["owner_id"],
