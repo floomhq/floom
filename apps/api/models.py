@@ -1420,6 +1420,13 @@ class WorkerContract(BaseModel):
     system_worker: Optional[bool] = None
     archived: bool = False
     archive_reason: Optional[str] = None
+    # Stage: a worker maturity LABEL, orthogonal to archived/enabled/visibility.
+    # "draft" — work-in-progress (default for newly created workers)
+    # "live"  — promoted, trusted-to-run-in-production
+    # Pure label: never gates execution, scheduling, or access. Lets the operator
+    # separate WIP workers from the ones they rely on (mess-control). Stored in
+    # worker.yml so it travels with the bundle and is version-controlled.
+    stage: Optional[str] = None
     # Visibility: controls who can see and run this worker.
     # "private"   — owner only (default)
     # "workspace" — all workspace members
@@ -2104,6 +2111,9 @@ class WorkerSummary(BaseModel):
     system: Optional[bool] = None
     archived: bool = False
     archive_reason: Optional[str] = None
+    # Maturity label: "draft" (WIP) | "live" (promoted). Pure label, never gates
+    # execution. Defaults None on the model; the serializer resolves draft/live.
+    stage: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     folder: Optional[str] = None
     status: WorkerStatus
@@ -2155,6 +2165,9 @@ class WorkerDetail(BaseModel):
     # operator click into a dead-end 409. Defaults true (a normal active worker).
     enabled: bool = True
     archive_reason: Optional[str] = None
+    # Maturity label: "draft" (WIP) | "live" (promoted). Pure label, never gates
+    # execution. The serializer resolves draft/live from the manifest.
+    stage: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     folder: Optional[str] = None
     status: WorkerStatus
