@@ -137,20 +137,21 @@ function MetricCard({
           </span>
         </p>
       </div>
-      {/* Full-width sparkline pinned to the bottom, edge-to-edge */}
-      <div className="mt-auto h-12">
-        {loading ? (
-          <Skeleton className="h-full w-full rounded-none" />
-        ) : hasSparkline ? (
-          <Sparkline
-            data={sparkline as OverviewSparklineBucket[]}
-            width={240}
-            height={40}
-            variant="area"
-            className="h-full w-full"
-          />
-        ) : null}
-      </div>
+      {(loading || hasSparkline) && (
+        <div className="mt-auto h-12">
+          {loading ? (
+            <Skeleton className="h-full w-full rounded-none" />
+          ) : (
+            <Sparkline
+              data={sparkline as OverviewSparklineBucket[]}
+              width={240}
+              height={40}
+              variant="area"
+              className="h-full w-full"
+            />
+          )}
+        </div>
+      )}
     </>
   );
   return href ? (
@@ -496,7 +497,7 @@ export function OverviewDashboard({
   const failedToday = data?.stats.failed_today;
   const hasRunBreakdown = completedToday !== undefined || failedToday !== undefined;
 
-  // S45: sparklines per metric tile
+  // One run-series sparkline belongs on the flagship run-completion tile.
   const runs7dSparkline = useMemo(
     () => data?.stats.runs_7d_sparkline ?? [],
     [data?.stats.runs_7d_sparkline],
@@ -529,23 +530,20 @@ export function OverviewDashboard({
         // "Runs completed" above); the runsToday total is raw activity volume.
         context: hasRunBreakdown
           ? `${completedToday ?? 0} ok · ${failedToday ?? 0} failed`
-          : `${runsToday} in last 24h`,
+          : "Last 24h",
         warning: Boolean(failedToday),
-        sparkline: runs7dSparkline,
       },
       {
         value: workerMetric.value,
         label: workerMetric.label,
         href: "/workers",
         context: workerMetric.context,
-        sparkline: runs7dSparkline,
       },
       {
         value: data?.stats.scheduled_24h_count ?? data?.scheduled_today?.length ?? 0,
         label: "Coming up today",
         href: "/runs",
         context: nextScheduled,
-        sparkline: runs7dSparkline,
       },
     ],
     [

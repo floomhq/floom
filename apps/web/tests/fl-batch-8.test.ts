@@ -105,23 +105,15 @@ function test556WorkerDetailShowsSecretNames(): void {
 }
 
 // ---------------------------------------------------------------------------
-// Frontend: connections page — setup required callout
+// Frontend: connections page — setup required handled inline
 // ---------------------------------------------------------------------------
 
-// #813 RESTORE — re-wired against ConnectionsCollection.tsx.
-// The ui-collection refactor dropped the callout; #813 product decision = restore.
-// computeMissingBySlug reads worker.missing_connections (#556 backend field) and
-// produces a missingBySlug map; the SetupRequiredCallout renders "Setup required".
-function test556ConnectionsSetupCallout(): void {
+function test556ConnectionsSetupInlineOnly(): void {
   const s = src("app/connections/ConnectionsCollection.tsx");
-  assert(s.includes("missingBySlug"),
-    "ConnectionsCollection must track missingBySlug state");
-  assert(s.includes("computeMissingBySlug"),
-    "ConnectionsCollection must define computeMissingBySlug helper");
-  assert(s.includes("Setup required"),
-    "ConnectionsCollection must render a 'Setup required' callout");
-  assert(s.includes("missing_connections"),
-    "computeMissingBySlug must read worker.missing_connections");
+  assert(!s.includes("SetupRequiredCallout"),
+    "ConnectionsCollection must not render the duplicated setup callout");
+  assert(s.includes("Reconnect"),
+    "ConnectionsCollection must keep the inline Reconnect action");
 }
 
 // ---------------------------------------------------------------------------
@@ -136,7 +128,7 @@ const tests: [string, () => void][] = [
   ["#556 worker detail builder computes and passes missing fields", test556MainComputesMissingInDetail],
   ["#556 TypeScript types updated for both interfaces", test556TypesUpdated],
   ["#556 worker detail page renders specific secret names with prefill links", test556WorkerDetailShowsSecretNames],
-  ["#556 connections page shows Setup required callout from missingBySlug", test556ConnectionsSetupCallout],
+  ["#556 connections page keeps setup affordance inline", test556ConnectionsSetupInlineOnly],
 ];
 
 let passed = 0;

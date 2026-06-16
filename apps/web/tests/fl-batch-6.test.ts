@@ -95,8 +95,8 @@ function test539SetupInDropdown(): void {
 
 function test539PrimaryTabsOnly4(): void {
   const s = src("lib/workers/tabs.ts");
-  assert(s.includes("Overview") && s.includes("History") && s.includes("Source") && s.includes("Versions") && s.includes("Config"),
-    "Worker split-pane tabs must expose the v4 detail tab set");
+  assert(s.includes("Overview") && s.includes("Runs") && s.includes("Config") && s.includes("Source") && s.includes("Versions"),
+    "Worker split-pane tabs must expose the minimal detail tab set");
 }
 
 // ---------------------------------------------------------------------------
