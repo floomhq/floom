@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound } from "lucide-react";
+import { Activity, Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -62,6 +62,24 @@ function WorkspaceDiceBearAvatar({ name, size }: { name: string; size: number })
       width={size}
       height={size}
       className="shrink-0 rounded-[var(--radius-button)] object-cover"
+      style={{ width: size, height: size }}
+    />
+  );
+}
+
+// #1306: user profile avatar fallback when /me returns no OAuth photo.
+// DiceBear `glass` style deterministically seeded by the user's email/name:
+// a calm geometric mark (no cartoon faces), consistent with the workspace
+// mark's squircle, flat, no-border treatment.
+function UserDiceBearAvatar({ seed, size }: { seed: string; size: number }) {
+  const safeSeed = encodeURIComponent(seed || "user");
+  const src = `https://api.dicebear.com/9.x/glass/svg?seed=${safeSeed}&radius=0`;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt="Profile avatar"
+      className="shrink-0 rounded-[var(--radius-button)] border-0 object-cover"
       style={{ width: size, height: size }}
     />
   );
@@ -161,7 +179,7 @@ type NavItem = {
 const nav: NavItem[] = [
   { href: "/overview", label: "Overview", icon: Activity },
   { href: "/workers", label: "Workers", icon: Box, hint: "Your AI workers" },
-  { href: "/library", label: "Library", icon: Brain },
+  { href: "/library", label: "Library", icon: Library },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
   { href: "/connections", label: "Connections", icon: Plug },
@@ -547,7 +565,6 @@ export function UserProfileFooter({
   const primary = (user as (typeof user & { username?: string | null }) | null)?.username
     || user?.email || user?.display_name || "Local user";
   const secondary = workspaceName;
-  const initials = profileInitials(primary);
   // #1306: prefer the explicit prop, else the OAuth photo off the fetched user
   // (Google/GitHub `picture` / `avatar_url`). OSS /me returns neither, so this
   // gracefully falls back to initials; the Downstream host's /me supplies it.
@@ -591,9 +608,11 @@ export function UserProfileFooter({
               referrerPolicy="no-referrer"
             />
           ) : (
-            <div className="size-7 shrink-0 rounded-[var(--radius-button)] border-0 bg-muted text-foreground grid place-items-center text-[11px] font-medium">
-              {initials}
-            </div>
+            // #1306: no OAuth photo (OSS /me returns none): fall back to a
+            // DiceBear avatar deterministically seeded by the user's
+            // email/name, NOT bare initials. Squircle container, no border,
+            // matching the workspace mark approach.
+            <UserDiceBearAvatar seed={primary} size={28} />
           )}
           <div className="min-w-0 leading-tight text-left">
             <p className="text-xs font-medium text-foreground truncate">{primary}</p>
@@ -629,17 +648,4 @@ export function UserProfileFooter({
       <ThemeModeButton />
     </div>
   );
-}
-
-function profileInitials(value: string) {
-  const local = value.includes("@") ? value.split("@", 1)[0] : value;
-  const parts = local
-    .split(/[\s._-]+/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const letters = parts.length > 1 ? [parts[0][0], parts[1][0]] : [local[0], local[1]];
-  return letters
-    .filter(Boolean)
-    .join("")
-    .toUpperCase() || "LU";
 }
