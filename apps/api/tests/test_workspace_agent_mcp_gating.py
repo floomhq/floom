@@ -20,6 +20,8 @@ import json
 import sys
 from pathlib import Path
 
+import pytest
+
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
@@ -99,6 +101,21 @@ def test_admin_only_tool_still_works_for_operator_token(monkeypatch, tmp_path):
     assert resp.status_code == 200
     result = resp.json()["result"]
     assert result.get("isError") is not True, result
+
+
+@pytest.mark.parametrize("bad_value", [12345, False, 0])
+def test_secrets_set_rejects_non_string_values(monkeypatch, tmp_path, bad_value):
+    main = _load_main(monkeypatch, tmp_path)
+
+    resp = _post(main, _rpc("tools/call", "s2", {
+        "name": "secrets.set",
+        "arguments": {"key": "TEST_KEY", "value": bad_value},
+    }))
+
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["error"]["code"] == -32602
+    assert body["error"]["message"] == "Invalid params: value must be a string"
 
 
 def test_workspace_chat_tool_is_not_gated(monkeypatch, tmp_path):
