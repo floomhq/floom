@@ -124,6 +124,13 @@ function OutputTab({ r }: { r: RunSummary }) {
     if (!res.ok) throw new Error(`Could not read ${file.name}`);
     return res.text();
   };
+  // .npz array viewer: same same-origin proxy URL, fetched as raw bytes and
+  // parsed header-only client-side (no numpy, no array-data load).
+  const loadArtifactBlob = async (file: InlineFile): Promise<ArrayBuffer> => {
+    const res = await fetch(file.url);
+    if (!res.ok) throw new Error(`Could not read ${file.name}`);
+    return res.arrayBuffer();
+  };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {d.error && (
@@ -141,6 +148,7 @@ function OutputTab({ r }: { r: RunSummary }) {
             rootLabel="Output"
             defaultOpenId={autoOpenId}
             loadText={loadArtifactText}
+            loadBlob={loadArtifactBlob}
           />
         </div>
       )}
