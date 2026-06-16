@@ -22,6 +22,7 @@ import { LoadingState } from "@/components/collection/CollectionStates";
 import { InlineFileOpen } from "@/components/file-viewer/InlineFileOpen";
 import { traceSteps } from "@/lib/runs/trace";
 import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
+import { useRunLogStream } from "@/lib/useRunLogStream";
 import { contentTagOptions } from "@/lib/workers/derive";
 import {
   formatDuration,
@@ -34,10 +35,13 @@ import {
 
 const detailCache = new Map<string, RunDetail>();
 
-function useRunDetail(id: string): RunDetail | undefined {
+function useRunDetail(id: string, status?: string): RunDetail | undefined {
   const [d, setD] = useState<RunDetail | undefined>(detailCache.get(id));
+  // §2.1: never serve a cached entry for an active (running/queued) run so the
+  // detail re-fetches when the run completes and the OutputTab shows final output.
+  const isActive = status === "running" || status === "queued";
   useEffect(() => {
-    if (detailCache.has(id)) {
+    if (!isActive && detailCache.has(id)) {
       setD(detailCache.get(id));
       return;
     }
@@ -45,21 +49,23 @@ function useRunDetail(id: string): RunDetail | undefined {
     api.runs
       .get(id)
       .then((rd) => {
-        detailCache.set(id, rd);
+        if (!isActive) detailCache.set(id, rd);
         if (alive) setD(rd);
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [id]);
+  }, [id, isActive]);
   return d;
 }
 
-// SPEC §4 Output: result + files; files open INLINE (breadcrumb/Back/Download);
-// PNG artifacts render as images (shared InlineFileOpen, rule #5).
+// SPEC §4 Output: files FIRST (§2.6), then result JSON.
+// Files open INLINE (breadcrumb/Back/Download); PNG artifacts render as
+// images (shared InlineFileOpen, rule #5). InlineFileOpen already carries
+// the Preview/Raw segmented toggle (#1289) for code/markdown/text files.
 function OutputTab({ r }: { r: RunSummary }) {
-  const d = useRunDetail(r.id);
+  const d = useRunDetail(r.id, r.status);
   if (!d) return <LoadingState rows={4} />;
   const files = (d.artifacts ?? []).map((a) => ({
     id: a.id,
@@ -75,16 +81,17 @@ function OutputTab({ r }: { r: RunSummary }) {
           {d.error}
         </div>
       )}
-      <div>
-        <h4 style={h4}>Result</h4>
-        <pre style={code}>{JSON.stringify(d.output ?? {}, null, 2)}</pre>
-      </div>
+      {/* §2.6: files shown FIRST, before the result JSON */}
       {files.length > 0 && (
         <div>
           <h4 style={h4}>Files</h4>
           <InlineFileOpen files={files} rootLabel="Output" />
         </div>
       )}
+      <div>
+        <h4 style={h4}>Result</h4>
+        <pre style={code}>{JSON.stringify(d.output ?? {}, null, 2)}</pre>
+      </div>
     </div>
   );
 }
@@ -114,11 +121,25 @@ function resolveTokenCount(d: import("@/lib/types").RunDetail): number | null {
   return null;
 }
 
+// §2.4/§2.5: Stream logs in real-time via GET /runs/{id}/logs/stream (SSE).
+// §2.1: While the run is in-progress, show the live stream instead of static data.
+// The hook replays full history on connect, so no separate REST fetch is needed
+// for logs. We still load the run detail (useRunDetail) for steps, tokens, and
+// raw JSON -- those are not in the log stream.
 function TraceTab({ r }: { r: RunSummary }) {
-  const d = useRunDetail(r.id);
+  const d = useRunDetail(r.id, r.status);
+  // Live SSE log stream -- connects immediately and accumulates log lines.
+  const { logs: streamLogs, connected: logConnected, done: logDone } = useRunLogStream(r.id);
+
   if (!d) return <LoadingState rows={4} />;
   const steps = traceSteps(d.transcript);
-  const logs = d.logs ?? [];
+  // Prefer the live stream logs while the run is active or the stream is
+  // open; fall back to the static d.logs once the stream is done and the
+  // detail payload has fully loaded (completed/failed runs).
+  const isActive = r.status === "running" || r.status === "queued";
+  const logs = isActive || logConnected || (streamLogs.length > 0 && !logDone)
+    ? streamLogs
+    : (d.logs ?? []);
   const tokenCount = resolveTokenCount(d);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
@@ -148,14 +169,32 @@ function TraceTab({ r }: { r: RunSummary }) {
           {steps.length === 0 && <div style={{ ...muted, padding: 14 }}>No steps recorded.</div>}
         </div>
       </div>
-      {logs.length > 0 && (
-        <div>
-          <h4 style={h4}>Logs</h4>
+      <div>
+        <h4 style={h4}>
+          Logs
+          {/* Live indicator while stream is open and run is active */}
+          {logConnected && isActive && (
+            <span style={{ marginLeft: 8, color: "var(--accent, #3E6FE0)", fontWeight: 500, fontSize: 10 }}>
+              Live
+            </span>
+          )}
+        </h4>
+        {logs.length > 0 ? (
           <pre style={code}>
-            {logs.map((l) => `${l.timestamp} [${l.level}] ${l.message}`).join("\n")}
+            {logs
+              .map((l) => {
+                const ts = l.timestamp ? l.timestamp.replace("T", " ").replace(/\.\d+Z$/, "Z") : "";
+                const tid = l.trace_id ? ` [${l.trace_id.slice(0, 8)}]` : "";
+                return `${ts} [${l.level}]${tid} ${l.message}`;
+              })
+              .join("\n")}
           </pre>
-        </div>
-      )}
+        ) : isActive && logConnected ? (
+          <div style={{ ...muted, padding: 14 }}>Waiting for log output...</div>
+        ) : (
+          <div style={{ ...muted, padding: 14 }}>No logs recorded.</div>
+        )}
+      </div>
       <details>
         <summary className="c-vpill inline-flex cursor-pointer" style={{ padding: "6px 11px", fontSize: 12.5 }}>
           View raw JSON
@@ -168,7 +207,7 @@ function TraceTab({ r }: { r: RunSummary }) {
 
 // SPEC §4: Inputs — the run's input payload.
 function InputsTab({ r }: { r: RunSummary }) {
-  const d = useRunDetail(r.id);
+  const d = useRunDetail(r.id, r.status);
   if (!d) return <LoadingState rows={3} />;
   const input = d.input ?? {};
   if (Object.keys(input).length === 0) return <div style={muted}>This run took no inputs.</div>;
