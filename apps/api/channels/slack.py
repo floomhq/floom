@@ -1320,6 +1320,91 @@ def _slack_pending_approvals_response(rows: List[Dict[str, Any]]) -> Dict[str, A
 
 
 # ---------------------------------------------------------------------------
+# Help command (#1383)
+# ---------------------------------------------------------------------------
+
+def _slack_help_response() -> Dict[str, Any]:
+    """Return an ephemeral Block Kit help card for /floom help (Feature #1383)."""
+    blocks = [
+        {
+            "type": "header",
+            "text": {"type": "plain_text", "text": "Emily — what I can do", "emoji": False},
+        },
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": (
+                    "*Run a worker* — `/floom run my-worker` or ask me in a DM\n"
+                    "*Approve/reject* — `/floom approvals` · or reply to the approval DM\n"
+                    "*Create a worker* — describe what you need in a DM, I'll build it\n"
+                    "*Notifications* — I'll DM you when runs complete or need approval\n"
+                    "\nSend me a message directly for anything else."
+                ),
+            },
+        },
+    ]
+    return {
+        "response_type": "ephemeral",
+        "text": "Run / Approve / Create / Notify — send me a DM for anything else.",
+        "blocks": blocks,
+    }
+
+
+def _slack_worker_created_blocks(
+    *,
+    worker_name: str,
+    worker_id: str,
+    run_id: Optional[str] = None,
+) -> tuple[str, List[Dict[str, Any]]]:
+    """Return (fallback_text, blocks) for a worker-created Block Kit card (#1386).
+
+    Includes Review, Run, and Disable buttons that route through the existing
+    interactivity handler (workeros_worker_review / workeros_worker_run /
+    workeros_worker_disable action_ids).
+    """
+    frontend_url = _frontend_base_url()
+    review_url = f"{frontend_url}/workers/{worker_id}"
+    fallback_text = f"Worker created: {worker_name}"
+    blocks: List[Dict[str, Any]] = [
+        {
+            "type": "section",
+            "text": {
+                "type": "mrkdwn",
+                "text": f"*Worker created:* {worker_name}\n`{worker_id}`",
+            },
+        },
+        {
+            "type": "actions",
+            "elements": [
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Review", "emoji": False},
+                    "url": review_url,
+                    "action_id": "workeros_worker_review",
+                    "value": worker_id,
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Run", "emoji": False},
+                    "style": "primary",
+                    "action_id": "workeros_worker_run",
+                    "value": worker_id,
+                },
+                {
+                    "type": "button",
+                    "text": {"type": "plain_text", "text": "Disable", "emoji": False},
+                    "style": "danger",
+                    "action_id": "workeros_worker_disable",
+                    "value": worker_id,
+                },
+            ],
+        },
+    ]
+    return fallback_text, blocks
+
+
+# ---------------------------------------------------------------------------
 # Message handlers (background tasks)
 # ---------------------------------------------------------------------------
 
@@ -1478,6 +1563,21 @@ async def _handle_slack_direct_message(
                 logger.exception("Slack unbound sender claim prompt failed")
             return
 
+    # Feature #1383: "help" keyword in DM → ephemeral help card (short-circuit, no agent run).
+    if prompt.lower().strip() in {"help", "/help", "floom help", "/floom help"}:
+        try:
+            _help = _slack_help_response()
+            _post_slack_thread_reply_blocks(
+                channel=channel,
+                thread_ts=thread_ts,
+                text=_help["text"],
+                blocks=_help.get("blocks") or [],
+                bot_token=bot_token,
+            )
+        except Exception:
+            logger.exception("Slack DM help reply failed")
+        return
+
     conversation_id = f"slack-assistant:{channel}:{thread_ts}"
     # Generate a short-lived sign-in URL and surface it in the system prompt so
     # Emily can share it when the user asks about signing in or getting started.
@@ -1618,10 +1718,7 @@ async def _slack_command_response_from_form(
             return _slack_unbound_command_response(team_id, slack_user_id)
 
     if command in {"", "help"}:
-        return JSONResponse({
-            "response_type": "ephemeral",
-            "text": "Try `/floom approvals` or `/floom <question for your workspace agent>`.",
-        })
+        return JSONResponse(_slack_help_response())
 
     if command in {"approvals", "approval", "pending approvals"}:
         repos = get_repositories()
@@ -1702,6 +1799,46 @@ def _slack_interactivity_response_from_form(form: Dict[str, str]) -> Response:
             "replace_original": True,
             "text": f"Dismissed approval `{run_id}`.",
         })
+
+    # Feature #1386: worker-card actions (Review opens a URL button — Slack handles
+    # it client-side; Run triggers a manual run; Disable pauses the worker).
+    if action_id == "workeros_worker_review":
+        # URL button: Slack has already opened the URL in the browser; acknowledge.
+        return JSONResponse({"replace_original": False, "text": ""})
+
+    if action_id in {"workeros_worker_run", "workeros_worker_disable"}:
+        worker_id_val = str(action.get("value") or "")
+        if not worker_id_val:
+            return JSONResponse({"replace_original": False, "text": "Missing worker_id."})
+        try:
+            from main import row_to_dict
+            from db import get_repositories as _get_repositories_main
+            _repos_w = _get_repositories_main()
+            if action_id == "workeros_worker_run":
+                from main import _trigger_run_for_worker
+                _trigger_run_for_worker(
+                    worker_id=worker_id_val,
+                    user_id=user_id,
+                    repos=_repos_w,
+                    trigger_source="slack",
+                )
+                return JSONResponse({
+                    "replace_original": False,
+                    "text": f"Run started for `{worker_id_val}`.",
+                })
+            else:
+                # Disable: set enabled=False on the worker.
+                _repos_w.workers.update(user_id=user_id, worker_id=worker_id_val, enabled=False)
+                return JSONResponse({
+                    "replace_original": True,
+                    "text": f"Worker `{worker_id_val}` disabled.",
+                })
+        except Exception as exc:
+            logger.exception("Slack worker action %s failed for %s", action_id, worker_id_val)
+            return JSONResponse({
+                "replace_original": False,
+                "text": f"Could not complete action: {exc}",
+            })
 
     if action_id not in {"workeros_approval_approve", "workeros_approval_reject"}:
         return JSONResponse({

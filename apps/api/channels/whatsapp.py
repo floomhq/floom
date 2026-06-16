@@ -1217,6 +1217,22 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, pr
             logger.exception("WhatsApp approval reply send failed")
         return
 
+    # Feature #1383: "help" keyword → short capability reply, no agent run.
+    if text.lower().strip() in {"help", "?", "commands", "/help"}:
+        _help_msg = (
+            "Here's what I can do:\n\n"
+            "*Run* — send 'run <worker>' to trigger a worker\n"
+            "*Approve* — reply 'yes' or 'no' to pending approvals\n"
+            "*Create* — describe a task and I'll build a worker for it\n"
+            "*Notify* — I'll message you when runs finish or need approval\n\n"
+            "Just describe what you need and I'll handle it."
+        )
+        try:
+            send_whatsapp_text(normalized_wa_id, _help_msg)
+        except Exception:
+            logger.exception("WhatsApp help reply failed")
+        return
+
     conversation_id = f"whatsapp:{normalized_wa_id}"
     try:
         try:
