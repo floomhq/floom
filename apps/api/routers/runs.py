@@ -875,23 +875,55 @@ def get_public_run(
     return get_run(run_id, auth=owner_auth, repos=repos)
 
 
+def _get_run_for_worker_share_stream(
+    run_id: str,
+    token: str,
+    repos: Repositories,
+) -> tuple[Any, str]:
+    row = _load_standalone_share_row(token)
+    if not row or str(row.get("entity_type") or "") != "worker":
+        raise HTTPException(status_code=404, detail="Run not found")
+    owner_id = str(row.get("owner_id") or "")
+    worker_id = str(row.get("entity_id") or "")
+    try:
+        run_row = repos.runs.get_any(run_id=run_id)
+    except Exception:
+        run_row = None
+    data = row_to_dict(run_row) if run_row is not None else {}
+    if (
+        not data
+        or str(data.get("worker_id") or "") != worker_id
+        or str(data.get("actor_user_id") or owner_id) != owner_id
+    ):
+        raise HTTPException(status_code=404, detail="Run not found")
+    owner_scoped = _get_run_by_explicit_id(run_id, user_id=owner_id, repos=repos)
+    if not owner_scoped:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return owner_scoped, owner_id
+
+
 @runs_router.get("/runs/{run_id}/stream")
 async def stream_run_parts(
     run_id: str,
     request: Request,
-    auth: AuthContext = Depends(get_auth_context),
+    token: Optional[str] = Query(None, min_length=10),
     repos: Repositories = Depends(get_repos),
 ):
     """Server-Sent Events stream of AI SDK parts for a single run."""
-    row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
-    if not row:
-        raise HTTPException(status_code=404, detail="Run not found")
+    if token:
+        row, stream_user_id = _get_run_for_worker_share_stream(run_id, token, repos)
+    else:
+        auth = await get_auth_context(request)
+        row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
+        if not row:
+            raise HTTPException(status_code=404, detail="Run not found")
+        stream_user_id = auth.user_id
 
     last_seen = _parse_last_event_id(request.headers.get("last-event-id"))
 
     # Per-user concurrent-stream cap (Round 16 DoS finding). Acquire
     # synchronously so the 429 is returned before the StreamingResponse.
-    stream_slot = _sse_stream_acquire(auth.user_id)
+    stream_slot = _sse_stream_acquire(stream_user_id)
 
     async def event_generator():
         try:
@@ -904,7 +936,7 @@ async def stream_run_parts(
                     # the client reconstructs the transcript instead of receiving a
                     # bare finish event.
                     event_id = 0
-                    for log_part in _log_replay_parts(repos, auth.user_id, run_id):
+                    for log_part in _log_replay_parts(repos, stream_user_id, run_id):
                         if event_id > last_seen:
                             yield _format_run_part_sse(event_id, log_part)
                         event_id += 1
