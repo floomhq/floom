@@ -38,7 +38,7 @@ def booted(monkeypatch, tmp_path):
             "main", "db", "db._legacy_sqlite", "db.sqlite", "db.factory",
             "db.dependency", "db.interface", "models", "files", "worker_registry",
             "runner_utils", "run_service", "webhook_service", "composio_client",
-            "scheduler", "auth", "auth.context", "auth.dependency", "auth.factory",
+            "scheduler", "services.chat_tool_impls", "auth", "auth.context", "auth.dependency", "auth.factory",
             "auth.interface", "auth.local", "contexts", "chat_service",
         ) or name.startswith("routers"):
             sys.modules.pop(name, None)
@@ -125,6 +125,32 @@ def test_args_preview_redacts_common_sensitive_fields_for_every_emily_tool(boote
         encoded = json.dumps(preview)
         for leaked in leaked_values:
             assert leaked not in encoded, f"{tool_name} leaked {leaked!r}: {encoded}"
+
+
+def test_connections_list_redacts_mcp_auth_secret_from_tool_result(booted):
+    repos = booted["db"].get_repositories()
+    repos.connections.upsert(
+        user_id="federico",
+        id="mcp-redact",
+        app_name="mcp",
+        composio_connection_id="mcp-redact",
+        kind="mcp",
+        status="active",
+        mcp_label="ops-mcp",
+        mcp_url="https://mcp.example.com",
+        mcp_auth_secret="RAW_BEARER_SECRET_NAME",
+        mcp_allowed_tools_json=json.dumps(["tickets.search"]),
+    )
+    chat_tools = importlib.import_module("services.chat_tool_impls")
+
+    result = chat_tools._tool_connections_list({}, "federico")
+    encoded = json.dumps(result)
+    conn = result["connections"][0]
+
+    assert result["ok"] is True
+    assert "RAW_BEARER_SECRET_NAME" not in encoded
+    assert "mcp_auth_secret" not in conn
+    assert conn["mcp_auth_configured"] is True
 
 
 def test_tool_event_metadata_keeps_legacy_safe_args_and_card_resource(booted):
