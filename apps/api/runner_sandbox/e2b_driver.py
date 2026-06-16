@@ -22,7 +22,7 @@ from urllib.parse import urlsplit
 from .base import SandboxDriver
 from .cancellation import run_cancel_requested
 from .memory_context import ensure_memory_context_pack
-from models import WorkerConfig, WorkerResult
+from models import WorkerConfig, WorkerResult, assert_safe_outbound_url
 import contexts as _contexts_module
 from contexts import CONTEXTS_DIR, context_scope_for_user, normalize_context_mount, use_context_scope
 from runner_utils import ARTIFACTS_DIR
@@ -65,6 +65,15 @@ _OOM_MARKERS = (
 )
 _active_sandboxes: dict[str, Any] = {}
 _active_sandboxes_lock = threading.Lock()
+
+
+def _safe_git_context_url(source: str) -> str:
+    repo_url = source.removeprefix("git+").strip()
+    if urlsplit(repo_url).scheme.lower() != "https":
+        raise ValueError("Git context URL must use https://")
+    return assert_safe_outbound_url(repo_url, label="Git context URL")
+
+
 _DEFAULT_E2B_DENY_OUT = (
     # NOTE: "0.0.0.0/8" intentionally omitted — E2B's network-policy API rejects it
     # ("400: invalid denied CIDR 0.0.0.0/8"), which kills sandbox creation for any
@@ -1472,7 +1481,10 @@ class E2BSandboxDriver(SandboxDriver):
                 made_dirs.add(sandbox_target)
 
                 if source.startswith("git+"):
-                    repo_url = source.removeprefix("git+")
+                    try:
+                        repo_url = _safe_git_context_url(source)
+                    except ValueError as exc:
+                        return f"Invalid git context {name!r}: {exc}"
                     log_fn(f"[e2b] Cloning git context {name!r}", "info")
                     result = sandbox.commands.run(
                         "git clone --depth 1 "
