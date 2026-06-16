@@ -21,6 +21,7 @@ from urllib.parse import urlsplit
 
 from .base import SandboxDriver
 from .cancellation import run_cancel_requested
+from .e2b_upload import upload_tree_tarball
 from .memory_context import ensure_memory_context_pack
 from models import WorkerConfig, WorkerResult, assert_safe_outbound_url
 import contexts as _contexts_module
@@ -1123,37 +1124,19 @@ class E2BSandboxDriver(SandboxDriver):
 
             # Upload bundle files (read-only worker code; never contains inputs/).
             made_dirs = {workdir}
-            for fpath in worker_dir.rglob("*"):
-                rel = fpath.relative_to(worker_dir)
-                # #995: never follow symlinks — a crafted bundle could symlink
-                # `x -> /etc/passwd` / the host api.env and exfiltrate host
-                # files into the sandbox. Skip the link entirely.
-                if fpath.is_symlink():
-                    log_fn(f"[e2b] Skipping symlink in bundle: {rel.as_posix()}", "warning")
-                    continue
-                # Skip any stale inputs/ dir that may exist in older bundles.
-                if rel.parts and rel.parts[0] == "inputs":
-                    continue
-                if (
-                    "__pycache__" in rel.parts
+            upload_tree_tarball(
+                sandbox,
+                worker_dir,
+                workdir,
+                skip=lambda _path, rel: (
+                    (rel.parts and rel.parts[0] == "inputs")
+                    or "__pycache__" in rel.parts
                     or rel.suffix == ".pyc"
                     or (rel.parts and rel.parts[0] in {".pytest_cache", ".ruff_cache"})
-                ):
-                    continue
-                dest = f"{workdir}/{rel.as_posix()}"
-                if fpath.is_dir():
-                    if dest not in made_dirs:
-                        sandbox.files.make_dir(dest)
-                        made_dirs.add(dest)
-                    continue
-                parent = f"{workdir}/{rel.parent.as_posix()}" if rel.parent.as_posix() != "." else workdir
-                if parent not in made_dirs:
-                    sandbox.files.make_dir(parent)
-                    made_dirs.add(parent)
-                content = fpath.read_bytes()
-                sandbox.files.write(dest, content)
-                log_fn(f"[e2b] Uploaded {rel.as_posix()}", "debug")
-
+                ),
+                log_fn=log_fn,
+                label="worker bundle",
+            )
             # Write workeros.py into the workdir so workers with calls: can do
             # `from workeros import call_worker`. Only uploaded when the worker
             # declares calls: — keeps the sandbox clean for workers that don't need it.
@@ -1496,22 +1479,17 @@ class E2BSandboxDriver(SandboxDriver):
                     log_fn(f"[e2b] context {name!r} not found locally", "warning")
                     continue
 
-                for fpath in local_dir.rglob("*"):
-                    if "__pycache__" in fpath.parts or fpath.is_symlink():
-                        continue
-                    rel = fpath.relative_to(local_dir)
-                    dest = f"{sandbox_target}/{rel.as_posix()}"
-                    if fpath.is_dir():
-                        if dest not in made_dirs:
-                            sandbox.files.make_dir(dest)
-                            made_dirs.add(dest)
-                        continue
-                    parent = f"{sandbox_target}/{rel.parent.as_posix()}" if rel.parent.as_posix() != "." else sandbox_target
-                    if parent not in made_dirs:
-                        sandbox.files.make_dir(parent)
-                        made_dirs.add(parent)
-                    sandbox.files.write(dest, fpath.read_bytes())
-                    log_fn(f"[e2b] Uploaded context {name}/{rel.as_posix()}", "debug")
+                try:
+                    upload_tree_tarball(
+                        sandbox,
+                        local_dir,
+                        sandbox_target,
+                        skip=lambda _path, rel: "__pycache__" in rel.parts,
+                        log_fn=log_fn,
+                        label=f"context {name}",
+                    )
+                except RuntimeError as exc:
+                    return str(exc)
         return None
 
     def _persist_writeable_contexts(
