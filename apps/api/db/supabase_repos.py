@@ -28,6 +28,13 @@ _recipe_cache: contextvars.ContextVar[dict[str, tuple[dict, dict | None]] | None
     "_workeros_recipe_cache", default=None
 )
 
+# Process-level set of "worker_id::skill_version_id" bundles already written to
+# disk this process. Config resolution happens on many read paths (GET /runs
+# resolves an output schema per run, detail, etc.); without this every one
+# re-wrote the same files. Reset per process — a fresh API instance simply
+# re-materializes on demand from Supabase, so statelessness is preserved.
+_materialized_versions: set[str] = set()
+
 from apps.api.obs import log_failure
 
 _repo_logger = logging.getLogger("workeros.cloud.supabase_repos")
@@ -130,13 +137,22 @@ def _json_dump(value: Any) -> str:
     return json.dumps(value if value is not None else {}, separators=(",", ":"))
 
 
-def _materialize_worker_files(worker_id: str, files: dict[str, str]) -> None:
+def _materialize_worker_files(
+    worker_id: str, files: dict[str, str], *, version_key: str | None = None
+) -> None:
     """Write worker files from Supabase manifest_json._files to WORKERS_DIR.
 
     Called by get_recipe() so the engine's skill/e2b drivers find the files
     at the expected path. Supabase is the source of truth in cloud mode;
     the filesystem is a write-through cache rebuilt on demand.
+
+    ``version_key`` ("worker_id::skill_version_id") memoizes the write per
+    process: the same bundle is written at most once, so repeated config
+    resolutions (runs/detail) don't pay the disk cost again. A new code version
+    has a new key, so updates re-materialize.
     """
+    if version_key and version_key in _materialized_versions:
+        return
     workers_dir_env = (os.environ.get("FLOOM_WORKERS_DIR") or "").strip()
     workers_dir = Path(workers_dir_env) if workers_dir_env else Path("/opt/workeros-cloud/var/workers")
     worker_dir = workers_dir / worker_id
@@ -147,6 +163,8 @@ def _materialize_worker_files(worker_id: str, files: dict[str, str]) -> None:
             fpath = worker_dir / safe_name
             fpath.parent.mkdir(parents=True, exist_ok=True)
             fpath.write_text(content, encoding="utf-8")
+        if version_key:
+            _materialized_versions.add(version_key)
         _repo_logger.debug("Materialized %d file(s) for worker %s to %s", len(files), worker_id, worker_dir)
     except Exception:
         _repo_logger.warning("Failed to materialize files for worker %s", worker_id, exc_info=True)
@@ -1403,7 +1421,11 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         # dominant endpoint latency (~4s for 6 workers); the list never reads these
         # files. Runs/scheduler (batch_render=False) still materialize before exec.
         if embedded_files and isinstance(embedded_files, dict) and not batch_render:
-            _materialize_worker_files(str(worker["id"]), _sanitize_worker_files(embedded_files))
+            _materialize_worker_files(
+                str(worker["id"]),
+                _sanitize_worker_files(embedded_files),
+                version_key=f"{worker['id']}::{skill.get('id')}",
+            )
 
         config = _config_from_manifest(
             worker_id=str(worker["id"]),
