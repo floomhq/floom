@@ -13,6 +13,7 @@ export type TagFamilyKey =
   | "status" // derived item state, per collection
   | "trigger" // Runs only: Scheduled · Manual · Webhook (its own family)
   | "type" // Connections only: Connection · MCP · Secret
+  | "stage" // Workers only: Draft · Live (maturity label, mess-control)
   | "visibility" // Private · Shared (SPEC §12)
   | "content"; // shared user-label vocabulary
 
@@ -22,6 +23,7 @@ export const TAG_FAMILY_ORDER: TagFamilyKey[] = [
   "status",
   "trigger",
   "type",
+  "stage",
   "visibility",
   "content",
 ];
