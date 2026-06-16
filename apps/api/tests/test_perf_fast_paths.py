@@ -3,6 +3,67 @@ from __future__ import annotations
 from types import SimpleNamespace
 
 
+def test_cloud_runs_omitted_limit_uses_safe_default(monkeypatch):
+    from starlette.responses import Response
+    from routers import runs
+
+    captured: dict[str, int] = {}
+
+    class Request:
+        headers = {}
+        query_params = {}
+
+    def fake_list_visible_runs(**kwargs):
+        captured["limit"] = kwargs["limit"]
+        return [], 0
+
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    monkeypatch.setattr(runs.hot_cache, "get", lambda _key: None)
+    monkeypatch.setattr(runs.hot_cache, "set", lambda _key, _value: None)
+    monkeypatch.setattr(runs, "_list_visible_runs", fake_list_visible_runs)
+
+    result = runs.list_runs(
+        request=Request(),
+        response=Response(),
+        auth=SimpleNamespace(user_id="user-a", role="admin"),
+        repos=SimpleNamespace(),
+    )
+
+    assert result == []
+    assert captured["limit"] == 20
+
+
+def test_cloud_runs_explicit_limit_is_respected(monkeypatch):
+    from starlette.responses import Response
+    from routers import runs
+
+    captured: dict[str, int] = {}
+
+    class Request:
+        headers = {}
+        query_params = {"limit": "50"}
+
+    def fake_list_visible_runs(**kwargs):
+        captured["limit"] = kwargs["limit"]
+        return [], 0
+
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    monkeypatch.setattr(runs.hot_cache, "get", lambda _key: None)
+    monkeypatch.setattr(runs.hot_cache, "set", lambda _key, _value: None)
+    monkeypatch.setattr(runs, "_list_visible_runs", fake_list_visible_runs)
+
+    result = runs.list_runs(
+        request=Request(),
+        response=Response(),
+        limit=50,
+        auth=SimpleNamespace(user_id="user-a", role="admin"),
+        repos=SimpleNamespace(),
+    )
+
+    assert result == []
+    assert captured["limit"] == 50
+
+
 def test_list_visible_runs_fast_mode_stops_after_page(monkeypatch):
     from services import run_access
 
