@@ -831,6 +831,33 @@ async def _hourly_sweep_loop() -> None:
         await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
 
 
+def _backfill_worker_memory_packs(user_id: str) -> int:
+    from models import WorkerConfig
+    from runner_sandbox.memory_context import ensure_memory_context_pack
+
+    count = 0
+
+    def _log(message: str, level: str = "info") -> None:
+        if level == "warning":
+            logger.warning(message)
+        else:
+            logger.debug(message)
+
+    with use_context_scope(context_scope_for_user(user_id)):
+        for worker in discover_workers(use_cache=False):
+            if worker.get("status") == "error":
+                continue
+            try:
+                config = WorkerConfig(**(worker.get("config") or {}))
+                if ensure_memory_context_pack(config=config, user_id=user_id, log_fn=_log):
+                    count += 1
+            except Exception:
+                logger.warning("Skipping memory backfill for worker %s", worker.get("id"), exc_info=True)
+    if count:
+        logger.info("Backfilled %d worker memory packs", count)
+    return count
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI lifespan: startup + shutdown hooks."""
@@ -915,6 +942,10 @@ async def lifespan(app: FastAPI):
                 _reload_exc,
                 exc_info=True,
             )
+        try:
+            _backfill_worker_memory_packs(bootstrap_user_id)
+        except Exception as _memory_exc:
+            logger.warning("Startup worker memory backfill failed (non-fatal): %s", _memory_exc)
         fail_interrupted_runs_on_startup(user_id=bootstrap_user_id)
         # #1130: sweep for zombie runs from previous deployments / server restarts.
         # Unlike fail_interrupted_runs_on_startup (process-local tracking), this
