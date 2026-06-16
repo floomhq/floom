@@ -896,18 +896,11 @@ def _extract_context_tar(raw_tar: bytes, target_dir: Path) -> None:
 
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
-    bundle_path = config.runtime.bundle_path if config and config.runtime else None
-    if bundle_path:
-        raw_path = Path(bundle_path)
-        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
-        resolved = target.resolve()
-        allowed_root = WORKERS_DIR.parent.resolve()
-        try:
-            resolved.relative_to(allowed_root)
-        except ValueError:
-            raise ValueError(f"Path traversal attempt: {resolved}")
-        return resolved
-    return _safe_path(WORKERS_DIR, worker_id)
+    # Keep E2B parity with run_service and agent_driver: bundle_path drift and
+    # bare relative cloud paths must resolve through the single shared guard.
+    from runner_utils import _resolve_worker_bundle_dir
+
+    return _resolve_worker_bundle_dir(WORKERS_DIR, worker_id, config, _safe_path)
 
 
 class E2BSandboxDriver(SandboxDriver):
