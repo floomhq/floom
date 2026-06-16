@@ -353,10 +353,9 @@ export function V3Body() {
             className="mt-9"
           >
             <V3Composer
-              compact
               fillSignal={fill}
               heading="Start with one job."
-              placeholder="Tell Emily one job to handle..."
+              placeholder=""
             />
           </motion.div>
           <motion.div
@@ -424,7 +423,7 @@ export function V3Body() {
             transition={{ duration: 0.5, delay: 0.1, ease: EASE }}
             className="mt-8"
           >
-            <V3Composer compact placeholder="Tell Emily one job to handle..." />
+            <V3Composer placeholder="" />
           </motion.div>
         </section>
 

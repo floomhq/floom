@@ -109,7 +109,7 @@ function Mirror({ text, matches }: { text: string; matches: Match[] }) {
 
 export function V3Composer({
   heading,
-  placeholder = "Every Monday, summarise last week's pipeline in #sales…",
+  placeholder = "",
   compact = false,
   fillSignal,
 }: {
