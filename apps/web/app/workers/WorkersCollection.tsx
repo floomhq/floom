@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { useWorkers } from "@/lib/query/hooks";
@@ -37,7 +37,7 @@ import { Button } from "@/components/ui/button";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { ArrowRight, Brain, ChevronDown, ChevronUp, Lock, MoreHorizontal, UploadCloud } from "lucide-react";
+import { ArrowRight, Brain, Lock, MoreHorizontal, SlidersHorizontal } from "lucide-react";
 import { BRAIN_FILE_META, inferBrainFileType } from "@/lib/brain/file-type-icon";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { Sparkline } from "@/components/Sparkline";
@@ -50,6 +50,7 @@ import {
   replaceTriggerBlock,
   type TriggerRow,
 } from "@/components/worker-form";
+import { WorkerInputForm, requiredRunInputErrors } from "@/components/run-page/WorkerInputForm";
 import { WorkerBrainEditor } from "@/components/worker/WorkerBrainEditor";
 import { WorkerToolsEditor } from "@/components/worker/WorkerToolsEditor";
 import { WorkerFeedbackPanel } from "@/components/worker/WorkerFeedbackPanel";
@@ -159,6 +160,48 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: Work
     [id],
   );
   return [detail, apply];
+}
+
+/**
+ * Project a fetched WorkerDetail into the WorkerSummary shape the list/cards
+ * need. Used when a deep-link / "Open worker" points at a worker that isn't in
+ * the (cache-first, 30s-stale) workers list yet, e.g. a worker Emily just
+ * created. We fetch it by id and merge a summary so the selection resolves
+ * instead of falsely toasting "Item not found … old ID format".
+ */
+function detailToSummary(d: WorkerDetail): WorkerSummary {
+  return {
+    id: d.id,
+    name: d.name,
+    description: d.description,
+    long_description: d.long_description,
+    use_cases: d.use_cases,
+    example_input: d.example_input,
+    example_output: d.example_output,
+    how_it_works: d.how_it_works,
+    is_example: d.is_example,
+    archived: d.archived,
+    enabled: d.enabled,
+    archive_reason: d.archive_reason,
+    tags: d.tags ?? [],
+    folder: d.folder,
+    status: d.status,
+    trigger_type: d.trigger_type,
+    runner: d.runner,
+    triggers: [],
+    triggers_spec: d.triggers_spec ?? [],
+    // Summary `connections` is the list of app slugs; derive from the config.
+    connections: (d.config?.connections ?? [])
+      .map((c) => (typeof c === "string" ? c : (c as { app?: string }).app))
+      .filter((s): s is string => Boolean(s)),
+    missing_secrets: d.missing_secrets,
+    missing_connections: d.missing_connections,
+    inputs: d.config?.inputs,
+    public_link: d.public_link,
+    owner_id: d.owner_id,
+    visibility: d.visibility,
+    permissions: d.permissions,
+  } as WorkerSummary;
 }
 
 /** Build the worker.yml text from a detail (files take precedence). */
@@ -878,7 +921,9 @@ function WorkerDetailActions({
   const [editOpen, setEditOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [runInputs, setRunInputs] = useState<Record<string, string>>({});
+  const [runInputs, setRunInputs] = useState<Record<string, unknown>>({});
+  const [runFileNames, setRunFileNames] = useState<Record<string, string>>({});
+  const [runErrors, setRunErrors] = useState<Record<string, string>>({});
   const [name, setName] = useState(w.name);
   const [description, setDescription] = useState(w.description ?? "");
 
@@ -886,12 +931,13 @@ function WorkerDetailActions({
 
   useEffect(() => {
     if (!runOpen) return;
-    const next: Record<string, string> = {};
+    const next: Record<string, unknown> = {};
     for (const input of inputs) {
-      const fallback = input.default == null ? "" : String(input.default);
-      next[input.name] = runInputs[input.name] ?? fallback;
+      next[input.name] =
+        runInputs[input.name] ?? (input.default == null ? "" : input.default);
     }
     setRunInputs(next);
+    setRunErrors({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runOpen, d?.id]);
 
@@ -904,12 +950,27 @@ function WorkerDetailActions({
   async function submitRun(event: React.FormEvent) {
     event.preventDefault();
     if (running) return;
+    // Schema-driven required-field validation (same rule as the run page).
+    const errors = requiredRunInputErrors(inputs, runInputs);
+    if (Object.keys(errors).length > 0) {
+      setRunErrors(errors);
+      toast.error("Fill in the required inputs before running.");
+      return;
+    }
+    setRunErrors({});
     setRunning(true);
     try {
       const payload: Record<string, unknown> = {};
       for (const input of inputs) {
-        const raw = runInputs[input.name] ?? "";
-        if (raw !== "") payload[input.name] = coerceInputValue(raw, input.type);
+        const value = runInputs[input.name];
+        if (value === undefined || value === null) continue;
+        if (typeof value === "string") {
+          if (value.trim() === "") continue;
+          payload[input.name] = coerceInputValue(value, input.type);
+        } else {
+          // Booleans, uploaded-file shas, arrays/objects pass through as-is.
+          payload[input.name] = value;
+        }
       }
       const result = await api.workers.run(w.id, payload);
       toast.success("Run queued");
@@ -1001,53 +1062,48 @@ function WorkerDetailActions({
       )}
 
       <Dialog open={runOpen} onOpenChange={setRunOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <form onSubmit={(event) => void submitRun(event)} className="space-y-4">
-            <DialogHeader>
+        <DialogContent className="max-h-[88vh] overflow-hidden p-0 sm:max-w-xl">
+          <form onSubmit={(event) => void submitRun(event)} className="flex max-h-[88vh] flex-col">
+            <DialogHeader className="px-6 pt-6 pb-1">
               <DialogTitle>Run {w.name}</DialogTitle>
-              <DialogDescription>Provide inputs for this manual run.</DialogDescription>
+              <DialogDescription>
+                {inputs.length === 0
+                  ? "This worker takes no inputs. Run it now to start a manual run."
+                  : "Fill in the inputs below to start a manual run."}
+              </DialogDescription>
             </DialogHeader>
-            {w.enabled === false && (
-              <div className="rounded-[var(--radius-card)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
-                This worker is paused. Running it manually may not behave as expected.
-              </div>
-            )}
-            <div className="space-y-3">
-              {inputs.length === 0 ? (
-                <p className="rounded-[var(--radius-card)] bg-[var(--bg-2)] p-3 text-sm text-muted-foreground">
-                  This worker has no required inputs.
-                </p>
-              ) : (
-                inputs.map((input) => (
-                  <div key={input.name} className="space-y-1.5">
-                    <Label htmlFor={`run-${w.id}-${input.name}`}>{input.label || input.name}</Label>
-                    {isStructuredInput(input) ? (
-                      <StructuredInputField
-                        input={input}
-                        workerId={w.id}
-                        value={runInputs[input.name] ?? ""}
-                        onChange={(v) => setRunInputs((prev) => ({ ...prev, [input.name]: v }))}
-                      />
-                    ) : (
-                      <>
-                        <Input
-                          id={`run-${w.id}-${input.name}`}
-                          value={runInputs[input.name] ?? ""}
-                          placeholder={input.placeholder || input.description || input.name}
-                          onChange={(event) =>
-                            setRunInputs((prev) => ({ ...prev, [input.name]: event.target.value }))
-                          }
-                        />
-                        {input.description ? (
-                          <p className="text-xs text-muted-foreground">{input.description}</p>
-                        ) : null}
-                      </>
-                    )}
-                  </div>
-                ))
+            <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
+              {w.enabled === false && (
+                <div className="rounded-[var(--radius-card)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
+                  This worker is paused. Running it manually may not behave as expected.
+                </div>
               )}
+              {/* Schema-driven form: renders the correct widget per input type
+                  (textarea, select, boolean checkbox, file/CSV, number, text)
+                  with labels, required markers, placeholders and validation,
+                  the same WorkerInputForm used by the /run page (single source
+                  of truth). */}
+              <WorkerInputForm
+                inputs={inputs}
+                values={runInputs}
+                fileNames={runFileNames}
+                validationErrors={runErrors}
+                onInputChange={(inputName, value) => {
+                  setRunInputs((prev) => ({ ...prev, [inputName]: value }));
+                  setRunErrors((prev) => {
+                    if (!prev[inputName]) return prev;
+                    const next = { ...prev };
+                    delete next[inputName];
+                    return next;
+                  });
+                }}
+                onFileUploaded={(inputName, sha256, fileName) => {
+                  setRunInputs((prev) => ({ ...prev, [inputName]: sha256 }));
+                  setRunFileNames((prev) => ({ ...prev, [inputName]: fileName }));
+                }}
+              />
             </div>
-            <DialogFooter>
+            <DialogFooter className="px-6 pb-6 pt-2">
               <Button type="button" variant="secondary" onClick={() => setRunOpen(false)}>
                 Cancel
               </Button>
@@ -1150,142 +1206,6 @@ function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }
   );
 }
 
-// ---- #1090: Friendly structured-input field for the manual-run modal ----------
-
-/** Returns true when the input type signals a JSON/CSV/structured payload. */
-function isStructuredInput(input: WorkerInput): boolean {
-  const t = (input.type ?? "").toLowerCase();
-  return (
-    t === "array" ||
-    t === "object" ||
-    t === "json" ||
-    t === "csv" ||
-    !!input.accept_csv
-  );
-}
-
-/**
- * A friendlier replacement for a raw textarea for structured/JSON inputs.
- * Shows:
- *  - A file upload button (CSV or JSON)
- *  - A "Load example" button (calls sampleInput API)
- *  - A collapsible "Format" details block for the schema hint
- *  - A fallback textarea for manual paste
- */
-function StructuredInputField({
-  input,
-  workerId,
-  value,
-  onChange,
-}: {
-  input: WorkerInput;
-  workerId: string;
-  value: string;
-  onChange: (v: string) => void;
-}) {
-  const fileInputRef = useRef<HTMLInputElement>(null);
-  const [fileName, setFileName] = useState<string | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [showFormat, setShowFormat] = useState(false);
-
-  const acceptAttr = input.accept_csv ? ".csv,.json" : ".json";
-  const label = input.label || input.name;
-
-  async function loadExample() {
-    setLoading(true);
-    try {
-      const sample = await api.workers.sampleInput(workerId);
-      const raw = sample[input.name];
-      if (raw !== undefined) {
-        onChange(typeof raw === "string" ? raw : JSON.stringify(raw, null, 2));
-        setFileName(null);
-      } else {
-        toast("No example available for this input.");
-      }
-    } catch {
-      toast.error("Could not load example.");
-    } finally {
-      setLoading(false);
-    }
-  }
-
-  function handleFile(file: File | undefined) {
-    if (!file) return;
-    setFileName(file.name);
-    const reader = new FileReader();
-    reader.onload = (e) => {
-      const text = e.target?.result as string;
-      onChange(text ?? "");
-    };
-    reader.readAsText(file);
-  }
-
-  // Schema hint: description or placeholder from the input spec.
-  const hint = input.description || input.placeholder || null;
-
-  return (
-    <div className="space-y-2">
-      {/* Upload + Load example toolbar */}
-      <div className="flex items-center gap-2 flex-wrap">
-        <button
-          type="button"
-          onClick={() => fileInputRef.current?.click()}
-          className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors"
-        >
-          <UploadCloud className="size-3.5" />
-          {fileName ?? `Upload ${acceptAttr}`}
-        </button>
-        <input
-          ref={fileInputRef}
-          type="file"
-          accept={acceptAttr}
-          className="hidden"
-          onChange={(e) => handleFile(e.target.files?.[0])}
-        />
-        <button
-          type="button"
-          disabled={loading}
-          onClick={() => void loadExample()}
-          className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] px-2.5 py-1.5 text-xs text-muted-foreground hover:text-foreground transition-colors disabled:opacity-50"
-        >
-          {loading ? "Loading…" : "Load example"}
-        </button>
-        {hint && (
-          <button
-            type="button"
-            onClick={() => setShowFormat((v) => !v)}
-            className="inline-flex items-center gap-1 ml-auto text-xs text-muted-foreground hover:text-foreground transition-colors"
-          >
-            Format {showFormat ? <ChevronUp className="size-3" /> : <ChevronDown className="size-3" />}
-          </button>
-        )}
-      </div>
-
-      {/* Collapsible format/schema hint */}
-      {showFormat && hint && (
-        <p className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2 text-xs text-muted-foreground">
-          {hint}
-        </p>
-      )}
-
-      {/* Paste textarea */}
-      <Textarea
-        id={`run-${workerId}-${input.name}`}
-        value={value}
-        placeholder={
-          input.accept_csv
-            ? `Paste CSV or JSON, or upload a file above…`
-            : `Paste JSON${hint ? ` (see Format for the schema)` : ""}…`
-        }
-        onChange={(e) => onChange(e.target.value)}
-        className="min-h-24 font-mono text-xs"
-      />
-      {label && input.required && (
-        <p className="text-[11px] text-muted-foreground">Required · {label}</p>
-      )}
-    </div>
-  );
-}
 
 /**
  * A host-injected top-level view (#1006). managed-deployment passes its
@@ -1341,9 +1261,60 @@ export default function WorkersCollection({
 
   useEffect(() => {
     if (workersQuery.data) {
-      setWorkers(workersQuery.data.filter((w) => !isSystemWorker(w)));
+      setWorkers((prev) => {
+        const fresh = workersQuery.data!.filter((w) => !isSystemWorker(w));
+        // Preserve any on-demand-hydrated worker (see hydration effect below)
+        // that the cache-first list doesn't include yet, so a freshly-opened
+        // worker doesn't blink out when the background refetch resolves.
+        const freshIds = new Set(fresh.map((w) => w.id));
+        const carry = prev.filter((w) => !freshIds.has(w.id) && hydratedIdsRef.current.has(w.id));
+        return [...fresh, ...carry];
+      });
     }
   }, [workersQuery.data]);
+
+  // BUG FIX (open-worker "Item not found … old ID format"): the workers list is
+  // cache-first (staleTime 30s, refetchOnMount:false), so a deep-link or Emily
+  // "Open worker" to a worker that isn't in the cached list yet (e.g. one just
+  // created) resolves to null in CollectionView → false "not found" toast +
+  // cleared selection. The id format is fine (slugs match); the list is just
+  // stale. When ?sel points at an id we don't have, fetch it by id and merge a
+  // summary so the selection resolves. api.workers.get(id) resolves the same
+  // slug ids used everywhere, so this is robust to the link format.
+  const searchParams = useSearchParams();
+  const selParam = searchParams.get("sel");
+  const hydratedIdsRef = useRef<Set<string>>(new Set());
+  const hydratingIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selParam) return;
+    if (workers.some((w) => w.id === selParam)) return; // already present
+    // Wait for the initial list load to settle before deciding it's missing,
+    // so we don't fire a redundant fetch during the first paint.
+    if (workersQuery.isLoading) return;
+    if (hydratingIdRef.current === selParam) return; // in flight
+    hydratingIdRef.current = selParam;
+    let alive = true;
+    api.workers
+      .get(selParam)
+      .then((d) => {
+        if (!alive) return;
+        hydratedIdsRef.current.add(d.id);
+        detailCache.set(d.id, d); // warm the detail-pane cache too
+        setWorkers((prev) =>
+          prev.some((w) => w.id === d.id) ? prev : [detailToSummary(d), ...prev],
+        );
+      })
+      .catch(() => {
+        // Genuinely missing/inaccessible worker → let CollectionView surface the
+        // existing "not found" toast (the real not-found path, not a stale list).
+      })
+      .finally(() => {
+        if (hydratingIdRef.current === selParam) hydratingIdRef.current = null;
+      });
+    return () => {
+      alive = false;
+    };
+  }, [selParam, workers, workersQuery.isLoading]);
 
   // Skeleton only on a true cold start (no cache and no server data); a slow
   // backend with cached data shows the cache, never the skeleton or the error.
@@ -1470,16 +1441,21 @@ export default function WorkersCollection({
       const isAdvanced = advancedOpen.has(w.id);
       const actions = (
         <>
-          {/* §3.5 Advanced toggle: compact pill in the header action area, right of Run. */}
+          {/* §3.5 Advanced toggle: a clearly-labeled control (icon + "Advanced")
+              in the header action area. Federico couldn't find the previous
+              faint flip-label pill, so it now reads as an obvious, persistent
+              toggle: icon + "Advanced" label, with a filled active state when
+              the Config / Source / Versions tabs are revealed. */}
           <button
             type="button"
-            className="c-vpill"
-            style={advancedPillStyle}
+            className="c-vpill inline-flex items-center gap-1.5"
+            style={isAdvanced ? advancedPillActiveStyle : advancedPillStyle}
             aria-pressed={isAdvanced}
             onClick={() => toggleAdvanced(w.id)}
-            title={isAdvanced ? "Show operator view" : "Show Config, Source, Versions"}
+            title="Show Config, Source and Versions"
           >
-            {isAdvanced ? "Less" : "Advanced"}
+            <SlidersHorizontal className="size-3.5" aria-hidden="true" />
+            Advanced
           </button>
           <WorkerDetailActions
             w={w}
@@ -1611,5 +1587,19 @@ const h4: React.CSSProperties = {
   margin: "0 0 9px",
 };
 const pillBtn: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5 };
-// §3.5 Advanced toggle pill: slightly muted so it reads as secondary to Run.
-const advancedPillStyle: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5, opacity: 0.75 };
+// §3.5 Advanced toggle pill: full-opacity and labeled so operators can find it
+// (Federico couldn't locate the prior faint version). Secondary to Run via the
+// --bg-2 fill rather than reduced opacity.
+const advancedPillStyle: React.CSSProperties = {
+  padding: "6px 11px",
+  fontSize: 12.5,
+  background: "var(--bg-2)",
+  color: "var(--ink)",
+};
+// Active state: filled with the calm fill so it's obvious the advanced tabs are on.
+const advancedPillActiveStyle: React.CSSProperties = {
+  padding: "6px 11px",
+  fontSize: 12.5,
+  background: "var(--bg-3)",
+  color: "var(--ink)",
+};
