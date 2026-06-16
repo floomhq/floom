@@ -1139,7 +1139,7 @@ function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser |
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-muted-foreground">Profile</h2>
         <div className="flex items-center gap-4">
-          <div className="size-14 shrink-0 rounded-full bg-muted text-foreground grid place-items-center text-lg font-medium">
+          <div className="size-14 shrink-0 rounded-[var(--radius-card)] bg-muted text-foreground grid place-items-center text-lg font-medium">
             {initials}
           </div>
           <div className="min-w-0">
