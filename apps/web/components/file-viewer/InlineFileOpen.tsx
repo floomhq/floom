@@ -4,12 +4,17 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { ArrowLeft, Download, Folder as FolderIcon, Pencil, Plus, Save, Upload, X } from "lucide-react";
 import { isImageFile } from "@/lib/runs/trace";
 import { SqliteTableView } from "@/components/file-viewer/SqliteTableView";
+import { NpzArrayView } from "@/components/file-viewer/NpzArrayView";
 import { CodeBlock } from "@/components/file-viewer/code-block";
 import { MarkdownRenderer } from "@/components/contexts/markdown-renderer";
 import type { SqliteView } from "@/lib/types";
 
 function isDbFile(name: string): boolean {
   return /\.(db|sqlite|sqlite3)$/i.test(name);
+}
+
+function isNpzFile(name: string): boolean {
+  return /\.npz$/i.test(name);
 }
 
 function isMarkdownFile(name: string): boolean {
@@ -82,6 +87,7 @@ export function InlineFileOpen({
   onCreateSubfolder,
   onSaveText,
   loadSqlite,
+  loadBlob,
   onUpload,
 }: {
   files: InlineFile[];
@@ -106,6 +112,12 @@ export function InlineFileOpen({
   onSaveText?: (file: InlineFile, content: string) => Promise<void>;
   /** #777: load a .db file's tables/rows for the inline SQLite viewer. */
   loadSqlite?: (file: InlineFile, table?: string) => Promise<SqliteView>;
+  /**
+   * Fetch a binary artifact's raw bytes for the inline `.npz` array viewer.
+   * The bytes are parsed header-only (no numpy, no array-data load). Omitted →
+   * `.npz` falls back to the download-only message.
+   */
+  loadBlob?: (file: InlineFile) => Promise<ArrayBuffer>;
   /**
    * When provided, the list view becomes a drag-and-drop dropzone (and exposes
    * a Browse button). `dirPrefix` is the current navigated subfolder ("" = root)
@@ -251,7 +263,8 @@ export function InlineFileOpen({
     }
   };
 
-  const canLoadText = !!loadText && !!open && !open.binary && !isImageFile(open.name);
+  const canLoadText =
+    !!loadText && !!open && !open.binary && !isImageFile(open.name) && !isNpzFile(open.name) && !isDbFile(open.name);
   const canEditText = !!onSaveText && canLoadText;
   // Reset the per-file image-error flag whenever a different file is opened.
   useEffect(() => {
@@ -454,11 +467,17 @@ export function InlineFileOpen({
         ) : isDbFile(open.name) && loadSqlite ? (
           // #777: inline SQLite table viewer (Brain supplies the loader).
           <SqliteTableView load={(table) => loadSqlite(open, table)} />
+        ) : isNpzFile(open.name) && loadBlob ? (
+          // .npz array viewer: parse the ZIP + npy headers client-side (no numpy,
+          // no array-data load) and show a flat name/shape/dtype/size table.
+          <NpzArrayView load={() => loadBlob(open)} />
         ) : (
           <div style={{ color: "var(--muted-foreground)", padding: 14 }}>
             {isDbFile(open.name)
               ? "SQLite database; use Download to open this file."
-              : "Preview isn't available inline yet; use Download to open this file."}
+              : isNpzFile(open.name)
+                ? "NumPy archive; use Download to open this file."
+                : "Preview isn't available inline yet; use Download to open this file."}
             {/* TODO(#815): richer artifact preview. */}
           </div>
         )}
