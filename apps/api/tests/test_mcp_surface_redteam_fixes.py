@@ -88,6 +88,10 @@ def _auth_headers(token="test-langdock-token"):
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
+def _serve_headers():
+    return {"x-floom-secret": "test-api-secret", "Content-Type": "application/json"}
+
+
 def _worker_yml(worker_id: str) -> str:
     return textwrap.dedent(
         f"""
@@ -235,9 +239,51 @@ def test_m03_tool_executes_under_user_header_scope(monkeypatch, tmp_path):
     assert "x-floom-user header required" not in text
 
 
-# ---------------------------------------------------------------------------
-# M-04 — /api/mcp must not leak raw exception detail
-# ---------------------------------------------------------------------------
+# M-06 / #1295 - /mcp-tools/serve must return JSON-RPC errors, not raw 500s
+
+def test_m06_mcp_serve_accepts_json_rpc_batch(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    payload = [
+        _rpc("tools/list", request_id=1),
+        _rpc("tools/call", request_id=2, params={"name": "runs.get", "arguments": {}}),
+    ]
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps(payload), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert isinstance(body, list)
+    assert body[0]["id"] == 1
+    assert "result" in body[0]
+    assert body[1]["id"] == 2
+    assert body[1]["error"]["code"] == -32602
+    assert "missing id" in body[1]["error"]["message"]
+
+
+def test_m06_mcp_serve_rejects_non_object_tool_arguments(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    payload = _rpc("tools/call", params={"name": "runs.get", "arguments": []})
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps(payload), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["error"]["code"] == -32602
+    assert body["error"]["message"] == "Invalid params"
+
+
+def test_m06_mcp_serve_rejects_non_object_json_rpc_payload(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps("not an object"), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["error"]["code"] == -32600
+    assert body["error"]["message"] == "Invalid JSON-RPC request"
+
+
+# M-04 - /api/mcp must not leak raw exception detail
 
 def test_m04_generic_error_no_internal_leak(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
