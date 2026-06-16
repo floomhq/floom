@@ -72,6 +72,7 @@ import { can, isViewOnly, canLeaveFeedback, visibilityLabel, FEEDBACK_BACKEND_AV
 import {
   isSystemWorker,
   workerStatusPill,
+  workerStageKey,
   workerTags,
   contentTagOptions,
   orderedSourceFiles,
@@ -183,6 +184,7 @@ function detailToSummary(d: WorkerDetail): WorkerSummary {
     archived: d.archived,
     enabled: d.enabled,
     archive_reason: d.archive_reason,
+    stage: d.stage,
     tags: d.tags ?? [],
     folder: d.folder,
     status: d.status,
@@ -1031,6 +1033,19 @@ function WorkerDetailActions({
             <DropdownMenuItem onClick={() => setEditOpen(true)}>Edit</DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
+                const next = workerStageKey(w) === "live" ? "draft" : "live";
+                api.workers.setStage(w.id, next)
+                  .then((updated) => {
+                    toast.success(next === "live" ? "Marked as live" : "Marked as draft");
+                    onUpdated({ ...w, stage: updated.stage });
+                  })
+                  .catch((err: Error) => toast.error(err.message || "Could not update stage"));
+              }}
+            >
+              {workerStageKey(w) === "live" ? "Mark as draft" : "Mark as live"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
                 const isArchived = (w as WorkerSummary & { archived?: boolean }).archived;
                 const action = isArchived ? api.workers.restore : api.workers.archive;
                 action(w.id)
@@ -1378,6 +1393,10 @@ export default function WorkersCollection({
         { value: "failing", label: "failing" },
         { value: "needs-attention", label: "needs attention" },
       ],
+      stage: [
+        { value: "draft", label: "Draft" },
+        { value: "live", label: "Live" },
+      ],
       visibility: [
         { value: "private", label: "Private" },
         { value: "shared", label: "Shared" },
@@ -1414,11 +1433,20 @@ export default function WorkersCollection({
     }),
     card: (w) => {
       const meta = workerCardMeta(w);
+      const isDraft = workerStageKey(w) === "draft";
+      const isPrivate = w.visibility === "private";
       return {
         // V4 SPEC rule 3: no avatar monogram. Lock is small+muted inline after name.
+        // Draft = quiet muted pill (mess-control); live shows nothing (calm default).
         leading: undefined,
-        name: w.visibility === "private"
-          ? <span className="inline-flex min-w-0 items-center gap-1.5"><span className="truncate">{w.name}</span><Lock className="size-3 shrink-0 text-[var(--muted-foreground)]" /></span>
+        name: (isPrivate || isDraft)
+          ? (
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <span className="truncate">{w.name}</span>
+              {isPrivate && <Lock className="size-3 shrink-0 text-[var(--muted-foreground)]" />}
+              {isDraft && <span className="c-vpill shrink-0" style={{ color: "var(--muted-foreground)" }}>Draft</span>}
+            </span>
+          )
           : w.name,
         description: displayBrandCopy(w.description),
         // B17: muted telemetry (last-run · run count · success rate) from recent_stats.
@@ -1480,6 +1508,9 @@ export default function WorkersCollection({
           actions,
           sub: (
             <>
+              {workerStageKey(w) === "draft" && (
+                <span className="c-vpill" style={{ color: "var(--muted-foreground)" }}>Draft</span>
+              )}
               <span className="c-vpill">{visibilityLabel(w.visibility)}</span>
               {viewOnly && (
                 <span className="c-vpill" style={{ color: "var(--warning)", borderColor: "var(--warning)" }}>
