@@ -1033,11 +1033,17 @@ async def novasearch_loxo_health(
 
 
 @router.get("/review/{query_id}", response_class=HTMLResponse)
-async def novasearch_review(query_id: str) -> HTMLResponse:
+async def novasearch_review(
+    query_id: str,
+    _auth: AuthContext = Depends(get_auth_context),
+) -> HTMLResponse:
     if not _REVIEW_ID_RE.fullmatch(query_id or ""):
         return HTMLResponse("<!doctype html><title>Not found</title><h1>Review link not found</h1>", status_code=404)
     query = _query_row_by_id(query_id)
     if not query:
+        return HTMLResponse("<!doctype html><title>Not found</title><h1>Review link not found</h1>", status_code=404)
+    workspace_id = get_active_workspace_id()
+    if not workspace_id or workspace_id != query.get("workspace_id"):
         return HTMLResponse("<!doctype html><title>Not found</title><h1>Review link not found</h1>", status_code=404)
     labels = (
         new_supabase_service_client()
@@ -1076,11 +1082,18 @@ async def novasearch_review(query_id: str) -> HTMLResponse:
 
 
 @router.post("/review/{query_id}/label")
-async def novasearch_review_label(query_id: str, request: Request) -> dict[str, Any]:
+async def novasearch_review_label(
+    query_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> dict[str, Any]:
     if not _REVIEW_ID_RE.fullmatch(query_id or ""):
         raise HTTPException(status_code=404, detail="Review link not found")
     query = _query_row_by_id(query_id)
     if not query:
+        raise HTTPException(status_code=404, detail="Review link not found")
+    workspace_id = get_active_workspace_id()
+    if not workspace_id or workspace_id != query.get("workspace_id"):
         raise HTTPException(status_code=404, detail="Review link not found")
     body = await _read_json_body(request)
     candidate_key = str(body.get("candidate_key") or "").strip()
@@ -1088,7 +1101,7 @@ async def novasearch_review_label(query_id: str, request: Request) -> dict[str, 
         raise HTTPException(status_code=400, detail="candidate_key is required")
     payload = {
         "workspace_id": query["workspace_id"],
-        "user_id": query["user_id"],
+        "user_id": auth.user_id,
         "query_id": query_id,
         "rank": body.get("rank"),
         "candidate_key": candidate_key,
