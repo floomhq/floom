@@ -21,3 +21,8 @@ WORKEROS_E2B_PYTHON_DEPS_BAKED=1
 Keep `WORKEROS_E2B_PYTHON_DEPS_BAKED=0` for workers whose `requirements.txt`
 contains packages not baked into this template; otherwise the runtime will skip
 `pip install -r requirements.txt`.
+
+The runtime also has a safety guard: with `WORKEROS_E2B_PYTHON_DEPS_BAKED=1`, it
+only skips `pip install` when every requirement name is in the baked package
+allowlist. Override that allowlist with `WORKEROS_E2B_PYTHON_BAKED_PACKAGES` if
+you build a custom base image.
