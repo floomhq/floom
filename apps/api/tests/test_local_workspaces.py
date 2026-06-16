@@ -26,6 +26,7 @@ def client_and_db(monkeypatch, tmp_path):
 
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("FLOOM_SECRET", "test-secret-workspaces")
+    monkeypatch.setenv("WORKEROS_USER_ID", "federico")
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))
