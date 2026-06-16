@@ -52,7 +52,7 @@ _DEFAULT_RUN_PY_STUB = (
     "from pathlib import Path\n"
     "from typing import Dict, Any\n\n\n"
     "def run(inputs: Dict[str, Any], context: Dict[str, Any]) -> Dict[str, Any]:\n"
-    "    # Placeholder worker — edit run.py to do the real work.\n"
+    "    # Placeholder worker - edit run.py to do the real work.\n"
     "    return {\"status\": \"success\", \"outputs\": {}, \"artifacts\": []}\n\n\n"
     "if __name__ == \"__main__\":\n"
     "    # E2B pure-script entry: write result.json so the run does not fail\n"
