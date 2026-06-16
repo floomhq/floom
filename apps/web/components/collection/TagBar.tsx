@@ -28,24 +28,17 @@ export function TagBar({ families, active, onToggle, onClear }: TagBarProps) {
   if (renderedFamilies.length === 0) return null;
 
   return (
-    <div className="c-tagbar-stack" role="group" aria-label="Filters">
-      <div className="c-filterbar">
-        <button
-          type="button"
-          className={`c-tag c-filter-toggle ${open || anyOn ? "on" : ""}`}
-          aria-expanded={open}
-          onClick={() => setOpen((value) => !value)}
-        >
-          <Filter className="size-3" aria-hidden="true" />
-          filters
-          {activeCount > 0 && <span className="ct">{activeCount}</span>}
-        </button>
-        {anyOn && (
-          <button type="button" className="c-tag" onClick={onClear}>
-            clear
-          </button>
-        )}
-      </div>
+    <div className="c-filterbar" role="group" aria-label="Filters">
+      <button
+        type="button"
+        className={`c-tag c-filter-toggle ${open || anyOn ? "on" : ""}`}
+        aria-expanded={open}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <Filter className="size-3" aria-hidden="true" />
+        filters
+        {activeCount > 0 && <span className="ct">{activeCount}</span>}
+      </button>
       {open && (
         <div className="c-tagbar">
           <div className="c-tgroup">
@@ -77,6 +70,13 @@ export function TagBar({ families, active, onToggle, onClear }: TagBarProps) {
               })}
             </div>
           ))}
+          {anyOn && (
+            <div className="c-tgroup">
+              <button type="button" className="c-tag" onClick={onClear}>
+                clear
+              </button>
+            </div>
+          )}
         </div>
       )}
     </div>
