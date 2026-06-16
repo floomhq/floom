@@ -5,13 +5,38 @@ repo is organized, and what we look for in a pull request.
 
 ## Repository layout
 
-- `apps/api` — FastAPI backend (the worker runtime, auth, workspaces, contexts).
-- `apps/web` — Next.js web app.
-- `apps/mcp` — MCP server / CLI.
-- `workers/` — bundled demo + engine workers (the example templates that ship).
-- `docs/` — architecture, design system, integration guides, security model.
+- `apps/api` - FastAPI backend: worker runtime, auth, workspaces, contexts.
+- `apps/web` - Next.js web app.
+- `apps/mcp` - MCP server and CLI package.
+- `workers/` - bundled demo and engine workers.
+- `docs/` - architecture, design system, integrations, and security docs.
+- `tests/` - root backend/runtime regression suite.
 
-## Local development (backend)
+## First local run
+
+The fastest path is the checked-in setup script for your OS. It creates the
+backend virtualenv, installs frontend dependencies, and scaffolds local `.env`
+files without overwriting existing ones.
+
+Linux / macOS:
+
+```bash
+./scripts/setup.sh
+# edit apps/api/.env and add OPENAI_API_KEY + E2B_API_KEY
+./scripts/dev.sh
+```
+
+Windows PowerShell:
+
+```powershell
+.\scripts\setup.ps1
+# edit apps\api\.env and add OPENAI_API_KEY + E2B_API_KEY
+.\scripts\dev.ps1
+```
+
+Open `http://localhost:3000`. The API listens on `http://localhost:8000`.
+
+## Manual backend setup
 
 ```bash
 cd apps/api
@@ -21,17 +46,64 @@ pip install -r requirements.txt
 cp .env.example .env   # then fill in the values you need
 ```
 
-Run the test suite. The repo's tests are I/O heavy; on a small machine, run them
-in chunks rather than all at once:
+On Windows PowerShell:
 
-```bash
-cd apps/api
-python -m pytest tests/ -q
+```powershell
+cd apps\api
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+Copy-Item .env.example .env
 ```
 
-Some tests expect a few environment variables to be set (for example
-`FLOOM_SECRET` and, for connection tests, `COMPOSIO_API_KEY`); see
-`.env.example` for the full list.
+## Test matrix
+
+Run the smallest relevant set before opening a PR. The full backend suite is I/O
+heavy, so on a small machine it is fine to run focused files first and note that
+in the PR.
+
+```bash
+# Backend focused or full root suite
+python -m pytest tests/test_api_endpoints.py -q
+python -m pytest tests -q
+
+# API package tests
+cd apps/api
+python -m pytest tests -q
+
+# Web
+cd apps/web
+npm run lint
+npm test
+
+# MCP package
+cd apps/mcp
+npm test
+
+# Root convenience scripts for common checks
+npm run test:api
+npm run lint:web
+npm run test:web
+npm run test:mcp
+```
+
+Some tests expect a few environment variables to be set, for example
+`FLOOM_SECRET` and, for connection tests, `COMPOSIO_API_KEY`. See
+`.env.example` and `apps/api/.env.example` for the full list.
+
+## CI expectations
+
+CI runs ruff, secret scanning, backend pytest, web lint/tests, and MCP tests.
+The project currently uses self-hosted GitHub Actions runners for the full CI
+matrix, so contributors should paste the commands they ran locally in the PR
+template. Maintainers will use the CI result as the merge gate.
+
+## Picking an issue
+
+Good first contributions are small, testable fixes: docs gaps, focused API
+regressions, worker examples, MCP CLI polish, or frontend states that already
+have an established pattern. For behavior changes, include the smallest test
+that would have failed before the fix.
 
 ## Pull requests
 
