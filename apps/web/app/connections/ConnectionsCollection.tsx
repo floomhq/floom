@@ -369,16 +369,18 @@ export default function ConnectionsCollection({
 
   useEffect(() => {
     void refresh(true);
-    // Safety timeout: if the API proxy is unreachable and the request hangs,
-    // stop showing the skeleton after 10 s so users see an error + retry.
+    // Safety timeout: if the API proxy hangs, stop the skeleton after 25 s. But
+    // only surface an error when we have NOTHING to show — with SSR/cached data
+    // we keep showing it instead of flashing "Something went wrong" on a slow
+    // backend (consistent with the workers/runs cache-first behavior).
     const timeout = setTimeout(() => {
       setLoading((prev) => {
-        if (prev) {
+        if (prev && initialConnections.length === 0) {
           setError("Could not load connections. Check your connection and try again.");
         }
         return false;
       });
-    }, 10_000);
+    }, 25_000);
     return () => clearTimeout(timeout);
   }, []);
 
