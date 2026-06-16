@@ -63,8 +63,10 @@ export function workerStatusMetric(
   }
   return {
     value: active,
-    label: "Workers active",
-    context: `${paused} paused`,
+    // "On duty" reads as outcome-oriented ("your workers are working for you")
+    // rather than the infra-counter phrasing "Workers active".
+    label: "Workers on duty",
+    context: paused > 0 ? `${paused} paused` : "Running when triggered",
   };
 }
 
@@ -466,7 +468,9 @@ export function OverviewDashboard({
     () => [
       {
         value: completedThisWeek,
-        label: "Runs completed",
+        // "Tasks finished" is outcome-oriented ("work your company got done")
+        // vs the infra-counter phrasing "Runs completed".
+        label: "Tasks finished",
         href: "/runs",
         // Backend scopes this to active, real workers (excludes paused/example/
         // system/listener churn) so the flagship metric reflects real outcomes,
@@ -481,10 +485,10 @@ export function OverviewDashboard({
       },
       {
         value: runsToday,
-        label: "Runs today",
+        label: "Done today",
         href: "/runs",
         // completed/failed breakdown is scoped to active, real workers (matches
-        // "Runs completed" above); the runsToday total is raw activity volume.
+        // flagship tile above); the runsToday total is raw activity volume.
         context: hasRunBreakdown
           ? `${completedToday ?? 0} ok · ${failedToday ?? 0} failed`
           : "Last 24h",
@@ -498,7 +502,9 @@ export function OverviewDashboard({
       },
       {
         value: data?.stats.scheduled_24h_count ?? data?.scheduled_today?.length ?? 0,
-        label: "Coming up today",
+        // "Scheduled today" is crisper than "Coming up today" and matches the
+        // section heading below, which stays "Coming up today" for the list.
+        label: "Scheduled today",
         href: "/runs",
         context: nextScheduled,
       },
@@ -547,7 +553,7 @@ export function OverviewDashboard({
       <section className="pb-4 shrink-0">
         <h1 className="text-[23px] font-semibold leading-tight tracking-normal text-[var(--text-primary)]">Work done</h1>
         <p className="mt-1 text-sm text-[var(--text-muted)]">
-          {completedThisWeek} {completedThisWeek === 1 ? "run" : "runs"} completed in the last 7 days.
+          {completedThisWeek} {completedThisWeek === 1 ? "task" : "tasks"} finished in the last 7 days.
         </p>
       </section>
 
