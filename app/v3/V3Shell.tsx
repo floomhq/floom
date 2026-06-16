@@ -42,7 +42,7 @@ function Mark({ size = 22 }: { size?: number }) {
 }
 
 // Header nav links removed per spec (Product / Templates / Docs).
-const NAV = [] as const;
+const NAV: ReadonlyArray<readonly [string, string]> = [];
 
 export function V3Shell({
   active,
