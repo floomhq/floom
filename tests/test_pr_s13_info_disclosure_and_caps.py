@@ -1329,11 +1329,12 @@ def test_chat_per_user_quota_returns_429(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     monkeypatch.setenv("WORKEROS_CHAT_RATE_LIMIT", "2")
     monkeypatch.setenv("WORKEROS_CHAT_RATE_WINDOW_SECONDS", "60")
+    monkeypatch.setenv("WORKEROS_CHAT_COST_UNITS_LIMIT", "0")
 
     # Stub stream_chat so the test never reaches OpenAI: just emit a finish part.
     import chat_service
 
-    async def _fake_stream_chat(*, message, user_id, conversation_id, part_queue):
+    async def _fake_stream_chat(*, message, user_id, conversation_id, part_queue, source="web"):
         await part_queue.put({"type": "finish", "conversation_id": "c1", "message_id": "m1"})
 
     monkeypatch.setattr(chat_service, "stream_chat", _fake_stream_chat)
@@ -1350,3 +1351,50 @@ def test_chat_per_user_quota_returns_429(monkeypatch, tmp_path):
     assert blocked.status_code == 429, blocked.text
     assert "Retry-After" in blocked.headers
     assert "Chat rate limit exceeded" in blocked.json()["detail"]
+
+
+def test_chat_cost_quota_exhaustion_returns_retry_after(monkeypatch, tmp_path):
+    _load_api(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_CHAT_RATE_LIMIT", "0")
+    monkeypatch.setenv("WORKEROS_CHAT_COST_UNITS_LIMIT", "3")
+    monkeypatch.setenv("WORKEROS_CHAT_COST_WINDOW_SECONDS", "60")
+    monkeypatch.setenv("WORKEROS_CHAT_MODEL", "bedrock/us.anthropic.claude-sonnet-4-6")
+
+    from auth import AuthContext
+    from services.quota import _enforce_chat_quota
+    from fastapi import HTTPException
+
+    # Sonnet multiplier makes a short message cost 2 units: first allowed,
+    # second would exceed the 3-unit bucket.
+    _enforce_chat_quota(AuthContext(user_id="alice"), message="hi")
+    try:
+        _enforce_chat_quota(AuthContext(user_id="alice"), message="hi")
+    except HTTPException as exc:
+        assert exc.status_code == 429
+        assert "Retry-After" in exc.headers
+        assert "cost quota" in str(exc.detail)
+    else:
+        raise AssertionError("second cost-bearing chat should be quota limited")
+
+
+def test_chat_cost_quota_is_scoped_by_identity_and_workspace(monkeypatch, tmp_path):
+    _load_api(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_CHAT_RATE_LIMIT", "0")
+    monkeypatch.setenv("WORKEROS_CHAT_COST_UNITS_LIMIT", "1")
+    monkeypatch.setenv("WORKEROS_CHAT_COST_WINDOW_SECONDS", "60")
+    monkeypatch.setenv("WORKEROS_CHAT_MODEL", "gpt-4.1-mini")
+
+    from auth import AuthContext
+    from services.quota import _enforce_chat_quota
+    from fastapi import HTTPException
+
+    _enforce_chat_quota(AuthContext(user_id="alice"), message="hi")
+    _enforce_chat_quota(AuthContext(user_id="bob"), message="hi")
+    _enforce_chat_quota(AuthContext(user_id="alice__ws_1234567890abcd"), message="hi")
+
+    try:
+        _enforce_chat_quota(AuthContext(user_id="alice"), message="again")
+    except HTTPException as exc:
+        assert exc.status_code == 429
+    else:
+        raise AssertionError("same identity/workspace bucket should be exhausted")
