@@ -186,7 +186,9 @@ function NewFolderForm({ onCreated }: { onCreated: () => void | Promise<void> })
     setBusy(true);
     setError(null);
     try {
-      await api.contexts.create(slug);
+      // #1241/#1243: user-created folders must default to writeable=true so the
+      // drop-zone and upload affordances are available immediately after creation.
+      await api.contexts.create(slug, true);
       toast.success(`Created "${slug}"`);
       await onCreated();
     } catch (e) {
@@ -283,7 +285,8 @@ function DropCreateFolderOverlay({
     setBusy(true);
     setError(null);
     try {
-      await api.contexts.create(slug);
+      // #1241/#1243: writeable=true so the created folder accepts uploads.
+      await api.contexts.create(slug, true);
       await api.contexts.upload(slug, files, undefined);
       toast.success(
         files.length === 1
@@ -484,7 +487,9 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
           <Folder size={20} />
         </span>
       ),
-      name: c.name,
+      // #1257: wrap in a span with title so the full name is accessible on hover
+      // even when it is ellipsis-truncated by c-gnm.
+      name: <span title={c.name}>{c.name}</span>,
       description: `${c.file_count ?? 0} files · ${formatRelative(c.updated_at ?? "")}`,
       status: c.read_only ? { tone: "idle", label: "Read only" } : null,
     }),

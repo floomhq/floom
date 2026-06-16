@@ -57,6 +57,8 @@ export function WorkerBrainEditor({
   return (
     <div>
       {showMemoryCta && (
+        // #1254: button shows "Connecting..." + spinner while busy so the user
+        // gets immediate visual feedback that the action is in progress.
         <button
           type="button"
           className="mb-3 flex w-full items-center gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-3)] disabled:opacity-60"
@@ -64,16 +66,37 @@ export function WorkerBrainEditor({
           onClick={() => void onAttachMemory?.()}
         >
           <span className="c-logo">
-            <Brain size={15} />
+            {busy ? (
+              <svg
+                className="animate-spin"
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+            ) : (
+              <Brain size={15} />
+            )}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-sm text-foreground">Connect a memory folder</span>
-            <span className="block text-xs text-muted-foreground">
-              Give this worker a writeable <span className="font-mono">{memoryFolderName}</span> folder it
-              can read and write across runs.
+            <span className="block text-sm text-foreground">
+              {busy ? "Connecting..." : "Connect a memory folder"}
             </span>
+            {!busy && (
+              <span className="block text-xs text-muted-foreground">
+                Give this worker a writeable <span className="font-mono">{memoryFolderName}</span> folder it
+                can read and write across runs.
+              </span>
+            )}
           </span>
-          <Plus size={15} className="shrink-0 text-muted-foreground" />
+          {!busy && <Plus size={15} className="shrink-0 text-muted-foreground" />}
         </button>
       )}
       <div className="c-ltable">
