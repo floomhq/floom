@@ -39,6 +39,7 @@ describe("#376 cloud auth cookie forwarding", () => {
     );
 
     expect(res.headers.get("set-cookie")).toContain("Secure");
+    expect(res.headers.get("cache-control")).toBe("private, no-store, max-age=0");
   });
 
   it("proxy route forwards upstream cookies with Secure forced", async () => {

@@ -77,8 +77,8 @@ export function buildCsp(nonce: string): string {
 // #947 — CSRF defence-in-depth, mirrored from the engine middleware. The cloud
 // /api/proxy forwards the victim's Supabase Bearer token to the backend, so a
 // cross-site mutation with their cookie is exactly as dangerous here. Validate
-// Origin (falling back to Referer) against the app's own host on every mutating
-// method. The proxy is browser-only, so a legit mutation always carries Origin.
+// Origin against the app's own host on every mutating method. The proxy is
+// browser-only, so a legit mutation always carries Origin.
 const MUTATING_METHODS = new Set(["POST", "PUT", "PATCH", "DELETE"]);
 
 function allowedHosts(req: NextRequest): Set<string> {
@@ -114,10 +114,7 @@ function isCsrfSafe(req: NextRequest): boolean {
   if (!MUTATING_METHODS.has(req.method.toUpperCase())) return true;
   const allowed = allowedHosts(req);
   const originHost = hostOf(req.headers.get("origin"));
-  if (originHost) return allowed.has(originHost);
-  const refererHost = hostOf(req.headers.get("referer"));
-  if (refererHost) return allowed.has(refererHost);
-  return false;
+  return originHost ? allowed.has(originHost) : false;
 }
 
 export async function middleware(req: NextRequest): Promise<NextResponse> {
@@ -143,10 +140,12 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     stripAppBase(req.nextUrl.pathname).startsWith("/api/proxy/") &&
     !isCsrfSafe(req)
   ) {
-    return NextResponse.json(
+    const response = NextResponse.json(
       { detail: "Cross-origin request blocked." },
       { status: 403 },
     );
+    response.headers.set("Cache-Control", "private, no-store, max-age=0");
+    return response;
   }
 
   if (isPublicPath(req.nextUrl.pathname)) {

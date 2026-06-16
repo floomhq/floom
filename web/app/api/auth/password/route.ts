@@ -6,6 +6,8 @@ const API_BASE =
   process.env.NEXT_PUBLIC_WORKEROS_API_BASE ||
   "https://workeros-api.floom.dev";
 
+const NO_STORE_HEADERS = { "Cache-Control": "private, no-store, max-age=0" };
+
 export async function POST(req: NextRequest) {
   const body = await req.json().catch(() => ({}));
   const mode = typeof body.mode === "string" ? body.mode : "signin";
@@ -18,7 +20,7 @@ export async function POST(req: NextRequest) {
   });
 
   const payload = await upstream.json().catch(() => ({}));
-  const response = NextResponse.json(payload, { status: upstream.status });
+  const response = NextResponse.json(payload, { status: upstream.status, headers: NO_STORE_HEADERS });
   forwardSecureSetCookies(upstream, response.headers);
   return response;
 }

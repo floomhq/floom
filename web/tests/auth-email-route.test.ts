@@ -16,7 +16,7 @@ describe("#357 email auth next validation", () => {
       .mockResolvedValue(new Response(JSON.stringify({ ok: true }), { status: 200 }));
     const { POST } = await import("@/app/api/auth/email/route");
 
-    await POST(
+    const res = await POST(
       new NextRequest("https://workers.floom.dev/api/auth/email", {
         method: "POST",
         body: JSON.stringify({ email: "user@example.com", next: "https://evil.example/cb" }),
@@ -25,6 +25,21 @@ describe("#357 email auth next validation", () => {
 
     const url = new URL(String(fetchMock.mock.calls[0][0]));
     expect(url.searchParams.get("next")).toBe("/app");
+    expect(res.headers.get("cache-control")).toBe("private, no-store, max-age=0");
+  });
+
+  it("marks validation errors private no-store", async () => {
+    const { POST } = await import("@/app/api/auth/email/route");
+
+    const res = await POST(
+      new NextRequest("https://workers.floom.dev/api/auth/email", {
+        method: "POST",
+        body: JSON.stringify({ next: "/app" }),
+      }),
+    );
+
+    expect(res.status).toBe(400);
+    expect(res.headers.get("cache-control")).toBe("private, no-store, max-age=0");
   });
 
   it("keeps relative app paths with query and hash", () => {

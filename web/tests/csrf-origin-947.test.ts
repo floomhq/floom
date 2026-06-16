@@ -66,6 +66,15 @@ describe("#947 cloud CSRF origin validation on /api/proxy", () => {
     expect((await middleware(req("/api/proxy/workers"))).status).toBe(403);
   });
 
+  it("blocks a mutation with only Referer and no Origin", async () => {
+    const { middleware } = await import("@/middleware");
+    const res = await middleware(
+      req("/api/proxy/workers", { referer: `https://${HOST}/dashboard` }),
+    );
+    expect(res.status).toBe(403);
+    expect(res.headers.get("cache-control")).toBe("private, no-store, max-age=0");
+  });
+
   it("does not block GET", async () => {
     const { middleware } = await import("@/middleware");
     const res = await middleware(
