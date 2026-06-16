@@ -1368,7 +1368,12 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         user_id: str | None = None,
     ) -> dict[str, Any] | None:
         cache = _recipe_cache.get()
-        if cache is not None and worker_id in cache:
+        # A populated recipe cache means we're inside a list/batch render: list()
+        # pre-fetches every visible worker, and those callers want config metadata
+        # for display, NOT the code files on disk. Single-worker resolves
+        # (runs/scheduler) leave the cache empty and DO need materialization.
+        batch_render = cache is not None and worker_id in cache
+        if batch_render:
             worker, skill = cache[worker_id]
             skill_map = {worker.get("skill_version_id"): skill} if skill else {}
         else:
@@ -1393,7 +1398,11 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         # the expected filesystem path. Strip _files before passing to
         # parse_worker_manifest so the config parser never sees it.
         embedded_files = manifest_json.pop("_files", None)
-        if embedded_files and isinstance(embedded_files, dict):
+        # Skip the disk write on list/batch renders. Writing every worker's bundle
+        # per /workers render (mkdir + write_text per file, x N workers) was the
+        # dominant endpoint latency (~4s for 6 workers); the list never reads these
+        # files. Runs/scheduler (batch_render=False) still materialize before exec.
+        if embedded_files and isinstance(embedded_files, dict) and not batch_render:
             _materialize_worker_files(str(worker["id"]), _sanitize_worker_files(embedded_files))
 
         config = _config_from_manifest(
