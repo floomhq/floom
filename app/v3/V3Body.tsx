@@ -186,7 +186,14 @@ function BeatRecord() {
             <span className={`w-12 shrink-0 font-mono text-[10.5px] ${done ? "text-muted-foreground" : "font-semibold"}`} style={!done ? { color: "var(--v3-accent)" } : undefined}>
               {d as string}
             </span>
-            <span className={`flex-1 ${done ? "text-muted-foreground" : "font-medium text-foreground"}`}>{s as string}</span>
+            <span className={`flex flex-1 items-center gap-1.5 ${done ? "text-muted-foreground" : "font-medium text-foreground"}`}>
+              {(s as string).includes("HubSpot") ? (
+                <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center [&_svg]:h-3.5 [&_svg]:w-3.5">
+                  <HubSpotLogo />
+                </span>
+              ) : null}
+              {s as string}
+            </span>
             {done ? (
               <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
             ) : (

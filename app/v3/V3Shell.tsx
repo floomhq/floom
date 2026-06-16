@@ -41,11 +41,8 @@ function Mark({ size = 22 }: { size?: number }) {
   );
 }
 
-const NAV = [
-  ["Product", "/product"],
-  ["Templates", "/templates"],
-  ["Docs", "/docs"],
-] as const;
+// Header nav links removed per spec (Product / Templates / Docs).
+const NAV = [] as const;
 
 export function V3Shell({
   active,

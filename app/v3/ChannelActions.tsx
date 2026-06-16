@@ -77,8 +77,12 @@ function McpCopyButton() {
 
 export function ChannelActions({ compact = false, only }: { compact?: boolean; only?: Channel }) {
   const [modal, setModal] = useState<Modal>(null);
-  const showSlack = !only || only === "slack";
-  const showWhatsApp = !only || only === "whatsapp";
+  // Slack + WhatsApp channel buttons cut per spec. Only MCP remains on the
+  // landing for now (MCP relocation is a separate follow-up). The Slack/WhatsApp
+  // render blocks + modal below are kept dead behind these flags pending a
+  // dead-code cleanup pass, so `only="slack"/"whatsapp"` callers don't crash.
+  const showSlack = false;
+  const showWhatsApp = false;
   const showMcp = !only || only === "mcp";
 
   return (
