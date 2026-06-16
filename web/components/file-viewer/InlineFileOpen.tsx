@@ -30,6 +30,26 @@ function sizeLabel(bytes?: number): string {
   return bytes < 1024 ? `${bytes} B` : `${Math.round(bytes / 1024)} KB`;
 }
 
+export function safeInlineFileUrl(value: string, origin = "https://workers.floom.dev"): string | null {
+  const raw = (value || "").trim();
+  if (!raw || raw.startsWith("//") || raw.includes("\\")) return null;
+  let parsed: URL;
+  try {
+    parsed = new URL(raw, origin);
+  } catch {
+    return null;
+  }
+  if (parsed.protocol !== "https:" && parsed.protocol !== "http:") return null;
+  if (parsed.origin !== origin) return null;
+  const path = parsed.pathname;
+  const allowed =
+    path.startsWith("/api/proxy/") ||
+    path.startsWith("/app/api/proxy/") ||
+    path.startsWith("/uploads/") ||
+    path.startsWith("/api/uploads/");
+  return allowed ? `${path}${parsed.search}${parsed.hash}` : null;
+}
+
 export function InlineFileOpen({
   files,
   rootLabel,
@@ -66,6 +86,12 @@ export function InlineFileOpen({
   const [uploading, setUploading] = useState(false);
   const fileInputRef = useRef<HTMLInputElement | null>(null);
   const open = files.find((f) => f.id === openId) ?? null;
+  const safeOpenUrl = open
+    ? safeInlineFileUrl(
+        open.url,
+        typeof window !== "undefined" ? window.location.origin : "https://workers.floom.dev",
+      )
+    : null;
 
   const doUpload = async (dropped: File[]) => {
     if (!onUpload || dropped.length === 0) return;
@@ -131,22 +157,28 @@ export function InlineFileOpen({
           <span style={{ color: "var(--muted-foreground)" }}>
             {rootLabel} / <span style={{ color: "var(--ink)" }}>{open.name}</span>
           </span>
-          <a
-            href={open.url}
-            download={open.name}
-            className="c-vpill"
-            style={{ marginLeft: "auto", padding: "4px 9px", textDecoration: "none" }}
-          >
-            <Download size={13} /> Download
-          </a>
+          {safeOpenUrl ? (
+            <a
+              href={safeOpenUrl}
+              download={open.name}
+              className="c-vpill"
+              style={{ marginLeft: "auto", padding: "4px 9px", textDecoration: "none" }}
+            >
+              <Download size={13} /> Download
+            </a>
+          ) : null}
         </div>
-        {isImageFile(open.name) ? (
+        {isImageFile(open.name) && safeOpenUrl ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
-            src={open.url}
+            src={safeOpenUrl}
             alt={open.name}
             style={{ maxWidth: "100%", borderRadius: "var(--r-card, 16px)", display: "block" }}
           />
+        ) : isImageFile(open.name) ? (
+          <div style={{ color: "var(--muted-foreground)", padding: 14 }}>
+            Preview blocked because the file URL is not from an allowed source.
+          </div>
         ) : canLoadText ? (
           loading ? (
             <div style={{ color: "var(--muted-foreground)", padding: 14 }}>Loading…</div>

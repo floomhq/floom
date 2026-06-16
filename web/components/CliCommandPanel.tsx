@@ -25,13 +25,51 @@ const MCP_TARGETS: { value: McpTarget; label: string; hint: string }[] = [
   { value: "generic",  label: "Generic",  hint: "prints snippet — paste manually" },
 ];
 
-function readStoredSecret(): string {
+export function readStoredSecret(): string {
   if (typeof window === "undefined") return "";
+  try {
+    for (const key of SECRET_STORAGE_KEYS) {
+      const value = window.sessionStorage.getItem(key);
+      if (value && value.trim()) return value.trim();
+    }
+  } catch {}
   for (const key of SECRET_STORAGE_KEYS) {
-    const value = window.localStorage.getItem(key);
-    if (value && value.trim()) return value.trim();
+    try {
+      const value = window.localStorage.getItem(key);
+      if (value && value.trim()) {
+        const trimmed = value.trim();
+        try {
+          window.sessionStorage.setItem("floom_secret", trimmed);
+        } catch {}
+        purgeLegacyStoredSecrets();
+        return trimmed;
+      }
+    } catch {}
   }
   return "";
+}
+
+export function storeSecretInSession(value: string) {
+  if (typeof window === "undefined") return;
+  try {
+    window.sessionStorage.setItem("floom_secret", value);
+  } catch {}
+  purgeLegacyStoredSecrets();
+}
+
+export function clearStoredSecrets() {
+  if (typeof window === "undefined") return;
+  try {
+    for (const key of SECRET_STORAGE_KEYS) window.sessionStorage.removeItem(key);
+  } catch {}
+  purgeLegacyStoredSecrets();
+}
+
+function purgeLegacyStoredSecrets() {
+  if (typeof window === "undefined") return;
+  try {
+    for (const key of SECRET_STORAGE_KEYS) window.localStorage.removeItem(key);
+  } catch {}
 }
 
 function maskSecret(secret: string): string {
@@ -174,9 +212,7 @@ export function CliCommandPanel() {
   }, []);
 
   function storeSecret(value: string) {
-    try {
-      window.localStorage.setItem("floom_secret", value);
-    } catch {}
+    storeSecretInSession(value);
     setStoredSecret(value);
   }
 
@@ -229,9 +265,7 @@ export function CliCommandPanel() {
   }
 
   function clearSecret() {
-    try {
-      for (const key of SECRET_STORAGE_KEYS) window.localStorage.removeItem(key);
-    } catch {}
+    clearStoredSecrets();
     setStoredSecret("");
     setRevealed(false);
   }
