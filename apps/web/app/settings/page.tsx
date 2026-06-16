@@ -211,6 +211,7 @@ function PersonalAccessTokensPanel() {
 export function WorkspaceTokensPanel() {
   const [tokens, setTokens] = useState<WorkspaceToken[] | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [newTokenName, setNewTokenName] = useState("");
   const [creating, setCreating] = useState(false);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
@@ -220,9 +221,18 @@ export function WorkspaceTokensPanel() {
       const list = await api.workspace.tokens.list();
       setTokens(list);
       setForbidden(false);
-    } catch {
-      // 403 (member) or 404 (endpoint not active) — show the admins-only note.
-      setForbidden(true);
+      setLoadError(null);
+    } catch (err) {
+      const msg = (err as Error).message || "";
+      // 403 = member role; 404 = endpoint not yet active → admins-only notice.
+      if (msg.includes("403") || msg.toLowerCase().includes("forbidden") || msg.toLowerCase().includes("admin")) {
+        setForbidden(true);
+      } else {
+        // Any other error (5xx, network) — show an error so admins aren't
+        // locked out by a transient failure misread as a permission error.
+        setLoadError(msg || "Could not load workspace tokens.");
+        setTokens([]);
+      }
     }
   }, []);
 
@@ -272,6 +282,8 @@ export function WorkspaceTokensPanel() {
         <p className="text-sm text-muted-foreground">
           Only workspace admins can manage the workspace token.
         </p>
+      ) : loadError ? (
+        <p className="text-sm text-destructive">{loadError}</p>
       ) : tokens === null ? null : (
         <>
           <p className="text-sm text-muted-foreground">
@@ -318,7 +330,7 @@ export function WorkspaceTokensPanel() {
           {tokens.length > 0 ? (
             <div className="space-y-1">
               {tokens.map((t) => (
-                <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm">
+                <div key={t.id} className="flex items-center gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] px-3 py-2 text-sm">
                   <div className="flex-1 min-w-0">
                     <span className="font-medium">{t.name}</span>
                     <span className="ml-2 text-xs text-muted-foreground">
@@ -1504,8 +1516,26 @@ function SettingsHistoryMenu({
       <Dialog open={!!pendingRestore} onOpenChange={(open) => { if (!open) setPendingRestore(null); }}>
         <DialogContent showCloseButton={false} className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Restore version {pendingRestore?.sha}?</DialogTitle>
+            <DialogTitle>Restore this version?</DialogTitle>
           </DialogHeader>
+          {pendingRestore && (
+            <div className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5 text-sm space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs text-[var(--ink-soft)]">{pendingRestore.sha}</span>
+                {pendingRestore.author && (
+                  <span className="text-xs text-[var(--ink-mute)]">by {pendingRestore.author}</span>
+                )}
+              </div>
+              {pendingRestore.message && (
+                <p className="font-medium text-foreground truncate">{pendingRestore.message}</p>
+              )}
+              {pendingRestore.timestamp && (
+                <p className="text-xs text-[var(--ink-mute)]">
+                  {new Date(pendingRestore.timestamp).toLocaleString()}
+                </p>
+              )}
+            </div>
+          )}
           <DialogDescription>
             {confirmLabel} The current version is saved automatically before restoring.
           </DialogDescription>
