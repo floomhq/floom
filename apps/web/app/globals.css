@@ -109,8 +109,8 @@
   --grid-card-bg: #FFFFFF;
   --text-primary: #16171A;
   --text-muted: #6B7280;
-  --border-default: rgba(16,17,20,.09);
-  --border-soft: rgba(16,17,20,.055);
+  --border-default: rgba(20,23,26,0.08);
+  --border-soft: rgba(20,23,26,0.05);
   --primary: #16171A;
   --primary-text: #FFFFFF;
   --warning: #E5533D;
@@ -126,15 +126,15 @@
      not a full pill. Langdock-style rounded-square tool chips. */
   --radius-squircle: 9px;
   --shadow-card: none;
-  /* v4: active nav bg uses --sel (blue tint) */
-  --active-nav-bg: #EEF3FE;
+  /* v4: active nav bg uses neutral cool surface (cool brand, not blue tint) */
+  --active-nav-bg: #F2F3F5;
   --active-nav-text: #3E6FE0;
 
   --bg: var(--bg-app);
-  --bg-2: #F3F4F6;
+  --bg-2: #F2F3F5;
   --bg-3: #ECEDF0;
   --paper: var(--bg-app);
-  --paper-2: #F3F4F6;
+  --paper-2: #F2F3F5;
   --ink: var(--text-primary);
   --ink-soft: #3a3b40;
   --ink-mute: color-mix(in srgb, var(--text-muted) 80%, transparent);
