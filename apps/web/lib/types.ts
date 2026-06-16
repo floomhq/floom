@@ -1,5 +1,8 @@
 export type WorkerStatus = "healthy" | "ready" | "needs_attention" | "missing_secret" | "error";
 
+/** Worker maturity stage — a label, not a gate. */
+export type WorkerStage = "draft" | "live";
+
 // ── Emily conversation persistence ─────────────────────────────────────────────
 // Shapes returned by GET /conversations and GET /conversations/{id}
 // (apps/api/main.py list_conversations + get_conversation_detail).
@@ -292,6 +295,10 @@ export interface WorkerSummary {
   archive_reason?: string;
   /** false when the worker is paused/disabled — UI disables/warns on the Run button (#788). */
   enabled?: boolean;
+  /** Maturity LABEL: "draft" (work-in-progress) | "live" (promoted). Orthogonal
+   *  to archived/enabled/visibility — never gates execution. New workers default
+   *  to "draft"; stock/example/system default to "live". */
+  stage?: WorkerStage;
   tags: string[];
   folder?: string;
   status: WorkerStatus;
@@ -349,6 +356,8 @@ export interface WorkerDetail {
   /** P2: false when the worker is paused/disabled — UI disables the Run button. */
   enabled?: boolean;
   archive_reason?: string;
+  /** Maturity LABEL: "draft" | "live". Pure label, never gates execution. */
+  stage?: WorkerStage;
   tags: string[];
   folder?: string;
   status: WorkerStatus;
