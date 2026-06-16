@@ -2117,10 +2117,11 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         until: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        include_total: bool = True,
     ) -> tuple[list[dict[str, Any]], int]:
         builder = self._client.table("runs").select(
             "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path,trigger_member_id",
-            count="exact",
+            count="exact" if include_total else None,
         )
         builder = _scope_by_workspace(builder, user_id=user_id)
         if worker_id:
@@ -2168,7 +2169,11 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
                 )
 
         rows = self._decorate_run_rows(raw_rows)
-        total = int(getattr(response, "count", 0) or 0)
+        total = (
+            int(getattr(response, "count", 0) or 0)
+            if include_total
+            else offset + len(raw_rows) + (1 if len(raw_rows) >= limit else 0)
+        )
         return rows, total
 
     def get(self, *, user_id: str, run_id: str) -> dict[str, Any] | None:

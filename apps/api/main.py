@@ -411,9 +411,17 @@ async def runs_trigger_member_middleware(request: Request, call_next):
     async for chunk in response.body_iterator:
         body += chunk
 
+    from starlette.responses import Response as _StResponse
     try:
         data = _json2.loads(body)
         items = [data] if is_run_detail and isinstance(data, dict) else (data if isinstance(data, list) else [])
+        if items and all(
+            isinstance(item, dict)
+            and ("trigger_member_id" in item)
+            and ("trigger_member_email" in item)
+            for item in items
+        ):
+            return _StResponse(content=body, status_code=response.status_code, media_type="application/json")
         run_ids = [r["id"] for r in items if isinstance(r, dict) and r.get("id")]
         if run_ids:
             def _fetch_run_members():
@@ -444,8 +452,7 @@ async def runs_trigger_member_middleware(request: Request, call_next):
     except Exception:
         pass
 
-    from starlette.responses import Response as _StResponse2
-    return _StResponse2(content=body, status_code=response.status_code, media_type="application/json")
+    return _StResponse(content=body, status_code=response.status_code, media_type="application/json")
 
 
 @app.middleware("http")
