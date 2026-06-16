@@ -227,6 +227,54 @@ function NewFolderForm({ onCreated }: { onCreated: () => void | Promise<void> })
   );
 }
 
+// Secondary create-folder path (drop is primary). Reuses NewFolderForm in a
+// centered modal, matching DropCreateFolderOverlay's surface treatment.
+function NewFolderModal({
+  onCreated,
+  onCancel,
+}: {
+  onCreated: () => void | Promise<void>;
+  onCancel: () => void;
+}) {
+  return (
+    <div
+      style={{
+        position: "fixed",
+        inset: 0,
+        zIndex: 50,
+        display: "flex",
+        alignItems: "center",
+        justifyContent: "center",
+        background: "rgba(0,0,0,.35)",
+      }}
+      onClick={(e) => {
+        if (e.target === e.currentTarget) onCancel();
+      }}
+    >
+      <div
+        style={{
+          background: "var(--bg-card)",
+          border: "var(--bd-card)",
+          borderRadius: "var(--radius-card)",
+          padding: 24,
+          minWidth: 340,
+          maxWidth: 440,
+          boxShadow: "var(--shadow-pop)",
+          display: "flex",
+          flexDirection: "column",
+          gap: 14,
+        }}
+      >
+        <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
+          <Folder size={16} style={{ color: "var(--ink-soft)" }} />
+          <span style={{ fontWeight: 600, fontSize: 14 }}>New folder</span>
+        </div>
+        <NewFolderForm onCreated={onCreated} />
+      </div>
+    </div>
+  );
+}
+
 function UsedByTab({ folder }: { folder: ContextSummary }) {
   const [d] = useContextDetail(folder.name);
   if (!d) return <LoadingState rows={3} />;
@@ -370,6 +418,39 @@ function DropCreateFolderOverlay({
   );
 }
 
+// Empty-state actions: drop is the headline (in EmptyState.help); here we offer
+// the two clickable paths under it. "Browse files" mirrors a drop (primary,
+// filled button); "New empty folder" is the secondary, quieter path.
+function EmptyStateActions({
+  onBrowse,
+  onNewFolder,
+}: {
+  onBrowse: () => void;
+  onNewFolder: () => void;
+}) {
+  return (
+    <div style={{ display: "flex", gap: 10, alignItems: "center", marginTop: 4 }}>
+      <button type="button" className="c-addbtn" onClick={onBrowse}>
+        <Upload size={14} /> Browse files
+      </button>
+      <button
+        type="button"
+        onClick={onNewFolder}
+        style={{
+          background: "none",
+          border: "none",
+          padding: "6px 4px",
+          fontSize: 13,
+          color: "var(--ink-soft)",
+          cursor: "pointer",
+        }}
+      >
+        New empty folder
+      </button>
+    </div>
+  );
+}
+
 export default function BrainCollection({ initialFolders }: { initialFolders: ContextSummary[] }) {
   const [folders, setFolders] = useState<ContextSummary[]>(initialFolders);
   // Show a loading skeleton until the first fetch completes so we never flash
@@ -378,6 +459,10 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
   // #1112: dropped files pending folder creation
   const [pendingDropFiles, setPendingDropFiles] = useState<File[] | null>(null);
   const [listDragOver, setListDragOver] = useState(false);
+  // Secondary path: create an empty folder (drop is the primary affordance).
+  const [newFolderOpen, setNewFolderOpen] = useState(false);
+  // Browse-files trigger for the empty state (same flow as a drop).
+  const browseInputRef = useRef<HTMLInputElement>(null);
 
   const refresh = async (initial = false) => {
     try {
@@ -403,6 +488,9 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       toast.error(`Could not delete ${c.name}`);
     }
   };
+
+  const openNewFolder = () => setNewFolderOpen(true);
+  const openBrowse = () => browseInputRef.current?.click();
 
   const folderTitle = (c: ContextSummary) => (
     <span className="inline-flex min-w-0 items-baseline gap-1.5">
@@ -434,9 +522,10 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     subtitle: "Reusable folders of files your workers can read before they act.",
     items: folders,
     loading,
-    // No banner: the toolbar "New folder" addButton is the single new-folder
-    // affordance (was duplicated by a slim banner button when folders existed),
-    // and the outer wrapper handles file drops + the empty state owns the rest.
+    // No banner and no prominent toolbar addButton: dropping files is the
+    // primary affordance (outer wrapper handles file drops; the empty state
+    // leads with a drop CTA). Folder-creation is the quiet secondary path in
+    // config.toolbarActions and under the empty-state CTA.
     idOf: (c) => c.name,
     searchOf: (c) => `${c.name} ${c.description ?? ""} ${c.category ?? ""}`,
     tagsOf: (c) =>
@@ -511,22 +600,27 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
         { key: "Used by", label: "Used by", count: c.worker_count, render: () => <UsedByTab folder={c} /> },
       ],
     }),
-    add: {
-      label: "New folder",
-      panel: {
-        title: "New folder",
-        render: (close) => <NewFolderForm onCreated={async () => { await refresh(); close(); }} />,
-      },
-    },
+    // No prominent toolbar "+ New folder" addButton (the operator 2026-06-15):
+    // dropping files is the primary affordance, so folder-creation is demoted to
+    // a quiet secondary text button in the toolbar (config.toolbarActions) and
+    // a secondary action under the empty-state drop CTA.
+    toolbarActions: (
+      <button type="button" className="c-vpill" onClick={openNewFolder}>
+        New folder
+      </button>
+    ),
     states: {
-      // design-polish: single empty state. Banner returns null when empty, so
-      // only the Collection EmptyState renders (no double-stacked boxes).
-      // Drop-and-drop still works: the outer wrapper handles dragOver/drop for
-      // all cases; the visual overlay fires regardless of whether folders exist.
-      // Help text uses colon not em-dash (lint:emdash).
+      // Default state LEADS with drop, not "+ New folder" (the operator
+      // 2026-06-15). The whole wrapper is already a drop zone (outer onDrop →
+      // DropCreateFolderOverlay), so the empty state is a big, obvious "drop
+      // files here" affordance. Creating a folder is the secondary path, a
+      // plain text button under the drop CTA. Upload icon, not Inbox.
+      // Copy uses colons not em-dashes (lint:emdash).
       empty: {
-        title: "No folders yet",
-        help: "Library folders give your workers long-term memory: upload docs, PDFs, or notes they read before acting.",
+        icon: Upload,
+        title: "Drop files here to get started",
+        help: "Drag any docs, PDFs, or notes onto this page and a folder is created for them automatically. Your workers read these before they act.",
+        action: <EmptyStateActions onBrowse={openBrowse} onNewFolder={openNewFolder} />,
       },
     },
   };
@@ -578,6 +672,21 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
         </div>
       )}
       <Collection config={config} />
+      {/* Hidden picker: "Browse files" in the empty state opens the OS file
+          dialog, then routes the chosen files through the same create-folder
+          flow as a drop. */}
+      <input
+        ref={browseInputRef}
+        type="file"
+        multiple
+        style={{ display: "none" }}
+        onChange={(e) => {
+          const chosen = Array.from(e.target.files ?? []);
+          if (chosen.length > 0) setPendingDropFiles(chosen);
+          // Reset so picking the same file again still fires onChange.
+          e.target.value = "";
+        }}
+      />
       {pendingDropFiles && (
         <DropCreateFolderOverlay
           files={pendingDropFiles}
@@ -586,6 +695,15 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
             await refresh();
           }}
           onCancel={() => setPendingDropFiles(null)}
+        />
+      )}
+      {newFolderOpen && (
+        <NewFolderModal
+          onCreated={async () => {
+            setNewFolderOpen(false);
+            await refresh();
+          }}
+          onCancel={() => setNewFolderOpen(false)}
         />
       )}
     </div>
