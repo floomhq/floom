@@ -171,18 +171,26 @@ const SUGGESTIONS = [
   "Show me yesterday's runs",
 ];
 
+// #1363 — Action-oriented suggestions shown when the workspace has no workers yet.
+const FIRST_RUN_SUGGESTIONS = [
+  "Build me a worker that sends a daily email digest",
+  "Build me a worker that posts Slack alerts for new HubSpot deals",
+];
+
 /** Compact pill row — shown above the composer when chat is active (not streaming). */
 function SuggestionPills({
   onSuggest,
   hidden,
+  pills = SUGGESTIONS,
 }: {
   onSuggest: (text: string) => void;
   hidden: boolean;
+  pills?: readonly string[];
 }) {
   if (hidden) return null;
   return (
     <div className="flex flex-wrap gap-1.5 px-1 pb-1">
-      {SUGGESTIONS.map((s) => (
+      {pills.map((s) => (
         <button
           key={s}
           type="button"
@@ -328,18 +336,31 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
 
 // ── Empty state (general chat) ────────────────────────────────────────────────
 
-function ChatEmptyState({ onSuggest }: { onSuggest: (text: string) => void }) {
+function ChatEmptyState({
+  onSuggest,
+  isNewWorkspace = false,
+}: {
+  onSuggest: (text: string) => void;
+  isNewWorkspace?: boolean;
+}) {
+  // #1363 — First-run opener: proactive builder message + action-oriented pills
+  const headline = isNewWorkspace
+    ? "Hi — describe what you want to automate and I’ll build the worker for you right now."
+    : "I am Emily, your Chief of Staff";
+  const sub = isNewWorkspace
+    ? null
+    : "Ask me to create workers, check runs, or manage connections.";
+  const pills = isNewWorkspace ? FIRST_RUN_SUGGESTIONS : SUGGESTIONS;
+
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 px-6 text-center">
       <EmilyAvatar size="md" />
       <div>
-        <p className="text-sm font-medium">I am Emily, your Chief of Staff</p>
-        <p className="text-xs text-muted-foreground mt-1">
-          Ask me to create workers, check runs, or manage connections.
-        </p>
+        <p className="text-sm font-medium">{headline}</p>
+        {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
       </div>
       <div className="flex flex-wrap gap-1.5 justify-center">
-        {SUGGESTIONS.map((s) => (
+        {pills.map((s) => (
           <button
             key={s}
             type="button"
@@ -479,11 +500,13 @@ interface EmilyChatCoreProps {
   onHasMessagesChange?: (has: boolean) => void;
   /** Called whenever conversationId changes so host can highlight active chat without reading a ref in render. */
   onConversationIdChange?: (id: string | null) => void;
+  /** #1363 — when true, show a proactive first-run opener instead of the generic empty state. */
+  isNewWorkspace?: boolean;
 }
 
 const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
 
-function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpenRunDetails, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange }: EmilyChatCoreProps) {
+function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpenRunDetails, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange, isNewWorkspace = false }: EmilyChatCoreProps) {
   const {
     messages,
     conversationId,
@@ -723,7 +746,7 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
               <p className="text-xs text-muted-foreground">Loading conversation...</p>
             </div>
           ) : (
-            <ChatEmptyState onSuggest={(text) => { setInput(text); }} />
+            <ChatEmptyState onSuggest={(text) => { setInput(text); }} isNewWorkspace={isNewWorkspace} />
           )
         ) : (
           <div className={cn("py-4 space-y-4", fullPage ? "px-6" : "px-4")}>
@@ -811,6 +834,21 @@ export function EmilyDock({ className }: { className?: string }) {
   const [coreConversationId, setCoreConversationId] = useState<string | null>(null);
   // Local state for recent chats popover in the header ⋯ menu
   const [recentItems, setRecentItems] = useState<import("@/lib/types").ConversationSummary[] | null>(null);
+  // #1363 — detect empty workspace so Emily shows a proactive first-run opener.
+  // Uses the existing overview stats endpoint (no new backend call).
+  const [isNewWorkspace, setIsNewWorkspace] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api.system.overview()
+      .then((overview) => {
+        if (!alive) return;
+        const hasWorkers = (overview?.stats?.active_workers_count ?? 0) > 0 ||
+          (overview?.stats?.paused_workers_count ?? 0) > 0;
+        setIsNewWorkspace(!hasWorkers);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
   // #1141: reset the dock conversation when navigating away from /chat?mode=create
   // so the Overview Emily panel shows a fresh context instead of the create-mode thread.
   const pathname = usePathname();
@@ -951,6 +989,7 @@ export function EmilyDock({ className }: { className?: string }) {
           actionsRef={coreActionsRef}
           onHasMessagesChange={setCoreHasMessages}
           onConversationIdChange={setCoreConversationId}
+          isNewWorkspace={isNewWorkspace}
         />
       </div>
     </div>

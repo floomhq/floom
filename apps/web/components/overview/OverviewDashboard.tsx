@@ -29,6 +29,7 @@ import {
 import { cn } from "@/lib/utils";
 import { workerIcon } from "@/lib/worker-icon";
 import { BrandLogo } from "@/components/connections/BrandLogo";
+import { ActivationPanel } from "@/components/overview/ActivationPanel";
 
 export type { SystemOverviewAttentionItem };
 
@@ -559,6 +560,26 @@ export function OverviewDashboard({
       workerMetric,
     ],
   );
+
+  // #1362 — Activation panel: when there are no active workers AND no runs this
+  // week, and we are done loading, replace the metric grid with the onboarding
+  // composer so new workspaces get a useful first-run experience instead of a
+  // wall of zeroes.
+  // ADDITIVE: new early-return branch; all code below this block is untouched,
+  // so merging with #1345/#1359/#1360 (which modify the metric grid / sections)
+  // is safe — those changes land inside the else path.
+  const isEmptyWorkspace =
+    !loading &&
+    (data?.stats.active_workers_count ?? 0) === 0 &&
+    completedThisWeek === 0;
+
+  if (isEmptyWorkspace) {
+    return (
+      <div className="flex flex-col flex-1 pb-6 pt-1 lg:min-h-[620px] lg:overflow-auto">
+        <ActivationPanel />
+      </div>
+    );
+  }
 
   return (
     <div className="flex flex-col flex-1 pb-6 pt-1 lg:min-h-[620px] lg:overflow-hidden">
