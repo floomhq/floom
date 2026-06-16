@@ -98,7 +98,7 @@ export function WorkerInputForm({
           className={`space-y-1.5 ${isLongInput(inp) ? "sm:col-span-2" : ""}`}
         >
           <Label className="text-sm">
-            {inp.label}
+            {inp.label || humanizeOptionLabel(inp.name)}
             {inp.required && (
               <span className="text-red-500 ml-0.5">*</span>
             )}
