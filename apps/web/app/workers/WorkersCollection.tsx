@@ -37,12 +37,11 @@ import { Button } from "@/components/ui/button";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { ArrowRight, Brain, ChevronDown, ChevronUp, FileText, Lock, MoreHorizontal, UploadCloud } from "lucide-react";
+import { ArrowRight, Brain, ChevronDown, ChevronUp, Lock, MoreHorizontal, UploadCloud } from "lucide-react";
 import { BRAIN_FILE_META, inferBrainFileType } from "@/lib/brain/file-type-icon";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { Sparkline } from "@/components/Sparkline";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
-import { CodeBlock } from "@/components/file-viewer/code-block";
 import {
   FilesEditor,
   TriggersEditor,
@@ -522,74 +521,39 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
   );
 }
 
-function sourceFileName(path: string): string {
-  return path.split("/").filter(Boolean).pop() || path;
-}
-
-type SourceEditorFile = {
-  path: string;
-  content: string;
-  binary?: boolean;
-  language?: string;
-  size?: number;
-};
-
-function sourceEditorFiles(files: WorkerFile[]): SourceEditorFile[] {
-  return files.map((f) => ({
-    path: f.path,
-    content: f.content ?? "",
-    binary: f.binary,
-    language: f.language,
-    size: f.size,
-  }));
-}
-
-function SourceFileTabs({
-  files,
-  activePath,
-  onSelect,
-}: {
-  files: WorkerFile[];
-  activePath: string;
-  onSelect: (path: string) => void;
-}) {
-  return (
-    <div className="c-dtabs c-source-file-tabs -mx-1 mb-3 px-1" role="tablist" aria-label="Source files">
-      {files.map((file) => (
-        <button
-          key={file.path}
-          type="button"
-          role="tab"
-          aria-selected={file.path === activePath}
-          className={`c-dtab ${file.path === activePath ? "on" : ""}`}
-          title={file.path}
-          onClick={() => onSelect(file.path)}
-        >
-          <FileText className="size-3.5 shrink-0" />
-          <span className="font-mono text-xs">{sourceFileName(file.path)}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
+// §3.2/§3.3/§3.4 — Source tab: two-pane file-rail viewer (FilesEditor view mode)
+// with an "Edit source" button that opens FilesEditor in edit mode.
+// On Save: calls api.workers.updateFiles (PUT /workers/{id}/files).
+// Protected workers that clone on edit return a new WorkerDetail — applyDetail handles it.
 function SourceTab({ w }: { w: WorkerSummary }) {
   const [d, applyDetail] = useWorkerDetail(w.id);
-  const [active, setActive] = useState<string | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
-  const [draftFiles, setDraftFiles] = useState<SourceEditorFile[]>([]);
+  const [draftFiles, setDraftFiles] = useState<{ path: string; content: string; binary?: boolean; language?: string; size?: number }[]>([]);
   const [draftPath, setDraftPath] = useState<string>("worker.yml");
   const [saving, setSaving] = useState(false);
+
   if (d === undefined) return <Loading />;
   if (d === null) return <DetailError />;
+
   const ordered = orderedSourceFiles(d.files ?? []);
   if (ordered.length === 0) return <div style={muted}>No source files.</div>;
-  const file = ordered.find((f) => f.path === active) ?? ordered[0];
+
   const editable = can("edit", d);
+  // Default selected path to first file if not yet set.
+  const activePath = selectedPath ?? ordered[0]?.path ?? null;
 
   function openEditor() {
-    setDraftFiles(sourceEditorFiles(ordered));
-    setDraftPath(file.path);
+    setDraftFiles(
+      ordered.map((f) => ({
+        path: f.path,
+        content: f.content ?? "",
+        binary: f.binary,
+        language: f.language,
+        size: f.size,
+      })),
+    );
+    setDraftPath(activePath ?? "worker.yml");
     setEditOpen(true);
   }
 
@@ -602,7 +566,7 @@ function SourceTab({ w }: { w: WorkerSummary }) {
         draftFiles.map((f) => ({ path: f.path, content: f.content ?? "" })),
       );
       applyDetail(updated);
-      setActive(draftPath);
+      setSelectedPath(draftPath);
       setEditOpen(false);
       toast.success("Source updated");
     } catch (err) {
@@ -614,17 +578,21 @@ function SourceTab({ w }: { w: WorkerSummary }) {
 
   return (
     <>
-      <div className="min-w-0">
-        <div className="mb-2 flex min-w-0 items-center gap-3">
-          <SourceFileTabs files={ordered} activePath={file.path} onSelect={setActive} />
-          {editable && (
-            <button type="button" className="c-vpill mb-3 shrink-0" style={pillBtn} onClick={openEditor}>
-              Edit
-            </button>
-          )}
+      {editable && (
+        <div className="mb-3 flex justify-end">
+          <button type="button" className="c-vpill" style={pillBtn} onClick={openEditor}>
+            Edit source
+          </button>
         </div>
-        <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} />
-      </div>
+      )}
+      {/* §3.2: full two-pane file-rail + syntax-highlighted viewer (FilesEditor view mode).
+          This replaces the prior compact SourceFileTabs + CodeBlock layout. */}
+      <FilesEditor
+        mode="view"
+        files={ordered as WorkerFile[]}
+        selectedPath={activePath}
+        onSelect={(path) => setSelectedPath(path)}
+      />
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="max-h-[90vh] sm:max-w-6xl overflow-y-auto">
           <DialogHeader>
@@ -1352,6 +1320,18 @@ export default function WorkersCollection({
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [canManageWorkers, setCanManageWorkers] = useState(false);
   const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
+  // §3.5 — per-worker Advanced toggle: tracks which worker detail panes have
+  // expanded the power-user tabs (Config, Source, Versions). Operator-facing tabs
+  // (Overview, Runs) are always shown; the advanced set is opt-in.
+  const [advancedOpen, setAdvancedOpen] = useState<Set<string>>(new Set());
+  const toggleAdvanced = useCallback((id: string) => {
+    setAdvancedOpen((prev) => {
+      const next = new Set(prev);
+      if (next.has(id)) next.delete(id);
+      else next.add(id);
+      return next;
+    });
+  }, []);
 
   useEffect(() => {
     if (workersQuery.data) {
@@ -1481,18 +1461,32 @@ export default function WorkersCollection({
     },
     detail: (w) => {
       const viewOnly = !canManageWorkers && isViewOnly(w);
+      const isAdvanced = advancedOpen.has(w.id);
       const actions = (
-        <WorkerDetailActions
-          w={w}
-          canManage={canManageWorkers}
-          onUpdated={(updated) => {
-            if ((updated as WorkerSummary & { _deleted?: boolean })._deleted) {
-              setWorkers((prev) => prev.filter((item) => item.id !== updated.id));
-            } else {
-              setWorkers((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
-            }
-          }}
-        />
+        <>
+          {/* §3.5 Advanced toggle: compact pill in the header action area, right of Run. */}
+          <button
+            type="button"
+            className="c-vpill"
+            style={advancedPillStyle}
+            aria-pressed={isAdvanced}
+            onClick={() => toggleAdvanced(w.id)}
+            title={isAdvanced ? "Show operator view" : "Show Config, Source, Versions"}
+          >
+            {isAdvanced ? "Less" : "Advanced"}
+          </button>
+          <WorkerDetailActions
+            w={w}
+            canManage={canManageWorkers}
+            onUpdated={(updated) => {
+              if ((updated as WorkerSummary & { _deleted?: boolean })._deleted) {
+                setWorkers((prev) => prev.filter((item) => item.id !== updated.id));
+              } else {
+                setWorkers((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
+              }
+            }}
+          />
+        </>
       );
       return {
         header: {
@@ -1516,25 +1510,28 @@ export default function WorkersCollection({
             </>
           ),
         },
-        // SPEC §4: tabs are DERIVED from WORKER_DETAIL_TABS so the contract test
-        // guards what actually renders (no drift between constant and component).
-        tabs: WORKER_DETAIL_TABS.map((key) => {
-          const Tab = WORKER_TAB_COMPONENT[key];
-          return {
-            key,
-            label: key,
-            // #1251: badge must match the count actually listed in the Runs tab,
-            // which renders d?.recent_runs (the capped list from WorkerDetail).
-            // Use cached recent_runs length when available; otherwise fall back to
-            // last_run presence so the badge shows something before detail loads.
-            // Avoids the mismatch where runs_7d (7-day total) differed from the list.
-            count: key === "Runs"
-              ? (detailCache.get(w.id)?.recent_runs?.length
-                  ?? (w.last_run ? 1 : undefined))
-              : undefined,
-            render: () => <Tab w={w} />,
-          };
-        }),
+        // §3.5: operator-focused tab set — Overview + Runs always visible;
+        // Config / Source / Versions behind an "Advanced" toggle in the header.
+        // WORKER_DETAIL_TABS (typed constant) stays as the 5-tab contract; the UI
+        // filters at render time without touching the constant.
+        tabs: (() => {
+          const visibleKeys: WorkerDetailTab[] = isAdvanced
+            ? WORKER_DETAIL_TABS.slice() // all 5
+            : ["Overview", "Runs"];
+          return visibleKeys.map((key) => {
+            const Tab = WORKER_TAB_COMPONENT[key];
+            return {
+              key,
+              label: key,
+              // #1251: badge matches the count listed in the Runs tab.
+              count: key === "Runs"
+                ? (detailCache.get(w.id)?.recent_runs?.length
+                    ?? (w.last_run ? 1 : undefined))
+                : undefined,
+              render: () => <Tab w={w} />,
+            };
+          });
+        })(),
       };
     },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
@@ -1543,7 +1540,7 @@ export default function WorkersCollection({
       // #1364 — improved help text + action CTA linking to /workers/new
       empty: {
         title: "No workers yet",
-        help: "Workers are AI agents that run on a schedule, webhook, or on demand — powered by your connected apps.",
+        help: "Workers are AI agents that run on a schedule, webhook, or on demand, powered by your connected apps.",
         action: (
           <WorkersEmptyPrompt
             onSubmit={(prompt) => router.push(`/chat?mode=create&q=${encodeURIComponent(prompt)}`)}
@@ -1608,3 +1605,5 @@ const h4: React.CSSProperties = {
   margin: "0 0 9px",
 };
 const pillBtn: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5 };
+// §3.5 Advanced toggle pill: slightly muted so it reads as secondary to Run.
+const advancedPillStyle: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5, opacity: 0.75 };
