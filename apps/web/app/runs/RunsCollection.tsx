@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { StatusPill } from "@/components/collection/StatusPill";
 import { api } from "@/lib/api";
+import { useRuns } from "@/lib/query/hooks";
 import { formatRelative } from "@/lib/formatters";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
@@ -185,28 +186,32 @@ const RUN_TAB_COMPONENT: Record<RunDetailTab, (props: { r: RunSummary }) => Reac
 const PAGE_SIZE = 50;
 
 export default function RunsCollection({ initialRuns }: { initialRuns: RunSummary[] }) {
+  // Cache-first first page (TanStack Query): /runs renders instantly from cache
+  // on return; a slow or failed refetch keeps the cached rows instead of going
+  // blank or flashing an error. Pagination (loadMore) and the bell refresh stay local.
+  const runsQuery = useRuns(
+    { limit: PAGE_SIZE, offset: 0 },
+    initialRuns.length > 0 ? initialRuns : undefined,
+  );
   const [runs, setRuns] = useState<RunSummary[]>(initialRuns);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
-  const [loading, setLoading] = useState(initialRuns.length === 0);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(initialRuns.length === 0); // unknown until first fetch
   const [offset, setOffset] = useState(0);
   const [now] = useState(() => Date.now());
 
-  // Initial load: fetch first page and set hasMore based on whether a full page was returned.
-  const loadInitial = useCallback(async () => {
-    try {
-      const rows = await api.runs.list({ limit: PAGE_SIZE, offset: 0 });
-      const sorted = [...rows].sort((a, b) => runSortTime(b) - runSortTime(a));
+  // Sync the cached first page into local state (which loadMore appends to).
+  useEffect(() => {
+    if (runsQuery.data) {
+      const sorted = [...runsQuery.data].sort((a, b) => runSortTime(b) - runSortTime(a));
       setRuns(sorted);
       setOffset(PAGE_SIZE);
-      setHasMore(rows.length === PAGE_SIZE);
-    } catch {
-      // leave existing state intact on refresh errors
-    } finally {
-      setLoading(false);
+      setHasMore(runsQuery.data.length === PAGE_SIZE);
     }
-  }, []);
+  }, [runsQuery.data]);
+
+  // Skeleton only on a true cold start (no cache and no server data).
+  const loading = runsQuery.isLoading && runs.length === 0;
 
   // Append the next page of runs (B37 — "Load more" pattern).
   const loadMore = async () => {
@@ -232,7 +237,7 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
 
   const refresh = async (initial = false) => {
     if (initial) {
-      await loadInitial();
+      await runsQuery.refetch();
     } else {
       // Non-initial refresh re-fetches the current window size (keeps existing offset).
       try {
@@ -245,10 +250,10 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
   };
 
   useEffect(() => {
-    void loadInitial();
-    // Content tags are inherited from the parent worker (SPEC §11).
+    // Runs first page comes from the cache-first query above; here we only need
+    // the workers list for content-tag filtering (SPEC §11).
     api.workers.list().then(setWorkers).catch(() => {});
-  }, [loadInitial]);
+  }, []);
 
   // worker_id → its content tags, for tag filtering + the shared vocabulary.
   const workerTags = useMemo(() => {
