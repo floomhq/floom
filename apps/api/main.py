@@ -332,6 +332,7 @@ from core.urls import (
 from core.net import _client_ip, _trusted_proxy_peer, _valid_ip_literal
 
 from run_service import (
+    _worker_owner_id,
     create_run,
     fail_interrupted_runs_on_startup,
     reap_abandoned_pending_approval_runs,
@@ -3910,13 +3911,16 @@ def create_worker_run(
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
+    true_owner_id = _worker_owner_id(worker_id, repos) or str(worker.get("owner_id") or "")
+    if not true_owner_id:
+        raise HTTPException(status_code=409, detail=f"Worker {worker_id} owner not found")
 
     # B-P1-1 (2026-05-29): a smoke-disabled worker must NOT run on demand. The
     # smoke+gate disables a worker whose first test run failed (enabled=False);
     # honour that here so a broken worker cannot be run from the UI/API to a
     # green-but-empty no-op. Reject with 409 + the worker_disabled headline.
     try:
-        recipe = repos.workers.get_recipe(worker_id=worker_id, user_id=auth.user_id)
+        recipe = repos.workers.get_recipe(worker_id=worker_id, user_id=true_owner_id)
     except Exception:
         recipe = None
     if isinstance(recipe, dict) and recipe.get("enabled") is False:
@@ -3974,7 +3978,7 @@ def create_worker_run(
             payload.inputs,
             trigger_source,
             status=RunStatus.RUNNING.value,
-            user_id=auth.user_id,
+            user_id=true_owner_id,
             trigger_ref=trigger_ref,
             repos=repos,
         )
@@ -4035,7 +4039,7 @@ def create_worker_run(
             RunStatus.FAILED.value,
             error=str(exc.detail),
             error_code="file_input_resolution_failed",
-            user_id=auth.user_id,
+            user_id=true_owner_id,
             repos=repos,
         )
         raise
@@ -4045,20 +4049,20 @@ def create_worker_run(
             RunStatus.FAILED.value,
             error=str(exc),
             error_code="file_input_resolution_failed",
-            user_id=auth.user_id,
+            user_id=true_owner_id,
             repos=repos,
         )
         raise
     # Persist resolved inputs (absolute file paths replace SHA values) so that
     # GET /runs/:id returns the staged paths, not raw SHA strings.
-    repos.runs.set_input_json(user_id=auth.user_id, run_id=run_id, input_json=resolved_inputs)
+    repos.runs.set_input_json(user_id=true_owner_id, run_id=run_id, input_json=resolved_inputs)
     repos.runs.update(
-        user_id=auth.user_id,
+        user_id=true_owner_id,
         run_id=run_id,
         status=RunStatus.QUEUED.value,
         started_at=None,
     )
-    start_run(run_id, worker_id, resolved_inputs, user_id=auth.user_id, repos=repos)
+    start_run(run_id, worker_id, resolved_inputs, user_id=true_owner_id, repos=repos)
     return ActionResponse(status="running", run_id=run_id)
 
 
