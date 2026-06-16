@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Folder, Lock, Plus, Upload, Users } from "lucide-react";
+import { Folder, Lock, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatRelative } from "@/lib/formatters";
 import type { ContextSummary, ContextDetail } from "@/lib/types";
@@ -434,17 +434,9 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     subtitle: "Reusable folders of files your workers can read before they act.",
     items: folders,
     loading,
-    // #1316: when folders exist, show a slim "+ New folder" button in the
-    // banner. When empty, the banner yields nothing — the single empty state
-    // below owns the whole affordance (drop zone + help + new-folder button).
-    banner: (openAdd: () => void) =>
-      folders.length > 0 ? (
-        <div className="bdrop-slim">
-          <button type="button" className="c-addbtn" onClick={openAdd}>
-            <Plus size={14} /> New folder
-          </button>
-        </div>
-      ) : null,
+    // No banner: the toolbar "New folder" addButton is the single new-folder
+    // affordance (was duplicated by a slim banner button when folders existed),
+    // and the outer wrapper handles file drops + the empty state owns the rest.
     idOf: (c) => c.name,
     searchOf: (c) => `${c.name} ${c.description ?? ""} ${c.category ?? ""}`,
     tagsOf: (c) =>
