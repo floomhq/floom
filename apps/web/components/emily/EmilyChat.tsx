@@ -346,7 +346,7 @@ function ChatEmptyState({
   // #1363 — First-run opener: proactive builder message + action-oriented pills
   const headline = isNewWorkspace
     ? "Hi — describe what you want to automate and I’ll build the worker for you right now."
-    : "I am Emily, your Chief of Staff";
+    : "I am Emily, your COO";
   const sub = isNewWorkspace
     ? null
     : "Ask me to create workers, check runs, or manage connections.";

@@ -491,7 +491,7 @@ def claim_whatsapp_sender(
     try:
         send_whatsapp_text(
             wa_id,
-            "Hi, it's *Emily*, your chief of staff. We're connected.\n"
+            "Hi, it's *Emily*, your COO. We're connected.\n"
             "Tell me what you want handled and I'll take it from here.",
         )
     except Exception:
