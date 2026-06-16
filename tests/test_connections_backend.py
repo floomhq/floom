@@ -14,6 +14,7 @@ from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -745,7 +746,7 @@ class TestMCPConnections:
                 "command": "npx",
                 "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
                 "env": {"GITHUB_TOKEN": "secret:GITHUB_PAT"},
-                "cwd": "/workspace",
+                "cwd": "workspace",
                 "allowed_tools": ["read_file"],
             },
         )
@@ -758,9 +759,28 @@ class TestMCPConnections:
         assert created["mcp_command"] == "npx"
         assert created["mcp_args"] == ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
         assert created["mcp_env"] == {"GITHUB_TOKEN": "secret:GITHUB_PAT"}
-        assert created["mcp_cwd"] == "/workspace"
+        assert created["mcp_cwd"] == "workspace"
         assert created["mcp_auth_secret"] is None
         assert created["mcp_allowed_tools"] == ["read_file"]
+
+    @pytest.mark.parametrize("cwd", ["/workspace", "../workspace", "workspace/../secrets", "C:\\workspace", "~/.workeros"])
+    def test_create_stdio_mcp_connection_rejects_unsafe_cwd(self, monkeypatch, tmp_path, cwd):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+
+        resp = client.post(
+            "/connections/mcp",
+            headers=AUTH_HEADERS,
+            json={
+                "label": "filesystem",
+                "transport": "stdio",
+                "command": "npx",
+                "cwd": cwd,
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "workspace-relative" in resp.json()["detail"]
 
     def test_create_mcp_connection_rejects_duplicate_label(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)

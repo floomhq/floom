@@ -5234,7 +5234,7 @@ def _mcp_text(data: Any, summary: Optional[str] = None) -> str:
 
 
 def _mcp_call_result(data: Any, summary: Optional[str] = None) -> Dict[str, Any]:
-    structured = jsonable_encoder(data)
+    structured = _mcp_redact(jsonable_encoder(data))
     if not isinstance(structured, dict):
         structured = {"data": structured}
     return {
@@ -5247,8 +5247,8 @@ def _mcp_call_result(data: Any, summary: Optional[str] = None) -> Dict[str, Any]
 def _mcp_http_error_result(exc: HTTPException) -> Dict[str, Any]:
     detail = exc.detail if isinstance(exc.detail, str) else json.dumps(jsonable_encoder(exc.detail), ensure_ascii=False)
     return {
-        "content": [{"type": "text", "text": detail}],
-        "structuredContent": {"status": exc.status_code, "detail": jsonable_encoder(exc.detail)},
+        "content": [{"type": "text", "text": _mcp_redact_string(detail)}],
+        "structuredContent": _mcp_redact({"status": exc.status_code, "detail": jsonable_encoder(exc.detail)}),
         "isError": True,
     }
 
@@ -5773,6 +5773,8 @@ async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, An
         if tool_name == "record_candidate_feedback":
             return _mcp_call_record_candidate_feedback(arguments, auth, repos)
         return _mcp_tool_error(f"Unknown tool: {tool_name or 'unknown'}")
+    except ValidationError:
+        raise
     except ValueError as exc:
         return _mcp_tool_error(str(exc))
     except HTTPException as exc:
@@ -5827,7 +5829,7 @@ async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Option
         auth = _workspace_agent_mcp_auth_context()
         tools = [
             t for t in _workeros_remote_mcp_tool_definitions()
-            if _mcp_access_error(t["name"], auth) is None
+            if _mcp_default_tool(t["name"]) is None or _mcp_access_error(t["name"], auth) is None
         ]
         return _mcp_result(request_id, {"tools": tools})
     if method != "tools/call":
@@ -5845,6 +5847,8 @@ async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Option
         return _mcp_error(request_id, -32602, invalid_args)
     try:
         return _mcp_result(request_id, await _call_workeros_remote_mcp_tool(tool_name, arguments))
+    except ValidationError as exc:
+        return _mcp_error(request_id, -32602, f"Invalid params: {exc}")
     except Exception as exc:
         return _mcp_internal_error(request_id, exc, f"tools/call:{tool_name or 'unknown'}")
 
@@ -6471,6 +6475,22 @@ _MCP_OFF_BY_DEFAULT_TOOLS: frozenset = frozenset({
 })
 
 
+def _mcp_default_tool_by_name() -> Dict[str, dict]:
+    return {str(tool["name"]): tool for tool in _MCP_DEFAULT_TOOLS}
+
+
+def _mcp_default_tool(name: str) -> Optional[dict]:
+    return _mcp_default_tool_by_name().get(name)
+
+
+def _mcp_visible_default_tools(auth: AuthContext) -> List[dict]:
+    return [
+        tool for tool in _MCP_DEFAULT_TOOLS
+        if _mcp_tool_served(str(tool["name"]))
+        and _mcp_access_error(str(tool["name"]), auth) is None
+    ]
+
+
 def _mcp_destructive_tools_enabled() -> bool:
     return os.environ.get("WORKEROS_MCP_ENABLE_DESTRUCTIVE") == "1"
 
@@ -6495,8 +6515,7 @@ def _mcp_tool_served(name: str) -> bool:
 
 def _mcp_access_error(name: str, auth: AuthContext) -> str | None:
     """Return an error string if this auth context may not call the tool."""
-    is_default_tool = any(t["name"] == name for t in _MCP_DEFAULT_TOOLS)
-    if is_default_tool and not _mcp_tool_served(name):
+    if _mcp_default_tool(name) is not None and not _mcp_tool_served(name):
         return f"Tool {name!r} is not enabled on this deployment"
     if name in _MCP_ADMIN_ONLY_TOOLS and not auth.is_admin:
         return f"Tool {name!r} requires admin role"
@@ -6705,8 +6724,24 @@ async def _mcp_dispatch(
 
     # --- workspace ---
     if name == "workspace.chat":
-        data, s = await _api_call("POST", "/chat", request, body={"message": a["message"], "source": "mcp", "conversation_id": a.get("conversation_id")})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        message = str(a.get("message") or "").strip()
+        if not message:
+            return _mcp_content("Tool argument 'message' is required", is_error=True)
+        if len(message) > 20000:
+            return _mcp_content("Tool argument 'message' is too long", is_error=True)
+        conversation_id = _workspace_agent_mcp_conversation_id(a.get("conversation_id"))
+        reply = await _collect_workspace_agent_reply_for_langdock(
+            message=message,
+            user_id=auth.user_id,
+            conversation_id=conversation_id,
+        )
+        return _mcp_call_result(
+            {
+                "reply": reply or "(No reply)",
+                "conversation_id": conversation_id,
+            },
+            "Workspace agent reply.",
+        )
     if name == "workspace.instructions.get":
         data, s = await _api_call("GET", "/workspace", request)
         return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
@@ -6884,10 +6919,7 @@ async def _mcp_handle_request(
         custom = repos.mcp_tools.list(user_id=auth.user_id)
         # #833: only advertise tools this deployment serves and this caller
         # may invoke — same predicate tools/call enforces.
-        tools = [
-            t for t in _MCP_DEFAULT_TOOLS
-            if _mcp_tool_served(t["name"]) and _mcp_access_error(t["name"], auth) is None
-        ] + [
+        tools = _mcp_visible_default_tools(auth) + [
             {"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]}
             for t in custom
         ]
@@ -6903,7 +6935,12 @@ async def _mcp_handle_request(
         arguments = {} if raw_arguments is None else raw_arguments
         if not isinstance(arguments, dict):
             return _mcp_err(rpc_id, -32602, "Invalid params")
-        invalid_args = _mcp_validate_arguments_against_schema(_MCP_DEFAULT_TOOLS, tool_name, arguments)
+        default_tool = _mcp_default_tool(tool_name)
+        invalid_args = (
+            _mcp_validate_arguments_against_schema([default_tool], tool_name, arguments)
+            if default_tool is not None
+            else None
+        )
         if invalid_args:
             return _mcp_err(rpc_id, -32602, invalid_args)
         # #833: audit trail for every MCP tool invocation.
@@ -6919,6 +6956,8 @@ async def _mcp_handle_request(
         except KeyError as exc:
             missing = str(exc).strip("'") or "required argument"
             return _mcp_err(rpc_id, -32602, f"Invalid params: missing {missing}")
+        except ValidationError as exc:
+            return _mcp_err(rpc_id, -32602, f"Invalid params: {exc}")
         except Exception:
             logger.exception("MCP serve tools/call failed: tool=%r", tool_name)
             return _mcp_err(rpc_id, -32603, "Internal error")
