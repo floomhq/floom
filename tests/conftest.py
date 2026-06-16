@@ -83,7 +83,7 @@ os.environ.setdefault("FLOOM_SECRET", "")
 #    prod secret (and prod DB path). Patch load_dotenv to drop these sensitive
 #    keys from every file load so dev-mode tests stay in dev mode and no test
 #    can ever be pointed at the prod DB via dotenv.
-_SENSITIVE_DOTENV_KEYS = frozenset({"FLOOM_SECRET", "FLOOM_DB", "WORKEROS_DB"})
+_SENSITIVE_DOTENV_KEYS = frozenset({"FLOOM_SECRET", "FLOOM_DB", "WORKEROS_DB", "WORKEROS_USER_ID"})
 
 
 def _install_dotenv_guard() -> None:
