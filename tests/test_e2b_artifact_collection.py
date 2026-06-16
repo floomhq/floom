@@ -623,6 +623,7 @@ def test_uploads_git_context_by_cloning_into_sandbox(tmp_path, monkeypatch):
     contexts_root = tmp_path / "contexts"
     monkeypatch.setattr(contexts_module, "CONTEXTS_DIR", contexts_root)
     monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
+    monkeypatch.setattr(e2b_driver, "assert_safe_outbound_url", lambda url, *, label: url)
     sandbox = FakeFullSandbox()
     config = WorkerConfig(
         id="git-context-test",
@@ -654,7 +655,7 @@ def test_uploads_git_context_by_cloning_into_sandbox(tmp_path, monkeypatch):
     assert not sandbox.files._files
 
 
-def test_uploads_git_context_clones_real_repo_into_context_dir(tmp_path, monkeypatch):
+def test_uploads_git_context_blocks_file_url_before_clone(tmp_path, monkeypatch):
     repo = tmp_path / "brain-pack-repo"
     repo.mkdir()
     (repo / "README.md").write_text("hello from git brain pack\n", encoding="utf-8")
@@ -733,15 +734,11 @@ def test_uploads_git_context_clones_real_repo_into_context_dir(tmp_path, monkeyp
         log_fn=lambda *_args, **_kwargs: None,
     )
 
-    assert err is None
+    assert err is not None
+    assert "Git context URL" in err
+    assert sandbox.commands.run_calls == []
     context_dir = tmp_path / "sandbox" / "home" / "user" / "worker" / "context" / "hello-world"
-    assert (context_dir / "README.md").read_text(encoding="utf-8") == "hello from git brain pack\n"
-    assert (context_dir / "notes" / "facts.md").read_text(encoding="utf-8") == "fact from cloned pack\n"
-    assert (context_dir / ".git").is_dir()
-    assert sandbox.commands.run_calls == [(
-        f"git clone --depth 1 {repo.as_uri()} /home/user/worker/context/hello-world",
-        {"timeout": 180},
-    )]
+    assert not (context_dir / "README.md").exists()
 
 
 def _tar_bytes(entries: dict[str, bytes]) -> bytes:
