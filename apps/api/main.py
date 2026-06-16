@@ -5185,6 +5185,23 @@ def _mcp_tool_error(message: str) -> Dict[str, Any]:
     }
 
 
+_MCP_SECRET_QUERY_RE = re.compile(
+    r"([?&](?:token|key|secret|signature|sig|code|api[_-]?key)=)([^&\s]+)",
+    re.IGNORECASE,
+)
+_MCP_SECRET_ASSIGNMENT_RE = re.compile(
+    r"\b((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)([^\s,;&\"'}]+)",
+    re.IGNORECASE,
+)
+_MCP_BEARER_RE = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE)
+
+
+def _mcp_redact_string(value: str) -> str:
+    redacted = _MCP_SECRET_QUERY_RE.sub(r"\1[redacted]", value)
+    redacted = _MCP_SECRET_ASSIGNMENT_RE.sub(r"\1[redacted]", redacted)
+    return _MCP_BEARER_RE.sub("Bearer [redacted]", redacted)
+
+
 def _mcp_redact(value: Any) -> Any:
     if isinstance(value, list):
         return [_mcp_redact(item) for item in value]
@@ -5196,6 +5213,8 @@ def _mcp_redact(value: Any) -> Any:
             else:
                 redacted[str(key)] = _mcp_redact(nested)
         return redacted
+    if isinstance(value, str):
+        return _mcp_redact_string(value)
     return value
 
 
@@ -6811,9 +6830,9 @@ async def _mcp_dispatch(
                 is_error=False,
             )
         if run["status"] == "failed":
-            return _mcp_content(run.get("error") or "Worker run failed", is_error=True)
+            return _mcp_content(_mcp_text(run.get("error") or "Worker run failed"), is_error=True)
         output = run.get("output_json") or run.get("output") or {}
-        return _mcp_content(json.dumps(output, indent=2, default=str))
+        return _mcp_content(_mcp_text(output))
 
     return _mcp_content(f"Unknown tool: {name!r}", is_error=True)
 
