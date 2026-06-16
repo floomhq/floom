@@ -8,44 +8,15 @@
  * (#1094)
  */
 
-import type { ComponentType } from "react";
 import {
   Brain,
   Check,
-  FileCode,
-  FileImage,
-  FileSpreadsheet,
-  FileText,
-  Folder,
-  Link2,
-  type LucideProps,
 } from "lucide-react";
 import type { ContextSummary } from "@/lib/types";
-
-type FileType = "pdf" | "doc" | "md" | "xlsx" | "url" | "png" | "folder" | "other";
-
-const FILE_META: Record<FileType, { ext: string; Icon: ComponentType<LucideProps>; tint: string }> = {
-  pdf:    { ext: "PDF",    Icon: FileText,        tint: "#D14343" },
-  doc:    { ext: "DOC",    Icon: FileText,        tint: "#2563eb" },
-  md:     { ext: "MD",     Icon: FileCode,        tint: "#181818" },
-  xlsx:   { ext: "XLSX",   Icon: FileSpreadsheet, tint: "#0F9D58" },
-  url:    { ext: "URL",    Icon: Link2,           tint: "#3a6ea5" },
-  png:    { ext: "PNG",    Icon: FileImage,       tint: "#9d6df1" },
-  folder: { ext: "DIR",    Icon: Folder,          tint: "#B45309" },
-  other:  { ext: "FILE",   Icon: FileText,        tint: "#6b7280" },
-};
-
-/** Derive file type from a folder name or category. */
-function inferType(folder: ContextSummary): FileType {
-  const name = folder.name.toLowerCase();
-  const cat  = (folder.category ?? "").toLowerCase();
-  if (name.includes("pdf")  || cat.includes("pdf"))  return "pdf";
-  if (name.includes("xls")  || cat.includes("xls") || cat.includes("spreadsheet")) return "xlsx";
-  if (name.includes("md")   || cat.includes("markdown") || cat.includes("doc"))    return "md";
-  if (name.includes("url")  || cat.includes("url")  || cat.includes("web"))  return "url";
-  if (name.includes("img")  || name.includes("png")  || cat.includes("image")) return "png";
-  return "folder";
-}
+import {
+  BRAIN_FILE_META,
+  inferBrainFileType,
+} from "@/lib/brain/file-type-icon";
 
 const KNOWS = [
   "Knows what good looks like",
@@ -55,8 +26,8 @@ const KNOWS = [
 ];
 
 function FolderChip({ folder, index }: { folder: ContextSummary; index: number }) {
-  const type = inferType(folder);
-  const meta = FILE_META[type];
+  const type = inferBrainFileType(folder.name, folder.category);
+  const meta = BRAIN_FILE_META[type];
   const Icon = meta.Icon;
   return (
     <div
@@ -145,13 +116,15 @@ export function BrainVisual({ folders }: BrainVisualProps) {
             ))
           ) : (
             // Placeholder chips when no folders exist yet
-            [
-              { name: "ICP brief", type: "pdf" as FileType },
-              { name: "Pricing", type: "xlsx" as FileType },
-              { name: "Tone guide", type: "md" as FileType },
-              { name: "Style guide", type: "url" as FileType },
-            ].map(({ name, type }) => {
-              const meta = FILE_META[type];
+            (
+              [
+                { name: "ICP brief",   type: "pdf"  },
+                { name: "Pricing",     type: "xlsx" },
+                { name: "Tone guide",  type: "md"   },
+                { name: "Style guide", type: "url"  },
+              ] as { name: string; type: keyof typeof BRAIN_FILE_META }[]
+            ).map(({ name, type }) => {
+              const meta = BRAIN_FILE_META[type];
               const Icon = meta.Icon;
               return (
                 <div
