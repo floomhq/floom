@@ -16,6 +16,7 @@ import {
   parseDecisionInput,
   approveApproval,
   rejectApproval,
+  approveCommentSupported,
 } from "@/lib/approvals/decision";
 import { notifyApprovalsChanged, useApprovalsListSync } from "@/lib/useApprovalsSync";
 
@@ -63,6 +64,10 @@ export default function ApprovalsCollection() {
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Per-approval reviewer comment (keyed by approval id), and the in-flight
+  // decision so the buttons can disable + show progress.
+  const [comments, setComments] = useState<Record<string, string>>({});
+  const [busy, setBusy] = useState<string | null>(null);
 
   const workerTags = useMemo(() => {
     const m: Record<string, string[]> = {};
@@ -103,16 +108,29 @@ export default function ApprovalsCollection() {
   useApprovalsListSync(refresh);
 
   const decide = async (a: ApprovalRow, approve: boolean) => {
+    const comment = comments[a.id]?.trim() || undefined;
+    setBusy(a.id);
     try {
-      if (approve) await approveApproval(a);
-      else await rejectApproval(a);
+      if (approve) await approveApproval(a, comment);
+      else await rejectApproval(a, comment);
       toast.success(approve ? "Approved" : "Rejected");
+      setComments((prev) => {
+        const next = { ...prev };
+        delete next[a.id];
+        return next;
+      });
       notifyApprovalsChanged();
       await refresh();
     } catch {
       toast.error("Could not record your decision.");
+    } finally {
+      setBusy(null);
     }
   };
+
+  const setComment = useCallback((id: string, value: string) => {
+    setComments((prev) => ({ ...prev, [id]: value }));
+  }, []);
 
   const config: CollectionConfig<ApprovalRow> = {
     title: "Approvals",
@@ -172,6 +190,7 @@ export default function ApprovalsCollection() {
                 className="c-vpill"
                 style={{ padding: "6px 11px", color: "var(--warning)", borderColor: "var(--warning)" }}
                 onClick={() => void decide(a, false)}
+                disabled={busy === a.id}
               >
                 Reject
               </button>
@@ -180,6 +199,7 @@ export default function ApprovalsCollection() {
                 className="c-addbtn"
                 style={{ padding: "6px 11px", fontSize: 12.5 }}
                 onClick={() => void decide(a, true)}
+                disabled={busy === a.id}
               >
                 Approve
               </button>
@@ -208,6 +228,14 @@ export default function ApprovalsCollection() {
                     </div>
                   </div>
                 )}
+                <DecisionPanel
+                  approval={a}
+                  comment={comments[a.id] ?? ""}
+                  onComment={(value) => setComment(a.id, value)}
+                  busy={busy === a.id}
+                  onApprove={() => void decide(a, true)}
+                  onReject={() => void decide(a, false)}
+                />
               </div>
             ),
           },
@@ -257,6 +285,92 @@ export default function ApprovalsCollection() {
 
   return <Collection config={config} />;
 }
+
+/**
+ * The per-approval decision surface shown in the detail Request tab: a comment
+ * field plus visible Approve / Reject. The comment is persisted as a decision
+ * annotation where the backend supports it (run + destructive_delete) and as
+ * the rejection reason on reject; for agent-tool approvals a comment cannot be
+ * attached on approve, so we say so plainly rather than silently dropping it.
+ */
+function DecisionPanel({
+  approval,
+  comment,
+  onComment,
+  busy,
+  onApprove,
+  onReject,
+}: {
+  approval: ApprovalRow;
+  comment: string;
+  onComment: (value: string) => void;
+  busy: boolean;
+  onApprove: () => void;
+  onReject: () => void;
+}) {
+  const approveKeepsComment = approveCommentSupported(approval);
+  return (
+    <div style={decisionWrap}>
+      <h4 style={h4}>Your decision</h4>
+      <textarea
+        value={comment}
+        onChange={(e) => onComment(e.target.value)}
+        placeholder="Add a comment for the worker (optional)"
+        rows={3}
+        disabled={busy}
+        style={noteBox}
+      />
+      {comment.trim() && !approveKeepsComment && (
+        <p style={noteHint}>
+          This worker approves via a tool callback that cannot store a comment.
+          Your note is sent only if you reject.
+        </p>
+      )}
+      <div style={{ display: "flex", gap: 9, marginTop: 12 }}>
+        <button
+          type="button"
+          className="c-addbtn"
+          style={{ padding: "8px 16px", fontSize: 13 }}
+          onClick={onApprove}
+          disabled={busy}
+        >
+          {busy ? "Working" : "Approve"}
+        </button>
+        <button
+          type="button"
+          className="c-vpill"
+          style={{ padding: "8px 16px", color: "var(--warning)", borderColor: "var(--warning)" }}
+          onClick={onReject}
+          disabled={busy}
+        >
+          Reject
+        </button>
+      </div>
+    </div>
+  );
+}
+
+const decisionWrap: React.CSSProperties = {
+  display: "flex",
+  flexDirection: "column",
+};
+const noteBox: React.CSSProperties = {
+  width: "100%",
+  resize: "vertical",
+  border: "var(--bd-input)",
+  borderRadius: "var(--radius-button)",
+  background: "var(--bg-2)",
+  padding: "10px 12px",
+  fontSize: 13.5,
+  color: "var(--ink)",
+  lineHeight: 1.5,
+};
+const noteHint: React.CSSProperties = {
+  margin: "8px 0 0",
+  fontSize: 12,
+  color: "var(--muted-foreground)",
+  lineHeight: 1.5,
+};
 
 const kvK: React.CSSProperties = { color: "var(--muted-foreground)", fontSize: 12.5 };
 const h4: React.CSSProperties = {
