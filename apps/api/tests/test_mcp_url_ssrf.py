@@ -124,6 +124,21 @@ def test_helper_allows_public_https():
         )
 
 
+def test_helper_pins_hostname_for_httpx_without_reconnect_dns():
+    from models import pinned_safe_outbound_httpx_target
+
+    with patch("models.socket.getaddrinfo", return_value=_addrinfo("93.184.216.34")) as resolve:
+        pinned_url, headers, extensions = pinned_safe_outbound_httpx_target(
+            "https://mcp.example.com:8443/mcp?mode=test",
+            label="MCP server URL",
+        )
+
+    assert resolve.call_count == 1
+    assert pinned_url == "https://93.184.216.34:8443/mcp?mode=test"
+    assert headers == {"Host": "mcp.example.com:8443"}
+    assert extensions == {"sni_hostname": "mcp.example.com"}
+
+
 def test_helper_fails_closed_on_resolution_error():
     from models import assert_safe_outbound_mcp_url, UnsafeMCPUrlError
 
