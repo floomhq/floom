@@ -126,8 +126,9 @@ describe("page components render with data (no client crash)", () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
     render(<WorkersCollection initialWorkers={[worker as never]} />);
     fireEvent.click(await screen.findByRole("button", { name: /Weekly Update/i }));
-    // §3.5: Config is behind the Advanced toggle; open it first.
-    fireEvent.click(await screen.findByRole("button", { name: /Advanced/i }));
+    // R8: Config is an advanced tab — pin it via the Customize menu, then open it.
+    fireEvent.click(await screen.findByRole("button", { name: /Customize tabs/i }));
+    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Config" }));
     fireEvent.click(await screen.findByRole("tab", { name: "Config" }));
     expect(await screen.findByText("Tools")).toBeInTheDocument();
     expect(screen.getByText("Brain")).toBeInTheDocument();
