@@ -30,3 +30,10 @@ lxml==6.1.1
 # Not needed for the default OpenAI path and not installed by the test suite, so
 # left as a bounded range rather than a hard pin.
 boto3>=1.40,<2
+
+# Optional: Google Vertex AI (Gemini) model provider (resolved by litellm at
+# runtime). litellm's vertex_ai/* path imports google.auth to mint access tokens,
+# including the AWS->GCP Workload Identity Federation external_account flow. Without
+# it, any vertex_ai/* call raises ModuleNotFoundError: google.auth. REST + token
+# only, so google-cloud-aiplatform is not required. Bounded range like boto3 above.
+google-auth>=2.49,<3
