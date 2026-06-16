@@ -345,7 +345,7 @@ function ChatEmptyState({
 }) {
   // #1363 — First-run opener: proactive builder message + action-oriented pills
   const headline = isNewWorkspace
-    ? "Hi — describe what you want to automate and I’ll build the worker for you right now."
+    ? "Hi, describe what you want to automate and I’ll build the worker for you right now."
     : "I am Emily, your COO";
   const sub = isNewWorkspace
     ? null
@@ -830,7 +830,6 @@ export function EmilyDock({ className }: { className?: string }) {
   const open = mode !== "collapsed";
   const cycleExpand = () =>
     setMode((m) => (m === "rail" ? "wide" : m === "wide" ? "full" : "rail"));
-  const collapseForRunDetails = useCallback(() => setMode("collapsed"), []);
   // actionsRef lets the dock header drive new/export/recent without prop-drilling
   const coreActionsRef = useRef<ChatCoreActions | null>(null);
   // hasMessages as state so the Export menu item disables correctly (can't read ref in render)
@@ -989,7 +988,6 @@ export function EmilyDock({ className }: { className?: string }) {
       {/* Chat content — ALWAYS mounted so useChatStream state survives collapse */}
       <div className={cn("flex-1 min-h-0 overflow-hidden", !open && "hidden")}>
         <EmilyChatCore
-          onOpenRunDetails={collapseForRunDetails}
           hideControls
           actionsRef={coreActionsRef}
           onHasMessagesChange={setCoreHasMessages}
