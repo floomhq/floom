@@ -139,7 +139,7 @@ function LiveTranscript({
           return (
             <div
               key={`${part.type}-${index}`}
-              className="rounded-[var(--radius-button)] border border-border bg-muted/40 p-3"
+              className="rounded-[var(--radius-button)] bg-muted/40 p-3"
             >
               <p className="mb-1 text-[11px] font-medium uppercase text-muted-foreground">
                 {part.type === "reasoning" ? "Reasoning" : "Text"}
