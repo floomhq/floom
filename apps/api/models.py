@@ -45,6 +45,19 @@ def _model_data(value: Any) -> Any:
     return value
 
 
+def _validate_timezone_name(value: Optional[str]) -> Optional[str]:
+    if value is None or not value.strip():
+        return value
+    stripped = value.strip()
+    try:
+        from zoneinfo import ZoneInfo
+
+        ZoneInfo(stripped)
+    except Exception as exc:
+        raise ValueError(f"invalid timezone: {stripped!r}") from exc
+    return stripped
+
+
 # ---------------------------------------------------------------------------
 # SSRF deny-list for outbound URLs (MCP server URLs, alert webhook URLs, ...)
 # ---------------------------------------------------------------------------
@@ -361,6 +374,11 @@ class WorkerTrigger(BaseModel):
         if not is_valid_cron_expr(value):
             raise ValueError(f"invalid cron expression: {value!r}")
         return value
+
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_timezone_name(value)
 
 
 class WorkerMCPConnection(BaseModel):
@@ -1292,6 +1310,11 @@ class WorkerContractTrigger(BaseModel):
             raise ValueError(f"invalid cron expression: {value!r}")
         return value
 
+    @field_validator("timezone")
+    @classmethod
+    def validate_timezone(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_timezone_name(value)
+
     @model_validator(mode="after")
     def validate_composio(self) -> "WorkerContractTrigger":
         if self.type == "composio" and not self.composio:
@@ -1803,6 +1826,11 @@ class WorkerUpdateRequest(BaseModel):
     # PUT /workers/{id} YAML rewrite.
     name: Optional[str] = None
     description: Optional[str] = None
+
+    @field_validator("cron_timezone")
+    @classmethod
+    def validate_cron_timezone(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_timezone_name(value)
 
 
 class RunCreate(BaseModel):
