@@ -144,7 +144,7 @@ function BrainArtifact() {
     <div className="relative h-[280px] w-full max-w-[440px]">
       <svg className="absolute inset-0 h-full w-full" aria-hidden>
         {[["18%", "20%"], ["74%", "14%"], ["22%", "82%"], ["74%", "82%"]].map(([x, y], i) => (
-          <line key={i} x1="50%" y1="50%" x2={x} y2={y} stroke="var(--bg-3)" strokeWidth="1" />
+          <line key={i} x1="50%" y1="50%" x2={x} y2={y} stroke="var(--border-default)" strokeWidth="1" />
         ))}
       </svg>
       <div className="absolute left-1/2 top-1/2 -translate-x-1/2 -translate-y-1/2 text-center">
