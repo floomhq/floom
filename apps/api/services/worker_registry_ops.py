@@ -292,6 +292,9 @@ def _parse_worker_payload(
     if len(worker_id) > 64:
         raise HTTPException(status_code=422, detail=f"Worker ID must be 64 characters or fewer (got {len(worker_id)})")
     if user_id:
+        from models import memory_context_mount_for_worker
+        memory_mount = memory_context_mount_for_worker(config.id, config.memory)
+        memory_context_name = (memory_mount or {}).get("name")
         with use_context_scope(context_scope_for_user(user_id)):
             metadata = load_context_metadata()
             for raw_context in config.contexts or []:
@@ -302,6 +305,8 @@ def _parse_worker_payload(
                 if context["source"] != "local":
                     continue
                 context_name = context["name"]
+                if memory_context_name and context_name == memory_context_name:
+                    continue
                 context_is_mountable = _is_system_context_pack(
                     context_name,
                     metadata,
