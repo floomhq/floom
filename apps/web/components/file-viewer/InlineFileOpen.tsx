@@ -75,6 +75,7 @@ export function InlineFileOpen({
   files,
   rootLabel,
   emptyLabel = "No files.",
+  defaultOpenId,
   loadText,
   onRename,
   onMoveItem,
@@ -86,6 +87,13 @@ export function InlineFileOpen({
   files: InlineFile[];
   rootLabel: string;
   emptyLabel?: string;
+  /**
+   * Open this file inline on mount (rule #3 — don't make the operator click a
+   * folder/file first). When a run produces a single file, the caller passes its
+   * id so the content shows immediately, with the same Preview/Raw toggle and a
+   * Back link to the file list.
+   */
+  defaultOpenId?: string;
   /** Text-content loader (Brain: readTextFile). Omitted → download-only fallback. */
   loadText?: (file: InlineFile) => Promise<string>;
   /** #770: when provided, each row offers an inline rename (never a native prompt). */
@@ -105,7 +113,9 @@ export function InlineFileOpen({
    */
   onUpload?: (files: File[], dirPrefix: string) => Promise<void>;
 }) {
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(
+    defaultOpenId && files.some((f) => f.id === defaultOpenId) ? defaultOpenId : null,
+  );
   const [text, setText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);

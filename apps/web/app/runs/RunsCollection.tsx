@@ -15,11 +15,14 @@ import { StatusPill } from "@/components/collection/StatusPill";
 import { api } from "@/lib/api";
 import { useRuns } from "@/lib/query/hooks";
 import { formatRelative } from "@/lib/formatters";
+import { humanizeKey } from "@/lib/run-format";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { InlineFileOpen } from "@/components/file-viewer/InlineFileOpen";
+import { InlineFileOpen, type InlineFile } from "@/components/file-viewer/InlineFileOpen";
+import { OutputRenderer } from "@/components/output-renderer";
+import { GenericOutput } from "@/components/generic-output";
 import { traceSteps } from "@/lib/runs/trace";
 import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
 import { useRunLogStream } from "@/lib/useRunLogStream";
@@ -31,6 +34,7 @@ import {
   runStatusPill,
   runSortTime,
   runsToCsvRows,
+  inferOutputType,
 } from "@/lib/runs/format";
 
 const detailCache = new Map<string, RunDetail>();
@@ -60,19 +64,66 @@ function useRunDetail(id: string, status?: string): RunDetail | undefined {
   return d;
 }
 
-// SPEC §4 Output: files FIRST (§2.6), then result JSON.
-// Files open INLINE (breadcrumb/Back/Download); PNG artifacts render as
-// images (shared InlineFileOpen, rule #5). InlineFileOpen already carries
-// the Preview/Raw segmented toggle (#1289) for code/markdown/text files.
+// Humane RESULT render (rule #2): reuse the shared OutputRenderer/GenericOutput
+// (the same primitives the run page uses) so the result reads as markdown / text
+// / table / formatted values — NOT a raw JSON.stringify wall. A declared
+// output_schema renders per field; otherwise each output key is rendered by its
+// inferred type. A Preview/Raw toggle (rule #1 — same content, two view modes,
+// NOT a separate tab) flips this humane view to the raw JSON source in place.
+function ResultPreview({ d }: { d: RunDetail }) {
+  const output = d.output ?? {};
+  const hasSchema = (d.output_schema?.length ?? 0) > 0;
+  const keys = Object.keys(output);
+  if (!hasSchema && keys.length === 0) {
+    return <div style={muted}>Run completed with no structured output.</div>;
+  }
+  if (hasSchema) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        {d.output_schema.map((field) => (
+          <OutputRenderer key={field.name} field={field} runId={d.id} />
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {keys.map((key) => (
+        <div key={key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <p style={{ ...kvK, fontWeight: 500 }}>{humanizeKey(key)}</p>
+          <GenericOutput type={inferOutputType(output[key])} value={output[key]} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// SPEC §4 Output: files FIRST (§2.6), then the humane result with a Preview/Raw
+// toggle. Files open INLINE (breadcrumb/Back/Download); a SINGLE file auto-opens
+// (rule #3 — no folder-then-file clicking), and every file carries the same
+// Preview/Raw toggle (#1289) for code/markdown/text. PNG artifacts render as
+// images (shared InlineFileOpen, rule #5).
 function OutputTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id, r.status);
+  // rule #1: Preview (humane) vs Raw (JSON source) on the SAME result.
+  const [resultMode, setResultMode] = useState<"preview" | "raw">("preview");
   if (!d) return <LoadingState rows={4} />;
-  const files = (d.artifacts ?? []).map((a) => ({
+  const files: InlineFile[] = (d.artifacts ?? []).map((a) => ({
     id: a.id,
     name: a.name,
     url: api.runs.artifactUrl(d.id, a.id),
     sizeBytes: a.size_bytes,
   }));
+  // rule #3: one file → auto-open it inline; multiple → list with the first
+  // selectable but the content still one click away (no folder depth).
+  const autoOpenId = files.length === 1 ? files[0].id : undefined;
+  // Run artifacts are same-origin proxy URLs (auth injected server-side), so the
+  // Preview/Raw toggle can read text content directly from the download URL.
+  const loadArtifactText = async (file: InlineFile): Promise<string> => {
+    const res = await fetch(file.url);
+    if (!res.ok) throw new Error(`Could not read ${file.name}`);
+    return res.text();
+  };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {d.error && (
@@ -81,23 +132,54 @@ function OutputTab({ r }: { r: RunSummary }) {
           {d.error}
         </div>
       )}
-      {/* §2.6: files shown FIRST, before the result JSON */}
+      {/* §2.6: files shown FIRST, before the result */}
       {files.length > 0 && (
         <div>
-          <h4 style={h4}>Files</h4>
-          <InlineFileOpen files={files} rootLabel="Output" />
+          <h4 style={h4}>{files.length === 1 ? "File" : "Files"}</h4>
+          <InlineFileOpen
+            files={files}
+            rootLabel="Output"
+            defaultOpenId={autoOpenId}
+            loadText={loadArtifactText}
+          />
         </div>
       )}
       <div>
-        <h4 style={h4}>Result</h4>
-        <pre style={code}>{JSON.stringify(d.output ?? {}, null, 2)}</pre>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 9 }}>
+          <h4 style={{ ...h4, margin: 0 }}>Result</h4>
+          {/* rule #1: same result, Preview/Raw toggle in place — not a Raw tab. */}
+          <div className="c-vtog" role="group" aria-label="Result view mode" style={{ marginLeft: "auto" }}>
+            <button
+              type="button"
+              className={resultMode === "preview" ? "on" : ""}
+              aria-pressed={resultMode === "preview"}
+              onClick={() => setResultMode("preview")}
+            >
+              Preview
+            </button>
+            <button
+              type="button"
+              className={resultMode === "raw" ? "on" : ""}
+              aria-pressed={resultMode === "raw"}
+              onClick={() => setResultMode("raw")}
+            >
+              Raw
+            </button>
+          </div>
+        </div>
+        {resultMode === "preview" ? (
+          <ResultPreview d={d} />
+        ) : (
+          <pre style={code}>{JSON.stringify(d.output ?? {}, null, 2)}</pre>
+        )}
       </div>
     </div>
   );
 }
 
-// SPEC §4 Trace: steps + logs. Transcript carries no per-step timestamps (no
-// structured field), so durations come from the run-level timeline, not faked.
+// SPEC §4 Logs (rule #4 — renamed from "Trace"): steps + log lines. Transcript
+// carries no per-step timestamps (no structured field), so durations come from
+// the run-level timeline, not faked.
 
 /** #1275: read token count from every location the backend might put it. */
 function resolveTokenCount(d: import("@/lib/types").RunDetail): number | null {
@@ -126,7 +208,7 @@ function resolveTokenCount(d: import("@/lib/types").RunDetail): number | null {
 // The hook replays full history on connect, so no separate REST fetch is needed
 // for logs. We still load the run detail (useRunDetail) for steps, tokens, and
 // raw JSON -- those are not in the log stream.
-function TraceTab({ r }: { r: RunSummary }) {
+function LogsTab({ r }: { r: RunSummary }) {
   const d = useRunDetail(r.id, r.status);
   // Live SSE log stream -- connects immediately and accumulates log lines.
   const { logs: streamLogs, connected: logConnected, done: logDone } = useRunLogStream(r.id);
@@ -218,7 +300,7 @@ function InputsTab({ r }: { r: RunSummary }) {
 // test guards the live tab set.
 const RUN_TAB_COMPONENT: Record<RunDetailTab, (props: { r: RunSummary }) => React.ReactNode> = {
   Output: OutputTab,
-  Trace: TraceTab,
+  Logs: LogsTab,
   Inputs: InputsTab,
 };
 

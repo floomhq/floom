@@ -75,6 +75,22 @@ export function runSortTime(r: RunSummary): number {
   return Date.parse(r.created_at ?? r.started_at ?? "") || 0;
 }
 
+/**
+ * Infer a GenericOutput render type from a raw value when the run carries no
+ * declared output_schema. Mirrors the run-page logic (RunPanel/RunDetailSplitPane)
+ * so the run-history OutputTab renders a humane result, not a JSON dump.
+ */
+export function inferOutputType(value: unknown): string {
+  if (typeof value === "object" && value !== null) return "json";
+  if (typeof value === "string") {
+    const t = value.trim();
+    if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) return "json";
+    if (/^#{1,3}\s|\n[-*]\s|\|.+\|/.test(t)) return "markdown";
+    return "text";
+  }
+  return "text";
+}
+
 /** Flatten runs into CSV rows (pure; the unparse/download stays in the view). */
 export function runsToCsvRows(
   runs: RunSummary[],
