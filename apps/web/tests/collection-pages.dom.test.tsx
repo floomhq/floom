@@ -126,6 +126,8 @@ describe("page components render with data (no client crash)", () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
     render(<WorkersCollection initialWorkers={[worker as never]} />);
     fireEvent.click(await screen.findByRole("button", { name: /Weekly Update/i }));
+    // §3.5: Config is behind the Advanced toggle; open it first.
+    fireEvent.click(await screen.findByRole("button", { name: /Advanced/i }));
     fireEvent.click(await screen.findByRole("tab", { name: "Config" }));
     expect(await screen.findByText("Tools")).toBeInTheDocument();
     expect(screen.getByText("Brain")).toBeInTheDocument();
