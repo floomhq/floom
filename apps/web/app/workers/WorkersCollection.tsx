@@ -37,7 +37,7 @@ import { Button } from "@/components/ui/button";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { ArrowRight, Brain, Lock, MoreHorizontal, SlidersHorizontal } from "lucide-react";
+import { ArrowRight, Brain, Lock, MoreHorizontal, Plus } from "lucide-react";
 import { BRAIN_FILE_META, inferBrainFileType } from "@/lib/brain/file-type-icon";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { Sparkline } from "@/components/Sparkline";
@@ -57,8 +57,10 @@ import { WorkerFeedbackPanel } from "@/components/worker/WorkerFeedbackPanel";
 import { VersionDiffPanel } from "@/components/VersionDiffPanel";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
@@ -77,6 +79,12 @@ import {
   orderedSourceFiles,
 } from "@/lib/workers/derive";
 import { getFavorites, saveFavorites } from "@/lib/workers/favorites";
+import {
+  ADVANCED_DETAIL_TABS,
+  BASE_DETAIL_TABS,
+  getPinnedTabs,
+  savePinnedTabs,
+} from "@/lib/workers/pinned-tabs";
 import { sortWorkersByRecentActivity } from "@/lib/worker-list-order";
 
 function rel(ts?: string | null): string {
@@ -906,6 +914,59 @@ const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }
   Versions: VersionsTab,
 };
 
+/**
+ * R8 "Customize" control — a quiet, muted affordance next to the worker-detail
+ * tab row that lets a user pin the advanced tabs (Config / Source / Versions)
+ * into their tab bar. Pins are a per-user GLOBAL preference (every worker), not
+ * per-worker. Checking an item pins the tab AND selects it; unchecking removes
+ * it. Uses the shared DropdownMenu checkbox primitives (flat, tokens, squircle,
+ * no borders, no accent — accent is links-only).
+ */
+function CustomizeTabsMenu({
+  workerId,
+  pinned,
+  onToggle,
+  onSelectTab,
+}: {
+  workerId: string;
+  pinned: Set<WorkerDetailTab>;
+  onToggle: (key: WorkerDetailTab) => void;
+  onSelectTab: (workerId: string, key: WorkerDetailTab) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="c-vpill inline-flex items-center gap-1.5"
+        style={customizePillStyle}
+        aria-label="Customize tabs"
+        title="Pin Config, Source or Versions tabs"
+      >
+        <Plus className="size-3.5" aria-hidden="true" />
+        Customize
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48 p-1">
+        <DropdownMenuLabel>Pinned tabs</DropdownMenuLabel>
+        {ADVANCED_DETAIL_TABS.map((key) => (
+          <DropdownMenuCheckboxItem
+            key={key}
+            checked={pinned.has(key)}
+            // base-ui fires onClick before state churn; closeOnClick stays open so
+            // the user can pin several tabs without reopening the menu.
+            closeOnClick={false}
+            onCheckedChange={(checked) => {
+              onToggle(key);
+              // Pinning selects the tab so the user lands on what they just added.
+              if (checked) onSelectTab(workerId, key);
+            }}
+          >
+            {key}
+          </DropdownMenuCheckboxItem>
+        ))}
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 function WorkerDetailActions({
   w,
   onUpdated,
@@ -1246,18 +1307,33 @@ export default function WorkersCollection({
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
   const [canManageWorkers, setCanManageWorkers] = useState(false);
   const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
-  // §3.5 — per-worker Advanced toggle: tracks which worker detail panes have
-  // expanded the power-user tabs (Config, Source, Versions). Operator-facing tabs
-  // (Overview, Runs) are always shown; the advanced set is opt-in.
-  const [advancedOpen, setAdvancedOpen] = useState<Set<string>>(new Set());
-  const toggleAdvanced = useCallback((id: string) => {
-    setAdvancedOpen((prev) => {
+  // R8 — pinnable advanced tabs (replaces the binary Advanced toggle): the
+  // default tab bar stays Overview · Runs; the power-user tabs (Config, Source,
+  // Versions) are pinned per-user (global, all workers) via the "Customize"
+  // control. Persisted to localStorage so a user who pins Source always sees it.
+  const [pinnedTabs, setPinnedTabs] = useState<Set<WorkerDetailTab>>(new Set());
+  useEffect(() => {
+    setPinnedTabs(getPinnedTabs());
+  }, []);
+  const togglePinnedTab = useCallback((key: WorkerDetailTab) => {
+    setPinnedTabs((prev) => {
       const next = new Set(prev);
-      if (next.has(id)) next.delete(id);
-      else next.add(id);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      savePinnedTabs(next);
       return next;
     });
   }, []);
+  // Selecting a tab = navigate to ?sel=<id>&tab=<key>; CollectionView reads the
+  // `tab` URL param to drive the active tab. replace() avoids a history entry.
+  const selectWorkerTab = useCallback(
+    (workerId: string, key: WorkerDetailTab) => {
+      router.replace(
+        `/workers?sel=${encodeURIComponent(workerId)}&tab=${encodeURIComponent(key)}`,
+      );
+    },
+    [router],
+  );
 
   useEffect(() => {
     if (workersQuery.data) {
@@ -1438,25 +1514,19 @@ export default function WorkersCollection({
     },
     detail: (w) => {
       const viewOnly = !canManageWorkers && isViewOnly(w);
-      const isAdvanced = advancedOpen.has(w.id);
       const actions = (
         <>
-          {/* §3.5 Advanced toggle: a clearly-labeled control (icon + "Advanced")
-              in the header action area. Federico couldn't find the previous
-              faint flip-label pill, so it now reads as an obvious, persistent
-              toggle: icon + "Advanced" label, with a filled active state when
-              the Config / Source / Versions tabs are revealed. */}
-          <button
-            type="button"
-            className="c-vpill inline-flex items-center gap-1.5"
-            style={isAdvanced ? advancedPillActiveStyle : advancedPillStyle}
-            aria-pressed={isAdvanced}
-            onClick={() => toggleAdvanced(w.id)}
-            title="Show Config, Source and Versions"
-          >
-            <SlidersHorizontal className="size-3.5" aria-hidden="true" />
-            Advanced
-          </button>
+          {/* R8 Customize control: replaces the binary Advanced toggle. A quiet,
+              muted "+ Customize" affordance opens a flat checkbox menu to pin
+              the advanced tabs (Config / Source / Versions) into the tab bar.
+              Pins are a per-user GLOBAL preference (every worker), persisted to
+              localStorage — a user who pins Source always sees it. */}
+          <CustomizeTabsMenu
+            workerId={w.id}
+            pinned={pinnedTabs}
+            onToggle={togglePinnedTab}
+            onSelectTab={selectWorkerTab}
+          />
           <WorkerDetailActions
             w={w}
             canManage={canManageWorkers}
@@ -1492,14 +1562,16 @@ export default function WorkersCollection({
             </>
           ),
         },
-        // §3.5: operator-focused tab set — Overview + Runs always visible;
-        // Config / Source / Versions behind an "Advanced" toggle in the header.
-        // WORKER_DETAIL_TABS (typed constant) stays as the 5-tab contract; the UI
-        // filters at render time without touching the constant.
+        // R8: operator-focused tab set — Overview + Runs always visible; the
+        // advanced tabs (Config / Source / Versions) appear only when the user
+        // has pinned them via Customize. Pinned tabs render in canonical order
+        // after the base tabs. WORKER_DETAIL_TABS (typed constant) stays the
+        // 5-tab contract; the UI filters at render time without touching it.
         tabs: (() => {
-          const visibleKeys: WorkerDetailTab[] = isAdvanced
-            ? WORKER_DETAIL_TABS.slice() // all 5
-            : ["Overview", "Runs"];
+          const visibleKeys: WorkerDetailTab[] = [
+            ...BASE_DETAIL_TABS,
+            ...ADVANCED_DETAIL_TABS.filter((t) => pinnedTabs.has(t)),
+          ];
           return visibleKeys.map((key) => {
             const Tab = WORKER_TAB_COMPONENT[key];
             return {
@@ -1587,19 +1659,11 @@ const h4: React.CSSProperties = {
   margin: "0 0 9px",
 };
 const pillBtn: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5 };
-// §3.5 Advanced toggle pill: full-opacity and labeled so operators can find it
-// (Federico couldn't locate the prior faint version). Secondary to Run via the
-// --bg-2 fill rather than reduced opacity.
-const advancedPillStyle: React.CSSProperties = {
+// R8 Customize control: quiet + muted (not accent — accent is links-only). It
+// sits next to the worker actions and stays unobtrusive but findable.
+const customizePillStyle: React.CSSProperties = {
   padding: "6px 11px",
   fontSize: 12.5,
   background: "var(--bg-2)",
-  color: "var(--ink)",
-};
-// Active state: filled with the calm fill so it's obvious the advanced tabs are on.
-const advancedPillActiveStyle: React.CSSProperties = {
-  padding: "6px 11px",
-  fontSize: 12.5,
-  background: "var(--bg-3)",
-  color: "var(--ink)",
+  color: "var(--muted-foreground)",
 };
