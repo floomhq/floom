@@ -26,6 +26,7 @@ import time
 import urllib.parse
 import uuid as _uuid_mod
 from datetime import datetime, timedelta, timezone
+from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 
 from fastapi import APIRouter, Depends, HTTPException, Request
@@ -39,6 +40,7 @@ from models import (
     RunSummary,
     UnsafeMCPUrlError,
     assert_safe_outbound_mcp_url,
+    pinned_safe_outbound_httpx_target,
     read_only_preset_for_app,
     read_only_presets,
 )
@@ -346,6 +348,19 @@ def _normalize_mcp_connection_payload(payload: MCPConnectionCreateRequest) -> Di
     url = (payload.url or "").strip() or None
     command = (payload.command or "").strip() or None
     cwd = (payload.cwd or "").strip() or None
+    if cwd:
+        posix = PurePosixPath(cwd.replace("\\", "/"))
+        windows = PureWindowsPath(cwd)
+        if (
+            posix.is_absolute()
+            or windows.is_absolute()
+            or cwd.startswith("~")
+            or any(part in {"", ".", ".."} for part in posix.parts)
+        ):
+            raise HTTPException(
+                status_code=400,
+                detail="MCP stdio cwd must be a workspace-relative path without '.' or '..'",
+            )
     if transport in {"streamable_http", "sse"}:
         if not url:
             raise HTTPException(status_code=400, detail="MCP URL is required for HTTP/SSE transports")
@@ -1445,10 +1460,15 @@ def test_connection(
                         return {}
                     return body if isinstance(body, dict) else {}
 
-                # #1180: re-validate at dial time to prevent SSRF via DNS
-                # rebinding or DB/admin URL mutation after creation.
+                # #1180/#1293: re-validate at dial time and pin the vetted IP
+                # for the actual httpx connection. This closes the DNS
+                # rebinding gap between validation and connect.
                 try:
-                    mcp_url = assert_safe_outbound_mcp_url(mcp_url)
+                    probe_url, pinned_headers, request_extensions = pinned_safe_outbound_httpx_target(
+                        mcp_url,
+                        label="MCP server URL",
+                    )
+                    headers.update(pinned_headers)
                 except Exception as _ssrf_exc:
                     _write_connection_check(
                         connection_id,
@@ -1463,7 +1483,7 @@ def test_connection(
                         reason=f"Connection URL is not permitted: {_ssrf_exc}",
                         tested_at=tested_at,
                     )
-                probe_url = mcp_url.rstrip("/")
+                probe_url = probe_url.rstrip("/")
                 init_payload = {
                     "jsonrpc": "2.0",
                     "method": "initialize",
@@ -1476,91 +1496,106 @@ def test_connection(
                 }
                 tools_payload = {"jsonrpc": "2.0", "method": "tools/list", "id": 2, "params": {}}
 
-                init_resp = _httpx.post(probe_url, json=init_payload, headers=headers, timeout=8.0)
-                if init_resp.status_code not in (200, 201):
-                    if init_resp.status_code in (401, 403):
-                        reason = (
-                            f"MCP server reachable but authentication failed (HTTP {init_resp.status_code}). "
-                            "Check your API key / token."
-                        )
-                    elif init_resp.status_code == 404:
-                        reason = "MCP server returned 404. Verify the server URL is correct."
-                    else:
-                        reason = f"MCP server returned HTTP {init_resp.status_code}."
-                    _write_connection_check(
-                        connection_id,
-                        "failed",
-                        f"HTTP {init_resp.status_code}",
-                        tested_at,
-                        status="failed",
-                        repos=repos,
+                with _httpx.Client(timeout=8.0, trust_env=False) as http:
+                    init_resp = http.post(
+                        probe_url,
+                        json=init_payload,
+                        headers=headers,
+                        extensions=request_extensions,
                     )
-                    return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
-
-                # Streamable-HTTP sessions: echo the server-assigned session id
-                # on follow-up requests, or compliant servers reject tools/list.
-                init_session_id = init_resp.headers.get("mcp-session-id")
-                if init_session_id:
-                    headers["mcp-session-id"] = init_session_id
-
-                tools_resp = _httpx.post(probe_url, json=tools_payload, headers=headers, timeout=8.0)
-                tools = None
-                if tools_resp.status_code in (200, 201):
-                    body = _parse_mcp_response(tools_resp)
-                    tools = body.get("tools")
-                    if tools is None and isinstance(body.get("result"), dict):
-                        tools = body["result"].get("tools")
-                    if tools is None and isinstance(body.get("result"), dict):
-                        tools = body["result"].get("capabilities", {}).get("tools")
-                elif tools_resp.status_code in (401, 403):
-                    reason = (
-                        f"MCP server reachable but authentication failed (HTTP {tools_resp.status_code}). "
-                        "Check your API key / token."
-                    )
-                    _write_connection_check(
-                        connection_id,
-                        "failed",
-                        f"HTTP {tools_resp.status_code}",
-                        tested_at,
-                        status="failed",
-                        repos=repos,
-                    )
-                    return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
-                elif tools_resp.status_code == 404 and mcp_transport in {"streamable_http", "sse"}:
-                    legacy_resp = _httpx.get(f"{probe_url}/tools/list", headers=headers, timeout=8.0)
-                    if legacy_resp.status_code in (200, 201):
-                        body = legacy_resp.json()
-                        tools = body.get("tools") if isinstance(body, dict) else None
-                    else:
-                        if legacy_resp.status_code in (401, 403):
+                    if init_resp.status_code not in (200, 201):
+                        if init_resp.status_code in (401, 403):
                             reason = (
-                                f"MCP server reachable but authentication failed (HTTP {legacy_resp.status_code}). "
+                                f"MCP server reachable but authentication failed (HTTP {init_resp.status_code}). "
                                 "Check your API key / token."
                             )
-                        elif legacy_resp.status_code == 404:
+                        elif init_resp.status_code == 404:
                             reason = "MCP server returned 404. Verify the server URL is correct."
                         else:
-                            reason = f"MCP server returned HTTP {legacy_resp.status_code}."
+                            reason = f"MCP server returned HTTP {init_resp.status_code}."
                         _write_connection_check(
                             connection_id,
                             "failed",
-                            f"HTTP {legacy_resp.status_code}",
+                            f"HTTP {init_resp.status_code}",
                             tested_at,
                             status="failed",
                             repos=repos,
                         )
                         return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
-                else:
-                    reason = f"MCP server returned HTTP {tools_resp.status_code}."
-                    _write_connection_check(
-                        connection_id,
-                        "failed",
-                        f"HTTP {tools_resp.status_code}",
-                        tested_at,
-                        status="failed",
-                        repos=repos,
+
+                    # Streamable-HTTP sessions: echo the server-assigned session id
+                    # on follow-up requests, or compliant servers reject tools/list.
+                    init_session_id = init_resp.headers.get("mcp-session-id")
+                    if init_session_id:
+                        headers["mcp-session-id"] = init_session_id
+
+                    tools_resp = http.post(
+                        probe_url,
+                        json=tools_payload,
+                        headers=headers,
+                        extensions=request_extensions,
                     )
-                    return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
+                    tools = None
+                    if tools_resp.status_code in (200, 201):
+                        body = _parse_mcp_response(tools_resp)
+                        tools = body.get("tools")
+                        if tools is None and isinstance(body.get("result"), dict):
+                            tools = body["result"].get("tools")
+                        if tools is None and isinstance(body.get("result"), dict):
+                            tools = body["result"].get("capabilities", {}).get("tools")
+                    elif tools_resp.status_code in (401, 403):
+                        reason = (
+                            f"MCP server reachable but authentication failed (HTTP {tools_resp.status_code}). "
+                            "Check your API key / token."
+                        )
+                        _write_connection_check(
+                            connection_id,
+                            "failed",
+                            f"HTTP {tools_resp.status_code}",
+                            tested_at,
+                            status="failed",
+                            repos=repos,
+                        )
+                        return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
+                    elif tools_resp.status_code == 404 and mcp_transport in {"streamable_http", "sse"}:
+                        legacy_resp = http.get(
+                            f"{probe_url}/tools/list",
+                            headers=headers,
+                            extensions=request_extensions,
+                        )
+                        if legacy_resp.status_code in (200, 201):
+                            body = legacy_resp.json()
+                            tools = body.get("tools") if isinstance(body, dict) else None
+                        else:
+                            if legacy_resp.status_code in (401, 403):
+                                reason = (
+                                    f"MCP server reachable but authentication failed (HTTP {legacy_resp.status_code}). "
+                                    "Check your API key / token."
+                                )
+                            elif legacy_resp.status_code == 404:
+                                reason = "MCP server returned 404. Verify the server URL is correct."
+                            else:
+                                reason = f"MCP server returned HTTP {legacy_resp.status_code}."
+                            _write_connection_check(
+                                connection_id,
+                                "failed",
+                                f"HTTP {legacy_resp.status_code}",
+                                tested_at,
+                                status="failed",
+                                repos=repos,
+                            )
+                            return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
+                    else:
+                        reason = f"MCP server returned HTTP {tools_resp.status_code}."
+                        _write_connection_check(
+                            connection_id,
+                            "failed",
+                            f"HTTP {tools_resp.status_code}",
+                            tested_at,
+                            status="failed",
+                            repos=repos,
+                        )
+                        return ConnectionTestResult(status="failed", reason=reason, tested_at=tested_at)
 
                 tool_names = sorted({
                     str(tool.get("name"))

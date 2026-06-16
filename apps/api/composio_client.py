@@ -16,6 +16,7 @@ import os
 import time
 import threading
 import base64
+from pathlib import Path
 from typing import Any, Dict, List, Optional
 
 import requests
@@ -36,7 +37,14 @@ _AUTH_CONFIG_TTL_SECONDS = 10 * 60
 _auth_config_cache: Dict[str, tuple[float, str]] = {}
 _auth_config_cache_lock = threading.Lock()
 
-load_dotenv("/root/.config/workeros/api.env", override=False)
+if os.environ.get("WORKEROS_DEV") == "1":
+    api_env_override = os.environ.get("WORKEROS_API_ENV_FILE") or os.environ.get("FLOOM_API_ENV_FILE")
+    api_env_path = (
+        Path(api_env_override).expanduser()
+        if api_env_override
+        else Path.home() / ".config" / "workeros" / "api.env"
+    )
+    load_dotenv(api_env_path, override=False)
 
 SUPPORTED_APPS: Dict[str, str] = {
     "gmail": "Gmail",

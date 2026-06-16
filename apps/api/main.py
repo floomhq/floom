@@ -1541,6 +1541,7 @@ async def auth_middleware(request: Request, call_next):
             or path.startswith("/approvals/public/")
             or path.startswith("/workers/public/")
             or path.startswith("/runs/public/")  # #765: token-gated read-only run view
+            or _RE_RUN_STREAM.match(path)  # #1338: endpoint enforces auth OR worker share token
             or path.startswith("/workers/short-links/")
             or path.startswith("/s/")
             or path.startswith("/c/")
@@ -1591,6 +1592,7 @@ logger = logging.getLogger("floom.api")
 # auth is by X-Workeros-Run-Token, scoped to the run_id in the path).
 import re as _re
 _RE_RUN_COMPOSIO_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/composio-execute/[A-Z0-9_]+$")
+_RE_RUN_STREAM = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/stream$")
 _RE_WORKER_RUN_CREATE = _re.compile(r"^/workers/[^/]+/runs$")
 _RE_RUN_DETAIL = _re.compile(r"^/runs/([a-zA-Z0-9_-]+)$")
 
@@ -3878,7 +3880,7 @@ def create_worker_run(
         trigger_source, trigger_ref = _worker_call_run_metadata(auth)
         trigger_source = trigger_source or "worker_call"
 
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     true_owner_id = _worker_owner_id(worker_id, repos) or str(worker.get("owner_id") or "")
@@ -4044,12 +4046,21 @@ def replay_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
     row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
     if not row:
+        try:
+            candidate = repos.runs.get_any(run_id=run_id)
+        except Exception:
+            candidate = None
+        if not candidate or str(candidate.get("actor_user_id") or "") != str(auth.user_id):
+            raise HTTPException(status_code=404, detail="Run not found")
+        row = candidate
+    actor_user_id = row.get("actor_user_id")
+    if actor_user_id is not None and str(actor_user_id) != str(auth.user_id):
         raise HTTPException(status_code=404, detail="Run not found")
     if row["worker_id"] != worker_id:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -5185,6 +5196,23 @@ def _mcp_tool_error(message: str) -> Dict[str, Any]:
     }
 
 
+_MCP_SECRET_QUERY_RE = re.compile(
+    r"([?&](?:token|key|secret|signature|sig|code|api[_-]?key)=)([^&\s]+)",
+    re.IGNORECASE,
+)
+_MCP_SECRET_ASSIGNMENT_RE = re.compile(
+    r"\b((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)([^\s,;&\"'}]+)",
+    re.IGNORECASE,
+)
+_MCP_BEARER_RE = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE)
+
+
+def _mcp_redact_string(value: str) -> str:
+    redacted = _MCP_SECRET_QUERY_RE.sub(r"\1[redacted]", value)
+    redacted = _MCP_SECRET_ASSIGNMENT_RE.sub(r"\1[redacted]", redacted)
+    return _MCP_BEARER_RE.sub("Bearer [redacted]", redacted)
+
+
 def _mcp_redact(value: Any) -> Any:
     if isinstance(value, list):
         return [_mcp_redact(item) for item in value]
@@ -5196,6 +5224,8 @@ def _mcp_redact(value: Any) -> Any:
             else:
                 redacted[str(key)] = _mcp_redact(nested)
         return redacted
+    if isinstance(value, str):
+        return _mcp_redact_string(value)
     return value
 
 
@@ -5206,7 +5236,7 @@ def _mcp_text(data: Any, summary: Optional[str] = None) -> str:
 
 
 def _mcp_call_result(data: Any, summary: Optional[str] = None) -> Dict[str, Any]:
-    structured = jsonable_encoder(data)
+    structured = _mcp_redact(jsonable_encoder(data))
     if not isinstance(structured, dict):
         structured = {"data": structured}
     return {
@@ -5219,8 +5249,8 @@ def _mcp_call_result(data: Any, summary: Optional[str] = None) -> Dict[str, Any]
 def _mcp_http_error_result(exc: HTTPException) -> Dict[str, Any]:
     detail = exc.detail if isinstance(exc.detail, str) else json.dumps(jsonable_encoder(exc.detail), ensure_ascii=False)
     return {
-        "content": [{"type": "text", "text": detail}],
-        "structuredContent": {"status": exc.status_code, "detail": jsonable_encoder(exc.detail)},
+        "content": [{"type": "text", "text": _mcp_redact_string(detail)}],
+        "structuredContent": _mcp_redact({"status": exc.status_code, "detail": jsonable_encoder(exc.detail)}),
         "isError": True,
     }
 
@@ -5232,6 +5262,38 @@ def _mcp_json_schema(properties: Dict[str, Any], required: Optional[List[str]] =
         "required": required or [],
         "additionalProperties": False,
     }
+
+
+def _mcp_validate_arguments_against_schema(
+    tool_definitions: List[Dict[str, Any]],
+    tool_name: str,
+    arguments: Dict[str, Any],
+) -> Optional[str]:
+    tool = next((t for t in tool_definitions if t.get("name") == tool_name), None)
+    schema = tool.get("inputSchema") if isinstance(tool, dict) else None
+    if not isinstance(schema, dict):
+        return None
+    properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    required = schema.get("required") if isinstance(schema.get("required"), list) else []
+    for name in required:
+        if name not in arguments:
+            return f"Invalid params: missing {name}"
+    for name, value in arguments.items():
+        prop = properties.get(name)
+        if not isinstance(prop, dict):
+            continue
+        expected = prop.get("type")
+        if expected == "string" and not isinstance(value, str):
+            return f"Invalid params: {name} must be a string"
+        if expected == "boolean" and not isinstance(value, bool):
+            return f"Invalid params: {name} must be a boolean"
+        if expected == "integer" and (not isinstance(value, int) or isinstance(value, bool)):
+            return f"Invalid params: {name} must be an integer"
+        if expected == "object" and not isinstance(value, dict):
+            return f"Invalid params: {name} must be an object"
+        if expected == "array" and not isinstance(value, list):
+            return f"Invalid params: {name} must be an array"
+    return None
 
 
 def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
@@ -5559,7 +5621,13 @@ def _mcp_call_secrets_list(auth: AuthContext, repos: Repositories) -> Dict[str, 
 
 def _mcp_call_secrets_set(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
     key = _mcp_arg(arguments, "key").upper()
-    payload = SecretUpsertRequest(value=_mcp_arg(arguments, "value"))
+    value = arguments.get("value")
+    if not isinstance(value, str):
+        raise ValueError("Tool argument 'value' must be a string")
+    try:
+        payload = SecretUpsertRequest(value=value)
+    except ValidationError as exc:
+        raise ValueError(str(exc)) from exc
     data = upsert_secret(key, payload, auth=auth, repos=repos)
     return _mcp_call_result(data, "Secret saved.")
 
@@ -5707,6 +5775,8 @@ async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, An
         if tool_name == "record_candidate_feedback":
             return _mcp_call_record_candidate_feedback(arguments, auth, repos)
         return _mcp_tool_error(f"Unknown tool: {tool_name or 'unknown'}")
+    except ValidationError:
+        raise
     except ValueError as exc:
         return _mcp_tool_error(str(exc))
     except HTTPException as exc:
@@ -5761,7 +5831,7 @@ async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Option
         auth = _workspace_agent_mcp_auth_context()
         tools = [
             t for t in _workeros_remote_mcp_tool_definitions()
-            if _mcp_access_error(t["name"], auth) is None
+            if _mcp_default_tool(t["name"]) is None or _mcp_access_error(t["name"], auth) is None
         ]
         return _mcp_result(request_id, {"tools": tools})
     if method != "tools/call":
@@ -5770,8 +5840,17 @@ async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Option
     params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
     tool_name = str(params.get("name") or "")
     arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+    invalid_args = _mcp_validate_arguments_against_schema(
+        _workeros_remote_mcp_tool_definitions(),
+        tool_name,
+        arguments,
+    )
+    if invalid_args:
+        return _mcp_error(request_id, -32602, invalid_args)
     try:
         return _mcp_result(request_id, await _call_workeros_remote_mcp_tool(tool_name, arguments))
+    except ValidationError as exc:
+        return _mcp_error(request_id, -32602, f"Invalid params: {exc}")
     except Exception as exc:
         return _mcp_internal_error(request_id, exc, f"tools/call:{tool_name or 'unknown'}")
 
@@ -6398,6 +6477,22 @@ _MCP_OFF_BY_DEFAULT_TOOLS: frozenset = frozenset({
 })
 
 
+def _mcp_default_tool_by_name() -> Dict[str, dict]:
+    return {str(tool["name"]): tool for tool in _MCP_DEFAULT_TOOLS}
+
+
+def _mcp_default_tool(name: str) -> Optional[dict]:
+    return _mcp_default_tool_by_name().get(name)
+
+
+def _mcp_visible_default_tools(auth: AuthContext) -> List[dict]:
+    return [
+        tool for tool in _MCP_DEFAULT_TOOLS
+        if _mcp_tool_served(str(tool["name"]))
+        and _mcp_access_error(str(tool["name"]), auth) is None
+    ]
+
+
 def _mcp_destructive_tools_enabled() -> bool:
     return os.environ.get("WORKEROS_MCP_ENABLE_DESTRUCTIVE") == "1"
 
@@ -6422,8 +6517,7 @@ def _mcp_tool_served(name: str) -> bool:
 
 def _mcp_access_error(name: str, auth: AuthContext) -> str | None:
     """Return an error string if this auth context may not call the tool."""
-    is_default_tool = any(t["name"] == name for t in _MCP_DEFAULT_TOOLS)
-    if is_default_tool and not _mcp_tool_served(name):
+    if _mcp_default_tool(name) is not None and not _mcp_tool_served(name):
         return f"Tool {name!r} is not enabled on this deployment"
     if name in _MCP_ADMIN_ONLY_TOOLS and not auth.is_admin:
         return f"Tool {name!r} requires admin role"
@@ -6632,8 +6726,24 @@ async def _mcp_dispatch(
 
     # --- workspace ---
     if name == "workspace.chat":
-        data, s = await _api_call("POST", "/chat", request, body={"message": a["message"], "source": "mcp", "conversation_id": a.get("conversation_id")})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        message = str(a.get("message") or "").strip()
+        if not message:
+            return _mcp_content("Tool argument 'message' is required", is_error=True)
+        if len(message) > 20000:
+            return _mcp_content("Tool argument 'message' is too long", is_error=True)
+        conversation_id = _workspace_agent_mcp_conversation_id(a.get("conversation_id"))
+        reply = await _collect_workspace_agent_reply_for_langdock(
+            message=message,
+            user_id=auth.user_id,
+            conversation_id=conversation_id,
+        )
+        return _mcp_call_result(
+            {
+                "reply": reply or "(No reply)",
+                "conversation_id": conversation_id,
+            },
+            "Workspace agent reply.",
+        )
     if name == "workspace.instructions.get":
         data, s = await _api_call("GET", "/workspace", request)
         return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
@@ -6766,23 +6876,39 @@ async def _mcp_dispatch(
                 is_error=False,
             )
         if run["status"] == "failed":
-            return _mcp_content(run.get("error") or "Worker run failed", is_error=True)
+            return _mcp_content(_mcp_text(run.get("error") or "Worker run failed"), is_error=True)
         output = run.get("output_json") or run.get("output") or {}
-        return _mcp_content(json.dumps(output, indent=2, default=str))
+        return _mcp_content(_mcp_text(output))
 
     return _mcp_content(f"Unknown tool: {name!r}", is_error=True)
 
 
 async def _mcp_handle_request(
-    body: dict,
+    body: Any,
     auth: AuthContext,
     repos: "Repositories",
     request: Request | None = None,
-) -> dict:
+) -> Any:
     """Core MCP JSON-RPC 2.0 dispatcher. Called by /mcp-tools/serve and by the cloud /mcp/{workspace_id}."""
+    if isinstance(body, list):
+        if not body:
+            return _mcp_err(None, -32600, "Invalid JSON-RPC request")
+        responses = []
+        for item in body:
+            if not isinstance(item, dict):
+                responses.append(_mcp_err(None, -32600, "Invalid JSON-RPC request"))
+                continue
+            responses.append(await _mcp_handle_request(item, auth, repos, request))
+        return responses
+
+    if not isinstance(body, dict):
+        return _mcp_err(None, -32600, "Invalid JSON-RPC request")
+
     rpc_id = body.get("id")
     method = body.get("method", "")
     params = body.get("params") or {}
+    if not isinstance(params, dict):
+        return _mcp_err(rpc_id, -32602, "Invalid params")
 
     if method == "initialize":
         return _mcp_ok(rpc_id, {
@@ -6795,10 +6921,7 @@ async def _mcp_handle_request(
         custom = repos.mcp_tools.list(user_id=auth.user_id)
         # #833: only advertise tools this deployment serves and this caller
         # may invoke — same predicate tools/call enforces.
-        tools = [
-            t for t in _MCP_DEFAULT_TOOLS
-            if _mcp_tool_served(t["name"]) and _mcp_access_error(t["name"], auth) is None
-        ] + [
+        tools = _mcp_visible_default_tools(auth) + [
             {"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]}
             for t in custom
         ]
@@ -6808,6 +6931,20 @@ async def _mcp_handle_request(
         if request is None:
             return _mcp_err(rpc_id, -32603, "Internal error: request context unavailable")
         tool_name = params.get("name", "")
+        if not isinstance(tool_name, str) or not tool_name:
+            return _mcp_err(rpc_id, -32602, "Invalid params")
+        raw_arguments = params.get("arguments")
+        arguments = {} if raw_arguments is None else raw_arguments
+        if not isinstance(arguments, dict):
+            return _mcp_err(rpc_id, -32602, "Invalid params")
+        default_tool = _mcp_default_tool(tool_name)
+        invalid_args = (
+            _mcp_validate_arguments_against_schema([default_tool], tool_name, arguments)
+            if default_tool is not None
+            else None
+        )
+        if invalid_args:
+            return _mcp_err(rpc_id, -32602, invalid_args)
         # #833: audit trail for every MCP tool invocation.
         logger.info(
             "mcp tools/call: tool=%r user=%s role=%s auth_method=%s",
@@ -6816,13 +6953,16 @@ async def _mcp_handle_request(
         denied = _mcp_access_error(tool_name, auth)
         if denied is not None:
             return _mcp_ok(rpc_id, _mcp_content(denied, is_error=True))
-        result = await _mcp_dispatch(
-            tool_name,
-            params.get("arguments") or {},
-            auth,
-            repos,
-            request,
-        )
+        try:
+            result = await _mcp_dispatch(tool_name, arguments, auth, repos, request)
+        except KeyError as exc:
+            missing = str(exc).strip("'") or "required argument"
+            return _mcp_err(rpc_id, -32602, f"Invalid params: missing {missing}")
+        except ValidationError as exc:
+            return _mcp_err(rpc_id, -32602, f"Invalid params: {exc}")
+        except Exception:
+            logger.exception("MCP serve tools/call failed: tool=%r", tool_name)
+            return _mcp_err(rpc_id, -32603, "Internal error")
         return _mcp_ok(rpc_id, result)
 
     return _mcp_err(rpc_id, -32601, f"Method not found: {method!r}")

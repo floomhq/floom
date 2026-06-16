@@ -1,0 +1,16 @@
+[Unit]
+Description=Workeros Cloud API autodeploy from origin/main
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+Type=oneshot
+Environment=WORKEROS_ROOT=/opt/workeros-cloud-deploy
+Environment=WORKEROS_BRANCH=main
+Environment=WORKEROS_AUTODEPLOY_LABEL=workeros-cloud-api
+Environment=WORKEROS_DEPLOY_CMD=/opt/workeros-cloud-deploy/ops/deploy-api.sh
+EnvironmentFile=-/root/.config/workeros-cloud/autodeploy.env
+ExecStart=/usr/local/bin/workeros-api-autodeploy
+StandardOutput=journal
+StandardError=journal
+

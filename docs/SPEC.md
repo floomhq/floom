@@ -319,19 +319,13 @@ V0: python. Later: node, bash, browser.
 
 # 9. Worker Code Contract
 
-Each worker exposes a `run(inputs, context)` function.
+Script workers are process entrypoints. The runner executes `exec.command`
+from the worker working directory, writes the run payload to `inputs.json`, and
+expects the process to write `result.json` in that same working directory before
+exiting. Declared secrets are exposed as environment variables. Declared
+connection identifiers are exposed through `connections.json`.
 
-Context includes:
-
-```python
-context["log"]("message")
-context["secrets"]
-context["run_id"]
-context["worker_id"]
-context["artifact_dir"]
-```
-
-Return value on success:
+`result.json` on success:
 
 ```python
 {
@@ -341,7 +335,7 @@ Return value on success:
 }
 ```
 
-Return value on failure:
+`result.json` on failure:
 
 ```python
 {"status": "error", "error": "Missing input: notes"}

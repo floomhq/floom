@@ -317,6 +317,77 @@ def _patch_repos(monkeypatch, impls, secret_repo) -> None:
     )
 
 
+# ===========================================================================
+# #1380 - Emily runs__cancel must not cancel another user's run
+# ===========================================================================
+
+class TestC1380RunCancelCrossUser:
+    def test_member_cannot_cancel_another_users_run(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        impls = _impls(main)
+        repos = main.get_repositories()
+        with main.get_db() as conn:
+            now = main.now_iso()
+            _seed_worker(
+                conn,
+                now,
+                worker_id="alice-worker",
+                name="Alice Worker",
+                owner_id="alice",
+                workspace_id="ws_alice",
+            )
+        run_id = main.create_run(
+            "alice-worker",
+            {},
+            trigger_source="manual",
+            user_id="alice",
+            repos=repos,
+        )
+
+        blocked = impls._tool_runs_cancel({"run_id": run_id}, user_id="bob")
+
+        assert blocked["ok"] is False
+        assert "not found" in blocked["error"].lower()
+        with main.get_db() as conn:
+            row = conn.execute(
+                "SELECT cancel_requested FROM runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+        assert row["cancel_requested"] == 0
+
+    def test_owner_can_cancel_own_run_from_emily_tool(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        impls = _impls(main)
+        repos = main.get_repositories()
+        with main.get_db() as conn:
+            now = main.now_iso()
+            _seed_worker(
+                conn,
+                now,
+                worker_id="owner-cancel-worker",
+                name="Owner Cancel Worker",
+                owner_id="alice",
+                workspace_id="ws_alice",
+            )
+        run_id = main.create_run(
+            "owner-cancel-worker",
+            {},
+            trigger_source="manual",
+            user_id="alice",
+            repos=repos,
+        )
+
+        allowed = impls._tool_runs_cancel({"run_id": run_id}, user_id="alice")
+
+        assert allowed["ok"] is True
+        with main.get_db() as conn:
+            row = conn.execute(
+                "SELECT cancel_requested FROM runs WHERE id = ?",
+                (run_id,),
+            ).fetchone()
+        assert row["cancel_requested"] == 1
+
+
 class TestC238SecretCrossUser:
     def test_member_cannot_overwrite_another_users_secret(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path, deploy="cloud")

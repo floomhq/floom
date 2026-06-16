@@ -53,10 +53,11 @@ def _run_replay_per_run_limit() -> int:
         return 0
 
 
-def _claim_run_create_quota_slot(key: str, *, limit: int, window: float) -> Optional[int]:
+def _claim_run_create_quota_slot(key: str, *, limit: int, window: float, cost: int = 1) -> Optional[int]:
     from db import get_db
     if limit <= 0:
         return None
+    cost = max(1, int(cost))
 
     now = time.time()
     cutoff = now - window
@@ -78,11 +79,14 @@ def _claim_run_create_quota_slot(key: str, *, limit: int, window: float) -> Opti
             (key,),
         ).fetchone()
         count = int(row["count"] or 0) if row else 0
-        if count >= limit:
+        if count + cost > limit:
             oldest_ts = float(row["oldest_ts"] or now) if row else now
             retry_after = max(1, int(math.ceil((oldest_ts + window) - now)))
             return retry_after
-        conn.execute("INSERT INTO run_create_rate_limits (key, ts) VALUES (?, ?)", (key, now))
+        conn.executemany(
+            "INSERT INTO run_create_rate_limits (key, ts) VALUES (?, ?)",
+            [(key, now)] * cost,
+        )
     return None
 
 
@@ -148,16 +152,76 @@ def _chat_quota_config() -> tuple[int, float]:
     return max(0, limit), max(1.0, window)
 
 
-def _enforce_chat_quota(auth: AuthContext) -> None:
+def _chat_cost_quota_config() -> tuple[int, float]:
+    try:
+        limit = int(os.environ.get("WORKEROS_CHAT_COST_UNITS_LIMIT", "200"))
+    except ValueError:
+        limit = 200
+    try:
+        window = float(os.environ.get("WORKEROS_CHAT_COST_WINDOW_SECONDS", os.environ.get("WORKEROS_CHAT_RATE_WINDOW_SECONDS", "60")))
+    except ValueError:
+        window = 60.0
+    return max(0, limit), max(1.0, window)
+
+
+def _chat_workspace_id_for_auth(auth: AuthContext) -> str:
+    user_id = str(getattr(auth, "user_id", "") or "")
+    if user_id.startswith("workspace:"):
+        return user_id.split(":", 1)[1] or "local-default"
+    try:
+        from db import derive_workspace_id
+
+        return derive_workspace_id(user_id)
+    except Exception:
+        return "local-default"
+
+
+def _chat_quota_identity_key(auth: AuthContext) -> str:
+    workspace_id = _chat_workspace_id_for_auth(auth)
+    return f"workspace:{workspace_id}:user:{getattr(auth, 'user_id', 'unknown')}:chat"
+
+
+def _chat_cost_units(message: str = "", *, model: str | None = None) -> int:
+    model_name = (model or os.environ.get("WORKEROS_CHAT_MODEL") or "").lower()
+    # This is intentionally conservative and pre-call: it limits expected cost
+    # exposure before the LLM request rather than waiting for post-hoc usage.
+    size_units = max(1, math.ceil(len(str(message or "")) / 1000))
+    multiplier = 1
+    if any(marker in model_name for marker in ("opus", "sonnet", "gpt-5", "o3", "o4")):
+        multiplier = 2
+    return max(1, size_units * multiplier)
+
+
+def _raise_chat_quota(limit: int, window: float, retry_after: int, *, cost_based: bool = False) -> None:
+    kind = "cost quota" if cost_based else "rate limit"
+    raise HTTPException(
+        status_code=429,
+        detail=f"Chat {kind} exceeded: {limit}/{int(window)}s",
+        headers={"Retry-After": str(retry_after)},
+    )
+
+
+def _enforce_chat_quota(auth: AuthContext, message: str = "") -> None:
     limit, window = _chat_quota_config()
     retry_after = _claim_run_create_quota_slot(
-        f"user:{auth.user_id}:chat",
+        _chat_quota_identity_key(auth),
         limit=limit,
         window=window,
     )
     if retry_after is not None:
-        raise HTTPException(
-            status_code=429,
-            detail=f"Chat rate limit exceeded: {limit}/{int(window)}s",
-            headers={"Retry-After": str(retry_after)},
+        _raise_chat_quota(limit, window, retry_after)
+
+    cost_limit, cost_window = _chat_cost_quota_config()
+    retry_after = _claim_run_create_quota_slot(
+        f"{_chat_quota_identity_key(auth)}:cost",
+        limit=cost_limit,
+        window=cost_window,
+        cost=_chat_cost_units(message),
+    )
+    if retry_after is not None:
+        _raise_chat_quota(
+            cost_limit,
+            cost_window,
+            retry_after,
+            cost_based=True,
         )
