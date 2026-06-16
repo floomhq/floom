@@ -22,7 +22,7 @@ export function EmilyAvatar({ size = "md" }: { size?: "sm" | "md" }) {
         "relative shrink-0 inline-flex items-center justify-center rounded-full bg-[var(--emily-mark)]",
         sz,
       )}
-      aria-label="Emily, Chief of Staff"
+      aria-label="Emily, COO"
     >
       <Radar
         size={iconSize}

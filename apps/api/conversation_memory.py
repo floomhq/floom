@@ -107,7 +107,7 @@ def _conversation_transcript(conversation_id: str) -> str:
 
 
 _SUMMARY_SYSTEM_PROMPT = (
-    "You maintain a long-term memory file for a personal AI chief of staff. "
+    "You maintain a long-term memory file for a personal AI COO. "
     "Given the existing memory index and a conversation transcript, extract only "
     "DURABLE facts worth remembering across future conversations: stable user "
     "preferences, decisions made, recurring topics, ongoing projects, key people "

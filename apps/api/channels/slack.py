@@ -1111,7 +1111,7 @@ def claim_slack_sender(
             slack_user_id=slack_user_id,
             team_id=team_id,
             text=(
-                "Hi, it's *Emily*, your chief of staff. We're connected. "
+                "Hi, it's *Emily*, your COO. We're connected. "
                 "Tell me what you want handled and I'll take it from here."
             ),
             bot_token=_slack_bot_token_for_team(team_id),

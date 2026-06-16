@@ -396,7 +396,7 @@ class TestSnapshotUserBenefitTone:
         # in chief-of-staff terms, not a tool inventory.
         lower = snap.lower()
         assert (
-            "chief of staff" in lower or "outcomes" in lower
+            "coo" in lower or "outcomes" in lower
             or "get done" in lower or "user-benefit" in lower or "benefit" in lower
         ), (
             "snapshot must include chief-of-staff / outcome framing instruction"
@@ -532,15 +532,15 @@ class TestPromptImprovements:
 # ---------------------------------------------------------------------------
 
 class TestChiefOfStaffIdentity:
-    """EMILY_BASE_PERSONA must present Emily as a chief of staff for a
+    """EMILY_BASE_PERSONA must present Emily as a coo for a
     non-technical buyer: autonomous, always-on, runs a team of workers, has a
     memory. NOT a developer tool inventory.
     """
 
     def test_identity_is_chief_of_staff(self):
         persona = chat_service.EMILY_BASE_PERSONA.lower()
-        assert "chief of staff" in persona, (
-            "identity must frame Emily as a chief of staff"
+        assert "coo" in persona, (
+            "identity must frame Emily as a coo"
         )
 
     def test_identity_conveys_autonomous_always_on(self):
