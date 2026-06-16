@@ -14,6 +14,19 @@ const API_BASE =
 const SESSION_COOKIE = "workeros_cloud_session";
 const PROXY_PREFIX = "/api/proxy";
 
+const SUPABASE_ORIGIN = (() => {
+  const raw =
+    process.env.WORKEROS_CLOUD_SUPABASE_URL ||
+    process.env.SUPABASE_URL ||
+    process.env.NEXT_PUBLIC_SUPABASE_URL ||
+    "";
+  try {
+    return raw ? new URL(raw).origin : "";
+  } catch {
+    return "";
+  }
+})();
+
 function normalizeCookieValue(value: string): string {
   const trimmed = value.trim();
   if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
@@ -153,6 +166,10 @@ function safeProxyLocation(location: string | null, req: NextRequest): string | 
 
   if (parsed.origin === req.nextUrl.origin) {
     return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+  }
+
+  if (SUPABASE_ORIGIN && parsed.origin === SUPABASE_ORIGIN) {
+    return parsed.toString();
   }
 
   if (parsed.origin !== apiBase.origin) {

@@ -14,6 +14,11 @@ const APP_API_BASE = API_BASE.endsWith("/api/proxy")
   : "/api";
 let loginRedirectStarted = false;
 
+function activeWorkspaceCookieAttrs(): string {
+  const secure = typeof window !== "undefined" && window.location.protocol === "https:" ? "; Secure" : "";
+  return `Path=/; SameSite=Lax${secure}`;
+}
+
 export function getActiveWorkspaceId(): string | null {
   if (typeof window === "undefined") return null;
   const value = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
@@ -24,10 +29,10 @@ export function setActiveWorkspaceId(workspaceId: string | null) {
   if (typeof window === "undefined") return;
   if (!workspaceId) {
     window.localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
-    window.document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=; Path=/; Max-Age=0; SameSite=Lax`;
+    window.document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=; ${activeWorkspaceCookieAttrs()}; Max-Age=0`;
   } else {
     window.localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, workspaceId);
-    window.document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=${encodeURIComponent(workspaceId)}; Path=/; Max-Age=31536000; SameSite=Lax`;
+    window.document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=${encodeURIComponent(workspaceId)}; ${activeWorkspaceCookieAttrs()}; Max-Age=31536000`;
   }
 }
 

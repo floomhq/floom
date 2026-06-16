@@ -23,6 +23,7 @@ describe("api proxy route", () => {
     vi.restoreAllMocks();
     vi.resetModules();
     delete process.env.WORKEROS_API_BASE;
+    delete process.env.WORKEROS_CLOUD_SUPABASE_URL;
     cookieState.value = "";
   });
 
@@ -90,6 +91,44 @@ describe("api proxy route", () => {
     );
 
     expect(res.status).toBe(302);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("passes the configured Supabase OAuth redirect through unchanged", async () => {
+    process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
+    process.env.WORKEROS_CLOUD_SUPABASE_URL = "https://sgizlsyygvlqosgwdimb.supabase.co";
+    const supabaseLocation =
+      "https://sgizlsyygvlqosgwdimb.supabase.co/auth/v1/authorize?provider=google&redirect_to=https%3A%2F%2Fworkeros-api.floom.dev%2Fauth%2Fcallback%3Fnext%3D%252Fapp";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, { status: 307, headers: { location: supabaseLocation } }),
+    );
+    const { GET } = await loadRoute();
+
+    const res = await GET(
+      new NextRequest("https://workers.floom.dev/api/proxy/auth/login?provider=google&next=%2Fapp"),
+      { params: Promise.resolve({ path: ["auth", "login"] }) },
+    );
+
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toBe(supabaseLocation);
+  });
+
+  it("strips non-configured Supabase-lookalike origins", async () => {
+    process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
+    process.env.WORKEROS_CLOUD_SUPABASE_URL = "https://sgizlsyygvlqosgwdimb.supabase.co";
+    vi.spyOn(globalThis, "fetch").mockResolvedValue(
+      new Response(null, {
+        status: 307,
+        headers: { location: "https://evil-project.supabase.co/auth/v1/authorize?provider=google" },
+      }),
+    );
+    const { GET } = await loadRoute();
+
+    const res = await GET(
+      new NextRequest("https://workers.floom.dev/api/proxy/auth/login?provider=google"),
+      { params: Promise.resolve({ path: ["auth", "login"] }) },
+    );
+
     expect(res.headers.get("location")).toBeNull();
   });
 });
