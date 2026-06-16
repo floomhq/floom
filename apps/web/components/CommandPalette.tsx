@@ -34,7 +34,7 @@ const NAV = [
   { href: "/overview", label: "Overview", icon: Activity, keywords: "home dashboard" },
   { href: "/workers", label: "Workers", icon: Box, keywords: "list jobs" },
   { href: "/runs", label: "Runs", icon: Clock, keywords: "history executions" },
-  { href: "/brain", label: "Brain", icon: Brain, keywords: "context folders files knowledge resources" },
+  { href: "/library", label: "Library", icon: Brain, keywords: "context folders files knowledge resources brain" },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, keywords: "review pending actions" },
   { href: "/connections/secrets", label: "Secrets", icon: KeyRound, keywords: "env tokens" },
   { href: "/connections", label: "Connections", icon: Plug, keywords: "integrations oauth" },

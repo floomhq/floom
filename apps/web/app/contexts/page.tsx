@@ -777,7 +777,7 @@ function ContextsPage() {
       {/* Page header */}
       <div className="flex items-start justify-between gap-4 shrink-0">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Brain</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Reusable folders of files your workers can read before they act.
           </p>

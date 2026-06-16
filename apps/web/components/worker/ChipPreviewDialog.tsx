@@ -168,7 +168,7 @@ export function ChipPreviewDialog({
               {target?.kind === "integration" ? target.app : target?.name}
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              {target?.kind === "integration" ? "Actions this tool can run" : "Files in this brain folder"}
+              {target?.kind === "integration" ? "Actions this tool can run" : "Files in this library folder"}
             </DialogDescription>
           </div>
           {target?.kind === "integration" && (

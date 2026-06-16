@@ -835,7 +835,7 @@ function ConfigTab({ w }: { w: WorkerSummary }) {
         <ToolsTab w={w} />
       </section>
       <section>
-        <h4 style={h4}>Brain</h4>
+        <h4 style={h4}>Library</h4>
         <BrainTab w={w} />
       </section>
       <section>
