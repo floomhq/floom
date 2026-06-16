@@ -279,7 +279,9 @@ function OverviewTab({ w }: { w: WorkerSummary }) {
           ID with no actual output text. The History tab shows the run list. */}
       <div>
         <h4 style={h4}>WHAT IT DOES</h4>
-        <AboutBody w={w} d={d} />
+        {/* #1279: useWorkerDetail can now return null (load failed); the overview
+            treats that the same as "not loaded yet" — AboutBody renders its empty state. */}
+        <AboutBody w={w} d={d ?? undefined} />
       </div>
     </div>
   );
