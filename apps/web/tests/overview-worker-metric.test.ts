@@ -13,7 +13,7 @@ describe("overview worker status metric (#1140)", () => {
   it("keeps active workers as the headline when any worker is active", () => {
     expect(workerStatusMetric({ active_workers_count: 2, paused_workers_count: 6 })).toEqual({
       value: 2,
-      label: "Workers active",
+      label: "Workers on duty",
       context: "6 paused",
     });
   });
