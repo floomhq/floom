@@ -18,6 +18,7 @@ from e2b import Template, default_build_logger
 
 COMMON_PYTHON_PACKAGES = [
     "boto3",
+    "google-auth",
     "httpx",
     "litellm",
     "numpy",

@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import io
+import re
 import shlex
 import shutil
 import tarfile
@@ -281,6 +282,49 @@ def _split_env_values(raw_value: str | None) -> list[str]:
 
 def _env_truthy(name: str) -> bool:
     return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+_DEFAULT_E2B_PYTHON_BAKED_PACKAGES = {
+    "boto3",
+    "google-auth",
+    "httpx",
+    "litellm",
+    "numpy",
+    "openai",
+    "python-dotenv",
+    "requests",
+}
+
+
+def _python_baked_package_names() -> set[str]:
+    configured = _split_env_values(os.environ.get("WORKEROS_E2B_PYTHON_BAKED_PACKAGES"))
+    if not configured:
+        return set(_DEFAULT_E2B_PYTHON_BAKED_PACKAGES)
+    return {name.strip().lower().replace("_", "-") for name in configured if name.strip()}
+
+
+def _requirement_name(line: str) -> str | None:
+    text = line.strip()
+    if not text or text.startswith("#"):
+        return None
+    if text.startswith(("-", "git+", "http://", "https://", ".")):
+        return ""
+    match = re.match(r"^([A-Za-z0-9_.-]+)", text)
+    if not match:
+        return ""
+    return match.group(1).lower().replace("_", "-")
+
+
+def _requirements_covered_by_baked_template(requirements_path: Path) -> tuple[bool, list[str]]:
+    baked = _python_baked_package_names()
+    missing: list[str] = []
+    for raw_line in requirements_path.read_text(encoding="utf-8").splitlines():
+        name = _requirement_name(raw_line)
+        if name is None:
+            continue
+        if not name or name not in baked:
+            missing.append(raw_line.strip())
+    return not missing, missing
 
 
 def _runtime_kind(config: WorkerConfig | None) -> str:
@@ -1258,7 +1302,17 @@ class E2BSandboxDriver(SandboxDriver):
             # install hook for non-Python bundles.
             req_path = worker_dir / "requirements.txt"
             if req_path.exists() and req_path.read_text().strip():
+                requirements_covered = False
                 if python_template_deps_baked:
+                    requirements_covered, missing_requirements = _requirements_covered_by_baked_template(req_path)
+                    if not requirements_covered:
+                        log_fn(
+                            "[e2b] Python template deps-baked is enabled, but requirements.txt "
+                            "contains packages not in the baked package list; running pip install "
+                            f"for this worker ({', '.join(missing_requirements[:5])})",
+                            "warning",
+                        )
+                if python_template_deps_baked and requirements_covered:
                     log_fn(
                         "[e2b] Skipping requirements.txt install; configured template marks Python deps as baked",
                         "info",
