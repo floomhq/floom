@@ -90,7 +90,7 @@ def test_guessed_foreign_server_conversation_id_remaps_for_caller(booted):
     assert chat_service.load_conversation_history(bob_storage_id)[0]["content"] == "bob message"
 
 
-def test_post_chat_accepts_source_and_defaults_to_web(booted, monkeypatch):
+def test_post_chat_derives_web_source_and_ignores_payload_source(booted, monkeypatch):
     main = booted["main"]
     chat_service = booted["chat_service"]
     seen_sources: list[str] = []
@@ -111,7 +111,7 @@ def test_post_chat_accepts_source_and_defaults_to_web(booted, monkeypatch):
         invalid = client.post("/chat", json={"message": "hello", "source": "email"})
         assert invalid.status_code == 422
 
-    assert seen_sources == ["mcp", "web"]
+    assert seen_sources == ["web", "web"]
 
 
 def test_auth_middleware_rejects_trailing_space_secret(booted):
