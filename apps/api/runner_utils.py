@@ -140,9 +140,9 @@ def _resolve_worker_bundle_dir(
     rejected a legitimate scheduled run.
 
     Resolution order, traversal guard intact throughout:
-      1. If a relative bundle_path is stored, join it under ``WORKERS_DIR.parent``
-         (the historical contract) and accept it only if it stays under the
-         allowed root.
+      1. If a relative bundle_path is stored as ``workers/<id>``, join it under
+         ``WORKERS_DIR.parent`` (the historical contract). If it is a bare
+         worker id, resolve it under the configured ``WORKERS_DIR``.
       2. Otherwise (or if an absolute bundle_path escapes the current root —
          the drift case), resolve the worker by its basename under the
          *current* ``WORKERS_DIR`` via ``safe_path`` (which still rejects
@@ -153,9 +153,11 @@ def _resolve_worker_bundle_dir(
     if bundle_path:
         raw_path = Path(bundle_path)
         if not raw_path.is_absolute():
-            resolved = workers_dir.parent.joinpath(raw_path).resolve()
+            parts = raw_path.parts
+            relative_root = workers_dir.parent if parts and parts[0] == workers_dir.name else workers_dir
+            resolved = relative_root.joinpath(raw_path).resolve()
             try:
-                resolved.relative_to(allowed_root)
+                resolved.relative_to(relative_root.resolve())
             except ValueError:
                 # Relative path escaped the root (genuine traversal): reject.
                 raise ValueError(f"Path traversal attempt: {resolved}")

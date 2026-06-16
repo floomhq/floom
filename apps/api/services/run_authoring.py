@@ -465,7 +465,7 @@ _MAX_SMOKE_REPAIRS = 1
 # Distinctive prefix of main._DEFAULT_RUN_PY_STUB's comment. A generated script
 # worker whose run.py is the placeholder stub does nothing (it writes a success
 # result.json with empty outputs and would otherwise PASS the smoke green).
-_PLACEHOLDER_RUN_PY_MARKER = "# Placeholder worker"
+_PLACEHOLDER_RUN_PY_MARKER = "# Script workers read inputs.json"
 
 # Failure error_codes that mean the worker's own code is broken (worth a repair
 # attempt). Setup/auth/secret/connection failures are NOT code bugs.

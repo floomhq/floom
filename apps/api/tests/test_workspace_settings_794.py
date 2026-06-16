@@ -74,6 +74,68 @@ def test_admin_round_trip(app_main, client):
     assert client.get("/workspace/settings").json()["auto_pause"] == "false"
 
 
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("auto_pause_enabled", "1"),
+        ("failure_email_enabled", "false"),
+        ("failure_email_to", "ops@example.com,alerts@example.com"),
+        ("monthly_spend_cap_usd", "25.50"),
+        ("default_model", "anthropic.claude-3-5-sonnet"),
+        ("default_timeout_seconds", "300"),
+        ("max_output_tokens", "8192"),
+        ("region", "us-west-2"),
+        ("timezone", "America/Phoenix"),
+        ("company_domain", "example.com"),
+    ],
+)
+def test_admin_validated_setting_values_persist(app_main, client, key, value):
+    _as_role(app_main, user_id="alice", role="admin")
+    resp = client.put(f"/workspace/settings/{key}", json={"value": value})
+    assert resp.status_code == 204, resp.text
+    assert client.get("/workspace/settings").json()[key] == value
+
+
+def test_unknown_workspace_setting_key_rejected(app_main, client):
+    _as_role(app_main, user_id="alice", role="admin")
+    resp = client.put("/workspace/settings/pwn_key", json={"value": "x"})
+    assert resp.status_code == 422
+    assert "unknown workspace setting" in resp.json()["detail"]
+
+
+def test_current_month_spend_setting_is_read_only(app_main, client):
+    _as_role(app_main, user_id="alice", role="admin")
+    resp = client.put("/workspace/settings/current_month_spend_usd", json={"value": "0"})
+    assert resp.status_code == 422
+    assert "read-only" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize("value", ["../etc/passwd", "file:///tmp/model", "openai/gpt-4"])
+def test_default_model_rejects_path_or_scheme_values(app_main, client, value):
+    _as_role(app_main, user_id="alice", role="admin")
+    resp = client.put("/workspace/settings/default_model", json={"value": value})
+    assert resp.status_code == 422
+    assert "safe model id" in resp.json()["detail"]
+
+
+@pytest.mark.parametrize(
+    ("key", "value"),
+    [
+        ("auto_pause_enabled", "sometimes"),
+        ("failure_email_to", "not-an-email"),
+        ("monthly_spend_cap_usd", "-1"),
+        ("default_timeout_seconds", "0"),
+        ("max_output_tokens", "1000001"),
+        ("timezone", "Mars/Olympus"),
+        ("company_domain", "not a domain"),
+    ],
+)
+def test_invalid_workspace_setting_values_rejected(app_main, client, key, value):
+    _as_role(app_main, user_id="alice", role="admin")
+    resp = client.put(f"/workspace/settings/{key}", json={"value": value})
+    assert resp.status_code == 422
+
+
 def test_member_cannot_write(app_main, client):
     _as_role(app_main, user_id="bob", role="member", auth_method="session")
     resp = client.put("/workspace/settings/approval_default", json={"value": "off"})

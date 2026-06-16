@@ -20,7 +20,6 @@ import json
 import logging
 import mimetypes
 import os
-import sqlite3
 import time
 import zipfile
 from pathlib import Path
@@ -265,42 +264,100 @@ def _preclear_backup_dir() -> str:
 
 
 def _live_db_file_path() -> Optional[str]:
-    """Resolve the on-disk path of the main SQLite database, or None for
-    an in-memory DB. Uses PRAGMA database_list so it reflects the connection
-    actually in use rather than a possibly-stale module global."""
+    """Resolve the on-disk path of the main SQLite database.
+
+    Kept for backward-compatible imports from main.py and older tests. The
+    scoped pre-clear backup does not use this because it must not copy the full
+    database.
+    """
     from db import get_db
     with get_db() as conn:
         for row in conn.execute("PRAGMA database_list").fetchall():
-            # row: (seq, name, file). The main schema is named 'main'.
             if row["name"] == "main":
                 file_path = row["file"]
                 return file_path or None
     return None
 
 
-def _backup_db_before_clear() -> str:
-    """Snapshot the live DB to a timestamped file before a destructive clear.
+def _backup_db_before_clear(user_id: str) -> str:
+    """Snapshot the caller's run history before a destructive clear.
 
-    Uses SQLite ``VACUUM INTO`` for an atomic, WAL-consistent single-file copy.
-    Raises on any failure so the caller can ABORT the clear (never wipe without
-    a verified backup). Returns the backup file path.
+    The backup intentionally contains only rows needed to restore this caller's
+    run history. It must never be a full-database copy: the full DB also holds
+    other tenants' runs, secrets, connections, and tokens.
     """
-    db_file = _live_db_file_path()
-    if not db_file:
-        raise RuntimeError("cannot back up an in-memory database before clear")
     backup_dir = _preclear_backup_dir()
-    os.makedirs(backup_dir, exist_ok=True)
+    os.makedirs(backup_dir, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(backup_dir, 0o700)
+    except OSError:
+        pass
     backup_path = os.path.join(
         backup_dir, f"floom-preclear-{time.time_ns()}.db"
     )
-    # VACUUM cannot run inside a transaction. Use a standalone autocommit
-    # connection so callers can safely invoke this before owner-scoped deletes.
-    with sqlite3.connect(db_file, timeout=30.0, isolation_level=None) as conn:
-        conn.execute("PRAGMA busy_timeout = 30000")
-        # VACUUM INTO writes a fresh, fully-consistent copy (no WAL sidecar).
-        conn.execute("VACUUM INTO ?", (backup_path,))
+    from db import get_db
+    try:
+        with get_db() as conn:
+            conn.execute("ATTACH DATABASE ? AS preclear_backup", (backup_path,))
+            try:
+                conn.execute(
+                    """
+                    CREATE TABLE preclear_backup.workers AS
+                    SELECT DISTINCT w.*
+                    FROM main.workers w
+                    JOIN main.runs r ON r.worker_id = w.id
+                    WHERE w.owner_id = ?
+                    """,
+                    (user_id,),
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE preclear_backup.runs AS
+                    SELECT r.*
+                    FROM main.runs r
+                    JOIN main.workers w ON w.id = r.worker_id
+                    WHERE w.owner_id = ?
+                    """,
+                    (user_id,),
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE preclear_backup.logs AS
+                    SELECT l.*
+                    FROM main.logs l
+                    JOIN main.runs r ON r.id = l.run_id
+                    JOIN main.workers w ON w.id = r.worker_id
+                    WHERE w.owner_id = ?
+                    """,
+                    (user_id,),
+                )
+                conn.execute(
+                    """
+                    CREATE TABLE preclear_backup.artifacts AS
+                    SELECT a.*
+                    FROM main.artifacts a
+                    JOIN main.runs r ON r.id = a.run_id
+                    JOIN main.workers w ON w.id = r.worker_id
+                    WHERE w.owner_id = ?
+                    """,
+                    (user_id,),
+                )
+                conn.commit()
+            finally:
+                conn.execute("DETACH DATABASE preclear_backup")
+        try:
+            os.chmod(backup_path, 0o600)
+        except OSError:
+            pass
+    except Exception:
+        try:
+            if os.path.exists(backup_path):
+                os.remove(backup_path)
+        except OSError:
+            pass
+        raise
     if not os.path.isfile(backup_path) or os.path.getsize(backup_path) == 0:
-        raise RuntimeError(f"backup file missing or empty after VACUUM INTO: {backup_path}")
+        raise RuntimeError(f"backup file missing or empty after scoped backup: {backup_path}")
     return backup_path
 
 
@@ -316,8 +373,9 @@ def clear_runs(
     query param to proceed.
 
     Hardened (post-incident 2026-05-29):
-    - Backs up the full DB to ``/root/backups/manual/floom-preclear-<epoch>.db``
-      BEFORE deleting anything. If the backup fails, the clear is ABORTED.
+    - Backs up the caller's run history to
+      ``/root/backups/manual/floom-preclear-<epoch>.db`` BEFORE deleting
+      anything. If the backup fails, the clear is ABORTED.
     - Scopes deletion to the caller (``owner_id``) only — never a global wipe
       of every user's runs.
     """
@@ -331,7 +389,7 @@ def clear_runs(
             ),
         )
     try:
-        backup_path = _backup_db_before_clear()
+        backup_path = _backup_db_before_clear(auth.user_id)
     except Exception as exc:
         logger.error("Aborting /runs/clear: pre-clear backup failed: %s", exc)
         raise HTTPException(
@@ -352,7 +410,6 @@ def clear_runs(
         "cleared_count": deleted_count,
         # Back-compat alias for pre-hardening callers.
         "deleted_runs": deleted_count,
-        "backup_path": backup_path,
     }
 
 
@@ -818,23 +875,55 @@ def get_public_run(
     return get_run(run_id, auth=owner_auth, repos=repos)
 
 
+def _get_run_for_worker_share_stream(
+    run_id: str,
+    token: str,
+    repos: Repositories,
+) -> tuple[Any, str]:
+    row = _load_standalone_share_row(token)
+    if not row or str(row.get("entity_type") or "") != "worker":
+        raise HTTPException(status_code=404, detail="Run not found")
+    owner_id = str(row.get("owner_id") or "")
+    worker_id = str(row.get("entity_id") or "")
+    try:
+        run_row = repos.runs.get_any(run_id=run_id)
+    except Exception:
+        run_row = None
+    data = row_to_dict(run_row) if run_row is not None else {}
+    if (
+        not data
+        or str(data.get("worker_id") or "") != worker_id
+        or str(data.get("actor_user_id") or owner_id) != owner_id
+    ):
+        raise HTTPException(status_code=404, detail="Run not found")
+    owner_scoped = _get_run_by_explicit_id(run_id, user_id=owner_id, repos=repos)
+    if not owner_scoped:
+        raise HTTPException(status_code=404, detail="Run not found")
+    return owner_scoped, owner_id
+
+
 @runs_router.get("/runs/{run_id}/stream")
 async def stream_run_parts(
     run_id: str,
     request: Request,
-    auth: AuthContext = Depends(get_auth_context),
+    token: Optional[str] = Query(None, min_length=10),
     repos: Repositories = Depends(get_repos),
 ):
     """Server-Sent Events stream of AI SDK parts for a single run."""
-    row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
-    if not row:
-        raise HTTPException(status_code=404, detail="Run not found")
+    if token:
+        row, stream_user_id = _get_run_for_worker_share_stream(run_id, token, repos)
+    else:
+        auth = await get_auth_context(request)
+        row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
+        if not row:
+            raise HTTPException(status_code=404, detail="Run not found")
+        stream_user_id = auth.user_id
 
     last_seen = _parse_last_event_id(request.headers.get("last-event-id"))
 
     # Per-user concurrent-stream cap (Round 16 DoS finding). Acquire
     # synchronously so the 429 is returned before the StreamingResponse.
-    stream_slot = _sse_stream_acquire(auth.user_id)
+    stream_slot = _sse_stream_acquire(stream_user_id)
 
     async def event_generator():
         try:
@@ -847,7 +936,7 @@ async def stream_run_parts(
                     # the client reconstructs the transcript instead of receiving a
                     # bare finish event.
                     event_id = 0
-                    for log_part in _log_replay_parts(repos, auth.user_id, run_id):
+                    for log_part in _log_replay_parts(repos, stream_user_id, run_id):
                         if event_id > last_seen:
                             yield _format_run_part_sse(event_id, log_part)
                         event_id += 1
