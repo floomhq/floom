@@ -85,6 +85,41 @@ def test_list_workspaces_falls_back_to_cookie_when_header_empty(monkeypatch):
     assert result.active_id == "ws_b"
 
 
+def test_list_workspaces_scoped_pat_only_returns_token_workspace(monkeypatch):
+    rows = [
+        {"id": "ws_a", "name": "A", "owner_user_id": "user-1", "created_at": "2026-01-01"},
+        {"id": "ws_b", "name": "B", "owner_user_id": "user-1", "created_at": "2026-01-02"},
+    ]
+    monkeypatch.setattr(workspace_routes.workspace_repo, "list_for_owner", lambda owner_user_id: rows)
+    monkeypatch.setattr(workspace_routes.workspace_repo, "list_member_workspaces", lambda user_id: [])
+
+    with active_workspace("ws_a", "member"):
+        result = asyncio.run(
+            workspace_routes.list_workspaces(
+                _request(),
+                AuthContext(user_id="user-1", email="u@example.com", scopes=(), auth_method="pat"),
+            )
+        )
+
+    assert result.active_id == "ws_a"
+    assert [ws.id for ws in result.workspaces] == ["ws_a"]
+    assert result.workspaces[0].role == "member"
+
+
+def test_scoped_pat_cannot_select_other_workspace(monkeypatch):
+    with active_workspace("ws_a", "admin"):
+        with pytest.raises(HTTPException) as exc_info:
+            asyncio.run(
+                workspace_routes.select_workspace(
+                    "ws_b",
+                    AuthContext(user_id="user-1", email="u@example.com", scopes=(), auth_method="pat"),
+                )
+            )
+
+    assert exc_info.value.status_code == 403
+    assert exc_info.value.detail == "token is not valid for this workspace"
+
+
 def test_create_share_link_returns_token_once(monkeypatch):
     captured = {}
 

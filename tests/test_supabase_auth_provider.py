@@ -1,10 +1,15 @@
 from __future__ import annotations
 
 import asyncio
+import sys
+import types
+from contextlib import contextmanager
+
 import pytest
 from fastapi import HTTPException
 from starlette.requests import Request
 
+from apps.api.auth.workspace_context import get_active_workspace_id
 from apps.api.auth import supabase_provider
 from apps.api.auth.supabase_provider import SupabaseAuthProvider
 
@@ -22,6 +27,40 @@ def _request(authorization: str | None) -> Request:
             "headers": headers,
         }
     )
+
+
+class _WorkspaceTokenConn:
+    def __init__(self, row):
+        self.row = row
+        self.touched = False
+
+    def execute(self, sql, params=()):
+        if "SELECT id, workspace_id, name, expires_at" in sql:
+            token_hash = params[0]
+            if self.row and self.row.get("token_hash") == token_hash:
+                return types.SimpleNamespace(fetchone=lambda: self.row)
+            return types.SimpleNamespace(fetchone=lambda: None)
+        if "UPDATE workspace_api_tokens SET last_used_at" in sql:
+            self.touched = True
+            return types.SimpleNamespace(rowcount=1)
+        raise AssertionError(sql)
+
+
+def _install_fake_workspace_token_db(monkeypatch, row):
+    conn = _WorkspaceTokenConn(row)
+
+    @contextmanager
+    def get_db():
+        yield conn
+
+    fake_db = types.ModuleType("db")
+    fake_db.get_db = get_db
+    fake_db.now_iso = lambda: "2026-06-16T00:00:00+00:00"
+    fake_sqlite = types.ModuleType("db.sqlite")
+    fake_sqlite.workspace_actor_id = lambda workspace_id: f"workspace:{workspace_id}"
+    monkeypatch.setitem(sys.modules, "db", fake_db)
+    monkeypatch.setitem(sys.modules, "db.sqlite", fake_sqlite)
+    return conn
 
 
 def test_verify_accepts_valid_supabase_jwt(monkeypatch):
@@ -63,6 +102,44 @@ def test_verify_rejects_invalid_supabase_jwt(monkeypatch):
 
     assert exc_info.value.status_code == 401
     assert exc_info.value.detail == "unauthorized"
+
+
+def test_verify_accepts_workspace_token_and_sets_active_workspace(monkeypatch):
+    raw = "wst_valid"
+    row = {
+        "id": "wtok-1",
+        "workspace_id": "ws_token",
+        "name": "ci",
+        "expires_at": None,
+        "token_hash": supabase_provider._hash_token(raw),
+    }
+    conn = _install_fake_workspace_token_db(monkeypatch, row)
+
+    provider = SupabaseAuthProvider()
+
+    async def _verify():
+        ctx = await provider.verify(_request(f"Bearer {raw}"))
+        assert get_active_workspace_id() == "ws_token"
+        return ctx
+
+    ctx = asyncio.run(_verify())
+
+    assert ctx.auth_method == "workspace_token"
+    assert ctx.role == "member"
+    assert ctx.user_id == "workspace:ws_token"
+    assert ctx.username == "ci"
+    assert conn.touched is True
+
+
+def test_verify_rejects_unknown_workspace_token(monkeypatch):
+    _install_fake_workspace_token_db(monkeypatch, None)
+
+    provider = SupabaseAuthProvider()
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(provider.verify(_request("Bearer wst_missing")))
+
+    assert exc_info.value.status_code == 401
+    assert exc_info.value.detail == "invalid token"
 
 
 # ---------------------------------------------------------------------------

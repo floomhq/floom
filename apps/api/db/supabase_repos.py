@@ -3175,9 +3175,31 @@ class SupabaseSecretRepository(_BaseSupabaseRepository):
 
 
 class SupabaseCliAuthRepository(_BaseSupabaseRepository):
+    _SECRET_PREFIX = "fernet:"
+
+    @classmethod
+    def _encode_secret(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        text = str(value)
+        if not text or text.startswith(cls._SECRET_PREFIX):
+            return value
+        return cls._SECRET_PREFIX + encrypt_secret(text).decode("ascii")
+
+    @classmethod
+    def _decode_secret(cls, value: Any) -> Any:
+        if value is None:
+            return None
+        text = str(value)
+        if not text.startswith(cls._SECRET_PREFIX):
+            # Legacy rows may contain a pending plaintext one-time token.
+            return text
+        return decrypt_secret(text.removeprefix(cls._SECRET_PREFIX).encode("ascii"))
+
     def _normalize_row(self, row: Mapping[str, Any]) -> dict[str, Any]:
         item = dict(row)
         item["scopes"] = _json_load(item.pop("scopes_json", None), [])
+        item["secret"] = self._decode_secret(item.get("secret"))
         return item
 
     def create_device(self, *, user_id: str | None, **fields: Any) -> dict[str, Any]:
@@ -3191,7 +3213,7 @@ class SupabaseCliAuthRepository(_BaseSupabaseRepository):
                 "user_id": user_id,
                 "user_code": str(fields["user_code"]).strip().upper(),
                 "status": fields.get("status") or "pending",
-                "secret": fields.get("secret"),
+                "secret": self._encode_secret(fields.get("secret")),
                 "client_name": fields["client_name"],
                 "scopes_json": _json_storage_value(fields.get("scopes"), []),
                 "created_ip": fields.get("created_ip"),
@@ -3297,6 +3319,8 @@ class SupabaseCliAuthRepository(_BaseSupabaseRepository):
         ):
             if key in fields:
                 payload[key] = fields[key]
+        if "secret" in payload:
+            payload["secret"] = self._encode_secret(payload["secret"])
         if "user_code" in payload:
             payload["user_code"] = str(payload["user_code"]).strip().upper()
         if "scopes_json" in fields:
@@ -3319,7 +3343,7 @@ class SupabaseCliAuthRepository(_BaseSupabaseRepository):
         payload = {
             "user_id": user_id,
             "status": "approved",
-            "secret": secret,
+            "secret": self._encode_secret(secret),
             "approved_at": approved_at,
         }
         response = (

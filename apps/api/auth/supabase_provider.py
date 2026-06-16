@@ -4,6 +4,7 @@ import hashlib
 import json
 import time
 import urllib.request
+from datetime import datetime, timezone
 from threading import Lock
 from typing import Iterable
 from urllib.parse import urljoin
@@ -239,6 +240,8 @@ class SupabaseAuthProvider:
         # taught its single-tenant MultiMemberAuthProvider about wrt_ tokens.
         if token.startswith("wrt_"):
             return await self._verify_worker_call_token(token, request)
+        if token.startswith("wst_"):
+            return await self._verify_workspace_token(token)
         if token.startswith("floom_"):
             return await self._verify_pat(token, request)
         claims = _verify_jwt(token, self._settings.supabase_url)
@@ -312,6 +315,58 @@ class SupabaseAuthProvider:
             role=role or "member",
             auth_method="run_token",
             run_token_payload=payload,
+        )
+
+    @staticmethod
+    def _token_expired(expires_at: object) -> bool:
+        if not expires_at:
+            return False
+        try:
+            parsed = datetime.fromisoformat(str(expires_at).replace("Z", "+00:00"))
+        except ValueError:
+            return False
+        if parsed.tzinfo is None:
+            parsed = parsed.replace(tzinfo=timezone.utc)
+        return parsed <= datetime.now(timezone.utc)
+
+    async def _verify_workspace_token(self, raw: str) -> AuthContext:
+        from db import get_db, now_iso
+        from db.sqlite import workspace_actor_id
+
+        token_hash = _hash_token(raw)
+        with get_db() as conn:
+            row = conn.execute(
+                """
+                SELECT id, workspace_id, name, expires_at
+                FROM workspace_api_tokens
+                WHERE token_hash = ? AND revoked_at IS NULL
+                LIMIT 1
+                """,
+                (token_hash,),
+            ).fetchone()
+        if row is None:
+            raise HTTPException(status_code=401, detail="invalid token")
+        if self._token_expired(row["expires_at"]):
+            raise HTTPException(status_code=401, detail="token expired")
+        try:
+            with get_db() as conn:
+                conn.execute(
+                    "UPDATE workspace_api_tokens SET last_used_at = ? WHERE id = ?",
+                    (now_iso(), row["id"]),
+                )
+        except Exception:
+            logger.warning("failed to touch workspace token last_used_at", exc_info=True)
+        workspace_id = str(row["workspace_id"])
+        set_active_workspace_id(workspace_id)
+        set_active_member_role("member")
+        actor_id = workspace_actor_id(workspace_id)
+        obs.set_context(user_id=actor_id)
+        return AuthContext(
+            user_id=actor_id,
+            role="member",
+            auth_method="workspace_token",
+            username=row["name"],
+            scopes=("workspace",),
         )
 
     async def _verify_pat(self, raw: str, request: Request) -> AuthContext:

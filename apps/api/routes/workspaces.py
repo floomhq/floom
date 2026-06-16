@@ -22,7 +22,7 @@ from pydantic import BaseModel, Field
 from starlette.datastructures import UploadFile
 
 from apps.api._engine import ensure_engine_api_path
-from apps.api.auth.workspace_context import active_workspace, get_active_workspace_id
+from apps.api.auth.workspace_context import active_workspace, get_active_workspace_id, get_active_member_role
 from apps.api.auth.supabase_provider import ACTIVE_WORKSPACE_COOKIE, ACTIVE_WORKSPACE_HEADER
 from apps.api.config import get_cloud_settings
 from apps.api.db import workspaces as workspace_repo
@@ -235,6 +235,21 @@ async def list_workspaces(
             seen_ids.add(ws_id)
             all_workspaces.append(_to_out(row, role=str(row.get("role") or "member")))
 
+    token_workspace_id = get_active_workspace_id() if auth.auth_method == "pat" else None
+    if token_workspace_id:
+        token_role = get_active_member_role() or "member"
+        all_workspaces = [
+            WorkspaceOut(
+                id=ws.id,
+                name=ws.name,
+                owner_user_id=ws.owner_user_id,
+                created_at=ws.created_at,
+                role=token_role if ws.id == token_workspace_id else ws.role,
+            )
+            for ws in all_workspaces
+            if ws.id == token_workspace_id
+        ]
+
     requested = (
         (request.headers.get(ACTIVE_WORKSPACE_HEADER) or "").strip()
         or request.cookies.get(ACTIVE_WORKSPACE_COOKIE)
@@ -267,6 +282,9 @@ async def select_workspace(
     workspace_id: str,
     auth: AuthContext = Depends(get_auth_context),
 ) -> JSONResponse:
+    token_workspace_id = get_active_workspace_id() if auth.auth_method == "pat" else None
+    if token_workspace_id and workspace_id != token_workspace_id:
+        raise HTTPException(status_code=403, detail="token is not valid for this workspace")
     workspace = workspace_repo.get(workspace_id=workspace_id)
     if workspace is None:
         raise HTTPException(status_code=404, detail="workspace not found")

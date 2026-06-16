@@ -47,6 +47,8 @@ class CloudSettings:
 def _require_https(url: str) -> None:
     if url.startswith("https://"):
         return
+    if (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud":
+        raise RuntimeError("Cloud mode requires an HTTPS Supabase URL.")
     if (os.environ.get("WORKEROS_DEV") or "").strip():
         return
     raise RuntimeError(
