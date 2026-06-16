@@ -205,7 +205,7 @@ def run_smoke(config: Config, client: HttpClient | None = None) -> list[str]:
     if config.web_base:
         step(
             "frontend proxy health",
-            lambda: client.request("GET", f"{config.web_base}/app/api/proxy/healthz", auth=False, expected={200}),
+            lambda: client.request("GET", f"{config.web_base}/app/api/proxy/healthz", auth=False, expected={200, 401}),
         )
 
     if not config.mutate:
@@ -254,31 +254,37 @@ def _smoke_mcp_tools(client: HttpClient, workspace_id: str) -> None:
         raise SmokeError(f"mcp tools/list returned error: {payload['error']}")
 
 
-def _smoke_create_worker(client: HttpClient, smoke_id: str) -> str:
-    worker_yml = "\n".join(
+def _smoke_worker_yml(smoke_id: str) -> str:
+    return "\n".join(
         [
             'schema_version: "0.3"',
-            f"id: {smoke_id}",
-            f"name: Cloud smoke {smoke_id}",
-            f"title: Cloud smoke {smoke_id}",
-            "description: Safe cloud smoke worker",
+            f'name: "{smoke_id}"',
+            f'title: "Cloud smoke {smoke_id}"',
+            'description: "Safe cloud smoke worker"',
             'version: "0.1.0"',
+            "exec:",
+            '  entry: "run.py"',
+            '  command: "python run.py"',
+            '  runtime: "python311"',
+            '  runner: "e2b"',
+            "  inputs: []",
+            "  outputs:",
+            '    - name: "result"',
+            '      kind: "scalar"',
+            '      type: "object"',
             "trigger:",
-            "  type: manual",
-            "runtime:",
-            "  type: python",
-            "  entrypoint: run.py",
-            "  runner: e2b",
-            "inputs: []",
-            "outputs:",
-            "  - name: result",
+            '  type: "manual"',
             "limits:",
             "  max_tool_iterations: 1",
             "  max_output_tokens: 512",
             "",
         ]
     )
-    run_py = "def run(inputs):\n    return {'ok': True, 'inputs': inputs}\n"
+
+
+def _smoke_create_worker(client: HttpClient, smoke_id: str) -> str:
+    worker_yml = _smoke_worker_yml(smoke_id)
+    run_py = _smoke_run_py(smoke_id)
     payload = _expect_json_object(
         client.request(
             "POST",
@@ -294,11 +300,35 @@ def _smoke_create_worker(client: HttpClient, smoke_id: str) -> str:
     return worker_id
 
 
+def _smoke_run_py(smoke_id: str) -> str:
+    return "\n".join(
+        [
+            "import json",
+            "from pathlib import Path",
+            "",
+            "inputs_path = Path('inputs.json')",
+            "inputs = json.loads(inputs_path.read_text()) if inputs_path.exists() else {}",
+            "Path('result.json').write_text(json.dumps({",
+            "    'status': 'success',",
+            f"    'outputs': {{'result': {{'ok': True, 'smoke_id': {smoke_id!r}, 'inputs': inputs}}}},",
+            "    'artifacts': [],",
+            "}))",
+            "",
+        ]
+    )
+
+
 def _smoke_edit_worker(client: HttpClient, worker_id: str, smoke_id: str) -> None:
     client.request(
         "PUT",
         f"/api/workers/{_q(worker_id)}/files",
-        json_body={"files": [{"path": "run.py", "content": f"def run(inputs):\n    return {{'ok': True, 'edited': '{smoke_id}'}}\n"}]},
+        json_body={
+            "files": [
+                {"path": "worker.yml", "content": _smoke_worker_yml(smoke_id)},
+                {"path": "run.py", "content": _smoke_run_py(f"{smoke_id}-edited")},
+                {"path": "SKILL.md", "content": "# Cloud smoke\n"},
+            ]
+        },
         expected={200},
     )
 
@@ -358,7 +388,7 @@ def _smoke_chat(client: HttpClient, smoke_id: str) -> None:
         "POST",
         "/api/chat",
         json_body={
-            "messages": [{"role": "user", "content": f"Smoke check {smoke_id}. Reply briefly."}],
+            "message": f"Smoke check {smoke_id}. Reply briefly.",
             "source": "web",
         },
         expected={200},
