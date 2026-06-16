@@ -5,7 +5,7 @@ import os
 import re
 import socket
 import warnings
-from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional, Union
+from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional, Tuple, Union
 from urllib.parse import unquote, urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from enum import Enum
@@ -252,6 +252,95 @@ def assert_safe_outbound_mcp_url(url: str) -> str:
     """SSRF validator for MCP HTTP/SSE server URLs. Thin wrapper around
     :func:`assert_safe_outbound_url` preserving the original API + error text."""
     return assert_safe_outbound_url(url, label="MCP server URL")
+
+
+def pinned_safe_outbound_httpx_target(
+    url: str,
+    *,
+    label: str = "URL",
+) -> Tuple[str, Dict[str, str], Dict[str, Any]]:
+    """Return a DNS-pinned httpx target for an outbound URL.
+
+    The URL is resolved and validated exactly once. Hostname URLs are rewritten
+    to dial the vetted IP literal, while the returned Host header and
+    ``sni_hostname`` extension preserve the original authority for HTTP and TLS.
+    """
+    stripped = (url or "").strip()
+
+    _once = unquote(stripped)
+    _twice = unquote(_once)
+    if any("\r" in s or "\n" in s for s in (stripped, _once, _twice)):
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: contains control characters (CRLF injection)"
+        )
+
+    if _allow_private_mcp_urls():
+        return stripped, {}, {}
+
+    parts = urlsplit(stripped)
+    scheme = parts.scheme.lower()
+    if scheme not in {"http", "https"}:
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: only http:// and https:// schemes are permitted"
+        )
+
+    host = parts.hostname
+    if not host:
+        raise UnsafeOutboundUrlError(f"{label} is not allowed: missing host")
+
+    try:
+        port = parts.port
+    except ValueError as exc:
+        raise UnsafeOutboundUrlError(f"{label} is not allowed: invalid port") from exc
+
+    try:
+        literal_ip = ipaddress.ip_address(host)
+    except ValueError:
+        literal_ip = None
+
+    if literal_ip is not None:
+        if _ip_is_disallowed(literal_ip):
+            raise UnsafeOutboundUrlError(
+                f"{label} is not allowed: points to an internal/loopback/link-local address"
+            )
+        return stripped, {}, {}
+
+    if host.lower() in {"localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback"}:
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: points to an internal/loopback/link-local address"
+        )
+
+    try:
+        resolved = _resolve_host_ips(host)
+    except (socket.gaierror, socket.timeout, OSError) as exc:
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: host could not be resolved ({host})"
+        ) from exc
+
+    if not resolved:
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: host could not be resolved ({host})"
+        )
+
+    for ip in resolved:
+        if _ip_is_disallowed(ip):
+            raise UnsafeOutboundUrlError(
+                f"{label} is not allowed: points to an internal/loopback/link-local address"
+            )
+
+    pinned_ip = resolved[0]
+    pinned_host = f"[{pinned_ip}]" if pinned_ip.version == 6 else str(pinned_ip)
+    port_suffix = f":{port}" if port is not None else ""
+    userinfo = ""
+    if "@" in parts.netloc:
+        userinfo = parts.netloc.rsplit("@", 1)[0] + "@"
+    pinned_url = parts._replace(netloc=f"{userinfo}{pinned_host}{port_suffix}").geturl()
+
+    host_header = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    if port is not None:
+        host_header = f"{host_header}:{port}"
+    extensions = {"sni_hostname": host} if scheme == "https" else {}
+    return pinned_url, {"Host": host_header}, extensions
 
 
 # ---------------------------------------------------------------------------
