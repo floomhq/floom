@@ -639,7 +639,12 @@ def _validate_cloud_worker_file_path(path: str) -> str:
     if not path:
         raise HTTPException(status_code=400, detail="file path must not be empty")
     candidate = _Path(path)
-    if candidate.is_absolute() or "\\" in path:
+    if (
+        candidate.is_absolute()
+        or path.startswith(("/", "\\"))
+        or "\\" in path
+        or _re.match(r"^[A-Za-z]:[\\/]", path)
+    ):
         raise HTTPException(status_code=400, detail=f"file path must be relative: {path!r}")
     parts = candidate.parts
     if any(part in ("", ".", "..") or part.startswith(".") for part in parts):

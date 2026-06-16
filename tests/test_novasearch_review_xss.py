@@ -5,8 +5,8 @@ fields (name/title/company/score) and label `reason` directly into HTML via
 f-strings. A candidate name like `<script>…</script>` (sourced from CRM /
 LinkedIn / match payloads) therefore executed in the reviewer's browser.
 
-This test mounts the real router (the endpoint is an unauthenticated
-capability-URL by design) and asserts the dangerous markup is HTML-escaped.
+This test mounts the real router with an authenticated reviewer and asserts the
+dangerous markup is HTML-escaped.
 """
 
 from __future__ import annotations
@@ -15,6 +15,7 @@ from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 import apps.api.routes.novasearch as nova
+from auth import AuthContext, get_auth_context
 
 
 class _FakeLabelsClient:
@@ -33,11 +34,17 @@ class _FakeLabelsClient:
         return type("Resp", (), {"data": []})()
 
 
-def _client(monkeypatch, *, query_row):
+def _client(monkeypatch, *, query_row, labels_client=None):
     monkeypatch.setattr(nova, "_query_row_by_id", lambda _qid: query_row)
-    monkeypatch.setattr(nova, "new_supabase_service_client", lambda: _FakeLabelsClient())
+    monkeypatch.setattr(nova, "get_active_workspace_id", lambda: "ws_1")
+    monkeypatch.setattr(nova, "new_supabase_service_client", lambda: labels_client or _FakeLabelsClient())
     app = FastAPI()
     app.include_router(nova.router, prefix="/api")
+    app.dependency_overrides[get_auth_context] = lambda: AuthContext(
+        user_id="reviewer-user",
+        role="member",
+        auth_method="session",
+    )
     return TestClient(app)
 
 
@@ -83,11 +90,9 @@ def test_label_reason_is_html_escaped(monkeypatch):
                            "reason": "<b onmouseover=alert(2)>bad</b>"}]},
             )()
 
-    monkeypatch.setattr(nova, "_query_row_by_id", lambda _qid: query_row)
-    monkeypatch.setattr(nova, "new_supabase_service_client", lambda: _LabelsWithReason())
-    app = FastAPI()
-    app.include_router(nova.router, prefix="/api")
-    resp = TestClient(app).get(f"/api/novasearch/review/{VALID_ID}")
+    resp = _client(monkeypatch, query_row=query_row, labels_client=_LabelsWithReason()).get(
+        f"/api/novasearch/review/{VALID_ID}"
+    )
 
     assert resp.status_code == 200
     assert "<b onmouseover=alert(2)>bad</b>" not in resp.text
@@ -96,9 +101,5 @@ def test_label_reason_is_html_escaped(monkeypatch):
 
 def test_bad_id_still_404s(monkeypatch):
     # Guard the regex path is unaffected by the fix.
-    monkeypatch.setattr(nova, "_query_row_by_id", lambda _qid: None)
-    monkeypatch.setattr(nova, "new_supabase_service_client", lambda: _FakeLabelsClient())
-    app = FastAPI()
-    app.include_router(nova.router, prefix="/api")
-    resp = TestClient(app).get("/api/novasearch/review/not-a-valid-id")
+    resp = _client(monkeypatch, query_row=None).get("/api/novasearch/review/not-a-valid-id")
     assert resp.status_code == 404
