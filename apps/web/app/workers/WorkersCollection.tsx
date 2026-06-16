@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useWorkers } from "@/lib/query/hooks";
 import type {
   WorkerSummary,
   WorkerDetail,
@@ -1338,12 +1339,33 @@ export default function WorkersCollection({
   extraViews?: WorkersExtraView[];
 }) {
   const router = useRouter();
+  // Cache-first workers list (TanStack Query): returning to /workers renders
+  // instantly from cache with no skeleton; a slow/failed refetch keeps showing
+  // the cached list instead of flashing "Something went wrong". Local `workers`
+  // state is kept in sync so the existing optimistic mutation handlers (delete,
+  // update, archive) still work.
+  const workersQuery = useWorkers(
+    { include_archived: true },
+    initialWorkers.length > 0 ? initialWorkers : undefined,
+  );
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(initialWorkers.length === 0);
-  const [error, setError] = useState<string | null>(null);
   const [canManageWorkers, setCanManageWorkers] = useState(false);
   const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
+
+  useEffect(() => {
+    if (workersQuery.data) {
+      setWorkers(workersQuery.data.filter((w) => !isSystemWorker(w)));
+    }
+  }, [workersQuery.data]);
+
+  // Skeleton only on a true cold start (no cache and no server data); a slow
+  // backend with cached data shows the cache, never the skeleton or the error.
+  const loading = workersQuery.isLoading && workers.length === 0;
+  const error =
+    workersQuery.isError && workers.length === 0
+      ? "Could not load workers. Check your connection and try again."
+      : null;
 
   useEffect(() => {
     let alive = true;
@@ -1358,28 +1380,8 @@ export default function WorkersCollection({
         }
       })
       .catch(() => {});
-    api.workers
-      .list({ include_archived: true })
-      .then((all) => {
-        if (alive) setWorkers(all.filter((w) => !isSystemWorker(w)));
-      })
-      .catch(() => {
-        if (alive) setError("Could not load workers. Check your connection and try again.");
-      })
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
-    // Safety timeout: if the API proxy is unreachable and the request hangs,
-    // stop showing the skeleton after 10 s so users see an error + retry.
-    const timeout = setTimeout(() => {
-      if (alive) {
-        setLoading(false);
-        setError("Could not load workers. Check your connection and try again.");
-      }
-    }, 10_000);
     return () => {
       alive = false;
-      clearTimeout(timeout);
     };
   }, []);
 
@@ -1549,13 +1551,7 @@ export default function WorkersCollection({
         ),
       },
       errorRetry: () => {
-        setError(null);
-        setLoading(true);
-        api.workers
-          .list({ include_archived: true })
-          .then((all) => setWorkers(all.filter((w) => !isSystemWorker(w))))
-          .catch(() => setError("Could not load workers. Check your connection and try again."))
-          .finally(() => setLoading(false));
+        void workersQuery.refetch();
       },
     },
   };
