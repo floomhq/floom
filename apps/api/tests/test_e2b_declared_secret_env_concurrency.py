@@ -204,6 +204,7 @@ def test_e2b_run_materializes_missing_worker_dir_from_db_files(tmp_path, monkeyp
             mode="pure-script",
         ),
         secrets=[],
+        memory=False,
         outputs=[],
     )
     logs: list[tuple[str, str]] = []
@@ -286,6 +287,7 @@ asyncio.run(main())
             bundle_path=str(worker_dir),
         ),
         secrets=["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+        memory=False,
         outputs=[],
     )
 
@@ -347,6 +349,7 @@ with open("result.json", "w", encoding="utf-8") as handle:
             bundle_path=str(worker_dir),
         ),
         secrets=[],
+        memory=False,
         outputs=[],
     )
     logs: list[tuple[str, str]] = []
@@ -405,6 +408,7 @@ with open("result.json", "w", encoding="utf-8") as handle:
             bundle_path=str(worker_dir),
         ),
         secrets=[],
+        memory=False,
         outputs=[],
     )
     logs: list[tuple[str, str]] = []
