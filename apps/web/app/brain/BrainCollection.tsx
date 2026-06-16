@@ -3,7 +3,7 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
-import { Folder, Lock, Upload, Users } from "lucide-react";
+import { Folder, Lock, Plus, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api";
 import { formatRelative } from "@/lib/formatters";
 import type { ContextSummary, ContextDetail } from "@/lib/types";
@@ -13,7 +13,6 @@ import { LoadingState } from "@/components/collection/CollectionStates";
 import { InlineFileOpen, type InlineDragItem } from "@/components/file-viewer/InlineFileOpen";
 import { visibilityLabel } from "@/lib/permissions";
 import { formatBytes, writeKey } from "@/lib/brain/format";
-import { BrainVisual } from "@/components/brain/BrainVisual";
 
 const detailCache = new Map<string, ContextDetail>();
 const FOLDER_PLACEHOLDER_FILE = ".workeros-folder";
@@ -435,12 +434,50 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
     subtitle: "Reusable folders of files your workers can read before they act.",
     items: folders,
     loading,
-    // #1094: radial Company Brain visual (ported from landing) above the list.
-    banner: (
-      <div style={{ marginBottom: 20 }}>
-        <BrainVisual folders={folders} />
-      </div>
-    ),
+    // #1316: the brain drop affordance adapts to whether folders exist.
+    //   • Empty  → prominent dashed drop-zone ("Drag files here, or + New
+    //     folder"), the primary create + upload affordance.
+    //   • Populated → no permanent box: a slim right-aligned "+ New folder"
+    //     button; the whole container is the drop target (outer wrapper below)
+    //     with a dashed overlay only on drag-over.
+    // The banner is a function so CollectionView passes openAdd; this opens the
+    // unified "New folder" panel (no duplicate toolbar affordance).
+    banner: (openAdd: () => void) =>
+      folders.length === 0 ? (
+        <div
+          className={`bdrop${listDragOver ? " over" : ""}`}
+          style={{ marginBottom: 2 }}
+          onDragOver={(e) => {
+            if (e.dataTransfer.types.includes("Files")) {
+              e.preventDefault();
+              if (!listDragOver) setListDragOver(true);
+            }
+          }}
+          onDragLeave={(e) => {
+            if (!e.currentTarget.contains(e.relatedTarget as Node)) {
+              setListDragOver(false);
+            }
+          }}
+          onDrop={(e) => {
+            e.preventDefault();
+            setListDragOver(false);
+            const dropped = Array.from(e.dataTransfer.files);
+            if (dropped.length > 0) setPendingDropFiles(dropped);
+          }}
+        >
+          <Upload size={14} style={{ opacity: 0.6 }} />
+          <span>Drag files here, or</span>
+          <button type="button" className="bdlink" onClick={openAdd}>
+            + New folder
+          </button>
+        </div>
+      ) : (
+        <div className="bdrop-slim">
+          <button type="button" className="c-addbtn" onClick={openAdd}>
+            <Plus size={14} /> New folder
+          </button>
+        </div>
+      ),
     idOf: (c) => c.name,
     searchOf: (c) => `${c.name} ${c.description ?? ""} ${c.category ?? ""}`,
     tagsOf: (c) =>

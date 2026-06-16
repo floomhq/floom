@@ -166,8 +166,10 @@ export interface CollectionConfig<T> {
   };
   /** Extra control-bar actions (e.g. Runs "Export CSV"), left of +Add. */
   toolbarActions?: ReactNode;
-  /** Optional banner above the list (e.g. member-visibility note). */
-  banner?: ReactNode;
+  /** Optional banner above the list (e.g. member-visibility note). When a
+   *  function, CollectionView passes an `openAdd` callback that opens the +Add
+   *  panel — used by Brain's unified drop-zone banner ("+ New folder"). */
+  banner?: ReactNode | ((openAdd: () => void) => ReactNode);
   /** Optional footer rendered below the list body (e.g. "Load more" button — B37). */
   footer?: ReactNode;
 }
