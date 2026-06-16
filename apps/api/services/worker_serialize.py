@@ -244,6 +244,29 @@ def _build_triggers_spec(worker: Dict[str, Any]) -> List[TriggerSpec]:
     )]
 
 
+def _resolve_worker_stage(worker: Dict[str, Any]) -> str:
+    """Single source of truth for a worker's maturity stage ("draft" | "live").
+
+    Pure label, orthogonal to status/archived/enabled/visibility. Resolution:
+    - explicit manifest ``stage`` wins (only "draft"/"live" are honored);
+    - stock/example/system workers default to "live" (they ship ready);
+    - everything else defaults to "draft" (a freshly authored worker is WIP
+      until the operator promotes it — keeps the trusted "live" set clean).
+    """
+    raw = str(worker.get("stage") or "").strip().lower()
+    if raw in ("draft", "live"):
+        return raw
+    manifest = worker.get("manifest") or {}
+    if (
+        worker.get("is_example")
+        or worker.get("system")
+        or worker.get("system_worker")
+        or manifest.get("system_worker")
+    ):
+        return "live"
+    return "draft"
+
+
 def _resolve_worker_status(
     worker: Dict[str, Any],
     *,
@@ -650,6 +673,7 @@ def _build_worker_detail(
         archived=bool(worker.get("archived", False)),
         enabled=worker_enabled,
         archive_reason=_sanitize_operator_text(worker.get("archive_reason")),
+        stage=_resolve_worker_stage(worker),
         tags=worker.get("tags") or [],
         folder=worker.get("folder"),
         status=status,
