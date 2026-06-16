@@ -2165,37 +2165,72 @@ function VersionList({ title, versions }: { title: string; versions: VersionSumm
 // No external service, no npm dep. The QR data was generated offline with
 // qrcode (Python) for https://wa.me/16503999709 at error-correction M.
 // To regenerate: python3 -c "import qrcode; ..." (see git history for script).
+//
+// #1385: WA_BOT_NUMBER is read from NEXT_PUBLIC_WA_BOT_NUMBER env at build time.
+// Cloud sets it via Railway env. Self-hosters set their own number. When unset,
+// the WhatsApp card renders a "not configured" state instead of QR/number.
+// The pre-computed QR SVG below encodes the cloud number; it is only rendered
+// when the env number matches (i.e. the cloud deployment). Self-hosters with a
+// custom number get the wa.me link only (they can regenerate the QR if needed).
 // ---------------------------------------------------------------------------
-const WA_BOT_NUMBER = "16503999709";
-const WA_LINK = `https://wa.me/${WA_BOT_NUMBER}`;
+
+// The cloud number the pre-computed QR encodes. Do not change without
+// regenerating WA_QR_PATH.
+const WA_QR_CLOUD_NUMBER = "16503999709";
+
+// Read from env — set NEXT_PUBLIC_WA_BOT_NUMBER in Railway (cloud) or .env
+// (self-host). When absent the WhatsApp channel card renders unconfigured.
+const WA_BOT_NUMBER = (process.env.NEXT_PUBLIC_WA_BOT_NUMBER || "").trim() || null;
+const WA_LINK = WA_BOT_NUMBER ? `https://wa.me/${WA_BOT_NUMBER}` : null;
 
 // Pre-computed QR path for WA_LINK (29×29 modules, 2-module border).
 const WA_QR_PATH =
   "M2,2h1v1h-1z M3,2h1v1h-1z M4,2h1v1h-1z M5,2h1v1h-1z M6,2h1v1h-1z M7,2h1v1h-1z M8,2h1v1h-1z M15,2h1v1h-1z M18,2h1v1h-1z M20,2h1v1h-1z M21,2h1v1h-1z M22,2h1v1h-1z M23,2h1v1h-1z M24,2h1v1h-1z M25,2h1v1h-1z M26,2h1v1h-1z M2,3h1v1h-1z M8,3h1v1h-1z M10,3h1v1h-1z M11,3h1v1h-1z M12,3h1v1h-1z M13,3h1v1h-1z M18,3h1v1h-1z M20,3h1v1h-1z M26,3h1v1h-1z M2,4h1v1h-1z M4,4h1v1h-1z M5,4h1v1h-1z M6,4h1v1h-1z M8,4h1v1h-1z M10,4h1v1h-1z M12,4h1v1h-1z M13,4h1v1h-1z M17,4h1v1h-1z M18,4h1v1h-1z M20,4h1v1h-1z M22,4h1v1h-1z M23,4h1v1h-1z M24,4h1v1h-1z M26,4h1v1h-1z M2,5h1v1h-1z M4,5h1v1h-1z M5,5h1v1h-1z M6,5h1v1h-1z M8,5h1v1h-1z M10,5h1v1h-1z M12,5h1v1h-1z M15,5h1v1h-1z M16,5h1v1h-1z M20,5h1v1h-1z M22,5h1v1h-1z M23,5h1v1h-1z M24,5h1v1h-1z M26,5h1v1h-1z M2,6h1v1h-1z M4,6h1v1h-1z M5,6h1v1h-1z M6,6h1v1h-1z M8,6h1v1h-1z M11,6h1v1h-1z M12,6h1v1h-1z M16,6h1v1h-1z M20,6h1v1h-1z M22,6h1v1h-1z M23,6h1v1h-1z M24,6h1v1h-1z M26,6h1v1h-1z M2,7h1v1h-1z M8,7h1v1h-1z M11,7h1v1h-1z M12,7h1v1h-1z M15,7h1v1h-1z M20,7h1v1h-1z M26,7h1v1h-1z M2,8h1v1h-1z M3,8h1v1h-1z M4,8h1v1h-1z M5,8h1v1h-1z M6,8h1v1h-1z M7,8h1v1h-1z M8,8h1v1h-1z M10,8h1v1h-1z M12,8h1v1h-1z M14,8h1v1h-1z M16,8h1v1h-1z M18,8h1v1h-1z M20,8h1v1h-1z M21,8h1v1h-1z M22,8h1v1h-1z M23,8h1v1h-1z M24,8h1v1h-1z M25,8h1v1h-1z M26,8h1v1h-1z M10,9h1v1h-1z M12,9h1v1h-1z M13,9h1v1h-1z M14,9h1v1h-1z M16,9h1v1h-1z M17,9h1v1h-1z M18,9h1v1h-1z M2,10h1v1h-1z M8,10h1v1h-1z M10,10h1v1h-1z M11,10h1v1h-1z M14,10h1v1h-1z M15,10h1v1h-1z M17,10h1v1h-1z M18,10h1v1h-1z M19,10h1v1h-1z M20,10h1v1h-1z M23,10h1v1h-1z M24,10h1v1h-1z M25,10h1v1h-1z M2,11h1v1h-1z M4,11h1v1h-1z M6,11h1v1h-1z M7,11h1v1h-1z M10,11h1v1h-1z M13,11h1v1h-1z M14,11h1v1h-1z M15,11h1v1h-1z M17,11h1v1h-1z M18,11h1v1h-1z M21,11h1v1h-1z M22,11h1v1h-1z M23,11h1v1h-1z M24,11h1v1h-1z M25,11h1v1h-1z M2,12h1v1h-1z M4,12h1v1h-1z M5,12h1v1h-1z M7,12h1v1h-1z M8,12h1v1h-1z M9,12h1v1h-1z M10,12h1v1h-1z M12,12h1v1h-1z M13,12h1v1h-1z M14,12h1v1h-1z M17,12h1v1h-1z M18,12h1v1h-1z M20,12h1v1h-1z M21,12h1v1h-1z M22,12h1v1h-1z M23,12h1v1h-1z M25,12h1v1h-1z M26,12h1v1h-1z M2,13h1v1h-1z M5,13h1v1h-1z M6,13h1v1h-1z M10,13h1v1h-1z M13,13h1v1h-1z M16,13h1v1h-1z M19,13h1v1h-1z M20,13h1v1h-1z M21,13h1v1h-1z M23,13h1v1h-1z M26,13h1v1h-1z M6,14h1v1h-1z M7,14h1v1h-1z M8,14h1v1h-1z M9,14h1v1h-1z M12,14h1v1h-1z M14,14h1v1h-1z M16,14h1v1h-1z M17,14h1v1h-1z M19,14h1v1h-1z M20,14h1v1h-1z M26,14h1v1h-1z M2,15h1v1h-1z M6,15h1v1h-1z M7,15h1v1h-1z M9,15h1v1h-1z M11,15h1v1h-1z M15,15h1v1h-1z M16,15h1v1h-1z M17,15h1v1h-1z M21,15h1v1h-1z M25,15h1v1h-1z M2,16h1v1h-1z M4,16h1v1h-1z M8,16h1v1h-1z M9,16h1v1h-1z M13,16h1v1h-1z M14,16h1v1h-1z M17,16h1v1h-1z M18,16h1v1h-1z M19,16h1v1h-1z M21,16h1v1h-1z M22,16h1v1h-1z M23,16h1v1h-1z M25,16h1v1h-1z M26,16h1v1h-1z M2,17h1v1h-1z M4,17h1v1h-1z M6,17h1v1h-1z M9,17h1v1h-1z M12,17h1v1h-1z M13,17h1v1h-1z M17,17h1v1h-1z M21,17h1v1h-1z M23,17h1v1h-1z M24,17h1v1h-1z M26,17h1v1h-1z M2,18h1v1h-1z M5,18h1v1h-1z M8,18h1v1h-1z M11,18h1v1h-1z M12,18h1v1h-1z M13,18h1v1h-1z M14,18h1v1h-1z M15,18h1v1h-1z M18,18h1v1h-1z M19,18h1v1h-1z M20,18h1v1h-1z M21,18h1v1h-1z M22,18h1v1h-1z M24,18h1v1h-1z M10,19h1v1h-1z M12,19h1v1h-1z M14,19h1v1h-1z M15,19h1v1h-1z M16,19h1v1h-1z M18,19h1v1h-1z M22,19h1v1h-1z M2,20h1v1h-1z M3,20h1v1h-1z M4,20h1v1h-1z M5,20h1v1h-1z M6,20h1v1h-1z M7,20h1v1h-1z M8,20h1v1h-1z M11,20h1v1h-1z M13,20h1v1h-1z M15,20h1v1h-1z M16,20h1v1h-1z M18,20h1v1h-1z M20,20h1v1h-1z M22,20h1v1h-1z M26,20h1v1h-1z M2,21h1v1h-1z M8,21h1v1h-1z M14,21h1v1h-1z M16,21h1v1h-1z M18,21h1v1h-1z M22,21h1v1h-1z M25,21h1v1h-1z M26,21h1v1h-1z M2,22h1v1h-1z M4,22h1v1h-1z M5,22h1v1h-1z M6,22h1v1h-1z M8,22h1v1h-1z M11,22h1v1h-1z M12,22h1v1h-1z M13,22h1v1h-1z M15,22h1v1h-1z M17,22h1v1h-1z M18,22h1v1h-1z M19,22h1v1h-1z M20,22h1v1h-1z M21,22h1v1h-1z M22,22h1v1h-1z M24,22h1v1h-1z M2,23h1v1h-1z M4,23h1v1h-1z M5,23h1v1h-1z M6,23h1v1h-1z M8,23h1v1h-1z M13,23h1v1h-1z M14,23h1v1h-1z M17,23h1v1h-1z M18,23h1v1h-1z M19,23h1v1h-1z M20,23h1v1h-1z M25,23h1v1h-1z M26,23h1v1h-1z M2,24h1v1h-1z M4,24h1v1h-1z M5,24h1v1h-1z M6,24h1v1h-1z M8,24h1v1h-1z M14,24h1v1h-1z M15,24h1v1h-1z M16,24h1v1h-1z M23,24h1v1h-1z M24,24h1v1h-1z M26,24h1v1h-1z M2,25h1v1h-1z M8,25h1v1h-1z M11,25h1v1h-1z M12,25h1v1h-1z M14,25h1v1h-1z M16,25h1v1h-1z M18,25h1v1h-1z M19,25h1v1h-1z M21,25h1v1h-1z M22,25h1v1h-1z M26,25h1v1h-1z M2,26h1v1h-1z M3,26h1v1h-1z M4,26h1v1h-1z M5,26h1v1h-1z M6,26h1v1h-1z M7,26h1v1h-1z M8,26h1v1h-1z M10,26h1v1h-1z M11,26h1v1h-1z M13,26h1v1h-1z M16,26h1v1h-1z M18,26h1v1h-1z M20,26h1v1h-1z M23,26h1v1h-1z M26,26h1v1h-1z";
 
 function WhatsAppQR() {
+  if (!WA_BOT_NUMBER || !WA_LINK) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        WhatsApp not configured — set <code className="font-mono">WA_BOT_NUMBER</code>.
+      </p>
+    );
+  }
+
+  // Format number for display: digits only → +N NNN-NNN-NNNN style for US numbers,
+  // or fall back to raw if non-US.
+  const digitsOnly = WA_BOT_NUMBER.replace(/\D/g, "");
+  const displayNumber =
+    digitsOnly.length === 11 && digitsOnly.startsWith("1")
+      ? `+1 ${digitsOnly.slice(1, 4)}-${digitsOnly.slice(4, 7)}-${digitsOnly.slice(7)}`
+      : `+${digitsOnly}`;
+
+  // The pre-computed QR SVG only matches the cloud number.
+  const showQR = digitsOnly === WA_QR_CLOUD_NUMBER;
+
   return (
     <div className="flex flex-col items-center gap-2">
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 29 29"
-        width={120}
-        height={120}
-        shapeRendering="crispEdges"
-        aria-label="WhatsApp QR code"
-        role="img"
-        className="rounded-[var(--radius-button)] [border:var(--bd-card)]"
-      >
-        <rect width="29" height="29" fill="white" />
-        <path fill="black" d={WA_QR_PATH} />
-      </svg>
+      {showQR && (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 29 29"
+          width={120}
+          height={120}
+          shapeRendering="crispEdges"
+          aria-label="WhatsApp QR code"
+          role="img"
+          className="rounded-[var(--radius-button)] [border:var(--bd-card)]"
+        >
+          <rect width="29" height="29" fill="white" />
+          <path fill="black" d={WA_QR_PATH} />
+        </svg>
+      )}
       <a
         href={WA_LINK}
         target="_blank"
         rel="noopener noreferrer"
         className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
       >
-        +1 650-399-9709
+        {displayNumber}
       </a>
     </div>
   );
@@ -2368,22 +2403,30 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
           </div>
         </TabsContent>
         <TabsContent value="whatsapp" className="space-y-4">
-          <div className="c-ltable">
-            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
-              <div className="c-lp-tx">
-                <div className="nm">WhatsApp</div>
-                <div className="sub">Scan the QR code to start a chat and bind your number.</div>
+          {WA_BOT_NUMBER ? (
+            <>
+              <div className="c-ltable">
+                <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
+                  <div className="c-lp-tx">
+                    <div className="nm">WhatsApp</div>
+                    <div className="sub">Scan the QR code to start a chat and bind your number.</div>
+                  </div>
+                  <Button type="button" variant="outline" onClick={() => setQrOpen(true)}>
+                    <QrCode className="size-3.5" />
+                    Show QR
+                  </Button>
+                </div>
               </div>
-              <Button type="button" variant="outline" onClick={() => setQrOpen(true)}>
-                <QrCode className="size-3.5" />
-                Show QR
-              </Button>
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <p className="text-xs font-medium text-muted-foreground">Your link status</p>
-            <WhatsAppBindingStatus />
-          </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Your link status</p>
+                <WhatsAppBindingStatus />
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              WhatsApp not configured — set <code className="font-mono">WA_BOT_NUMBER</code>.
+            </p>
+          )}
         </TabsContent>
         <TabsContent value="agent-install" className="space-y-5">
           <CopyCodeCard
@@ -2407,6 +2450,73 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
           <WhatsAppQR />
         </DialogContent>
       </Dialog>
+
+      <ChannelCapabilityMatrix />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// #1383: Channel capability matrix — what each channel can do.
+// Static documentation surface; no network calls.
+// ---------------------------------------------------------------------------
+
+type CapCell = "yes" | "no" | "partial";
+
+interface ChannelCapRow {
+  capability: string;
+  web: CapCell;
+  emily: CapCell;
+  slack: CapCell;
+  whatsapp: CapCell;
+}
+
+const CHANNEL_CAPS: ChannelCapRow[] = [
+  { capability: "Run worker",    web: "yes",     emily: "yes",     slack: "yes",     whatsapp: "yes"     },
+  { capability: "Approve run",   web: "yes",     emily: "partial", slack: "partial", whatsapp: "partial" },
+  { capability: "Create worker", web: "yes",     emily: "no",      slack: "no",      whatsapp: "no"      },
+  { capability: "Notify on run", web: "partial", emily: "yes",     slack: "yes",     whatsapp: "yes"     },
+];
+
+// "partial" = limited support (e.g. approve via link, notify via browser only)
+const CAP_LABELS: Record<CapCell, { label: string; className: string }> = {
+  yes:     { label: "Yes",     className: "text-foreground" },
+  partial: { label: "Partial", className: "text-muted-foreground" },
+  no:      { label: "—",       className: "text-muted-foreground/50" },
+};
+
+function ChannelCapabilityMatrix() {
+  const cols = ["Web", "Emily", "Slack", "WhatsApp"] as const;
+  return (
+    <div className="mt-6 space-y-2">
+      <p className="text-xs font-medium text-muted-foreground">Channel capabilities</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr>
+              <th className="py-1.5 pr-4 text-left font-medium text-muted-foreground w-32">Capability</th>
+              {cols.map((col) => (
+                <th key={col} className="py-1.5 px-3 text-center font-medium text-muted-foreground">{col}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {CHANNEL_CAPS.map((row) => (
+              <tr key={row.capability} className="[border-top:var(--bd-div)]">
+                <td className="py-1.5 pr-4 text-muted-foreground">{row.capability}</td>
+                {(["web", "emily", "slack", "whatsapp"] as const).map((ch) => {
+                  const cell = row[ch];
+                  const { label, className } = CAP_LABELS[cell];
+                  return (
+                    <td key={ch} className={`py-1.5 px-3 text-center ${className}`}>{label}</td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[11px] text-muted-foreground/60">Partial = supported via link or limited flow.</p>
     </div>
   );
 }
