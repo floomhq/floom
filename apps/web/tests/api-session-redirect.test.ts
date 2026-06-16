@@ -13,6 +13,24 @@ function stubBrowserLocation(pathname = "/app/runs/run_123", search = "?tab=appr
   return assign;
 }
 
+function stubWorkspaceCookieBrowser(protocol: "http:" | "https:") {
+  const written: string[] = [];
+  vi.stubGlobal("window", {
+    location: { protocol },
+    localStorage: {
+      getItem: vi.fn(() => null),
+      setItem: vi.fn(),
+      removeItem: vi.fn(),
+    },
+    document: {
+      set cookie(value: string) {
+        written.push(value);
+      },
+    },
+  });
+  return written;
+}
+
 describe("api session expiry handling", () => {
   afterEach(() => {
     delete process.env.NEXT_PUBLIC_BASE_PATH;
@@ -75,5 +93,23 @@ describe("api session expiry handling", () => {
 
     const headers = fetchMock.mock.calls[0]?.[1]?.headers as Headers;
     expect(headers.get("x-workeros-workspace")).toBe("local-default");
+  });
+
+  it("marks the active workspace cookie Secure on HTTPS only", async () => {
+    let written = stubWorkspaceCookieBrowser("https:");
+    let mod = await import("@/lib/api");
+    mod.setActiveWorkspaceId("ws secure");
+    expect(written.at(-1)).toBe(
+      "workeros.activeWorkspaceId=ws%20secure; Path=/; Max-Age=31536000; SameSite=Lax; Secure",
+    );
+
+    vi.resetModules();
+    vi.unstubAllGlobals();
+    written = stubWorkspaceCookieBrowser("http:");
+    mod = await import("@/lib/api");
+    mod.setActiveWorkspaceId("ws local");
+    expect(written.at(-1)).toBe(
+      "workeros.activeWorkspaceId=ws%20local; Path=/; Max-Age=31536000; SameSite=Lax",
+    );
   });
 });
