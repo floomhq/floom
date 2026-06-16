@@ -2236,7 +2236,10 @@ async def stream_chat(
             mcp_servers=mcp_servers,
             model=_emily_model,
             model_settings=ModelSettings(
-                max_tokens=4096,
+                # Output cap for Emily replies. Default raised 4k->8k for longer
+                # answers + bigger tool-result summaries; tune with
+                # WORKEROS_CHAT_MAX_TOKENS.
+                max_tokens=int(os.environ.get("WORKEROS_CHAT_MAX_TOKENS") or "8192"),
                 include_usage=True,
                 extra_args=_llm.cache_control_extra_args(_emily_model),
             ),
