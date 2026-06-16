@@ -69,13 +69,13 @@ describe("formatVersionRows", () => {
 });
 
 describe("WORKER_DETAIL_TABS (§4 contract)", () => {
-  it("is exactly the v4 five, in order", () => {
+  it("is exactly the minimal five, in order", () => {
     expect([...WORKER_DETAIL_TABS]).toEqual([
       "Overview",
-      "History",
+      "Runs",
+      "Config",
       "Source",
       "Versions",
-      "Config",
     ]);
   });
 });

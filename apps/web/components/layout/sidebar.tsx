@@ -45,7 +45,7 @@ export function FloomMark({ size = 28 }: { size?: number }) {
   );
 }
 
-// S24: Secrets removed from top-level nav; reachable as a third tab on
+// #1403: Secrets removed from top-level nav; reachable as a third tab on
 // /connections ("Connected" / "Browse" / "Secrets"). Connections + secrets
 // are the same mental model (credentials a worker can read) so they share
 // a surface.

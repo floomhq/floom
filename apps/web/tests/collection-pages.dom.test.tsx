@@ -127,10 +127,12 @@ describe("page components render with data (no client crash)", () => {
     render(<WorkersCollection initialWorkers={[worker as never]} />);
     fireEvent.click(await screen.findByRole("button", { name: /Weekly Update/i }));
     fireEvent.click(await screen.findByRole("tab", { name: "Config" }));
-    expect(await screen.findByRole("tab", { name: "Tools" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Triggers" }));
-    expect(await screen.findByText("E2B sandbox · Agent skill")).toBeInTheDocument();
-    expect(screen.getByText("Claude Sonnet 4.6")).toBeInTheDocument();
+    expect(await screen.findByText("Tools")).toBeInTheDocument();
+    expect(screen.getByText("Brain")).toBeInTheDocument();
+    expect(screen.getAllByText("Triggers").length).toBeGreaterThan(0);
+    expect(await screen.findByText(/E2B sandbox/)).toBeInTheDocument();
+    expect(screen.getByText(/Agent skill/)).toBeInTheDocument();
+    expect(screen.getByText(/Claude Sonnet 4\.6/)).toBeInTheDocument();
     expect(screen.queryByText("bedrock/us.anthropic.claude-sonnet-4-6")).not.toBeInTheDocument();
   });
 
