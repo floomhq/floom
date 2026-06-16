@@ -50,7 +50,7 @@ function PATForm({ onConnected }: { onConnected: (username: string) => void }) {
             token page with everything chosen and only has to click Generate. */}
         <div className="flex-1 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/40 px-4 py-3.5 space-y-2.5">
           <div className="flex items-start gap-2.5">
-            <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-full bg-foreground/10 text-[11px] font-semibold text-foreground">1</span>
+            <span className="mt-0.5 grid size-5 shrink-0 place-items-center rounded-[var(--radius-squircle)] bg-foreground/10 text-[11px] font-semibold text-foreground">1</span>
             <div className="space-y-1.5">
               <p className="text-sm font-medium text-foreground">Create a token on GitHub</p>
               <p className="text-xs text-muted-foreground">
@@ -74,7 +74,7 @@ function PATForm({ onConnected }: { onConnected: (username: string) => void }) {
             has the same visual weight as step 1 and the two cards align. */}
         <div className="flex-1 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-muted/40 px-4 py-3.5 space-y-3">
           <div className="flex items-center gap-2.5">
-            <span className="grid size-5 shrink-0 place-items-center rounded-full bg-foreground/10 text-[11px] font-semibold text-foreground">2</span>
+            <span className="grid size-5 shrink-0 place-items-center rounded-[var(--radius-squircle)] bg-foreground/10 text-[11px] font-semibold text-foreground">2</span>
             <p className="text-sm font-medium text-foreground">Paste the token here</p>
           </div>
           <div className="flex gap-2">
