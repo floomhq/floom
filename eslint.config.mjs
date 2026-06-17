@@ -8,10 +8,14 @@ const eslintConfig = defineConfig([
   globalIgnores([
     ".next/**",
     ".vercel/**",
+    ".ci-venv/**",
     "out/**",
     "build/**",
+    "venv/**",
     "next-env.d.ts",
     "engine/**",
+    "test-results/**",
+    "tests/e2e/report/**",
     "web/**",
   ]),
   {
