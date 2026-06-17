@@ -69,21 +69,20 @@ function WorkspaceDiceBearAvatar({ name, size }: { name: string; size: number })
   );
 }
 
-// #1306: user profile avatar fallback when /me returns no OAuth photo.
-// DiceBear `glass` style deterministically seeded by the user's email/name:
-// a calm geometric mark (no cartoon faces), consistent with the workspace
-// mark's squircle, flat, no-border treatment.
-function UserDiceBearAvatar({ seed, size }: { seed: string; size: number }) {
-  const safeSeed = encodeURIComponent(seed || "user");
-  const src = `https://api.dicebear.com/9.x/glass/svg?seed=${safeSeed}&radius=0`;
+// #1306 / G5: user profile avatar fallback when /me returns no OAuth photo.
+// Flat squircle with plain initials: ink text on subtle bg, no gradient,
+// no DiceBear network fetch. Matches design-system: squircle (radius-button),
+// flat, no border, NO avatars/gradients.
+function UserInitialsAvatar({ seed, size }: { seed: string; size: number }) {
+  const initial = (seed || "U").trim()[0]?.toUpperCase() ?? "U";
   return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt="Profile avatar"
-      className="shrink-0 rounded-[var(--radius-button)] border-0 object-cover"
-      style={{ width: size, height: size }}
-    />
+    <span
+      aria-hidden="true"
+      className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-button)] bg-[var(--bg-2)] text-[var(--ink-soft)] font-medium select-none"
+      style={{ width: size, height: size, fontSize: Math.round(size * 0.45) }}
+    >
+      {initial}
+    </span>
   );
 }
 
@@ -636,7 +635,7 @@ export function UserProfileFooter({
             // DiceBear avatar deterministically seeded by the user's
             // email/name, NOT bare initials. Squircle container, no border,
             // matching the workspace mark approach.
-            <UserDiceBearAvatar seed={primary} size={28} />
+            <UserInitialsAvatar seed={primary} size={28} />
           )}
           <div className="min-w-0 leading-tight text-left">
             <p className="text-xs font-medium text-foreground truncate">{primary}</p>
