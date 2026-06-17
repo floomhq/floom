@@ -300,7 +300,7 @@ def test_whatsapp_help_keyword_short_circuits_agent(monkeypatch, tmp_path):
             message_id="msg_help_001",
             profile_name="Tester",
         )
-    asyncio.get_event_loop().run_until_complete(_run())
+    asyncio.run(_run())
 
     # Agent must NOT have been called.
     assert not agent_called, "Agent should not run for 'help' keyword"
