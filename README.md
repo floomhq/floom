@@ -215,6 +215,21 @@ data/         SQLite DB + run artifacts
 
 ---
 
+## Docs
+
+- [Getting started](docs/GETTING-STARTED.md) — why Workeros exists, first run,
+  first worker, and safe self-hosting checklist.
+- [Authoring workers](docs/AUTHORING.md) — full `worker.yml` schema, execution
+  modes, secrets, connections, triggers, and approvals.
+- [Agent cookbook](docs/AGENT-COOKBOOK.md) — agent-assisted worker authoring
+  recipes.
+- [API overview](docs/API.md) — curated endpoint map plus the OpenAPI location.
+- [Troubleshooting](docs/TROUBLESHOOTING.md) — setup, runtime, and test fixes.
+- [Contributing](CONTRIBUTING.md) — local checks, first-contribution map, and PR
+  expectations.
+
+---
+
 ## Workers
 
 Workers live in `workers/<name>/` and contain:
@@ -290,54 +305,8 @@ Contexts are **sensitive by default** and excluded from git (they may hold crede
 
 ## API
 
-Base URL: `http://localhost:8000`
-
-All endpoints require the `x-floom-secret` header (set `FLOOM_SECRET` in `.env`). Omit `FLOOM_SECRET` entirely to run in unauthenticated local dev mode.
-
-**Workers**
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/workers` | GET | List workers |
-| `/workers/{id}` | GET | Worker detail (includes `missing_secrets`, `missing_connections`) |
-| `/workers/reload` | POST | Reload workers from disk |
-| `/workers/{id}/runs` | POST | Trigger a run — returns 422 with named items if secrets/connections missing |
-| `/workers/import-from-share` | POST | Import a worker from a public share token |
-
-**Runs**
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/runs` | GET | List runs |
-| `/runs/{id}` | GET | Run detail (includes `tool_calls`, `approval_trail`, `can_replay`, `total_tokens`) |
-| `/runs/{id}/approve` | POST | Approve a pending run |
-| `/runs/{id}/reject` | POST | Reject a pending run |
-| `/approvals` | GET | List pending approvals |
-
-**Connections & Secrets**
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/connections` | GET | List connections |
-| `/connections/{id}` | GET | Connection detail |
-| `/connections/{id}/activity` | GET | Recent runs that used this connection |
-| `/connections/{id}/peek` | GET | Recent emails for active Gmail connections (trust signal) |
-| `/connections/secrets` | GET | List secret metadata |
-
-**Auth (multi-member mode)**
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/auth/magic-link` | POST | Issue a 15-minute personal sign-in URL (authenticated) |
-| `/auth/magic/{token}` | GET | Consume a magic-link token and create a session (unauthenticated) |
-
-**System**
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/composio-events` | POST | Signed Composio webhook receiver |
-| `/healthz` | GET | Health check |
-| `/system/overview` | GET | Overview stats, attention items, setup-incomplete alerts |
+For a curated endpoint map, see [docs/API.md](docs/API.md). For the exhaustive
+reference, start the API and open `http://localhost:8000/docs`.
 
 ---
 
