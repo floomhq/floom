@@ -72,6 +72,19 @@ async function parseResponse(response: Response): Promise<unknown> {
   }
 }
 
+function responseDetail(parsed: unknown): string {
+  const detail =
+    parsed && typeof parsed === "object" && "detail" in parsed
+      ? (parsed as { detail: unknown }).detail
+      : parsed;
+  if (typeof detail === "string") return detail;
+  try {
+    return JSON.stringify(detail);
+  } catch {
+    return String(detail);
+  }
+}
+
 // In-process cache for the short-lived Supabase JWT. Avoids hitting
 // /auth/v1/token on every CLI command; a refresh exchange takes ~200ms.
 type CachedJwt = { token: string; expires_at_ms: number };
@@ -220,10 +233,7 @@ export class WorkerosApiClient {
     });
     const parsed = await parseResponse(response);
     if (!response.ok) {
-      const detail =
-        parsed && typeof parsed === "object" && "detail" in parsed
-          ? String((parsed as { detail: unknown }).detail)
-          : JSON.stringify(parsed);
+      const detail = responseDetail(parsed);
       throw new WorkerosApiError(
         `API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
         response.status,
@@ -248,10 +258,7 @@ export class WorkerosApiClient {
     });
     if (!response.ok) {
       const parsed = await parseResponse(response);
-      const detail =
-        parsed && typeof parsed === "object" && "detail" in parsed
-          ? String((parsed as { detail: unknown }).detail)
-          : JSON.stringify(parsed);
+      const detail = responseDetail(parsed);
       throw new WorkerosApiError(
         `API ${method} ${path} failed with HTTP ${response.status}: ${detail}`,
         response.status,
@@ -278,10 +285,7 @@ export class WorkerosApiClient {
     });
     const parsed = await parseResponse(response);
     if (!response.ok) {
-      const detail =
-        parsed && typeof parsed === "object" && "detail" in parsed
-          ? String((parsed as { detail: unknown }).detail)
-          : JSON.stringify(parsed);
+      const detail = responseDetail(parsed);
       throw new WorkerosApiError(
         `Upload for input ${inputName} failed with HTTP ${response.status}: ${detail}`,
         response.status,
