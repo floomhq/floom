@@ -1,4 +1,3 @@
-# syntax=docker/dockerfile:1.7
 FROM python:3.12-slim
 
 RUN apt-get update && apt-get install -y --no-install-recommends \
@@ -12,19 +11,14 @@ RUN pip install --no-cache-dir uv
 # --- Dependency layer (cached) -------------------------------------------------
 # Install Python deps in a layer keyed ONLY on the requirements files, copied
 # BEFORE the app code. A code-only deploy then reuses this cached layer instead
-# of reinstalling ~80 packages every time, cutting deploys from ~3min to ~30-45s.
-# The uv cache mount (Railway's builder supports --mount=type=cache) means even a
-# requirements change only re-downloads the deltas.
-#
-# The cloud requirements.txt chains: root -> apps/api/requirements.txt ->
-# engine/apps/api/requirements.txt, so all three are copied first. On `railway
-# up` (the deploy path for this service) the engine/ submodule files are present
-# in the build context.
+# of reinstalling ~80 packages every time, cutting build time from ~3min to
+# ~30-45s. The cloud requirements.txt chains: root -> apps/api/requirements.txt
+# -> engine/apps/api/requirements.txt, so all three are copied first. On `railway
+# up` the engine/ submodule files are present in the build context.
 COPY requirements.txt ./requirements.txt
 COPY apps/api/requirements.txt ./apps/api/requirements.txt
 COPY engine/apps/api/requirements.txt ./engine/apps/api/requirements.txt
-RUN --mount=type=cache,target=/root/.cache/uv \
-    uv pip install --system -r requirements.txt
+RUN uv pip install --system --no-cache -r requirements.txt
 
 # --- App code ------------------------------------------------------------------
 # (.dockerignore keeps .env files, node_modules, tests, and other non-runtime
@@ -37,18 +31,12 @@ COPY . .
 # no-op. The re-install covers a clone build where engine/ was absent during the
 # dependency layer above; on `railway up` every dep is already satisfied so it is
 # a fast no-op.
-#
-# NOTE: Railway's builder does NOT support `--mount=type=secret` (only
-# `--mount=type=cache`); using it fails build validation immediately. So the
-# token is read from the ARG only. Keep GIT_TOKEN out of the image by leaving it
-# unset on Railway (engine/ comes from COPY).
 ARG GIT_TOKEN
-RUN --mount=type=cache,target=/root/.cache/uv \
-    TOKEN="$(printf '%s' "$GIT_TOKEN")"; \
+RUN TOKEN="$(printf '%s' "$GIT_TOKEN")"; \
     if [ -n "$TOKEN" ]; then \
       git config --global url."https://${TOKEN}@github.com/".insteadOf "https://github.com/" && \
       git submodule update --init --recursive && \
-      uv pip install --system -r requirements.txt; \
+      uv pip install --system --no-cache -r requirements.txt; \
       status=$?; \
       git config --global --unset-all url."https://${TOKEN}@github.com/".insteadOf || true; \
       [ "$status" -eq 0 ] || exit "$status"; \
