@@ -525,7 +525,7 @@ function PdfArtifactPreview({ href, file }: { href: string; file: PreviewFile })
         {loading && <LoadingPreview />}
         <canvas
           ref={canvasRef}
-          className={`mx-auto max-w-full rounded-[var(--radius-button)] bg-white shadow-[var(--shadow-card)] ${loading ? "invisible" : ""}`}
+          className={`mx-auto max-w-full rounded-[var(--radius-button)] bg-white shadow-[var(--shadow-pop)] ${loading ? "invisible" : ""}`}
         />
       </div>
     </div>
