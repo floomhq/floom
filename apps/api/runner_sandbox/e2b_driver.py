@@ -26,7 +26,13 @@ from .e2b_upload import upload_tree_tarball
 from .memory_context import ensure_memory_context_pack
 from models import WorkerConfig, WorkerResult, assert_safe_outbound_url
 import contexts as _contexts_module
-from contexts import CONTEXTS_DIR, context_scope_for_user, normalize_context_mount, use_context_scope
+from contexts import (
+    CONTEXTS_DIR,
+    context_mount_matches_inputs,
+    context_scope_for_user,
+    normalize_context_mount,
+    use_context_scope,
+)
 from runner_utils import ARTIFACTS_DIR
 from runtime_limits import (
     DEFAULT_RUN_TIMEOUT_SECONDS,
@@ -1312,13 +1318,16 @@ class E2BSandboxDriver(SandboxDriver):
                 sandbox.files.write(f"{workdir}/workeros.py", WORKEROS_PY_CONTENT.encode())
                 log_fn("[e2b] Uploaded workeros.py (worker-to-worker calling enabled)", "info")
 
+            mounted_contexts: set[str] = set()
             context_error = self._upload_contexts_to_sandbox(
                 sandbox=sandbox,
                 workdir=workdir,
                 config=config,
+                inputs=inputs,
                 made_dirs=made_dirs,
                 log_fn=log_fn,
                 user_id=user_id,
+                mounted_contexts=mounted_contexts,
             )
             if context_error:
                 return WorkerResult(
@@ -1644,6 +1653,7 @@ class E2BSandboxDriver(SandboxDriver):
                     config=config,
                     log_fn=log_fn,
                     user_id=user_id,
+                    mounted_contexts=mounted_contexts,
                 )
 
             log_fn("[e2b] Run completed successfully", "info")
@@ -1676,31 +1686,43 @@ class E2BSandboxDriver(SandboxDriver):
         sandbox: Any,
         workdir: str,
         config: Optional[WorkerConfig],
+        inputs: Dict[str, Any],
         made_dirs: set[str],
         log_fn: Callable[[str, str], None],
         user_id: str | None = None,
+        mounted_contexts: set[str] | None = None,
     ) -> str | None:
         if not config or not config.contexts:
             return None
 
         contexts_root = f"{workdir}/context"
-        if contexts_root not in made_dirs:
-            sandbox.files.make_dir(contexts_root)
-            made_dirs.add(contexts_root)
+        made_context_root = False
 
         with use_context_scope(context_scope_for_user(user_id)):
             ensure_memory_context_pack(config=config, user_id=user_id, log_fn=log_fn)
             for raw_context in config.contexts:
                 try:
                     context = normalize_context_mount(raw_context)
+                    should_mount = context_mount_matches_inputs(context, inputs)
                 except ValueError as exc:
                     return f"Invalid context declaration: {exc}"
 
                 name = context["name"]
+                if not should_mount:
+                    log_fn(f"[e2b] Skipping context {name!r}: run inputs did not match mount condition", "debug")
+                    continue
+
+                if not made_context_root:
+                    sandbox.files.make_dir(contexts_root)
+                    made_dirs.add(contexts_root)
+                    made_context_root = True
+
                 source = context["source"]
                 sandbox_target = f"{contexts_root}/{name}"
                 sandbox.files.make_dir(sandbox_target)
                 made_dirs.add(sandbox_target)
+                if mounted_contexts is not None:
+                    mounted_contexts.add(name)
 
                 if source.startswith("git+"):
                     try:
@@ -1747,6 +1769,7 @@ class E2BSandboxDriver(SandboxDriver):
         config: Optional[WorkerConfig],
         log_fn: Callable[[str, str], None],
         user_id: str | None = None,
+        mounted_contexts: set[str] | None = None,
     ) -> None:
         if not config or not config.contexts:
             return
@@ -1768,6 +1791,12 @@ class E2BSandboxDriver(SandboxDriver):
                     continue
 
                 name = context["name"]
+                if mounted_contexts is not None and name not in mounted_contexts:
+                    log_fn(
+                        f"[e2b] Skipping writeback for context {name!r}: it was not mounted for this run",
+                        "debug",
+                    )
+                    continue
                 sandbox_source = f"{workdir}/context/{name}"
                 try:
                     if not sandbox.files.exists(sandbox_source, request_timeout=30):
