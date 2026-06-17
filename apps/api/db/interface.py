@@ -26,8 +26,12 @@ class WorkerRepository(Protocol):
         Supabase) supply their own implementation. *user_id* is the effective
         visibility user id; stock_worker_ids are passed in (caller owns the
         PUBLIC/PROTECTED sets) to avoid a db<-main import cycle. Each row carries
-        at least id, name, trigger_type, enabled, manifest_json; the caller
-        shapes the agent output and applies system/example hiding.
+        at least id, name, trigger_type, enabled, owner_id, manifest_json; the
+        caller shapes the agent output and applies system/example hiding.
+        ``owner_id`` lets the caller exclude seeded stock/example/test workers the
+        operator does NOT own so Emily's list matches the owner-scoped dashboard
+        grid (round-09 #1 split-brain fix); a backend that cannot supply it may
+        omit it and the caller falls back to the prior behaviour.
         """
         ...
 

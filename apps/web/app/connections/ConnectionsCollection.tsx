@@ -17,6 +17,7 @@ import {
   STATUS_PILL,
   TYPE_LABEL,
   toUnified,
+  collectionCounts,
   humaniseAppName,
 } from "@/lib/connections/unify";
 
@@ -447,12 +448,10 @@ export default function ConnectionsCollection({
         { value: "error", label: "error" },
       ],
     },
-    counts: [
-      { value: items.length, label: "total" },
-      { value: items.filter((i) => i.statusKey === "active").length, label: "active" },
-      { value: items.filter((i) => i.statusKey === "reauth").length, label: "reauth" },
-      { value: items.filter((i) => i.statusKey === "error").length, label: "error" },
-    ],
+    // round-09 #6: secrets are NOT connections — count connections + secrets
+    // separately and scope the active/reauth/error health tiles to real
+    // connections, so a "set" secret can never read as an "active connection".
+    counts: collectionCounts(items),
     view: { default: "grid", grid: true },
     columns: {
       template: "1.8fr 110px 1fr 120px 40px",

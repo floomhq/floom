@@ -26,20 +26,30 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
 
     visibility_user_id = _effective_worker_visibility_user_id(user_id)
     include_all_users = bool(args.get("include_all_users"))
-    all_stock_ids = list(PUBLIC_STOCK_WORKER_IDS | PROTECTED_STOCK_WORKER_IDS)
+    stock_id_set = PUBLIC_STOCK_WORKER_IDS | PROTECTED_STOCK_WORKER_IDS
+    all_stock_ids = list(stock_id_set)
     rows = get_repositories().workers.list_for_agent(
         user_id=visibility_user_id,
         include_all_users=include_all_users,
         stock_worker_ids=all_stock_ids,
     )
-    # Seed-all model: shipped example/starter workers ARE real, owned, runnable
-    # workers — Emily lists and runs them like any other. She hides EXACTLY what
-    # the operator worker grid hides (single source of truth): canonical
-    # system/internal workers (_worker_hidden_from_api — workspace-agent,
-    # worker-author, slack/whatsapp listeners, ".", _mcp_/smoke- prefixes) plus
-    # manifest system_worker:true (e.g. node-smoke-test). is_example is NO LONGER
-    # a hiding signal — reverses #841/#1080 (it's label-only now). include_system
-    # opts the hidden set back in.
+    # Emily must report the SAME worker set the operator sees in the dashboard
+    # worker grid (round-09 #1 split-brain: grid showed 1, Emily showed 9). The
+    # grid reads repos.workers.list (owner + workspace-member scoped) and never
+    # surfaces seeded stock workers on cloud. Emily's list_for_agent, however,
+    # pads in the PUBLIC/PROTECTED stock ids and pulls public-visibility seeds,
+    # so it over-counted by the seeded stock/example/test set the operator does
+    # NOT own. Hide EXACTLY what the grid hides:
+    #   (a) canonical system/internal workers (_worker_hidden_from_api —
+    #       workspace-agent, worker-author, slack/whatsapp listeners, ".",
+    #       _mcp_/smoke- prefixes) + manifest system_worker:true; PLUS
+    #   (b) any worker whose id is in the seeded stock/example/test set
+    #       (PUBLIC ∪ PROTECTED) that the operator does NOT own — these are the
+    #       cross-tenant seeds the owner-scoped grid never shows.
+    # A stock/example worker the operator GENUINELY owns (OSS seed-all, owner_id
+    # == visibility user) is still shown — the discriminator is ownership, not
+    # the cosmetic is_example label. The hidden set is footnoted in
+    # hidden_system_count and include_system opts it all back in.
     from services.worker_access import _worker_hidden_from_api, _build_owned_tracked_ids
     _owned_tracked = _build_owned_tracked_ids()
     include_system = bool(args.get("include_system"))
@@ -59,7 +69,21 @@ def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
             "system_worker": manifest.get("system_worker", False),
             "is_example": manifest.get("is_example", False),
         }
-        is_hidden = _worker_hidden_from_api(str(row["id"]), _owned_tracked) or entry["system_worker"]
+        wid = str(row["id"])
+        # owner_id may be absent if a backend doesn't supply it; in that case we
+        # cannot tell an owned seed from a cross-tenant one, so fall back to the
+        # prior behaviour (do not apply the stock-not-owned filter).
+        owner_id = row.get("owner_id")
+        unowned_stock = (
+            wid in stock_id_set
+            and owner_id is not None
+            and str(owner_id) != str(visibility_user_id)
+        )
+        is_hidden = (
+            _worker_hidden_from_api(wid, _owned_tracked)
+            or entry["system_worker"]
+            or unowned_stock
+        )
         if is_hidden and not include_system:
             hidden_system += 1
             continue
