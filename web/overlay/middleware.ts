@@ -37,6 +37,10 @@ function isPublicPath(pathname: string): boolean {
   const path = stripAppBase(pathname);
   if (path === "/favicon.ico") return true;
   if (path === "/login") return true;
+  // #1447: pre-session onboarding + magic-link consumption pages. (The proxy
+  // hop these use is already public above via the /api/proxy/ rule.)
+  if (path === "/start" || path.startsWith("/start/")) return true;
+  if (path.startsWith("/auth/magic/")) return true;
   if (path.startsWith("/invite/")) return true;
   if (path === "/connections/callback") return true;
   if (path === "/privacy" || path === "/terms") return true;

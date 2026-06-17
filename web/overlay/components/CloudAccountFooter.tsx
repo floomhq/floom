@@ -21,7 +21,7 @@ const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
 
 function activeWorkspaceHeaders(headers?: HeadersInit): Headers {
   const next = new Headers(headers);
-  if (typeof window === "undefined") return next;
+  if (typeof window === "undefined" || !window.localStorage) return next;
   const workspaceId = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
   if (workspaceId && workspaceId !== "local-default") {
     next.set("x-workeros-workspace", workspaceId);
@@ -75,12 +75,17 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
           fetch("/app/api/proxy/auth/tokens/bootstrap", {
             method: "POST",
             headers: activeWorkspaceHeaders(),
-          }).catch(() => {});
+            // #1446: do not swallow silently; a failed token bootstrap leaves
+            // the session unable to reach the API. Log for ops.
+          }).catch((err) => console.error("Token bootstrap failed", err));
         } else if (!cancelled) {
           window.location.replace("/app/login?next=/app");
         }
       })
-      .catch(() => {
+      .catch((err) => {
+        // #1446: log the load failure before redirecting to login so ops can
+        // tell a real /me outage apart from an expected logged-out state.
+        console.error("Could not load current user", err);
         if (!cancelled) window.location.replace("/app/login?next=/app");
       });
     return () => {

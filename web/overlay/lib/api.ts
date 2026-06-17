@@ -20,13 +20,13 @@ function activeWorkspaceCookieAttrs(): string {
 }
 
 export function getActiveWorkspaceId(): string | null {
-  if (typeof window === "undefined") return null;
+  if (typeof window === "undefined" || !window.localStorage) return null;
   const value = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
   return value || "local-default";
 }
 
 export function setActiveWorkspaceId(workspaceId: string | null) {
-  if (typeof window === "undefined") return;
+  if (typeof window === "undefined" || !window.localStorage) return;
   if (!workspaceId) {
     window.localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
     window.document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=; ${activeWorkspaceCookieAttrs()}; Max-Age=0`;

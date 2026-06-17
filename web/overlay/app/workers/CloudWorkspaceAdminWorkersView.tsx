@@ -19,7 +19,7 @@ const API_PROXY_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE ?? "/api/proxy";
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
 
 function getActiveWorkspaceId(): string | null {
-  if (typeof window === "undefined") return null;
+  if (typeof window === "undefined" || !window.localStorage) return null;
   const value = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
   return value && value !== "local-default" ? value : null;
 }
