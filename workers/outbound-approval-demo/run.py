@@ -6,6 +6,12 @@ Phase 2 (run 2): execute the approved message (the side-effect — recorded once
 
 The side-effect MUST happen exactly once — in run 2 only.
 
+Engine contract (#418): for an approvals.required worker the engine stamps an
+authoritative `decision` onto inputs.json BEFORE every run: "proposed" on the
+propose phase, "approved" only on the engine-spawned post-approval execute run.
+Branch on `decision == "approved"` to act; treat everything else as propose. The
+worker must NEVER fire a side-effect unless `decision == "approved"`.
+
 Workeros passes inputs as an inputs.json FILE in the working dir (the platform
 standard), NOT via an env var. The side-effect is recorded as an output field
 (`sent: true`) so it is verifiable from the run record — a sandbox-local /tmp
