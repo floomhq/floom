@@ -438,6 +438,10 @@ def test_workeros_py_content_is_importable(tmp_path, monkeypatch):
     sys.modules.pop("workeros", None)
     import workeros  # type: ignore[import]
     assert callable(workeros.call_worker), "workeros.call_worker must be callable"
+    assert callable(workeros.call_workers_parallel), "workeros.call_workers_parallel must be callable"
+    assert callable(workeros.llm_chat), "workeros.llm_chat must be callable"
+    assert callable(workeros.llm_chat_batch), "workeros.llm_chat_batch must be callable"
+    assert callable(workeros.embed), "workeros.embed must be callable"
 
 
 def test_workeros_call_worker_raises_without_env(tmp_path, monkeypatch):
@@ -453,3 +457,78 @@ def test_workeros_call_worker_raises_without_env(tmp_path, monkeypatch):
     import workeros  # type: ignore[import]
     with pytest.raises(RuntimeError, match="WORKEROS_API_URL"):
         workeros.call_worker("some-worker", {})
+
+
+def test_workeros_managed_llm_helpers_use_run_token_header(tmp_path, monkeypatch):
+    from runner_sandbox.workeros_helper import WORKEROS_PY_CONTENT
+
+    (tmp_path / "workeros.py").write_text(WORKEROS_PY_CONTENT)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    sys.modules.pop("workeros", None)
+
+    monkeypatch.setenv("WORKEROS_API_URL", "https://api.example.test")
+    monkeypatch.setenv("WORKEROS_RUN_TOKEN", "run-token")
+    monkeypatch.setenv("FLOOM_RUN_ID", "run-1")
+
+    captured = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"ok": true}'
+
+    def fake_urlopen(req, timeout):
+        captured["url"] = req.full_url
+        captured["headers"] = dict(req.header_items())
+        captured["body"] = req.data
+        captured["timeout"] = timeout
+        return _Resp()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    import workeros  # type: ignore[import]
+
+    assert workeros.llm_chat([{"role": "user", "content": "hello"}], timeout=9) == {"ok": True}
+    assert captured["url"] == "https://api.example.test/runs/run-1/llm"
+    assert captured["headers"]["X-workeros-run-token"] == "run-token"
+    assert captured["timeout"] == 9
+
+
+def test_workeros_managed_llm_helpers_use_bearer_for_worker_call_token(tmp_path, monkeypatch):
+    from runner_sandbox.workeros_helper import WORKEROS_PY_CONTENT
+
+    (tmp_path / "workeros.py").write_text(WORKEROS_PY_CONTENT)
+    monkeypatch.syspath_prepend(str(tmp_path))
+    sys.modules.pop("workeros", None)
+
+    monkeypatch.setenv("WORKEROS_API_URL", "https://api.example.test")
+    monkeypatch.setenv("WORKEROS_RUN_TOKEN", "wrt_example")
+    monkeypatch.setenv("FLOOM_RUN_ID", "run-1")
+
+    captured = {}
+
+    class _Resp:
+        def __enter__(self):
+            return self
+
+        def __exit__(self, *args):
+            return False
+
+        def read(self):
+            return b'{"results": []}'
+
+    def fake_urlopen(req, timeout):
+        captured["headers"] = dict(req.header_items())
+        return _Resp()
+
+    monkeypatch.setattr("urllib.request.urlopen", fake_urlopen)
+
+    import workeros  # type: ignore[import]
+
+    assert workeros.llm_chat_batch([{"messages": [{"role": "user", "content": "hello"}]}]) == []
+    assert captured["headers"]["Authorization"] == "Bearer wrt_example"
