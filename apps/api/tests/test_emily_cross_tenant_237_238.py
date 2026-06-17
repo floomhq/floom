@@ -382,10 +382,13 @@ class TestC1380RunCancelCrossUser:
         assert allowed["ok"] is True
         with main.get_db() as conn:
             row = conn.execute(
-                "SELECT cancel_requested FROM runs WHERE id = ?",
+                "SELECT cancel_requested, status, error_code, completed_at FROM runs WHERE id = ?",
                 (run_id,),
             ).fetchone()
         assert row["cancel_requested"] == 1
+        assert row["status"] == "failed"
+        assert row["error_code"] == "cancelled_queued"
+        assert row["completed_at"]
 
 
 class TestC238SecretCrossUser:
