@@ -1,10 +1,8 @@
 "use client";
 
 import { useState } from "react";
-import Link from "next/link";
-import { Check, Copy, ExternalLink, Slack, Terminal, X } from "lucide-react";
-import { QRCodeSVG } from "qrcode.react";
-import { ClaudeLogo, CodexLogo, CursorLogo, WhatsAppLogo } from "@/components/landing-icons";
+import { Check, Copy, Terminal, X } from "lucide-react";
+import { ClaudeLogo, CodexLogo, CursorLogo } from "@/components/landing-icons";
 
 const MCP_CLIENTS: { name: string; logo: React.ReactNode }[] = [
   { name: "Claude Code", logo: <ClaudeLogo /> },
@@ -12,8 +10,8 @@ const MCP_CLIENTS: { name: string; logo: React.ReactNode }[] = [
   { name: "Cursor", logo: <CursorLogo /> },
 ];
 
-type Channel = "slack" | "whatsapp" | "mcp";
-type Modal = Exclude<Channel, "slack"> | null;
+type Channel = "mcp";
+type Modal = "mcp" | null;
 
 const MCP_CONFIG = `{
   "mcpServers": {
@@ -23,10 +21,6 @@ const MCP_CONFIG = `{
     }
   }
 }`;
-
-const WORKEROS_API_BASE = (process.env.NEXT_PUBLIC_WORKEROS_API_BASE ?? "https://workeros-api.floom.dev").replace(/\/$/, "");
-const SLACK_INSTALL_URL = `${WORKEROS_API_BASE}/slack/install/start`;
-const WHATSAPP_CHAT_URL = "https://wa.me/16503999709";
 
 function ModalShell({
   title,
@@ -139,84 +133,27 @@ export function ChannelActions({ compact = false, only }: { compact?: boolean; o
   const [modal, setModal] = useState<Modal>(null);
   // On the landing hero the MCP affordance now lives in the top-right header
   // (McpHeaderButton), so the default (no `only`) ChannelActions row renders
-  // nothing. The explicit single-channel callers still work: the /start/[channel]
-  // deep pages and the docs page pass `only` to surface a specific install CTA.
-  const showSlack = only === "slack";
-  const showWhatsApp = only === "whatsapp";
+  // nothing. The explicit MCP caller (/start/mcp) passes `only="mcp"` to surface
+  // the install CTA. Slack/WhatsApp channels were removed (never shipped).
   const showMcp = only === "mcp";
 
   // Nothing to render in the default landing case: hide the row entirely.
-  if (!showSlack && !showWhatsApp && !showMcp) return null;
+  if (!showMcp) return null;
 
   return (
     <>
       <span className={`inline-flex flex-wrap items-center justify-center gap-2 ${compact ? "" : "mt-4"}`}>
-        {showSlack ? (
-          <Link
-            href={SLACK_INSTALL_URL}
-            className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-secondary px-3.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]"
-          >
-            <Slack className="h-3.5 w-3.5" />
-            Add to Slack
-          </Link>
-        ) : null}
-        {showWhatsApp ? (
-          <button
-            type="button"
-            onClick={() => setModal("whatsapp")}
-            className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-secondary px-3.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]"
-          >
-            <span className="flex h-3.5 w-3.5 items-center justify-center [&_svg]:h-3.5 [&_svg]:w-3.5">
-              <WhatsAppLogo />
-            </span>
-            WhatsApp QR
-          </button>
-        ) : null}
-        {showMcp ? (
-          <button
-            type="button"
-            onClick={() => setModal("mcp")}
-            className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-secondary px-3.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]"
-          >
-            <Terminal className="h-3.5 w-3.5" />
-            MCP config
-          </button>
-        ) : null}
+        <button
+          type="button"
+          onClick={() => setModal("mcp")}
+          className="inline-flex h-9 items-center gap-2 rounded-[10px] bg-secondary px-3.5 text-[12.5px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]"
+        >
+          <Terminal className="h-3.5 w-3.5" />
+          MCP config
+        </button>
       </span>
 
       {modal === "mcp" ? <McpConfigModal open onClose={() => setModal(null)} /> : null}
-
-      {modal === "whatsapp" ? (
-        <ModalShell title="Connect WhatsApp" onClose={() => setModal(null)}>
-          <div className="mt-5 flex flex-col items-center gap-4">
-            <div className="rounded-[18px] bg-card p-4">
-              <QRCodeSVG
-                value={WHATSAPP_CHAT_URL}
-                size={144}
-                marginSize={1}
-                bgColor="transparent"
-                fgColor="currentColor"
-                level="M"
-                className="text-foreground"
-                data-testid="whatsapp-qr"
-              />
-            </div>
-            <p className="max-w-[300px] text-center text-[13px] leading-relaxed text-muted-foreground">
-              Scan to message Emily on WhatsApp. No dashboard sign-in needed.
-            </p>
-            <a
-              href={WHATSAPP_CHAT_URL}
-              target="_blank"
-              rel="noopener noreferrer"
-              className="inline-flex h-10 items-center gap-2 rounded-[10px] px-4 text-[13px] font-medium text-white"
-              style={{ background: "var(--v3-accent)" }}
-            >
-              Message Emily
-              <ExternalLink className="h-3.5 w-3.5" />
-            </a>
-          </div>
-        </ModalShell>
-      ) : null}
     </>
   );
 }

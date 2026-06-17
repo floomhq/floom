@@ -10,7 +10,7 @@ import { notFound } from "next/navigation";
 import { ChannelActions } from "@/app/v3/ChannelActions";
 import { V3Shell } from "../../v3/V3Shell";
 
-type ChannelKey = "slack" | "whatsapp" | "mcp";
+type ChannelKey = "mcp";
 
 const CHANNELS: Record<
   ChannelKey,
@@ -22,28 +22,6 @@ const CHANNELS: Record<
     ctaNote: string;
   }
 > = {
-  slack: {
-    name: "Slack",
-    title: "Floom in Slack",
-    lead: "Hire and run AI workers from the workspace you already live in. The dashboard stays optional.",
-    steps: [
-      ["Add Floom to Slack", "One workspace install. Your team DMs Emily, the Floom assistant, like any coworker."],
-      ["Describe the job", "“Every Monday, pull last week’s signups and draft the investor update.” Emily sets the worker up from the conversation."],
-      ["Approve in-channel", "Anything that writes to your tools pauses for an approval card in Slack. Nothing ships without you."],
-    ],
-    ctaNote: "Connecting Slack creates your workspace at the last step — that's the only moment sign-in appears.",
-  },
-  whatsapp: {
-    name: "WhatsApp",
-    title: "Floom on WhatsApp",
-    lead: "Message your workers like you message anyone else. No app to learn, no dashboard required.",
-    steps: [
-      ["Connect your number", "Scan a QR code and Floom recognises your WhatsApp number."],
-      ["Describe the job", "Send the job as a message. Emily sets the worker up and confirms what it will do."],
-      ["Approve by reply", "Runs that need a decision message you first. Reply to approve or reject."],
-    ],
-    ctaNote: "The QR opens the pairing flow. Sign-in appears only when the number is ready to bind to your workspace.",
-  },
   mcp: {
     name: "MCP",
     title: "Floom from any MCP agent",
