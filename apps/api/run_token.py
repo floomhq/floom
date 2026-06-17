@@ -103,6 +103,14 @@ def verify_run_token(token: str, *, secret: str | None = None) -> str | None:
 WORKER_CALL_TOKEN_PREFIX = "wrt_"
 MAX_CALL_DEPTH = 3
 
+# Hard ceiling on how many child runs a single run may spawn via worker-to-worker
+# calls (fan-out), enforced server-side at child-run creation. Complements
+# MAX_CALL_DEPTH (which caps chain *depth*): this caps the *number* of calls a run
+# makes, so a buggy/looping worker can't spawn unbounded children (cost + runaway
+# guard). Per-workspace configurability within this ceiling is tracked as a
+# follow-up (see issue).
+MAX_WORKER_CALLS_PER_RUN = 50
+
 
 class WorkerCallDepthExceeded(ValueError):
     """#994: a worker-call token cannot be minted at or beyond MAX_CALL_DEPTH."""
