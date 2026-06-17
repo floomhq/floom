@@ -451,6 +451,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
                 <DetailPane
                   header={detail.header}
                   tabs={detail.tabs}
+                  tabsTrailing={detail.tabsTrailing}
                   activeTab={activeTabKey}
                   onTab={(key) => patch({ tab: key })}
                   onClose={close}

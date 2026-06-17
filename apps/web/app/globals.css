@@ -952,9 +952,20 @@ html.dark .grain {
 .c-dtab2.on { color:var(--ink); font-weight:500; }
 .c-dtab2.on::after { content:""; position:absolute; left:0; right:0; bottom:0; height:2px; background:var(--ink); border-radius:0; }
 .c-dtab2 .cb { background:var(--bg-3); color:var(--ink-soft); font-size:10px; border-radius:var(--radius-pill); padding:0 5px; }
-/* Operations framing: "Visual editor of worker.yml" + a "View as YAML" link */
-.c-ops-frame { display:flex; align-items:center; gap:8px; padding:10px 0 6px; font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted-foreground); }
+/* R9 FIX 2: pull the Operations second-row tabs flush under the primary tab row.
+   Breaks out of .c-dbody padding (18px 20px) so .c-dtabs2 sits directly beneath
+   .c-dtabs with no gap or framing text between the two rows. */
+.c-ops-row-flush { margin:-18px -20px 0; flex:0 0 auto; }
+/* Operations framing: "Visual editor of worker.yml" + a "View as YAML" link.
+   R9: lives in the panel BODY below both tab rows, not between them. */
+.c-ops-frame { display:flex; align-items:center; gap:8px; padding:14px 0 4px; font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted-foreground); }
 .c-dbody { flex:1; min-width:0; overflow:auto; padding:18px 20px; }
+/* R9 FIX 1: "Advanced ▾" group on the primary tab row — right-aligned, quiet,
+   findable. Not accent (accent is links-only); reads as a secondary tab group. */
+.c-dtabs-trailing { margin-left:auto; display:flex; align-items:center; padding-left:8px; }
+.c-dtab-adv { color:var(--muted-foreground); font-size:13px; padding:5px 9px 6px; border-radius:8px; white-space:nowrap; }
+.c-dtab-adv:hover { background:var(--bg-2); color:var(--ink); }
+.c-dtab-adv[data-state="open"] { background:var(--bg-2); color:var(--ink); }
 
 /* states (SPEC §7) */
 .c-statebox { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; color:var(--muted-foreground); padding:50px; }
