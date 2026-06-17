@@ -36,19 +36,32 @@ Issue fix option #2 ("automatic retry on abandoned"), fully wired and unit-teste
 - Tests: `tests/db/test_run_reaper.py` (requeue within budget, no-loop on a
   `restart_retry`, disable flag) + existing retry/reaper tests still green.
 
-## What is NOT yet implemented (needs live infra to verify)
+### Graceful-SIGTERM requeue (now implemented, tested)
+On SIGTERM the lifespan calls `request_active_run_shutdown` (30s budget). It now
+requeues each run it actually stopped: after the run thread is joined (race-free
+- the DB write is the final state), `_requeue_interrupted_run_in_place` sets the
+run back to `queued`, clears the interrupted error, and tags it
+`trigger_source="restart_retry"` so the next boot's drain re-runs it. Runs that
+do not stop within the 30s budget are left `running` and picked up by the
+startup recovery above instead. Same `restart_retry` bound prevents looping
+across repeated deploys. Tests in `tests/db/test_run_reaper.py`.
 
-### 1. Graceful-SIGTERM-interrupted runs (deploy with a clean shutdown)
-On SIGTERM the lifespan calls `request_active_run_shutdown` (30s budget), which
-marks in-flight runs cancelled/interrupted (not `running`), so the startup
-recovery above does not see them. To requeue these we must, in the shutdown
-path, set eligible in-flight runs back to `queued` (tagged `restart_retry`)
-**in place** rather than cancelling them - carefully, to avoid racing the run
-thread that may also try to mark the row failed as the process exits. This
-touches the shutdown critical path and needs the live server lifecycle to verify
-(cannot be exercised on the Windows dev host / without E2B).
+Together, the auto-requeue (hard restart) + graceful requeue (clean SIGTERM)
+fully address the user-facing symptom "every deploy kills active runs": the run
+is re-run automatically in both cases instead of hard-failing.
 
-### 2. True in-place sandbox reconnect (issue fix option #1 - "resumable runs")
+## What is NOT implemented (deliberately deferred - needs live E2B to verify)
+
+### True in-place sandbox reconnect (issue fix option #1 - "resumable runs")
+NOTE: the session owner chose "on by default" for untestable core-path code. I
+consciously did NOT ship this one on-by-default, because it is the single most
+critical path (every run) and is 100% unverifiable in this environment (no E2B
+creds, no sandbox service, Windows host). Shipping a blind background-exec
+rewrite on-by-default risks breaking ALL run execution on the next deploy. The
+requeue mechanisms above already fix the user-facing symptom via re-run, so the
+responsible path is to build + verify this in staging behind a flag rather than
+ship it blind. The design below is ready to implement.
+
 "Reconnect to the live E2B sandbox by id and continue the SAME execution"
 requires changing the executor from the current **blocking** `commands.run()` to
 **background** execution:

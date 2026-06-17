@@ -167,6 +167,34 @@ def _worker_author_platform_env() -> dict[str, str]:
     return env
 
 
+def _llm_gateway_env() -> dict[str, str]:
+    """#1448: route a worker's LLM calls through the managed LiteLLM gateway.
+
+    When WORKEROS_LLM_GATEWAY_URL is set, point the OpenAI-compatible base URL
+    (which the OpenAI SDK and litellm both honour) at the gateway and supply the
+    shared virtual key. The gateway pools provider quota, applies shared backoff,
+    and does multi-region round-robin, so concurrent judge-heavy runs no longer
+    each hammer the raw provider and 429 the shared quota (#1448).
+
+    Unset (the default) -> returns {} -> workers call providers directly with
+    their own keys (today's behaviour). This is the kill-switch: clearing the env
+    var instantly reverts to direct calls.
+    """
+    url = (os.environ.get("WORKEROS_LLM_GATEWAY_URL") or "").strip().rstrip("/")
+    if not url:
+        return {}
+    env = {
+        "OPENAI_BASE_URL": url,   # openai-python >= 1.x
+        "OPENAI_API_BASE": url,   # litellm + older openai
+    }
+    key = (os.environ.get("WORKEROS_LLM_GATEWAY_KEY") or "").strip()
+    if key:
+        # The gateway holds the real provider keys; the worker presents only this
+        # shared virtual key, so per-worker raw keys no longer set the rate ceiling.
+        env["OPENAI_API_KEY"] = key
+    return env
+
+
 def _csv_env(name: str) -> list[str]:
     return [part.strip() for part in (os.environ.get(name) or "").split(",") if part.strip()]
 
@@ -189,6 +217,9 @@ def _platform_egress_hosts(api_url: str | None = None) -> list[str]:
         _host_from_url(os.environ.get("WORKEROS_API_URL")),
         _host_from_url(os.environ.get("WORKEROS_API_BASE")),
         _host_from_url(os.environ.get("COMPOSIO_API_BASE") or "https://backend.composio.dev"),
+        # #1448: the managed LLM gateway must be reachable from the sandbox when
+        # configured, or routed worker LLM calls would be blocked by egress policy.
+        _host_from_url(os.environ.get("WORKEROS_LLM_GATEWAY_URL")),
         "api.openai.com",
         "api.anthropic.com",
         "generativelanguage.googleapis.com",
@@ -1480,6 +1511,11 @@ class E2BSandboxDriver(SandboxDriver):
             _cmd_envs: dict[str, str] = {
                 **_worker_author_env,
                 **secrets,
+                # #1448: the gateway env is applied AFTER worker secrets so it
+                # overrides a worker's direct OPENAI_API_KEY/base, centralising
+                # LLM traffic on the managed gateway's pooled quota. No-op ({})
+                # when WORKEROS_LLM_GATEWAY_URL is unset (workers call directly).
+                **_llm_gateway_env(),
                 "FLOOM_RUN_ID": run_id,
                 "FLOOM_TRACE_ID": trace_id,
                 "WORKEROS_API_URL": _sandbox_envs["WORKEROS_API_URL"],

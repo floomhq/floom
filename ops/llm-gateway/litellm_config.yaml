@@ -1,0 +1,79 @@
+# #1448 Managed LLM gateway - LiteLLM Proxy config.
+#
+# Pools provider quota, applies shared backoff, and round-robins across regions,
+# so concurrent judge-heavy worker runs draw from ONE budget instead of each
+# hammering the raw provider (which 429'd the shared quota - see #1448).
+#
+# Workers reach this via the OpenAI-compatible endpoint: the engine injects
+# OPENAI_BASE_URL=<gateway>/v1 + OPENAI_API_KEY=<virtual key> into the sandbox
+# (runner_sandbox/e2b_driver.py::_llm_gateway_env) when WORKEROS_LLM_GATEWAY_URL
+# is set. Workers then call the model_name aliases below.
+#
+# Secrets are read from env (os.environ/VAR) - never hardcode them here.
+
+model_list:
+  # --- Gemini (Vertex) multi-region pool: requests round-robin across regions
+  #     by live headroom; a region that 429s is cooled out (see router_settings).
+  - model_name: gemini-3-flash
+    litellm_params:
+      model: vertex_ai/gemini-3-flash-preview
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: us-central1
+      rpm: 60          # per-deployment ceiling the router respects
+  - model_name: gemini-3-flash
+    litellm_params:
+      model: vertex_ai/gemini-3-flash-preview
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: us-east1
+      rpm: 60
+  - model_name: gemini-3-flash
+    litellm_params:
+      model: vertex_ai/gemini-3-flash-preview
+      vertex_project: os.environ/VERTEX_PROJECT
+      vertex_location: europe-west1
+      rpm: 60
+
+  # --- OpenAI pool (fallback target + general use) ---
+  - model_name: gpt-4o
+    litellm_params:
+      model: openai/gpt-4o
+      api_key: os.environ/OPENAI_API_KEY
+      rpm: 500
+
+  # --- Anthropic via Bedrock ---
+  - model_name: claude-sonnet
+    litellm_params:
+      model: bedrock/anthropic.claude-3-5-sonnet-20241022-v2:0
+      aws_region_name: us-east-1
+
+router_settings:
+  # Spread load by each deployment's remaining RPM/TPM headroom (best for the
+  # judge-burst pattern), not naive round-robin.
+  routing_strategy: usage-based-routing-v2
+  # Shared state so multiple gateway replicas coordinate one global budget +
+  # backoff. Point at the Redis in docker-compose.yml (or a managed Redis).
+  redis_host: os.environ/REDIS_HOST
+  redis_port: os.environ/REDIS_PORT
+  redis_password: os.environ/REDIS_PASSWORD
+  num_retries: 3
+  retry_after: 5
+  allowed_fails: 3        # this many failures...
+  cooldown_time: 30       # ...cools a deployment out for 30s (shared backoff)
+  # If the whole gemini pool is saturated, fall back to gpt-4o rather than 429.
+  fallbacks:
+    - gemini-3-flash: ["gpt-4o"]
+
+litellm_settings:
+  drop_params: true
+  request_timeout: 600
+  num_retries: 3
+  # Translate provider 429s into LiteLLM retries/backoff instead of erroring.
+  set_verbose: false
+
+general_settings:
+  # The shared virtual key workers present (injected as OPENAI_API_KEY). Mint
+  # per-team/per-workspace virtual keys off this for central budgets if desired.
+  master_key: os.environ/LITELLM_MASTER_KEY
+  # Optional: a Postgres URL enables virtual keys + per-key spend/RPM budgets and
+  # usage tracking. Omit for a stateless quota-pooling proxy.
+  # database_url: os.environ/DATABASE_URL
