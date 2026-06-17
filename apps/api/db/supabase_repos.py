@@ -2218,6 +2218,20 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             row["output_json"] = _json_text(row.get("output_json"), {})
         return row
 
+    def count_child_runs(self, *, parent_run_id: str) -> int:
+        # Child runs spawned via worker-to-worker calls carry the parent run id in
+        # trigger_ref. Used to enforce the per-run fan-out cap at child creation
+        # (engine run_token.MAX_WORKER_CALLS_PER_RUN).
+        if not parent_run_id:
+            return 0
+        response = (
+            self._client.table("runs")
+            .select("id", count="exact")
+            .eq("trigger_ref", parent_run_id)
+            .execute()
+        )
+        return int(getattr(response, "count", 0) or 0)
+
     def create(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
         worker_id = fields["worker_id"]
         # Pre-check: confirm the worker belongs to this user. We scope by
