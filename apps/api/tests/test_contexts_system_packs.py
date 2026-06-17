@@ -206,6 +206,13 @@ def test_context_upload_accepts_multi_mb_image_by_default(client_and_main):
     assert body["files"][0]["size"] == len(image_bytes)
 
 
+def test_context_upload_default_limit_is_fifty_mb(client_and_main):
+    _client, main = client_and_main
+
+    assert main._context_upload_limit_bytes() == 50 * 1024 * 1024
+    assert main._context_upload_body_limit_bytes() == (51 * 1024 * 1024)
+
+
 def test_context_file_metadata_tags_roundtrip(client_and_main):
     client, _main = client_and_main
     assert client.post("/contexts/my-company").status_code == 200

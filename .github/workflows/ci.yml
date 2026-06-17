@@ -110,7 +110,7 @@ jobs:
         # #604: root pytest.ini points at tests/ (66 files). These cover the
         # full worker runtime — agent driver, E2B sandbox, run orchestration —
         # and were previously not run in CI.
-        run: pytest tests/ -v --tb=short -p no:warnings
+        run: pytest tests/ -v --tb=short -p no:warnings -n auto --dist loadscope
 
   runtime-tests-windows:
     name: Runtime tests (Windows)
@@ -140,7 +140,7 @@ jobs:
           FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
           OPENAI_API_KEY: sk-test-${{ github.run_id }}
           COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
-        run: python -m pytest tests/ -v --tb=short -p no:warnings
+        run: python -m pytest tests/ -v --tb=short -p no:warnings -n auto --dist loadscope
 
   web-tests:
     name: Web tests (vitest + tsx + lint)

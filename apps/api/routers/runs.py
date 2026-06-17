@@ -432,7 +432,7 @@ def clear_runs(
     }
 
 
-_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed"})
+_TERMINAL_RUN_STATUSES = frozenset({"completed", "failed", "cancelled"})
 
 
 @runs_router.post("/runs/{run_id}/cancel", response_model=ActionResponse)
@@ -448,8 +448,9 @@ def cancel_run(
     spawned.  Sets cancel_requested=1 first so the drain loop skips the row
     if it is already past the get_queued() poll boundary.
 
-    For running runs: sets cancel_requested=1 and asks the E2B driver to kill
-    any registered sandbox command for this run.
+    For running runs: sets cancel_requested=1, asks the E2B driver to kill
+    any registered sandbox command for this run, then marks the run cancelled
+    promptly so list/detail surfaces stop reporting it as active.
 
     Returns 404 if no cancellable run is visible, 200 if cancellation was
     recorded.
@@ -495,8 +496,16 @@ def cancel_run(
     except Exception:
         logger.warning("Failed to cancel E2B sandbox for run %s", run_id, exc_info=True)
 
-    logger.info("Cancel requested for running run %s", run_id)
-    return ActionResponse(status="cancel_requested", run_id=run_id)
+    update_run_status(
+        run_id,
+        RunStatus.CANCELLED.value,
+        error="Run was cancelled by the user.",
+        error_code="user_cancel",
+        user_id=auth.user_id,
+        repos=repos,
+    )
+    logger.info("Cancelled running run %s", run_id)
+    return ActionResponse(status="cancelled", run_id=run_id)
 
 
 # ---------------------------------------------------------------------------

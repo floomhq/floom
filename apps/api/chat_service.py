@@ -149,6 +149,9 @@ def _workspace_root() -> Path:
     custom = os.environ.get("WORKEROS_WORKSPACE_DIR", "").strip()
     if custom:
         return Path(custom).resolve()
+    workers_dir = os.environ.get("FLOOM_WORKERS_DIR", "").strip()
+    if workers_dir:
+        return Path(workers_dir).resolve().parent
     return Path(__file__).resolve().parents[3]
 
 WORKSPACE_MD_PATH = _workspace_root() / "workspace.md"
@@ -715,6 +718,7 @@ def build_workspace_agent_config(user_id: str, settings: Optional[Dict[str, bool
         WorkerConfig,
         WorkerConnection,
         WorkerContextMount,
+        WorkerMemoryConfig,
         WorkerMCPConnection,
         WorkerOutput,
         WorkerRuntime,
@@ -780,6 +784,7 @@ def build_workspace_agent_config(user_id: str, settings: Optional[Dict[str, bool
         runtime=WorkerRuntime(type="agent", entrypoint="SKILL.md", runner="e2b", mode="agent"),
         connections=connections,
         contexts=contexts,
+        memory=WorkerMemoryConfig(enabled=False),
         outputs=[WorkerOutput(name="reply", label="Agent reply", type="markdown", required=True)],
     )
 

@@ -160,6 +160,20 @@ async function startMockApi() {
       return;
     }
 
+    if (request.method === "POST" && url.pathname === "/contexts/versioned-test") {
+      const body = await readBody(request);
+      bodies.push(body);
+      json(response, 200, {
+        name: "versioned-test",
+        file_count: 0,
+        total_size_bytes: 0,
+        updated_at: "2026-05-28T00:00:00Z",
+        writeable: Boolean(body.writeable),
+        sensitive: Boolean(body.sensitive),
+      });
+      return;
+    }
+
     if (request.method === "GET" && url.pathname === "/contexts/kb-test/files/faq.md") {
       response.writeHead(200, { "content-type": "text/markdown" });
       response.end("# FAQ\n");
@@ -427,6 +441,12 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
     const contexts = await client.callTool({ name: "contexts.list", arguments: {} });
     assert.equal(contexts.structuredContent.data[0].name, "kb-test");
 
+    await client.callTool({
+      name: "contexts.create",
+      arguments: { name: "versioned-test", writeable: true, sensitive: false },
+    });
+    assert.deepEqual(mock.bodies.at(-1), { writeable: true, sensitive: false });
+
     const contextFile = await client.callTool({ name: "contexts.read", arguments: { name: "kb-test", path: "faq.md" } });
     assert.equal(contextFile.structuredContent.content, "# FAQ\n");
 
@@ -500,6 +520,7 @@ test("workeros MCP exposes context tools and covers lifecycle happy paths", asyn
   assert.deepEqual(mock.seen, [
     "GET /workers",
     "GET /contexts",
+    "POST /contexts/versioned-test",
     "GET /contexts/kb-test",
     "GET /contexts/kb-test/files/faq.md",
     "PUT /contexts/kb-test/files/notes.txt",

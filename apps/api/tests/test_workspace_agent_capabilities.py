@@ -80,6 +80,7 @@ def _log(_msg, _level="info"):
 def _config_with(connections=None, contexts=None):
     from models import (
         WorkerConfig,
+        WorkerMemoryConfig,
         WorkerOutput,
         WorkerRuntime,
         WorkerTrigger,
@@ -92,6 +93,7 @@ def _config_with(connections=None, contexts=None):
         runtime=WorkerRuntime(type="agent", entrypoint="SKILL.md", runner="e2b", mode="agent"),
         connections=connections or [],
         contexts=contexts or [],
+        memory=WorkerMemoryConfig(enabled=False),
         outputs=[WorkerOutput(name="reply", label="Reply", type="markdown", required=True)],
     )
 
