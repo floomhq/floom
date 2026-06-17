@@ -1,4 +1,4 @@
-"""E2B cloud sandbox driver for Workeros — uses e2b SDK 2.x.
+"""E2B cloud sandbox driver for Workeros - uses e2b SDK 2.x.
 
 Worker protocol: run.py in an E2B worker reads inputs from inputs.json and
 MUST write result.json with:
@@ -15,6 +15,8 @@ import shutil
 import tarfile
 import threading
 import time
+import hashlib
+from dataclasses import dataclass, field
 from pathlib import Path
 from pathlib import PurePosixPath
 from typing import Any, Callable, Dict, Optional
@@ -29,6 +31,8 @@ import contexts as _contexts_module
 from contexts import (
     CONTEXTS_DIR,
     context_mount_matches_inputs,
+    context_total_size,
+    context_updated_at,
     context_scope_for_user,
     normalize_context_mount,
     use_context_scope,
@@ -51,7 +55,7 @@ MAX_E2B_SANDBOX_LIFETIME_SECONDS = E2B_MAX_SANDBOX_LIFETIME_SECONDS
 # unbounded multi-MB output bloats the DB row and the run-detail response.
 # Reject above this with a clear error instead of silently ingesting it.
 MAX_RESULT_JSON_BYTES = 5 * 1024 * 1024  # 5 MiB
-# #1041 — bound writeback-tar extraction so a sandboxed worker cannot OOM the
+# #1041 - bound writeback-tar extraction so a sandboxed worker cannot OOM the
 # API host with an arbitrarily large context file. Each member is read fully
 # into memory (extracted.read()), so cap both per-member and total bytes.
 MAX_CONTEXT_TAR_MEMBER_BYTES = 100 * 1024 * 1024  # 100 MiB per member
@@ -76,6 +80,116 @@ _active_sandboxes: dict[str, Any] = {}
 _active_sandboxes_lock = threading.Lock()
 
 
+@dataclass
+class _WarmSandboxEntry:
+    key: str
+    sandbox: Any
+    workdir: str
+    mounted_contexts: set[str]
+    created_at: float = field(default_factory=time.monotonic)
+    last_used_at: float = field(default_factory=time.monotonic)
+    uses: int = 0
+
+
+_warm_pool: dict[str, list[_WarmSandboxEntry]] = {}
+_warm_pool_lock = threading.Lock()
+
+
+def _warm_pool_enabled() -> bool:
+    return _env_truthy("WORKEROS_E2B_WARM_POOL_ENABLED")
+
+
+def _warm_pool_size_per_key() -> int:
+    try:
+        return max(0, int(os.environ.get("WORKEROS_E2B_WARM_POOL_SIZE_PER_KEY", "1")))
+    except ValueError:
+        return 1
+
+
+def _warm_pool_max_age_seconds() -> int:
+    try:
+        return max(60, int(os.environ.get("WORKEROS_E2B_WARM_POOL_MAX_AGE_SECONDS", "900")))
+    except ValueError:
+        return 900
+
+
+def _sandbox_alive(sandbox: Any, workdir: str) -> bool:
+    try:
+        return bool(sandbox.files.exists(workdir, request_timeout=10))
+    except Exception:
+        return False
+
+
+def _kill_sandbox_quietly(sandbox: Any) -> None:
+    try:
+        sandbox.kill()
+    except Exception:
+        logger.debug("E2B sandbox kill suppressed", exc_info=True)
+
+
+def _warm_pool_lease(key: str, *, log_fn: Callable[[str, str], None]) -> _WarmSandboxEntry | None:
+    if not _warm_pool_enabled() or not key:
+        return None
+    now = time.monotonic()
+    max_age = _warm_pool_max_age_seconds()
+    while True:
+        with _warm_pool_lock:
+            entries = _warm_pool.get(key) or []
+            entry = entries.pop() if entries else None
+            if entries:
+                _warm_pool[key] = entries
+            else:
+                _warm_pool.pop(key, None)
+        if entry is None:
+            return None
+        if now - entry.created_at > max_age:
+            _kill_sandbox_quietly(entry.sandbox)
+            continue
+        if not _sandbox_alive(entry.sandbox, entry.workdir):
+            _kill_sandbox_quietly(entry.sandbox)
+            continue
+        entry.uses += 1
+        entry.last_used_at = now
+        log_fn(f"[e2b] Reusing warm sandbox for key {key[:12]}", "info")
+        return entry
+
+
+def _warm_pool_return(entry: _WarmSandboxEntry, *, log_fn: Callable[[str, str], None]) -> bool:
+    if not _warm_pool_enabled() or _warm_pool_size_per_key() <= 0:
+        _kill_sandbox_quietly(entry.sandbox)
+        return False
+    if not _sandbox_alive(entry.sandbox, entry.workdir):
+        _kill_sandbox_quietly(entry.sandbox)
+        return False
+    entry.last_used_at = time.monotonic()
+    with _warm_pool_lock:
+        entries = _warm_pool.setdefault(entry.key, [])
+        entries.append(entry)
+        max_size = _warm_pool_size_per_key()
+        overflow: list[_WarmSandboxEntry] = []
+        while len(entries) > max_size:
+            overflow.append(entries.pop(0))
+    for stale in overflow:
+        _kill_sandbox_quietly(stale.sandbox)
+    log_fn(f"[e2b] Returned sandbox to warm pool for key {entry.key[:12]}", "debug")
+    return True
+
+
+def clear_warm_pool() -> int:
+    """Kill and remove all warm sandboxes. Used by tests and shutdown hooks."""
+    with _warm_pool_lock:
+        entries = [entry for bucket in _warm_pool.values() for entry in bucket]
+        _warm_pool.clear()
+    for entry in entries:
+        _kill_sandbox_quietly(entry.sandbox)
+    return len(entries)
+
+
+def warm_pool_size() -> int:
+    with _warm_pool_lock:
+        return sum(len(bucket) for bucket in _warm_pool.values())
+
+
 def _safe_git_context_url(source: str) -> str:
     repo_url = source.removeprefix("git+").strip()
     if urlsplit(repo_url).scheme.lower() != "https":
@@ -84,7 +198,7 @@ def _safe_git_context_url(source: str) -> str:
 
 
 _DEFAULT_E2B_DENY_OUT = (
-    # NOTE: "0.0.0.0/8" intentionally omitted — E2B's network-policy API rejects it
+    # NOTE: "0.0.0.0/8" intentionally omitted - E2B's network-policy API rejects it
     # ("400: invalid denied CIDR 0.0.0.0/8"), which kills sandbox creation for any
     # egress worker (e.g. worker-author). It's the non-routable "this network"
     # reserved range (RFC 1122), not a real SSRF target, so the loss is negligible;
@@ -121,7 +235,7 @@ _WORKER_AUTHOR_PROVIDER_ENV_VARS = (
     # worker-author smoke-tests the worker it generates in a NESTED E2B sandbox,
     # which reads the E2B key from *this* sandbox's env. Without it the nested run
     # fails with "Invalid API key format". Normal workers never self-test, so they
-    # never needed E2B creds inside the sandbox — only worker-author does.
+    # never needed E2B creds inside the sandbox - only worker-author does.
     "E2B_API_KEY",
     "E2B_API_KEY_FALLBACK",
     "E2B_API_KEYS",
@@ -248,7 +362,7 @@ def _worker_network_caps(config: WorkerConfig | None) -> tuple[bool, list[str], 
 
 
 def _is_e2b_ip_cidr(value: str) -> bool:
-    """True if E2B will accept ``value`` in deny_out — an IPv4/IPv6 CIDR or bare IP.
+    """True if E2B will accept ``value`` in deny_out - an IPv4/IPv6 CIDR or bare IP.
 
     E2B's deny_out validator rejects domains, the non-routable "0.0.0.0/8" range,
     "::/0", and the "ALL_TRAFFIC" sentinel (all -> "400: invalid denied CIDR ...").
@@ -266,21 +380,21 @@ def _e2b_network_policy(config: WorkerConfig | None, *, api_url: str | None = No
     """Build the E2B sandbox network policy. Two modes, both verified live against
     the e2b SDK + the E2B API:
 
-    OPEN (default — single-tenant / OSS self-host, where you run your own workers):
+    OPEN (default - single-tenant / OSS self-host, where you run your own workers):
         allow all public egress, block only the private/internal CIDR ranges (SSRF).
         ``{allow_public_traffic: True, deny_out: [private CIDRs]}``. Public platform
         endpoints (OpenAI / Anthropic / Bedrock / Composio / API host) are reachable
-        because they're public — no allow_out needed.
+        because they're public - no allow_out needed.
 
-    STRICT ALLOWLIST (``WORKEROS_E2B_RESTRICT_EGRESS=1`` — multi-tenant cloud running
+    STRICT ALLOWLIST (``WORKEROS_E2B_RESTRICT_EGRESS=1`` - multi-tenant cloud running
     UNTRUSTED user workers): deny ALL egress, then allow only the platform egress
     hosts + the worker's own declared allows. E2B expresses "deny everything else"
     as the CIDR ``0.0.0.0/0`` (its error message says "ALL_TRAFFIC", but only
     ``0.0.0.0/0`` is actually accepted; ``::/0`` is rejected, so this allowlist is
-    IPv4-only — IPv6 egress is not constrained).
+    IPv4-only - IPv6 egress is not constrained).
 
     Earlier code sent DOMAIN entries in allow_out *without* a deny-all, which E2B
-    rejects ("must include ALL_TRAFFIC ...") — that broke every egress worker
+    rejects ("must include ALL_TRAFFIC ...") - that broke every egress worker
     (e.g. worker-author). Both shapes below are what the API actually accepts.
     """
     _egress, declared_allow, declared_deny = _worker_network_caps(config)
@@ -299,7 +413,7 @@ def _e2b_network_policy(config: WorkerConfig | None, *, api_url: str | None = No
         return {"allow_out": allow_out, "deny_out": ["0.0.0.0/0", *extra_deny]}
 
     # Open: block private ranges, allow the rest. Only IP/CIDR allow-overrides are
-    # safe here — a domain allow entry would force allowlist mode (use strict for
+    # safe here - a domain allow entry would force allowlist mode (use strict for
     # that), and public hosts are reachable anyway.
     deny_candidates = dict.fromkeys(
         [*_DEFAULT_E2B_DENY_OUT, *_csv_env("WORKEROS_E2B_DENY_OUT"), *declared_deny]
@@ -681,7 +795,7 @@ def _read_result_json(
         )
 
     # 3. Parse. A failure here means a file WAS written but is not valid JSON
-    #    (or wrong encoding) — distinct from "no file written".
+    #    (or wrong encoding) - distinct from "no file written".
     try:
         result_data = json.loads(raw_bytes)
     except (json.JSONDecodeError, UnicodeDecodeError, ValueError) as exc:
@@ -991,8 +1105,8 @@ def _extract_context_tar(raw_tar: bytes, target_dir: Path) -> None:
 
     #1020: this used to extract to a tmp dir, ``rmtree(target_dir)``, then swap
     the whole tree in. But the sandbox snapshot is frozen at run START, so any
-    file written to the LIVE store DURING the run — e.g. feedback captured by
-    Emily while a `distill` worker was running — was erased on completion.
+    file written to the LIVE store DURING the run - e.g. feedback captured by
+    Emily while a `distill` worker was running - was erased on completion.
     Feedback was silently lost, breaking the whole loop.
 
     We now OVERLAY instead of replace: every file in the tar is written over its
@@ -1000,7 +1114,7 @@ def _extract_context_tar(raw_tar: bytes, target_dir: Path) -> None:
     ``target_dir`` that are NOT in the tar are left untouched. The worker still
     fully controls the files it writes; it just can no longer clobber a sibling
     it never saw. Deletions made inside the sandbox intentionally do NOT
-    propagate — correct for the accumulate-style stores this path serves
+    propagate - correct for the accumulate-style stores this path serves
     (feedback, memory). Path-traversal members are skipped as before.
     """
     target_dir.mkdir(parents=True, exist_ok=True)
@@ -1017,7 +1131,7 @@ def _extract_context_tar(raw_tar: bytes, target_dir: Path) -> None:
                 continue
             if not member.isfile():
                 continue
-            # #1041 — enforce size caps from tar metadata BEFORE reading the
+            # #1041 - enforce size caps from tar metadata BEFORE reading the
             # member into memory; skip (don't raise) so the rest of the
             # writeback still lands, matching the path-traversal skip above.
             if member.size > MAX_CONTEXT_TAR_MEMBER_BYTES:
@@ -1066,6 +1180,117 @@ def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
     from runner_utils import _resolve_worker_bundle_dir
 
     return _resolve_worker_bundle_dir(WORKERS_DIR, worker_id, config, _safe_path)
+
+
+def _hash_tree(root: Path) -> str:
+    digest = hashlib.sha256()
+    if not root.is_dir():
+        return ""
+    for path in sorted(root.rglob("*")):
+        rel = path.relative_to(root)
+        if (
+            (rel.parts and rel.parts[0] == "inputs")
+            or "__pycache__" in rel.parts
+            or rel.suffix == ".pyc"
+            or (rel.parts and rel.parts[0] in {".pytest_cache", ".ruff_cache"})
+        ):
+            continue
+        digest.update(rel.as_posix().encode("utf-8"))
+        if path.is_file():
+            stat = path.stat()
+            digest.update(str(stat.st_size).encode("ascii"))
+            digest.update(str(int(stat.st_mtime_ns)).encode("ascii"))
+    return digest.hexdigest()
+
+
+def _selected_contexts_for_inputs(
+    config: WorkerConfig | None,
+    inputs: Dict[str, Any],
+) -> tuple[list[dict[str, Any]], str | None]:
+    if not config or not config.contexts:
+        return [], None
+    selected: list[dict[str, Any]] = []
+    for raw_context in config.contexts:
+        try:
+            context = normalize_context_mount(raw_context)
+            if context_mount_matches_inputs(context, inputs):
+                selected.append(context)
+        except ValueError as exc:
+            return [], f"Invalid context declaration: {exc}"
+    return selected, None
+
+
+def _warm_pool_context_key_entries(
+    selected_contexts: list[dict[str, Any]],
+    *,
+    user_id: str | None,
+) -> list[dict[str, Any]]:
+    entries: list[dict[str, Any]] = []
+    with use_context_scope(context_scope_for_user(user_id)):
+        for context in selected_contexts:
+            source = context.get("source", "local")
+            entry: dict[str, Any] = {
+                "name": context["name"],
+                "source": source,
+            }
+            if source == "local":
+                local_dir = _contexts_module.context_dir(context["name"])
+                entry["size"] = context_total_size(local_dir) if local_dir.exists() else 0
+                entry["updated_at"] = context_updated_at(local_dir)
+            entries.append(entry)
+    return entries
+
+
+def _warm_pool_key(
+    *,
+    worker_id: str,
+    user_id: str | None,
+    worker_dir: Path,
+    config: WorkerConfig | None,
+    inputs: Dict[str, Any],
+    sandbox_template: str | None,
+) -> tuple[str | None, str | None]:
+    if not _warm_pool_enabled():
+        return None, None
+    selected_contexts, context_error = _selected_contexts_for_inputs(config, inputs)
+    if context_error:
+        return None, context_error
+    # Keep v1 conservative: mutable or git-backed context mounts are not pooled.
+    # They still run through the cold path, which preserves existing semantics.
+    for context in selected_contexts:
+        if context.get("writeable"):
+            return None, None
+        if str(context.get("source") or "").startswith("git+"):
+            return None, None
+    command = "python run.py"
+    if config and config.runtime and config.runtime.command:
+        command = config.runtime.command
+    key_payload = {
+        "v": 1,
+        "worker_id": worker_id,
+        "user_id": user_id or "",
+        "template": sandbox_template or "",
+        "runtime": _runtime_kind(config),
+        "command": command,
+        "bundle": _hash_tree(worker_dir),
+        "contexts": _warm_pool_context_key_entries(selected_contexts, user_id=user_id),
+    }
+    raw = json.dumps(key_payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest(), None
+
+
+def _cleanup_run_state(sandbox: Any, workdir: str, *, log_fn: Callable[[str, str], None]) -> bool:
+    result = sandbox.commands.run(
+        "rm -rf inputs outputs result.json .env.local secrets.json connections.json",
+        cwd=workdir,
+        timeout=30,
+        request_timeout=45,
+    )
+    if getattr(result, "exit_code", 1) != 0:
+        detail = (getattr(result, "stderr", "") or getattr(result, "stdout", "") or "")[:300]
+        log_fn(f"[e2b] Warm sandbox cleanup failed: {detail}", "warning")
+        return False
+    return True
 
 
 class E2BSandboxDriver(SandboxDriver):
@@ -1218,7 +1443,7 @@ class E2BSandboxDriver(SandboxDriver):
                 "warning",
             )
 
-        log_fn(f"[e2b] Spawning sandbox for run {run_id}", "info")
+        log_fn(f"[e2b] Preparing sandbox for run {run_id}", "info")
         install_timeout = _install_timeout_for_run(effective_timeout_seconds)
         sandbox_timeout = _sandbox_lifetime_timeout(effective_timeout_seconds, install_timeout)
         requested_sandbox_timeout = max(
@@ -1262,7 +1487,7 @@ class E2BSandboxDriver(SandboxDriver):
             "FLOOM_RUN_ID": run_id,
             "FLOOM_TRACE_ID": trace_id,
             "WORKEROS_API_URL": _sandbox_api_url_val,
-            # Scoped capability token — valid only for /runs/{run_id}/composio-execute/*
+            # Scoped capability token - valid only for /runs/{run_id}/composio-execute/*
             # Never inject the full FLOOM_SECRET into sandboxes (it grants full API access).
             "WORKEROS_RUN_TOKEN": _worker_call_token if _worker_call_token else make_run_token(run_id),
             **({"WORKEROS_CALL_DEPTH": str(_self_depth)} if _worker_call_token else {}),  # #994
@@ -1280,62 +1505,96 @@ class E2BSandboxDriver(SandboxDriver):
                 f"[e2b] Using configured {_runtime_kind(config)} template for sandbox startup",
                 "info",
             )
-        sandbox = _create_sandbox_with_key_fallback(
-            Sandbox,
-            api_keys=api_keys,
-            timeout=sandbox_timeout,
-            envs=_sandbox_envs,
-            template=sandbox_template,
-            network=_e2b_network_policy(config, api_url=_sandbox_api_url_val),
-            log_fn=log_fn,
+        warm_key, warm_key_error = _warm_pool_key(
+            worker_id=worker_id,
+            user_id=user_id,
+            worker_dir=worker_dir,
+            config=config,
+            inputs=inputs,
+            sandbox_template=sandbox_template,
         )
+        if warm_key_error:
+            return WorkerResult(
+                status="error",
+                error=warm_key_error,
+                error_code="context_mount_failed",
+                retryable=True,
+            )
+        warm_entry = _warm_pool_lease(warm_key or "", log_fn=log_fn) if warm_key else None
+        sandbox_prepared = warm_entry is not None
+        if warm_entry is not None:
+            sandbox = warm_entry.sandbox
+        else:
+            log_fn(f"[e2b] Spawning sandbox for run {run_id}", "info")
+            sandbox = _create_sandbox_with_key_fallback(
+                Sandbox,
+                api_keys=api_keys,
+                timeout=sandbox_timeout,
+                envs=_sandbox_envs,
+                template=sandbox_template,
+                network=_e2b_network_policy(config, api_url=_sandbox_api_url_val),
+                log_fn=log_fn,
+            )
         _register_sandbox(run_id, sandbox)
+        keep_warm = False
 
         try:
             workdir = "/home/user/worker"
-            sandbox.files.make_dir(workdir)
+            if sandbox_prepared:
+                if not _cleanup_run_state(sandbox, workdir, log_fn=log_fn):
+                    return WorkerResult(
+                        status="error",
+                        error="Warm sandbox cleanup failed before execution; retry the run.",
+                        error_code="warm_sandbox_cleanup_failed",
+                        retryable=True,
+                    )
+                made_dirs = {workdir}
+                mounted_contexts = set(warm_entry.mounted_contexts if warm_entry else set())
+            else:
+                sandbox.files.make_dir(workdir)
 
-            # Upload bundle files (read-only worker code; never contains inputs/).
-            made_dirs = {workdir}
-            upload_tree_tarball(
-                sandbox,
-                worker_dir,
-                workdir,
-                skip=lambda _path, rel: (
-                    (rel.parts and rel.parts[0] == "inputs")
-                    or "__pycache__" in rel.parts
-                    or rel.suffix == ".pyc"
-                    or (rel.parts and rel.parts[0] in {".pytest_cache", ".ruff_cache"})
-                ),
-                log_fn=log_fn,
-                label="worker bundle",
-            )
-            # Write workeros.py into the workdir so workers with calls: can do
-            # `from workeros import call_worker`. Only uploaded when the worker
-            # declares calls: — keeps the sandbox clean for workers that don't need it.
-            if _worker_call_token:
-                from runner_sandbox.workeros_helper import WORKEROS_PY_CONTENT  # noqa: PLC0415
-                sandbox.files.write(f"{workdir}/workeros.py", WORKEROS_PY_CONTENT.encode())
-                log_fn("[e2b] Uploaded workeros.py (worker-to-worker calling enabled)", "info")
-
-            mounted_contexts: set[str] = set()
-            context_error = self._upload_contexts_to_sandbox(
-                sandbox=sandbox,
-                workdir=workdir,
-                config=config,
-                inputs=inputs,
-                made_dirs=made_dirs,
-                log_fn=log_fn,
-                user_id=user_id,
-                mounted_contexts=mounted_contexts,
-            )
-            if context_error:
-                return WorkerResult(
-                    status="error",
-                    error=context_error,
-                    error_code="context_mount_failed",
-                    retryable=True,
+            if not sandbox_prepared:
+                # Upload bundle files (read-only worker code; never contains inputs/).
+                made_dirs = {workdir}
+                upload_tree_tarball(
+                    sandbox,
+                    worker_dir,
+                    workdir,
+                    skip=lambda _path, rel: (
+                        (rel.parts and rel.parts[0] == "inputs")
+                        or "__pycache__" in rel.parts
+                        or rel.suffix == ".pyc"
+                        or (rel.parts and rel.parts[0] in {".pytest_cache", ".ruff_cache"})
+                    ),
+                    log_fn=log_fn,
+                    label="worker bundle",
                 )
+                # Write workeros.py into the workdir so workers with calls: can do
+                # `from workeros import call_worker`. Only uploaded when the worker
+                # declares calls; keeps the sandbox clean for workers that do not need it.
+                if _worker_call_token:
+                    from runner_sandbox.workeros_helper import WORKEROS_PY_CONTENT  # noqa: PLC0415
+                    sandbox.files.write(f"{workdir}/workeros.py", WORKEROS_PY_CONTENT.encode())
+                    log_fn("[e2b] Uploaded workeros.py (worker-to-worker calling enabled)", "info")
+
+                mounted_contexts: set[str] = set()
+                context_error = self._upload_contexts_to_sandbox(
+                    sandbox=sandbox,
+                    workdir=workdir,
+                    config=config,
+                    inputs=inputs,
+                    made_dirs=made_dirs,
+                    log_fn=log_fn,
+                    user_id=user_id,
+                    mounted_contexts=mounted_contexts,
+                )
+                if context_error:
+                    return WorkerResult(
+                        status="error",
+                        error=context_error,
+                        error_code="context_mount_failed",
+                        retryable=True,
+                    )
 
             # Upload per-run file inputs from their isolated staging paths.
             # Inputs dict values for file inputs are absolute local paths.
@@ -1366,7 +1625,7 @@ class E2BSandboxDriver(SandboxDriver):
                 json.dumps(sandbox_inputs, indent=2),
             )
 
-            # Write .env.local — industry-standard convention; workers load via
+            # Write .env.local - industry-standard convention; workers load via
             # python-dotenv's load_dotenv(".env.local") + os.environ.
             env_local_lines = [_format_env_line(k, v) for k, v in secrets.items()]
             sandbox.files.write(
@@ -1374,7 +1633,7 @@ class E2BSandboxDriver(SandboxDriver):
                 "\n".join(env_local_lines) + ("\n" if env_local_lines else ""),
             )
 
-            # Write secrets.json — kept for ONE release as backward-compat with
+            # Write secrets.json - kept for ONE release as backward-compat with
             # user-uploaded workers still using json.load(open("secrets.json")).
             # Will be removed in PR S11.
             sandbox.files.write(
@@ -1400,7 +1659,7 @@ class E2BSandboxDriver(SandboxDriver):
             # google-auth-library: E2B can run any language; we just had no
             # install hook for non-Python bundles.
             req_path = worker_dir / "requirements.txt"
-            if req_path.exists() and req_path.read_text().strip():
+            if not sandbox_prepared and req_path.exists() and req_path.read_text().strip():
                 requirements_covered = False
                 if python_template_deps_baked:
                     requirements_covered, missing_requirements = _requirements_covered_by_baked_template(req_path)
@@ -1437,7 +1696,7 @@ class E2BSandboxDriver(SandboxDriver):
                     log_fn("[e2b] Requirements installed", "info")
 
             pkg_path = worker_dir / "package.json"
-            if pkg_path.exists() and pkg_path.read_text().strip():
+            if not sandbox_prepared and pkg_path.exists() and pkg_path.read_text().strip():
                 if node_template_deps_baked:
                     log_fn(
                         "[e2b] Skipping npm install; configured template marks Node deps as baked",
@@ -1469,7 +1728,7 @@ class E2BSandboxDriver(SandboxDriver):
             # host venv already has boto3). Install it just for that case + Bedrock,
             # so `litellm.APIConnectionError: No module named 'boto3'` can't bite.
             _author_model = _worker_author_env.get("WORKEROS_CODEGEN_MODEL", "")
-            if "bedrock" in _author_model.lower():
+            if not sandbox_prepared and "bedrock" in _author_model.lower():
                 if python_template_deps_baked:
                     log_fn(
                         "[e2b] Skipping boto3 install; configured template marks Python deps as baked",
@@ -1498,7 +1757,7 @@ class E2BSandboxDriver(SandboxDriver):
                 log_fn=log_fn,
             )
 
-            # Run the worker — commands.run() is sync, returns CommandResult directly
+            # Run the worker - commands.run() is sync, returns CommandResult directly
             command = "python run.py"
             if config and config.runtime and config.runtime.command:
                 command = config.runtime.command
@@ -1528,6 +1787,7 @@ class E2BSandboxDriver(SandboxDriver):
                 "FLOOM_RUN_ID": run_id,
                 "FLOOM_TRACE_ID": trace_id,
                 "WORKEROS_API_URL": _sandbox_envs["WORKEROS_API_URL"],
+                "WORKEROS_RUN_TOKEN": _sandbox_envs["WORKEROS_RUN_TOKEN"],
             }
             if _worker_call_token:
                 _cmd_envs["WORKEROS_RUN_TOKEN"] = _worker_call_token
@@ -1617,7 +1877,7 @@ class E2BSandboxDriver(SandboxDriver):
 
             # Read + parse result.json. Distinct, actionable errors for each
             # failure mode (missing file / oversized / invalid JSON / not-a-dict
-            # / non-dict outputs) — see _read_result_json (audit P1).
+            # / non-dict outputs) - see _read_result_json (audit P1).
             result_path = f"{workdir}/result.json"
             result_data, parse_error = _read_result_json(
                 sandbox,
@@ -1655,6 +1915,7 @@ class E2BSandboxDriver(SandboxDriver):
                     user_id=user_id,
                     mounted_contexts=mounted_contexts,
                 )
+                keep_warm = bool(warm_key) and _cleanup_run_state(sandbox, workdir, log_fn=log_fn)
 
             log_fn("[e2b] Run completed successfully", "info")
             decision_required = result_data.get("decision_required")
@@ -1671,14 +1932,24 @@ class E2BSandboxDriver(SandboxDriver):
 
         finally:
             _unregister_sandbox(run_id, sandbox)
-            try:
-                # e2b 2.x: kill() may raise if the sandbox already exited.
-                # We attempt gracefully; any exception is a warning, not a failure.
-                sandbox.kill()
-                log_fn("[e2b] Sandbox killed", "debug")
-            except Exception as close_exc:
-                # Sandbox may have self-terminated (timeout, OOM) — not an error.
-                logger.debug("E2B sandbox already gone (kill suppressed): %s", close_exc)
+            pooled = False
+            if keep_warm and warm_key:
+                entry = warm_entry or _WarmSandboxEntry(
+                    key=warm_key,
+                    sandbox=sandbox,
+                    workdir=workdir,
+                    mounted_contexts=set(mounted_contexts),
+                )
+                pooled = _warm_pool_return(entry, log_fn=log_fn)
+            if not pooled:
+                try:
+                    # e2b 2.x: kill() may raise if the sandbox already exited.
+                    # We attempt gracefully; any exception is a warning, not a failure.
+                    sandbox.kill()
+                    log_fn("[e2b] Sandbox killed", "debug")
+                except Exception as close_exc:
+                    # Sandbox may have self-terminated (timeout, OOM) — not an error.
+                    logger.debug("E2B sandbox already gone (kill suppressed): %s", close_exc)
 
     def _upload_contexts_to_sandbox(
         self,
