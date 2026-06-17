@@ -276,7 +276,7 @@ function SecretsContent() {
               return (
                 <div key={s.name} className="space-y-2">
                   {/* min-h-[44px] ensures the row itself is a comfortable touch target */}
-                  <div className="flex items-start justify-between gap-2 rounded-lg p-3 hover:bg-[var(--active-nav-bg)] transition-colors min-h-[44px]">
+                  <div className="flex items-start justify-between gap-2 rounded-lg p-3 hover:bg-[var(--bg-2)] transition-colors min-h-[44px]">
                     <div className="flex items-start gap-3 min-w-0">
                       <KeyRound className="mt-0.5 w-4 h-4 text-muted-foreground shrink-0" />
                       <div className="min-w-0">
@@ -341,8 +341,8 @@ function SecretsContent() {
                               <span
                                 className={
                                   s.last_check_status === "valid"
-                                    ? " text-emerald-600 font-medium"
-                                    : " text-red-500 font-medium"
+                                    ? " text-[var(--positive)] font-medium"
+                                    : " text-[var(--negative)] font-medium"
                                 }
                               >
                                 {" "}&middot; {s.last_check_status}
@@ -394,7 +394,7 @@ function SecretsContent() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="min-h-[44px] min-w-[44px] px-2 text-xs text-red-500 hover:text-red-700 sm:min-h-0 sm:min-w-0 sm:h-7"
+                        className="min-h-[44px] min-w-[44px] px-2 text-xs text-[var(--negative)] hover:text-[var(--negative)] sm:min-h-0 sm:min-w-0 sm:h-7"
                         onClick={() => handleDelete(s.name)}
                         disabled={deletingName === s.name}
                         title="Remove secret"
