@@ -899,6 +899,16 @@ class WorkerContextMount(BaseModel):
     name: str
     writeable: bool = False
     source: str = "local"
+    # #1433: optional per-run mount predicate. Example:
+    # contexts:
+    #   - name: novasearch-data
+    #     when: {input: operation, not_in: [profile]}
+    # Existing mounts omit this and are always staged.
+    when: Optional[Dict[str, Any]] = None
+
+    def model_dump(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
+        kwargs.setdefault("exclude_none", True)
+        return super().model_dump(*args, **kwargs)
 
     @field_validator("name")
     @classmethod

@@ -378,6 +378,24 @@ contexts:
 
 Local packs are copied from the workspace context store. Git-backed packs are cloned into the E2B sandbox at run time; they are read-only from Workeros' perspective. Add `writeable: true` only for local packs that the worker is allowed to persist back after a successful run.
 
+For large packs, use `when` to mount them only for run inputs that actually need them. This keeps lightweight operations from paying the sandbox upload cost for data they never read.
+
+```yaml
+inputs:
+  - name: operation
+    type: select
+    options: [search, profile]
+
+contexts:
+  - name: novasearch-data
+    source: local
+    when:
+      input: operation
+      not_in: [profile]
+```
+
+Supported predicates are `equals`/`eq`, `not_equals`/`neq`, `in`, `not_in`, `exists`, and `truthy`. Dotted input paths such as `candidate.source` are supported. Omitting `when` preserves the default behavior: the pack is mounted on every run.
+
 Working example:
 
 ```yaml
