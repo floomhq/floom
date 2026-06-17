@@ -219,3 +219,40 @@ def test_recover_respects_disable_flag(repo_bundle, monkeypatch):
 
     assert result == {"failed": 1, "requeued": 0}
     assert scheduled == []
+
+
+# --- #1434: graceful-SIGTERM requeue (in place) ------------------------------
+
+def test_requeue_interrupted_run_in_place(repo_bundle, monkeypatch):
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    _create_worker(repos, manifest)
+    repos.runs.create(
+        user_id="user-a", run_id="run-int", worker_id="worker-a",
+        status=RunStatus.FAILED.value, trigger_source="manual", runner="e2b",
+        error=run_service.INTERRUPTED_RUN_ERROR, input_json={"q": 1},
+    )
+    monkeypatch.setenv("WORKEROS_AUTO_REQUEUE_ABANDONED_RUNS", "1")
+    monkeypatch.setenv("WORKEROS_MAX_RESTART_RETRIES", "1")
+
+    assert run_service._requeue_interrupted_run_in_place(repos, "run-int", "user-a") is True
+    row = repos.runs.get(user_id="user-a", run_id="run-int")
+    assert row["status"] == RunStatus.QUEUED.value
+    assert row["trigger_source"] == "restart_retry"
+    assert not row.get("error")
+
+
+def test_requeue_interrupted_does_not_loop_on_restart_retry(repo_bundle, monkeypatch):
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    _create_worker(repos, manifest)
+    repos.runs.create(
+        user_id="user-a", run_id="run-int2", worker_id="worker-a",
+        status=RunStatus.FAILED.value, trigger_source="restart_retry", runner="e2b",
+    )
+    monkeypatch.setenv("WORKEROS_MAX_RESTART_RETRIES", "1")
+    # Already a restart_retry -> must not requeue again (bounded across deploys).
+    assert run_service._requeue_interrupted_run_in_place(repos, "run-int2", "user-a") is False
+    assert repos.runs.get(user_id="user-a", run_id="run-int2")["status"] == RunStatus.FAILED.value
