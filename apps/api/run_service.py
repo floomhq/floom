@@ -1319,6 +1319,44 @@ def _cancel_active_runs(
         return [run_id for run_id in _active_runs if run_id in active_ids]
 
 
+def _requeue_interrupted_run_in_place(
+    repos_obj: Repositories, run_id: str, user_id: str | None
+) -> bool:
+    """#1434: on a graceful (SIGTERM) shutdown, set an interrupted run back to
+    `queued` IN PLACE so the next process boot re-runs it, instead of leaving the
+    user with a hard "interrupted by restart" failure.
+
+    Called AFTER the run thread has been joined (race-free: this DB write is the
+    final state). Bounded via trigger_source="restart_retry" so a run that keeps
+    spanning deploys is retried at most once and cannot loop. user_id is the run
+    owner (the raw runs row has no owner column - it lives on the workers join).
+    """
+    if not _auto_requeue_abandoned_enabled() or _max_restart_retries() <= 0:
+        return False
+    if not user_id:
+        return False
+    try:
+        run = repos_obj.runs.get_any(run_id=run_id)
+        if not run:
+            return False
+        if str(run.get("trigger_source") or "").startswith("restart_retry"):
+            return False  # already a restart retry - do not loop across deploys
+        repos_obj.runs.update(
+            user_id=str(user_id),
+            run_id=run_id,
+            status=RunStatus.QUEUED.value,
+            started_at=None,
+            completed_at=None,
+            error=None,
+            error_code=None,
+            trigger_source="restart_retry",
+        )
+        return True
+    except Exception as exc:
+        logger.warning("Failed to requeue interrupted run %s on shutdown: %s", run_id, exc)
+        return False
+
+
 def request_active_run_shutdown(
     *,
     repos: Repositories | None = None,
@@ -1341,6 +1379,17 @@ def request_active_run_shutdown(
     )
     if remaining_ids:
         logger.warning("Shutdown timed out waiting for active runs: %s", ", ".join(sorted(remaining_ids)))
+    # #1434: requeue the runs we actually stopped (threads joined) so a deploy
+    # does not kill them. Runs that did NOT stop in time (remaining_ids) are left
+    # `running` and recovered by the next boot's startup recovery instead.
+    requeued = 0
+    for run in active:
+        if run.run_id in remaining_ids:
+            continue
+        if _requeue_interrupted_run_in_place(repos_obj, run.run_id, run.user_id):
+            requeued += 1
+    if requeued:
+        logger.warning("Requeued %d interrupted run(s) for retry after restart", requeued)
     return len(active)
 
 
