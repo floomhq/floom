@@ -1346,7 +1346,7 @@ def _slack_help_response() -> Dict[str, Any]:
     ]
     return {
         "response_type": "ephemeral",
-        "text": "Run / Approve / Create / Notify — send me a DM for anything else.",
+        "text": "Run / Approve / Create / Notify — try /floom approvals or send me a DM for anything else.",
         "blocks": blocks,
     }
 

@@ -40,7 +40,12 @@ def _clear_catalog_cache():
         composio_client._catalog_cache.clear()
 
 
-def test_first_call_fails_second_succeeds_returns_catalog():
+def _configure_composio(monkeypatch):
+    monkeypatch.setenv("COMPOSIO_API_KEY", "test-composio-key")
+
+
+def test_first_call_fails_second_succeeds_returns_catalog(monkeypatch):
+    _configure_composio(monkeypatch)
     _clear_catalog_cache()
     calls = {"n": 0}
 
@@ -62,7 +67,8 @@ def test_first_call_fails_second_succeeds_returns_catalog():
     assert result["total_items"] == 2
 
 
-def test_first_call_succeeds_no_retry():
+def test_first_call_succeeds_no_retry(monkeypatch):
+    _configure_composio(monkeypatch)
     _clear_catalog_cache()
     calls = {"n": 0}
 
@@ -79,7 +85,8 @@ def test_first_call_succeeds_no_retry():
     assert result["total_items"] == 2
 
 
-def test_both_calls_fail_raises():
+def test_both_calls_fail_raises(monkeypatch):
+    _configure_composio(monkeypatch)
     _clear_catalog_cache()
 
     def fake_get(path, **params):
@@ -96,9 +103,10 @@ def test_both_calls_fail_raises():
     assert raised, "a persistent failure must still propagate (handler maps to 502)"
 
 
-def test_catalog_endpoint_recovers_after_one_failure():
+def test_catalog_endpoint_recovers_after_one_failure(monkeypatch):
     """End-to-end through the FastAPI route: first fetch fails, retry succeeds,
     endpoint returns 200 instead of 502 'Could not load integrations'."""
+    _configure_composio(monkeypatch)
     _clear_catalog_cache()
     from fastapi.testclient import TestClient
     from main import app

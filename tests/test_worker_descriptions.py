@@ -6,6 +6,7 @@ API projection, and all-12-stock-worker YAML round-trips.
 import os
 import sys
 import json
+import subprocess
 import pytest
 import yaml
 from pathlib import Path
@@ -33,6 +34,16 @@ WORKERS_DIR = REPO_ROOT / "workers"
 # Non-stock test fixtures (input_types_test, etc.) were moved out of workers/
 # into tests/fixtures/ (commit db255be) so they no longer ship as stock workers.
 FIXTURES_DIR = REPO_ROOT / "tests" / "fixtures"
+
+
+def _tracked_worker_ids() -> list[str]:
+    result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "workers/*/worker.yml"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    return sorted(Path(line).parent.name for line in result.stdout.splitlines() if line.strip())
 
 
 # ---------------------------------------------------------------------------
@@ -200,10 +211,7 @@ class TestFolderValidator:
 # ---------------------------------------------------------------------------
 
 class TestStockWorkerManifests:
-    @pytest.mark.parametrize("worker_id", sorted([
-        d.name for d in WORKERS_DIR.iterdir()
-        if d.is_dir() and (d / "worker.yml").is_file()
-    ]))
+    @pytest.mark.parametrize("worker_id", _tracked_worker_ids())
     def test_manifest_roundtrip(self, worker_id):
         yml_path = WORKERS_DIR / worker_id / "worker.yml"
         raw = yaml.safe_load(yml_path.read_text())
