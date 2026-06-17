@@ -707,18 +707,27 @@ def approve_run(
     )
 
     # We won the claim — now (and only now) spawn the single follow-up run.
+    # #418: create the run in a NON-QUEUED holding status (RUNNING) so the
+    # background drain loop (which only dispatches QUEUED runs) cannot pick it up
+    # before its approval linkage is attached. Otherwise the execute-phase run
+    # could be dispatched in the window before attach_follow_up, and
+    # _is_engine_approved_execution_run would misclassify it as the propose
+    # phase (re-gating it / skipping the side effect).
     try:
         follow_up_run_id = create_run(
             worker_id,
             follow_up_inputs,
             trigger_source="approval",
+            status=RunStatus.RUNNING.value,
             user_id=auth.user_id,
             repos=repos,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to spawn follow-up run: {exc}") from exc
 
-    # Attach the follow-up run id to the (already-approved) approval row.
+    # Attach the follow-up run id to the (already-approved) approval row BEFORE
+    # the run is made dispatchable, so the execute-phase signal is authoritative
+    # by the time any executor reads it.
     attach = getattr(repos.approvals, "attach_follow_up", None)
     if callable(attach):
         attach(
@@ -727,6 +736,15 @@ def approve_run(
             follow_up_run_id=follow_up_run_id,
             edited_output_json=edited_output_json,
         )
+
+    # Now flip the follow-up run to QUEUED and wake the drain loop. The linkage
+    # above is committed first, so the run is recognised as execute-phase the
+    # instant it becomes dispatchable.
+    repos.runs.update_status(
+        user_id=auth.user_id,
+        run_id=follow_up_run_id,
+        status=RunStatus.QUEUED.value,
+    )
 
     # Kick off the follow-up run
     start_run(follow_up_run_id, worker_id, follow_up_inputs, user_id=auth.user_id, repos=repos)

@@ -16,6 +16,28 @@ Agent-mode workers use the approval gate after the agent has produced the
 proposed final output. Script-mode workers use the approval contract in the
 worker manifest and runtime output path.
 
+## Two-Phase Side-Effect Contract (#418)
+
+For a worker with `approvals.required: true`, the engine guarantees the worker
+runs in exactly one of two phases and stamps an authoritative `decision` value
+onto its inputs **before execution**:
+
+- **Propose phase** — `decision == "proposed"`. Every run that is not an
+  engine-spawned post-approval run. The worker MUST draft its action and emit
+  `decision_required` and MUST NOT fire any side effect.
+- **Execute phase** — `decision == "approved"`. Only the follow-up run the
+  engine spawns after an owner approves. `approved_output` carries the
+  (optionally edited) proposed output. The worker fires the side effect here,
+  exactly once.
+
+The phase is determined authoritatively from the approval record
+(`follow_up_run_id`), never from caller-supplied inputs or `trigger_source`. A
+caller cannot bypass the gate by sending `decision: "approved"` — the engine
+overrides it to `"proposed"` for any non-approved run, and strips
+`approved_output`. Worker rule: **branch on `decision == "approved"` to act;
+treat everything else as propose. Never fire a side effect unless
+`decision == "approved"`.**
+
 ## Owner Review Flow
 
 `GET /approvals` returns pending approval rows for the authenticated owner. The
