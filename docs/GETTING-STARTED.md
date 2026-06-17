@@ -51,7 +51,116 @@ Windows PowerShell:
 
 Open `http://localhost:3000`. The API listens on `http://localhost:8000`.
 
-## 2. Build your first worker
+## 2. Manual setup and configuration
+
+The scripts above are the recommended path. Use the manual steps only when you
+need to debug one side of the stack.
+
+Backend:
+
+```bash
+cd apps/api
+python3.11 -m venv venv
+source venv/bin/activate
+pip install -r requirements.txt
+cp .env.example .env
+# edit .env and add OPENAI_API_KEY + E2B_API_KEY
+python main.py
+```
+
+Windows PowerShell:
+
+```powershell
+cd apps\api
+python -m venv venv
+.\venv\Scripts\activate
+pip install -r requirements.txt
+Copy-Item .env.example .env
+# edit .env and add OPENAI_API_KEY + E2B_API_KEY
+python main.py
+```
+
+Frontend:
+
+```bash
+cd apps/web
+cp .env.example .env
+npm install
+npm run dev
+```
+
+Start the backend with `python main.py` during development. Avoid bare
+`uvicorn main:app --reload`; the checked-in entry point excludes runtime
+artifact directories from reload watching.
+
+### Model providers
+
+OpenAI is the zero-config default. To use another provider, set the role-specific
+model variables to a litellm model id and provide that provider's credentials.
+
+| Env var | Role | Default |
+| --- | --- | --- |
+| `WORKEROS_WORKER_AGENT_MODEL` | tool-calling worker agents | `gpt-5.5` |
+| `WORKEROS_CHAT_MODEL` | Emily chat assistant | `gpt-5.4-mini` |
+| `WORKEROS_CODEGEN_MODEL` | worker codegen, draft, and repair | `gpt-5.5` |
+| `WORKEROS_SUGGEST_MODEL` | worker-edit conflict check | codegen model |
+
+Example Bedrock configuration:
+
+```bash
+WORKEROS_WORKER_AGENT_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
+WORKEROS_CHAT_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
+WORKEROS_CODEGEN_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION_NAME=us-west-2
+```
+
+Other litellm providers work the same way:
+
+| Provider | Model id example | Key |
+| --- | --- | --- |
+| Anthropic | `anthropic/claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
+| Google Gemini | `gemini/gemini-2.5-pro` | `GEMINI_API_KEY` |
+| Groq | `groq/llama-3.3-70b-versatile` | `GROQ_API_KEY` |
+
+Emily and web-search workers use a provider-agnostic `web_search` function tool.
+It defaults to DuckDuckGo; set `SERPER_API_KEY` for Google-quality results.
+
+### Optional configuration
+
+- `FLOOM_SECRET`: operator secret for API requests. Leave unset for local dev.
+- `COMPOSIO_API_KEY` and `COMPOSIO_WEBHOOK_SIGNING_KEY`: OAuth apps and triggers.
+- `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET`: Slack integration.
+- `WORKEROS_MAGIC_LINK_SECRET`: HMAC key for magic sign-in links.
+- `FLOOM_WORKERS_DIR` and `FLOOM_CONTEXTS_DIR`: set both outside the source
+  checkout to enable git-backed worker/context history.
+- `WORKEROS_GIT_REMOTE`: optional remote for workspace history.
+
+Worker secrets are stored encrypted in `.secrets.enc`. For local git setups,
+back up `~/.config/workeros/secrets.key`; losing it means existing encrypted
+secrets must be re-entered.
+
+### Version history
+
+Workers, contexts, and workspace settings can be committed to a local git
+workspace. `workers.versions` and `contexts.versions` list commits; rollback
+restores a version by writing a new commit, so you can roll forward again.
+
+The workspace git root is the parent of `FLOOM_WORKERS_DIR`. The engine refuses
+to commit history into its own source checkout, so point worker and context
+directories somewhere else:
+
+```bash
+FLOOM_WORKERS_DIR=~/.workeros/workers
+FLOOM_CONTEXTS_DIR=~/.workeros/contexts
+```
+
+That shared parent becomes a local git repo with no remote. Set
+`WORKEROS_GIT_REMOTE` only if you want to push workspace history to your own git
+host.
+
+## 3. Build your first worker
 
 Create a folder:
 
@@ -120,7 +229,7 @@ the Workers page.
 For the full schema, agent workers, approvals, triggers, secrets, and
 connections, read [AUTHORING.md](AUTHORING.md).
 
-## 3. Deploy safely
+## 4. Deploy safely
 
 For a self-hosted deployment:
 

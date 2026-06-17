@@ -47,157 +47,14 @@ You pay only for sandbox execution time (E2B bills per second of run time), with
 .\scripts\dev.ps1                 # starts backend (:8000) + frontend (:3000); Ctrl+C stops both
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and sign in. That's the whole setup — no auth secret required for local dev, and the example workers are seeded on first boot. Everything below is **optional**: other model providers (Bedrock/Claude, Gemini, …), an operator secret, git-backed version history, and integrations.
+Open [http://localhost:3000](http://localhost:3000) and sign in. That's the
+whole setup: no auth secret required for local dev, and the example workers are
+seeded on first boot.
 
-Prefer to run things by hand (or need to debug one side)? The manual per-OS steps are below.
-
-### Troubleshooting
-
-See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for the full setup,
-runtime, and test troubleshooting index.
-
-- **Frontend shows a cloud sign-in screen:** copy `apps/web/.env.example` to
-  `apps/web/.env`. The local frontend should point at `http://localhost:8000`.
-- **Port already in use:** stop the existing process on `3000` or `8000`, or set
-  `WORKEROS_API_PORT` before starting the backend.
-- **Backend restarts during worker runs:** start the API with `python main.py`,
-  not bare `uvicorn main:app --reload`; the checked-in entry point excludes
-  runtime artifact folders from reload watching.
-- **Workers fail before running:** confirm `E2B_API_KEY` is set in
-  `apps/api/.env`.
-- **Agent workers or Emily fail on model calls:** confirm `OPENAI_API_KEY` is set,
-  or configure the model-provider variables shown below.
-- **Version history is empty:** set `FLOOM_WORKERS_DIR` and `FLOOM_CONTEXTS_DIR`
-  to directories outside the engine checkout. The engine refuses to commit
-  worker history into its own source repo.
-
----
-
-### 1. Install backend dependencies
-
-**Linux / macOS**
-```bash
-cd apps/api
-python3.11 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-**Windows**
-```powershell
-cd apps/api
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 2. Set up secrets
-
-```bash
-cp apps/api/.env.example apps/api/.env
-# Edit apps/api/.env and fill in at minimum: OPENAI_API_KEY, E2B_API_KEY
-```
-
-**Required:**
-- `OPENAI_API_KEY` — the default model provider (powers Emily, agent-mode workers, and codegen)
-- `E2B_API_KEY` — sandbox execution (get one at e2b.dev)
-
-**Model providers (OpenAI by default, or AWS Bedrock / Claude):**
-
-The backend is provider-agnostic: each model call is selected by a *model id* and
-routed through litellm. OpenAI is the zero-config default. To use another provider,
-point the per-role model vars at that provider's id and supply its credentials:
-
-| Env var | Role | Default |
-| --- | --- | --- |
-| `WORKEROS_WORKER_AGENT_MODEL` | tool-calling worker agents | `gpt-5.5` |
-| `WORKEROS_CHAT_MODEL` | Emily (chat assistant) | `gpt-5.4-mini` |
-| `WORKEROS_CODEGEN_MODEL` | worker codegen / draft / repair | `gpt-5.5` |
-| `WORKEROS_SUGGEST_MODEL` | worker-edit conflict check | codegen model |
-
-Example — AWS Bedrock (Claude Sonnet 4.6):
-
-```bash
-WORKEROS_WORKER_AGENT_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
-WORKEROS_CHAT_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
-WORKEROS_CODEGEN_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
-AWS_REGION_NAME=us-west-2
-```
-
-Other litellm providers work the same way — set a role's model id to a provider-prefixed
-id and supply that provider's key. Tool-call reliability and prompt caching vary by
-provider (caching auto-applies on OpenAI and Anthropic/Bedrock only):
-
-| Provider | Model id example | Key |
-| --- | --- | --- |
-| Anthropic (direct) | `anthropic/claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
-| Google Gemini | `gemini/gemini-2.5-pro` | `GEMINI_API_KEY` |
-| Groq | `groq/llama-3.3-70b-versatile` | `GROQ_API_KEY` |
-
-Anthropic models on Bedrock require submitting the one-time "use case details" form
-in the Bedrock console (per region). Prompt caching of the static system prompt is
-applied automatically on Anthropic/Bedrock for both codegen and agent (worker +
-Emily) calls; OpenAI caches prefixes server-side.
-
-**Web search:** Emily and web-search workers use a provider-agnostic `web_search`
-function tool that works on every model (including Bedrock/Claude), not OpenAI's
-hosted tool. It defaults to free DuckDuckGo (no key); set `SERPER_API_KEY` for
-Google-quality results (serper.dev).
-
-**Recommended for production:**
-- `FLOOM_SECRET` — operator secret that gates all API requests. Omit entirely for unauthenticated local dev.
-
-**Optional integrations:**
-- `COMPOSIO_API_KEY` + `COMPOSIO_WEBHOOK_SIGNING_KEY` — Connections feature (OAuth apps, triggers)
-- `SLACK_CLIENT_ID` + `SLACK_CLIENT_SECRET` — Slack integration (Emily in Slack, magic sign-in links)
-- `WORKEROS_MAGIC_LINK_SECRET` — dedicated HMAC key for magic sign-in links; falls back to `FLOOM_SECRET` then a per-process key if unset
-
-**Version history (recommended):**
-- `FLOOM_WORKERS_DIR` + `FLOOM_CONTEXTS_DIR` — point these to a directory **outside the cloned repo** (e.g. `~/.workeros/workers` and `~/.workeros/contexts`) to enable git-backed version history and rollback. Left at their in-repo defaults, the engine **refuses to version into its own source checkout** (and logs a warning), so worker/context versions stay empty. See [Workspace & versioning](#workspace--versioning).
-- `WORKEROS_GIT_REMOTE` *(optional)* — a git remote (`https://{token}@github.com/{owner}/{repo}.git`) to push version history to. Unset = local history only.
-
-**Secrets encryption key (`.secrets.enc`):**
-
-Worker secrets are stored encrypted in `.secrets.enc` in your workspace. The decryption key is stored out-of-band:
-
-| Setup | Key location |
-|---|---|
-| Cloud (workeros.floom.dev) | Supabase Vault — managed automatically |
-| Self-hosted + GitHub remote | GitHub repo Variable `WORKEROS_SECRETS_KEY` — set automatically on first use |
-| Self-hosted, local git only | `~/.config/workeros/secrets.key` (mode 600) — generated automatically on first use |
-
-For local git setups, back up `~/.config/workeros/secrets.key`. Losing it means existing `.secrets.enc` is unreadable and secrets must be re-entered.
-
-### 3. Start the backend
-
-**Linux / macOS**
-```bash
-cd apps/api
-source venv/bin/activate
-python main.py
-```
-
-**Windows**
-```powershell
-cd apps/api
-venv\Scripts\activate
-python main.py
-```
-
-The API serves on `http://localhost:8000` with auto-reload. Start it with **`python main.py`**, not a bare `uvicorn main:app --reload`: `main.py` configures the reloader to exclude `data/` and the workers directory. Without that, every run — which stages a bundle under `data/run-bundles/` — would trip the file-watcher and **restart the API mid-execution**. For production, run without reload, e.g. `uvicorn main:app --host 0.0.0.0 --port 8000`.
-
-### 4. Start the frontend
-
-```bash
-cd apps/web
-cp .env.example .env   # points the web app at your local backend (http://localhost:8000)
-npm install
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000). **Without `apps/web/.env`, the web app falls back to the production cloud API** and you'll see the production sign-in screen instead of "Create your workspace" — so don't skip the `cp` step. On a fresh install the first sign-in creates your admin account.
+For manual setup, model provider configuration, optional integrations, and safe
+self-hosting notes, see [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md).
+For common setup/runtime issues, see
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ---
 
@@ -280,26 +137,19 @@ A few of the workers shipped in [`workers/`](workers/) — browse the directory 
 
 ## Workspace & versioning
 
-Every change to a worker, context, or workspace setting is committed to a **git "workspace" repo** — that's your version history. `workers.versions` / `contexts.versions` list the commits; rollback restores any of them (and writes a *new* commit, so you can roll forward again too).
-
-The workspace git root is the **parent of `FLOOM_WORKERS_DIR`**, which by default is this cloned repo. To avoid versioning into — and accidentally pushing to — its own source tree, **the engine refuses to commit when the workspace root is the engine checkout**, so with the defaults versioning is off and a one-time warning is logged.
-
-**To enable versioning**, point `FLOOM_WORKERS_DIR` and `FLOOM_CONTEXTS_DIR` at a directory **outside** the checkout that share a parent:
-
-```bash
-FLOOM_WORKERS_DIR=~/.workeros/workers
-FLOOM_CONTEXTS_DIR=~/.workeros/contexts
-```
-
-That shared parent (`~/.workeros`) becomes a local git repo with **no remote** — versioned locally, never pushed. Copy the shipped example workers into `FLOOM_WORKERS_DIR` once if you want them tracked. To also push history to your own git host (never the engine's repo), set `WORKEROS_GIT_REMOTE`.
+Workers, contexts, and workspace settings can be versioned in a git-backed
+workspace so rollback writes a new commit and can be rolled forward again. To
+enable history, set `FLOOM_WORKERS_DIR` and `FLOOM_CONTEXTS_DIR` outside the
+source checkout. See [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for the
+setup notes.
 
 ---
 
 ## Contexts (brain packs)
 
-Contexts are reusable file bundles you attach to workers as reference material, stored in `contexts/<name>/`. Manage them via the API/MCP (`contexts.create`, `contexts.write`, `contexts.read`, …) or the UI, then list a context under a worker's `contexts:` in `worker.yml`.
-
-Contexts are **sensitive by default** and excluded from git (they may hold credentials). To put one under version control, create it with `sensitive: false` — its history then appears in `contexts.versions` and is restorable via `contexts.rollback`, exactly like workers.
+Contexts are reusable file bundles you attach to workers as reference material.
+They are sensitive by default and excluded from git unless explicitly created as
+non-sensitive. See [docs/AUTHORING.md](docs/AUTHORING.md) for manifest usage.
 
 ---
 
