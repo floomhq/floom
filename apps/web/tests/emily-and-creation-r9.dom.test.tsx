@@ -93,4 +93,17 @@ describe("Emily dock — full screen controls", () => {
     expect(screen.queryByRole("button", { name: /close full screen/i })).not.toBeInTheDocument();
     expect(screen.getByRole("button", { name: /expand emily/i })).toBeInTheDocument();
   });
+
+  it("full screen renders the chat core with fullPage layout (fixes composer dead space)", async () => {
+    const user = userEvent.setup();
+    const { container } = render(<EmilyDock />);
+    // Not full yet → no centered fullPage thread container.
+    expect(container.querySelector(".max-w-2xl.mx-auto")).toBeNull();
+    await user.click(screen.getByRole("button", { name: /expand emily/i }));
+    await user.click(screen.getByRole("button", { name: /expand emily/i }));
+    // In full mode the core is rendered with fullPage → max-w-2xl mx-auto w-full
+    // wrapper, so the thread takes proper height and the composer is anchored
+    // (Federico 2026-06-17: full mode previously mounted without fullPage).
+    expect(container.querySelector(".max-w-2xl.mx-auto.w-full")).not.toBeNull();
+  });
 });
