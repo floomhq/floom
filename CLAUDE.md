@@ -79,17 +79,35 @@ WorkerOS PR in the same session and delete the workaround once it merges.
 # After a WorkerOS PR merges:
 cd engine && git fetch origin && git checkout <new-sha> && cd ..
 git add engine && git commit -m "chore(engine): bump to <sha> (<what>)"
-# deploy: pull on /opt/workeros-cloud, git submodule update, restart service
+# deploy: railway up --service workeros-cloud-api, then run smoke gate
 ```
 
-## Live deployment (AX41)
-- API: systemd `workeros-cloud-api` (port 8030) → Cloudflare tunnel →
-  `workeros-api.floom.dev`. Restart: `systemctl restart workeros-cloud-api`.
-- Live checkout: `/opt/workeros-cloud` — treat as read-only mainline; do branch
-  work in `/tmp/` clones/worktrees and deploy by pulling main on `/opt`.
-- Dashboard: `web/` → Vercel project `workeros-cloud-dashboard`, served at
+## Live deployment
+- API: Railway service `workeros-cloud-api`, public base
+  `https://workeros-api.floom.dev`. Deploy from this repo after the engine
+  submodule is pinned:
+
+  ```bash
+  railway up --service workeros-cloud-api
+  bash ops/smoke-routes.sh cloud
+  ```
+
+- API engine/runtime env required for performant E2B execution:
+
+  ```bash
+  WORKEROS_E2B_WARM_POOL_ENABLED=1
+  WORKEROS_E2B_WARM_POOL_SIZE_PER_KEY=1
+  WORKEROS_E2B_WARM_POOL_MAX_AGE_SECONDS=900
+  ```
+
+  These flags keep successful read-only local-context E2B sandboxes warm for
+  repeat runs of the same worker/template/context shape. Workers with writeable
+  memory/context mounts or git-backed contexts stay on the cold path so
+  writeback and clone semantics remain correct.
+
+- Dashboard: `web/` -> Vercel project `workeros-cloud-dashboard`, served at
   `/app/*` via the apex project's `vercel.json` rewrite to
-  `workeros-cloud-dashboard.vercel.app`. Landing: repo root `app/` → Vercel
+  `workeros-cloud-dashboard.vercel.app`. Landing: repo root `app/` -> Vercel
   landing project `workeros-cloud-landing` (apex). NOT git-auto-deployed.
 - **HARD post-deploy gate:** after every production deploy and before relying on
   any production alias, run `bash ops/smoke-routes.sh` from the repo root. It
@@ -115,11 +133,6 @@ git add engine && git commit -m "chore(engine): bump to <sha> (<what>)"
   Engine seams live upstream (floomhq/workeros#324: env api-base, env basePath,
   exported sidebar parts). Landing deploys with `npm run deploy:prod` from the
   repo root, or `vercel deploy --prod --yes && bash ops/smoke-routes.sh`.
-- **NOTE (2026-05-30):** the de-fork bumped the `engine/` submodule pin to
-  `66e9a6e` (from the old `#197`). This moves the **API's** engine too. The
-  dashboard frontend is verified against the current API, but the running API on
-  `/opt` was NOT bumped/restarted — bump + restart `workeros-cloud-api` only after
-  separately verifying the API against engine `66e9a6e`.
 - Supabase project `sgizlsyygvlqosgwdimb`. Backend uses the **service_role** key
   (bypasses RLS). **Every public table MUST have RLS enabled** — the backend is
   the only data path; PostgREST/anon must be denied. (Audit 2026-05-29 found

@@ -70,7 +70,7 @@ After login, the MCP package detects credentials and uses Supabase JWT for API c
 | Layer | Choice |
 |---|---|
 | Frontend | Next.js (Vercel) — `workeros.floom.dev` |
-| Backend | FastAPI hosted (likely Hetzner via cloudflared) — `api.workeros.floom.dev` |
+| Backend | FastAPI on Railway - `workeros-api.floom.dev` |
 | Auth | Supabase Auth (Google OAuth + email magic link) |
 | DB | Supabase Postgres with row-level security |
 | Sandbox | E2B (per-user, sandboxed by default for hosted) — no local subprocess |
@@ -85,6 +85,21 @@ After login, the MCP package detects credentials and uses Supabase JWT for API c
 Cloud scheduler boot acquires Postgres advisory lock `87452311` before starting
 the in-process cron loop. If another instance already holds the lock, the second
 API process logs the conflict and exits instead of double-firing scheduled runs.
+
+## Cloud Runtime Env
+
+Set these on the Railway `workeros-cloud-api` service for performant E2B repeat
+runs:
+
+```bash
+WORKEROS_E2B_WARM_POOL_ENABLED=1
+WORKEROS_E2B_WARM_POOL_SIZE_PER_KEY=1
+WORKEROS_E2B_WARM_POOL_MAX_AGE_SECONDS=900
+```
+
+Warm pooling reuses successful read-only local-context sandboxes for the same
+worker/template/context shape. Workers with writeable memory/context mounts or
+git-backed contexts intentionally stay on the cold path.
 
 ## Tenancy model
 
