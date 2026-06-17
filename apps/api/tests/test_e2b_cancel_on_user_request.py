@@ -96,12 +96,14 @@ def test_running_run_cancel_kills_e2b_sandbox(monkeypatch, tmp_path):
     )
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["status"] == "cancel_requested"
+    assert resp.json()["status"] == "cancelled"
     assert calls == [("run-cancel", "User requested cancellation.")]
 
     row = repos.runs.get(user_id="federico", run_id="run-cancel")
     assert row["cancel_requested"] == 1
-    assert row["status"] == "running"
+    assert row["status"] == "cancelled"
+    assert row["error_code"] == "user_cancel"
+    assert row["completed_at"]
     db.get_repositories.cache_clear()
 
 
@@ -125,12 +127,14 @@ def test_running_run_cancel_still_records_request_when_no_e2b_sandbox(monkeypatc
     )
 
     assert resp.status_code == 200, resp.text
-    assert resp.json()["status"] == "cancel_requested"
+    assert resp.json()["status"] == "cancelled"
     assert calls == ["run-cancel"]
 
     row = repos.runs.get(user_id="federico", run_id="run-cancel")
     assert row["cancel_requested"] == 1
-    assert row["status"] == "running"
+    assert row["status"] == "cancelled"
+    assert row["error_code"] == "user_cancel"
+    assert row["completed_at"]
     db.get_repositories.cache_clear()
 
 
