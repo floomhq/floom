@@ -267,7 +267,7 @@ def test_emily_create_generates_runpy_and_gates(booted, monkeypatch):
     def _spy_repair(*, run_code, failure, secrets, log_fn, intent=""):
         # The codegen MUST receive the placeholder code + the worker's intent so it
         # can implement the declared outputs.
-        repair_calls.append({"intent": intent, "had_placeholder": "# Placeholder worker" in run_code})
+        repair_calls.append({"intent": intent, "had_placeholder": run_service._PLACEHOLDER_RUN_PY_MARKER in run_code})
         return _REAL_RUN_PY
 
     def _spy_gate(worker_id, bundle, *, user_id, repos, log_fn, allow_code_repair=True):
@@ -286,7 +286,7 @@ def test_emily_create_generates_runpy_and_gates(booted, monkeypatch):
     assert repair_calls[0]["had_placeholder"] is True
     assert repair_calls[0]["intent"], "codegen did not receive the worker intent"
     run_py = (workers_dir / worker_id / "run.py").read_text(encoding="utf-8")
-    assert "# Placeholder worker" not in run_py, "placeholder run.py was not replaced"
+    assert run_service._PLACEHOLDER_RUN_PY_MARKER not in run_py, "placeholder run.py was not replaced"
     assert "result" in run_py
 
     # The smoke+repair gate ran with code-repair allowed (Path B behavior).
