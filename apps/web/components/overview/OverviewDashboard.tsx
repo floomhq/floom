@@ -475,34 +475,43 @@ export function OverviewDashboard({
         <div className="mt-1 text-[13px] text-[var(--text-muted)]">{todayLabel}</div>
 
         {/* 2. Label + the big near-black number (heavier/larger than the
-            greeting — reclaims visual primacy) + inline sparkline. */}
-        <div className="mt-9 text-[13px] text-[var(--text-muted)]">Work done this week</div>
-        <div className="mt-1 flex items-end gap-5">
-          {loading ? (
-            <Skeleton className="h-[60px] w-[96px] rounded-[var(--radius-button)]" />
-          ) : (
-            <div className="text-[64px] font-bold leading-none tracking-[-0.03em] text-[var(--text-primary)]">
-              {completedThisWeek}
-            </div>
-          )}
-          {sparkPoints && (
-            <svg
-              width="150"
-              height="44"
-              viewBox="0 0 150 44"
-              className="mb-2 block"
-              aria-hidden="true"
-            >
-              <polyline
-                fill="none"
-                stroke="var(--accent)"
-                strokeWidth="2.5"
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                points={sparkPoints}
-              />
-            </svg>
-          )}
+            greeting — reclaims visual primacy) + inline sparkline.
+            O2/OV-ASCII: wrapped in the same framed-card treatment as the
+            WorkerAsciiDiagram (bg-[var(--bg-2)], radius-card, px-5 py-4)
+            so the overview hero has the same surface vocabulary as the
+            worker-detail "WHAT IT DOES" panel. */}
+        <div
+          className="mt-9 bg-[var(--bg-2)] px-5 py-4"
+          style={{ borderRadius: "var(--radius-card)" }}
+        >
+          <div className="text-[13px] text-[var(--text-muted)]">Work done this week</div>
+          <div className="mt-1 flex items-end gap-5">
+            {loading ? (
+              <Skeleton className="h-[60px] w-[96px] rounded-[var(--radius-button)]" />
+            ) : (
+              <div className="text-[64px] font-bold leading-none tracking-[-0.03em] text-[var(--text-primary)]">
+                {completedThisWeek}
+              </div>
+            )}
+            {sparkPoints && (
+              <svg
+                width="150"
+                height="44"
+                viewBox="0 0 150 44"
+                className="mb-2 block"
+                aria-hidden="true"
+              >
+                <polyline
+                  fill="none"
+                  stroke="var(--accent)"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  points={sparkPoints}
+                />
+              </svg>
+            )}
+          </div>
         </div>
 
         {/* 3. One-sentence plain-language summary (2-line cap). */}
