@@ -52,7 +52,7 @@ PUBLIC_SHARE_TEXT_PREVIEW_LIMIT = 512 * 1024
 
 DEFAULT_JSON_BODY_LIMIT_BYTES = 256 * 1024
 FROM_BUNDLE_BODY_LIMIT_BYTES = 5 * 1024 * 1024
-DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES = 25 * 1024 * 1024
+DEFAULT_CONTEXT_UPLOAD_LIMIT_BYTES = 50 * 1024 * 1024
 # #1024: PUT /workers/{id}/files replaces ALL worker files atomically, so a
 # worker that bundles a data file (candidate pools, datasets) must re-send it on
 # every deploy. The 256 KB JSON default 413'd those before the body was read,
