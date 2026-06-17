@@ -10,6 +10,8 @@ if str(API_DIR) not in sys.path:
 
 import main
 from runner_sandbox.e2b_driver import (
+    _append_memory_diagnostics,
+    _diagnostics_show_oom,
     _sandbox_exception_result,
     _worker_result_failure_fields,
 )
@@ -63,3 +65,17 @@ def test_e2b_sandbox_error_operator_message_is_not_timeout_headline():
         "configuration if it repeats."
     )
     assert "too long" not in headline
+
+
+def test_memory_diagnostics_detect_cgroup_oom_kill():
+    diagnostics = "/sys/fs/cgroup/memory.events: low 0\nhigh 0\nmax 12\noom 1\noom_kill 1"
+
+    assert _diagnostics_show_oom(diagnostics) is True
+
+
+def test_memory_diagnostics_are_appended_to_error_message():
+    error = _append_memory_diagnostics("Sandbox ran out of memory", "memory.events: oom_kill 1")
+
+    assert "Sandbox ran out of memory" in error
+    assert "Sandbox memory diagnostics" in error
+    assert "oom_kill 1" in error

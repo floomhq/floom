@@ -486,13 +486,102 @@ def _runtime_kind(config: WorkerConfig | None) -> str:
     return "python"
 
 
+def _worker_resources(config: WorkerConfig | None) -> tuple[int | None, int | None]:
+    resources = getattr(config, "resources", None)
+    memory_mb = getattr(resources, "memory_mb", None)
+    cpu_count = getattr(resources, "cpu_count", None)
+    try:
+        memory_value = int(memory_mb) if memory_mb is not None else None
+    except (TypeError, ValueError):
+        memory_value = None
+    try:
+        cpu_value = int(cpu_count) if cpu_count is not None else None
+    except (TypeError, ValueError):
+        cpu_value = None
+    return memory_value, cpu_value
+
+
+def _resource_template_env_key(kind: str, memory_mb: int | None) -> str | None:
+    if not memory_mb:
+        return None
+    normalized_kind = "NODE" if kind == "node" else "PYTHON"
+    return f"WORKEROS_E2B_{normalized_kind}_TEMPLATE_MEMORY_{memory_mb}"
+
+
 def _e2b_template_for_config(config: WorkerConfig | None) -> str | None:
     kind = _runtime_kind(config)
+    memory_mb, _cpu_count = _worker_resources(config)
+    resource_env = _resource_template_env_key(kind, memory_mb)
+    if resource_env:
+        value = os.environ.get(resource_env)
+        if value:
+            return value.strip() or None
     if kind == "node":
         value = os.environ.get("WORKEROS_E2B_NODE_TEMPLATE_ID")
     else:
         value = os.environ.get("WORKEROS_E2B_PYTHON_TEMPLATE_ID")
     return (value or os.environ.get("WORKEROS_E2B_DEFAULT_TEMPLATE_ID") or "").strip() or None
+
+
+def _worker_template_cache_key(worker_dir: Path, config: WorkerConfig | None) -> str:
+    memory_mb, cpu_count = _worker_resources(config)
+    payload = {
+        "v": 1,
+        "runtime": _runtime_kind(config),
+        "command": getattr(getattr(config, "runtime", None), "command", None) or "python run.py",
+        "bundle": _hash_tree(worker_dir),
+        "resources": {
+            "memory_mb": memory_mb,
+            "cpu_count": cpu_count,
+        },
+    }
+    raw = json.dumps(payload, sort_keys=True, separators=(",", ":"))
+    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+def _template_cache_mapping() -> dict[str, str]:
+    raw = os.environ.get("WORKEROS_E2B_TEMPLATE_CACHE_JSON", "").strip()
+    if not raw:
+        path = os.environ.get("WORKEROS_E2B_TEMPLATE_CACHE_FILE", "").strip()
+        if path:
+            try:
+                raw = Path(path).read_text(encoding="utf-8").strip()
+            except Exception:
+                logger.warning("Failed to read WORKEROS_E2B_TEMPLATE_CACHE_FILE=%s", path, exc_info=True)
+                raw = ""
+    if not raw:
+        return {}
+    try:
+        data = json.loads(raw)
+    except json.JSONDecodeError:
+        logger.warning("Ignoring invalid WORKEROS_E2B_TEMPLATE_CACHE_JSON")
+        return {}
+    if not isinstance(data, dict):
+        return {}
+    return {
+        str(key): str(value).strip()
+        for key, value in data.items()
+        if str(key).strip() and str(value).strip()
+    }
+
+
+def _e2b_template_for_run(worker_dir: Path, config: WorkerConfig | None, *, log_fn: Callable[[str, str], None]) -> str | None:
+    cache_key = _worker_template_cache_key(worker_dir, config)
+    cached_template = _template_cache_mapping().get(cache_key)
+    if cached_template:
+        log_fn(f"[e2b] Using cached worker template for bundle key {cache_key[:12]}", "info")
+        return cached_template
+
+    template = _e2b_template_for_config(config)
+    memory_mb, _cpu_count = _worker_resources(config)
+    resource_env = _resource_template_env_key(_runtime_kind(config), memory_mb)
+    if memory_mb and resource_env and not os.environ.get(resource_env):
+        log_fn(
+            f"[e2b] Worker requests {memory_mb}MB memory, but {resource_env} is not configured; "
+            "using the default E2B template",
+            "warning",
+        )
+    return template
 
 
 def _configured_e2b_api_keys() -> list[str]:
@@ -896,6 +985,68 @@ def _looks_like_sandbox_oom(exit_code: int | None, stdout: str | None, stderr: s
         return True
     text = f"{stdout or ''}\n{stderr or ''}".lower()
     return any(marker in text for marker in _OOM_MARKERS)
+
+
+def _sandbox_memory_diagnostics(sandbox: Any, workdir: str) -> str:
+    command = (
+        "python - <<'PY'\n"
+        "from pathlib import Path\n"
+        "paths = [\n"
+        "    '/sys/fs/cgroup/memory.events',\n"
+        "    '/sys/fs/cgroup/memory.current',\n"
+        "    '/sys/fs/cgroup/memory.max',\n"
+        "    '/sys/fs/cgroup/memory/memory.oom_control',\n"
+        "    '/sys/fs/cgroup/memory/memory.failcnt',\n"
+        "    '/sys/fs/cgroup/memory/memory.limit_in_bytes',\n"
+        "]\n"
+        "for raw in paths:\n"
+        "    path = Path(raw)\n"
+        "    if path.exists():\n"
+        "        try:\n"
+        "            print(f'{raw}: {path.read_text(errors=\"replace\").strip()}')\n"
+        "        except Exception as exc:\n"
+        "            print(f'{raw}: <read failed: {exc}>')\n"
+        "PY"
+    )
+    try:
+        result = sandbox.commands.run(
+            command,
+            cwd=workdir,
+            timeout=5,
+            request_timeout=10,
+        )
+    except Exception as exc:
+        return f"memory diagnostics unavailable: {exc}"
+    output = _worker_output_snippet(
+        stdout=getattr(result, "stdout", None),
+        stderr=getattr(result, "stderr", None),
+    )
+    return output or "memory diagnostics unavailable: no cgroup memory files returned data"
+
+
+def _append_memory_diagnostics(error: str, diagnostics: str | None) -> str:
+    detail = (diagnostics or "").strip()
+    if not detail:
+        return error
+    if len(detail) > MAX_WORKER_ERROR_OUTPUT_CHARS:
+        detail = detail[:MAX_WORKER_ERROR_OUTPUT_CHARS].rstrip() + "..."
+    return f"{error}\n\nSandbox memory diagnostics:\n{detail}"
+
+
+def _diagnostics_show_oom(diagnostics: str | None) -> bool:
+    text = (diagnostics or "").lower()
+    if "under_oom 1" in text:
+        return True
+    for marker in ("oom_kill", "oom", "memory.failcnt"):
+        if marker not in text:
+            continue
+        for token in re.findall(rf"{re.escape(marker)}\s*:?\s*(\d+)", text):
+            try:
+                if int(token) > 0:
+                    return True
+            except ValueError:
+                continue
+    return False
 
 
 def _emit_command_output(raw: str, level: str, prefix: str, log_fn: Callable[[str, str], None]) -> None:
@@ -1497,7 +1648,7 @@ class E2BSandboxDriver(SandboxDriver):
         # still receive only declared user secrets plus callback vars.
         _worker_author_env = _worker_author_platform_env() if worker_id == _WORKER_AUTHOR_ID else {}
         _sandbox_envs.update(_worker_author_env)
-        sandbox_template = _e2b_template_for_config(config)
+        sandbox_template = _e2b_template_for_run(worker_dir, config, log_fn=log_fn)
         python_template_deps_baked = _env_truthy("WORKEROS_E2B_PYTHON_DEPS_BAKED")
         node_template_deps_baked = _env_truthy("WORKEROS_E2B_NODE_DEPS_BAKED")
         if sandbox_template:
@@ -1813,11 +1964,13 @@ class E2BSandboxDriver(SandboxDriver):
                 if exc_exit_code is None:
                     raise
                 if _looks_like_sandbox_oom(exc_exit_code, exc_stdout, exc_stderr):
+                    diagnostics = _sandbox_memory_diagnostics(sandbox, workdir)
                     err = _append_worker_output_to_error(
                         "Sandbox ran out of memory",
                         stdout=exc_stdout,
                         stderr=exc_stderr,
                     )
+                    err = _append_memory_diagnostics(err, diagnostics)
                     log_fn(f"[e2b] {err}", "error")
                     return WorkerResult(
                         status="error",
@@ -1850,11 +2003,13 @@ class E2BSandboxDriver(SandboxDriver):
 
             if proc.exit_code != 0:
                 if _looks_like_sandbox_oom(proc.exit_code, proc_stdout, proc_stderr):
+                    diagnostics = _sandbox_memory_diagnostics(sandbox, workdir)
                     err = _append_worker_output_to_error(
                         "Sandbox ran out of memory",
                         stdout=proc_stdout,
                         stderr=proc_stderr,
                     )
+                    err = _append_memory_diagnostics(err, diagnostics)
                     log_fn(f"[e2b] {err}", "error")
                     return WorkerResult(
                         status="error",
@@ -1887,6 +2042,23 @@ class E2BSandboxDriver(SandboxDriver):
                 worker_stderr="".join(streamed_stderr) or proc_stderr,
             )
             if parse_error is not None:
+                if getattr(parse_error, "error_code", None) == "missing_result":
+                    diagnostics = _sandbox_memory_diagnostics(sandbox, workdir)
+                    if _diagnostics_show_oom(diagnostics):
+                        err = _append_worker_output_to_error(
+                            "Sandbox ran out of memory before writing result.json",
+                            stdout="".join(streamed_stdout) or proc_stdout,
+                            stderr="".join(streamed_stderr) or proc_stderr,
+                        )
+                        err = _append_memory_diagnostics(err, diagnostics)
+                        log_fn(f"[e2b] {err}", "error")
+                        return WorkerResult(
+                            status="error",
+                            error=err,
+                            error_code="sandbox_oom",
+                            retryable=False,
+                        )
+                    parse_error.error = _append_memory_diagnostics(parse_error.error or "", diagnostics)
                 return parse_error
 
             outputs = result_data.get("outputs", {})
