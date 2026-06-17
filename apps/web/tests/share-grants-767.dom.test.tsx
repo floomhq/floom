@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor as rtlWaitFor } from "@testing-library/react";
 import { ShareModal } from "@/components/sharing/ShareModal";
 
-// #767/#768: ShareModal invite + people-with-access (when grantAsset is given).
+// #767/#768: ShareModal invite + people-with-access (when companyAccess.grantAsset is given).
 
 const { listGrants, addGrant, revokeGrant } = vi.hoisted(() => ({
   listGrants: vi.fn(),
@@ -24,18 +24,21 @@ describe("ShareModal grants (#767/#768)", () => {
       <ShareModal
         open
         onOpenChange={() => {}}
-        title="My worker"
-        getShareLink={vi.fn().mockResolvedValue("u")}
-        grantAsset={{ type: "worker", id: "alpha" }}
+        asset={{ type: "worker", name: "My worker" }}
+        companyAccess={{
+          visibility: "private",
+          setVisibility: vi.fn(),
+          grantAsset: { type: "worker", id: "alpha" },
+        }}
       />
     );
 
     // #768: existing grant listed.
     expect(await screen.findByText("bob@example.com")).toBeInTheDocument();
-    expect(screen.getByText("You (owner)")).toBeInTheDocument();
+    expect(screen.getByText("You")).toBeInTheDocument();
 
     // #767: invite a new person.
-    fireEvent.change(screen.getByPlaceholderText("Invite people by email"), {
+    fireEvent.change(screen.getByPlaceholderText("Add teammate by email"), {
       target: { value: "carol@example.com" },
     });
     fireEvent.click(screen.getByRole("button", { name: "Invite" }));
@@ -43,8 +46,15 @@ describe("ShareModal grants (#767/#768)", () => {
     expect(await screen.findByText("carol@example.com")).toBeInTheDocument();
   });
 
-  it("keeps the invite disabled when no grantAsset is supplied", () => {
-    render(<ShareModal open onOpenChange={() => {}} title="run" getShareLink={vi.fn().mockResolvedValue("u")} />);
-    expect((screen.getByPlaceholderText("Invite people by email") as HTMLInputElement).disabled).toBe(true);
+  it("shows a fallback when companyAccess has no grantAsset", () => {
+    render(
+      <ShareModal
+        open
+        onOpenChange={() => {}}
+        asset={{ type: "run", name: "run" }}
+        companyAccess={{ visibility: "private", setVisibility: vi.fn() }}
+      />
+    );
+    expect(screen.getByText("You have access.")).toBeInTheDocument();
   });
 });
