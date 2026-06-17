@@ -354,7 +354,6 @@ export function V3Body() {
           >
             <V3Composer
               fillSignal={fill}
-              heading="Start with one job."
               placeholder=""
             />
           </motion.div>
