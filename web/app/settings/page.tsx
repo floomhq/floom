@@ -1285,6 +1285,16 @@ export function BehaviourSettings({ canEdit = true }: { canEdit?: boolean }) {
   return <BehaviourSettingsInner canEdit={canEdit} />;
 }
 
+// Round-09 trust fix (silent no-op #2): the failure-email toggle is useless
+// without a recipient. Mirror the backend's `failure_email_to` validator
+// (routers/workspace.py: comma-separated emails) so the operator can't enable
+// the toggle and silently email nobody.
+const _FAILURE_EMAIL_RE = /^[^@\s,]+@[^@\s,]+\.[^@\s,]+$/;
+function failureRecipientsValid(raw: string): boolean {
+  const parts = raw.split(",").map((p) => p.trim()).filter(Boolean);
+  return parts.length > 0 && parts.every((p) => _FAILURE_EMAIL_RE.test(p));
+}
+
 function BehaviourSettingsInner({ canEdit }: { canEdit: boolean }) {
   const [values, setValues] = useState<Record<string, string> | null>(null);
 
@@ -1297,6 +1307,13 @@ function BehaviourSettingsInner({ canEdit }: { canEdit: boolean }) {
 
   const toggle = (key: string, next: boolean) => {
     if (!canEdit) return;
+    // The failure-email toggle is a no-op unless a recipient is configured.
+    // Block turning it ON with an empty/invalid recipient so the operator never
+    // believes failures are emailed when they are not.
+    if (key === "failure_email_enabled" && next && !failureRecipientsValid(values?.failure_email_to ?? "")) {
+      toast.error("Add a failure-email recipient before enabling failure emails.");
+      return;
+    }
     setValues((prev) => ({ ...(prev ?? {}), [key]: next ? "true" : "false" }));
     api.workspace.setSetting(key, next ? "true" : "false").catch((err) => {
       toast.error((err as Error).message || "Could not save setting");
@@ -1305,18 +1322,53 @@ function BehaviourSettingsInner({ canEdit }: { canEdit: boolean }) {
     });
   };
 
+  const saveRecipient = (raw: string) => {
+    if (!canEdit) return;
+    const v = raw.trim();
+    if (v === (values?.failure_email_to ?? "")) return;
+    if (v && !failureRecipientsValid(v)) {
+      toast.error("Enter a valid email (comma-separated for multiple).");
+      return;
+    }
+    setValues((prev) => ({ ...(prev ?? {}), failure_email_to: v }));
+    api.workspace.setSetting("failure_email_to", v).catch((err) => {
+      toast.error((err as Error).message || "Could not save recipient");
+      api.workspace.getSettings().then(setValues).catch(() => {});
+    });
+  };
+
   if (values === null) return <Skeleton className="h-24 w-full" />;
   return (
     <div className="space-y-4">
       {BEHAVIOUR_TOGGLES.map((t) => (
-        <ToggleRow
-          key={t.key}
-          title={t.title}
-          description={t.description}
-          disabled={!canEdit}
-          checked={values[t.key] === "true"}
-          onCheckedChange={(v) => toggle(t.key, v)}
-        />
+        <div key={t.key} className="space-y-3">
+          <ToggleRow
+            title={t.title}
+            description={t.description}
+            disabled={!canEdit}
+            checked={values[t.key] === "true"}
+            onCheckedChange={(v) => toggle(t.key, v)}
+          />
+          {t.key === "failure_email_enabled" && (
+            <div className="space-y-1.5 pl-1">
+              <Label htmlFor="failure-email-to" className="text-sm">
+                Send failure emails to
+              </Label>
+              <Input
+                id="failure-email-to"
+                type="text"
+                defaultValue={values.failure_email_to ?? ""}
+                placeholder="ops@acme.com, oncall@acme.com"
+                className="max-w-xs"
+                disabled={!canEdit}
+                onBlur={(e) => saveRecipient(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Required to enable failure emails. Comma-separate multiple recipients.
+              </p>
+            </div>
+          )}
+        </div>
       ))}
     </div>
   );
@@ -1335,7 +1387,11 @@ const MODEL_DEFAULT_FIELDS: {
 }[] = [
   { key: "default_model", label: "Default model", placeholder: "e.g. claude-opus-4-8", type: "text", hint: "Used by new workers that don't pin a model." },
   { key: "max_output_tokens", label: "Max output tokens", placeholder: "e.g. 4096", type: "number", hint: "Per-run output ceiling." },
-  { key: "spend_cap_usd", label: "Monthly spend cap (USD)", placeholder: "e.g. 100", type: "number", hint: "Soft cap for run costs this month." },
+  // Round-09 trust fix B1: MUST be "monthly_spend_cap_usd" — run_cost.py reads
+  // exactly this key and the workspace-settings allow-list only accepts it. The
+  // UI previously wrote "spend_cap_usd" (not in the allow-list → 422 on save),
+  // so the operator's cap was a silent no-op and nothing was ever enforced.
+  { key: "monthly_spend_cap_usd", label: "Monthly spend cap (USD)", placeholder: "e.g. 100", type: "number", hint: "Soft cap for run costs this month." },
 ];
 
 // #791: workspace region / timezone / company domain, persisted to the
