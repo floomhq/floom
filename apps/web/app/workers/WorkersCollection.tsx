@@ -1451,7 +1451,7 @@ export default function WorkersCollection({
       // #1364 — improved help text + action CTA linking to /workers/new
       empty: {
         title: "No workers yet",
-        help: "Workers are AI agents that run on a schedule, webhook, or on demand — powered by your connected apps.",
+        help: "Workers are AI agents that run on a schedule, webhook, or on demand, powered by your connected apps.",
         action: (
           <WorkersEmptyPrompt
             onSubmit={(prompt) => router.push(`/chat?mode=create&q=${encodeURIComponent(prompt)}`)}

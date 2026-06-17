@@ -527,7 +527,7 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
       // ("New folder" panel trigger) so no dead /brain/new route is needed.
       empty: {
         title: "No folders yet",
-        help: "Brain folders give your workers long-term memory — upload docs, PDFs, or notes they read before acting.",
+        help: "Brain folders give your workers long-term memory. Upload docs, PDFs, or notes they read before acting.",
       },
     },
   };

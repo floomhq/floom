@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint && npm run lint:emdash && npm run lint:tokens",
-    "lint:emdash": "bash -c 'hits=$(grep -rnP \"\\x{2014}\" --include=\"*.tsx\" --include=\"*.ts\" app/ components/ lib/ 2>/dev/null | grep -vP \"^\\S+:\\d+:\\s*(//|\\*|/\\*)\" | grep -vP \"\\{\\s*/\\*\" | grep -vP \"\\*/\\s*\\}\" | grep -vP \"<span[^>]*>—<\\\\/span>\" | grep -vP \"return \\\"—\\\"|\\?\\? \\\"—\\\"|\\|\\| \\\"—\\\"\" | grep -vP \"// \" | grep -v \"em-dash-ok\" | grep -v \"Binary\"); if [ -n \"$hits\" ]; then echo \"Em dash (U+2014) found in copy strings. Replace with comma/colon/semicolon/parens. Add em-dash-ok comment to opt out.\"; echo \"$hits\"; exit 1; fi'",
+    "lint:emdash": "node scripts/lint-emdash.mjs",
     "lint:tokens": "node scripts/lint-tokens.mjs",
     "test": "vitest run"
   },

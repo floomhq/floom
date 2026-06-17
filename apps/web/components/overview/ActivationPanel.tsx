@@ -157,7 +157,7 @@ export function ActivationPanel({ onFocusEmily }: { onFocusEmily?: () => void })
           >
             ask Emily
           </button>{" "}
-          — describe what you want and she will build it for you.
+          {" "}and describe what you want. She will build it for you.
         </p>
       )}
     </div>
