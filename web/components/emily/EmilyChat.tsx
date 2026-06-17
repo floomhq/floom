@@ -351,9 +351,10 @@ function ChatEmptyState({
   // #1363 — First-run opener: proactive builder message + action-oriented pills
   const headline = isNewWorkspace
     ? "Hi, describe what you want to automate and I’ll build the worker for you right now."
-    // take-base (round-09 copy). FLAG: brand-string conflict — base says "COO",
-    // main says "Chief of Staff". Defaulting to round-09; needs human brand call.
-    : `I am ${assistantName}, your COO`;
+    // Brand call made by Federico (2026-06-16): the assistant is the "chief of
+    // staff", not "COO". Greeting follows the persona ("I'm Emily, your chief of
+    // staff") instead of the old hardcoded COO string.
+    : `I am ${assistantName}, your chief of staff`;
   const sub = isNewWorkspace
     ? null
     : "Ask me to create workers, check runs, or manage connections.";
