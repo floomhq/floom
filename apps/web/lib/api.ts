@@ -881,6 +881,22 @@ export const api = {
         `/connections/${encodeURIComponent(id)}/peek`,
         { cache: "no-store" }
       ),
+    // #789: live tool list advertised by an MCP connection's server (dials the
+    // server; distinct from the configured mcp_allowed_tools allowlist). 503 when
+    // the server is unreachable — callers degrade to the configured allowlist.
+    tools: (id: string) =>
+      fetchJson<{ tools: string[] }>(
+        `/connections/${encodeURIComponent(id)}/tools`,
+        { cache: "no-store" }
+      ),
+    // C-B9: curated read-only tool presets for the Tools-tab allowlist editor.
+    // With `app`, returns the single preset (`tools: null` when none exists);
+    // without it, every preset keyed by canonical app slug.
+    toolPresets: (app?: string) =>
+      fetchJson<{ app?: string; tools?: string[] | null; presets?: Record<string, string[]> }>(
+        `/connections/tool-presets${app ? `?app=${encodeURIComponent(app)}` : ""}`,
+        { cache: "no-store" }
+      ),
   },
   slack: {
     // Read-only status (configured: true/false + installed workspaces). Slack
