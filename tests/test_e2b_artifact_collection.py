@@ -64,6 +64,22 @@ class FakeRunResult:
     stderr = "stderr after exit\n"
 
 
+def _extract_uploaded_archive(files, cwd: str) -> None:
+    archive_path = f"{str(cwd).rstrip('/')}/.workeros-upload.tar.gz"
+    raw = files._files.get(archive_path)
+    if raw is None:
+        return
+    with tarfile.open(fileobj=BytesIO(raw), mode="r:gz") as archive:
+        for member in archive.getmembers():
+            target = f"{str(cwd).rstrip('/')}/{member.name}"
+            if member.isdir():
+                files.make_dir(target)
+            elif member.isfile():
+                extracted = archive.extractfile(member)
+                files.write(target, extracted.read() if extracted else b"")
+    files._files.pop(archive_path, None)
+
+
 class FakeCommandRunner:
     def __init__(self, files):
         self.files = files
@@ -71,6 +87,8 @@ class FakeCommandRunner:
 
     def run(self, command, **kwargs):
         self.run_calls.append((command, kwargs))
+        if command.startswith("tar -xzf .workeros-upload.tar.gz"):
+            _extract_uploaded_archive(self.files, kwargs.get("cwd"))
         if "python run.py" in command:  # #977: command may be env-scrub wrapped
             kwargs["on_stdout"]("live stdout\n")
             kwargs["on_stderr"]("live stderr\n")
@@ -353,7 +371,7 @@ def test_e2b_driver_streams_command_output_callbacks(tmp_path, monkeypatch):
     assert result.outputs == {"ok": True}
     sandbox = FakeFullSandbox.instances[-1]
     assert FakeFullSandbox.last_create_kwargs["envs"]["WORKEROS_API_URL"] == "https://origin-api.internal"
-    command, kwargs = sandbox.commands.run_calls[-1]
+    command, kwargs = next(call for call in sandbox.commands.run_calls if "python run.py" in call[0])
     assert "python run.py" in command  # #977: env-scrub wrapped
     assert command.startswith("env -u ")
     assert kwargs["envs"]["WORKEROS_API_URL"] == "https://origin-api.internal"
@@ -404,9 +422,9 @@ def test_e2b_driver_sets_request_timeouts_for_dependency_installs(tmp_path, monk
 
     assert result.status == "success"
     sandbox = FakeFullSandbox.instances[-1]
-    pip_command, pip_kwargs = sandbox.commands.run_calls[0]
-    npm_command, npm_kwargs = sandbox.commands.run_calls[1]
-    worker_command, worker_kwargs = sandbox.commands.run_calls[2]
+    pip_command, pip_kwargs = next(call for call in sandbox.commands.run_calls if call[0].startswith("pip install"))
+    npm_command, npm_kwargs = next(call for call in sandbox.commands.run_calls if call[0].startswith("cd /home/user/worker && npm install"))
+    worker_command, worker_kwargs = next(call for call in sandbox.commands.run_calls if "python run.py" in call[0])
     install_timeout = _install_timeout_for_run(120)
     assert pip_command.startswith("pip install")
     assert npm_command.startswith("cd /home/user/worker && npm install")
@@ -560,7 +578,7 @@ def test_uploads_declared_context_files_as_bytes(tmp_path, monkeypatch):
     monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
     local_context = contexts_root / "knowledge-base"
     local_context.mkdir(parents=True)
-    (local_context / "faq.md").write_text("# FAQ\n")
+    (local_context / "faq.md").write_bytes(b"# FAQ\n")
     (local_context / "deck.pdf").write_bytes(b"%PDF-1.4\x00binary")
     sandbox = FakeFullSandbox()
     config = WorkerConfig(
@@ -594,8 +612,8 @@ def test_uploads_context_files_from_owner_scoped_root(tmp_path, monkeypatch):
     foreign_context = contexts_root / "user-b" / "knowledge-base"
     owner_context.mkdir(parents=True)
     foreign_context.mkdir(parents=True)
-    (owner_context / "faq.md").write_text("# Owner FAQ\n")
-    (foreign_context / "faq.md").write_text("# Foreign FAQ\n")
+    (owner_context / "faq.md").write_bytes(b"# Owner FAQ\n")
+    (foreign_context / "faq.md").write_bytes(b"# Foreign FAQ\n")
     sandbox = FakeFullSandbox()
     config = WorkerConfig(
         id="context-scope-test",
@@ -646,13 +664,13 @@ def test_uploads_git_context_by_cloning_into_sandbox(tmp_path, monkeypatch):
     )
 
     assert err is None
-    assert sandbox.commands.run_calls == [(
+    assert sandbox.commands.run_calls[:1] == [(
         "git clone --depth 1 https://github.com/example/notes.git "
         "/home/user/worker/context/external-notes",
         {"timeout": 180},
     )]
     assert "/home/user/worker/context/external-notes" in sandbox.files.dirs
-    assert not sandbox.files._files
+    assert not any(path.startswith("/home/user/worker/context/external-notes/") for path in sandbox.files._files)
 
 
 def test_uploads_git_context_blocks_file_url_before_clone(tmp_path, monkeypatch):
@@ -757,7 +775,7 @@ def test_persists_writeable_context_tar_safely(tmp_path, monkeypatch):
     monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
     target = contexts_root / "history"
     target.mkdir(parents=True)
-    (target / "state.json").write_text('{"before": true}\n')
+    (target / "state.json").write_bytes(b'{"before": true}\n')
 
     raw_tar = _tar_bytes({"state.json": b'{"after": true}\n', "nested/log.bin": b"\x00\x01"})
     _extract_context_tar(raw_tar, target)
@@ -791,6 +809,9 @@ def test_persists_writeable_context_tar_under_owner_scope(tmp_path, monkeypatch)
             self.files = files
 
         def run(self, command, **_kwargs):
+            if command.startswith("tar -xzf .workeros-upload.tar.gz"):
+                _extract_uploaded_archive(self.files, _kwargs.get("cwd"))
+                return types.SimpleNamespace(exit_code=0, stdout="", stderr="")
             tar_path = command.split("tar -cf ", 1)[1].split(" ", 1)[0]
             self.files.write(tar_path, _tar_bytes({"state.json": b'{"owner": false}\n'}))
             return types.SimpleNamespace(exit_code=0, stdout="", stderr="")
@@ -830,13 +851,16 @@ def test_writeable_context_round_trip_persists_sandbox_edits(tmp_path, monkeypat
     monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
     target = contexts_root / "history"
     target.mkdir(parents=True)
-    (target / "state.json").write_text('{"before": true}\n')
+    (target / "state.json").write_bytes(b'{"before": true}\n')
 
     class _RoundTripCommands:
         def __init__(self, files):
             self.files = files
 
         def run(self, command, **_kwargs):
+            if command.startswith("tar -xzf .workeros-upload.tar.gz"):
+                _extract_uploaded_archive(self.files, _kwargs.get("cwd"))
+                return types.SimpleNamespace(exit_code=0, stdout="", stderr="")
             tar_path = command.split("tar -cf ", 1)[1].split(" ", 1)[0]
             prefix = "/home/user/worker/context/history/"
             buffer = BytesIO()
@@ -893,13 +917,16 @@ def test_overlay_writeback_preserves_concurrent_external_context_files(tmp_path,
     monkeypatch.setattr(e2b_driver, "CONTEXTS_DIR", contexts_root)
     target = contexts_root / "history"
     target.mkdir(parents=True)
-    (target / "feedback-memory.json").write_text('{"before": true}\n')
+    (target / "feedback-memory.json").write_bytes(b'{"before": true}\n')
 
     class _RoundTripCommands:
         def __init__(self, files):
             self.files = files
 
         def run(self, command, **_kwargs):
+            if command.startswith("tar -xzf .workeros-upload.tar.gz"):
+                _extract_uploaded_archive(self.files, _kwargs.get("cwd"))
+                return types.SimpleNamespace(exit_code=0, stdout="", stderr="")
             tar_path = command.split("tar -cf ", 1)[1].split(" ", 1)[0]
             prefix = "/home/user/worker/context/history/"
             buffer = BytesIO()

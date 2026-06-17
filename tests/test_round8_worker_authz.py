@@ -988,7 +988,10 @@ def test_context_symlink_traversal_is_blocked(monkeypatch, tmp_path):
     outside = tmp_path / "outside.txt"
     outside.write_text("outside")
     with main.use_context_scope(main.context_scope_for_user("user-a")):
-        os.symlink(outside, main.context_dir("audit-ctx") / "escape.txt")
+        try:
+            os.symlink(outside, main.context_dir("audit-ctx") / "escape.txt")
+        except OSError as exc:
+            pytest.skip(f"symlink creation is not permitted on this Windows runner: {exc}")
 
     get_response = client.get("/contexts/audit-ctx/files/escape.txt", headers=_headers("user-a"))
     put_response = client.put(

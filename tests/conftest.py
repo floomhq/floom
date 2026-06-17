@@ -200,11 +200,12 @@ def _clear_rate_buckets() -> None:
     """
     for mod_name, attr in (
         ("main", "_rate_buckets"),
+        ("main", "_draft_rate_store"),
         ("services.worker_codegen", "_draft_rate_store"),
     ):
         mod = sys.modules.get(mod_name)
         store = getattr(mod, attr, None)
-        if isinstance(store, dict):
+        if hasattr(store, "clear"):
             store.clear()
 
 

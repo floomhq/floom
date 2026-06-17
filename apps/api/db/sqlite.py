@@ -2755,7 +2755,7 @@ class SqliteRunRepository:
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
                 WHERE r.status = 'queued' AND (r.cancel_requested = 0 OR r.cancel_requested IS NULL)
-                ORDER BY r.created_at ASC
+                ORDER BY r.created_at ASC, r.rowid ASC
                 LIMIT ?
                 """,
                 (limit,),
