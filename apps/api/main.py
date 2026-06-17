@@ -1779,11 +1779,26 @@ async def value_error_handler(_request, exc: ValueError):
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_error_handler(_request, exc: RequestValidationError):
+    # RECONCILIATION: main's WorkerUpdateRequest.cron_timezone model validator
+    # raises a ValidationError ("invalid timezone: ...") which FastAPI surfaces
+    # here. base's contract (test_security_quickwins_1293_1296) is that a bad
+    # cron timezone on PATCH /workers/{id} returns HTTP 400, not the generic 422.
+    # Map that single, specific class of error to 400 while leaving every other
+    # request-validation failure at 422.
+    raw_errors = exc.errors()
+    if any("invalid timezone" in str(e.get("msg", "")).lower() for e in raw_errors):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": "Invalid cron timezone. Use an IANA timezone name such "
+                "as 'UTC' or 'Europe/Berlin'.",
+            },
+        )
     return JSONResponse(
         status_code=422,
         content={
             "detail": "validation failed",
-            "errors": _redacted_validation_errors(exc.errors(), expose_locations=False),
+            "errors": _redacted_validation_errors(raw_errors, expose_locations=False),
         },
     )
 
