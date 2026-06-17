@@ -1,18 +1,23 @@
 "use client";
 
-// A1 refined (Federico-approved layout). Spec: /tmp/overview-a1-spec.html.
+// V4 "Brief / digest" (Federico-approved, scored winner). Mockup: /tmp/ov-variant-4.png.
 //
-// Hero row: LEFT = work-done block (muted label, big number + inline sparkline,
-// green delta + "vs last week", thin supporting-stats line). RIGHT = time-aware
-// greeting ("Good afternoon, {firstName}") + muted date/context subline.
-//
-// Below a divider, two columns: LEFT (wider) "Recent work" outcome rows;
-// RIGHT "What's next" combining the old "Needs attention" (now "Needs you")
-// and "Coming up" groups into one card with two small group labels.
+// The most reduced overview. A single editorial column:
+//   1. Time-aware greeting ("Good evening, {firstName}") + date line.
+//   2. "Work done this week" label + the BIG near-black number (heavier/larger
+//      than the greeting — the number reclaims visual primacy) + inline sparkline.
+//   3. A one-sentence plain-language summary (2-line cap) composed from the same
+//      overview aggregates (delta %, success %, hours saved, runs today, needs-you
+//      count). The "need your input" phrase is an accent LINK to the needs-you list.
+//   4. A "needs you" list (lowercase hairline label) of attention items.
+//   5. A quiet hairline "Recent work" strip — the last ~3 runs, one line each
+//      (worker + outcome + time), hairline dividers, no cards/borders. This kills
+//      the "too empty" risk on a fresh / quiet workspace.
 //
 // Data layer (useOverview cache-first hook) is owned by a parallel lane, not
-// touched here. The empty-workspace ActivationPanel path is preserved.
-import { useEffect, useMemo, useState } from "react";
+// touched here. Only the presentational layout changed. The empty-workspace
+// ActivationPanel path is preserved.
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 
 import { useOverview as useOverviewQuery } from "@/lib/query/hooks";
@@ -20,7 +25,6 @@ import type {
   SystemOverview,
   SystemOverviewAttentionItem,
   SystemOverviewRunItem,
-  SystemOverviewScheduledItem,
 } from "@/lib/types";
 
 // Retained pure helper (covered by tests/overview-worker-metric.test.ts). The
@@ -44,25 +48,10 @@ export function workerStatusMetric(
 }
 import { api } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
-import {
-  formatRelative,
-  formatRelativeFuture,
-  formatTimeOfDay,
-} from "@/lib/formatters";
-import { cn } from "@/lib/utils";
-import { workerIcon } from "@/lib/worker-icon";
-import { BrandLogo } from "@/components/connections/BrandLogo";
+import { formatRelative } from "@/lib/formatters";
 import { ActivationPanel } from "@/components/overview/ActivationPanel";
 
 export type { SystemOverviewAttentionItem };
-
-// FLAT: separation is bg-step only (a `--bg-card` panel on the `--bg-app`
-// page). Borders come from CSS variables (--bd-card is `none`) so the computed
-// border width is 0px, and there is NO drop-shadow/elevation — cards read as
-// flat panels, consistent with .c-gcard and the rest of the app. (Do not add a
-// shadow token here; the flat language is intentional.)
-const cardClass =
-  "rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]";
 
 function metricTrend(current: number, previous: number) {
   if (previous <= 0) return null;
@@ -205,25 +194,10 @@ function groupRuns(runs: SystemOverviewRunItem[]): ActivityGroup[] {
   return groups;
 }
 
-function WorkerRowIcon({ workerId, workerName }: { workerId: string; workerName?: string | null }) {
-  const resolved = workerIcon({ id: workerId, name: workerName || undefined });
-  return (
-    <span
-      className="inline-flex shrink-0 items-center justify-center size-[30px] bg-[var(--bg-2)] text-[var(--text-muted)]"
-      style={{ borderRadius: "var(--radius-squircle)" }}
-      aria-hidden="true"
-    >
-      {resolved.kind === "brand" ? (
-        <BrandLogo icon={resolved.slug} className="size-3.5" />
-      ) : (
-        <resolved.Icon className="size-3.5" />
-      )}
-    </span>
-  );
-}
-
-// LEFT column. "Recent work": outcome rows (worker + status pill + one-line
-// what-it-did + relative time). Reuses recent_runs.
+// Quiet hairline "Recent work" strip: the last ~3 runs, one line each
+// (worker name + outcome + relative time), hairline dividers, NO card/border.
+// This is the anti-empty fix — it keeps the brief from reading "too empty" on a
+// fresh or quiet workspace. Reuses recent_runs.
 function RecentWork({
   runs,
   loading,
@@ -231,25 +205,21 @@ function RecentWork({
   runs: SystemOverviewRunItem[];
   loading: boolean;
 }) {
-  // High-level: only the 3 most recent outcomes. The rest live behind "See all".
   const grouped = groupRuns(runs).slice(0, 3);
+  if (!loading && grouped.length === 0) return null;
   return (
-    <section className={cn(cardClass, "px-[22px] py-2")}>
-      <div className="flex items-center justify-between pt-4 pb-1 font-semibold">
-        <h2 className="text-[15px] text-[var(--text-primary)]">Recent work</h2>
+    <section className="pt-8">
+      <div className="flex items-center justify-between pb-1">
+        <h2 className="text-[12.5px] font-medium text-[var(--text-muted)]">Recent work</h2>
         <Link href="/runs" className="text-[12.5px] font-medium text-[var(--accent)] hover:underline">
           See all
         </Link>
       </div>
       {loading ? (
-        <div className="space-y-3 py-3">
+        <div className="space-y-2 py-2">
           {Array.from({ length: 3 }).map((_, index) => (
-            <Skeleton key={index} className="h-[44px] w-full rounded-[var(--radius-button)]" />
+            <Skeleton key={index} className="h-[34px] w-full rounded-[var(--radius-button)]" />
           ))}
-        </div>
-      ) : grouped.length === 0 ? (
-        <div className="flex min-h-[120px] items-center justify-center px-6 py-10 text-center text-sm text-[var(--text-muted)]">
-          No runs yet.
         </div>
       ) : (
         <div className="[&>*+*]:[border-top:var(--bd-div)]">
@@ -260,19 +230,12 @@ function RecentWork({
               <Link
                 key={run.run_id}
                 href={`/runs?sel=${run.run_id}`}
-                className="-mx-[22px] flex items-center gap-3 px-[22px] py-[18px] transition-colors hover:bg-[var(--active-nav-bg)]"
+                className="flex items-baseline gap-3 py-[13px] transition-colors hover:opacity-80"
               >
-                <WorkerRowIcon workerId={run.worker_id} workerName={run.worker_name} />
-                <span className="min-w-0 flex-1 truncate text-sm font-semibold text-[var(--text-primary)]">
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--text-primary)]">
                   {run.worker_name || humanizeSlug(run.worker_id, "Worker")}
                 </span>
-                <span
-                  className="shrink-0 rounded-[var(--radius-pill)] px-2 py-0.5 text-[11px] font-semibold leading-none"
-                  style={{
-                    color: meta.color,
-                    background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
-                  }}
-                >
+                <span className="shrink-0 text-[12.5px]" style={{ color: meta.color }}>
                   {meta.label}
                 </span>
                 {count > 1 && (
@@ -339,122 +302,65 @@ function attentionAction(item: SystemOverviewAttentionItem): {
   };
 }
 
-// RIGHT column. "What's next": "Needs you" group (shown only when there are
-// attention items) then "Coming up" group (scheduled runs). Replaces the old
-// separate Needs-attention / Coming-up split.
-function WhatsNext({
+// "needs you" list: attention items only (failing workers, expired connections,
+// missing setup). Lowercase hairline label (NOT all-caps), a small warning dot,
+// title + one-line detail, and an accent action link (Fix / Reconnect / Set up).
+// "Coming up" / scheduled runs are intentionally dropped in the V4 brief — they
+// live behind the bell. Rendered with id="needs-you" so the summary sentence's
+// "need your input" link can anchor to it.
+function NeedsYou({
   attention,
-  scheduled,
   loading,
 }: {
   attention: SystemOverviewAttentionItem[];
-  scheduled: SystemOverviewScheduledItem[];
   loading: boolean;
 }) {
-  // High-level: top items only. The most urgent needs-you (cap 3) then the next
-  // couple of coming-up runs (cap 2). The rest are a click away on /workers.
   const needs = attention.slice(0, 3);
-  const coming = scheduled.slice(0, 2);
-  const empty = !loading && needs.length === 0 && coming.length === 0;
-  return (
-    <section className={cn(cardClass, "px-[22px] py-2")}>
-      <div className="pt-4 pb-1 text-[15px] font-semibold text-[var(--text-primary)]">
-        What&rsquo;s next
-      </div>
-      {loading ? (
-        <div className="space-y-3 py-3">
-          {Array.from({ length: 3 }).map((_, index) => (
-            <Skeleton key={index} className="h-[44px] w-full rounded-[var(--radius-button)]" />
+  if (loading) {
+    return (
+      <section id="needs-you" className="pt-7">
+        <div className="space-y-2 py-2">
+          {Array.from({ length: 2 }).map((_, index) => (
+            <Skeleton key={index} className="h-[40px] w-full rounded-[var(--radius-button)]" />
           ))}
         </div>
-      ) : empty ? (
-        <div className="flex min-h-[120px] flex-col items-center justify-center px-6 py-10 text-center">
-          <p className="text-sm font-medium text-[var(--text-primary)]">Nothing needs you</p>
-          <Link
-            href="/workers"
-            className="mt-2 text-xs font-medium text-[var(--accent)] hover:underline"
-          >
-            Schedule a worker
-          </Link>
-        </div>
-      ) : (
-        <>
-          {needs.length > 0 && (
-            <>
-              <div className="px-0 pt-4 pb-1 text-[11px] font-bold uppercase tracking-[0.04em] text-[var(--ink-faint)]">
-                Needs you
+      </section>
+    );
+  }
+  if (needs.length === 0) return <span id="needs-you" />;
+  return (
+    <section id="needs-you" className="pt-7 [box-shadow:inset_0_1px_0_var(--line-soft)]">
+      <div className="pt-7 pb-1 text-[12.5px] font-medium text-[var(--text-muted)]">needs you</div>
+      <div className="[&>*+*]:[border-top:var(--bd-div)]">
+        {needs.map((item, idx) => {
+          const a = attentionAction(item);
+          return (
+            <div
+              key={`needs-${item.worker_id ?? item.connection_id ?? idx}`}
+              className="flex items-start gap-3 py-[15px]"
+            >
+              <span
+                className="mt-[7px] size-[7px] shrink-0 rounded-[var(--radius-pill)] bg-[var(--warning)]"
+                aria-hidden="true"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
+                  {a.title}
+                </div>
+                <div className="mt-0.5 truncate text-[12.5px] text-[var(--text-muted)]">
+                  {a.detail}
+                </div>
               </div>
-              <div className="[&>*+*]:[border-top:var(--bd-div)]">
-                {needs.map((item, idx) => {
-                  const a = attentionAction(item);
-                  return (
-                    <div
-                      key={`needs-${item.worker_id ?? item.connection_id ?? idx}`}
-                      className="flex items-start gap-3 py-[18px]"
-                    >
-                      <span
-                        className="mt-1.5 size-[7px] shrink-0 rounded-[var(--radius-pill)] bg-[var(--warning)]"
-                        aria-hidden="true"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
-                          {a.title}
-                        </div>
-                        <div className="mt-0.5 truncate text-[12.5px] text-[var(--text-muted)]">
-                          {a.detail}
-                        </div>
-                      </div>
-                      <Link
-                        href={a.href}
-                        className="shrink-0 text-[12.5px] font-medium text-[var(--accent)] hover:underline"
-                      >
-                        {a.actionLabel}
-                      </Link>
-                    </div>
-                  );
-                })}
-              </div>
-            </>
-          )}
-          {coming.length > 0 && (
-            <>
-              <div className="px-0 pt-4 pb-1 text-[11px] font-bold uppercase tracking-[0.04em] text-[var(--ink-faint)]">
-                Coming up
-              </div>
-              <div className="[&>*+*]:[border-top:var(--bd-div)]">
-                {coming.map((item) => (
-                  <Link
-                    key={`${item.worker_id}-${item.next_fire_at}`}
-                    href={`/workers?sel=${item.worker_id}`}
-                    className="-mx-[22px] flex items-start gap-3 px-[22px] py-[18px] transition-colors hover:bg-[var(--active-nav-bg)]"
-                  >
-                    <span
-                      className="mt-1.5 size-[7px] shrink-0 rounded-[var(--radius-pill)] bg-[var(--accent)]"
-                      aria-hidden="true"
-                    />
-                    <div className="min-w-0 flex-1">
-                      <div
-                        className={cn(
-                          "truncate text-sm font-semibold",
-                          item.paused ? "text-[var(--text-muted)]" : "text-[var(--text-primary)]",
-                        )}
-                      >
-                        {item.worker_name || humanizeSlug(item.worker_id, "Worker")}
-                      </div>
-                      <div className="mt-0.5 truncate text-[12.5px] text-[var(--text-muted)]">
-                        {formatRelativeFuture(item.next_fire_at)} at {formatTimeOfDay(item.next_fire_at)}
-                      </div>
-                    </div>
-                    <span className="shrink-0 text-[12.5px] text-[var(--ink-faint)]">
-                      {item.paused ? "paused" : "scheduled"}
-                    </span>
-                  </Link>
-                ))}
-              </div>
-            </>
-          )}
-        </>
-      )}
+              <Link
+                href={a.href}
+                className="shrink-0 text-[12.5px] font-medium text-[var(--accent)] hover:underline"
+              >
+                {a.actionLabel}
+              </Link>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
@@ -475,10 +381,12 @@ export function OverviewDashboard({
   const previousWeek = data?.stats.work_shipped_previous_7d ?? 0;
   const workTrend = metricTrend(completedThisWeek, previousWeek);
 
-  // Supporting stats line: success rate, workers on duty, est. time saved.
+  // Aggregates that feed the one-sentence summary.
   const successRate = data?.stats.success_rate_7d ?? null;
-  const workersOnDuty = workerStatusMetric(data?.stats).value;
+  const successPct =
+    successRate !== null ? Math.round(successRate * (successRate <= 1 ? 100 : 1)) : null;
   const runsToday = data?.stats.runs_today ?? data?.stats.runs_24h ?? 0;
+  const needsYouCount = data?.needs_attention?.length ?? 0;
 
   // No `hours_saved` field exists in SystemOverviewStats. Estimate ~15 min of
   // manual work saved per finished task (rounded to whole hours). Honest,
@@ -519,92 +427,115 @@ export function OverviewDashboard({
     );
   }
 
+  // One-sentence plain-language summary, composed from the same aggregates.
+  // Capped at 2 lines via max-w + line-clamp. The "need your input" phrase is
+  // an accent LINK anchoring to the #needs-you list below. Each clause is only
+  // emitted when its underlying number is real.
+  const summaryParts: ReactNode[] = [];
+  if (workTrend !== null && workTrend > 0) {
+    summaryParts.push(
+      <span key="trend">
+        Up <b className="font-semibold text-[var(--text-primary)]">{workTrend}%</b> on last week
+      </span>,
+    );
+  }
+  if (successPct !== null) {
+    summaryParts.push(
+      <span key="success">
+        <b className="font-semibold text-[var(--text-primary)]">{successPct}%</b> of runs succeeded
+      </span>,
+    );
+  }
+  if (estHoursSaved > 0) {
+    summaryParts.push(
+      <span key="saved">
+        roughly <b className="font-semibold text-[var(--text-primary)]">{estHoursSaved} hours</b> were
+        saved
+      </span>,
+    );
+  }
+
   return (
     <div className="flex flex-col flex-1 min-h-0 pb-6 pt-1">
-      {/* Hero row: work-done block left, greeting right. Extra bottom air so the
-          hero number is clearly the first thing the eye lands on. */}
-      <section className="flex flex-col items-start justify-between gap-6 pb-9 sm:flex-row sm:items-start">
-        <div>
-          <div className="mb-1.5 text-[13px] text-[var(--text-muted)]">Work done this week</div>
-          <div className="flex items-end gap-[18px]">
-            {loading ? (
-              <Skeleton className="h-[50px] w-[80px] rounded-[var(--radius-button)]" />
-            ) : (
-              <div className="text-[50px] font-bold leading-none tracking-[-0.025em] text-[var(--text-primary)]">
-                {completedThisWeek}
-              </div>
-            )}
-            {sparkPoints && (
-              <svg
-                width="150"
-                height="44"
-                viewBox="0 0 150 44"
-                className="mb-1.5 block"
-                aria-hidden="true"
-              >
-                <polyline
-                  fill="none"
-                  stroke="var(--accent)"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  points={sparkPoints}
-                />
-              </svg>
-            )}
-          </div>
-          <div className="mt-2 text-[13px]">
-            {workTrend !== null && workTrend > 0 && (
-              <span className="font-semibold text-[var(--success)]">&#8593; {workTrend}%</span>
-            )}{" "}
-            <span className="text-[var(--ink-faint)]">vs last week</span>
-          </div>
-          <div className="mt-4 flex flex-wrap gap-x-5 gap-y-1 text-[12.5px]">
-            {successRate !== null && (
-              <span>
+      <div className="w-full max-w-[640px]">
+        {/* 1. Greeting + date line. */}
+        <div className="text-[26px] font-semibold leading-tight tracking-[-0.01em] text-[var(--text-primary)]">
+          {greeting}
+          {firstName ? `, ${firstName}` : ""}
+        </div>
+        <div className="mt-1 text-[13px] text-[var(--text-muted)]">{todayLabel}</div>
+
+        {/* 2. Label + the big near-black number (heavier/larger than the
+            greeting — reclaims visual primacy) + inline sparkline. */}
+        <div className="mt-9 text-[13px] text-[var(--text-muted)]">Work done this week</div>
+        <div className="mt-1 flex items-end gap-5">
+          {loading ? (
+            <Skeleton className="h-[60px] w-[96px] rounded-[var(--radius-button)]" />
+          ) : (
+            <div className="text-[64px] font-bold leading-none tracking-[-0.03em] text-[var(--text-primary)]">
+              {completedThisWeek}
+            </div>
+          )}
+          {sparkPoints && (
+            <svg
+              width="150"
+              height="44"
+              viewBox="0 0 150 44"
+              className="mb-2 block"
+              aria-hidden="true"
+            >
+              <polyline
+                fill="none"
+                stroke="var(--accent)"
+                strokeWidth="2.5"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                points={sparkPoints}
+              />
+            </svg>
+          )}
+        </div>
+
+        {/* 3. One-sentence plain-language summary (2-line cap). */}
+        {!loading && (summaryParts.length > 0 || runsToday > 0 || needsYouCount > 0) && (
+          <p className="mt-6 max-w-[560px] line-clamp-2 text-[15px] leading-relaxed text-[var(--text-muted)]">
+            {summaryParts.map((part, i) => (
+              <span key={i}>
+                {i === 0 ? part : <>{i === summaryParts.length - 1 ? " and " : ", "}{part}</>}
+              </span>
+            ))}
+            {summaryParts.length > 0 ? ". " : ""}
+            {runsToday > 0 && (
+              <>
                 <b className="font-semibold text-[var(--text-primary)]">
-                  {Math.round(successRate * (successRate <= 1 ? 100 : 1))}%
+                  {runsToday} {runsToday === 1 ? "worker" : "workers"}
                 </b>{" "}
-                <span className="text-[var(--text-muted)]">success</span>
-              </span>
+                ran today
+                {needsYouCount > 0 ? "; " : "."}
+              </>
             )}
-            <span>
-              <b className="font-semibold text-[var(--text-primary)]">{workersOnDuty}</b>{" "}
-              <span className="text-[var(--text-muted)]">
-                {workersOnDuty === 1 ? "worker on duty" : "workers on duty"}
-              </span>
-            </span>
-            {estHoursSaved > 0 && (
-              <span>
-                <b className="font-semibold text-[var(--text-primary)]">~{estHoursSaved}h</b>{" "}
-                <span className="text-[var(--text-muted)]">saved</span>
-              </span>
+            {needsYouCount > 0 && (
+              <>
+                {runsToday > 0
+                  ? `${needsYouCount === 1 ? "one" : needsYouCount} now `
+                  : `${needsYouCount === 1 ? "One worker" : `${needsYouCount} workers`} now `}
+                <Link
+                  href="#needs-you"
+                  className="font-medium text-[var(--accent)] hover:underline"
+                >
+                  {needsYouCount === 1 ? "needs your input" : "need your input"}
+                </Link>
+                .
+              </>
             )}
-          </div>
-        </div>
+          </p>
+        )}
 
-        <div className="text-left sm:text-right">
-          <div className="text-[19px] font-semibold text-[var(--text-primary)]">
-            {greeting}
-            {firstName ? `, ${firstName}` : ""}
-          </div>
-          <div className="mt-0.5 text-[12.5px] text-[var(--text-muted)]">
-            {todayLabel}
-            {runsToday > 0
-              ? ` · ${runsToday} ${runsToday === 1 ? "worker" : "workers"} ran today`
-              : ""}
-          </div>
-        </div>
-      </section>
+        {/* 4. "needs you" list (lowercase hairline label). */}
+        <NeedsYou attention={data?.needs_attention ?? []} loading={loading} />
 
-      {/* Divider, then the two columns. */}
-      <div className="grid flex-1 grid-cols-1 gap-6 pt-7 [box-shadow:inset_0_1px_0_var(--line-soft)] lg:grid-cols-[1.35fr_1fr]">
+        {/* 5. Quiet hairline "Recent work" strip — kills the "too empty" risk. */}
         <RecentWork runs={data?.recent_runs ?? []} loading={loading} />
-        <WhatsNext
-          attention={data?.needs_attention ?? []}
-          scheduled={data?.scheduled_today ?? []}
-          loading={loading}
-        />
       </div>
     </div>
   );
