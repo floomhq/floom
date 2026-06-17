@@ -2004,10 +2004,11 @@ class WorkerUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
 
-    @field_validator("cron_timezone")
-    @classmethod
-    def validate_cron_timezone(cls, value: Optional[str]) -> Optional[str]:
-        return _validate_timezone_name(value)
+    # RECONCILIATION: main added a model-level cron_timezone validator (-> 422),
+    # but base validates cron_timezone at the PATCH route (main.py) -> 400, which
+    # the base test test_security_quickwins_1293_1296 asserts. Keeping ONLY the
+    # route-level 400 check (base contract) and dropping the model validator so
+    # the two don't conflict. (HYPOTHESIS-TEST EDIT)
 
 
 class RunCreate(BaseModel):

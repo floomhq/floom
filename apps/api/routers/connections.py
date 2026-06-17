@@ -1507,10 +1507,9 @@ def test_connection(
                         return {}
                     return body if isinstance(body, dict) else {}
 
-                # take-main (#1180/#1293): re-validate at dial time and pin the
-                # vetted IP for the actual httpx connection, closing the DNS
-                # rebinding gap. main's target returns Host header + sni_hostname
-                # extension (required by the http.post extensions= below).
+                # #1180/#1293: re-validate at dial time and pin the vetted IP
+                # for the actual httpx connection. This closes the DNS
+                # rebinding gap between validation and connect.
                 try:
                     probe_url, pinned_headers, request_extensions = pinned_safe_outbound_httpx_target(
                         mcp_url,
