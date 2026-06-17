@@ -37,6 +37,12 @@ yarn-error.log*
 .env
 .env.local
 .env.*.local
+# #1436 defense-in-depth: catch loose secret dumps with non-.env names + JWTs
+# (the audit found a live .fede.jwt and *-env-setup.txt copies on disk).
+*env-setup*.txt
+*env-backup*
+*.jwt
+.fede.jwt
 .venv/
 __pycache__/
 
