@@ -153,7 +153,17 @@ export interface CollectionConfig<T> {
   row: (item: T) => ListRowSpec;
   card?: (item: T) => CardSpec;
 
-  detail: (item: T) => { header: DetailHeader; tabs: DetailTab[] };
+  detail: (item: T) => {
+    header: DetailHeader;
+    tabs: DetailTab[];
+    /**
+     * Optional node rendered INSIDE the primary tab row, after the tabs and
+     * right-aligned (e.g. an "Advanced ▾" group that exposes secondary tabs).
+     * Most collections omit it; the worker detail uses it so the advanced tab
+     * group is visibly on the tab row, not buried in the header overflow.
+     */
+    tabsTrailing?: ReactNode;
+  };
 
   states?: CollectionStates;
 
