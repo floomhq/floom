@@ -354,9 +354,6 @@ export function V3Body() {
             transition={{ duration: 0.55, delay: 0.18, ease: EASE }}
             className="mt-9"
           >
-            <p className="mb-3 text-[14px] font-medium text-foreground">
-              Start with one <Hl>job</Hl>.
-            </p>
             <V3Composer
               fillSignal={fill}
               placeholder=""
