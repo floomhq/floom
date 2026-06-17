@@ -33,8 +33,10 @@ def _load(monkeypatch, tmp_path, *, with_secret: bool = True):
         monkeypatch.setenv("OPENAI_API_KEY", "sk-env-test-value")
         monkeypatch.setenv("E2B_API_KEY", "e2b-env-test-value")
     else:
-        monkeypatch.delenv("OPENAI_API_KEY", raising=False)
-        monkeypatch.delenv("E2B_API_KEY", raising=False)
+        # main.py loads the repo .env in local mode. Set empty values so
+        # python-dotenv does not repopulate real developer credentials.
+        monkeypatch.setenv("OPENAI_API_KEY", "")
+        monkeypatch.setenv("E2B_API_KEY", "")
     for name in list(sys.modules):
         if name in ("main", "db") or name.startswith("db.") or name == "auth" or name.startswith("auth."):
             sys.modules.pop(name, None)

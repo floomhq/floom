@@ -1601,6 +1601,8 @@ class AgentDriver(SandboxDriver):
                 "stdout": _truncate(_scrub(proc.stdout or "", secrets), _STDOUT_CAP),
                 "stderr": _truncate(_scrub(proc.stderr or "", secrets), _STDERR_CAP),
             }
+        except FileNotFoundError:
+            return {"ok": False, "error": f"command not found: {cmd}", "exit_code": 127}
         finally:
             if _workeros_helper_dir:
                 import shutil
