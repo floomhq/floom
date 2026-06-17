@@ -35,6 +35,9 @@ import {
   useChatStream,
 } from "@/lib/useChatStream";
 import { exportConversationMarkdown } from "@/lib/emily-chat-export";
+import { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
+// Re-export so the create-mode wiring + its tests share one source of truth.
+export { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
 import { api } from "@/lib/api";
 import type { ConversationSummary } from "@/lib/types";
 import type { AttachedFile, ChatMessage } from "@/lib/emily-chat-types";
@@ -629,10 +632,17 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
   const handleSubmit = useCallback(() => {
     const text = input.trim();
     if (!text && attachedFiles.length === 0) return;
-    sendMessage(text, attachedFiles.length > 0 ? attachedFiles : undefined);
+    // Round-09 #2: the create-mode "Hire a worker" hero must DRAFT a worker, not
+    // send a bare chat message Emily can answer as a query. Wrap the FIRST
+    // create-mode message in an explicit worker-authoring directive so the
+    // backend routes it to the drafting path. Only the opening message (the
+    // hero) is wrapped; once a thread exists the user chats normally.
+    const message =
+      createMode && messages.length === 0 ? buildCreateWorkerMessage(text) : text;
+    sendMessage(message, attachedFiles.length > 0 ? attachedFiles : undefined);
     setInput("");
     setAttachedFiles([]);
-  }, [input, attachedFiles, sendMessage]);
+  }, [input, attachedFiles, sendMessage, createMode, messages.length]);
 
   // Create-mode source pill → append a natural "use my <source>" hint to the
   // composer so the assistant knows which context to wire into the new worker.
