@@ -57,17 +57,20 @@ function ToolHl({
 
 /* ───────────────── the one story: four beats ───────────────── */
 
-const BEATS = [
+const BEATS: { key: string; t: React.ReactNode; p: string }[] = [
   {
-    t: "Describe the job",
+    key: "describe",
+    t: <>Describe the <Hl>job</Hl></>,
     p: "One sentence, plain English. Floom recognises your tools as you type and drafts the worker.",
   },
   {
-    t: "Approve the draft",
+    key: "approve",
+    t: <>Approve the <Hl>draft</Hl></>,
     p: "The finished work comes to you first. Nothing ships without your yes, in Slack, WhatsApp, or here.",
   },
   {
-    t: "It runs, on the record",
+    key: "record",
+    t: <>It <Hl>runs</Hl>, on the record</>,
     p: "Background work, every run auditable. The output lands where you already are.",
   },
 ];
@@ -233,7 +236,7 @@ function Story() {
         <div className="flex flex-col justify-center">
           {BEATS.map((b, i) => (
             <div
-              key={b.t}
+              key={b.key}
               data-beat={i}
               ref={(el) => { refs.current[i] = el; }}
               className="flex min-h-[200px] cursor-default flex-col justify-center py-4 md:min-h-[175px]"
@@ -335,7 +338,7 @@ export function V3Body() {
             transition={{ duration: 0.6, ease: EASE }}
             className="text-[42px] font-semibold leading-[1.02] tracking-[-0.034em] sm:text-[64px]"
           >
-            Hire AI <Hl>workers</Hl>.
+            <Hl>Hire</Hl> AI workers.
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 12 }}
@@ -351,6 +354,9 @@ export function V3Body() {
             transition={{ duration: 0.55, delay: 0.18, ease: EASE }}
             className="mt-9"
           >
+            <p className="mb-3 text-[14px] font-medium text-foreground">
+              Start with one <Hl>job</Hl>.
+            </p>
             <V3Composer
               fillSignal={fill}
               placeholder=""
