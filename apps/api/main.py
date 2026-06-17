@@ -5277,6 +5277,19 @@ def _mcp_call_result(data: Any, summary: Optional[str] = None) -> Dict[str, Any]
     }
 
 
+def _mcp_api_result(data: Any, status_code: int) -> Dict[str, Any]:
+    return _mcp_content(_mcp_text(data), status_code >= 400)
+
+
+def _mcp_max_batch_items() -> int:
+    raw = os.environ.get("WORKEROS_MCP_MAX_BATCH_ITEMS", "50")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 50
+    return min(max(value, 1), 200)
+
+
 def _mcp_http_error_result(exc: HTTPException) -> Dict[str, Any]:
     detail = exc.detail if isinstance(exc.detail, str) else json.dumps(jsonable_encoder(exc.detail), ensure_ascii=False)
     return {
@@ -5911,6 +5924,8 @@ async def _workspace_agent_mcp_post(request: Request) -> Response:
         raise HTTPException(status_code=400, detail="Invalid MCP JSON payload") from exc
 
     if isinstance(payload, list):
+        if len(payload) > _mcp_max_batch_items():
+            return JSONResponse(_mcp_error(None, -32600, "Batch too large"))
         responses = []
         for item in payload:
             if not isinstance(item, dict):
@@ -6582,80 +6597,80 @@ async def _mcp_dispatch(
     # --- workers ---
     if name == "workers.list":
         data, s = await _api_call("GET", "/workers", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.get":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.create":
         body = {k: a[k] for k in ("worker_yml", "run_py") if k in a}
         if "skill_md" in a: body["skill_md"] = a["skill_md"]
         data, s = await _api_call("POST", "/workers", request, body=body)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.update":
         body = {k: a[k] for k in a if k != "id"}
         data, s = await _api_call("PATCH", f"/workers/{_enc(a['id'])}", request, body=body)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.delete":
         data, s = await _api_call("DELETE", f"/workers/{_enc(a['id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.run":
         body = {"inputs": a.get("inputs") or {}, "trigger_source": a.get("trigger_source", "manual")}
         data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/runs", request, body=body)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.write_file":
         data, s = await _api_call("PUT", f"/workers/{_enc(a['id'])}/files", request, body={"files": a["files"]})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.logs":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/logs", request, params={"level": a.get("level"), "since": a.get("since"), "limit": a.get("limit", 200)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.stats":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/stats", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.timeseries":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/runs/timeseries", request, params={"days": a.get("days", 30)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.versions":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/versions", request, params={"limit": a.get("limit", 50)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.rollback":
         data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/rollback/{_enc(a['version_id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.archive":
         data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/archive", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.restore":
         data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/restore", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.reload":
         data, s = await _api_call("POST", "/workers/reload", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.sample_input":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/sample-input", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.alerts.list":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/alerts", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.alerts.create":
         body = {k: a[k] for k in a if k != "id"}
         data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/alerts", request, body=body)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.alerts.delete":
         data, s = await _api_call("DELETE", f"/workers/{_enc(a['id'])}/alerts/{_enc(a['alert_id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- runs ---
     if name == "runs.list":
         data, s = await _api_call("GET", "/runs", request, params={"worker_id": a.get("worker_id"), "status": a.get("status"), "limit": a.get("limit", 50), "offset": a.get("offset", 0)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "runs.get":
         data, s = await _api_call("GET", f"/runs/{_enc(a['id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "runs.cancel":
         data, s = await _api_call("POST", f"/runs/{_enc(a['id'])}/cancel", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "runs.replay":
         data, s = await _api_call("POST", f"/workers/{_enc(a['worker_id'])}/runs/{_enc(a['run_id'])}/replay", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "runs.watch":
         run_id = a["id"]
         timeout = _mcp_watch_timeout_seconds(a.get("timeout_ms"))  # #834: 30s cap
@@ -6665,57 +6680,57 @@ async def _mcp_dispatch(
             await asyncio.sleep(1.5)
             run_data, s = await _api_call("GET", f"/runs/{_enc(run_id)}", request)
             if s >= 400:
-                return _mcp_content(json.dumps(run_data, indent=2, default=str), True)
+                return _mcp_api_result(run_data, s)
             if run_data.get("status") in ("completed", "failed", "cancelled"):
-                return _mcp_content(json.dumps(run_data, indent=2, default=str), run_data.get("status") == "failed")
+                return _mcp_content(_mcp_text(run_data), run_data.get("status") == "failed")
         return _mcp_content(f"Run {run_id!r} did not complete within {timeout:.0f}s", is_error=True)
 
     # --- secrets ---
     if name == "secrets.list":
         data, s = await _api_call("GET", "/secrets", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "secrets.set":
         data, s = await _api_call("POST", f"/secrets/{_enc(a['key'])}", request, body={"value": a["value"]})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "secrets.delete":
         data, s = await _api_call("DELETE", f"/secrets/{_enc(a['key'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "secrets.test":
         data, s = await _api_call("POST", f"/secrets/{_enc(a['key'])}/test", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- connections ---
     if name == "connections.list":
         data, s = await _api_call("GET", "/connections", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "connections.add_mcp":
         data, s = await _api_call("POST", "/connections/mcp", request, body=a)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "connections.delete":
         data, s = await _api_call("DELETE", f"/connections/{_enc(a['connection_id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "connections.status":
         data, s = await _api_call("GET", f"/connections/{_enc(a['connection_id'])}/status", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "connections.test":
         data, s = await _api_call("POST", f"/connections/{_enc(a['connection_id'])}/test", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- contexts ---
     if name == "contexts.list":
         data, s = await _api_call("GET", "/contexts", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "contexts.create":
         data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}", request, body={"writeable": a.get("writeable", False), "sensitive": a.get("sensitive", True)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "contexts.read":
         encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
         data, s = await _api_call("GET", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "contexts.write":
         encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
         data, s = await _api_call("PUT", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request, body={"content": a["content"]})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "record_candidate_feedback":
         body = {k: a[k] for k in ("run_id", "candidate_id", "rank", "feedback_text", "outcome") if k in a}
         if "scope" in a:
@@ -6723,37 +6738,37 @@ async def _mcp_dispatch(
         if "reporter" in a:
             body["reporter"] = a["reporter"]
         data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}/record-candidate-feedback", request, body=body)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "contexts.delete":
         qs = "?force=true" if a.get("force") else ""
         data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}{qs}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "contexts.delete_file":
         encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
         data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "contexts.versions":
         data, s = await _api_call("GET", f"/contexts/{_enc(a['name'])}/versions", request, params={"limit": a.get("limit", 50)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "contexts.rollback":
         data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}/rollback/{_enc(a['version_id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- triggers ---
     if name == "triggers.list":
         data, s = await _api_call("GET", "/integrations/triggers", request, params={"worker_id": a.get("worker_id"), "app": a.get("app")})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- approvals ---
     if name == "approvals.list":
         data, s = await _api_call("GET", "/approvals", request, params={"limit": a.get("limit", 50)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "approvals.approve":
         data, s = await _api_call("POST", f"/runs/{_enc(a['run_id'])}/approve", request, body={"comment": a.get("comment")})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "approvals.reject":
         data, s = await _api_call("POST", f"/runs/{_enc(a['run_id'])}/reject", request, body={"comment": a.get("comment")})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- workspace ---
     if name == "workspace.chat":
@@ -6777,43 +6792,43 @@ async def _mcp_dispatch(
         )
     if name == "workspace.instructions.get":
         data, s = await _api_call("GET", "/workspace", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workspace.instructions.set":
         data, s = await _api_call("PUT", "/workspace", request, body={"content": a["content"]})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workspace.versions":
         data, s = await _api_call("GET", "/workspace/versions", request, params={"limit": a.get("limit", 20)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workspace.rollback":
         data, s = await _api_call("POST", f"/workspace/rollback/{_enc(a['version_id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- system ---
     if name == "system.overview":
         data, s = await _api_call("GET", "/system/overview", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "system.stats":
         data, s = await _api_call("GET", "/stats", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "system.info":
         data, s = await _api_call("GET", "/system/info", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "system.alerts":
         data, s = await _api_call("GET", "/system/alerts", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- integrations ---
     if name == "integrations.catalog":
         data, s = await _api_call("GET", "/integrations/catalog", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- conversations ---
     if name == "conversations.list":
         data, s = await _api_call("GET", "/conversations", request, params={"limit": a.get("limit", 20)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "conversations.get":
         data, s = await _api_call("GET", f"/conversations/{_enc(a['id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- custom tools management ---
     if name == "tools_list":
@@ -6924,6 +6939,8 @@ async def _mcp_handle_request(
     if isinstance(body, list):
         if not body:
             return _mcp_err(None, -32600, "Invalid JSON-RPC request")
+        if len(body) > _mcp_max_batch_items():
+            return _mcp_err(None, -32600, "Batch too large")
         responses = []
         for item in body:
             if not isinstance(item, dict):
