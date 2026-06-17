@@ -39,6 +39,14 @@ import {
 
 const detailCache = new Map<string, RunDetail>();
 
+// gap N2: a run can be cancelled only while it is in-progress (running or
+// queued). Terminal runs (completed / failed / cancelled) expose no Cancel.
+// Single source of truth shared by the detail header and the row menu so the
+// two surfaces can never disagree.
+export function isCancellableRunStatus(status?: string): boolean {
+  return status === "running" || status === "queued";
+}
+
 function useRunDetail(id: string, status?: string): RunDetail | undefined {
   const [d, setD] = useState<RunDetail | undefined>(detailCache.get(id));
   // §2.1: never serve a cached entry for an active (running/queued) run so the
@@ -482,6 +490,21 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     }
   };
 
+  // gap N2: cancel an in-progress run via the real POST /runs/{id}/cancel
+  // endpoint (api.runs.cancel — previously invoked by zero components). Confirm
+  // first (irreversible), then refresh so the row/detail reflect the new status.
+  const cancel = async (r: RunSummary) => {
+    if (!isCancellableRunStatus(r.status)) return;
+    if (!window.confirm("Cancel this run? It cannot be resumed.")) return;
+    try {
+      await api.runs.cancel(r.id);
+      toast.success("Cancellation requested");
+      await refresh();
+    } catch (err) {
+      toast.error((err as Error).message || "Could not cancel this run.");
+    }
+  };
+
   const config: CollectionConfig<RunSummary> = {
     title: "Run history",
     items: sorted,
@@ -542,7 +565,9 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       template: "1.6fr 1fr .8fr 130px 1fr",
       headers: ["Worker", "Trigger", "Duration", "Status", "Started"],
       statusColumn: false,
-      menuColumn: false,
+      // gap N2: re-enable the trailing ⋯ row-action slot so in-progress runs can
+      // be cancelled directly from the list. Terminal runs render no menu.
+      menuColumn: true,
     },
     row: (r) => ({
       // V4 SPEC rule 3: no avatar for runs — non-person entity.
@@ -556,6 +581,11 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
         <StatusPill key="status" spec={runStatusPill(r.status)} />,
         formatRelative(r.created_at ?? r.started_at ?? ""),
       ],
+      // gap N2: Cancel row action, only for in-progress runs. Omitting `menu`
+      // entirely for terminal runs hides the ⋯ menu for that row.
+      menu: isCancellableRunStatus(r.status)
+        ? [{ label: "Cancel run", danger: true, onSelect: () => void cancel(r) }]
+        : undefined,
     }),
     card: (r) => ({
       // V4 SPEC rule 3: no avatar monogram for runs.
@@ -611,6 +641,18 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
             >
               Replay
             </button>
+            {/* gap N2: Cancel an in-progress run — only shown while running/queued,
+                wired to the real api.runs.cancel endpoint. */}
+            {isCancellableRunStatus(r.status) && (
+              <button
+                type="button"
+                className="c-vpill"
+                style={{ padding: "6px 11px" }}
+                onClick={() => void cancel(r)}
+              >
+                Cancel run
+              </button>
+            )}
           </>
         ),
       },
