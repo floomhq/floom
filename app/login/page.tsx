@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { OAUTH_LOGIN_URL, OAUTH_LOGIN_URL_GITHUB } from "@/lib/api";
 import { LoginEmailPanel } from "@/components/LoginEmailPanel";
-import { V3Shell } from "@/app/v3/V3Shell";
+import { Hl, V3Shell } from "@/app/v3/V3Shell";
 
 export const metadata = {
   title: "Sign in · Floom Workers",
@@ -47,24 +47,13 @@ export default async function LoginPage({
             className="text-[40px] font-semibold leading-[1.04] tracking-[-0.034em]"
             style={{ color: "var(--text-primary)" }}
           >
-            Workers that{" "}
-            <span
-              style={{
-                color: "#3e6fe0",
-                background: "#eef3fe",
-                borderRadius: 4,
-                padding: "0 4px",
-              }}
-            >
-              actually run
-            </span>
-            .
+            <Hl>Hire</Hl> AI workers.
           </h1>
           <p
             className="mt-4 max-w-[380px] text-[14px] leading-relaxed"
             style={{ color: "var(--text-muted)" }}
           >
-            Review drafts, connect tools, and keep every worker run on the record.
+            Describe the job, review the draft, and keep every worker run on the record.
           </p>
 
           {/* Activity card — white, flat, no border/shadow per design spec */}
