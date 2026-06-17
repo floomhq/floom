@@ -30,10 +30,9 @@ import {
   SlackLogo,
 } from "@/components/landing-icons";
 import { V3Composer } from "./V3Composer";
-import { ChannelActions } from "./ChannelActions";
 import { V3TemplateCard } from "./V3TemplateCard";
 import { getTemplate } from "@/components/landing-ref/data";
-import { V3Shell } from "./V3Shell";
+import { Hl, V3Shell } from "./V3Shell";
 import "./theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -58,17 +57,20 @@ function ToolHl({
 
 /* ───────────────── the one story: four beats ───────────────── */
 
-const BEATS = [
+const BEATS: { key: string; t: React.ReactNode; p: string }[] = [
   {
-    t: "Describe the job",
+    key: "describe",
+    t: <>Describe the <Hl>job</Hl></>,
     p: "One sentence, plain English. Floom recognises your tools as you type and drafts the worker.",
   },
   {
-    t: "Approve the draft",
+    key: "approve",
+    t: <>Approve the <Hl>draft</Hl></>,
     p: "The finished work comes to you first. Nothing ships without your yes, in Slack, WhatsApp, or here.",
   },
   {
-    t: "It runs, on the record",
+    key: "record",
+    t: <>It <Hl>runs</Hl>, on the record</>,
     p: "Background work, every run auditable. The output lands where you already are.",
   },
 ];
@@ -186,7 +188,14 @@ function BeatRecord() {
             <span className={`w-12 shrink-0 font-mono text-[10.5px] ${done ? "text-muted-foreground" : "font-semibold"}`} style={!done ? { color: "var(--v3-accent)" } : undefined}>
               {d as string}
             </span>
-            <span className={`flex-1 ${done ? "text-muted-foreground" : "font-medium text-foreground"}`}>{s as string}</span>
+            <span className={`flex flex-1 items-center gap-1.5 ${done ? "text-muted-foreground" : "font-medium text-foreground"}`}>
+              {(s as string).includes("HubSpot") ? (
+                <span className="flex h-3.5 w-3.5 shrink-0 items-center justify-center [&_svg]:h-3.5 [&_svg]:w-3.5">
+                  <HubSpotLogo />
+                </span>
+              ) : null}
+              {s as string}
+            </span>
             {done ? (
               <Check className="h-3.5 w-3.5 shrink-0 text-muted-foreground/60" />
             ) : (
@@ -227,7 +236,7 @@ function Story() {
         <div className="flex flex-col justify-center">
           {BEATS.map((b, i) => (
             <div
-              key={b.t}
+              key={b.key}
               data-beat={i}
               ref={(el) => { refs.current[i] = el; }}
               className="flex min-h-[200px] cursor-default flex-col justify-center py-4 md:min-h-[175px]"
@@ -329,7 +338,7 @@ export function V3Body() {
             transition={{ duration: 0.6, ease: EASE }}
             className="text-[42px] font-semibold leading-[1.02] tracking-[-0.034em] sm:text-[64px]"
           >
-            Hire AI workers.
+            <Hl>Hire</Hl> AI workers.
           </motion.h1>
           <motion.p
             initial={{ opacity: 0, y: 12 }}
@@ -346,10 +355,8 @@ export function V3Body() {
             className="mt-9"
           >
             <V3Composer
-              compact
               fillSignal={fill}
-              heading="Start with one job."
-              placeholder="Tell Emily one job to handle..."
+              placeholder=""
             />
           </motion.div>
           <motion.div
@@ -368,15 +375,6 @@ export function V3Body() {
                 {p.label}
               </button>
             ))}
-          </motion.div>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5, delay: 0.46 }}
-            className="mx-auto mt-8 flex flex-col items-center text-[12px] text-muted-foreground/90"
-          >
-            <span>Works without the dashboard too.</span>
-            <ChannelActions />
           </motion.div>
         </section>
 
@@ -417,7 +415,7 @@ export function V3Body() {
             transition={{ duration: 0.5, delay: 0.1, ease: EASE }}
             className="mt-8"
           >
-            <V3Composer compact placeholder="Tell Emily one job to handle..." />
+            <V3Composer placeholder="" />
           </motion.div>
         </section>
 

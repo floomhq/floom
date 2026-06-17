@@ -10,7 +10,6 @@ import { useState } from "react";
 import { motion } from "motion/react";
 import { SlackLogo, WhatsAppLogo } from "@/components/landing-icons";
 import { Hl, V3Shell } from "../V3Shell";
-import { ChannelActions } from "../ChannelActions";
 import "../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
@@ -159,9 +158,6 @@ export function V3DocsBody() {
             <p className="text-[13.5px] leading-relaxed text-muted-foreground">
               You never have to open the dashboard. Install Floom where your team already talks and hire, approve, and redirect from there.
             </p>
-            <div className="mt-4">
-              <ChannelActions compact />
-            </div>
             <div className="mt-4 flex flex-col">
               <div className="flex items-center gap-3 py-3.5">
                 <span className="[&_svg]:h-4 [&_svg]:w-4"><SlackLogo /></span>

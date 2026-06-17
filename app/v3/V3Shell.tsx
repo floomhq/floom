@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Monitor, Moon, Sun } from "lucide-react";
+import { McpHeaderButton } from "./ChannelActions";
 import "./theme.css";
 
 /* theme mode: same contract as the app's ThemeModeButton (key, values, cycle
@@ -41,11 +42,8 @@ function Mark({ size = 22 }: { size?: number }) {
   );
 }
 
-const NAV = [
-  ["Product", "/product"],
-  ["Templates", "/templates"],
-  ["Docs", "/docs"],
-] as const;
+// Header nav links removed per spec (Product / Templates / Docs).
+const NAV: ReadonlyArray<readonly [string, string]> = [];
 
 export function V3Shell({
   active,
@@ -103,6 +101,7 @@ export function V3Shell({
                 {label}
               </Link>
             ))}
+            <McpHeaderButton />
             <button
               type="button"
               aria-label={`Theme: ${MODE_LABELS[mode]}. Click to switch.`}
@@ -126,12 +125,9 @@ export function V3Shell({
       </div>
 
       <footer>
-        <div className="mx-auto flex max-w-[1000px] flex-col gap-3 px-7 py-6 text-[12px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
-          <div className="flex flex-col gap-1">
-            <span>Floom</span>
-            <span>Built in San Francisco · © 2026 Floom</span>
-          </div>
-          <span className="flex flex-wrap gap-4">
+        <div className="mx-auto flex max-w-[1000px] flex-col gap-4 px-7 py-7 text-[12px] text-muted-foreground sm:flex-row sm:items-center sm:justify-between">
+          <span>© 2026 Floom · Built in San Francisco</span>
+          <nav aria-label="Footer" className="flex flex-wrap items-center gap-x-5 gap-y-2">
             <Link href="/product" className="transition-colors hover:text-foreground">Product</Link>
             <Link href="/templates" className="transition-colors hover:text-foreground">Templates</Link>
             <Link href="/integrations" className="transition-colors hover:text-foreground">Integrations</Link>
@@ -139,7 +135,7 @@ export function V3Shell({
             <a href="https://github.com/floomhq/workeros" target="_blank" rel="noopener noreferrer" className="transition-colors hover:text-foreground">GitHub</a>
             <Link href="/privacy" className="transition-colors hover:text-foreground">Privacy</Link>
             <Link href="/terms" className="transition-colors hover:text-foreground">Terms</Link>
-          </span>
+          </nav>
         </div>
       </footer>
     </div>
