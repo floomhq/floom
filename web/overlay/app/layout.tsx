@@ -4,6 +4,7 @@ import "./globals.css";
 import "./cloud-shell.css";
 import { CloudAppChrome } from "@/components/CloudAppChrome";
 import { PostHogProvider } from "@/components/PostHogProvider";
+import { QueryProvider } from "@/components/providers/QueryProvider";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -41,7 +42,13 @@ export default function RootLayout({
             the desktop flex direction so the hosted Cloud build cannot stack
             the sidebar above the app body through Tailwind utility ordering. */}
         <PostHogProvider>
-          <CloudAppChrome>{children}</CloudAppChrome>
+          {/* QueryProvider must wrap the chrome: the sidebar + collection
+              pages use TanStack useQuery hooks (lib/query/hooks), and without a
+              QueryClient in the tree every SSR render throws "No QueryClient
+              set" -> 500. Mirrors the engine root layout. */}
+          <QueryProvider>
+            <CloudAppChrome>{children}</CloudAppChrome>
+          </QueryProvider>
         </PostHogProvider>
       </body>
     </html>

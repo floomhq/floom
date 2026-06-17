@@ -96,10 +96,12 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
     : user?.email
       ? "Signed in"
       : "Floom";
-  const initial = profileInitials(primary);
   // #1306: show the real Google/GitHub photo when present and still loading;
-  // fall back to squared initials on error or when no picture is provided.
+  // fall back to a DiceBear `glass` mark on error or when no picture is
+  // provided (mirrors the engine sidebar UserDiceBearAvatar — a calm geometric
+  // mark, squircle, flat, no border), not bare initials.
   const avatarUrl = user?.picture && !avatarFailed ? user.picture : null;
+  const dicebearUrl = `https://api.dicebear.com/9.x/glass/svg?seed=${encodeURIComponent(primary || "user")}&radius=0`;
 
   async function logout() {
     try {
@@ -127,7 +129,8 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
         >
           {/* #1306: squared avatar (radius-button / 9px), NO border — matches
               the worker/employee card mark. Photo for Google/GitHub logins,
-              initials otherwise (and on photo load error). */}
+              DiceBear glass mark otherwise (and on photo load error), mirroring
+              the engine sidebar UserDiceBearAvatar. */}
           {avatarUrl ? (
             <img
               src={avatarUrl}
@@ -137,9 +140,11 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
               className="size-7 shrink-0 rounded-[var(--radius-button)] object-cover"
             />
           ) : (
-            <div className="grid size-7 shrink-0 place-items-center rounded-[var(--radius-button)] bg-muted text-[11px] font-medium text-foreground">
-              {initial}
-            </div>
+            <img
+              src={dicebearUrl}
+              alt="Profile avatar"
+              className="size-7 shrink-0 rounded-[var(--radius-button)] border-0 object-cover"
+            />
           )}
           <div className="min-w-0 leading-tight text-left">
             <p className="truncate text-xs font-medium text-foreground">{primary}</p>

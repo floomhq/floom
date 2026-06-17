@@ -274,6 +274,13 @@ export const api = {
       });
       return worker;
     },
+    setStage: async (id: string, stage: import("@/lib/types").WorkerStage) => {
+      const worker = await fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/stage`, {
+        method: "PUT",
+        body: JSON.stringify({ stage }),
+      });
+      return worker;
+    },
     shareLink: async (id: string) => {
       const link = await fetchJson<import("@/lib/types").StandaloneShareLink>(`/workers/${encodeURIComponent(id)}/share-link`, {
         method: "POST",
