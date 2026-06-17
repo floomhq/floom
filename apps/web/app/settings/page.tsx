@@ -48,6 +48,12 @@ import { ClaimSuccessOverlay, type ClaimChannel } from "@/components/channels/Cl
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
 import { EmilyAvatar } from "@/components/emily/EmilyAvatar";
+import {
+  useAssistantName,
+  setCachedAssistantName,
+  ASSISTANT_NAME_KEY,
+  DEFAULT_ASSISTANT_NAME,
+} from "@/lib/workspace/assistant-name";
 import { modelLabel } from "@/lib/model-labels";
 import { cn } from "@/lib/utils";
 import {
@@ -1554,6 +1560,65 @@ function SettingsHistoryMenu({
   );
 }
 
+// Round-09 (Federico 2026-06-17): the assistant name is a workspace setting.
+// Renaming here writes the `assistant_name` KV and propagates to every visible
+// surface (chat header, channels copy, approvals copy) via useAssistantName().
+function AssistantNameSection({ canEdit }: { canEdit: boolean }) {
+  const current = useAssistantName();
+  const [value, setValue] = useState(current);
+  const [original, setOriginal] = useState(current);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setValue(current);
+    setOriginal(current);
+  }, [current]);
+
+  const dirty = value.trim() !== original && value.trim().length > 0;
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    const next = value.trim();
+    if (!canEdit || !next || saving) return;
+    setSaving(true);
+    try {
+      await api.workspace.setSetting(ASSISTANT_NAME_KEY, next);
+      setCachedAssistantName(next);
+      setOriginal(next);
+      toast.success(`Assistant renamed to "${next}"`);
+    } catch (err) {
+      toast.error((err as Error).message || "Could not rename the assistant");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <div>
+        <h3 className="text-sm font-medium">Name</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          What your assistant is called across the app, channels, and approvals.
+        </p>
+      </div>
+      <form onSubmit={(e) => void save(e)} className="flex gap-2">
+        <Input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={DEFAULT_ASSISTANT_NAME}
+          maxLength={32}
+          disabled={!canEdit}
+          className="max-w-xs"
+          aria-label="Assistant name"
+        />
+        <Button type="submit" size="sm" disabled={!canEdit || !dirty || saving}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </form>
+    </section>
+  );
+}
+
 function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: boolean }) {
   const [agent, setAgent] = useState<WorkspaceAgentInfo | null>(null);
   const [base, setBase] = useState("");
@@ -1571,6 +1636,7 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
   const [error, setError] = useState<string | null>(null);
   const [versionsKey, setVersionsKey] = useState(0);
   const [baseVersionsKey, setBaseVersionsKey] = useState(0);
+  const assistantName = useAssistantName();
 
   const canEdit = canManageWorkspace && agent?.permissions?.can_edit !== false;
   const dirty = instructions !== originalInstructions;
@@ -1670,8 +1736,8 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
       <div className="flex flex-wrap items-center gap-3">
         <EmilyAvatar size="md" />
         <div className="min-w-0">
-          <h2 className="text-sm font-medium">Emily</h2>
-          <p className="text-xs text-muted-foreground">Persona, workspace notes, and compiled prompt.</p>
+          <h2 className="text-sm font-medium">{assistantName}</h2>
+          <p className="text-xs text-muted-foreground">Name, persona, workspace notes, and compiled prompt.</p>
         </div>
         {agent?.model ? <Badge variant="outline" className="text-xs">{modelLabel(agent.model)}</Badge> : null}
         {agent ? (
@@ -1679,8 +1745,8 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
             <AssetVisibilityControl
               visibility={agent.visibility}
               canShare={canEdit && (agent.permissions?.can_share ?? true)}
-              noun="Emily"
-              titleLabel="Emily visibility"
+              noun={assistantName}
+              titleLabel={`${assistantName} visibility`}
               onApply={async (next) => {
                 const updated = await api.system.setAssistantVisibility(next);
                 setAgent(updated);
@@ -1690,6 +1756,8 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
           </span>
         ) : null}
       </div>
+
+      <AssistantNameSection canEdit={canEdit} />
 
       <Tabs defaultValue="base">
         <TabsList>
@@ -1703,10 +1771,10 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-medium">Emily persona</h3>
+                    <h3 className="text-sm font-medium">{assistantName} persona</h3>
                     <Badge variant="outline" className="text-xs">{baseIsCustom ? "Custom" : "Built-in default"}</Badge>
                   </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Emily&apos;s core identity and style.</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{assistantName}&apos;s core identity and style.</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <SettingsHistoryMenu
