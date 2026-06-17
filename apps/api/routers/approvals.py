@@ -280,14 +280,7 @@ def _approval_response(
     # `type` mirrors preview_type for the v4 frontend's preview dispatcher.
     if response.get("preview_type") is not None:
         response["type"] = response.get("preview_type")
-    # Standalone share/review link for the authenticated owner. The token is the
-    # same deterministic HMAC the /approvals/public/* routes verify, so the owner
-    # can copy this URL to open the approval full-page (no app chrome) or share it
-    # with an external approver. Mirrors the chat tool's `link` field.
-    response["public_link"] = (
-        f"{_frontend_base_url()}/approvals/review"
-        f"?id={response.get('id')}&token={_approval_public_token(dict(approval))}"
-    )
+    response["public_link"] = _approval_public_link_for_owner(dict(approval))
     return response
 
 
@@ -342,6 +335,18 @@ def _approval_public_token(approval: Dict[str, Any]) -> str:
         _approval_public_payload(approval).encode("utf-8"),
         hashlib.sha256,
     ).hexdigest()
+
+
+def _approval_public_link_for_owner(approval: Dict[str, Any]) -> str | None:
+    """Return the optional owner share/review link without breaking list views."""
+    try:
+        token = _approval_public_token(approval)
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            logger.warning("Approval public link omitted because FLOOM_SECRET is not configured")
+            return None
+        raise
+    return f"{_frontend_base_url()}/approvals/review?id={approval.get('id')}&token={token}"
 
 
 # F3 (2026-06-03): the public approval endpoints must NOT leak which approval
