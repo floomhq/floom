@@ -311,7 +311,7 @@ function TimelineRow({ item }: { item: TimelineItem }) {
     <div className="relative flex gap-2 pb-3 pl-1">
       <div className="flex flex-col items-center">
         <RunStatusGlyph status={item.status} className="size-4" />
-        <div className="mt-1 h-full w-px bg-border" />
+        <div className="mt-1 h-full w-px bg-[var(--line)]" />
       </div>
       <div className="min-w-0 flex-1 rounded-[var(--radius-button)] px-2 py-1 hover:bg-muted">
         <div className="flex items-center justify-between gap-2">
@@ -847,7 +847,7 @@ function ApprovalView({ approval }: { approval: ApprovalEntry | null }) {
   }
   const statusColor =
     approval.status === "approved"
-      ? "text-emerald-600"
+      ? "text-[var(--positive)]"
       : approval.status === "rejected"
       ? "text-destructive"
       : "text-[var(--ink-soft)]";

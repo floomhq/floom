@@ -102,7 +102,7 @@ function LiveTranscript({
       </div>
 
       {streamUnavailable && isActive && (
-        <div className="flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-button)] border border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-button)] bg-[color-mix(in_srgb,var(--warning)_8%,transparent)] px-4 py-3">
           <p className="text-sm text-[var(--ink)]">
             {streamError || "Stream connection dropped. Refresh to re-check."}
           </p>
