@@ -43,8 +43,12 @@ function ModalShell({
       role="dialog"
       aria-modal="true"
       aria-label={title}
+      onClick={onClose}
     >
-      <div className="w-full max-w-[420px] rounded-[20px] bg-[var(--bg-app)] p-5 text-left">
+      <div
+        className="w-full max-w-[420px] rounded-[20px] bg-[var(--bg-app)] p-5 text-left"
+        onClick={(e) => e.stopPropagation()}
+      >
         <div className="flex items-center justify-between gap-4">
           <h2 className="text-[18px] font-semibold tracking-[-0.018em]">{title}</h2>
           <button
