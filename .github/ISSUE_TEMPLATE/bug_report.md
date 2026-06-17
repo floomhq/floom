@@ -9,6 +9,10 @@ labels: bug
 
 <!-- A clear, concise description of the bug. -->
 
+## Impact
+
+<!-- What is blocked or broken? Is there a workaround? -->
+
 ## Steps to reproduce
 
 1.
@@ -21,10 +25,16 @@ labels: bug
 
 ## Environment
 
-- WorkerOS version / commit:
+- Workeros version / commit:
 - Component: [ ] api  [ ] web  [ ] mcp  [ ] worker runtime
 - OS / Python / Node version:
 - Deploy mode: [ ] local (SQLite)  [ ] cloud
+- Browser, if web:
+- Worker id, if worker-specific:
+
+## What I tried
+
+<!-- Commands run, docs followed, or troubleshooting steps checked. -->
 
 ## Logs / screenshots
 

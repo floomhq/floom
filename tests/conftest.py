@@ -49,6 +49,9 @@ if _SUITE_WORKSPACE_DIR and not os.environ.get("WORKEROS_WORKSPACE_DIR"):
     os.environ["WORKEROS_WORKSPACE_DIR"] = _SUITE_WORKSPACE_DIR
 if not os.environ.get("FLOOM_ARTIFACTS_DIR"):
     os.environ["FLOOM_ARTIFACTS_DIR"] = tempfile.mkdtemp(prefix="workeros-suite-artifacts-")
+if not os.environ.get("FLOOM_CONTEXTS_DIR"):
+    os.environ["FLOOM_CONTEXTS_DIR"] = tempfile.mkdtemp(prefix="workeros-suite-contexts-")
+_SUITE_CONTEXTS_DIR = os.environ.get("FLOOM_CONTEXTS_DIR")
 
 # 1c) Point the operator-secrets .env persistence at a throwaway file. The
 #     secrets writer (db.sqlite._upsert_env_var, used by repos.secrets.set) and
@@ -83,11 +86,13 @@ os.environ.setdefault("FLOOM_SECRET", "")
 #    prod secret (and prod DB path). Patch load_dotenv to drop these sensitive
 #    keys from every file load so dev-mode tests stay in dev mode and no test
 #    can ever be pointed at the prod DB via dotenv.
+# union (base round-09 model-env keys + main's WORKEROS_USER_ID)
 _SENSITIVE_DOTENV_KEYS = frozenset(
     {
         "FLOOM_SECRET",
         "FLOOM_DB",
         "WORKEROS_DB",
+        "WORKEROS_USER_ID",
         "WORKEROS_CHAT_MODEL",
         "WORKEROS_CODEGEN_MODEL",
         "WORKEROS_WORKER_AGENT_MODEL",
@@ -212,11 +217,12 @@ def _clear_rate_buckets() -> None:
     """
     for mod_name, attr in (
         ("main", "_rate_buckets"),
+        ("main", "_draft_rate_store"),
         ("services.worker_codegen", "_draft_rate_store"),
     ):
         mod = sys.modules.get(mod_name)
         store = getattr(mod, attr, None)
-        if isinstance(store, dict):
+        if hasattr(store, "clear"):
             store.clear()
 
 
@@ -298,6 +304,15 @@ def _isolate_global_state(request):
         wr_mod = sys.modules.get("worker_registry")
         if wr_mod is not None and hasattr(wr_mod, "WORKERS_DIR"):
             wr_mod.WORKERS_DIR = _pathlib.Path(_target_workers_dir).resolve()
+    if _SUITE_CONTEXTS_DIR and not os.environ.get("FLOOM_CONTEXTS_DIR"):
+        os.environ["FLOOM_CONTEXTS_DIR"] = _SUITE_CONTEXTS_DIR
+    if _SUITE_CONTEXTS_DIR:
+        import pathlib as _pathlib
+        ctx_mod = sys.modules.get("contexts")
+        if ctx_mod is not None and hasattr(ctx_mod, "CONTEXTS_DIR"):
+            contexts_dir = _pathlib.Path(os.environ.get("FLOOM_CONTEXTS_DIR") or _SUITE_CONTEXTS_DIR).resolve()
+            ctx_mod.CONTEXTS_DIR = contexts_dir
+            ctx_mod.CONTEXT_METADATA_PATH = contexts_dir / ".workeros-contexts.json"
 
     # "routers" covers the routers package + routers.* route-group modules: a
     # router module pins the auth.dependency/auth.factory instances it imported

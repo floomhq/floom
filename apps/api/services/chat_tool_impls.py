@@ -479,16 +479,18 @@ def _tool_runs_get(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
 
 
 def _tool_runs_cancel(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
-    from db import get_db as _get_db
+    from db import get_repositories, now_iso
     run_id = str(args.get("run_id") or "")
     if not run_id:
         return {"ok": False, "error": "run_id is required"}
     try:
-        with _get_db() as conn:
-            conn.execute(
-                "UPDATE runs SET cancel_requested = 1 WHERE id = ?",
-                (run_id,),
-            )
+        repos = get_repositories()
+        run = repos.runs.get(user_id=user_id, run_id=run_id)
+        if not run:
+            return {"ok": False, "error": f"Run not found: {run_id}"}
+        if str(run.get("status") or "").lower() in {"completed", "failed"}:
+            return {"ok": False, "error": f"Run not found: {run_id}"}
+        repos.runs.cancel(user_id=user_id, run_id=run_id, cancelled_at=now_iso())
         return {"ok": True, "message": f"Cancel requested for run '{run_id}'."}
     except Exception as exc:
         return {"ok": False, "error": str(exc)}
@@ -582,7 +584,7 @@ def _tool_connections_list(args: Dict[str, Any], user_id: str) -> Dict[str, Any]
             "last_check_status": c.get("last_check_status"),
             "mcp_label": c.get("mcp_label"),
             "mcp_url": c.get("mcp_url"),
-            "mcp_auth_secret": c.get("mcp_auth_secret"),
+            "mcp_auth_configured": bool(c.get("mcp_auth_secret")),
             "mcp_allowed_tools": [tool for tool in allowed_tools if isinstance(tool, str)],
         })
     return {"ok": True, "connections": result, "count": len(result)}
@@ -595,6 +597,26 @@ def _tool_connections_add_mcp(args: Dict[str, Any], user_id: str) -> Dict[str, A
     allowed_tools = args.get("allowed_tools")
     if not label or not url:
         return {"ok": False, "error": "label and url are required"}
+    try:
+        from fastapi import HTTPException
+        from routers.connections import MCPConnectionCreateRequest, _normalize_mcp_connection_payload
+
+        normalized = _normalize_mcp_connection_payload(
+            MCPConnectionCreateRequest(
+                label=label,
+                url=url,
+                auth_secret=auth_secret,
+                allowed_tools=allowed_tools or [],
+            )
+        )
+    except HTTPException as exc:
+        return {"ok": False, "error": str(exc.detail)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    label = normalized["label"]
+    url = normalized["url"]
+    auth_secret = normalized["auth_secret"]
+    allowed_tools = normalized["allowed_tools"]
     from db import get_db as _get_db, now_iso as _now_iso
     import uuid as _uuid
     conn_id = f"mcp_{_uuid.uuid4().hex[:12]}"

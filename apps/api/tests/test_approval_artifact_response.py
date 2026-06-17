@@ -121,9 +121,12 @@ def test_public_approval_artifact_download_uses_signed_link(monkeypatch, tmp_pat
         main.app.dependency_overrides.clear()
 
     assert response.status_code == 200
-    assert response.headers["content-type"].startswith("text/csv")
+    assert response.headers["content-type"].split(";", 1)[0] in {
+        "text/csv",
+        "application/vnd.ms-excel",
+    }
     assert "report.csv" in response.headers["content-disposition"]
-    assert response.text == "name,value\nFloom,1\n"
+    assert response.text.splitlines() == ["name,value", "Floom,1"]
 
 
 def test_public_approval_artifact_download_serves_pdf_and_xlsx(monkeypatch, tmp_path):

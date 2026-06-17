@@ -47,7 +47,7 @@ def _load_api(monkeypatch, tmp_path, *, stock_workers: tuple[str, ...] = ()):
     monkeypatch.delenv("ALLOWED_ORIGIN_REGEX", raising=False)
     monkeypatch.delenv("WORKEROS_DEV", raising=False)
 
-    reset_prefixes = ("auth.", "db.", "routers")
+    reset_prefixes = ("auth.", "db.", "routers", "services.")
     reset_exact = {
         "main",
         "auth",
@@ -386,10 +386,9 @@ def test_runs_clear_only_deletes_owner_history(monkeypatch, tmp_path):
     body = clear_resp.json()
     assert body["deleted_runs"] == 1
     assert body["cleared_count"] == 1
-    # Hardening: a pre-wipe backup must have been written before deletion.
-    backup_path = Path(body["backup_path"])
-    assert backup_path.is_file()
-    assert backup_path.stat().st_size > 0
+    # Hardening: a pre-wipe backup must have been written before deletion, but
+    # the server filesystem path must not be exposed to the caller.
+    assert "backup_path" not in body
 
     owner_after = client.get("/runs", headers=_headers("user-a"))
     foreign_after = client.get("/runs", headers=_headers("user-b"))
@@ -867,6 +866,118 @@ def test_run_replay_cross_worker_same_user_returns_404(monkeypatch, tmp_path):
     assert right_worker.json()["run_id"] != run_id
 
 
+def test_shared_worker_runs_are_actor_scoped_for_detail_and_replay(monkeypatch, tmp_path):
+    """#1076: shared-worker runs carry the triggering actor's inputs/outputs.
+
+    Visibility to the worker must not let another workspace member, or even the
+    worker owner, read/replay a different actor's stored run payload.
+    """
+    main = _load_api(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    created = client.post(
+        "/workers",
+        headers=_headers("user-a"),
+        json=_worker_payload("shared-run-idor", title="Shared Run IDOR"),
+    )
+    assert created.status_code == 200, created.text
+
+    with main.get_db() as conn:
+        workspace_id = conn.execute(
+            "SELECT workspace_id FROM workers WHERE id = ?",
+            ("shared-run-idor",),
+        ).fetchone()["workspace_id"] or "local-default"
+        conn.execute(
+            "UPDATE workers SET visibility = 'workspace', workspace_id = ? WHERE id = ?",
+            (workspace_id, "shared-run-idor"),
+        )
+        conn.execute(
+            "INSERT OR IGNORE INTO workspace_members "
+            "(workspace_id, user_id, role, status, created_at, updated_at) "
+            "VALUES (?, 'user-b', 'member', 'active', ?, ?)",
+            (workspace_id, main.now_iso(), main.now_iso()),
+        )
+
+    from auth.local_workspaces import local_workspace_user_id
+
+    scoped_user_a = local_workspace_user_id("user-a", workspace_id)
+    scoped_user_b = local_workspace_user_id("user-b", workspace_id)
+
+    repos = main.get_repositories()
+    run_a_id = "run-shared-a"
+    run_b_id = "run-shared-b"
+    repos.runs.create(
+        user_id=scoped_user_a,
+        run_id=run_a_id,
+        worker_id="shared-run-idor",
+        status=main.RunStatus.COMPLETED.value,
+        trigger_source="manual",
+        runner="e2b",
+        input_json={"secret": "from-a"},
+        output_json={},
+    )
+    repos.runs.create(
+        user_id=scoped_user_b,
+        run_id=run_b_id,
+        worker_id="shared-run-idor",
+        status=main.RunStatus.COMPLETED.value,
+        trigger_source="manual",
+        runner="e2b",
+        input_json={"secret": "from-b"},
+        output_json={},
+    )
+    with main.get_db() as conn:
+        actor_b = conn.execute(
+            "SELECT actor_user_id FROM runs WHERE id = ?",
+            (run_b_id,),
+        ).fetchone()["actor_user_id"]
+    assert actor_b == scoped_user_b
+    row_b = repos.runs.get(user_id=scoped_user_b, run_id=run_b_id)
+    assert row_b is not None
+    assert row_b.get("actor_user_id") == scoped_user_b
+    from services.run_access import _get_run_by_explicit_id, _run_visible_to_api
+
+    assert _run_visible_to_api(row_b, user_id=scoped_user_b, repos=repos)
+    assert _get_run_by_explicit_id(run_b_id, user_id=scoped_user_b, repos=repos) is not None
+
+    from auth import AuthContext
+    from fastapi import HTTPException
+    from routers import runs as runs_router
+
+    auth_a = AuthContext(user_id=scoped_user_a, role="member", auth_method="secret")
+    auth_b = AuthContext(user_id=scoped_user_b, role="member", auth_method="secret")
+
+    own_a = runs_router.get_run(run_a_id, auth=auth_a, repos=repos)
+    own_b = runs_router.get_run(run_b_id, auth=auth_b, repos=repos)
+    assert own_a.input == {"secret": "from-a"}
+    assert own_b.input == {"secret": "from-b"}
+
+    with pytest.raises(HTTPException) as cross_detail_a:
+        runs_router.get_run(run_a_id, auth=auth_b, repos=repos)
+    with pytest.raises(HTTPException) as cross_detail_b:
+        runs_router.get_run(run_b_id, auth=auth_a, repos=repos)
+    assert cross_detail_a.value.status_code == 404
+    assert cross_detail_b.value.status_code == 404
+
+    with pytest.raises(HTTPException) as cross_replay:
+        main.replay_run(
+            "shared-run-idor",
+            run_b_id,
+            request=None,
+            auth=auth_a,
+            repos=repos,
+        )
+    own_replay = main.replay_run(
+        "shared-run-idor",
+        run_b_id,
+        request=None,
+        auth=auth_b,
+        repos=repos,
+    )
+    assert cross_replay.value.status_code == 404
+    assert own_replay["run_id"] != run_b_id
+
+
 def test_context_symlink_traversal_is_blocked(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
@@ -877,7 +988,10 @@ def test_context_symlink_traversal_is_blocked(monkeypatch, tmp_path):
     outside = tmp_path / "outside.txt"
     outside.write_text("outside")
     with main.use_context_scope(main.context_scope_for_user("user-a")):
-        os.symlink(outside, main.context_dir("audit-ctx") / "escape.txt")
+        try:
+            os.symlink(outside, main.context_dir("audit-ctx") / "escape.txt")
+        except OSError as exc:
+            pytest.skip(f"symlink creation is not permitted on this Windows runner: {exc}")
 
     get_response = client.get("/contexts/audit-ctx/files/escape.txt", headers=_headers("user-a"))
     put_response = client.put(

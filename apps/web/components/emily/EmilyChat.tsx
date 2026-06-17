@@ -346,6 +346,8 @@ function ChatEmptyState({
   // #1363 — First-run opener: proactive builder message + action-oriented pills
   const headline = isNewWorkspace
     ? "Hi, describe what you want to automate and I’ll build the worker for you right now."
+    // take-base (round-09 copy). FLAG: brand-string conflict — base says "COO",
+    // main says "Chief of Staff". Defaulting to round-09; needs human brand call.
     : "I am Emily, your COO";
   const sub = isNewWorkspace
     ? null

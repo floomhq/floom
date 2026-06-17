@@ -7,6 +7,10 @@ The open-source, self-hosted runtime for AI workers. Sandboxed by default.
 
 > Create a worker. Give it tools. Let it run. See everything.
 
+New here? Start with [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for the
+short path from "why Workeros exists" to your first worker and a safe self-hosted
+deployment checklist.
+
 ## Worker execution model
 
 Pure-script workers run in an **E2B sandbox by default** — isolated dependencies, no host process access, contained resource usage. Agent workers (`SKILL.md`) run through the API-hosted AgentDriver tool loop. There is no supported local in-process worker runner.
@@ -18,6 +22,16 @@ You pay only for sandbox execution time (E2B bills per second of run time), with
 ## Quick Start
 
 **Fastest path** — two scripts. You need an OpenAI key and an E2B key ([e2b.dev](https://e2b.dev)).
+
+### Prerequisites
+
+- Python 3.11 or newer.
+- Node.js 20 or newer, with npm.
+- Git.
+- An `OPENAI_API_KEY` for Emily, agent workers, and code generation.
+- An `E2B_API_KEY` for sandboxed script-worker execution.
+- On Windows, run setup and dev commands from PowerShell. If script execution is
+  blocked, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
 
 **Linux / macOS**
 ```bash
@@ -36,6 +50,26 @@ You pay only for sandbox execution time (E2B bills per second of run time), with
 Open [http://localhost:3000](http://localhost:3000) and sign in. That's the whole setup — no auth secret required for local dev, and the example workers are seeded on first boot. Everything below is **optional**: other model providers (Bedrock/Claude, Gemini, …), an operator secret, git-backed version history, and integrations.
 
 Prefer to run things by hand (or need to debug one side)? The manual per-OS steps are below.
+
+### Troubleshooting
+
+See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for the full setup,
+runtime, and test troubleshooting index.
+
+- **Frontend shows a cloud sign-in screen:** copy `apps/web/.env.example` to
+  `apps/web/.env`. The local frontend should point at `http://localhost:8000`.
+- **Port already in use:** stop the existing process on `3000` or `8000`, or set
+  `WORKEROS_API_PORT` before starting the backend.
+- **Backend restarts during worker runs:** start the API with `python main.py`,
+  not bare `uvicorn main:app --reload`; the checked-in entry point excludes
+  runtime artifact folders from reload watching.
+- **Workers fail before running:** confirm `E2B_API_KEY` is set in
+  `apps/api/.env`.
+- **Agent workers or Emily fail on model calls:** confirm `OPENAI_API_KEY` is set,
+  or configure the model-provider variables shown below.
+- **Version history is empty:** set `FLOOM_WORKERS_DIR` and `FLOOM_CONTEXTS_DIR`
+  to directories outside the engine checkout. The engine refuses to commit
+  worker history into its own source repo.
 
 ---
 
@@ -310,7 +344,19 @@ All endpoints require the `x-floom-secret` header (set `FLOOM_SECRET` in `.env`)
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup,
-the repo layout, and PR guidelines.
+the first-contribution map, and PR guidelines.
+
+For quick local checks from the repo root:
+
+```bash
+npm run test:api
+npm run lint:web
+npm run test:web
+npm run test:mcp
+```
+
+The full GitHub Actions matrix currently runs on project GitHub-hosted runners, so
+external contributors should include the local commands they ran in the PR.
 
 ## Security
 

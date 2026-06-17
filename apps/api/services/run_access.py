@@ -51,6 +51,9 @@ def _run_visible_to_api(row: Any, *, user_id: str, repos: "Repositories") -> boo
         return False
     if _worker_hidden_from_api(worker_id):
         return False
+    actor_user_id = row_to_dict(row).get("actor_user_id")
+    if actor_user_id is not None and str(actor_user_id) == str(user_id):
+        return True
     # A run is visible if its worker is owned by the requesting user — regardless
     # of whether the worker is a stock/tracked worker. This closes the gap where
     # Emily (which bypasses the visibility filter) could see runs that /runs hid.
@@ -178,10 +181,21 @@ def _get_run_by_explicit_id(
     """
     row = repos.runs.get(user_id=user_id, run_id=run_id)
     if row is None:
+        try:
+            candidate = repos.runs.get_any(run_id=run_id)
+        except Exception:
+            candidate = None
+        candidate_data = row_to_dict(candidate) if candidate is not None else {}
+        if str(candidate_data.get("actor_user_id") or "") != str(user_id):
+            return None
+        row = candidate
+    data = row_to_dict(row)
+    actor_user_id = data.get("actor_user_id")
+    if actor_user_id is not None and str(actor_user_id) != str(user_id):
         return None
     if _run_visible_to_api(row, user_id=user_id, repos=repos):
         return row
-    worker_id = str(row_to_dict(row).get("worker_id") or "")
+    worker_id = str(data.get("worker_id") or "")
     if worker_id in _OPERATOR_REACHABLE_HIDDEN_WORKER_IDS:
         return row
     return None
@@ -217,15 +231,20 @@ def _list_visible_runs(
     limit: int = 50,
     offset: int = 0,
     include_system: bool = False,
+    exact_total: bool = True,
 ) -> tuple[list[Any], int]:
     batch_size = max(limit, 100)
     raw_offset = 0
     raw_total_count: int | None = None
     visible_total = 0
     visible_rows: list[Any] = []
+    target_visible = offset + limit
+    # Fast mode only needs one extra visible row to tell callers there may be
+    # another page. It avoids scanning the full run table for exact counts.
+    stop_after_visible = None if exact_total else target_visible + 1
 
     while raw_total_count is None or raw_offset < raw_total_count:
-        rows, raw_total_count = repos.runs.list(
+        list_kwargs = dict(
             user_id=user_id,
             worker_id=worker_id,
             statuses=statuses,
@@ -234,6 +253,15 @@ def _list_visible_runs(
             limit=batch_size,
             offset=raw_offset,
         )
+        try:
+            rows, raw_total_count = repos.runs.list(
+                **list_kwargs,
+                include_total=exact_total,
+            )
+        except TypeError as exc:
+            if "include_total" not in str(exc):
+                raise
+            rows, raw_total_count = repos.runs.list(**list_kwargs)
         if not rows:
             break
         raw_offset += len(rows)
@@ -249,4 +277,8 @@ def _list_visible_runs(
                 continue
             if len(visible_rows) < limit:
                 visible_rows.append(row)
+            if stop_after_visible is not None and visible_total >= stop_after_visible:
+                return visible_rows, visible_total
+        if not exact_total and len(rows) < batch_size:
+            break
     return visible_rows, visible_total

@@ -27,7 +27,7 @@ from services import git_service as _gitsvc
 # ---------------------------------------------------------------------------
 
 def test_local_key_path_constant_correct():
-    assert str(_gitsvc._LOCAL_KEY_PATH).endswith(".config/workeros/secrets.key"), (
+    assert _gitsvc._LOCAL_KEY_PATH.parts[-3:] == (".config", "workeros", "secrets.key"), (
         f"_LOCAL_KEY_PATH should end with .config/workeros/secrets.key, got {_gitsvc._LOCAL_KEY_PATH}"
     )
 
@@ -67,8 +67,9 @@ def test_get_or_create_generates_local_key_when_missing(tmp_path):
         assert key_file.exists(), "Key file must be created when absent"
         assert len(result) == 32, "Generated key must be 32 bytes"
         assert key_file.read_bytes() == result, "Written key must match returned key"
-        mode = oct(key_file.stat().st_mode & 0o777)
-        assert mode == oct(0o600), f"Key file must be mode 600, got {mode}"
+        if os.name != "nt":
+            mode = oct(key_file.stat().st_mode & 0o777)
+            assert mode == oct(0o600), f"Key file must be mode 600, got {mode}"
     finally:
         _gitsvc._secrets_key_resolver = original_resolver
 

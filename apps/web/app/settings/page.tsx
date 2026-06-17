@@ -2192,7 +2192,7 @@ function WhatsAppQR() {
   if (!WA_BOT_NUMBER || !WA_LINK) {
     return (
       <p className="text-sm text-muted-foreground">
-        WhatsApp not configured — set <code className="font-mono">WA_BOT_NUMBER</code>.
+        WhatsApp not configured. Set <code className="font-mono">WA_BOT_NUMBER</code>.
       </p>
     );
   }
@@ -2425,7 +2425,7 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
             </>
           ) : (
             <p className="text-sm text-muted-foreground">
-              WhatsApp not configured — set <code className="font-mono">WA_BOT_NUMBER</code>.
+              WhatsApp not configured. Set <code className="font-mono">WA_BOT_NUMBER</code>.
             </p>
           )}
         </TabsContent>

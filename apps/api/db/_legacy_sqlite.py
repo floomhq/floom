@@ -1090,6 +1090,7 @@ MIGRATIONS: list[Migration] = [
     CREATE TABLE IF NOT EXISTS runs (
         id TEXT PRIMARY KEY,
         worker_id TEXT NOT NULL,
+        actor_user_id TEXT,
         status TEXT NOT NULL,
         trigger_source TEXT NOT NULL,
         runner TEXT NOT NULL,
@@ -2081,6 +2082,14 @@ MIGRATIONS: list[Migration] = [
         ON approvals(run_id)
         WHERE status = 'pending';
     """,
+    # -- migration 82: actor-scoped runs (#1076). Shared/workspace workers are
+    # owned by a workspace/owner actor, but run inputs/outputs belong to the
+    # caller that triggered the run. Legacy rows fall back to worker owner.
+    """
+    ALTER TABLE runs ADD COLUMN actor_user_id TEXT;
+    CREATE INDEX IF NOT EXISTS idx_runs_actor_created
+        ON runs(actor_user_id, created_at DESC);
+    """,
 ]
 
 
@@ -2108,7 +2117,7 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50, 65, 71} or "duplicate column name" not in str(exc):
+                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50, 65, 71, 82} or "duplicate column name" not in str(exc):
                         raise
                     logger.info(
                         "Skipping already-applied column migration %s: %s",

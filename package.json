@@ -1,7 +1,6 @@
 {
   "name": "workeros",
   "version": "0.1.0",
-  "private": true,
   "description": "The open-source, self-hosted runtime for AI workers. Sandboxed by default.",
   "license": "MIT",
   "repository": {
@@ -18,10 +17,16 @@
     "sandbox"
   ],
   "scripts": {
-    "dev:api": "cd apps/api && source venv/bin/activate && uvicorn main:app --host 0.0.0.0 --port ${WORKEROS_API_PORT:-8000} --reload",
-    "dev:web": "cd apps/web && npm run dev",
-    "dev": "echo 'Run dev:api and dev:web in separate terminals'",
-    "build:web": "cd apps/web && npm run build",
-    "test:crud": "python3 tests/crud_regression.py"
+    "dev": "node scripts/dev-help.mjs",
+    "dev:web": "npm --prefix apps/web run dev",
+    "build:web": "npm --prefix apps/web run build",
+    "lint:web": "npm --prefix apps/web run lint",
+    "test:web": "npm --prefix apps/web test",
+    "build:mcp": "npm --prefix apps/mcp run build",
+    "test:mcp": "npm --prefix apps/mcp test",
+    "test:api": "python -m pytest tests -q -n auto --dist loadscope",
+    "test:api:serial": "python -m pytest tests -q",
+    "test:api:full": "python -m pytest apps/api/tests -q",
+    "test:crud": "python tests/crud_regression.py"
   }
 }

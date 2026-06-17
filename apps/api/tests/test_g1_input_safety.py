@@ -35,7 +35,9 @@ def _load_main(monkeypatch, tmp_path, *, secret: str | None = SECRET, env: dict 
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("WORKEROS_INSECURE_COOKIES", "1")
-    monkeypatch.delenv("WORKEROS_DEV", raising=False)
+    # Keep local-mode dotenv loading from repopulating WORKEROS_DEV=1 out of
+    # the developer's .env. Individual tests can still override it explicitly.
+    monkeypatch.setenv("WORKEROS_DEV", "")
     monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
     monkeypatch.delenv("ALLOWED_ORIGIN_REGEX", raising=False)
     if secret is None:

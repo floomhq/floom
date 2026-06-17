@@ -88,6 +88,10 @@ def _auth_headers(token="test-langdock-token"):
     return {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
 
 
+def _serve_headers():
+    return {"x-floom-secret": "test-api-secret", "Content-Type": "application/json"}
+
+
 def _worker_yml(worker_id: str) -> str:
     return textwrap.dedent(
         f"""
@@ -235,9 +239,149 @@ def test_m03_tool_executes_under_user_header_scope(monkeypatch, tmp_path):
     assert "x-floom-user header required" not in text
 
 
-# ---------------------------------------------------------------------------
-# M-04 — /api/mcp must not leak raw exception detail
-# ---------------------------------------------------------------------------
+# M-06 / #1295 - /mcp-tools/serve must return JSON-RPC errors, not raw 500s
+
+def test_m06_mcp_serve_accepts_json_rpc_batch(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    payload = [
+        _rpc("tools/list", request_id=1),
+        _rpc("tools/call", request_id=2, params={"name": "runs.get", "arguments": {}}),
+    ]
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps(payload), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert isinstance(body, list)
+    assert body[0]["id"] == 1
+    assert "result" in body[0]
+    assert body[1]["id"] == 2
+    assert body[1]["error"]["code"] == -32602
+    assert "missing id" in body[1]["error"]["message"]
+
+
+def test_m06_mcp_serve_rejects_oversized_json_rpc_batch(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    payload = [_rpc("tools/list", request_id=i) for i in range(main._mcp_max_batch_items() + 1)]
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps(payload), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["error"]["code"] == -32600
+    assert body["error"]["message"] == "Batch too large"
+
+
+def test_m06_mcp_serve_rejects_non_object_tool_arguments(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    payload = _rpc("tools/call", params={"name": "runs.get", "arguments": []})
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps(payload), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["error"]["code"] == -32602
+    assert body["error"]["message"] == "Invalid params"
+
+
+def test_m06_mcp_serve_rejects_non_object_json_rpc_payload(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps("not an object"), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["error"]["code"] == -32600
+    assert body["error"]["message"] == "Invalid JSON-RPC request"
+
+
+def test_m06_remote_mcp_rejects_oversized_json_rpc_batch(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    payload = [_rpc("tools/list", request_id=i) for i in range(main._mcp_max_batch_items() + 1)]
+    with TestClient(main.app) as client:
+        resp = client.post("/api/mcp", data=json.dumps(payload), headers=_auth_headers())
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["error"]["code"] == -32600
+    assert body["error"]["message"] == "Batch too large"
+
+
+@pytest.mark.parametrize("bad_value", [12345, False, 0])
+def test_m07_mcp_serve_rejects_non_string_secret_values(monkeypatch, tmp_path, bad_value):
+    monkeypatch.setenv("WORKEROS_MCP_ENABLE_DESTRUCTIVE", "1")
+    main = _load_api(monkeypatch, tmp_path)
+    payload = _rpc("tools/call", params={
+        "name": "secrets.set",
+        "arguments": {"key": "TEST_KEY", "value": bad_value},
+    })
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps(payload), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["error"]["code"] == -32602
+    assert body["error"]["message"] == "Invalid params: value must be a string"
+
+
+def test_mcp_serve_default_tool_results_redact_secret_shaped_output(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    leaked = "tok_live_1234567890abcdef"
+    leaked_bearer = "Bearer abcdefghijklmnop"
+
+    async def _fake_api_call(method, path, request, **kwargs):
+        assert method == "GET"
+        assert path == "/runs/run-1"
+        return {
+            "id": "run-1",
+            "output_json": {
+                "api_key": "sk-live-secret-value",
+                "message": f"done token={leaked} {leaked_bearer}",
+            },
+        }, 200
+
+    monkeypatch.setattr(main, "_api_call", _fake_api_call)
+    payload = _rpc("tools/call", params={"name": "runs.get", "arguments": {"id": "run-1"}})
+    with TestClient(main.app) as client:
+        resp = client.post("/mcp-tools/serve", data=json.dumps(payload), headers=_serve_headers())
+
+    assert resp.status_code == 200, resp.text
+    text = resp.json()["result"]["content"][0]["text"]
+    assert leaked not in text
+    assert leaked_bearer not in text
+    assert "sk-live-secret-value" not in text
+    assert "api_key" in text
+    assert "[redacted]" in text
+
+
+def test_m08_remote_mcp_validation_error_is_invalid_params(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    payload = _rpc("tools/call", params={
+        "name": "workers.update",
+        "arguments": {"id": "worker-1", "cron_timezone": "Mars/Olympus"},
+    })
+
+    with TestClient(main.app) as client:
+        resp = client.post("/api/mcp", data=json.dumps(payload), headers=_auth_headers())
+
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["error"]["code"] == -32602
+    assert "Invalid params" in body["error"]["message"]
+
+
+def test_m09_default_tool_visibility_uses_shared_helper(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    auth = main.AuthContext(user_id="u", role="member")
+
+    visible = {tool["name"] for tool in main._mcp_visible_default_tools(auth)}
+
+    assert "workers.list" in visible
+    assert "workers.delete" not in visible
+    assert "connections.add_mcp" not in visible
+
+
+# M-04 - /api/mcp must not leak raw exception detail
 
 def test_m04_generic_error_no_internal_leak(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)

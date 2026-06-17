@@ -1,4 +1,4 @@
-# Agent Cookbook — Building & Deploying Workers
+# Agent Cookbook - Building & Deploying Workers
 
 For agents (Claude Code / Cursor / custom) installing the `@floomhq/workeros` MCP and producing real workers from prompts. This is the **read-this-first** recipe book.
 
@@ -15,9 +15,9 @@ create or edit a worker.
 
 The npm package exposes three binaries:
 
-- `workeros` — preferred CLI name in these docs.
-- `floom` — compatible alias for existing Floom operator workflows.
-- `workeros-mcp` — stdio MCP fallback binary for clients that cannot use HTTP MCP.
+- `workeros` - preferred CLI name in these docs.
+- `floom` — compatibility alias for older installs.
+- `workeros-mcp` - stdio MCP fallback binary for clients that cannot use HTTP MCP.
 
 If a different local `floom` command exists, use `workeros`.
 
@@ -27,10 +27,10 @@ npx -y @floomhq/workeros mcp install --target claude
 npx -y @floomhq/workeros mcp install --target cursor
 ```
 
-Set `WORKEROS_API_SECRET` in env before install to skip the prompt. The installer
-writes HTTP MCP config pointing at
-`https://workers-api.floom.dev/mcp-tools/serve`. For older harnesses that need a
-local stdio process, configure `npx -y -p @floomhq/workeros workeros-mcp`.
+Set `WORKEROS_API_BASE` to your API URL before install; for local development
+that is usually `http://localhost:8000`. Set `WORKEROS_API_SECRET` to skip the
+secret prompt when your API is protected by `FLOOM_SECRET`. For older harnesses
+that need a local stdio process, configure `npx -y -p @floomhq/workeros workeros-mcp`.
 Verify:
 
 ```bash
@@ -112,7 +112,7 @@ input defaults, capabilities, and webhook secret rotation; it does not replace
 - Run outputs render according to `exec.outputs[].media_type`; markdown renders
   inline, JSON is pretty-printed, and other media types are downloadable.
 - Select input labels are humanized in the UI, but the raw enum value is what
-  reaches `run(inputs, context)`.
+  appears in `inputs.json`.
 
 ---
 
@@ -124,19 +124,36 @@ The shortest possible worker. Plain Python, OpenAI summarization, one input, one
 
 ```python
 # run.py
-def run(inputs, context):
-    text = inputs["text"]
-    client = context.openai()
-    response = client.chat.completions.create(
-        model="gpt-5-mini",
-        messages=[
-            {"role": "system", "content": "Summarize the user's text in 3 bullets."},
-            {"role": "user", "content": text},
-        ],
-    )
-    summary = response.choices[0].message.content
-    context.write_output("summary", summary)
-    return {"summary": summary}
+import json
+import os
+from pathlib import Path
+
+from openai import OpenAI
+
+inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+text = inputs["text"]
+
+client = OpenAI(api_key=os.environ["OPENAI_API_KEY"])
+response = client.chat.completions.create(
+    model="gpt-5-mini",
+    messages=[
+        {"role": "system", "content": "Summarize the user's text in 3 bullets."},
+        {"role": "user", "content": text},
+    ],
+)
+summary = response.choices[0].message.content or ""
+
+Path("out").mkdir(exist_ok=True)
+Path("out/summary.md").write_text(summary, encoding="utf-8")
+Path("result.json").write_text(
+    json.dumps({
+        "status": "success",
+        "outputs": {"summary": "out/summary.md"},
+        "artifacts": [],
+        "error": None,
+    }),
+    encoding="utf-8",
+)
 ```
 
 ```yaml
@@ -222,7 +239,7 @@ workers.get({ id: "text-summarizer" })
 # Expect: status=ready, last run with status=succeeded
 ```
 
-Open `https://workers.floom.dev/workers/text-summarizer` in browser to confirm the Overview tab renders.
+Open `http://localhost:3000/workers/text-summarizer` in browser to confirm the Overview tab renders.
 
 ---
 
@@ -231,7 +248,7 @@ Open `https://workers.floom.dev/workers/text-summarizer` in browser to confirm t
 When the task needs reasoning, web search, or multi-step tool calls, use agent mode. Same `worker.yml` shape, but `entrypoint: SKILL.md` and no `run.py`.
 
 ```markdown
-# SKILL.md — Research Brief
+# SKILL.md - Research Brief
 
 You receive:
   - topic (string): the subject to research.
@@ -313,11 +330,16 @@ trigger:
 In agent mode, the SKILL.md will receive the Gmail message payload in `inputs["event"]`. In script mode:
 
 ```python
-def run(inputs, context):
-    msg = inputs["event"]  # full Gmail message payload
-    gmail = context.connections["gmail"]
-    # Use gmail.<action>(...) — see Composio docs
-    ...
+import json
+from pathlib import Path
+
+inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+connections = json.loads(Path("connections.json").read_text(encoding="utf-8"))
+
+msg = inputs["event"]  # full Gmail message payload
+gmail_connection_id = connections["gmail"]
+# Use the Workeros API or Composio SDK with this connection id.
+...
 ```
 
 Live reference: [workers/gmail_intake_brief/](../workers/gmail_intake_brief/).
@@ -370,14 +392,32 @@ approvals:
   label: Review and approve before sending to client
 ```
 
-In agent mode, the runner inserts an approval step after the agent declares "done" but before writing outputs. In script mode:
+In script mode, use the two-run approval protocol: Run 1 writes
+`decision_required` to `result.json`; after approval, Run 2 receives
+`decision: "approved"` and `approved_output` in `inputs.json`.
 
 ```python
-def run(inputs, context):
-    draft = generate_draft(...)
-    context.approve(f"Send this draft? {draft[:200]}...")
-    # Execution pauses here until human approves via UI or API
-    send(draft)
+import json
+from pathlib import Path
+
+inputs = json.loads(Path("inputs.json").read_text(encoding="utf-8"))
+
+if inputs.get("decision") == "approved":
+    send(inputs["approved_output"])
+    result = {"status": "success", "outputs": {"sent": True}, "artifacts": []}
+else:
+    draft = generate_draft(inputs)
+    result = {
+        "status": "success",
+        "outputs": {"message_draft": draft},
+        "decision_required": {
+            "label": "Review and approve before sending",
+            "preview": draft,
+        },
+        "artifacts": [],
+    }
+
+Path("result.json").write_text(json.dumps(result), encoding="utf-8")
 ```
 
 ---
@@ -456,7 +496,7 @@ workers.get({ id: "text-summarizer" })
 ```
 workers.create({
   worker_yml: "schema_version: '0.3'\nname: my-worker\n...",
-  run_py: "def run(inputs, context): ...",
+  run_py: "import json\nfrom pathlib import Path\ninputs=json.loads(Path('inputs.json').read_text())\nPath('result.json').write_text(json.dumps({'status':'success','outputs':{},'artifacts':[]}))",
 })
 ```
 
@@ -515,12 +555,12 @@ runs.get({ id: "run_abc123" })
 **Returns:** stream of SSE events until terminal.
 
 Events emitted:
-- `text` — agent narration
-- `tool-call` — agent called a tool
-- `tool-result` — tool returned
-- `reasoning` — agent internal reasoning (if enabled)
-- `step-start` — new step
-- `finish` — terminal; run is done
+- `text` - agent narration
+- `tool-call` - agent called a tool
+- `tool-result` - tool returned
+- `reasoning` - agent internal reasoning (if enabled)
+- `step-start` - new step
+- `finish` - terminal; run is done
 
 ```
 for await (const part of runs.watch({ run_id: "run_abc123" })) {
@@ -568,7 +608,7 @@ Run `workeros workers validate ./workers/<id>` before pushing. It catches E2B an
 When an agent is asked "build me a worker that does X", produce:
 
 1. **Default to agent mode** unless X is deterministic / ETL-shaped.
-2. **Include `long_description`, `use_cases`, `how_it_works`** — these power the Overview tab.
+2. **Include `long_description`, `use_cases`, `how_it_works`** - these power the Overview tab.
 3. **Pin every secret** the worker will read.
 4. **`capabilities.network.egress: true`** if any external API is called.
 5. **`approvals.required: true`** for any worker that sends, deletes, or pays.
@@ -611,6 +651,6 @@ If smoke-test fails:
 ## 11. When in doubt
 
 - Check [AUTHORING.md](AUTHORING.md) for the full schema.
-- Read the reference workers in [workers/](../workers/) — copy the closest match.
+- Read the reference workers in [workers/](../workers/) - copy the closest match.
 - If a tool returns an unclear error, call `runs.get` and read the logs.
-- The MCP server prints structured errors; never just retry — diagnose first.
+- The MCP server prints structured errors; never just retry - diagnose first.

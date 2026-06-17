@@ -3,8 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 # #938: least-privilege token — CI only reads the repo.
 permissions:
@@ -111,7 +110,37 @@ jobs:
         # #604: root pytest.ini points at tests/ (66 files). These cover the
         # full worker runtime — agent driver, E2B sandbox, run orchestration —
         # and were previously not run in CI.
-        run: pytest tests/ -v --tb=short -p no:warnings
+        run: pytest tests/ -v --tb=short -p no:warnings -n auto --dist loadscope
+
+  runtime-tests-windows:
+    name: Runtime tests (Windows)
+    runs-on: windows-latest
+    # Advisory until GitHub-hosted Windows availability is proven for this repo.
+    # The same suite is blocking in the contributor workflow on Ubuntu.
+    continue-on-error: true
+
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+
+      - name: Install dependencies
+        run: python -m pip install -r apps/api/requirements.txt pytest pytest-asyncio
+
+      - name: Run root runtime tests
+        env:
+          WORKEROS_DEPLOY: local
+          WORKEROS_ROOT: ${{ github.workspace }}
+          FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          OPENAI_API_KEY: sk-test-${{ github.run_id }}
+          COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
+        run: python -m pytest tests/ -v --tb=short -p no:warnings -n auto --dist loadscope
 
   web-tests:
     name: Web tests (vitest + tsx + lint)
