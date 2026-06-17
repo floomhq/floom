@@ -25,13 +25,22 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 
-from fastapi import APIRouter, Depends, HTTPException, Query, Response
+from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
 from pydantic import BaseModel, Field
 
 from auth import AuthContext, get_auth_context
 from db import Repositories, get_repos
-from models import ActionResponse, PublicWorker, PublicWorkerInput, PublicWorkerOutput, RunCreate, WorkerConfig, _ImportFromShareRequest
+from models import (
+    ActionResponse,
+    DraftFile,
+    PublicWorker,
+    PublicWorkerInput,
+    PublicWorkerOutput,
+    RunCreate,
+    WorkerConfig,
+    _ImportFromShareRequest,
+)
 from services.context_access import (
     _assert_context_file_shareable,
     _assert_context_pack_shareable,
@@ -61,6 +70,42 @@ from services.worker_registry_ops import _register_worker_from_files
 worker_public_router = APIRouter()
 
 
+class _PublicWorkerRunRequest(BaseModel):
+    inputs: Dict[str, Any] = Field(default_factory=dict)
+    token: str = Field(..., min_length=10)
+
+
+def _load_standalone_worker_share(
+    worker_id: str,
+    token: str,
+    repos: Repositories,
+) -> tuple[Dict[str, Any], Dict[str, Any]]:
+    row = _load_standalone_share_row(token)
+    if (
+        not row
+        or str(row.get("entity_type") or "") != "worker"
+        or str(row.get("entity_id") or "") != worker_id
+    ):
+        raise HTTPException(status_code=404, detail="Worker share not found")
+    worker = repos.workers.get_any(worker_id=worker_id)
+    if not worker or str(worker.get("owner_id") or "") != str(row.get("owner_id") or ""):
+        raise HTTPException(status_code=404, detail="Worker share not found")
+    return row, worker
+
+
+def _public_worker_from_row(worker: Dict[str, Any]) -> PublicWorker:
+    try:
+        config = WorkerConfig(**(worker.get("config") or {}))
+    except Exception:
+        config = WorkerConfig(
+            id=str(worker.get("id") or ""),
+            name=str(worker.get("name") or ""),
+            trigger={"type": "manual"},
+            runtime={"type": "python", "entrypoint": "run.py"},
+        )
+    return _public_worker_response(worker, config)
+
+
 @worker_public_router.get("/workers/public/{worker_id}", response_model=PublicWorker)
 def get_public_worker(
     worker_id: str,
@@ -85,6 +130,47 @@ def get_public_worker(
             runtime={"type": "python", "entrypoint": "run.py"},
         )
     return _public_worker_response(worker, config)
+
+
+@worker_public_router.get("/workers/public/{worker_id}/run-meta")
+def get_public_worker_run_meta(
+    worker_id: str,
+    token: str = Query(..., min_length=10),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    """Return the safe run form metadata for a revocable worker share token."""
+    _row, worker = _load_standalone_worker_share(worker_id, token, repos)
+    public = _public_worker_from_row(worker).model_dump()
+    return {
+        "id": public.get("id"),
+        "name": public.get("name"),
+        "description": public.get("description"),
+        "inputs": public.get("inputs") or [],
+        "outputs": public.get("outputs") or [],
+    }
+
+
+@worker_public_router.post("/workers/public/{worker_id}/runs")
+def create_public_worker_run(
+    worker_id: str,
+    body: _PublicWorkerRunRequest,
+    request: Request,
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, str]:
+    """Start a shared worker anonymously, scoped to exactly one worker token."""
+    row, _worker = _load_standalone_worker_share(worker_id, body.token, repos)
+    owner_auth = AuthContext(
+        user_id=str(row.get("owner_id") or ""),
+        email=None,
+        scopes=("worker_share",),
+        role="admin",
+        auth_method="public_share",
+    )
+    payload = RunCreate(inputs=body.inputs, trigger_source="public_share")
+    from main import create_worker_run
+
+    result = create_worker_run(worker_id, payload, request=request, auth=owner_auth, repos=repos)
+    return {"run_id": str(result.run_id or "")}
 
 
 @worker_public_router.post("/workers/{worker_id}/short-link")

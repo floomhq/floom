@@ -12,6 +12,8 @@ import os
 import sys
 import json
 import asyncio
+import shutil
+import subprocess
 from pathlib import Path
 import pytest
 import yaml
@@ -460,12 +462,26 @@ class TestTagChipFiltering:
 def tmp_db(tmp_path, monkeypatch):
     """Provide a fresh temp SQLite DB for API integration tests."""
     db_file = tmp_path / "test.db"
+    workers_dir = tmp_path / "workers"
+    workers_dir.mkdir()
+    result = subprocess.run(
+        ["git", "-C", str(REPO_ROOT), "ls-files", "workers/*/worker.yml"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    for rel_path in result.stdout.splitlines():
+        worker_id = Path(rel_path).parent.name
+        shutil.copytree(REPO_ROOT / "workers" / worker_id, workers_dir / worker_id)
     monkeypatch.setenv("FLOOM_DB", str(db_file))
     monkeypatch.setenv("FLOOM_SECRET", "test-secret-descriptions-ui")
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     # Force re-import of db module with the new env
     import importlib
     import db as _db
+    import worker_registry as _worker_registry
     monkeypatch.setattr(_db, "DB_PATH", str(db_file))
+    monkeypatch.setattr(_worker_registry, "WORKERS_DIR", workers_dir.resolve())
     _db.init_db()
     return db_file
 

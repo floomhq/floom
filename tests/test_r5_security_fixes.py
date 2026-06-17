@@ -37,6 +37,8 @@ def _load_api(
     monkeypatch.setenv("COMPOSIO_API_KEY", "cmp-test")
     monkeypatch.setenv("COMPOSIO_WEBHOOK_SIGNING_KEY", "whsec-test")
     monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://workers.floom.dev,https://workeros.floom.dev")
+    monkeypatch.delenv("ALLOWED_ORIGIN_REGEX", raising=False)
     if upload_hourly_cap_bytes is None:
         monkeypatch.delenv("WORKEROS_UPLOAD_HOURLY_CAP_BYTES", raising=False)
     else:

@@ -215,6 +215,20 @@ def test_read_result_missing_file_distinct_error():
     assert "did not write a result" in err.error
 
 
+def test_read_result_missing_file_includes_worker_output():
+    sandbox = _FakeSandbox(None, raise_on_read=True)
+    data, err = e2b_driver._read_result_json(
+        sandbox,
+        "/wd/result.json",
+        _noop_log,
+        worker_stderr="Traceback (most recent call last):\nRuntimeError: import crashed\n",
+    )
+    assert data is None
+    assert err.error_code == "missing_result"
+    assert "Worker output:" in err.error
+    assert "RuntimeError: import crashed" in err.error
+
+
 def test_read_result_invalid_json_distinct_error():
     sandbox = _FakeSandbox("this is { not json")
     data, err = e2b_driver._read_result_json(sandbox, "/wd/result.json", _noop_log)

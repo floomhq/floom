@@ -188,3 +188,25 @@ def completion(
         if key:
             kwargs["api_key"] = key
     return litellm.completion(model=model, messages=msgs, **kwargs)
+
+
+def embedding(
+    *,
+    model: str,
+    input: Any,
+    **kwargs: Any,
+) -> Any:
+    """Embedding call routed through the same provider credential path.
+
+    The default deployment path uses OpenAI-compatible embeddings. Provider
+    credentials stay in the API process; workers call the run-scoped proxy.
+    """
+    import os
+
+    import litellm
+
+    if not is_litellm_model(model) and "api_key" not in kwargs:
+        key = os.environ.get("OPENAI_API_KEY") or os.environ.get("PLATFORM_OPENAI_API_KEY")
+        if key:
+            kwargs["api_key"] = key
+    return litellm.embedding(model=model, input=input, **kwargs)

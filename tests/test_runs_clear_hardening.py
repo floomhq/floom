@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import importlib
 import os
+import sqlite3
 import sys
 import types
 from pathlib import Path
@@ -141,11 +142,28 @@ def test_clear_backs_up_before_deleting_and_is_owner_scoped(monkeypatch, tmp_pat
     assert body["status"] == "cleared"
     assert body["cleared_count"] == 1  # only user-a's run
 
-    # 1. Backup created before delete, non-empty.
-    backup_path = Path(body["backup_path"])
+    assert "backup_path" not in body
+
+    # 1. Backup created before delete, non-empty, and scoped to user-a.
+    backups = list(backups_dir.glob("*.db"))
+    assert len(backups) == 1
+    backup_path = backups[0]
     assert backup_path.is_file()
     assert backup_path.stat().st_size > 0
-    assert str(backups_dir) in str(backup_path)
+    with sqlite3.connect(backup_path) as conn:
+        backed_up_run_ids = {
+            row[0] for row in conn.execute("SELECT id FROM runs").fetchall()
+        }
+        table_names = {
+            row[0]
+            for row in conn.execute(
+                "SELECT name FROM sqlite_master WHERE type='table'"
+            ).fetchall()
+        }
+    assert run_a in backed_up_run_ids
+    assert run_b not in backed_up_run_ids
+    assert "secrets" not in table_names
+    assert "user_sessions" not in table_names
 
     # 3. Owner-scoped: user-a's run gone, user-b's run untouched.
     a_after = client.get("/runs", headers=_headers("user-a")).json()

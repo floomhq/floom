@@ -23,6 +23,7 @@ import codegen_model as cm  # noqa: E402
 
 def test_default_is_strong_coder(monkeypatch):
     monkeypatch.delenv("WORKEROS_CODEGEN_MODEL", raising=False)
+    monkeypatch.delenv("WORKEROS_CHAT_MODEL", raising=False)
     assert cm.codegen_model() == "gpt-5.5"
     assert cm.DEFAULT_CODEGEN_MODEL == "gpt-5.5"
 
@@ -34,6 +35,7 @@ def test_env_override(monkeypatch):
 
 def test_blank_env_falls_back_to_default(monkeypatch):
     monkeypatch.setenv("WORKEROS_CODEGEN_MODEL", "   ")
+    monkeypatch.delenv("WORKEROS_CHAT_MODEL", raising=False)
     assert cm.codegen_model() == "gpt-5.5"
 
 

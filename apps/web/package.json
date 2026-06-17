@@ -7,7 +7,7 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint && npm run lint:emdash && npm run lint:tokens && npm run lint:borders",
-    "lint:emdash": "bash -c 'hits=$(grep -rnP \"\\x{2014}\" --include=\"*.tsx\" --include=\"*.ts\" app/ components/ lib/ 2>/dev/null | grep -vP \"^\\S+:\\d+:\\s*(//|\\*|/\\*)\" | grep -vP \"\\{\\s*/\\*\" | grep -vP \"\\*/\\s*\\}\" | grep -vP \"<span[^>]*>—<\\\\/span>\" | grep -vP \"return \\\"—\\\"|\\?\\? \\\"—\\\"|\\|\\| \\\"—\\\"\" | grep -vP \"// \" | grep -v \"em-dash-ok\" | grep -v \"Binary\"); if [ -n \"$hits\" ]; then echo \"Em dash (U+2014) found in copy strings. Replace with comma/colon/semicolon/parens. Add em-dash-ok comment to opt out.\"; echo \"$hits\"; exit 1; fi'",
+    "lint:emdash": "node scripts/lint-emdash.mjs",
     "lint:tokens": "node scripts/lint-tokens.mjs",
     "lint:borders": "node scripts/lint-borders.mjs --fail",
     "test": "vitest run"
@@ -24,7 +24,7 @@
     "cmdk": "^1.1.1",
     "diff": "8.0.4",
     "highlight.js": "^11.11.1",
-    "js-yaml": "^4.1.1",
+    "js-yaml": "^4.2.0",
     "jszip": "^3.10.1",
     "lucide-react": "^1.16.0",
     "next": "16.2.6",
@@ -60,5 +60,11 @@
     "tailwindcss": "^4",
     "typescript": "^5",
     "vitest": "^4.1.7"
+  },
+  "overrides": {
+    "postcss": "8.5.15",
+    "hono": "4.12.25",
+    "form-data": "4.0.6",
+    "js-yaml": "^4.2.0"
   }
 }

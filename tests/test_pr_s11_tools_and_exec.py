@@ -12,6 +12,7 @@ Six test families:
 import importlib
 import json
 import os
+import subprocess
 import sys
 import tempfile
 import types
@@ -369,8 +370,14 @@ def test_all_stock_workers_parse_with_new_entry_field():
     import yaml
     from models import parse_worker_manifest, WorkerContract
 
-    workers_root = Path(__file__).resolve().parents[1] / "workers"
-    yml_files = sorted(workers_root.glob("*/worker.yml"))
+    root = Path(__file__).resolve().parents[1]
+    result = subprocess.run(
+        ["git", "-C", str(root), "ls-files", "workers/*/worker.yml"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    yml_files = [root / line for line in result.stdout.splitlines() if line.strip()]
     assert len(yml_files) >= 5, f"expected stock workers, found {yml_files}"
 
     for path in yml_files:

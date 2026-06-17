@@ -3,6 +3,7 @@ from __future__ import annotations
 import contextlib
 import json
 import os
+import shlex
 import shutil
 import sqlite3
 import subprocess
@@ -61,7 +62,11 @@ class _Commands:
     def run(self, command: str, **kwargs):
         self.run_calls.append((command, kwargs))
         cwd = self.files._host_path(kwargs.get("cwd") or "/home/user/worker")
-        env = {**os.environ, **(kwargs.get("envs") or {})}
+        envs = kwargs.get("envs") or {}
+        env = {**os.environ, **envs}
+        if envs:
+            assignments = " ".join(f"{key}={shlex.quote(str(value))}" for key, value in envs.items())
+            command = f"{assignments} {command}"
         proc = subprocess.run(
             ["bash", "-lc", command],
             cwd=str(cwd),
@@ -199,6 +204,7 @@ def test_e2b_run_materializes_missing_worker_dir_from_db_files(tmp_path, monkeyp
             mode="pure-script",
         ),
         secrets=[],
+        memory=False,
         outputs=[],
     )
     logs: list[tuple[str, str]] = []
@@ -281,6 +287,7 @@ asyncio.run(main())
             bundle_path=str(worker_dir),
         ),
         secrets=["AWS_ACCESS_KEY_ID", "AWS_SECRET_ACCESS_KEY"],
+        memory=False,
         outputs=[],
     )
 
@@ -342,6 +349,7 @@ with open("result.json", "w", encoding="utf-8") as handle:
             bundle_path=str(worker_dir),
         ),
         secrets=[],
+        memory=False,
         outputs=[],
     )
     logs: list[tuple[str, str]] = []
@@ -366,6 +374,188 @@ with open("result.json", "w", encoding="utf-8") as handle:
     assert command.endswith("python3 run.py'")
     assert kwargs["timeout"] == 3600.0
     assert any("Capping sandbox lifetime at 3600s" in msg for msg, _level in logs)
+
+    if _Sandbox.host_root:
+        shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
+
+
+def test_e2b_python_template_skips_baked_requirements_install(tmp_path, monkeypatch):
+    _install_fake_e2b(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_ID", "tpl-python-fast")
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_DEPS_BAKED", "1")
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "requirements.txt").write_text("openai>=1.0.0\npython_dotenv>=1.0.0\n", encoding="utf-8")
+    (worker_dir / "run.py").write_text(
+        """
+import json
+
+with open("result.json", "w", encoding="utf-8") as handle:
+    json.dump({"status": "success", "outputs": {"ok": True}, "artifacts": []}, handle)
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    config = WorkerConfig(
+        id="templated-worker",
+        name="Templated Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python3 run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        secrets=[],
+        memory=False,
+        outputs=[],
+    )
+    logs: list[tuple[str, str]] = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="templated-worker",
+        run_id="run-templated-worker",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+        trace_id="trace-templated-worker",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    assert result.status == "success"
+    assert _Sandbox.last_create_kwargs["template"] == "tpl-python-fast"
+    commands = [command for command, _kwargs in _Sandbox.instances[-1].commands.run_calls]
+    assert not any("pip install -q -r" in command for command in commands)
+    assert any("template marks Python deps as baked" in msg for msg, _level in logs)
+
+    if _Sandbox.host_root:
+        shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
+
+
+def test_e2b_python_template_installs_requirements_not_in_baked_template(tmp_path, monkeypatch):
+    _install_fake_e2b(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_ID", "tpl-python-fast")
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_DEPS_BAKED", "1")
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_BAKED_PACKAGES", "numpy")
+    original_run = _Commands.run
+
+    def run_with_successful_install(self, command: str, **kwargs):
+        if "pip install -q -r" in command:
+            self.run_calls.append((command, kwargs))
+            return types.SimpleNamespace(exit_code=0, stdout="", stderr="")
+        return original_run(self, command, **kwargs)
+
+    monkeypatch.setattr(_Commands, "run", run_with_successful_install)
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "requirements.txt").write_text("pip>=0\n", encoding="utf-8")
+    (worker_dir / "run.py").write_text(
+        """
+import json
+
+with open("result.json", "w", encoding="utf-8") as handle:
+    json.dump({"status": "success", "outputs": {"ok": True}, "artifacts": []}, handle)
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    config = WorkerConfig(
+        id="templated-worker",
+        name="Templated Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python3 run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        secrets=[],
+        memory=False,
+        outputs=[],
+    )
+    logs: list[tuple[str, str]] = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="templated-worker",
+        run_id="run-templated-worker",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+        trace_id="trace-templated-worker",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    assert result.status == "success"
+    commands = [command for command, _kwargs in _Sandbox.instances[-1].commands.run_calls]
+    assert any("pip install -q -r" in command for command in commands)
+    assert any("contains packages not in the baked package list" in msg for msg, _level in logs)
+
+    if _Sandbox.host_root:
+        shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
+
+
+def test_e2b_worker_command_exception_surfaces_stderr_traceback(tmp_path, monkeypatch):
+    _install_fake_e2b(monkeypatch, tmp_path)
+    original_run = _Commands.run
+
+    class CommandFailed(RuntimeError):
+        exit_code = 1
+        stdout = "worker booted\n"
+        stderr = (
+            "Traceback (most recent call last):\n"
+            '  File "/home/user/worker/run.py", line 1, in <module>\n'
+            "RuntimeError: nova exploded\n"
+        )
+
+    def run_with_command_exception(self, command: str, **kwargs):
+        if command.endswith("python3 run.py'") or command == "python3 run.py":
+            self.run_calls.append((command, kwargs))
+            raise CommandFailed("Command exited with code 1")
+        return original_run(self, command, **kwargs)
+
+    monkeypatch.setattr(_Commands, "run", run_with_command_exception)
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("raise RuntimeError('nova exploded')\n", encoding="utf-8")
+
+    config = WorkerConfig(
+        id="crashing-worker",
+        name="Crashing Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python3 run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        secrets=[],
+        memory=False,
+        outputs=[],
+    )
+    logs: list[tuple[str, str]] = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="crashing-worker",
+        run_id="run-crashing-worker",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+        trace_id="trace-crashing-worker",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    assert result.status == "error"
+    assert result.error_code == "execution_error"
+    assert "Worker exited with code 1" in result.error
+    assert "RuntimeError: nova exploded" in result.error
+    assert any("[e2b] stderr: Traceback" in msg for msg, _level in logs)
+    assert any("RuntimeError: nova exploded" in msg for msg, _level in logs)
 
     if _Sandbox.host_root:
         shutil.rmtree(_Sandbox.host_root, ignore_errors=True)

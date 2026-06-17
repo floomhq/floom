@@ -35,6 +35,7 @@ db.DB_PATH = _tmp_db.name
 
 import main as app_module  # noqa: E402
 from fastapi.testclient import TestClient  # noqa: E402
+from starlette.requests import Request  # noqa: E402
 
 client = TestClient(app_module.app, raise_server_exceptions=True)
 
@@ -79,6 +80,20 @@ def _create_worker(name: str) -> dict:
     )
     assert r.status_code == 200, f"create failed {r.status_code}: {r.text}"
     return r.json()
+
+
+def _body_limit_for(method: str, path: str):
+    request = Request({
+        "type": "http",
+        "method": method,
+        "path": path,
+        "headers": [],
+        "query_string": b"",
+        "server": ("testserver", 80),
+        "client": ("testclient", 50000),
+        "scheme": "http",
+    })
+    return app_module._body_limit_for_request(request)
 
 
 # ---------------------------------------------------------------------------
@@ -191,6 +206,26 @@ class TestBulkFilesUpdate(unittest.TestCase):
         paths = {f["path"] for f in body["files"]}
         self.assertIn("lib/helpers.py", paths)
 
+    def test_large_data_bundled_file_body_is_accepted(self):
+        """>256 KB PUT /workers/{id}/files payloads use the worker source body cap."""
+        large_module = "DATA = " + repr("x" * (1024 * 1024)) + "\n"
+        r = client.put(
+            f"/workers/{self.worker_id}/files",
+            json={"files": self._files_for_worker([
+                {"path": "data_bundle.py", "content": large_module},
+            ])},
+        )
+        self.assertEqual(r.status_code, 200, r.text)
+        paths = {f["path"] for f in r.json()["files"]}
+        self.assertIn("data_bundle.py", paths)
+
+    def test_large_run_trigger_body_still_uses_default_json_cap(self):
+        """Unrelated worker subpaths still fail at the 256 KB default JSON cap."""
+        payload = {"input_values": {"blob": "x" * (app_module.DEFAULT_JSON_BODY_LIMIT_BYTES + 1)}}
+        r = client.post(f"/workers/{self.worker_id}/runs", json=payload)
+        self.assertEqual(r.status_code, 413, r.text)
+        self.assertIn("Request body is too large", r.json().get("detail", ""))
+
     def test_path_traversal_blocked_dotdot(self):
         """PUT /workers/{id}/files must reject paths containing '..'."""
         bad_files = self._files_for_worker([
@@ -298,6 +333,37 @@ class TestBulkFilesUpdate(unittest.TestCase):
             ]},
         )
         self.assertEqual(r.status_code, 400, r.text)
+
+
+class TestWorkerBodyLimitRouting(unittest.TestCase):
+    """Body-limit routing stays scoped to worker source-write endpoints."""
+
+    def test_worker_source_write_routes_use_worker_files_limit(self):
+        for method, path in (
+            ("POST", "/workers"),
+            ("PUT", "/workers/example-worker"),
+            ("PATCH", "/workers/example-worker"),
+            ("PUT", "/workers/example-worker/files"),
+        ):
+            with self.subTest(method=method, path=path):
+                self.assertEqual(
+                    _body_limit_for(method, path),
+                    app_module.WORKER_FILES_BODY_LIMIT_BYTES,
+                )
+
+    def test_unrelated_worker_subpaths_keep_default_limit(self):
+        for method, path in (
+            ("POST", "/workers/example-worker/runs"),
+            ("POST", "/workers/example-worker/archive"),
+            ("POST", "/workers/reload"),
+            ("PATCH", "/workers/example-worker/files"),
+            ("PUT", "/workers/example-worker/files/extra"),
+        ):
+            with self.subTest(method=method, path=path):
+                self.assertEqual(
+                    _body_limit_for(method, path),
+                    app_module.DEFAULT_JSON_BODY_LIMIT_BYTES,
+                )
 
 
 if __name__ == "__main__":

@@ -14,6 +14,7 @@ ROOT = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(ROOT / "apps" / "api"))
 
 import db  # noqa: E402
+import db._legacy_sqlite as _legacy_sqlite  # noqa: E402
 
 
 class WorkerContractMigrationTest(unittest.TestCase):
@@ -48,6 +49,11 @@ class WorkerContractMigrationTest(unittest.TestCase):
                     skill_version_count = conn.execute("SELECT COUNT(*) FROM skill_versions").fetchone()[0]
                     foreign_key_errors = conn.execute("PRAGMA foreign_key_check").fetchall()
             finally:
+                try:
+                    db.get_repositories.cache_clear()
+                    _legacy_sqlite._close_cached_db_connection()
+                except Exception:
+                    pass
                 db.DB_PATH = original_db_path
                 for key, value in original_env.items():
                     if value is None:

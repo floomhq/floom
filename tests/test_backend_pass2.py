@@ -113,11 +113,11 @@ def test_mcp_tools_alias_crud_and_emily_metadata(monkeypatch, tmp_path):
 
     forwarded_chat_bodies = []
 
-    async def fake_api_call(method, path, request, *, body=None, params=None):
-        forwarded_chat_bodies.append((method, path, body))
-        return {"reply": "chat ok"}, 200
+    async def fake_workspace_agent_reply(*, message, user_id, conversation_id):
+        forwarded_chat_bodies.append((message, user_id, conversation_id))
+        return "chat ok"
 
-    monkeypatch.setattr(main, "_api_call", fake_api_call)
+    monkeypatch.setattr(main, "_collect_workspace_agent_reply_for_langdock", fake_workspace_agent_reply)
     rpc_chat = client.post(
         "/mcp-tools/serve",
         headers=_headers("user-a"),
@@ -135,17 +135,9 @@ def test_mcp_tools_alias_crud_and_emily_metadata(monkeypatch, tmp_path):
         },
     )
     assert rpc_chat.status_code == 200, rpc_chat.text
-    assert forwarded_chat_bodies == [
-        (
-            "POST",
-            "/chat",
-            {
-                "message": "hello from mcp",
-                "source": "mcp",
-                "conversation_id": "mcp-thread",
-            },
-        )
-    ]
+    assert forwarded_chat_bodies == [("hello from mcp", "user-a", "langdock:mcp-thread")]
+    assert "chat ok" in rpc_chat.text
+    assert "mcp-thread" in rpc_chat.text
 
     updated = client.put(
         f"/mcp/tools/{tool['id']}",

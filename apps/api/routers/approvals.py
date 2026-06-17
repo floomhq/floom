@@ -283,17 +283,14 @@ def _approval_response(
     # `type` mirrors preview_type for the v4 frontend's preview dispatcher.
     if response.get("preview_type") is not None:
         response["type"] = response.get("preview_type")
-    # Standalone share/review link for the authenticated owner. The token is the
-    # same deterministic HMAC the /approvals/public/* routes verify, so the owner
-    # can copy this URL to open the approval full-page (no app chrome) or share it
-    # with an external approver. Mirrors the chat tool's `link` field.
-    #
-    # DEGRADE, never 503: the serializer is used for the owner's own list/detail
-    # (GET /approvals). When no signer secret is configured (e.g. cloud mode,
-    # where FLOOM_SECRET is intentionally stripped and the dedicated
-    # WORKEROS_APPROVAL_SIGNING_SECRET is unset), we omit the optional public
-    # share link rather than fail the whole list. The authenticated owner must
-    # always get their approvals — only the share link is unavailable.
+    # take-base (round-09 cloud-safe signer): standalone share/review link for the
+    # authenticated owner. The token is the same deterministic HMAC the
+    # /approvals/public/* routes verify. DEGRADE, never 503: try_approval_public_token
+    # returns None when no signer secret is configured (cloud strips FLOOM_SECRET;
+    # base adds the dedicated WORKEROS_APPROVAL_SIGNING_SECRET so cloud links still
+    # work). The authenticated owner always gets their approvals list/detail; only
+    # the optional share link is omitted. (Main's _approval_public_link_for_owner
+    # also degrades but is FLOOM_SECRET-only → no cloud share link.)
     token = try_approval_public_token(dict(approval))
     response["public_link"] = (
         f"{_frontend_base_url()}/approvals/review"
@@ -349,6 +346,18 @@ def _publish_approval_terminal_status(
 # canonical name is now `approval_public_token`; keep the underscore alias so
 # the re-export and existing callers keep working.
 _approval_public_token = approval_public_token
+
+
+def _approval_public_link_for_owner(approval: Dict[str, Any]) -> str | None:
+    """Return the optional owner share/review link without breaking list views."""
+    try:
+        token = _approval_public_token(approval)
+    except HTTPException as exc:
+        if exc.status_code == 503:
+            logger.warning("Approval public link omitted because FLOOM_SECRET is not configured")
+            return None
+        raise
+    return f"{_frontend_base_url()}/approvals/review?id={approval.get('id')}&token={token}"
 
 
 # F3 (2026-06-03): the public approval endpoints must NOT leak which approval

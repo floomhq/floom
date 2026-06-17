@@ -1,36 +1,34 @@
 # Workeros CLI + MCP
 
-Workeros lets agents create, update, run, watch, and delete production worker automations through an HTTP MCP endpoint backed by the Workeros API. The package installs into Claude Code, Cursor, VS Code, Windsurf, Continue, or any harness that accepts an MCP HTTP or stdio server entry.
+Workeros lets agents create, update, run, watch, and delete worker automations through an HTTP MCP endpoint backed by the Workeros API. The package installs into Claude Code, Cursor, VS Code, Windsurf, Continue, or any harness that accepts an MCP HTTP or stdio server entry.
 
 Workeros ships as a single npm package that exposes:
 
-- **`workeros` CLI** – `login`, `workspaces`, `workers`, `run`, `runs`, `secrets`, `mcp`, `whoami`, `logout`, plus an `install` shortcut that wires the MCP server into Claude Code / Cursor / Continue. `floom` remains a compatibility alias for older Floom operator workflows.
-- **HTTP MCP endpoint** – `workeros mcp install` writes an HTTP transport entry (`url` + `headers`) pointing at `/mcp-tools/serve` on the Workeros API. No local subprocess is required.
-- **`workeros-mcp` stdio server** – legacy stdio path; still works when run directly as `npx -p @floomhq/workeros workeros-mcp` (or `node dist/server.js`). Use this for harnesses that do not support HTTP MCP transport.
+- **`workeros` CLI** - `login`, `workspaces`, `workers`, `run`, `runs`, `secrets`, `mcp`, `whoami`, `logout`, plus an `install` shortcut that wires the MCP server into Claude Code / Cursor / Continue. `floom` remains a compatibility alias for older installs.
+- **HTTP MCP endpoint** - `workeros mcp install` writes an HTTP transport entry (`url` + `headers`) pointing at `/mcp-tools/serve` on the Workeros API. No local subprocess is required.
+- **`workeros-mcp` stdio server** - legacy stdio path; still works when run directly as `npx -p @floomhq/workeros workeros-mcp` (or `node dist/server.js`). Use this for harnesses that do not support HTTP MCP transport.
 
-The CLI targets both deployments:
+The CLI targets local, self-hosted, and cloud deployments:
 
 | Mode | API base | Auth | Workspaces |
 |------|----------|------|------------|
-| **OSS** (default) | `https://workers-api.floom.dev` | per-CLI `x-floom-secret` minted by `workeros login` | n/a |
-| **Cloud** | `https://workeros-api.floom.dev` (workeros.floom.dev dashboard) | Supabase refresh token → JWT bearer, `X-Workeros-Workspace` header | multi-workspace |
+| **OSS/self-hosted** (default) | `http://localhost:8000` or your API URL | `x-floom-secret` when `FLOOM_SECRET` is set | local workspace |
+| **Cloud** | `https://workeros-api.floom.dev` (workeros.floom.dev dashboard) | Supabase refresh token -> JWT bearer, `X-Workeros-Workspace` header | multi-workspace |
 
-## Cloud quickstart (workeros.floom.dev)
+## OSS quickstart
 
 ```bash
 npm i -g @floomhq/workeros@latest
-workeros login --cloud           # opens workeros.floom.dev/app/cli-auth
-workeros workspace list             # auth status + active marker
-workeros workspace switch <name>    # persists to ~/.config/workeros/credentials.json
+workeros login --api http://localhost:8000
 workeros workers list
 workeros run <worker-id> --input key=value
 ```
 
-`workeros login` auto-detects cloud when the verification URL the API returns is `workeros.floom.dev` or contains `/app/`, so `--cloud` is only needed if you also set `WORKEROS_API_BASE` to a non-default host. `WORKEROS_CLOUD=1` is equivalent to `--cloud`.
+If your local API runs without `FLOOM_SECRET`, login is not required for basic local development. For a protected self-hosted API, set `FLOOM_SECRET` on the backend and use the matching secret when the CLI prompts.
 
 Credentials live at `~/.config/workeros/credentials.json` (mode 0600). `workeros logout` clears them.
 
-## OSS quickstart (workers.floom.dev)
+## MCP install
 
 ```bash
 npx -y @floomhq/workeros mcp install
@@ -57,7 +55,7 @@ workeros mcp switch <name>          # set the active MCP server by label
 workeros mcp test [name]            # live probe (initialize + tools/list); defaults to the active server
 ```
 
-Switches persist in `~/.config/workeros/credentials.json` and apply to every later CLI invocation. `workspaces`/`use` remain as aliases of `workspace`/`switch`. Workspace switching works in both modes: cloud scopes by membership, OSS scopes local workspaces via the `x-workeros-workspace` header (which the CLI now sends on every request, and `mcp install` bakes into the client config — re-run `mcp install` after switching to repoint installed MCP clients).
+Switches persist in `~/.config/workeros/credentials.json` and apply to every later CLI invocation. `workspaces`/`use` remain as aliases of `workspace`/`switch`. Workspace switching works in both modes: cloud scopes by membership, OSS scopes local workspaces via the `x-workeros-workspace` header (which the CLI now sends on every request, and `mcp install` bakes into the client config - re-run `mcp install` after switching to repoint installed MCP clients).
 
 Re-running the installer updates the existing `workeros` entry instead of duplicating it.
 
@@ -72,13 +70,13 @@ Re-running the installer updates the existing `workeros` entry instead of duplic
 | `continue` | `~/.continue/.continuerc.json` | `{ mcpServers: [ { name:"workeros", ... } ] }` |
 | `generic` | (no file) | prints JSON snippet to stdout |
 
-All targets write **HTTP MCP transport** (`url` + `headers`) — no local subprocess is spawned. The MCP endpoint is hosted on the Workeros API server.
+All targets write **HTTP MCP transport** (`url` + `headers`) - no local subprocess is spawned. The MCP endpoint is hosted on the Workeros API server.
 
 ```json
 {
   "mcpServers": {
     "workeros": {
-      "url": "https://workers-api.floom.dev/mcp-tools/serve",
+      "url": "http://localhost:8000/mcp-tools/serve",
       "headers": {
         "x-floom-secret": "<WORKEROS_API_SECRET>"
       }
@@ -87,7 +85,7 @@ All targets write **HTTP MCP transport** (`url` + `headers`) — no local subpro
 }
 ```
 
-### HTTP transport (recommended — written by `workeros mcp install`)
+### HTTP transport (recommended - written by `workeros mcp install`)
 
 Claude Code / Cursor / VS Code / Windsurf (`mcpServers` object shape):
 
@@ -95,7 +93,7 @@ Claude Code / Cursor / VS Code / Windsurf (`mcpServers` object shape):
 {
   "mcpServers": {
     "workeros": {
-      "url": "https://workers-api.floom.dev/mcp-tools/serve",
+      "url": "http://localhost:8000/mcp-tools/serve",
       "headers": {
         "x-floom-secret": "<WORKEROS_API_SECRET>"
       }
@@ -114,7 +112,7 @@ Claude Code / Cursor / VS Code / Windsurf (`mcpServers` object shape, HTTP MCP):
 {
   "mcpServers": {
     "workeros": {
-      "url": "https://workers-api.floom.dev/mcp-tools/serve",
+      "url": "http://localhost:8000/mcp-tools/serve",
       "headers": {
         "x-floom-secret": "<WORKEROS_API_SECRET>"
       }
@@ -130,7 +128,7 @@ Continue (`~/.continue/.continuerc.json`, array shape, HTTP MCP):
   "mcpServers": [
     {
       "name": "workeros",
-      "url": "https://workers-api.floom.dev/mcp-tools/serve",
+      "url": "http://localhost:8000/mcp-tools/serve",
       "headers": {
         "x-floom-secret": "<WORKEROS_API_SECRET>"
       }
@@ -139,9 +137,9 @@ Continue (`~/.continue/.continuerc.json`, array shape, HTTP MCP):
 }
 ```
 
-For self-hosted OSS, replace `https://workers-api.floom.dev` with your API base URL.
+Replace `http://localhost:8000` with your deployed API base URL when connecting to a remote self-hosted instance.
 
-### Stdio transport (fallback — for harnesses that do not support HTTP MCP)
+### Stdio transport (fallback - for harnesses that do not support HTTP MCP)
 
 ```json
 {
@@ -151,7 +149,7 @@ For self-hosted OSS, replace `https://workers-api.floom.dev` with your API base 
       "args": ["-p", "@floomhq/workeros", "workeros-mcp"],
       "env": {
         "WORKEROS_API_SECRET": "<WORKEROS_API_SECRET>",
-        "WORKEROS_API_BASE": "https://workers-api.floom.dev"
+        "WORKEROS_API_BASE": "http://localhost:8000"
       }
     }
   }
@@ -174,7 +172,7 @@ workeros workers info <id>
 
 `workers validate` is offline. It checks that `worker.yml` parses, the entry file exists, the runtime is declared, and E2B Composio workers do not use the local `composio execute` CLI. For structured connection declarations it also verifies that referenced tool slugs are covered by `allowed_tools`.
 
-`workers push` uses `POST /workers` for new workers and `PUT /workers/{id}` for existing workers. If an older API returns 404/405 for source updates, upgrade the API before editing production workers in place.
+`workers push` uses `POST /workers` for new workers and `PUT /workers/{id}` for existing workers. If an older API returns 404/405 for source updates, upgrade the API before editing workers in place.
 
 ## Tools
 
@@ -272,12 +270,12 @@ workeros workers info <id>
 ### System
 | Tool | Description |
 | --- | --- |
-| `system.overview` | Full workspace dashboard — health, runs, pending approvals, alerts. |
+| `system.overview` | Full workspace dashboard - health, runs, pending approvals, alerts. |
 | `system.stats` | 7-day aggregate run statistics across the whole workspace. |
 | `system.info` | Platform version and configuration flags. |
 | `system.alerts` | Active system-wide alerts. |
 
-## Quick example — write + deploy + verify a worker in one MCP session
+## Quick example - write + deploy + verify a worker in one MCP session
 
 ```js
 // 1. Create
@@ -335,4 +333,4 @@ console.log(run.status); // "succeeded"
 console.log(run.output?.summary);
 ```
 
-See [docs/AGENT-COOKBOOK.md §1](../../docs/AGENT-COOKBOOK.md) for the full annotated walkthrough plus six more recipes (agent mode, Gmail trigger, cron schedule, webhook, approval gate, claude-skill port).
+See [docs/AGENT-COOKBOOK.md section 1](../../docs/AGENT-COOKBOOK.md) for the full annotated walkthrough plus six more recipes (agent mode, Gmail trigger, cron schedule, webhook, approval gate, claude-skill port).

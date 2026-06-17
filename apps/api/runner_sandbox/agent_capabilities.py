@@ -313,7 +313,12 @@ def make_mcp_server(
             "env": env,
         }
         if getattr(connection, "cwd", None):
-            params["cwd"] = connection.cwd
+            cwd = str(connection.cwd).replace("\\", "/")
+            if cwd.startswith(("/", "~")) or ".." in cwd.split("/"):
+                raise MCPConnectionError(
+                    f"MCP connection {connection.label} has unsafe stdio cwd"
+                )
+            params["cwd"] = cwd
         return MCPServerStdio(params=params, **common)
 
     # Defense in depth: re-validate the URL at dial time. DNS can rebind between

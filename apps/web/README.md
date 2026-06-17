@@ -1,36 +1,55 @@
-This is a [Next.js](https://nextjs.org) project bootstrapped with [`create-next-app`](https://nextjs.org/docs/app/api-reference/cli/create-next-app).
+# Workeros Web App
 
-## Getting Started
+This is the Next.js frontend for Workeros. It talks to the FastAPI backend in
+`apps/api` and provides the UI for workers, runs, approvals, connections,
+contexts, and settings.
 
-First, run the development server:
+## Local Development
+
+From the repository root, the easiest path is:
 
 ```bash
-npm run dev
-# or
-yarn dev
-# or
-pnpm dev
-# or
-bun dev
+./scripts/setup.sh
+./scripts/dev.sh
 ```
 
-Open [http://localhost:3000](http://localhost:3000) with your browser to see the result.
+On Windows PowerShell:
 
-You can start editing the page by modifying `app/page.tsx`. The page auto-updates as you edit the file.
+```powershell
+.\scripts\setup.ps1
+.\scripts\dev.ps1
+```
 
-This project uses [`next/font`](https://nextjs.org/docs/app/building-your-application/optimizing/fonts) to automatically optimize and load [Geist](https://vercel.com/font), a new font family for Vercel.
+To run the web app directly:
 
-## Learn More
+```bash
+cd apps/web
+cp .env.example .env
+npm install
+npm run dev
+```
 
-To learn more about Next.js, take a look at the following resources:
+Open `http://localhost:3000`. The default `.env.example` points the frontend at
+the local API on `http://localhost:8000`.
 
-- [Next.js Documentation](https://nextjs.org/docs) - learn about Next.js features and API.
-- [Learn Next.js](https://nextjs.org/learn) - an interactive Next.js tutorial.
+## Useful Commands
 
-You can check out [the Next.js GitHub repository](https://github.com/vercel/next.js) - your feedback and contributions are welcome!
+```bash
+npm run lint
+npm test
+npm run build
+```
 
-## Deploy on Vercel
+Run these from `apps/web`. Root-level shortcuts are also available:
 
-The easiest way to deploy your Next.js app is to use the [Vercel Platform](https://vercel.com/new?utm_medium=default-template&filter=next.js&utm_source=create-next-app&utm_campaign=create-next-app-readme) from the creators of Next.js.
+```bash
+npm run lint:web
+npm run test:web
+npm run build:web
+```
 
-Check out our [Next.js deployment documentation](https://nextjs.org/docs/app/building-your-application/deploying) for more details.
+## Deployment
+
+Build the app with `npm run build` and deploy the generated Next.js application
+with any hosting provider that supports Next.js. Set `FLOOM_API_BASE` and
+`NEXT_PUBLIC_API_BASE` to the URL of your Workeros API.
