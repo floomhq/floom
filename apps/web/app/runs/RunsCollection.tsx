@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { StatusPill } from "@/components/collection/StatusPill";
 import { api } from "@/lib/api";
+import { ShareModal } from "@/components/sharing/ShareModal";
 import { useRuns } from "@/lib/query/hooks";
 import { formatRelative } from "@/lib/formatters";
 import { humanizeKey } from "@/lib/run-format";
@@ -339,6 +340,35 @@ function InputsTab({ r }: { r: RunSummary }) {
   return <pre style={code}>{JSON.stringify(input, null, 2)}</pre>;
 }
 
+// #765: run Share — opens the real Share modal (anonymous public link, view-only,
+// with revoke). Owns its own modal state so it slots into the detail-header actions.
+function RunShareButton({ r }: { r: RunSummary }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="c-vpill"
+        style={{ padding: "6px 11px" }}
+        onClick={() => setOpen(true)}
+      >
+        Share
+      </button>
+      <ShareModal
+        open={open}
+        onOpenChange={setOpen}
+        asset={{ type: "run", name: r.worker_name ?? r.worker_id }}
+        publicLink={{
+          create: async () => (await api.runs.shareLink(r.id)).url,
+          revoke: async () => {
+            await api.runs.revokeShareLink(r.id);
+          },
+        }}
+      />
+    </>
+  );
+}
+
 // Tab key → its (named) component, keyed by RUN_DETAIL_TABS so the §4 contract
 // test guards the live tab set.
 const RUN_TAB_COMPONENT: Record<RunDetailTab, (props: { r: RunSummary }) => React.ReactNode> = {
@@ -620,15 +650,8 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
             <Link href={`/workers?sel=${encodeURIComponent(r.worker_id)}`} className="c-vpill" style={{ padding: "6px 11px" }}>
               ↑ Open worker
             </Link>
-            {/* TODO(#765): run share link — backend pending; honest stub for now. */}
-            <button
-              type="button"
-              className="c-vpill"
-              style={{ padding: "6px 11px" }}
-              onClick={() => toast("Sharing a run is coming soon (#765).")}
-            >
-              Share
-            </button>
+            {/* #765: run share link — opens the real Share modal. */}
+            <RunShareButton r={r} />
             {/* #1274: confirm before replaying — avoids accidental duplicate runs. */}
             <button
               type="button"

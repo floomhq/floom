@@ -3,7 +3,7 @@ import {
   GENERAL_ACCESS_OPTIONS,
   generalAccessLabel,
   shareSummary,
-  SHARE_GAPS,
+  publicLinkScope,
 } from "@/lib/sharing/share-model";
 
 describe("General access (rule #8: no public level)", () => {
@@ -32,8 +32,12 @@ describe("shareSummary", () => {
   });
 });
 
-describe("SHARE_GAPS", () => {
-  it("tracks the backend-pending issue numbers", () => {
-    expect(SHARE_GAPS).toEqual({ invite: 767, peopleList: 768, publicLinkToggle: 766 });
+describe("publicLinkScope", () => {
+  it("describes what an anonymous public link exposes, per asset type", () => {
+    expect(publicLinkScope("run")).toMatch(/inputs, steps, tool calls/i);
+    expect(publicLinkScope("worker")).toMatch(/inspect its files, and duplicate/i);
+    expect(publicLinkScope("brain_pack")).toMatch(/brain pack/i);
+    expect(publicLinkScope("brain_file")).toMatch(/this file/i);
+    expect(publicLinkScope("approval")).toMatch(/approve, or reject/i);
   });
 });
