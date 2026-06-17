@@ -54,7 +54,7 @@ import {
   replaceTriggerBlock,
   type TriggerRow,
 } from "@/components/worker-form";
-import { WorkerInputForm, requiredRunInputErrors } from "@/components/run-page/WorkerInputForm";
+import { WorkerInputForm } from "@/components/run-page/WorkerInputForm";
 import { WorkerBrainEditor } from "@/components/worker/WorkerBrainEditor";
 import { WorkerToolsEditor } from "@/components/worker/WorkerToolsEditor";
 import { WorkerFeedbackPanel } from "@/components/worker/WorkerFeedbackPanel";
@@ -249,16 +249,6 @@ function patchTopLevelRaw(yaml: string, key: string, raw: string): string {
   const re = new RegExp(`^${key}:.*$`, "m");
   if (re.test(yaml)) return yaml.replace(re, line);
   return `${line}\n${yaml.trimStart()}`;
-}
-
-function coerceInputValue(value: string, type?: string): unknown {
-  const kind = (type ?? "string").toLowerCase();
-  if (kind === "number" || kind === "integer") {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : value;
-  }
-  if (kind === "boolean") return value === "true";
-  return value;
 }
 
 function Loading() {
@@ -1301,71 +1291,16 @@ function WorkerDetailActions({
 }) {
   const router = useRouter();
   const [d, applyDetail] = useWorkerDetail(w.id);
-  const [runOpen, setRunOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [running, setRunning] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [runInputs, setRunInputs] = useState<Record<string, unknown>>({});
-  const [runFileNames, setRunFileNames] = useState<Record<string, string>>({});
-  const [runErrors, setRunErrors] = useState<Record<string, string>>({});
   const [name, setName] = useState(w.name);
   const [description, setDescription] = useState(w.description ?? "");
-
-  const inputs = d?.config?.inputs ?? w.inputs ?? [];
-
-  useEffect(() => {
-    if (!runOpen) return;
-    const next: Record<string, unknown> = {};
-    for (const input of inputs) {
-      next[input.name] =
-        runInputs[input.name] ?? (input.default == null ? "" : input.default);
-    }
-    setRunInputs(next);
-    setRunErrors({});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runOpen, d?.id]);
 
   useEffect(() => {
     if (!editOpen) return;
     setName(d?.name ?? w.name);
     setDescription(d?.description ?? w.description ?? "");
   }, [editOpen, d?.description, d?.name, w.description, w.name]);
-
-  async function submitRun(event: React.FormEvent) {
-    event.preventDefault();
-    if (running) return;
-    // Schema-driven required-field validation (same rule as the run page).
-    const errors = requiredRunInputErrors(inputs, runInputs);
-    if (Object.keys(errors).length > 0) {
-      setRunErrors(errors);
-      toast.error("Fill in the required inputs before running.");
-      return;
-    }
-    setRunErrors({});
-    setRunning(true);
-    try {
-      const payload: Record<string, unknown> = {};
-      for (const input of inputs) {
-        const value = runInputs[input.name];
-        if (value === undefined || value === null) continue;
-        if (typeof value === "string") {
-          if (value.trim() === "") continue;
-          payload[input.name] = coerceInputValue(value, input.type);
-        } else {
-          // Booleans, uploaded-file shas, arrays/objects pass through as-is.
-          payload[input.name] = value;
-        }
-      }
-      const result = await api.workers.run(w.id, payload);
-      toast.success("Run queued");
-      setRunOpen(false);
-      if (result.run_id) router.push(`/runs?sel=${encodeURIComponent(result.run_id)}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not run worker");
-    } finally {
-      setRunning(false);
-    }
-  }
 
   async function submitEdit(event: React.FormEvent) {
     event.preventDefault();
@@ -1400,7 +1335,11 @@ function WorkerDetailActions({
           type="button"
           className="c-addbtn"
           style={pillBtn}
-          onClick={() => setRunOpen(true)}
+          // R9: kill the jarring popup + hard-nav. The Run button routes to the
+          // calm inline /run/{worker} page (schema-driven inputs + live
+          // output-first run panel), the same standalone runnable surface — no
+          // Dialog, no third page. See feedback/round-09/run-detail-real.md.
+          onClick={() => router.push(`/run/${encodeURIComponent(w.id)}`)}
           title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused; it may not run as expected" : undefined}
         >
           Run
@@ -1493,59 +1432,10 @@ function WorkerDetailActions({
         </DropdownMenu>
       )}
 
-      <Dialog open={runOpen} onOpenChange={setRunOpen}>
-        <DialogContent className="max-h-[88vh] overflow-hidden p-0 sm:max-w-xl">
-          <form onSubmit={(event) => void submitRun(event)} className="flex max-h-[88vh] flex-col">
-            <DialogHeader className="px-6 pt-6 pb-1">
-              <DialogTitle>Run {w.name}</DialogTitle>
-              <DialogDescription>
-                {inputs.length === 0
-                  ? "This worker takes no inputs. Run it now to start a manual run."
-                  : "Fill in the inputs below to start a manual run."}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
-              {w.enabled === false && (
-                <div className="rounded-[var(--radius-card)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
-                  This worker is paused. Running it manually may not behave as expected.
-                </div>
-              )}
-              {/* Schema-driven form: renders the correct widget per input type
-                  (textarea, select, boolean checkbox, file/CSV, number, text)
-                  with labels, required markers, placeholders and validation,
-                  the same WorkerInputForm used by the /run page (single source
-                  of truth). */}
-              <WorkerInputForm
-                inputs={inputs}
-                values={runInputs}
-                fileNames={runFileNames}
-                validationErrors={runErrors}
-                onInputChange={(inputName, value) => {
-                  setRunInputs((prev) => ({ ...prev, [inputName]: value }));
-                  setRunErrors((prev) => {
-                    if (!prev[inputName]) return prev;
-                    const next = { ...prev };
-                    delete next[inputName];
-                    return next;
-                  });
-                }}
-                onFileUploaded={(inputName, sha256, fileName) => {
-                  setRunInputs((prev) => ({ ...prev, [inputName]: sha256 }));
-                  setRunFileNames((prev) => ({ ...prev, [inputName]: fileName }));
-                }}
-              />
-            </div>
-            <DialogFooter className="px-6 pb-6 pt-2">
-              <Button type="button" variant="secondary" onClick={() => setRunOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={running}>
-                {running ? "Running..." : "Run"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {/* R9: the Run popup is gone — the Run button now routes to the calm
+          inline /run/{worker} page (no Dialog, no hard-nav). The schema-driven
+          run form lives there (the same WorkerInputForm), so the worker detail
+          no longer carries a duplicate run dialog. */}
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="sm:max-w-lg">
