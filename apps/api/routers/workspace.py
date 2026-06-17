@@ -1078,6 +1078,7 @@ _WORKSPACE_SETTING_ALLOWED_KEYS = _WORKSPACE_SETTING_BOOL_KEYS | {
     "region",
     "timezone",
     "company_domain",
+    "worker_call_fanout_limit",  # #1444: per-workspace fan-out cap (<= hard ceiling)
 }
 _WORKSPACE_SETTING_READ_ONLY_KEYS = {"current_month_spend_usd"}
 _BOOL_SETTING_VALUES = {"true", "false", "1", "0", "yes", "no", "on", "off"}
@@ -1140,6 +1141,22 @@ def _validate_workspace_setting(key: str, value: str) -> str:
         if parsed < 1 or parsed > upper:
             _setting_error(f"{key} must be between 1 and {upper}")
         return raw
+
+    if key == "worker_call_fanout_limit":
+        # #1444: a workspace may LOWER its worker-call fan-out cap below the hard
+        # ceiling, never raise it above. Reject out-of-range rather than silently
+        # clamping, so the UI surfaces the real bound.
+        from run_token import MAX_WORKER_CALLS_PER_RUN
+
+        try:
+            parsed = int(raw)
+        except ValueError:
+            _setting_error("worker_call_fanout_limit must be an integer")
+        if parsed < 1 or parsed > MAX_WORKER_CALLS_PER_RUN:
+            _setting_error(
+                f"worker_call_fanout_limit must be between 1 and {MAX_WORKER_CALLS_PER_RUN}"
+            )
+        return str(parsed)
 
     if key == "default_model":
         if not raw:

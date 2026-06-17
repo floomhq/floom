@@ -13,13 +13,14 @@ from __future__ import annotations
 import logging
 from typing import Any, Dict, List
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends, HTTPException, Request
 
 from auth import AuthContext, get_auth_context
 from db import Repositories, get_repos
 from models import VersionSummary, WorkerDetail
 from services.git_service import _git_author, _git_workspace, _require_sha_in_asset_history, _workers_git_prefix
 from services.worker_access import _get_visible_worker, _raise_if_protected_worker_mutation
+from services.worker_mutation import _require_worker_write_workspace_context
 from services.worker_registry_ops import (
     _embed_files_in_skill_version,
     _git_commit_worker,
@@ -90,6 +91,7 @@ def get_worker_version(
 def rollback_worker(
     worker_id: str,
     sha: str,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
@@ -97,6 +99,9 @@ def rollback_worker(
     from db import get_db
     from worker_registry import discover_workers, invalidate_worker_cache
     import git_ops as _git_ops
+    # #1455(b): rollback rewrites the worker bundle, so it is a worker write and
+    # takes the same workspace-context guard as create/update/delete.
+    _require_worker_write_workspace_context(request)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
     if not worker:

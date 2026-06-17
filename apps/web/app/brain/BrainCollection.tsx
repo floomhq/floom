@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Folder, Lock, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api";
+import { reportError } from "@/lib/notify";
 import { formatRelative } from "@/lib/formatters";
 import type { ContextSummary, ContextDetail } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
@@ -31,7 +32,7 @@ function useContextDetail(name: string): [ContextDetail | undefined, () => Promi
         detailCache.set(name, cd);
         setD(cd);
       })
-      .catch(() => {});
+      .catch((err) => reportError("Could not load folder contents.", err));
   };
   useEffect(() => {
     let alive = true;
@@ -41,7 +42,7 @@ function useContextDetail(name: string): [ContextDetail | undefined, () => Promi
       api.contexts.get(name).then((cd) => {
         detailCache.set(name, cd);
         if (alive) setD(cd);
-      }).catch(() => {});
+      }).catch((err) => reportError("Could not load folder contents.", err));
     }
     return () => {
       alive = false;

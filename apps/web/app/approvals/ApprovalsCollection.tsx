@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { CheckSquare2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { reportError } from "@/lib/notify";
 import type { ApprovalRow, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey, TagOption } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
@@ -85,7 +86,10 @@ export default function ApprovalsCollection() {
   useEffect(() => {
     void refresh();
     // Content tags are inherited from the parent worker (SPEC §11).
-    api.workers.list().then(setWorkers).catch(() => {});
+    api.workers
+      .list()
+      .then(setWorkers)
+      .catch((err) => reportError("Could not load workers for approval filters.", err));
   }, [refresh]);
 
   // Keep the sidebar badge + other tabs in sync (preserves legacy behavior).

@@ -32,6 +32,7 @@ import {
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { reportError } from "@/lib/notify";
 import type { ContextDetail, ContextFileItem, ContextSummary, SecretWarning, VersionSummary } from "@/lib/types";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl, AssetVisibilityIndicator } from "@/components/AssetVisibilityControl";
@@ -1020,7 +1021,10 @@ function ContextsPage() {
                 onRestored={(restoredContent) => {
                   setFileText(restoredContent);
                   setVersionsKey((k) => k + 1);
-                  void api.contexts.get(selectedName).then(setDetail).catch(() => {});
+                  void api.contexts
+                    .get(selectedName)
+                    .then(setDetail)
+                    .catch((err) => reportError("Could not reload this folder.", err));
                   void loadContexts(selectedName);
                 }}
               />

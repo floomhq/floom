@@ -952,8 +952,8 @@ async def lifespan(app: FastAPI):
         # uses a very broad window (24h) to catch runs that were never cleaned up
         # regardless of how many restarts occurred since.
         try:
-            from run_service import reap_abandoned_runs as _reap
-            _reap(timeout_seconds=86400, grace_seconds=0)
+            from run_service import recover_abandoned_runs as _recover
+            _recover(timeout_seconds=86400, grace_seconds=0)
         except Exception as _reap_exc:
             logger.warning("Startup zombie-run sweep failed (non-fatal): %s", _reap_exc)
         reap_abandoned_pending_approval_runs()
@@ -3930,16 +3930,24 @@ def create_worker_run(
             )
         trigger_source, trigger_ref = _worker_call_run_metadata(auth)
         trigger_source = trigger_source or "worker_call"
-        # Fan-out cap: a single run may spawn at most MAX_WORKER_CALLS_PER_RUN child
-        # runs via worker-to-worker calls (cost + runaway guard, complements the
-        # depth cap above). trigger_ref is the parent run id.
+        # Fan-out cap: a single run may spawn at most `fanout_limit` child runs
+        # via worker-to-worker calls (cost + runaway guard, complements the depth
+        # cap above). trigger_ref is the parent run id. #1444: the limit is the
+        # per-workspace setting clamped to [1, MAX_WORKER_CALLS_PER_RUN]; it
+        # defaults to the hard ceiling when unset.
         if trigger_ref:
+            from services.workspace_ops import (
+                _active_workspace_id,
+                resolve_workspace_fanout_limit,
+            )
+
+            fanout_limit = resolve_workspace_fanout_limit(_active_workspace_id(request))
             already_spawned = repos.runs.count_child_runs(parent_run_id=trigger_ref)
-            if already_spawned >= MAX_WORKER_CALLS_PER_RUN:
+            if already_spawned >= fanout_limit:
                 raise HTTPException(
                     status_code=429,
                     detail=(
-                        f"Worker call fan-out limit ({MAX_WORKER_CALLS_PER_RUN}) "
+                        f"Worker call fan-out limit ({fanout_limit}) "
                         "reached for this run; cannot spawn more child runs."
                     ),
                 )

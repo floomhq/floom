@@ -1053,6 +1053,11 @@ class WorkerConfig(BaseModel):
     name: str
     description: Optional[str] = None
     model: Optional[str] = None
+    # #1448: a worker that makes heavy/bursty LLM calls (e.g. a judge fan-out)
+    # declares this so the run scheduler can space concurrent heavy runs under a
+    # shared provider-quota budget (WORKEROS_MAX_CONCURRENT_LLM_RUNS) instead of
+    # letting them stack and 429 the shared provider. Default false = no gating.
+    llm_intensive: bool = False
     trigger: WorkerTrigger
     runtime: WorkerRuntime
     inputs: List[WorkerInput] = []
