@@ -1,4 +1,4 @@
-# Agent Cookbook — Building & Deploying Workers
+# Agent Cookbook - Building & Deploying Workers
 
 For agents (Claude Code / Cursor / custom) installing the `@floomhq/workeros` MCP and producing real workers from prompts. This is the **read-this-first** recipe book.
 
@@ -15,9 +15,9 @@ create or edit a worker.
 
 The npm package exposes three binaries:
 
-- `workeros` — preferred CLI name in these docs.
-- `floom` — compatible alias for existing Floom operator workflows.
-- `workeros-mcp` — stdio MCP fallback binary for clients that cannot use HTTP MCP.
+- `workeros` - preferred CLI name in these docs.
+- `floom` — compatibility alias for older installs.
+- `workeros-mcp` - stdio MCP fallback binary for clients that cannot use HTTP MCP.
 
 If a different local `floom` command exists, use `workeros`.
 
@@ -27,10 +27,10 @@ npx -y @floomhq/workeros mcp install --target claude
 npx -y @floomhq/workeros mcp install --target cursor
 ```
 
-Set `WORKEROS_API_SECRET` in env before install to skip the prompt. The installer
-writes HTTP MCP config pointing at
-`https://workers-api.floom.dev/mcp-tools/serve`. For older harnesses that need a
-local stdio process, configure `npx -y -p @floomhq/workeros workeros-mcp`.
+Set `WORKEROS_API_BASE` to your API URL before install; for local development
+that is usually `http://localhost:8000`. Set `WORKEROS_API_SECRET` to skip the
+secret prompt when your API is protected by `FLOOM_SECRET`. For older harnesses
+that need a local stdio process, configure `npx -y -p @floomhq/workeros workeros-mcp`.
 Verify:
 
 ```bash
@@ -239,7 +239,7 @@ workers.get({ id: "text-summarizer" })
 # Expect: status=ready, last run with status=succeeded
 ```
 
-Open `https://workers.floom.dev/workers/text-summarizer` in browser to confirm the Overview tab renders.
+Open `http://localhost:3000/workers/text-summarizer` in browser to confirm the Overview tab renders.
 
 ---
 
@@ -248,7 +248,7 @@ Open `https://workers.floom.dev/workers/text-summarizer` in browser to confirm t
 When the task needs reasoning, web search, or multi-step tool calls, use agent mode. Same `worker.yml` shape, but `entrypoint: SKILL.md` and no `run.py`.
 
 ```markdown
-# SKILL.md — Research Brief
+# SKILL.md - Research Brief
 
 You receive:
   - topic (string): the subject to research.
@@ -555,12 +555,12 @@ runs.get({ id: "run_abc123" })
 **Returns:** stream of SSE events until terminal.
 
 Events emitted:
-- `text` — agent narration
-- `tool-call` — agent called a tool
-- `tool-result` — tool returned
-- `reasoning` — agent internal reasoning (if enabled)
-- `step-start` — new step
-- `finish` — terminal; run is done
+- `text` - agent narration
+- `tool-call` - agent called a tool
+- `tool-result` - tool returned
+- `reasoning` - agent internal reasoning (if enabled)
+- `step-start` - new step
+- `finish` - terminal; run is done
 
 ```
 for await (const part of runs.watch({ run_id: "run_abc123" })) {
@@ -608,7 +608,7 @@ Run `workeros workers validate ./workers/<id>` before pushing. It catches E2B an
 When an agent is asked "build me a worker that does X", produce:
 
 1. **Default to agent mode** unless X is deterministic / ETL-shaped.
-2. **Include `long_description`, `use_cases`, `how_it_works`** — these power the Overview tab.
+2. **Include `long_description`, `use_cases`, `how_it_works`** - these power the Overview tab.
 3. **Pin every secret** the worker will read.
 4. **`capabilities.network.egress: true`** if any external API is called.
 5. **`approvals.required: true`** for any worker that sends, deletes, or pays.
@@ -651,6 +651,6 @@ If smoke-test fails:
 ## 11. When in doubt
 
 - Check [AUTHORING.md](AUTHORING.md) for the full schema.
-- Read the reference workers in [workers/](../workers/) — copy the closest match.
+- Read the reference workers in [workers/](../workers/) - copy the closest match.
 - If a tool returns an unclear error, call `runs.get` and read the logs.
-- The MCP server prints structured errors; never just retry — diagnose first.
+- The MCP server prints structured errors; never just retry - diagnose first.

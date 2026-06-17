@@ -29,7 +29,7 @@ permissions:
 jobs:
   sync-cloud-submodule:
     name: Bump cloud engine submodule + guard + push
-    # Self-hosted AX41 runner (org GitHub-hosted Actions are billing-disabled).
+    # Uses the repository's configured Linux runner.
     # Same runner used by engine CI and cloud CI/deploy.
     runs-on: [self-hosted, linux, x64, workeros-ci]
     timeout-minutes: 30
@@ -43,7 +43,7 @@ jobs:
 
       # Runtime gh auth: the self-hosted runner is logged in to gh with write
       # access to floomhq/workeros-cloud and read access to floomhq/workeros.
-      # No stored token secret (same pattern as cloud ci.yml / vercel-deploy.yml).
+      # No stored token secret; the runner-local GitHub CLI provides auth.
       - name: Configure git auth (runner-local gh token)
         run: |
           set -euo pipefail
@@ -189,9 +189,7 @@ jobs:
 
           Automated by floomhq/workeros cloud-engine-autosync on engine push.
           Guards passed: drift, web build, cloud API import smoke.
-          Includes the regenerated web/ tree (kept in lockstep with engine).
-
-          Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+          Includes the regenerated web/ tree (kept in lockstep with engine)."
 
           # Rebase-then-push right before pushing so we never clobber a
           # concurrent cloud-main push (e.g. Vivek, dashboard autodeploy).
@@ -259,9 +257,7 @@ jobs:
             api=${{ steps.guard_api.outcome }}
 
           The cloud web overlay or build likely needs a manual re-fork against
-          the new engine. Do not merge until the guards are green.
-
-          Co-Authored-By: Claude Opus 4.8 <noreply@anthropic.com>"
+          the new engine. Do not merge until the guards are green."
           git push -f origin "HEAD:${BRANCH}"
           gh pr create \
             --repo floomhq/workeros-cloud \
@@ -275,9 +271,7 @@ jobs:
           - web build: \`${{ steps.guard_build.outcome }}\`
           - cloud API import smoke: \`${{ steps.guard_api.outcome }}\`
 
-          Most likely the cloud \`web/\` overlay needs a re-fork against the new engine (see the proven manual procedure in cloud PR #252). Fix the overlay, re-run the guards locally, then merge.
-
-          🤖 Generated with [Claude Code](https://claude.com/claude-code)" \
+          Most likely the cloud \`web/\` overlay needs a re-fork against the new engine (see the proven manual procedure in cloud PR #252). Fix the overlay, re-run the guards locally, then merge." \
             || echo "::warning::PR may already exist for ${BRANCH}."
 
       - name: Cleanup
