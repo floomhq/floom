@@ -3921,7 +3921,7 @@ def create_worker_run(
                 status_code=403,
                 detail=f"Worker {worker_id!r} is not in the caller's calls: list",
             )
-        from run_token import MAX_CALL_DEPTH
+        from run_token import MAX_CALL_DEPTH, MAX_WORKER_CALLS_PER_RUN
         depth = int(rtp.get("depth") or 0)
         if depth >= MAX_CALL_DEPTH:
             raise HTTPException(
@@ -3930,6 +3930,19 @@ def create_worker_run(
             )
         trigger_source, trigger_ref = _worker_call_run_metadata(auth)
         trigger_source = trigger_source or "worker_call"
+        # Fan-out cap: a single run may spawn at most MAX_WORKER_CALLS_PER_RUN child
+        # runs via worker-to-worker calls (cost + runaway guard, complements the
+        # depth cap above). trigger_ref is the parent run id.
+        if trigger_ref:
+            already_spawned = repos.runs.count_child_runs(parent_run_id=trigger_ref)
+            if already_spawned >= MAX_WORKER_CALLS_PER_RUN:
+                raise HTTPException(
+                    status_code=429,
+                    detail=(
+                        f"Worker call fan-out limit ({MAX_WORKER_CALLS_PER_RUN}) "
+                        "reached for this run; cannot spawn more child runs."
+                    ),
+                )
 
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role)
     if not worker:
