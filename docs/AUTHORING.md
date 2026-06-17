@@ -1,6 +1,6 @@
 # Authoring Workers
 
-> **If you are an agent (Claude Code / Cursor) authoring via the MCP, read [AGENT-COOKBOOK.md](AGENT-COOKBOOK.md) first** — it has the per-tool examples + end-to-end recipes. This doc is the schema + concept reference.
+> **If you are an agent (Claude Code / Cursor) authoring via the MCP, read [AGENT-COOKBOOK.md](AGENT-COOKBOOK.md) first** - it has the per-tool examples + end-to-end recipes. This doc is the schema + concept reference.
 
 This is the canonical guide for writing, deploying, and updating workers on Workeros. It covers:
 
@@ -367,12 +367,12 @@ python3 scripts/smoke_git_context_worker.py --secret "$FLOOM_SECRET"
 
 ### Triggers
 
-- **manual** — runs only from /workers/<id> Run tab or via `POST /workers/<id>/runs`.
-- **schedule** — fires on cron (`cron`, `timezone`) via the scheduler service.
-- **webhook** — fires when POST hits `https://workers-api.floom.dev/webhooks/<worker-id>?token=<derived>`. The token is a per-worker HMAC of the worker_id under the host's webhook signing key. The URL is shown in the Triggers tab after the worker is created.
-- **composio** — fires when the named Composio event arrives, scoped to the named connection.
+- **manual** - runs only from /workers/<id> Run tab or via `POST /workers/<id>/runs`.
+- **schedule** - fires on cron (`cron`, `timezone`) via the scheduler service.
+- **webhook** - fires when POST hits `http://localhost:8000/webhooks/<worker-id>?token=<derived>`. The token is a per-worker HMAC of the worker_id under the host's webhook signing key. The URL is shown in the Triggers tab after the worker is created.
+- **composio** - fires when the named Composio event arrives, scoped to the named connection.
 
-A worker can have multiple triggers (use the `triggers:` plural form). the operator tip: keep it to one when possible; two becomes confusing fast.
+A worker can have multiple triggers (use the `triggers:` plural form). Prefer one trigger per worker unless there is a clear reason to combine them.
 
 Use `type: schedule` for cron workers. Legacy manifests with `type: cron` are accepted and normalized to `schedule`, but new templates must emit `schedule`.
 
@@ -380,7 +380,7 @@ Use `type: schedule` for cron workers. Legacy manifests with `type: cron` are ac
 
 When `approvals.required: true`, runs use a **two-phase respawn model**:
 
-1. **Run 1 — propose.** The worker does its work, drafts the action, then writes
+1. **Run 1 - propose.** The worker does its work, drafts the action, then writes
    `decision_required` to `result.json` before exiting. The engine intercepts this,
    lands the run as `PENDING_APPROVAL`, and creates an approval record in the database.
    **Run 1 must NOT perform the real side-effect** (send email, delete data, spend money).
@@ -388,7 +388,7 @@ When `approvals.required: true`, runs use a **two-phase respawn model**:
 2. **Human decision.** The `/approvals` page (or the inline card on `/runs/[id]`) shows
    the pending approval. The reviewer can Approve, Edit-then-approve, or Reject.
 
-3. **Run 2 — execute.** On approval, the engine spawns a fresh run of the same worker
+3. **Run 2 - execute.** On approval, the engine spawns a fresh run of the same worker
    with the original inputs merged with `{decision: "approved", approved_output: <edited or original output>}`.
    Run 2 reads `inputs.decision` and `inputs.approved_output` and performs the real action.
 
@@ -408,7 +408,7 @@ When `approvals.required: true`, runs use a **two-phase respawn model**:
 #### Run 2 inputs
 
 ```python
-# Workeros passes inputs as an inputs.json FILE in the working dir — NOT an env var.
+# Workeros passes inputs as an inputs.json FILE in the working dir - NOT an env var.
 with open("inputs.json") as f:
     inputs = json.load(f)
 decision = inputs.get("decision")        # "approved"
@@ -465,7 +465,7 @@ If you already have a Claude skill in `~/.claude/skills/<name>/SKILL.md`, the pa
 
 1. Copy or symlink the skill directory to `workers/<name>/`:
    ```bash
-   cp -r ~/.claude/skills/my-skill /root/workeros/workers/my-skill
+   cp -r ~/.claude/skills/my-skill workers/my-skill
    ```
 2. Add a `worker.yml` next to the `SKILL.md`. Minimum viable:
    ```yaml
@@ -506,7 +506,7 @@ If you already have a Claude skill in `~/.claude/skills/<name>/SKILL.md`, the pa
 **Gotchas:**
 
 - Claude-skill bundles often assume the working directory is the skill folder (`~/.claude/skills/<name>/`). Inside the sandbox the working dir IS the bundle, so relative paths work; absolute paths to `~/.claude/...` won't.
-- Skills that depend on Claude-Code-only tools (Read, Edit, Bash that hits the host filesystem) won't work — the runner exposes a different tool set. Audit the skill's tool calls before porting.
+- Skills that depend on Claude-Code-only tools (Read, Edit, Bash that hits the host filesystem) won't work - the runner exposes a different tool set. Audit the skill's tool calls before porting.
 - Heavy Python deps (torch, transformers) won't fit in the E2B template. Trim dependencies or split the worker into smaller sandboxed steps.
 
 `workeros workers push` creates a new worker id with `POST /workers` and updates
@@ -554,7 +554,7 @@ rotation.
 
 ```bash
 SECRET=$(cat ~/.workeros/secret)
-curl -X POST https://workers-api.floom.dev/workers/<id>/runs \
+curl -X POST http://localhost:8000/workers/<id>/runs \
   -H "x-floom-secret: $SECRET" \
   -H "Content-Type: application/json" \
   -d '{"inputs": {"topic": "AI tools"}}'
@@ -566,17 +566,17 @@ curl -X POST https://workers-api.floom.dev/workers/<id>/runs \
 
 When an agent (Claude Code / Cursor / a draft-and-create endpoint) writes a worker from a free-text prompt, it must produce:
 
-1. `worker.yml` — well-formed, schema 0.3, every required field present.
-2. `SKILL.md` (agent mode) OR `run.py` (script mode) — never both.
-3. `requirements.txt` — pinned exact versions (no `^` or `~`). Skip if no third-party deps.
+1. `worker.yml` - well-formed, schema 0.3, every required field present.
+2. `SKILL.md` (agent mode) OR `run.py` (script mode) - never both.
+3. `requirements.txt` - pinned exact versions (no `^` or `~`). Skip if no third-party deps.
 
 Rules the agent should follow (these are the failure modes observed in real drafts):
 
 - **Default to agent mode** unless the task is deterministic / ETL-shaped. Script mode is faster to debug but loses the "describe in plain English" wedge.
-- **Include `long_description`, `use_cases`, `how_it_works`** — these power the Overview tab. Skipping them lands a worker that reads as "developer-config-first" and the operator has flagged that pattern multiple times.
+- **Include `long_description`, `use_cases`, `how_it_works`** — these power the Overview tab and make the worker understandable before someone opens the source.
 - **Pin every secret** the worker will read. Missing-secret failure = silent empty output.
 - **Set `capabilities.network.egress: true`** if any external API is called. Default-deny.
-- **Set realistic `limits.timeout_seconds`** — 300 is the safe default; longer needs justification.
+- **Set realistic `limits.timeout_seconds`** - 300 is the safe default; longer needs justification.
 - **Set `approvals.required: true`** for any worker that sends external messages, deletes data, or spends money. Default-off saves a click but raises a regret tax.
 - **Default `trigger: manual`** unless the prompt explicitly says "every Monday" / "when X arrives".
 
@@ -588,11 +588,11 @@ The draft-and-create endpoint runs an LLM with this contract baked in. Look at `
 
 Read these end-to-end before writing your first one:
 
-- `workers/research_brief/` — agent mode, manual trigger, markdown output.
-- `workers/resume_helper/` — agent mode, file input + multiple outputs, branded format.
-- `workers/csv_enricher/` — script mode, CSV passthrough, OpenAI per row.
-- `workers/github-digest/` — schedule trigger, Composio GitHub connection.
-- `workers/gmail_intake_brief/` — composio trigger, Gmail connection, approval-gated output.
+- `workers/research_brief/` - agent mode, manual trigger, markdown output.
+- `workers/resume_helper/` - agent mode, file input + multiple outputs, branded format.
+- `workers/csv_enricher/` - script mode, CSV passthrough, OpenAI per row.
+- `workers/github-digest/` - schedule trigger, Composio GitHub connection.
+- `workers/gmail_intake_brief/` - composio trigger, Gmail connection, approval-gated output.
 
 The pattern: copy the closest match, edit identity + inputs + outputs + SKILL.md, smoke-test from /workers/<id>#run, then enable the desired trigger.
 
@@ -607,4 +607,4 @@ If you ship a change that affects:
 - The CLI / MCP / API surface for workers,
 - The trigger types or webhook URL shape,
 
-…update this file in the SAME PR. Doc drift here is the highest-leverage bug we can ship — every new worker author reads this first.
+...update this file in the SAME PR. Doc drift here is the highest-leverage bug we can ship - every new worker author reads this first.
