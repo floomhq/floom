@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useRef, useState } from "react";
 import { usePathname } from "next/navigation";
-import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, PenSquare, Download, History, MoreHorizontal } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -35,6 +35,7 @@ import {
   useChatStream,
 } from "@/lib/useChatStream";
 import { exportConversationMarkdown } from "@/lib/emily-chat-export";
+import { useAssistantName } from "@/lib/workspace/assistant-name";
 import { api } from "@/lib/api";
 import type { ConversationSummary } from "@/lib/types";
 import type { AttachedFile, ChatMessage } from "@/lib/emily-chat-types";
@@ -343,12 +344,13 @@ function ChatEmptyState({
   onSuggest: (text: string) => void;
   isNewWorkspace?: boolean;
 }) {
+  const assistantName = useAssistantName();
   // #1363 — First-run opener: proactive builder message + action-oriented pills
   const headline = isNewWorkspace
     ? "Hi, describe what you want to automate and I’ll build the worker for you right now."
     // take-base (round-09 copy). FLAG: brand-string conflict — base says "COO",
     // main says "Chief of Staff". Defaulting to round-09; needs human brand call.
-    : "I am Emily, your COO";
+    : `I am ${assistantName}, your COO`;
   const sub = isNewWorkspace
     ? null
     : "Ask me to create workers, check runs, or manage connections.";
@@ -386,76 +388,65 @@ const CREATE_EXAMPLES = [
   { label: "HubSpot deal → Slack",       prompt: "When a new deal is created in HubSpot, send a Slack message to #sales-channel" },
 ] as const;
 
+// Round-09 (Federico 2026-06-17): the old "Hire a new AI worker" hero was a
+// form-y card — a bespoke <textarea> + a "Hire worker" button + a divider — that
+// read as a FORM, not as talking to the assistant ("super unclean, should be more
+// native Emily"). Rebuilt below as an Emily-native conversational opener: her
+// avatar greeting + the REAL PromptInput composer (the same one the chat thread
+// uses — auto-resize, attachments, source pills, Enter-to-submit). Describe the
+// job → Emily drafts the worker → review. No reinvented composer.
 function CreateWorkerHeroState({
   input,
   onInput,
   onSubmit,
   onAddSource,
+  attachedFiles,
+  onFilesChange,
 }: {
   input: string;
   onInput: (v: string) => void;
   onSubmit: () => void;
   onAddSource: (source: string) => void;
+  attachedFiles: AttachedFile[];
+  onFilesChange: (files: AttachedFile[]) => void;
 }) {
+  const assistantName = useAssistantName();
   return (
     <div className="flex flex-col items-center justify-center min-h-full w-full px-6 py-12 gap-8">
-      {/* Headline */}
-      <div className="text-center space-y-2 max-w-xl">
-        <h1 className="text-2xl font-semibold tracking-tight text-foreground leading-tight">
-          Hire a new AI worker
-        </h1>
-        <p className="text-sm text-muted-foreground leading-relaxed">
-          Describe the job in plain English. Emily drafts the worker, picks the right
-          integrations, and opens the editor so you can review before running.
-        </p>
-      </div>
-
-      {/* Composer card — wide and prominent */}
-      <div className="w-full max-w-2xl">
-        <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)] p-5 space-y-4">
-          <textarea
-            autoFocus
-            placeholder="Create me: a worker that…"
-            value={input}
-            onChange={(e) => onInput(e.target.value)}
-            onKeyDown={(e) => {
-              // #1313: Enter sends, Shift+Enter inserts a newline.
-              if (e.key === "Enter" && !e.shiftKey) {
-                e.preventDefault();
-                onSubmit();
-              }
-            }}
-            rows={5}
-            className="w-full resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60"
-          />
-          <PromptChips prompt={input} />
-          <div className="h-px bg-[var(--border-default)]" />
-          <div className="flex flex-wrap items-center justify-between gap-3">
-            <CreateSourcePills onPick={onAddSource} />
-            <div className="flex items-center gap-2 shrink-0 ml-auto">
-              <Button
-                onClick={onSubmit}
-                disabled={!input.trim()}
-                className="h-9 px-5 text-sm"
-              >
-                Hire worker
-              </Button>
-              <kbd
-                className="hidden sm:inline-flex items-center gap-0.5 rounded [border:var(--bd-card)] bg-[var(--bg-2)] px-1.5 py-1 text-[10px] font-mono text-[var(--ink-mute)]"
-                aria-hidden="true"
-                title="Press Enter to send, Shift+Enter for a new line"
-              >
-                <span>↵</span>
-              </kbd>
-            </div>
-          </div>
+      {/* Greeting — Emily speaks, this is a conversation not a form */}
+      <div className="flex flex-col items-center text-center space-y-3 max-w-xl">
+        <EmilyAvatar size="md" />
+        <div className="space-y-1.5">
+          <h1 className="text-xl font-semibold tracking-tight text-foreground leading-tight">
+            What should I get done for you?
+          </h1>
+          <p className="text-sm text-muted-foreground leading-relaxed">
+            Describe the job in plain English. {assistantName} drafts the worker,
+            picks the right integrations, and opens it so you can review before running.
+          </p>
         </div>
       </div>
 
-      {/* Example cards */}
+      {/* The REAL Emily composer — same component as the chat thread. Enter
+          submits, Shift+Enter adds a newline, attachments + source pills work. */}
+      <div className="w-full max-w-2xl space-y-2">
+        <PromptInput
+          value={input}
+          onChange={onInput}
+          onSubmit={onSubmit}
+          onFilesChange={onFilesChange}
+          attachedFiles={attachedFiles}
+          placeholder="Create me: a worker that…"
+        />
+        <div className="px-1">
+          <CreateSourcePills onPick={onAddSource} />
+        </div>
+      </div>
+
+      {/* Example prompts — fill the same composer, still a conversation */}
       <div className="w-full max-w-2xl space-y-3">
         <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Or start from a template
+          Or start from an example
         </p>
         <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
           {CREATE_EXAMPLES.map((ex) => (
@@ -509,6 +500,7 @@ interface EmilyChatCoreProps {
 const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
 
 function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpenRunDetails, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange, isNewWorkspace = false }: EmilyChatCoreProps) {
+  const assistantName = useAssistantName();
   const {
     messages,
     conversationId,
@@ -703,6 +695,8 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
           onInput={setInput}
           onSubmit={handleSubmit}
           onAddSource={handleAddSource}
+          attachedFiles={attachedFiles}
+          onFilesChange={setAttachedFiles}
         />
       </div>
     );
@@ -803,10 +797,10 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
           onFilesChange={setAttachedFiles}
           attachedFiles={attachedFiles}
           disabled={isStreaming}
-          placeholder={createMode ? "Create me: a worker that…" : "Message Emily..."}
+          placeholder={createMode ? "Create me: a worker that…" : `Message ${assistantName}...`}
         />
         <p className="mt-1 text-center text-[10px] text-muted-foreground">
-          Emily can make mistakes. Verify important results.
+          {assistantName} can make mistakes. Verify important results.
         </p>
       </div>
     </div>
@@ -828,10 +822,17 @@ const DOCK_WIDTH: Record<DockMode, string> = {
 };
 
 export function EmilyDock({ className }: { className?: string }) {
+  const assistantName = useAssistantName();
   const [mode, setMode] = useState<DockMode>("rail");
   const open = mode !== "collapsed";
+  const isFull = mode === "full";
+  // Cycle the dock width: rail → wide → full → rail. The header control widens;
+  // a dedicated Close control (full mode only) restores the right-rail directly.
   const cycleExpand = () =>
     setMode((m) => (m === "rail" ? "wide" : m === "wide" ? "full" : "rail"));
+  // Round-09 (Federico 2026-06-17): in full-screen, exit must be one click back
+  // to the rail (not a 2-step cycle through "wide").
+  const exitFull = () => setMode("rail");
   // actionsRef lets the dock header drive new/export/recent without prop-drilling
   const coreActionsRef = useRef<ChatCoreActions | null>(null);
   // hasMessages as state so the Export menu item disables correctly (can't read ref in render)
@@ -898,24 +899,40 @@ export function EmilyDock({ className }: { className?: string }) {
         <div className="flex h-14 shrink-0 items-center gap-2 [border-bottom:var(--bd-div)] px-3">
           <EmilyAvatar size="sm" />
           <div className="flex-1 min-w-0 flex items-center gap-1.5">
-            <p className="text-sm font-semibold leading-none truncate">Emily</p>
+            <p className="text-sm font-semibold leading-none truncate">{assistantName}</p>
             {/* Green presence dot */}
             <span
               className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500"
               aria-label="Online"
             />
           </div>
-          {/* Fullscreen toggle */}
+          {/* Fullscreen / shrink toggle — the make-fullscreen control lives here
+              in the right sidebar (Federico 2026-06-17). Maximize widens toward
+              full; Minimize steps back. */}
           <Button
             size="sm"
             variant="ghost"
             className="size-7 p-0 text-muted-foreground hover:text-foreground"
             onClick={cycleExpand}
-            title={mode === "full" ? "Shrink Emily" : "Expand Emily"}
-            aria-label={mode === "full" ? "Shrink Emily" : "Expand Emily"}
+            title={isFull ? `Shrink ${assistantName}` : `Expand ${assistantName}`}
+            aria-label={isFull ? `Shrink ${assistantName}` : `Expand ${assistantName}`}
           >
-            {mode === "full" ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+            {isFull ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
           </Button>
+          {/* Full-screen CLOSE control (Federico 2026-06-17): only in full mode,
+              one click exits the overlay straight back to the right rail. */}
+          {isFull && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="size-7 p-0 text-muted-foreground hover:text-foreground"
+              onClick={exitFull}
+              title="Close full screen"
+              aria-label="Close full screen"
+            >
+              <X className="size-4" />
+            </Button>
+          )}
           {/* ⋯ menu: New chat / Export / Recent chats */}
           <DropdownMenu onOpenChange={(open) => {
             if (open) {
@@ -973,23 +990,29 @@ export function EmilyDock({ className }: { className?: string }) {
               )}
             </DropdownMenuContent>
           </DropdownMenu>
-          {/* Collapse button */}
-          <Button
-            size="sm"
-            variant="ghost"
-            className="size-7 p-0 text-muted-foreground hover:text-foreground"
-            onClick={() => setMode("collapsed")}
-            title="Collapse Emily"
-            aria-label="Collapse Emily"
-          >
-            <ChevronRight className="size-4" />
-          </Button>
+          {/* Collapse button — hidden in full screen (Close exits there). */}
+          {!isFull && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="size-7 p-0 text-muted-foreground hover:text-foreground"
+              onClick={() => setMode("collapsed")}
+              title={`Collapse ${assistantName}`}
+              aria-label={`Collapse ${assistantName}`}
+            >
+              <ChevronRight className="size-4" />
+            </Button>
+          )}
         </div>
       )}
 
-      {/* Chat content — ALWAYS mounted so useChatStream state survives collapse */}
+      {/* Chat content — ALWAYS mounted so useChatStream state survives collapse.
+          In full screen, render with fullPage layout so the message thread takes
+          the full height and the composer is anchored to the bottom (fixes the
+          dead whitespace below the prompt box Federico flagged 2026-06-17). */}
       <div className={cn("flex-1 min-h-0 overflow-hidden", !open && "hidden")}>
         <EmilyChatCore
+          fullPage={isFull}
           hideControls
           actionsRef={coreActionsRef}
           onHasMessagesChange={setCoreHasMessages}
@@ -1004,6 +1027,7 @@ export function EmilyDock({ className }: { className?: string }) {
 // ── Mobile bottom-sheet (SPEC §8c: Emily becomes a bottom sheet on mobile) ────
 
 export function EmilyMobileSheet() {
+  const assistantName = useAssistantName();
   const [open, setOpen] = useState(false);
   return (
     <>
@@ -1011,17 +1035,17 @@ export function EmilyMobileSheet() {
         <button
           type="button"
           onClick={() => setOpen(true)}
-          aria-label="Open Emily"
+          aria-label={`Open ${assistantName}`}
           className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-[var(--radius-pill)] bg-background shadow-lg [border:var(--bd-card)]"
         >
           <EmilyAvatar size="sm" />
         </button>
       )}
       {open && (
-        <div className="fixed inset-0 z-50 flex flex-col justify-end" role="dialog" aria-label="Emily">
+        <div className="fixed inset-0 z-50 flex flex-col justify-end" role="dialog" aria-label={assistantName}>
           <button
             type="button"
-            aria-label="Close Emily"
+            aria-label={`Close ${assistantName}`}
             className="absolute inset-0 bg-black/40"
             onClick={() => setOpen(false)}
           />
@@ -1029,7 +1053,7 @@ export function EmilyMobileSheet() {
             <div className="flex h-14 shrink-0 items-center gap-2 [border-bottom:var(--bd-div)] px-3">
               <EmilyAvatar size="sm" />
               <div className="flex-1 min-w-0 flex items-center gap-1.5">
-                <p className="text-sm font-semibold leading-none truncate">Emily</p>
+                <p className="text-sm font-semibold leading-none truncate">{assistantName}</p>
                 <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
               </div>
               <Button
@@ -1037,8 +1061,8 @@ export function EmilyMobileSheet() {
                 variant="ghost"
                 className="size-7 p-0"
                 onClick={() => setOpen(false)}
-                title="Close Emily"
-                aria-label="Close Emily"
+                title={`Close ${assistantName}`}
+                aria-label={`Close ${assistantName}`}
               >
                 <ChevronDown className="size-4" />
               </Button>
@@ -1063,13 +1087,14 @@ export function EmilyChatPage({
   createMode?: boolean;
   primeInput?: string;
 } = {}) {
+  const assistantName = useAssistantName();
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
       <div className="flex h-14 shrink-0 items-center gap-2 [border-bottom:var(--bd-div)] px-4">
         <EmilyAvatar size="sm" />
         <div className="flex-1 min-w-0 flex items-center gap-1.5">
           <p className="text-sm font-semibold leading-none">
-            {createMode ? "Hire a worker" : "Emily"}
+            {createMode ? "Hire a worker" : assistantName}
           </p>
           {!createMode && (
             <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
