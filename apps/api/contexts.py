@@ -17,7 +17,7 @@ from contextlib import contextmanager
 from contextvars import ContextVar
 from datetime import datetime, timezone
 from pathlib import Path, PurePosixPath
-from typing import Any, Callable, Iterable, Optional
+from typing import Any, Callable, Iterable, Mapping, Optional
 
 
 PROJECT_ROOT = Path(__file__).resolve().parents[2]
@@ -725,14 +725,84 @@ def normalize_context_mount(raw: Any) -> dict[str, Any]:
         source = str(raw.get("source") or "local").strip()
         if source != "local" and not source.startswith("git+"):
             raise ValueError("context source must be 'local' or start with 'git+'")
-        return {
+        normalized = {
             "name": name,
             "writeable": bool(raw.get("writeable", raw.get("writable", False))),
             "source": source,
         }
+        if raw.get("when") is not None:
+            when = raw.get("when")
+            if not isinstance(when, Mapping):
+                raise ValueError("context when must be an object")
+            normalized["when"] = dict(when)
+        return normalized
     if hasattr(raw, "model_dump"):
         return normalize_context_mount(raw.model_dump())
     raise ValueError("context must be a name string or object")
+
+
+def _lookup_input_value(inputs: Mapping[str, Any], path: str) -> tuple[bool, Any]:
+    current: Any = inputs
+    for part in path.split("."):
+        if not part:
+            return False, None
+        if isinstance(current, Mapping):
+            if part not in current:
+                return False, None
+            current = current[part]
+        else:
+            return False, None
+    return True, current
+
+
+def context_mount_matches_inputs(raw: Any, inputs: Mapping[str, Any] | None) -> bool:
+    """Whether a context mount should be staged for this run's inputs.
+
+    #1433: large context packs can dominate light operations. A mount may include
+    a simple input predicate, for example:
+
+        {"name": "sample-search-data", "when": {"input": "operation", "not_in": ["profile"]}}
+
+    Missing ``when`` preserves historical behavior: stage the pack on every run.
+    """
+    context = normalize_context_mount(raw)
+    condition = context.get("when")
+    if not condition:
+        return True
+    if not isinstance(condition, Mapping):
+        raise ValueError("context when must be an object")
+
+    input_name = str(condition.get("input") or condition.get("field") or "").strip()
+    if not input_name:
+        raise ValueError("context when.input is required")
+
+    exists, value = _lookup_input_value(inputs or {}, input_name)
+    if "exists" in condition:
+        return exists is bool(condition["exists"])
+    if not exists:
+        return False
+
+    if "equals" in condition:
+        return value == condition["equals"]
+    if "eq" in condition:
+        return value == condition["eq"]
+    if "not_equals" in condition:
+        return value != condition["not_equals"]
+    if "neq" in condition:
+        return value != condition["neq"]
+    if "in" in condition:
+        choices = condition["in"]
+        if not isinstance(choices, list):
+            raise ValueError("context when.in must be a list")
+        return value in choices
+    if "not_in" in condition:
+        choices = condition["not_in"]
+        if not isinstance(choices, list):
+            raise ValueError("context when.not_in must be a list")
+        return value not in choices
+    if "truthy" in condition:
+        return bool(value) is bool(condition["truthy"])
+    return bool(value)
 
 
 def context_mount_names(contexts: Iterable[Any]) -> list[str]:
