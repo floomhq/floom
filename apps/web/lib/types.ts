@@ -620,6 +620,15 @@ export interface ApprovalRow {
   public_link?: string;
   /** X4: structured reviewer feedback attached with the decision (highlight+comment on text, screenshot pins). */
   annotations?: ApprovalAnnotations | null;
+  /** Cost snapshot at pause (#795): dollars + tokens consumed before the gate. */
+  cost_usd_so_far?: number | null;
+  tokens_so_far?: number | null;
+  /** Expiry (#798): ISO timestamp the pending approval lapses (APPROVAL_TTL_HOURS, default 24h). */
+  expires_at?: string | null;
+  /** Typed preview (#792): preview_type + parsed preview_payload (email / records / tasks). `type` mirrors preview_type. */
+  preview_type?: string | null;
+  type?: string | null;
+  preview_payload?: unknown;
 }
 
 /** X4: a comment attached to a highlighted span of a text/markdown artifact. */
