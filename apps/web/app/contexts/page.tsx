@@ -29,6 +29,7 @@ import {
   ShieldAlert,
   Table,
   Trash2,
+  UploadCloud,
   X,
 } from "lucide-react";
 import Papa from "papaparse";
@@ -918,32 +919,11 @@ function ContextsPage() {
 
         {/* ---- Pack detail / miller folder columns ------------------------ */}
         {!selectedName ? (
-          <section
-            {...dropHandlers}
-            className={`relative flex-1 overflow-hidden flex items-center justify-center p-8 transition-colors duration-300 ${
-              dragActive ? "bg-muted/30" : ""
-            }`}
-          >
-            <div className="max-w-md text-center space-y-4">
-              <div className="space-y-1.5">
-                <h2 className="text-base font-semibold">Give your workers knowledge</h2>
-                <p className="text-sm text-muted-foreground">
-                  A folder is a small set of files your workers read before they act:
-                  company facts, your ICP, product details, and brand voice. Attach a folder to a
-                  worker and it uses those files on every run.
-                </p>
-              </div>
-              <Button onClick={() => setShowNewContext(true)}>
-                <Plus className="size-4" />
-                New folder
-              </Button>
-            </div>
-            {dragActive && (
-              <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
-                Drop files to create a folder
-              </div>
-            )}
-          </section>
+          <ContextEmptyState
+            dragActive={dragActive}
+            onNewFolder={() => setShowNewContext(true)}
+            dropHandlers={dropHandlers}
+          />
         ) : !detail ? (
           <section className="flex-1 overflow-hidden flex items-center justify-center">
             <Skeleton className="h-10 w-48 rounded-[var(--radius-button)]" />
@@ -1003,9 +983,9 @@ function ContextsPage() {
 
             <section
               {...dropHandlers}
-              className={`relative flex-1 overflow-hidden flex flex-col min-w-0 transition-colors duration-300 ${
-                dragActive && !readOnly ? "bg-muted/30" : ""
-              } ${mobilePane === "file" ? "flex" : "hidden lg:flex"}`}
+              className={`relative flex-1 overflow-hidden flex flex-col min-w-0 ${
+                mobilePane === "file" ? "flex" : "hidden lg:flex"
+              }`}
             >
               {secretWarnings.length > 0 && (
                 <SecretWarningBanner
@@ -1038,9 +1018,9 @@ function ContextsPage() {
                 }}
               />
               {dragActive && !readOnly && (
-                <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
-                  Drop files to add them{folderPath.length ? ` to ${folderPath.join("/")}` : ""}
-                </div>
+                <DropZoneOverlay
+                  label={`Drop files to add them${folderPath.length ? ` to ${folderPath.join("/")}` : ""}`}
+                />
               )}
             </section>
           </>
@@ -1285,6 +1265,89 @@ function PackRow({
 }
 
 // ===========================================================================
+// Drop affordance (B11 + B6). ONE clearly-bounded dashed rounded box — never a
+// whole-pane grey wash. Reused by every drop target so the affordance is
+// globally consistent.
+//   - DropZoneOverlay: the on-drag overlay floated inside an existing pane
+//     (PackDetailPane / file viewer). Bounded box, not a pane-wide tint.
+//   - ContextEmptyState: the empty Library pane. The dashed box is PERSISTENT
+//     (the missing drop affordance, B6) and goes to its active state on drag.
+// ===========================================================================
+
+const DROPZONE_BASE =
+  "flex items-center justify-center gap-2 rounded-[var(--radius-card)] " +
+  "border-2 border-dashed text-sm font-medium transition-colors";
+
+/** On-drag bounded dashed box floated over an existing pane. */
+function DropZoneOverlay({ label }: { label: string }) {
+  return (
+    <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center">
+      <div
+        data-dropzone="true"
+        className={`${DROPZONE_BASE} h-full w-full border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_8%,var(--bg-card))] text-[var(--accent)] backdrop-blur-[1px]`}
+      >
+        <UploadCloud className="size-4" />
+        {label}
+      </div>
+    </div>
+  );
+}
+
+/** Empty Library pane: a persistent dashed drop-zone box (B6) that highlights
+ *  on drag (B11). No whole-pane grey wash. */
+export function ContextEmptyState({
+  dragActive,
+  onNewFolder,
+  dropHandlers,
+}: {
+  dragActive: boolean;
+  onNewFolder: () => void;
+  dropHandlers: Partial<{
+    onDragEnter: React.DragEventHandler<HTMLElement>;
+    onDragOver: React.DragEventHandler<HTMLElement>;
+    onDragLeave: React.DragEventHandler<HTMLElement>;
+    onDrop: React.DragEventHandler<HTMLElement>;
+  }>;
+}) {
+  return (
+    <section
+      {...dropHandlers}
+      className="relative flex-1 overflow-hidden flex items-center justify-center p-8"
+    >
+      <div className="w-full max-w-md text-center space-y-4">
+        <div className="space-y-1.5">
+          <h2 className="text-base font-semibold">Give your workers knowledge</h2>
+          <p className="text-sm text-muted-foreground">
+            A folder is a small set of files your workers read before they act:
+            company facts, your ICP, product details, and brand voice. Attach a folder to a
+            worker and it uses those files on every run.
+          </p>
+        </div>
+        {/* Persistent dashed drop-zone box: drag-drop and "New folder" wired
+            together in one affordance (B6 / L4 / L7). */}
+        <div
+          data-dropzone="true"
+          className={`${DROPZONE_BASE} flex-col px-6 py-8 ${
+            dragActive
+              ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_8%,var(--bg-card))] text-[var(--accent)]"
+              : "border-[var(--line)] text-muted-foreground"
+          }`}
+        >
+          <UploadCloud className={`size-5 ${dragActive ? "" : "opacity-70"}`} />
+          <span>
+            {dragActive ? "Drop files to create a folder" : "Drag files here to create a folder"}
+          </span>
+          <Button variant="outline" size="sm" onClick={onNewFolder} className="mt-1">
+            <Plus className="size-4" />
+            New folder
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ===========================================================================
 // Pack detail pane (default 2-pane mode): metadata header + miller columns.
 // ===========================================================================
 
@@ -1331,9 +1394,9 @@ export function PackDetailPane({
   return (
     <section
       {...dropHandlers}
-      className={`relative flex-1 overflow-hidden flex-col min-w-0 transition-colors ${
-        dragActive && !readOnly ? "bg-muted/30" : ""
-      } ${mobileVisible ? "flex" : "hidden lg:flex"}`}
+      className={`relative flex-1 overflow-hidden flex-col min-w-0 ${
+        mobileVisible ? "flex" : "hidden lg:flex"
+      }`}
     >
       {/* Pack header / metadata (used-by chips live here) */}
       <div className="min-h-[82px] shrink-0 [border-bottom:var(--bd-div)] px-5 py-4">
@@ -1528,13 +1591,13 @@ export function PackDetailPane({
         </div>
       )}
 
-      {/* Full-pane drop overlay (covers the whole detail pane, including the
-          miller columns) so a drop anywhere over a writable pack uploads.
-          pointer-events-none lets the underlying drag events keep firing. */}
+      {/* Drop affordance: ONE bounded dashed box (covers the pane, drop lands
+          anywhere over a writable pack). pointer-events-none lets the
+          underlying drag events keep firing. No whole-pane grey wash (B11). */}
       {dragActive && !readOnly && (
-        <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
-          Drop files to add them{folderPath.length ? ` to ${folderPath.join("/")}` : ""}
-        </div>
+        <DropZoneOverlay
+          label={`Drop files to add them${folderPath.length ? ` to ${folderPath.join("/")}` : ""}`}
+        />
       )}
     </section>
   );
