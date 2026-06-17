@@ -21,31 +21,22 @@ You pay only for sandbox execution time (E2B bills per second of run time), with
 
 ## Quick Start
 
-**Fastest path** — two scripts. You need an OpenAI key and an E2B key ([e2b.dev](https://e2b.dev)).
-
-### Prerequisites
-
-- Python 3.11 or newer.
-- Node.js 20 or newer, with npm.
-- Git.
-- An `OPENAI_API_KEY` for Emily, agent workers, and code generation.
-- An `E2B_API_KEY` for sandboxed script-worker execution.
-- On Windows, run setup and dev commands from PowerShell. If script execution is
-  blocked, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
-
 **Linux / macOS**
 ```bash
-./scripts/setup.sh                # venv + deps + scaffolds apps/api/.env  (run once)
-# edit apps/api/.env → add OPENAI_API_KEY and E2B_API_KEY
-./scripts/dev.sh                  # starts backend (:8000) + frontend (:3000); Ctrl+C stops both
+./scripts/setup.sh
+# edit apps/api/.env and add OPENAI_API_KEY and E2B_API_KEY
+./scripts/dev.sh
 ```
 
-**Windows (PowerShell)**
+**Windows PowerShell**
 ```powershell
-.\scripts\setup.ps1               # venv + deps + scaffolds apps\api\.env  (run once)
-# edit apps\api\.env → add OPENAI_API_KEY and E2B_API_KEY
-.\scripts\dev.ps1                 # starts backend (:8000) + frontend (:3000); Ctrl+C stops both
+.\scripts\setup.ps1
+# edit apps\api\.env and add OPENAI_API_KEY and E2B_API_KEY
+.\scripts\dev.ps1
 ```
+
+Requires Python 3.11+, Node.js 20+, Git, an OpenAI key, and an E2B key from
+[e2b.dev](https://e2b.dev). On Windows, run commands from PowerShell.
 
 Open [http://localhost:3000](http://localhost:3000) and sign in. That's the
 whole setup: no auth secret required for local dev, and the example workers are
