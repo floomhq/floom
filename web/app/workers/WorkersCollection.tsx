@@ -18,9 +18,13 @@ import type {
   WorkerInput,
 } from "@/lib/types";
 import { formatVersionRows } from "@/lib/workers/versions";
-import { WORKER_DETAIL_TABS, type WorkerDetailTab } from "@/lib/workers/tabs";
+import {
+  WORKER_DETAIL_TABS,
+  type WorkerDetailTab,
+  OPERATIONS_SUBTABS,
+  type OperationsSubtab,
+} from "@/lib/workers/tabs";
 import { formatDuration } from "@/lib/runs/format";
-import { modelLabel } from "@/lib/model-labels";
 import { runtimeSummary } from "@/lib/runtime-labels";
 import {
   Dialog,
@@ -37,7 +41,7 @@ import { Button } from "@/components/ui/button";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { ArrowRight, Brain, Lock, MoreHorizontal, Plus } from "lucide-react";
+import { ArrowRight, Brain, ChevronDown, Lock, MoreHorizontal, Plus } from "lucide-react";
 import { BRAIN_FILE_META, inferBrainFileType } from "@/lib/brain/file-type-icon";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { Sparkline } from "@/components/Sparkline";
@@ -50,7 +54,8 @@ import {
   replaceTriggerBlock,
   type TriggerRow,
 } from "@/components/worker-form";
-import { WorkerInputForm, requiredRunInputErrors } from "@/components/run-page/WorkerInputForm";
+import { WorkerInputForm } from "@/components/run-page/WorkerInputForm";
+import { ShareModal } from "@/components/sharing/ShareModal";
 import { WorkerBrainEditor } from "@/components/worker/WorkerBrainEditor";
 import { WorkerToolsEditor } from "@/components/worker/WorkerToolsEditor";
 import { WorkerFeedbackPanel } from "@/components/worker/WorkerFeedbackPanel";
@@ -236,16 +241,6 @@ function patchTopLevelScalar(yaml: string, key: string, value: string): string {
   const re = new RegExp(`^${key}:.*$`, "m");
   if (re.test(yaml)) return yaml.replace(re, line);
   return `${line}\n${yaml.trimStart()}`;
-}
-
-function coerceInputValue(value: string, type?: string): unknown {
-  const kind = (type ?? "string").toLowerCase();
-  if (kind === "number" || kind === "integer") {
-    const n = Number(value);
-    return Number.isFinite(n) ? n : value;
-  }
-  if (kind === "boolean") return value === "true";
-  return value;
 }
 
 function Loading() {
@@ -859,52 +854,421 @@ function stripRowId(row: TriggerRow): Omit<TriggerRow, "id"> {
   return rest;
 }
 
-// Config: Tools · Brain attach · Triggers · runtime in one scroll.
-// ("paused" = enabled:false — there is no paused status; pause/resume is #788;
-// spend cap is #793; PATCH name/desc is #785; brain attach/detach is #790 —
-// today these route through the full worker-YAML PUT.)
-function ConfigTab({ w }: { w: WorkerSummary }) {
-  const [d] = useWorkerDetail(w.id);
-  // #1279: distinguish loading (undefined) from load-failure (null) so a hung
-  // API surfaces an error instead of an infinite skeleton.
-  if (d === undefined) return <Loading />;
-  if (d === null) return <DetailError />;
-  const runtime = d.config?.runtime;
-  const modelId = runtime?.model ?? d.config?.model;
-  const runtimeLine = [
-    d.enabled === false ? "Paused" : "Enabled",
-    runtimeSummary({
-      runner: runtime?.runner ?? d.runner ?? w.runner,
-      runtime: runtime?.type ?? w.runtime,
-    }),
-    runtime?.mode ? friendlyToken(runtime.mode) : null,
-    runtime?.entrypoint ? `Entry ${runtime.entrypoint}` : null,
-    modelId ? modelLabel(modelId) : null,
-  ].filter(Boolean).join(" · ");
+// round-09: the old monolithic ConfigTab (Tools + Brain + Triggers + runtime +
+// Feedback in one scroll) is dissolved into the new structure — Tools and Brain
+// are Advanced tabs, Triggers + runtime/limits live under Operations. The proven
+// Feedback section (backend-gated) is preserved as a reusable helper and shown in
+// the Operations > Limits panel so no proven content is cut.
+function WorkerFeedbackSection({ w }: { w: WorkerSummary }) {
+  if (!FEEDBACK_BACKEND_AVAILABLE) return null;
   return (
-    <div className="flex flex-col gap-7">
-      <p className="m-0 text-[12.5px] text-muted-foreground">{runtimeLine}</p>
-      <section>
-        <h4 style={h4}>Tools</h4>
-        <ToolsTab w={w} />
-      </section>
-      <section>
-        <h4 style={h4}>Library</h4>
-        <BrainTab w={w} />
-      </section>
-      <section>
-        <h4 style={h4}>Triggers</h4>
-        {/* W-02: editable trigger control (schedule / webhook / app-event / manual). */}
-        <TriggersTab w={w} />
-      </section>
-      {FEEDBACK_BACKEND_AVAILABLE && (
-        <section>
-          <h4 style={h4}>Feedback</h4>
-          <WorkerFeedbackPanel workerId={w.id} canLeave={canLeaveFeedback(w)} canModerate={can("edit", w)} />
-        </section>
+    <section>
+      <h4 style={h4}>Feedback</h4>
+      <WorkerFeedbackPanel workerId={w.id} canLeave={canLeaveFeedback(w)} canModerate={can("edit", w)} />
+    </section>
+  );
+}
+
+// ---- Operations (round-09) ---------------------------------------------------
+// Operations is a PRIMARY tab that hosts a SECOND ROW of tabs (no sidebar):
+//   Inputs · Alerts & webhooks · Triggers · Limits
+// framed as a "Visual editor of worker.yml" with a "View as YAML" deep-link into
+// Source. Each panel REUSES the real editors/primitives (WorkerInputForm,
+// TriggersEditor via TriggersTab, ConfigInfoGrid) — no hand-rolled chrome.
+
+/** Persisted named input templates (per-user, per-worker, localStorage). A
+ *  worker carries one declared-input schema; an operator saves multiple named
+ *  value sets ("Weekly default", "Month-end close") to run from. */
+type InputTemplate = { name: string; values: Record<string, unknown> };
+function inputTemplatesKey(workerId: string): string {
+  return `floom.workerDetail.inputTemplates.${workerId}`;
+}
+function loadInputTemplates(workerId: string): InputTemplate[] {
+  if (typeof window === "undefined") return [];
+  try {
+    const raw = localStorage.getItem(inputTemplatesKey(workerId));
+    const parsed = raw ? (JSON.parse(raw) as unknown) : [];
+    if (!Array.isArray(parsed)) return [];
+    return parsed.filter(
+      (t): t is InputTemplate =>
+        !!t && typeof (t as InputTemplate).name === "string" && typeof (t as InputTemplate).values === "object",
+    );
+  } catch {
+    return [];
+  }
+}
+function saveInputTemplates(workerId: string, templates: InputTemplate[]): void {
+  if (typeof window === "undefined") return;
+  try {
+    localStorage.setItem(inputTemplatesKey(workerId), JSON.stringify(templates));
+  } catch {
+    /* ignore quota / privacy-mode */
+  }
+}
+
+// Operations > Inputs: a segmented named-template picker above the REAL
+// WorkerInputForm (single source of truth, same widget the /run page uses).
+function OpsInputsPanel({ w }: { w: WorkerSummary }) {
+  const [d, applyDetail] = useWorkerDetail(w.id);
+  const inputs = d?.config?.inputs ?? w.inputs ?? [];
+  const [templates, setTemplates] = useState<InputTemplate[]>([]);
+  const [activeIdx, setActiveIdx] = useState(0); // 0 = "Default" (the saved backend recipe)
+  const [values, setValues] = useState<Record<string, unknown>>({});
+  const [fileNames, setFileNames] = useState<Record<string, string>>({});
+  const [savingDefault, setSavingDefault] = useState(false);
+
+  useEffect(() => {
+    setTemplates(loadInputTemplates(w.id));
+  }, [w.id]);
+
+  // The saved backend default-inputs recipe (input_values). This is what
+  // scheduled/automated runs actually merge over the schema defaults
+  // (scheduler._effective_scheduled_inputs). gap #1: load it so "Default" is
+  // the persisted recipe, not a write-blind local guess.
+  const savedDefaults = (d?.input_values ?? {}) as Record<string, unknown>;
+
+  // Seed values from the active source:
+  //  - "Default" (idx 0): the saved backend recipe, falling back to schema defaults.
+  //  - a named template (idx > 0): a local convenience value-set.
+  useEffect(() => {
+    const tmpl = activeIdx > 0 ? templates[activeIdx - 1] : undefined;
+    const next: Record<string, unknown> = {};
+    for (const inp of inputs) {
+      const fromTemplate = tmpl?.values[inp.name];
+      const fromSaved = activeIdx === 0 ? savedDefaults[inp.name] : undefined;
+      next[inp.name] =
+        fromTemplate ?? fromSaved ?? (inp.default == null ? "" : inp.default);
+    }
+    setValues(next);
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [activeIdx, templates, d?.id, d?.input_values]);
+
+  const activeName = activeIdx > 0 ? templates[activeIdx - 1]?.name : "Default";
+
+  // Persist the "Default" set to the backend recipe column (input_values) via
+  // PATCH /workers/{id}. This is the gap #1 fix: scheduled runs now have saved
+  // values. Named templates remain a per-user local convenience layer.
+  const saveDefault = async () => {
+    setSavingDefault(true);
+    try {
+      const updated = await api.workers.updateInputValues(w.id, values);
+      applyDetail(updated);
+      toast.success("Default inputs saved. Scheduled and automated runs will use these.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save default inputs");
+    } finally {
+      setSavingDefault(false);
+    }
+  };
+
+  const saveTemplate = () => {
+    if (activeIdx === 0) {
+      const name = window.prompt("Name this input template", "Month-end close")?.trim();
+      if (!name) return;
+      const next = [...templates, { name, values }];
+      setTemplates(next);
+      saveInputTemplates(w.id, next);
+      setActiveIdx(next.length);
+      toast.success(`Saved template "${name}"`);
+    } else {
+      const next = templates.map((t, i) => (i === activeIdx - 1 ? { ...t, values } : t));
+      setTemplates(next);
+      saveInputTemplates(w.id, next);
+      toast.success(`Updated "${activeName}"`);
+    }
+  };
+
+  return (
+    <div className="flex flex-col gap-4">
+      {/* gap #1 callout: makes the operator-blocking truth explicit. */}
+      <div
+        className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3"
+        style={{ fontSize: 12.5, color: "var(--ink-soft)" }}
+      >
+        <strong style={{ color: "var(--ink)" }}>Default inputs</strong> are what
+        scheduled and automated (webhook / app-event) runs use. Save them here so an
+        unattended run never fires with an empty required field.
+      </div>
+
+      {/* Segmented named-template picker (Default + saved templates + New). */}
+      <div>
+        <h4 style={h4}>Input templates</h4>
+        <div className="flex flex-wrap items-center gap-2">
+          {["Default", ...templates.map((t) => t.name)].map((name, idx) => (
+            <button
+              key={`${name}-${idx}`}
+              type="button"
+              className="c-vpill"
+              style={{
+                padding: "5px 10px",
+                cursor: "pointer",
+                ...(idx === activeIdx
+                  ? { background: "var(--bg-3)", color: "var(--ink)", fontWeight: 500 }
+                  : {}),
+              }}
+              onClick={() => setActiveIdx(idx)}
+            >
+              {name}
+            </button>
+          ))}
+          <button
+            type="button"
+            className="c-vpill"
+            style={{ padding: "5px 10px", cursor: "pointer", color: "var(--muted-foreground)" }}
+            onClick={() => setActiveIdx(0)}
+            title="Start from Default, fill values, then Save as a new template"
+          >
+            <Plus className="size-3" aria-hidden="true" /> New template
+          </button>
+        </div>
+      </div>
+
+      {/* The REAL schema-driven input form (same component the run dialog uses). */}
+      <WorkerInputForm
+        inputs={inputs}
+        values={values}
+        fileNames={fileNames}
+        onInputChange={(name, value) => setValues((prev) => ({ ...prev, [name]: value }))}
+        onFileUploaded={(name, sha256, fileName) => {
+          setValues((prev) => ({ ...prev, [name]: sha256 }));
+          setFileNames((prev) => ({ ...prev, [name]: fileName }));
+        }}
+      />
+
+      {inputs.length > 0 && (
+        <div className="flex items-center gap-3 pt-1">
+          <span style={{ ...muted, fontSize: 12.5 }}>
+            Editing {activeName ? `"${activeName}"` : "Default"}
+          </span>
+          {activeIdx === 0 ? (
+            <>
+              {/* gap #1: persists to the backend recipe column. */}
+              <button
+                type="button"
+                className="c-addbtn"
+                style={pillBtn}
+                onClick={() => void saveDefault()}
+                disabled={savingDefault}
+              >
+                {savingDefault ? "Saving…" : "Save default inputs"}
+              </button>
+              <button
+                type="button"
+                className="c-vpill"
+                style={pillBtn}
+                onClick={saveTemplate}
+              >
+                Save as template
+              </button>
+            </>
+          ) : (
+            <button type="button" className="c-addbtn" style={pillBtn} onClick={saveTemplate}>
+              Save template
+            </button>
+          )}
+        </div>
       )}
     </div>
   );
+}
+
+// Operations > Alerts & webhooks: split EMAIL-ON-EVENT from WEBHOOK-POST, honest
+// about the backend. Per-worker alert rows (email + webhook channels) are wired;
+// the workspace failure-email RECIPIENT is a confirmed silent no-op (no UI field
+// to set failure_email_to) — surfaced as a neutral callout, not implied working.
+function OpsAlertsPanel({ w }: { w: WorkerSummary }) {
+  const [d] = useWorkerDetail(w.id);
+  if (d === undefined) return <Loading />;
+  if (d === null) return <DetailError />;
+  return (
+    <div className="flex flex-col gap-6">
+      <section>
+        <h4 style={h4}>Alerts (email on event)</h4>
+        <ConfigInfoGrid
+          rows={[
+            ["Events", "failed, completed"],
+            ["Recipients", "Workspace members (validated at save)"],
+            ["Channel", "Email via Resend"],
+          ]}
+        />
+        <p style={{ ...muted, fontSize: 12.5, marginTop: 8 }}>
+          Email a workspace member when this worker&apos;s run fails or completes.
+        </p>
+      </section>
+
+      <section>
+        <h4 style={h4}>Webhooks (POST on event)</h4>
+        <ConfigInfoGrid
+          rows={[
+            ["Events", "failed, completed"],
+            ["Signing", "X-Workeros-Signature (HMAC)"],
+            ["Egress", "Internal/metadata targets blocked (SSRF-pinned)"],
+            ["Current", d.webhook_url ? <span key="u" className="font-mono text-xs">{d.webhook_url}</span> : "Not set"],
+          ]}
+        />
+        <p style={{ ...muted, fontSize: 12.5, marginTop: 8 }}>
+          POST the run outcome to an external URL on the same events, signed and
+          redirect-blocked.
+        </p>
+      </section>
+
+      {/* Honest callout for the confirmed workspace failure-email no-op (N3). */}
+      <div
+        className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3"
+        style={{ fontSize: 12.5, color: "var(--ink-soft)" }}
+      >
+        <strong style={{ color: "var(--ink)" }}>Heads up:</strong> the workspace-level
+        &quot;email me on run failures&quot; toggle sends to nobody unless a recipient is
+        configured server-side (no UI field exists for it yet). Per-worker alert and
+        webhook channels above are wired and do deliver.
+        <div style={{ marginTop: 6, color: "var(--muted-foreground)" }}>
+          One alert row carries one event set plus an email and/or a webhook channel; the
+          two channels are split here for clarity.
+        </div>
+      </div>
+    </div>
+  );
+}
+
+// Operations > Limits: spend cap / reliability / runtime / approvals / egress,
+// read from the worker.yml manifest (runtime.limits + connection approval flags).
+function OpsLimitsPanel({ w }: { w: WorkerSummary }) {
+  const [d] = useWorkerDetail(w.id);
+  if (d === undefined) return <Loading />;
+  if (d === null) return <DetailError />;
+  const runtime = d.config?.runtime;
+  const limits = (runtime?.limits ?? {}) as Record<string, unknown>;
+  const lim = (k: string): React.ReactNode => {
+    const v = limits[k];
+    return v == null || v === "" ? "Not set" : String(v);
+  };
+  const connections = d.config?.connections ?? [];
+  const approvalConns = connections.filter(
+    (c) => typeof c === "object" && c !== null && "mcp" in c && (c as { mcp?: { require_approval?: string } }).mcp?.require_approval === "always",
+  ).length;
+  const egressTargets = connections
+    .map((c) => (typeof c === "string" ? c : (c as { app?: string }).app))
+    .filter((s): s is string => Boolean(s));
+  return (
+    <div className="flex flex-col gap-6">
+      <section>
+        <h4 style={h4}>Spend cap</h4>
+        <ConfigInfoGrid
+          rows={[
+            ["Per run", lim("max_cost_usd")],
+            ["Per day", lim("max_cost_usd_per_day")],
+          ]}
+        />
+      </section>
+      <section>
+        <h4 style={h4}>Reliability</h4>
+        <ConfigInfoGrid rows={[["Retries", lim("max_retries")]]} />
+      </section>
+      <section>
+        <h4 style={h4}>Runtime</h4>
+        <ConfigInfoGrid
+          rows={[
+            ["Timeout", lim("timeout_seconds")],
+            ["Engine", runtimeSummary({ runner: runtime?.runner ?? d.runner ?? w.runner, runtime: runtime?.type ?? w.runtime })],
+          ]}
+        />
+      </section>
+      <section>
+        <h4 style={h4}>Approvals</h4>
+        <ConfigInfoGrid
+          rows={[["Require approval", approvalConns > 0 ? `${approvalConns} connection${approvalConns === 1 ? "" : "s"}` : "Never"]]}
+        />
+      </section>
+      <section>
+        <h4 style={h4}>Network egress (declared)</h4>
+        {egressTargets.length > 0 ? (
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {egressTargets.map((t) => (
+              <span key={t} className="c-vpill" style={{ padding: "4px 9px" }}>{t}</span>
+            ))}
+          </div>
+        ) : (
+          <div style={{ ...muted, fontSize: 12.5 }}>No connected apps declared.</div>
+        )}
+      </section>
+      {/* Preserved proven content: backend-gated worker feedback moderation. */}
+      <WorkerFeedbackSection w={w} />
+    </div>
+  );
+}
+
+// Operations: PRIMARY tab hosting the second-row sub-tabs. Reuses .c-dtabs2 /
+// .c-dtab2 (the smaller straight-ink underline variant) — NO sidebar.
+function OperationsTab({ w }: { w: WorkerSummary }) {
+  const router = useRouter();
+  const [sub, setSub] = useState<OperationsSubtab>("Inputs");
+  const counts = useOperationsSubCounts(w);
+  return (
+    <div className="flex flex-col">
+      {/* R9 FIX 2: the Operations second-row tabs sit DIRECTLY under the primary
+          tab row, with no framing text and no gap wedged between the two rows.
+          The .c-ops-row-flush wrapper breaks out of the c-dbody padding so
+          .c-dtabs2 lines up flush beneath .c-dtabs. The "visual editor of
+          worker.yml" framing moved INTO the panel content (below both rows). */}
+      <div className="c-ops-row-flush">
+        <div className="c-dtabs2" role="tablist" aria-label="Operations">
+          {OPERATIONS_SUBTABS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={sub === key}
+              className={`c-dtab2 ${sub === key ? "on" : ""}`}
+              onClick={() => setSub(key)}
+            >
+              {key}
+              {counts[key] != null && <span className="cb">{counts[key]}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+      {/* Visual-editor-of-worker.yml framing + View-as-YAML deep-link, now in the
+          panel body below the rows (not between them). */}
+      <div className="c-ops-frame">
+        <span>Visual editor of worker.yml</span>
+        <Link
+          href={`/workers?sel=${encodeURIComponent(w.id)}&tab=Source`}
+          className="ml-auto normal-case"
+          style={{ fontSize: 11, letterSpacing: 0 }}
+          onClick={(e) => {
+            e.preventDefault();
+            router.replace(`/workers?sel=${encodeURIComponent(w.id)}&tab=Source`);
+          }}
+        >
+          View as YAML →
+        </Link>
+      </div>
+      <div style={{ paddingTop: 12 }}>
+        {sub === "Inputs" && <OpsInputsPanel w={w} />}
+        {sub === "Alerts & webhooks" && <OpsAlertsPanel w={w} />}
+        {sub === "Triggers" && <TriggersTab w={w} />}
+        {sub === "Limits" && <OpsLimitsPanel w={w} />}
+      </div>
+    </div>
+  );
+}
+
+/** Small count badges for the Operations sub-tabs, derived from the manifest. */
+function useOperationsSubCounts(w: WorkerSummary): Partial<Record<OperationsSubtab, number>> {
+  const [d] = useWorkerDetail(w.id);
+  return useMemo(() => {
+    const inputs = (d?.config?.inputs ?? w.inputs ?? []).length;
+    const triggers =
+      (d?.triggers_spec && d.triggers_spec.length > 0
+        ? d.triggers_spec.length
+        : d?.config?.trigger
+          ? 1
+          : 0) || undefined;
+    return {
+      Inputs: inputs || undefined,
+      Triggers: triggers,
+    };
+  }, [d, w.inputs]);
 }
 
 // Tab key → its (named) component, keyed by WORKER_DETAIL_TABS so the §4
@@ -912,14 +1276,16 @@ function ConfigTab({ w }: { w: WorkerSummary }) {
 const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }) => React.ReactNode> = {
   Overview: OverviewTab,
   Runs: RunsTab,
-  Config: ConfigTab,
+  Operations: OperationsTab,
   Source: SourceTab,
   Versions: VersionsTab,
+  Brain: BrainTab,
+  Tools: ToolsTab,
 };
 
 /**
  * R8 "Customize" control — a quiet, muted affordance next to the worker-detail
- * tab row that lets a user pin the advanced tabs (Config / Source / Versions)
+ * tab row that lets a user pin the advanced tabs (Source / Versions / Brain / Tools)
  * into their tab bar. Pins are a per-user GLOBAL preference (every worker), not
  * per-worker. Checking an item pins the tab AND selects it; unchecking removes
  * it. Uses the shared DropdownMenu checkbox primitives (flat, tokens, squircle,
@@ -936,23 +1302,26 @@ function CustomizeTabsMenu({
   onToggle: (key: WorkerDetailTab) => void;
   onSelectTab: (workerId: string, key: WorkerDetailTab) => void;
 }) {
+  // R9: the advanced group is a clearly-visible affordance ON the primary tab
+  // row (an "Advanced ▾" button) — not a header-overflow control. Selecting an
+  // item pins that tab onto the row AND opens it. The chevron + label read as a
+  // tab group, so Source/Versions/Brain/Tools are obviously reachable.
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="c-vpill inline-flex items-center gap-1.5"
-        style={customizePillStyle}
-        aria-label="Customize tabs"
-        title="Pin Config, Source or Versions tabs"
+        className="c-dtab-adv inline-flex items-center gap-1"
+        aria-label="Advanced tabs"
+        title="Open Source, Versions, Brain or Tools"
       >
-        <Plus className="size-3.5" aria-hidden="true" />
-        Customize
+        Advanced
+        <ChevronDown className="size-3.5" aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48 p-1">
         {/* base-ui MenuPrimitive.GroupLabel REQUIRES a Menu.Group ancestor —
             rendering DropdownMenuLabel bare crashes the detail pane. Wrap the
             label + items in DropdownMenuGroup. */}
         <DropdownMenuGroup>
-          <DropdownMenuLabel>Pinned tabs</DropdownMenuLabel>
+          <DropdownMenuLabel>Advanced tabs</DropdownMenuLabel>
           {ADVANCED_DETAIL_TABS.map((key) => (
             <DropdownMenuCheckboxItem
               key={key}
@@ -986,71 +1355,17 @@ function WorkerDetailActions({
 }) {
   const router = useRouter();
   const [d, applyDetail] = useWorkerDetail(w.id);
-  const [runOpen, setRunOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
-  const [running, setRunning] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [runInputs, setRunInputs] = useState<Record<string, unknown>>({});
-  const [runFileNames, setRunFileNames] = useState<Record<string, string>>({});
-  const [runErrors, setRunErrors] = useState<Record<string, string>>({});
   const [name, setName] = useState(w.name);
   const [description, setDescription] = useState(w.description ?? "");
-
-  const inputs = d?.config?.inputs ?? w.inputs ?? [];
-
-  useEffect(() => {
-    if (!runOpen) return;
-    const next: Record<string, unknown> = {};
-    for (const input of inputs) {
-      next[input.name] =
-        runInputs[input.name] ?? (input.default == null ? "" : input.default);
-    }
-    setRunInputs(next);
-    setRunErrors({});
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [runOpen, d?.id]);
 
   useEffect(() => {
     if (!editOpen) return;
     setName(d?.name ?? w.name);
     setDescription(d?.description ?? w.description ?? "");
   }, [editOpen, d?.description, d?.name, w.description, w.name]);
-
-  async function submitRun(event: React.FormEvent) {
-    event.preventDefault();
-    if (running) return;
-    // Schema-driven required-field validation (same rule as the run page).
-    const errors = requiredRunInputErrors(inputs, runInputs);
-    if (Object.keys(errors).length > 0) {
-      setRunErrors(errors);
-      toast.error("Fill in the required inputs before running.");
-      return;
-    }
-    setRunErrors({});
-    setRunning(true);
-    try {
-      const payload: Record<string, unknown> = {};
-      for (const input of inputs) {
-        const value = runInputs[input.name];
-        if (value === undefined || value === null) continue;
-        if (typeof value === "string") {
-          if (value.trim() === "") continue;
-          payload[input.name] = coerceInputValue(value, input.type);
-        } else {
-          // Booleans, uploaded-file shas, arrays/objects pass through as-is.
-          payload[input.name] = value;
-        }
-      }
-      const result = await api.workers.run(w.id, payload);
-      toast.success("Run queued");
-      setRunOpen(false);
-      if (result.run_id) router.push(`/runs?sel=${encodeURIComponent(result.run_id)}`);
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : "Could not run worker");
-    } finally {
-      setRunning(false);
-    }
-  }
 
   async function submitEdit(event: React.FormEvent) {
     event.preventDefault();
@@ -1085,7 +1400,11 @@ function WorkerDetailActions({
           type="button"
           className="c-addbtn"
           style={pillBtn}
-          onClick={() => setRunOpen(true)}
+          // R9: kill the jarring popup + hard-nav. The Run button routes to the
+          // calm inline /run/{worker} page (schema-driven inputs + live
+          // output-first run panel), the same standalone runnable surface — no
+          // Dialog, no third page. See feedback/round-09/run-detail-real.md.
+          onClick={() => router.push(`/run/${encodeURIComponent(w.id)}`)}
           title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused; it may not run as expected" : undefined}
         >
           Run
@@ -1098,6 +1417,27 @@ function WorkerDetailActions({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44 p-1">
             <DropdownMenuItem onClick={() => setEditOpen(true)}>Edit</DropdownMenuItem>
+            {/* Pause/Resume — gap #6 / #788: hit the real lifecycle endpoints
+                (POST /workers/{id}/pause|/resume). These set enabled AND re-enqueue
+                the schedule, which a raw worker.yml `enabled:` PUT does not do. */}
+            <DropdownMenuItem
+              onClick={() => {
+                const pausing = w.enabled !== false;
+                const action = pausing ? api.workers.pause : api.workers.resume;
+                action(w.id)
+                  .then((updated) => {
+                    applyDetail(updated);
+                    onUpdated({ ...w, enabled: !pausing });
+                    toast.success(pausing ? "Worker paused" : "Worker resumed");
+                  })
+                  .catch((err: Error) => toast.error(err.message || "Could not update worker"));
+              }}
+            >
+              {w.enabled === false ? "Resume" : "Pause"}
+            </DropdownMenuItem>
+            {/* Share — opens the real Share modal (company access + grants +
+                anonymous public link with revoke), not a bare copy-link. */}
+            <DropdownMenuItem onClick={() => setShareOpen(true)}>Share</DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
                 const next = workerStageKey(w) === "live" ? "draft" : "live";
@@ -1143,59 +1483,32 @@ function WorkerDetailActions({
         </DropdownMenu>
       )}
 
-      <Dialog open={runOpen} onOpenChange={setRunOpen}>
-        <DialogContent className="max-h-[88vh] overflow-hidden p-0 sm:max-w-xl">
-          <form onSubmit={(event) => void submitRun(event)} className="flex max-h-[88vh] flex-col">
-            <DialogHeader className="px-6 pt-6 pb-1">
-              <DialogTitle>Run {w.name}</DialogTitle>
-              <DialogDescription>
-                {inputs.length === 0
-                  ? "This worker takes no inputs. Run it now to start a manual run."
-                  : "Fill in the inputs below to start a manual run."}
-              </DialogDescription>
-            </DialogHeader>
-            <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
-              {w.enabled === false && (
-                <div className="rounded-[var(--radius-card)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
-                  This worker is paused. Running it manually may not behave as expected.
-                </div>
-              )}
-              {/* Schema-driven form: renders the correct widget per input type
-                  (textarea, select, boolean checkbox, file/CSV, number, text)
-                  with labels, required markers, placeholders and validation,
-                  the same WorkerInputForm used by the /run page (single source
-                  of truth). */}
-              <WorkerInputForm
-                inputs={inputs}
-                values={runInputs}
-                fileNames={runFileNames}
-                validationErrors={runErrors}
-                onInputChange={(inputName, value) => {
-                  setRunInputs((prev) => ({ ...prev, [inputName]: value }));
-                  setRunErrors((prev) => {
-                    if (!prev[inputName]) return prev;
-                    const next = { ...prev };
-                    delete next[inputName];
-                    return next;
-                  });
-                }}
-                onFileUploaded={(inputName, sha256, fileName) => {
-                  setRunInputs((prev) => ({ ...prev, [inputName]: sha256 }));
-                  setRunFileNames((prev) => ({ ...prev, [inputName]: fileName }));
-                }}
-              />
-            </div>
-            <DialogFooter className="px-6 pb-6 pt-2">
-              <Button type="button" variant="secondary" onClick={() => setRunOpen(false)}>
-                Cancel
-              </Button>
-              <Button type="submit" disabled={running}>
-                {running ? "Running..." : "Run"}
-              </Button>
-            </DialogFooter>
-          </form>
-        </DialogContent>
-      </Dialog>
+      {/* R9: the Run popup is gone — the Run button now routes to the calm
+          inline /run/{worker} page (no Dialog, no hard-nav). The schema-driven
+          run form lives there (the same WorkerInputForm), so the worker detail
+          no longer carries a duplicate run dialog. */}
+
+      <ShareModal
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        asset={{ type: "worker", name: w.name }}
+        companyAccess={{
+          visibility: d?.visibility ?? w.visibility ?? "private",
+          setVisibility: async (next) => {
+            const updated = await api.workers.setVisibility(w.id, next);
+            applyDetail(updated);
+            onUpdated({ ...w, visibility: updated.visibility });
+            return updated.visibility;
+          },
+          grantAsset: { type: "worker", id: w.id },
+        }}
+        publicLink={{
+          create: async () => (await api.workers.shareLink(w.id)).url,
+          revoke: async () => {
+            await api.workers.revokeShareLink(w.id);
+          },
+        }}
+      />
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="sm:max-w-lg">
@@ -1550,17 +1863,6 @@ export default function WorkersCollection({
       const viewOnly = !canManageWorkers && isViewOnly(w);
       const actions = (
         <>
-          {/* R8 Customize control: replaces the binary Advanced toggle. A quiet,
-              muted "+ Customize" affordance opens a flat checkbox menu to pin
-              the advanced tabs (Config / Source / Versions) into the tab bar.
-              Pins are a per-user GLOBAL preference (every worker), persisted to
-              localStorage — a user who pins Source always sees it. */}
-          <CustomizeTabsMenu
-            workerId={w.id}
-            pinned={pinnedTabs}
-            onToggle={togglePinnedTab}
-            onSelectTab={selectWorkerTab}
-          />
           <WorkerDetailActions
             w={w}
             canManage={canManageWorkers}
@@ -1599,11 +1901,13 @@ export default function WorkersCollection({
             </>
           ),
         },
-        // R8: operator-focused tab set — Overview + Runs always visible; the
-        // advanced tabs (Config / Source / Versions) appear only when the user
-        // has pinned them via Customize. Pinned tabs render in canonical order
-        // after the base tabs. WORKER_DETAIL_TABS (typed constant) stays the
-        // 5-tab contract; the UI filters at render time without touching it.
+        // R9: operator-focused tab set — Overview/Runs/Operations always visible;
+        // the advanced tabs (Source / Versions / Brain / Tools) live in the
+        // "Advanced ▾" group ON the tab row (tabsTrailing). Picking one pins it
+        // onto the row (per-user GLOBAL preference, localStorage) and opens it,
+        // so an already-pinned advanced tab also renders inline after the base
+        // tabs. WORKER_DETAIL_TABS (typed constant) stays the full contract; the
+        // UI filters at render time without touching it.
         tabs: (() => {
           const visibleKeys: WorkerDetailTab[] = [
             ...BASE_DETAIL_TABS,
@@ -1623,6 +1927,17 @@ export default function WorkersCollection({
             };
           });
         })(),
+        // R9 FIX 1: the advanced group is a clearly-visible affordance ON the
+        // primary tab row (right-aligned), not a header-overflow "Customize"
+        // pill — Federico couldn't find the advanced tabs at all.
+        tabsTrailing: (
+          <CustomizeTabsMenu
+            workerId={w.id}
+            pinned={pinnedTabs}
+            onToggle={togglePinnedTab}
+            onSelectTab={selectWorkerTab}
+          />
+        ),
       };
     },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
@@ -1696,11 +2011,3 @@ const h4: React.CSSProperties = {
   margin: "0 0 9px",
 };
 const pillBtn: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5 };
-// R8 Customize control: quiet + muted (not accent — accent is links-only). It
-// sits next to the worker actions and stays unobtrusive but findable.
-const customizePillStyle: React.CSSProperties = {
-  padding: "6px 11px",
-  fontSize: 12.5,
-  background: "var(--bg-2)",
-  color: "var(--muted-foreground)",
-};

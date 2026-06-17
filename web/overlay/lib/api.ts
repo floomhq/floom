@@ -287,6 +287,33 @@ export const api = {
       });
       return link;
     },
+    // R9: revoke a worker's public share link (cloud overlay parity with engine).
+    revokeShareLink: (id: string) =>
+      fetchJson<{ revoked: boolean }>(`/workers/${encodeURIComponent(id)}/share-link`, {
+        method: "DELETE",
+      }),
+    // R9: real lifecycle endpoints — set enabled AND (re)enqueue the schedule,
+    // which a raw worker.yml `enabled:` PUT does not.
+    pause: async (id: string) => {
+      const worker = await fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/pause`, {
+        method: "POST",
+      });
+      return worker;
+    },
+    resume: async (id: string) => {
+      const worker = await fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}/resume`, {
+        method: "POST",
+      });
+      return worker;
+    },
+    // R9: persist default input values (worker-detail Operations editor).
+    updateInputValues: async (id: string, input_values: Record<string, unknown>) => {
+      const worker = await fetchJson<import("@/lib/types").WorkerDetail>(`/workers/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ input_values }),
+      });
+      return worker;
+    },
     importFromShare: (token: string) =>
       fetchJson<{ worker_id: string; url: string }>("/workers/import-from-share", {
         method: "POST",
@@ -448,6 +475,16 @@ export const api = {
     cancel: (id: string) =>
       fetchJson<import("@/lib/types").ActionResponse>(`/runs/${id}/cancel`, {
         method: "POST",
+      }),
+    // #765: mint a read-only public share link for a run (cloud overlay parity).
+    shareLink: (id: string) =>
+      fetchJson<import("@/lib/types").StandaloneShareLink>(`/runs/${encodeURIComponent(id)}/share-link`, {
+        method: "POST",
+      }),
+    // #765/#766: revoke a run's public share link.
+    revokeShareLink: (id: string) =>
+      fetchJson<{ revoked: boolean }>(`/runs/${encodeURIComponent(id)}/share-link`, {
+        method: "DELETE",
       }),
     approve: async (
       id: string,
@@ -678,6 +715,12 @@ export const api = {
       );
       return link;
     },
+    // #766: revoke a brain pack's public share link (cloud overlay parity).
+    revokePackLink: (name: string) =>
+      fetchJson<{ revoked: boolean }>(
+        `/contexts/${encodeURIComponent(name)}/share-link`,
+        { method: "DELETE" }
+      ),
     delete: (name: string, force = false) =>
       fetchJson<{ status: string; referenced_by: string[] }>(
         `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
@@ -702,6 +745,12 @@ export const api = {
       );
       return link;
     },
+    // #766: revoke a single brain file's public share link (cloud overlay parity).
+    revokeFileLink: (name: string, path: string) =>
+      fetchJson<{ revoked: boolean }>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/share-link`,
+        { method: "DELETE" }
+      ),
     // #777: inspect a brain .db file — tables list, or a table's rows.
     sqlite: (name: string, path: string, table?: string) => {
       const qs = table ? `?table=${encodeURIComponent(table)}` : "";
@@ -932,6 +981,18 @@ export const api = {
     peek: (id: string) =>
       fetchJson<{ emails: Array<{ subject: string; from_name: string; from_email: string; date: string }> }>(
         `/connections/${encodeURIComponent(id)}/peek`,
+        { cache: "no-store" }
+      ),
+    // R9 connection-detail: live tool list + curated read-only presets for the
+    // Tools-tab allowlist editor (cloud overlay parity with engine).
+    tools: (id: string) =>
+      fetchJson<{ tools: string[] }>(
+        `/connections/${encodeURIComponent(id)}/tools`,
+        { cache: "no-store" }
+      ),
+    toolPresets: (app?: string) =>
+      fetchJson<{ app?: string; tools?: string[] | null; presets?: Record<string, string[]> }>(
+        `/connections/tool-presets${app ? `?app=${encodeURIComponent(app)}` : ""}`,
         { cache: "no-store" }
       ),
   },

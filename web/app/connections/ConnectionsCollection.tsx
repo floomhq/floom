@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Check, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
+import { AlertTriangle, Check, ChevronDown, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary, WorkspaceMember } from "@/lib/types";
@@ -13,10 +13,19 @@ import { BrandLogo } from "@/components/connections/BrandLogo";
 import { RunStatusBadge } from "@/components/RunStatus";
 import { StatusPill } from "@/components/collection/StatusPill";
 import {
+  DropdownMenu,
+  DropdownMenuCheckboxItem,
+  DropdownMenuContent,
+  DropdownMenuGroup,
+  DropdownMenuLabel,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import {
   type UnifiedConn,
   STATUS_PILL,
   TYPE_LABEL,
   toUnified,
+  collectionCounts,
   humaniseAppName,
 } from "@/lib/connections/unify";
 
@@ -335,6 +344,370 @@ function ActivityPanel({ connectionId }: { connectionId: string }) {
   );
 }
 
+// ---------------------------------------------------------------------------
+// Tools tab — the SCOPED-TOOLS surface for a connection.
+//   * MCP   : the live tools advertised by the server (GET /connections/{id}/tools,
+//             reused via api.connections.tools) split into "Allowed for workers"
+//             (the configured mcp_allowed_tools) and "Available but not allowed"
+//             (live − configured). Degrades to the configured allowlist on 503.
+//   * OAuth : the curated read-only preset (GET /connections/tool-presets?app=)
+//             vs the full granted scope. Copy is honest: this is the DEFAULT
+//             scope for new workers — the real allowlist is per-worker
+//             (WorkerConnectionSpec.allowed_tools), so each worker can narrow it.
+// ---------------------------------------------------------------------------
+function ToolChips({ items, mono = true }: { items: string[]; mono?: boolean }) {
+  return (
+    <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+      {items.map((t) => (
+        <span
+          key={t}
+          className="c-vpill"
+          style={{ fontFamily: mono ? "var(--font-mono)" : undefined, fontSize: 11.5 }}
+        >
+          {t}
+        </span>
+      ))}
+    </div>
+  );
+}
+
+function ToolSection({ label, items, mono }: { label: string; items: string[]; mono?: boolean }) {
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+      <div style={{ fontSize: 11, letterSpacing: ".04em", textTransform: "uppercase", color: "var(--muted-foreground)" }}>
+        {label} · {items.length}
+      </div>
+      {items.length > 0 ? <ToolChips items={items} mono={mono} /> : <div style={pad}>None.</div>}
+    </div>
+  );
+}
+
+function McpToolsPanel({ connection }: { connection: ConnectionItem }) {
+  const allowed = connection.mcp_allowed_tools ?? [];
+  const [live, setLive] = useState<string[] | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [unreachable, setUnreachable] = useState(false);
+
+  useEffect(() => {
+    let alive = true;
+    setLoading(true);
+    setUnreachable(false);
+    api.connections
+      .tools(connection.id)
+      .then((r) => {
+        if (alive) setLive(r.tools ?? []);
+      })
+      .catch(() => {
+        if (alive) setUnreachable(true);
+      })
+      .finally(() => {
+        if (alive) setLoading(false);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [connection.id]);
+
+  if (loading) return <LoadingState rows={3} />;
+
+  // "Available but not allowed" = live server tools the allowlist doesn't include.
+  const allowedSet = new Set(allowed);
+  const available = (live ?? []).filter((t) => !allowedSet.has(t));
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      <ToolSection label="Allowed for workers" items={allowed} />
+      {unreachable ? (
+        <div style={pad}>
+          Server unreachable: showing the configured allowlist only. Test the
+          connection to enumerate live tools.
+        </div>
+      ) : (
+        <ToolSection label="Available but not allowed · live from server" items={available} />
+      )}
+    </div>
+  );
+}
+
+const TOOL_PRESET_SCOPES = ["Read-only", "All", "Custom"] as const;
+type ToolPresetScope = (typeof TOOL_PRESET_SCOPES)[number];
+
+function OAuthToolsPanel({ connection }: { connection: ConnectionItem }) {
+  const scopes = connection.scopes ?? [];
+  const [preset, setPreset] = useState<string[] | null>(null);
+  const [scope, setScope] = useState<ToolPresetScope>("Read-only");
+
+  useEffect(() => {
+    let alive = true;
+    api.connections
+      .toolPresets(connection.app_name)
+      .then((r) => {
+        if (alive) setPreset(r.tools ?? null);
+      })
+      .catch(() => {
+        if (alive) setPreset(null);
+      });
+    return () => {
+      alive = false;
+    };
+  }, [connection.app_name]);
+
+  const readOnly = preset ?? [];
+  const shown =
+    scope === "Read-only" ? readOnly : scope === "All" ? scopes : [];
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      <div style={{ display: "inline-flex", gap: 2, alignSelf: "flex-start", background: "var(--bg-2)", padding: 3, borderRadius: "var(--radius-pill)" }}>
+        {TOOL_PRESET_SCOPES.map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => setScope(s)}
+            className={scope === s ? "c-addbtn" : "c-vpill"}
+            style={{ padding: "4px 12px", fontSize: 12, border: "none" }}
+          >
+            {s === "All" ? `All ${scopes.length}` : s}
+          </button>
+        ))}
+      </div>
+      <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
+        Default tool scope for new workers. Each worker can narrow this further.
+      </div>
+      {scope === "Custom" ? (
+        <div style={pad}>Configure the exact tool list on each worker (Operations → Tools).</div>
+      ) : (
+        <ToolSection label="Granted scopes" items={shown} mono={false} />
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Secrets tab — secrets associated with this connection, grouped by NAME prefix
+// convention (the backend has no connection_id FK — pure UI grouping). The
+// managed OAuth token (when present) is shown as a read-only "managed" row that
+// rotates on reconnect; user-set secrets get Test / Replace / Delete inline.
+// "Replace" is the honest label: there is no rotate endpoint, rotation = setting
+// a new value over the old one (POST /secrets/{name}). Set/test/delete are the
+// real api.secrets.{upsert,test,delete} calls.
+// ---------------------------------------------------------------------------
+function secretsForConnection(connection: ConnectionItem, secrets: SecretItem[]): SecretItem[] {
+  const prefix = (connection.app_name || "").toUpperCase().replace(/[^A-Z0-9]+/g, "_");
+  if (!prefix) return [];
+  return secrets.filter((s) => s.name.toUpperCase().startsWith(prefix));
+}
+
+function ConnSecretsPanel({
+  connection,
+  secrets,
+  onChanged,
+}: {
+  connection: ConnectionItem;
+  secrets: SecretItem[];
+  onChanged: () => void;
+}) {
+  const related = secretsForConnection(connection, secrets);
+  const [adding, setAdding] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newValue, setNewValue] = useState("");
+  const [busy, setBusy] = useState(false);
+
+  const isManaged = (name: string) => /TOKEN|OAUTH/.test(name.toUpperCase());
+
+  const test = async (name: string) => {
+    try {
+      const r = await api.secrets.test(name);
+      toast[r.status === "set" || r.status === "valid" ? "success" : "error"](`${name}: ${r.status}`);
+    } catch {
+      toast.error(`Test failed for ${name}`);
+    }
+  };
+  const replace = async (name: string) => {
+    const value = window.prompt(`New value for ${name} (write-only, overwrites the old value):`);
+    if (value == null || value === "") return;
+    try {
+      await api.secrets.upsert(name, value);
+      toast.success(`${name} replaced`);
+      onChanged();
+    } catch {
+      toast.error(`Could not replace ${name}`);
+    }
+  };
+  const del = async (name: string) => {
+    try {
+      await api.secrets.delete(name);
+      toast.success(`Deleted ${name}`);
+      onChanged();
+    } catch {
+      toast.error(`Could not delete ${name}`);
+    }
+  };
+  const add = async () => {
+    if (!newName.trim() || !newValue) return;
+    setBusy(true);
+    try {
+      await api.secrets.upsert(newName.trim(), newValue);
+      toast.success(`Saved ${newName.trim()}`);
+      setNewName("");
+      setNewValue("");
+      setAdding(false);
+      onChanged();
+    } catch {
+      toast.error(`Could not save ${newName.trim()}`);
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 12 }}>
+      <div className="c-ltable">
+        {related.map((s) => {
+          const managed = isManaged(s.name);
+          return (
+            <div key={s.name} className="c-lrow" style={{ gridTemplateColumns: "1fr auto", alignItems: "center" }}>
+              <div className="c-lprimary">
+                <div className="c-lp-tx">
+                  <div className="nm" style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{s.name}</div>
+                  <div className="meta">
+                    {managed
+                      ? "Managed · rotates on reconnect"
+                      : `Reference as secret:${s.name}`}
+                  </div>
+                </div>
+              </div>
+              {managed ? (
+                <StatusPill spec={{ tone: "ok", label: "Set" }} />
+              ) : (
+                <span style={{ display: "inline-flex", gap: 6 }}>
+                  <button type="button" className="c-vpill" style={pillBtn} onClick={() => void test(s.name)}>Test</button>
+                  <button type="button" className="c-vpill" style={pillBtn} onClick={() => void replace(s.name)}>Replace</button>
+                  <button type="button" className="c-vpill" style={pillBtn} onClick={() => void del(s.name)}>Delete</button>
+                </span>
+              )}
+            </div>
+          );
+        })}
+        {related.length === 0 && <div style={pad}>No secrets stored for this connection.</div>}
+      </div>
+      {adding ? (
+        <div style={{ display: "flex", flexDirection: "column", gap: 8, maxWidth: 460 }}>
+          <input
+            placeholder={`${(connection.app_name || "APP").toUpperCase().replace(/[^A-Z0-9]+/g, "_")}_API_KEY`}
+            value={newName}
+            onChange={(e) => setNewName(e.target.value)}
+            style={{ ...fieldStyle, fontFamily: "var(--font-mono)" }}
+          />
+          <input
+            type="password"
+            placeholder="Value (write-only, never returned)"
+            value={newValue}
+            onChange={(e) => setNewValue(e.target.value)}
+            style={fieldStyle}
+          />
+          <div style={{ display: "flex", gap: 8 }}>
+            <button type="button" className="c-addbtn" style={pillBtn} disabled={busy} onClick={() => void add()}>
+              {busy ? "Saving…" : "Save"}
+            </button>
+            <button type="button" className="c-vpill" style={pillBtn} onClick={() => setAdding(false)}>Cancel</button>
+          </div>
+        </div>
+      ) : (
+        <button type="button" className="c-vpill" style={{ ...pillBtn, alignSelf: "flex-start" }} onClick={() => setAdding(true)}>
+          + Add secret
+        </button>
+      )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Used by — the reverse index of workers that declare this connection. Derived
+// client-side from the worker list (WorkerSummary.connections = app slugs) since
+// there is no single dedicated endpoint. Powers the disconnect-impact warning.
+// ---------------------------------------------------------------------------
+function workersUsing(connection: ConnectionItem, workers: WorkerSummary[]): WorkerSummary[] {
+  const slug = (connection.app_name || "").toLowerCase();
+  if (!slug) return [];
+  return workers.filter((w) => (w.connections ?? []).some((c) => c.toLowerCase() === slug));
+}
+
+function UsedByPanel({ connection, workers }: { connection: ConnectionItem; workers: WorkerSummary[] }) {
+  const using = workersUsing(connection, workers);
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
+      {using.length > 0 && (
+        <div style={{ fontSize: 12, color: "var(--muted-foreground)" }}>
+          Disconnecting stops {using.length} worker{using.length !== 1 ? "s" : ""} that depend on this connection.
+        </div>
+      )}
+      <div className="c-ltable">
+        {using.map((w) => (
+          <Link
+            key={w.id}
+            href={`/workers/${encodeURIComponent(w.id)}`}
+            className="c-lrow"
+            style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
+          >
+            <div className="c-lprimary">
+              <div className="c-lp-tx">
+                <div className="nm">{w.name}</div>
+              </div>
+            </div>
+          </Link>
+        ))}
+        {using.length === 0 && <div style={pad}>No workers use this connection yet.</div>}
+      </div>
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Advanced ▾ group for the connection detail — mirrors the worker-detail
+// pattern: a clearly-visible affordance ON the primary tab row (tabsTrailing,
+// right-aligned) that pins + opens secondary tabs (per-mode: Recent emails for
+// Gmail, Config for MCP). Reuses the real DropdownMenu primitives + .c-dtab-adv.
+// ---------------------------------------------------------------------------
+function ConnAdvancedMenu({
+  advancedTabs,
+  pinned,
+  onToggle,
+}: {
+  advancedTabs: string[];
+  pinned: Set<string>;
+  onToggle: (key: string, checked: boolean) => void;
+}) {
+  if (advancedTabs.length === 0) return null;
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="c-dtab-adv inline-flex items-center gap-1"
+        aria-label="Advanced tabs"
+        title="Open advanced connection tabs"
+      >
+        Advanced
+        <ChevronDown className="size-3.5" aria-hidden="true" />
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48 p-1">
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Advanced tabs</DropdownMenuLabel>
+          {advancedTabs.map((key) => (
+            <DropdownMenuCheckboxItem
+              key={key}
+              checked={pinned.has(key)}
+              closeOnClick={false}
+              onCheckedChange={(checked) => onToggle(key, checked)}
+            >
+              {key}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
 export default function ConnectionsCollection({
   initialConnections,
 }: {
@@ -350,6 +723,18 @@ export default function ConnectionsCollection({
   // resolves, so this never becomes an infinite skeleton on a hung API.
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  // Pinned advanced connection tabs (per-session): the "Advanced ▾" group on the
+  // tab row pins/opens secondary tabs (Recent emails, Config). Mirrors the
+  // worker-detail Advanced group but session-scoped (no cross-worker preference
+  // to persist for connections).
+  const [pinnedTabs, setPinnedTabs] = useState<Set<string>>(new Set());
+  const toggleAdvancedTab = (key: string) =>
+    setPinnedTabs((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      return next;
+    });
 
   const refresh = async (initial = false) => {
     const [c, s, w, m] = await Promise.allSettled([
@@ -447,12 +832,10 @@ export default function ConnectionsCollection({
         { value: "error", label: "error" },
       ],
     },
-    counts: [
-      { value: items.length, label: "total" },
-      { value: items.filter((i) => i.statusKey === "active").length, label: "active" },
-      { value: items.filter((i) => i.statusKey === "reauth").length, label: "reauth" },
-      { value: items.filter((i) => i.statusKey === "error").length, label: "error" },
-    ],
+    // round-09 #6: secrets are NOT connections — count connections + secrets
+    // separately and scope the active/reauth/error health tiles to real
+    // connections, so a "set" secret can never read as an "active connection".
+    counts: collectionCounts(items),
     view: { default: "grid", grid: true },
     columns: {
       template: "1.8fr 110px 1fr 120px 40px",
@@ -482,6 +865,9 @@ export default function ConnectionsCollection({
       status: STATUS_PILL[i.statusKey],
     }),
     detail: (i) => {
+      // The two highest-value actions inline (Test + Reconnect for managed
+      // connections), with disconnect demoted into a More ▾ menu so the
+      // destructive action is never a primary button (matches worker/run detail).
       const actions = (
         <>
           {i.kind === "connection" && i.connection && (
@@ -496,9 +882,23 @@ export default function ConnectionsCollection({
           <button type="button" className="c-addbtn" style={pillBtn} onClick={() => void test(i)}>
             Test
           </button>
-          <button type="button" className="c-vpill" style={pillBtn} onClick={() => void remove(i)}>
-            Remove
-          </button>
+          <DropdownMenu>
+            <DropdownMenuTrigger className="c-vpill inline-flex items-center gap-1" style={pillBtn} title="More actions">
+              More
+              <ChevronDown className="size-3.5" aria-hidden="true" />
+            </DropdownMenuTrigger>
+            <DropdownMenuContent align="end" className="w-44 p-1">
+              <DropdownMenuGroup>
+                <DropdownMenuCheckboxItem
+                  checked={false}
+                  closeOnClick
+                  onCheckedChange={() => void remove(i)}
+                >
+                  {i.kind === "secret" ? "Delete" : "Disconnect"}
+                </DropdownMenuCheckboxItem>
+              </DropdownMenuGroup>
+            </DropdownMenuContent>
+          </DropdownMenu>
         </>
       );
       const header = {
@@ -514,127 +914,156 @@ export default function ConnectionsCollection({
           </>
         ),
       };
+
+      // OAuth / API-key managed connection. The shared spine: Overview ·
+      // Tools · Secrets · Used by · Activity. Recent emails (Gmail trust peek)
+      // is an Advanced tab so the default view stays uncluttered.
       if (i.kind === "connection" && i.connection) {
         const c = i.connection;
         const isEmailConnection = c.app_name.toLowerCase().includes("gmail");
+        const using = workersUsing(c, workers);
+        const related = secretsForConnection(c, secrets);
+        const advancedTabs = isEmailConnection ? ["Recent emails"] : [];
+        const baseTabs = [
+          {
+            key: "Overview",
+            label: "Overview",
+            render: () => (
+              <KV
+                rows={[
+                  ["App", humaniseAppName(c.app_name)],
+                  ["Account", i.account],
+                  ["Auth", "OAuth · managed token (rotates on reconnect)"],
+                  ["Status", <StatusPill key="st" spec={STATUS_PILL[i.statusKey]} />],
+                  ["Scopes", String(c.scopes?.length ?? 0)],
+                  ["Connected", new Date(c.created_at).toLocaleDateString()],
+                  ["Last used", formatLastUsed(c)],
+                  ["Owner", resolveOwner(c.owner_id, members)],
+                ]}
+              />
+            ),
+          },
+          {
+            key: "Tools",
+            label: "Tools",
+            count: c.scopes?.length,
+            render: () => <OAuthToolsPanel connection={c} />,
+          },
+          {
+            key: "Secrets",
+            label: "Secrets",
+            count: related.length || undefined,
+            render: () => (
+              <ConnSecretsPanel connection={c} secrets={secrets} onChanged={() => void refresh()} />
+            ),
+          },
+          {
+            key: "Used by",
+            label: "Used by",
+            count: using.length || undefined,
+            render: () => <UsedByPanel connection={c} workers={workers} />,
+          },
+          {
+            key: "Activity",
+            label: "Activity",
+            render: () => <ActivityPanel connectionId={c.id} />,
+          },
+        ];
+        const advancedRendered = advancedTabs
+          .filter((t) => pinnedTabs.has(t))
+          .map((t) => ({
+            key: t,
+            label: t,
+            render: () => <EmailPeekPanel connectionId={c.id} />,
+          }));
         return {
           header,
-          tabs: [
-            {
-              key: "Overview",
-              label: "Overview",
-              render: () => (
-                <KV
-                  rows={[
-                    ["App", c.app_name],
-                    ["Account", i.account],
-                    ["Status", <StatusPill spec={STATUS_PILL[i.statusKey]} />],
-                    ["Scopes", String(c.scopes?.length ?? 0)],
-                    ["Connected", new Date(c.created_at).toLocaleDateString()],
-                    ["Last used", formatLastUsed(c)],
-                    ["Owner", resolveOwner(c.owner_id, members)],
-                  ]}
-                />
-              ),
-            },
-            {
-              key: "Permissions",
-              label: "Permissions",
-              count: c.scopes?.length,
-              render: () => (
-                <div className="c-ltable">
-                  {(c.scopes ?? []).map((s) => (
-                    <div key={s} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
-                      <div className="c-lprimary">
-                        <div className="c-lp-tx">
-                          <div className="nm">{s}</div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {(c.scopes?.length ?? 0) === 0 && <div style={pad}>No scopes recorded.</div>}
-                </div>
-              ),
-            },
-            {
-              key: "Activity",
-              label: "Activity",
-              render: () => <ActivityPanel connectionId={c.id} />,
-            },
-            ...(isEmailConnection
-              ? [
-                  {
-                    key: "Recent emails",
-                    label: "Recent emails",
-                    render: () => <EmailPeekPanel connectionId={c.id} />,
-                  },
-                ]
-              : []),
-          ],
+          tabs: [...baseTabs, ...advancedRendered],
+          tabsTrailing: (
+            <ConnAdvancedMenu advancedTabs={advancedTabs} pinned={pinnedTabs} onToggle={toggleAdvancedTab} />
+          ),
         };
       }
+
+      // MCP server connection. Same spine; the Tools tab reads live from the
+      // server (allowed vs available), Config lives under Advanced.
       if (i.kind === "mcp" && i.connection) {
         const c = i.connection;
+        const using = workersUsing(c, workers);
+        const related = secretsForConnection(c, secrets);
+        const advancedTabs = ["Config"];
+        const baseTabs = [
+          {
+            key: "Overview",
+            label: "Overview",
+            render: () => (
+              <KV
+                rows={[
+                  ["Server", c.mcp_label || c.app_name],
+                  [
+                    "Endpoint",
+                    <span key="ep" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                      {c.mcp_url || c.mcp_command || "—"}
+                    </span>,
+                  ],
+                  ["Transport", c.mcp_transport || "—"],
+                  ["Auth secret", c.mcp_auth_secret ? <span key="as" style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>{c.mcp_auth_secret}</span> : "None"],
+                  ["Status", <StatusPill key="st" spec={STATUS_PILL[i.statusKey]} />],
+                  ["Tools", String(c.mcp_allowed_tools?.length ?? 0)],
+                  ["Last used", formatLastUsed(c)],
+                ]}
+              />
+            ),
+          },
+          {
+            key: "Tools",
+            label: "Tools",
+            count: c.mcp_allowed_tools?.length,
+            render: () => <McpToolsPanel connection={c} />,
+          },
+          {
+            key: "Secrets",
+            label: "Secrets",
+            count: related.length || undefined,
+            render: () => (
+              <ConnSecretsPanel connection={c} secrets={secrets} onChanged={() => void refresh()} />
+            ),
+          },
+          {
+            key: "Used by",
+            label: "Used by",
+            count: using.length || undefined,
+            render: () => <UsedByPanel connection={c} workers={workers} />,
+          },
+          {
+            key: "Activity",
+            label: "Activity",
+            render: () => <ActivityPanel connectionId={c.id} />,
+          },
+        ];
+        const advancedRendered = advancedTabs
+          .filter((t) => pinnedTabs.has(t))
+          .map((t) => ({
+            key: t,
+            label: t,
+            render: () => (
+              <pre style={codeBlock}>
+                {JSON.stringify(
+                  c.mcp_transport === "stdio" || c.mcp_command
+                    ? { command: c.mcp_command, args: c.mcp_args ?? [], transport: c.mcp_transport ?? "stdio" }
+                    : { url: c.mcp_url, transport: c.mcp_transport ?? "streamable_http" },
+                  null,
+                  2,
+                )}
+              </pre>
+            ),
+          }));
         return {
           header,
-          tabs: [
-            {
-              key: "Overview",
-              label: "Overview",
-              render: () => (
-                <KV
-                  rows={[
-                    ["Server", c.mcp_label || c.app_name],
-                    [
-                      "Endpoint",
-                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
-                        {c.mcp_url || c.mcp_command || "—"}
-                      </span>,
-                    ],
-                    ["Transport", c.mcp_transport || "—"],
-                    ["Status", <StatusPill spec={STATUS_PILL[i.statusKey]} />],
-                    ["Tools", String(c.mcp_allowed_tools?.length ?? 0)],
-                  ]}
-                />
-              ),
-            },
-            {
-              key: "Tools",
-              label: "Tools",
-              count: c.mcp_allowed_tools?.length,
-              render: () => (
-                <div className="c-ltable">
-                  {(c.mcp_allowed_tools ?? []).map((t) => (
-                    <div key={t} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
-                      <div className="c-lprimary">
-                        <div className="c-lp-tx">
-                          <div className="nm" style={{ fontFamily: "var(--font-mono)" }}>
-                            {t}
-                          </div>
-                        </div>
-                      </div>
-                    </div>
-                  ))}
-                  {(c.mcp_allowed_tools?.length ?? 0) === 0 && <div style={pad}>No tools listed.</div>}
-                </div>
-              ),
-            },
-            {
-              key: "Config",
-              label: "Config",
-              render: () => (
-                <pre style={codeBlock}>
-                  {JSON.stringify(
-                    c.mcp_transport === "stdio" || c.mcp_command
-                      ? { command: c.mcp_command, args: c.mcp_args ?? [], transport: c.mcp_transport ?? "stdio" }
-                      : { url: c.mcp_url, transport: c.mcp_transport ?? "streamable_http" },
-                    null,
-                    2,
-                  )}
-                </pre>
-              ),
-            },
-          ],
+          tabs: [...baseTabs, ...advancedRendered],
+          tabsTrailing: (
+            <ConnAdvancedMenu advancedTabs={advancedTabs} pinned={pinnedTabs} onToggle={toggleAdvancedTab} />
+          ),
         };
       }
       // secret
@@ -651,12 +1080,13 @@ export default function ConnectionsCollection({
                 rows={[
                   [
                     "Name",
-                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{s.name}</span>,
+                    <span key="nm" style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{s.name}</span>,
                   ],
-                  ["Value", <SecretValueField name={s.name} />],
+                  ["Value", <SecretValueField key="val" name={s.name} />],
                   [
                     "Status",
                     <StatusPill
+                      key="st"
                       spec={
                         s.status === "set"
                           ? { tone: "ok", label: "Set" }
@@ -777,6 +1207,15 @@ export default function ConnectionsCollection({
 
 const pad: React.CSSProperties = { color: "var(--muted-foreground)", padding: "8px 2px" };
 const pillBtn: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5 };
+const fieldStyle: React.CSSProperties = {
+  background: "var(--bg-2)",
+  border: "var(--bd-input)",
+  borderRadius: "var(--radius-input)",
+  padding: "8px 11px",
+  fontSize: 13,
+  color: "var(--ink)",
+  outline: "none",
+};
 const codeBlock: React.CSSProperties = {
   border: "var(--bd-card)",
   borderRadius: "var(--radius-card)",

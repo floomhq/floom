@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { StatusPill } from "@/components/collection/StatusPill";
 import { api } from "@/lib/api";
+import { ShareModal } from "@/components/sharing/ShareModal";
 import { useRuns } from "@/lib/query/hooks";
 import { formatRelative } from "@/lib/formatters";
 import { humanizeKey } from "@/lib/run-format";
@@ -23,7 +24,7 @@ import { LoadingState } from "@/components/collection/CollectionStates";
 import { InlineFileOpen, type InlineFile } from "@/components/file-viewer/InlineFileOpen";
 import { OutputRenderer } from "@/components/output-renderer";
 import { GenericOutput } from "@/components/generic-output";
-import { traceSteps } from "@/lib/runs/trace";
+import { RunTranscript } from "@/components/RunDetailSplitPane";
 import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
 import { useRunLogStream } from "@/lib/useRunLogStream";
 import { contentTagOptions } from "@/lib/workers/derive";
@@ -38,6 +39,14 @@ import {
 } from "@/lib/runs/format";
 
 const detailCache = new Map<string, RunDetail>();
+
+// gap N2: a run can be cancelled only while it is in-progress (running or
+// queued). Terminal runs (completed / failed / cancelled) expose no Cancel.
+// Single source of truth shared by the detail header and the row menu so the
+// two surfaces can never disagree.
+export function isCancellableRunStatus(status?: string): boolean {
+  return status === "running" || status === "queued";
+}
 
 function useRunDetail(id: string, status?: string): RunDetail | undefined {
   const [d, setD] = useState<RunDetail | undefined>(detailCache.get(id));
@@ -98,6 +107,39 @@ function ResultPreview({ d }: { d: RunDetail }) {
   );
 }
 
+// R9: quiet one-line metrics strip for the output-first in-app run detail.
+// A thin inline row of muted key/value pairs (started · duration · tokens ·
+// files), NOT a card grid and NOT a left sidebar; the result leads, this is
+// context underneath the header.
+function RunMetricsStrip({ d }: { d: RunDetail }) {
+  const tokenCount = resolveTokenCount(d);
+  const items: Array<[string, string]> = [
+    ["Started", d.started_at ? formatRelative(d.started_at) : "Not started"],
+    ["Duration", formatDuration(d.duration_ms)],
+    ["Files", String(d.artifacts?.length ?? 0)],
+  ];
+  if (tokenCount != null) items.push(["Tokens", tokenCount.toLocaleString()]);
+  return (
+    <div
+      style={{
+        display: "flex",
+        flexWrap: "wrap",
+        gap: "4px 18px",
+        fontSize: 12.5,
+        color: "var(--muted-foreground)",
+      }}
+    >
+      {items.map(([label, value]) => (
+        <span key={label}>
+          {label}
+          {": "}
+          <span style={{ color: "var(--ink-soft)", fontWeight: 500 }}>{value}</span>
+        </span>
+      ))}
+    </div>
+  );
+}
+
 // SPEC §4 Output: files FIRST (§2.6), then the humane result with a Preview/Raw
 // toggle. Files open INLINE (breadcrumb/Back/Download); a SINGLE file auto-opens
 // (rule #3 — no folder-then-file clicking), and every file carries the same
@@ -133,6 +175,11 @@ function OutputTab({ r }: { r: RunSummary }) {
   };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
+      {/* R9: output-first. A quiet, thin inline metrics row (NOT a card grid,
+          NOT a left sidebar) carries the run's context; the result owns the
+          full width below. Duration / started / tokens moved here out of the
+          header so the header matches the worker-detail treatment. */}
+      <RunMetricsStrip d={d} />
       {d.error && (
         <div className="c-pill err" style={{ alignSelf: "flex-start" }}>
           <span className="dot" />
@@ -222,7 +269,6 @@ function LogsTab({ r }: { r: RunSummary }) {
   const { logs: streamLogs, connected: logConnected, done: logDone } = useRunLogStream(r.id);
 
   if (!d) return <LoadingState rows={4} />;
-  const steps = traceSteps(d.transcript);
   // Prefer the live stream logs while the run is active or the stream is
   // open; fall back to the static d.logs once the stream is done and the
   // detail payload has fully loaded (completed/failed runs).
@@ -243,21 +289,11 @@ function LogsTab({ r }: { r: RunSummary }) {
       </div>
       <div>
         <h4 style={h4}>Steps</h4>
-        <div className="c-ltable">
-          {steps.map((s, i) => (
-            <div key={i} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
-              <div className="c-lprimary">
-                <div className="c-lp-tx">
-                  <div className="nm">{s.label}</div>
-                  <div className="sub" style={{ whiteSpace: "normal" }}>
-                    {s.content}
-                  </div>
-                </div>
-              </div>
-            </div>
-          ))}
-          {steps.length === 0 && <div style={{ ...muted, padding: 14 }}>No steps recorded.</div>}
-        </div>
+        {/* R9: reuse RunDetailSplitPane's real ai-elements (Tool / Task /
+            StackTrace) transcript renderer, no hand-rolled steps table. The
+            tool-call blocks, step tasks, and failure banners are the same
+            components used everywhere else a run is rendered. */}
+        <RunTranscript run={d} />
       </div>
       <div>
         <h4 style={h4}>
@@ -302,6 +338,35 @@ function InputsTab({ r }: { r: RunSummary }) {
   const input = d.input ?? {};
   if (Object.keys(input).length === 0) return <div style={muted}>This run took no inputs.</div>;
   return <pre style={code}>{JSON.stringify(input, null, 2)}</pre>;
+}
+
+// #765: run Share — opens the real Share modal (anonymous public link, view-only,
+// with revoke). Owns its own modal state so it slots into the detail-header actions.
+function RunShareButton({ r }: { r: RunSummary }) {
+  const [open, setOpen] = useState(false);
+  return (
+    <>
+      <button
+        type="button"
+        className="c-vpill"
+        style={{ padding: "6px 11px" }}
+        onClick={() => setOpen(true)}
+      >
+        Share
+      </button>
+      <ShareModal
+        open={open}
+        onOpenChange={setOpen}
+        asset={{ type: "run", name: r.worker_name ?? r.worker_id }}
+        publicLink={{
+          create: async () => (await api.runs.shareLink(r.id)).url,
+          revoke: async () => {
+            await api.runs.revokeShareLink(r.id);
+          },
+        }}
+      />
+    </>
+  );
 }
 
 // Tab key → its (named) component, keyed by RUN_DETAIL_TABS so the §4 contract
@@ -455,6 +520,21 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     }
   };
 
+  // gap N2: cancel an in-progress run via the real POST /runs/{id}/cancel
+  // endpoint (api.runs.cancel — previously invoked by zero components). Confirm
+  // first (irreversible), then refresh so the row/detail reflect the new status.
+  const cancel = async (r: RunSummary) => {
+    if (!isCancellableRunStatus(r.status)) return;
+    if (!window.confirm("Cancel this run? It cannot be resumed.")) return;
+    try {
+      await api.runs.cancel(r.id);
+      toast.success("Cancellation requested");
+      await refresh();
+    } catch (err) {
+      toast.error((err as Error).message || "Could not cancel this run.");
+    }
+  };
+
   const config: CollectionConfig<RunSummary> = {
     title: "Run history",
     items: sorted,
@@ -515,7 +595,9 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       template: "1.6fr 1fr .8fr 130px 1fr",
       headers: ["Worker", "Trigger", "Duration", "Status", "Started"],
       statusColumn: false,
-      menuColumn: false,
+      // gap N2: re-enable the trailing ⋯ row-action slot so in-progress runs can
+      // be cancelled directly from the list. Terminal runs render no menu.
+      menuColumn: true,
     },
     row: (r) => ({
       // V4 SPEC rule 3: no avatar for runs — non-person entity.
@@ -529,6 +611,11 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
         <StatusPill key="status" spec={runStatusPill(r.status)} />,
         formatRelative(r.created_at ?? r.started_at ?? ""),
       ],
+      // gap N2: Cancel row action, only for in-progress runs. Omitting `menu`
+      // entirely for terminal runs hides the ⋯ menu for that row.
+      menu: isCancellableRunStatus(r.status)
+        ? [{ label: "Cancel run", danger: true, onSelect: () => void cancel(r) }]
+        : undefined,
     }),
     card: (r) => ({
       // V4 SPEC rule 3: no avatar monogram for runs.
@@ -545,11 +632,17 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
             {`Run · ${r.worker_name ?? r.worker_id}`}
           </span>
         ),
+        // R9: header matches the WORKER detail treatment exactly — a status
+        // c-pill plus a quiet description line, NOT a verbose
+        // "trigger · duration · started" string above the tabs (Federico:
+        // "too much info above the tabs, inconsistent"). Duration / started /
+        // tokens now live as a quiet metrics strip INSIDE the Output body
+        // (output-first), not in the header.
         sub: (
-          <span className="c-dh-sub" style={{ margin: 0 }}>
-            {formatTrigger(r.trigger_source)} · {formatDuration(r.duration_ms)} ·{" "}
-            {formatRelative(r.created_at ?? r.started_at ?? "")}
-          </span>
+          <>
+            <StatusPill spec={runStatusPill(r.status)} />
+            <span className="c-dh-desc">{formatTrigger(r.trigger_source)}</span>
+          </>
         ),
         actions: (
           <>
@@ -557,15 +650,8 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
             <Link href={`/workers?sel=${encodeURIComponent(r.worker_id)}`} className="c-vpill" style={{ padding: "6px 11px" }}>
               ↑ Open worker
             </Link>
-            {/* TODO(#765): run share link — backend pending; honest stub for now. */}
-            <button
-              type="button"
-              className="c-vpill"
-              style={{ padding: "6px 11px" }}
-              onClick={() => toast("Sharing a run is coming soon (#765).")}
-            >
-              Share
-            </button>
+            {/* #765: run share link — opens the real Share modal. */}
+            <RunShareButton r={r} />
             {/* #1274: confirm before replaying — avoids accidental duplicate runs. */}
             <button
               type="button"
@@ -578,6 +664,18 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
             >
               Replay
             </button>
+            {/* gap N2: Cancel an in-progress run — only shown while running/queued,
+                wired to the real api.runs.cancel endpoint. */}
+            {isCancellableRunStatus(r.status) && (
+              <button
+                type="button"
+                className="c-vpill"
+                style={{ padding: "6px 11px" }}
+                onClick={() => void cancel(r)}
+              >
+                Cancel run
+              </button>
+            )}
           </>
         ),
       },

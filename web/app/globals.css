@@ -936,12 +936,41 @@ html.dark .grain {
 .c-dtabs { display:flex; gap:2px; padding:4px 16px; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
 .c-dtabs::-webkit-scrollbar { height:0; display:none; }
 .c-source-file-tabs { min-width:0; max-width:100%; flex:1 1 auto; flex-wrap:nowrap; }
-.c-dtab { display:inline-flex; align-items:center; gap:7px; padding:5px 11px; border-radius:9px; color:var(--muted-foreground); font-size:13px; white-space:nowrap; }
+/* Tab cell: round only the TOP corners so the active underline reads as a
+   STRAIGHT, square-ended rule (round-09 Federico: underline must be straight,
+   not swirled/boxed; accent is links-only). */
+.c-dtab { display:inline-flex; align-items:center; gap:7px; padding:5px 11px 6px; border-radius:9px 9px 0 0; color:var(--muted-foreground); font-size:13px; white-space:nowrap; position:relative; }
 .c-dtab:hover { background:var(--bg-2); }
-/* §6.6: active tab = blue underline via inset bottom shadow; no grey bg fill */
-.c-dtab.on { color:var(--ink); font-weight:500; box-shadow:inset 0 -2px 0 var(--accent); }
+/* round-09: active tab = STRAIGHT 2px INK underline (square ends, no box, no
+   accent). A sharp ::after rule the full width of the cell keeps the ends
+   square regardless of the cell's top-corner radius. */
+.c-dtab.on { color:var(--ink); font-weight:500; }
+.c-dtab.on::after { content:""; position:absolute; left:0; right:0; bottom:0; height:2px; background:var(--ink); border-radius:0; }
 .c-dtab .cb { background:var(--bg-3); color:var(--ink-soft); font-size:10.5px; border-radius:var(--radius-pill); padding:0 6px; }
+
+/* Operations SECOND-ROW tabs: same straight-ink pattern, smaller + quieter,
+   sits directly under the primary row. No sidebar (round-09 worker-detail-v2). */
+.c-dtabs2 { display:flex; gap:2px; padding:6px 16px 0; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; }
+.c-dtabs2::-webkit-scrollbar { height:0; display:none; }
+.c-dtab2 { display:inline-flex; align-items:center; gap:6px; padding:4px 10px 6px; border-radius:8px 8px 0 0; color:var(--muted-foreground); font-size:12px; white-space:nowrap; position:relative; }
+.c-dtab2:hover { background:var(--bg-2); }
+.c-dtab2.on { color:var(--ink); font-weight:500; }
+.c-dtab2.on::after { content:""; position:absolute; left:0; right:0; bottom:0; height:2px; background:var(--ink); border-radius:0; }
+.c-dtab2 .cb { background:var(--bg-3); color:var(--ink-soft); font-size:10px; border-radius:var(--radius-pill); padding:0 5px; }
+/* R9 FIX 2: pull the Operations second-row tabs flush under the primary tab row.
+   Breaks out of .c-dbody padding (18px 20px) so .c-dtabs2 sits directly beneath
+   .c-dtabs with no gap or framing text between the two rows. */
+.c-ops-row-flush { margin:-18px -20px 0; flex:0 0 auto; }
+/* Operations framing: "Visual editor of worker.yml" + a "View as YAML" link.
+   R9: lives in the panel BODY below both tab rows, not between them. */
+.c-ops-frame { display:flex; align-items:center; gap:8px; padding:14px 0 4px; font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted-foreground); }
 .c-dbody { flex:1; min-width:0; overflow:auto; padding:18px 20px; }
+/* R9 FIX 1: "Advanced ▾" group on the primary tab row — right-aligned, quiet,
+   findable. Not accent (accent is links-only); reads as a secondary tab group. */
+.c-dtabs-trailing { margin-left:auto; display:flex; align-items:center; padding-left:8px; }
+.c-dtab-adv { color:var(--muted-foreground); font-size:13px; padding:5px 9px 6px; border-radius:8px; white-space:nowrap; }
+.c-dtab-adv:hover { background:var(--bg-2); color:var(--ink); }
+.c-dtab-adv[data-state="open"] { background:var(--bg-2); color:var(--ink); }
 
 /* states (SPEC §7) */
 .c-statebox { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; color:var(--muted-foreground); padding:50px; }
@@ -974,4 +1003,67 @@ html.dark .grain {
   white-space: pre !important;
   word-break: normal !important;
   overflow-wrap: normal !important;
+}
+
+/* ---------------------------------------------------------------------------
+   APPROVAL DETAIL / REVIEW (round-09 r9, approved share-approval design).
+   input-left / proposed-output-right + a multi-item dotted pager. Extends the
+   real stylesheet; reuses --ink/--muted/--accent/--bd-div tokens, no bespoke
+   per-page CSS, accent on links only, no borders (hairline dividers only),
+   no amber as a second accent (the awaiting pill uses the muted --pending dot).
+   --------------------------------------------------------------------------- */
+
+/* Pager bar: "Approval N of M" + dotted indicator + prev/next. */
+.c-appr-pager { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 0 14px; font-size:12.5px; color:var(--muted-foreground); }
+.c-appr-pager .where { display:inline-flex; align-items:center; gap:6px; min-width:0; }
+.c-appr-pager .where b { color:var(--ink-soft); font-weight:600; }
+.c-appr-pager .where .of { color:var(--muted-foreground); }
+.c-appr-pager .right { display:flex; align-items:center; gap:12px; flex:0 0 auto; }
+.c-appr-dots { display:flex; align-items:center; gap:5px; }
+.c-appr-dots i { width:6px; height:6px; border-radius:var(--radius-pill); background:var(--bg-3); display:inline-block; }
+.c-appr-dots i.on { background:var(--ink); }
+.c-appr-nav { display:flex; align-items:center; gap:4px; }
+.c-appr-pgbtn { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:var(--radius-button); color:var(--ink-soft); }
+.c-appr-pgbtn:hover:not(:disabled) { background:var(--bg-2); }
+.c-appr-pgbtn:disabled { opacity:.35; }
+
+/* Hero block: eyebrow + awaiting pill + confident title + meta line. */
+.c-appr-hero { padding:0 0 16px; }
+.c-appr-eyebrow { font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted-foreground); }
+.c-appr-wait { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--muted-foreground); }
+.c-appr-wait .dot { width:6px; height:6px; border-radius:var(--radius-pill); background:var(--pending); display:inline-block; }
+.c-appr-title { font-size:24px; line-height:1.18; font-weight:600; color:var(--ink); margin:8px 0 0; letter-spacing:-.01em; }
+.c-appr-meta { font-size:13px; color:var(--muted-foreground); line-height:1.55; margin:11px 0 0; }
+.c-appr-meta b { color:var(--ink-soft); font-weight:600; }
+
+/* Two-column grid: input LEFT, proposed output RIGHT, hairline divider between. */
+.c-appr-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0; }
+.c-appr-grid .col-left { padding-right:28px; }
+.c-appr-grid .col-right { padding-left:28px; border-left:var(--bd-div); }
+.c-appr-sech { font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted-foreground); margin:0 0 11px; }
+
+/* LEFT: comment box, attach affordance, who/why k/v, decide buttons. */
+.c-appr-comment { width:100%; min-height:84px; resize:vertical; border-radius:var(--radius-button); background:var(--bg-2); padding:11px 13px; font-size:13.5px; color:var(--ink); line-height:1.5; }
+.c-appr-comment::placeholder { color:var(--ink-faint); }
+.c-appr-attach { display:inline-flex; align-items:center; gap:7px; margin-top:11px; font-size:12.5px; color:var(--ink-soft); }
+.c-appr-attach:hover { color:var(--ink); }
+.c-appr-kv { display:grid; grid-template-columns:96px 1fr; gap:8px 14px; margin:16px 0 0; font-size:12.5px; }
+.c-appr-kv dt { color:var(--muted-foreground); }
+.c-appr-kv dd { color:var(--ink-soft); margin:0; min-width:0; overflow-wrap:anywhere; }
+.c-appr-kv dd a { color:var(--accent); }
+.c-appr-decide { display:flex; gap:9px; margin-top:20px; }
+
+/* RIGHT: the proposed output rendered AS ITSELF (email To/Subject/body), no box. */
+.c-appr-proposed { font-size:13.5px; color:var(--ink-soft); line-height:1.6; }
+.c-appr-proposed .addr { margin:0 0 14px; padding:0 0 12px; border-bottom:var(--bd-div); color:var(--ink-soft); }
+.c-appr-proposed .addr b { display:inline-block; min-width:62px; color:var(--muted-foreground); font-weight:500; }
+.c-appr-proposed .body p { margin:0 0 11px; }
+.c-appr-proposed .body p:last-child { margin-bottom:0; }
+
+.c-appr-foot { font-size:11.5px; color:var(--muted-foreground); margin:22px 0 0; padding:16px 0 0; border-top:var(--bd-div); }
+
+@media (max-width:760px) {
+  .c-appr-grid { grid-template-columns:1fr; }
+  .c-appr-grid .col-left { padding-right:0; padding-bottom:22px; margin-bottom:22px; border-bottom:var(--bd-div); }
+  .c-appr-grid .col-right { padding-left:0; border-left:0; }
 }

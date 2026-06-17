@@ -390,6 +390,11 @@ export interface WorkerDetail {
   // Text excerpt of the most recent successful run's result (≤500 chars).
   latest_output?: string | null;
   latest_output_run_id?: string | null;
+  // Round-09 gap #1: the saved per-worker default inputs (recipe column
+  // `input_values_json`). Scheduled/automated runs merge these over schema
+  // defaults. Surfaced so the Operations > Inputs panel can LOAD what is saved,
+  // not just write blind. Empty object when nothing is saved.
+  input_values?: Record<string, unknown>;
 }
 
 // A feedback comment left on a worker (SPEC §12). Anyone who can SEE the worker
@@ -442,7 +447,7 @@ export interface PublicWorker {
 export interface StandaloneShareLink {
   token: string;
   url: string;
-  entity_type: "worker" | "brain_file" | "brain_pack";
+  entity_type: "worker" | "brain_file" | "brain_pack" | "run";
 }
 
 export interface PublicShareFile {
@@ -615,6 +620,15 @@ export interface ApprovalRow {
   public_link?: string;
   /** X4: structured reviewer feedback attached with the decision (highlight+comment on text, screenshot pins). */
   annotations?: ApprovalAnnotations | null;
+  /** Cost snapshot at pause (#795): dollars + tokens consumed before the gate. */
+  cost_usd_so_far?: number | null;
+  tokens_so_far?: number | null;
+  /** Expiry (#798): ISO timestamp the pending approval lapses (APPROVAL_TTL_HOURS, default 24h). */
+  expires_at?: string | null;
+  /** Typed preview (#792): preview_type + parsed preview_payload (email / records / tasks). `type` mirrors preview_type. */
+  preview_type?: string | null;
+  type?: string | null;
+  preview_payload?: unknown;
 }
 
 /** X4: a comment attached to a highlighted span of a text/markdown artifact. */
