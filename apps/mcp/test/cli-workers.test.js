@@ -309,6 +309,22 @@ test("workers push creates a new worker with POST /workers", async (t) => {
   assert.equal(mock.bodies[0].skill_md, undefined);
 });
 
+test("workers push strips UTF-8 BOMs before sending source to the API", async (t) => {
+  const mock = await startMockApi({ existing: false });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+  const dir = await makeWorkerDir({
+    workerYml: `\ufeff${scriptWorkerYml}`,
+    run: `\ufeff${runPy}`,
+  });
+
+  const result = await runCli(["workers", "push", dir], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.equal(mock.bodies[0].worker_yml.charCodeAt(0), "s".charCodeAt(0));
+  assert.equal(mock.bodies[0].run_py.charCodeAt(0), "d".charCodeAt(0));
+});
+
 test("workers push updates an existing worker with PUT /workers/:id", async (t) => {
   const mock = await startMockApi({ existing: true });
   t.after(() => mock.server.close());
