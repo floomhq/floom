@@ -61,6 +61,14 @@ def _require_secret_mutation_allowed(auth: AuthContext, existing: Optional[Dict[
 secrets_router = APIRouter()
 
 
+def _safe_worker_config_for_secret_listing(get_worker_config_for_run, worker_id: str):
+    try:
+        return get_worker_config_for_run(worker_id)
+    except Exception:
+        logger.warning("secrets list: ignoring invalid config for worker %s", worker_id, exc_info=True)
+        return None
+
+
 class SecretUpsertRequest(BaseModel):
     value: str = Field(min_length=1, max_length=32 * 1024)
 
@@ -238,7 +246,7 @@ def list_secrets(
     worker_configs: dict[str, Any] = {}
     worker_secret_names: set[str] = set()
     for w in workers:
-        config = get_worker_config_for_run(w["id"])
+        config = _safe_worker_config_for_secret_listing(get_worker_config_for_run, w["id"])
         worker_configs[w["id"]] = config
         if config:
             worker_secret_names.update(config.secrets)
