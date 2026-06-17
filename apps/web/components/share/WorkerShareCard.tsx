@@ -16,9 +16,8 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { Clock, FileText, MousePointerClick, Webhook, Zap } from "lucide-react";
+import { Clock, FileText, Layers, MousePointerClick, Webhook, Zap } from "lucide-react";
 import { BrandLogo } from "@/components/connections/BrandLogo";
-import { WorkerAvatar } from "@/components/WorkerAvatar";
 import { GenericOutput } from "@/components/generic-output";
 import { SHARE_CARD_BODY_HEIGHT } from "@/components/share/ShareCardShell";
 import type { PublicWorker } from "@/lib/types";
@@ -141,7 +140,9 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
             <div className="min-h-0 flex-1 overflow-y-auto">
               {/* Title */}
               <div className="flex items-start gap-4 px-5 py-4">
-                <WorkerAvatar seed={worker.id} name={worker.name} size="size-11" />
+                <span className="c-logo shrink-0" style={{ width: 36, height: 36 }}>
+                  <Layers className="size-4 text-[var(--ink-soft)]" />
+                </span>
                 <div className="min-w-0 flex-1">
                   <div className="mb-1 flex flex-wrap items-center gap-2">
                     <h1 className="text-lg font-semibold tracking-tight">{worker.name}</h1>
