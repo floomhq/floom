@@ -382,6 +382,20 @@ Simple scheduler loop in FastAPI. No complex recurrence UI.
 
 Each worker gets a webhook URL: `POST /webhooks/{worker_id}`. Request body becomes run input.
 
+## 11.4 Pre-defined Inputs (automated triggers)
+
+Schedule/webhook/event triggers have no Run form, so they use the worker's saved
+`input_values` defaults. The scheduler injects them and **skips** a fire whose
+*required* inputs are unset; webhook/event payloads are **merged** over the
+defaults (payload wins). See AUTHORING.md for details.
+
+## 11.5 Worker-to-Worker Calls
+
+A worker may invoke other workers via a top-level `calls:` allowlist in
+`worker.yml`. Enforced server-side (and in a signed call token): only allowlisted
+worker IDs are callable, chain depth is capped at `MAX_CALL_DEPTH` (3), and a
+single run may spawn at most `MAX_WORKER_CALLS_PER_RUN` (50) child runs.
+
 ---
 
 # 12. Secrets Model
