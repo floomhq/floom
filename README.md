@@ -19,6 +19,16 @@ You pay only for sandbox execution time (E2B bills per second of run time), with
 
 **Fastest path** — two scripts. You need an OpenAI key and an E2B key ([e2b.dev](https://e2b.dev)).
 
+### Prerequisites
+
+- Python 3.11 or newer.
+- Node.js 20 or newer, with npm.
+- Git.
+- An `OPENAI_API_KEY` for Emily, agent workers, and code generation.
+- An `E2B_API_KEY` for sandboxed script-worker execution.
+- On Windows, run setup and dev commands from PowerShell. If script execution is
+  blocked, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
+
 **Linux / macOS**
 ```bash
 ./scripts/setup.sh                # venv + deps + scaffolds apps/api/.env  (run once)
@@ -36,6 +46,23 @@ You pay only for sandbox execution time (E2B bills per second of run time), with
 Open [http://localhost:3000](http://localhost:3000) and sign in. That's the whole setup — no auth secret required for local dev, and the example workers are seeded on first boot. Everything below is **optional**: other model providers (Bedrock/Claude, Gemini, …), an operator secret, git-backed version history, and integrations.
 
 Prefer to run things by hand (or need to debug one side)? The manual per-OS steps are below.
+
+### Troubleshooting
+
+- **Frontend shows a cloud sign-in screen:** copy `apps/web/.env.example` to
+  `apps/web/.env`. The local frontend should point at `http://localhost:8000`.
+- **Port already in use:** stop the existing process on `3000` or `8000`, or set
+  `WORKEROS_API_PORT` before starting the backend.
+- **Backend restarts during worker runs:** start the API with `python main.py`,
+  not bare `uvicorn main:app --reload`; the checked-in entry point excludes
+  runtime artifact folders from reload watching.
+- **Workers fail before running:** confirm `E2B_API_KEY` is set in
+  `apps/api/.env`.
+- **Agent workers or Emily fail on model calls:** confirm `OPENAI_API_KEY` is set,
+  or configure the model-provider variables shown below.
+- **Version history is empty:** set `FLOOM_WORKERS_DIR` and `FLOOM_CONTEXTS_DIR`
+  to directories outside the engine checkout. The engine refuses to commit
+  worker history into its own source repo.
 
 ---
 
