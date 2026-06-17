@@ -31,12 +31,12 @@ afterEach(() => {
 });
 
 describe("pinned-tabs tab sets", () => {
-  it("base tabs are Overview and Runs only", () => {
-    expect([...BASE_DETAIL_TABS]).toEqual(["Overview", "Runs"]);
+  it("primary tabs are Overview, Runs and Operations (round-09)", () => {
+    expect([...BASE_DETAIL_TABS]).toEqual(["Overview", "Runs", "Operations"]);
   });
 
-  it("advanced (pinnable) tabs are Config, Source, Versions in canonical order", () => {
-    expect(ADVANCED_DETAIL_TABS).toEqual(["Config", "Source", "Versions"]);
+  it("advanced (pinnable) tabs are Source, Versions, Brain, Tools in canonical order", () => {
+    expect(ADVANCED_DETAIL_TABS).toEqual(["Source", "Versions", "Brain", "Tools"]);
   });
 });
 
@@ -50,14 +50,14 @@ describe("getPinnedTabs / savePinnedTabs", () => {
 
   it("persists in canonical order regardless of insertion order", () => {
     const store = installLocalStorage();
-    savePinnedTabs(new Set<WorkerDetailTab>(["Versions", "Config"]));
-    expect(store[LS_KEY]).toBe(JSON.stringify(["Config", "Versions"]));
+    savePinnedTabs(new Set<WorkerDetailTab>(["Brain", "Source"]));
+    expect(store[LS_KEY]).toBe(JSON.stringify(["Source", "Brain"]));
   });
 
   it("ignores unknown / base tabs in stored data (no poisoned bar)", () => {
     const store = installLocalStorage();
-    store[LS_KEY] = JSON.stringify(["Overview", "Bogus", "Config"]);
-    expect([...getPinnedTabs()]).toEqual(["Config"]);
+    store[LS_KEY] = JSON.stringify(["Overview", "Bogus", "Source"]);
+    expect([...getPinnedTabs()]).toEqual(["Source"]);
   });
 
   it("returns an empty set on malformed JSON", () => {

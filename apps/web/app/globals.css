@@ -931,12 +931,41 @@ html.dark .grain {
 .c-dtabs { display:flex; gap:2px; padding:4px 16px; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
 .c-dtabs::-webkit-scrollbar { height:0; display:none; }
 .c-source-file-tabs { min-width:0; max-width:100%; flex:1 1 auto; flex-wrap:nowrap; }
-.c-dtab { display:inline-flex; align-items:center; gap:7px; padding:5px 11px; border-radius:9px; color:var(--muted-foreground); font-size:13px; white-space:nowrap; }
+/* Tab cell: round only the TOP corners so the active underline reads as a
+   STRAIGHT, square-ended rule (round-09 Federico: underline must be straight,
+   not swirled/boxed; accent is links-only). */
+.c-dtab { display:inline-flex; align-items:center; gap:7px; padding:5px 11px 6px; border-radius:9px 9px 0 0; color:var(--muted-foreground); font-size:13px; white-space:nowrap; position:relative; }
 .c-dtab:hover { background:var(--bg-2); }
-/* §6.6: active tab = blue underline via inset bottom shadow; no grey bg fill */
-.c-dtab.on { color:var(--ink); font-weight:500; box-shadow:inset 0 -2px 0 var(--accent); }
+/* round-09: active tab = STRAIGHT 2px INK underline (square ends, no box, no
+   accent). A sharp ::after rule the full width of the cell keeps the ends
+   square regardless of the cell's top-corner radius. */
+.c-dtab.on { color:var(--ink); font-weight:500; }
+.c-dtab.on::after { content:""; position:absolute; left:0; right:0; bottom:0; height:2px; background:var(--ink); border-radius:0; }
 .c-dtab .cb { background:var(--bg-3); color:var(--ink-soft); font-size:10.5px; border-radius:var(--radius-pill); padding:0 6px; }
+
+/* Operations SECOND-ROW tabs: same straight-ink pattern, smaller + quieter,
+   sits directly under the primary row. No sidebar (round-09 worker-detail-v2). */
+.c-dtabs2 { display:flex; gap:2px; padding:6px 16px 0; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; }
+.c-dtabs2::-webkit-scrollbar { height:0; display:none; }
+.c-dtab2 { display:inline-flex; align-items:center; gap:6px; padding:4px 10px 6px; border-radius:8px 8px 0 0; color:var(--muted-foreground); font-size:12px; white-space:nowrap; position:relative; }
+.c-dtab2:hover { background:var(--bg-2); }
+.c-dtab2.on { color:var(--ink); font-weight:500; }
+.c-dtab2.on::after { content:""; position:absolute; left:0; right:0; bottom:0; height:2px; background:var(--ink); border-radius:0; }
+.c-dtab2 .cb { background:var(--bg-3); color:var(--ink-soft); font-size:10px; border-radius:var(--radius-pill); padding:0 5px; }
+/* R9 FIX 2: pull the Operations second-row tabs flush under the primary tab row.
+   Breaks out of .c-dbody padding (18px 20px) so .c-dtabs2 sits directly beneath
+   .c-dtabs with no gap or framing text between the two rows. */
+.c-ops-row-flush { margin:-18px -20px 0; flex:0 0 auto; }
+/* Operations framing: "Visual editor of worker.yml" + a "View as YAML" link.
+   R9: lives in the panel BODY below both tab rows, not between them. */
+.c-ops-frame { display:flex; align-items:center; gap:8px; padding:14px 0 4px; font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted-foreground); }
 .c-dbody { flex:1; min-width:0; overflow:auto; padding:18px 20px; }
+/* R9 FIX 1: "Advanced ▾" group on the primary tab row — right-aligned, quiet,
+   findable. Not accent (accent is links-only); reads as a secondary tab group. */
+.c-dtabs-trailing { margin-left:auto; display:flex; align-items:center; padding-left:8px; }
+.c-dtab-adv { color:var(--muted-foreground); font-size:13px; padding:5px 9px 6px; border-radius:8px; white-space:nowrap; }
+.c-dtab-adv:hover { background:var(--bg-2); color:var(--ink); }
+.c-dtab-adv[data-state="open"] { background:var(--bg-2); color:var(--ink); }
 
 /* states (SPEC §7) */
 .c-statebox { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; color:var(--muted-foreground); padding:50px; }
