@@ -5,6 +5,7 @@ import sys
 import types
 from pathlib import Path
 
+from fastapi import FastAPI
 from fastapi.testclient import TestClient
 
 
@@ -122,6 +123,127 @@ def test_default_json_oversize_returns_friendly_message(monkeypatch, tmp_path):
     detail = response.json()["detail"]
     assert "Request body is too large" in detail
     assert detail != "Request body too large"
+
+
+def _make_request(path: str, method: str = "POST", root_path: str = ""):
+    """Build a minimal Starlette Request with a given ASGI path.
+
+    When mounted under a prefix (cloud mounts the engine under /api), Starlette
+    sets scope['root_path'] to the mount prefix while scope['path'] keeps the
+    full prefixed path — exactly the shape that breaks the bare exemption
+    checks. Pass root_path to simulate that mounted case.
+    """
+    from starlette.requests import Request
+
+    scope = {
+        "type": "http",
+        "method": method,
+        "path": path,
+        "raw_path": path.encode(),
+        "root_path": root_path,
+        "headers": [],
+        "query_string": b"",
+        "scheme": "http",
+        "server": ("testserver", 80),
+        "client": ("testclient", 50000),
+    }
+    return Request(scope)
+
+
+def test_body_limit_helpers_are_mount_prefix_agnostic(monkeypatch, tmp_path):
+    """B10: cloud mounts the engine under /api, so exemption checks must see
+    through a leading /api mount prefix. The un-prefixed path and the
+    /api-prefixed path must resolve to the SAME limit / classification."""
+    main = load_main(monkeypatch, tmp_path)
+
+    def mounted(path: str, method: str = "POST"):
+        # Mounted shape: full /api-prefixed scope['path'] + root_path='/api',
+        # exactly what Starlette produces when the engine is mounted under /api.
+        return _make_request(path, method=method, root_path="/api")
+
+    # Context upload: exempt (None) on BOTH the bare and the /api-mounted path.
+    assert main._body_limit_for_request(_make_request("/contexts/x/upload")) is None
+    assert main._body_limit_for_request(mounted("/api/contexts/x/upload")) is None
+
+    assert main._is_context_upload_request(_make_request("/contexts/x/upload")) is True
+    assert main._is_context_upload_request(mounted("/api/contexts/x/upload")) is True
+
+    # Approval screenshot uploads: exempt on both.
+    assert main._body_limit_for_request(_make_request("/approvals/a/uploads")) is None
+    assert main._body_limit_for_request(mounted("/api/approvals/a/uploads")) is None
+
+    # from-bundle / workspace import: generous caps on both.
+    assert (
+        main._body_limit_for_request(_make_request("/workers/from-bundle"))
+        == main.FROM_BUNDLE_BODY_LIMIT_BYTES
+    )
+    assert (
+        main._body_limit_for_request(mounted("/api/workers/from-bundle"))
+        == main.FROM_BUNDLE_BODY_LIMIT_BYTES
+    )
+    assert (
+        main._body_limit_for_request(_make_request("/workspace/import"))
+        == main.WORKSPACE_IMPORT_BODY_LIMIT_BYTES
+    )
+    assert (
+        main._body_limit_for_request(mounted("/api/workspace/import"))
+        == main.WORKSPACE_IMPORT_BODY_LIMIT_BYTES
+    )
+
+    # PUT /workers/{id}/files: generous cap on both.
+    assert (
+        main._body_limit_for_request(_make_request("/workers/w/files", method="PUT"))
+        == main.WORKER_FILES_BODY_LIMIT_BYTES
+    )
+    assert (
+        main._body_limit_for_request(mounted("/api/workers/w/files", method="PUT"))
+        == main.WORKER_FILES_BODY_LIMIT_BYTES
+    )
+
+    # A genuinely non-exempt JSON path keeps the small default on both forms.
+    assert (
+        main._body_limit_for_request(_make_request("/workers/draft-from-prompt"))
+        == main.DEFAULT_JSON_BODY_LIMIT_BYTES
+    )
+    assert (
+        main._body_limit_for_request(mounted("/api/workers/draft-from-prompt"))
+        == main.DEFAULT_JSON_BODY_LIMIT_BYTES
+    )
+
+    # Guard against over-stripping: a path that merely *starts with* the prefix
+    # string but is a different segment (/apiary) must NOT be normalized.
+    assert (
+        main._body_limit_for_request(
+            _make_request("/apiary/contexts/x/upload", root_path="/api")
+        )
+        == main.DEFAULT_JSON_BODY_LIMIT_BYTES
+    )
+
+
+def test_api_mounted_context_upload_not_413_for_one_mb(monkeypatch, tmp_path):
+    """B10 (cloud repro): with the engine mounted under /api (as managed-deployment
+    does), a >256KB upload to /api/contexts/x/upload must NOT be rejected with
+    413 by the body-size middleware. It should reach the route (auth/404),
+    never 413."""
+    main = load_main(monkeypatch, tmp_path)
+
+    parent = FastAPI()
+    parent.mount("/api", main.app)
+
+    one_mb = b"x" * (1024 * 1024 + 1024)  # ~1 MB, well over the 256KB default
+    with TestClient(parent) as client:
+        # Authenticate so the request gets past auth_middleware and actually
+        # reaches the body-size middleware (the live repro is an authed cookie
+        # request; an unauthed one short-circuits at 401 before body size).
+        response = client.post(
+            "/api/contexts/test/upload",
+            headers={"x-floom-secret": "test-secret"},
+            files={"files": ("img.png", one_mb, "image/png")},
+        )
+
+    assert response.status_code != 413, (
+        f"middleware 413'd a 1MB upload on the /api-mounted path: {response.text}"
+    )
 
 
 def test_worker_files_put_accepts_four_mb_payload(monkeypatch, tmp_path):
