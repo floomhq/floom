@@ -61,8 +61,11 @@ describe("Round-09 #2 — Hire worker drafts a worker (create intent)", () => {
     render(<EmilyChatPage createMode />);
 
     const composer = screen.getByPlaceholderText("Create me: a worker that…");
+    await user.click(composer);
+    // Round-09 (Emily-native create hero): the bespoke "Hire worker" button was
+    // replaced by the real PromptInput composer — submit is Enter-to-send.
     await user.type(composer, PLAIN_JOB);
-    await user.click(screen.getByRole("button", { name: /Hire worker/i }));
+    await user.keyboard("{Enter}");
 
     expect(sendMessage).toHaveBeenCalledTimes(1);
     const sent = sendMessage.mock.calls[0][0] as string;

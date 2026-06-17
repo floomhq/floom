@@ -65,8 +65,13 @@ describe("Emily creation flow — native composer", () => {
     const composer = screen.getByPlaceholderText("Create me: a worker that…");
     await user.click(composer);
     await user.keyboard("Send a daily digest{Enter}");
+    // Enter fires exactly one submit (no click required).
     expect(sendMessage).toHaveBeenCalledTimes(1);
-    expect(sendMessage.mock.calls[0][0]).toBe("Send a daily digest");
+    // Round-09 #2: the FIRST create-mode message is wrapped in an explicit
+    // worker-authoring directive so the backend drafts a worker instead of
+    // answering as a chat query. The raw prompt is preserved verbatim inside it.
+    expect(sendMessage.mock.calls[0][0]).toContain("Send a daily digest");
+    expect(sendMessage.mock.calls[0][0]).not.toBe("Send a daily digest");
   });
 });
 
