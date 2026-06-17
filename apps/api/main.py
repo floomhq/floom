@@ -983,6 +983,14 @@ async def lifespan(app: FastAPI):
         )
         if cancelled_runs:
             logger.warning("Shutdown requested cancellation for %d active run(s)", cancelled_runs)
+        try:
+            from runner_sandbox.e2b_driver import clear_warm_pool
+
+            cleared_warm = clear_warm_pool()
+            if cleared_warm:
+                logger.info("Cleared %d warm E2B sandbox(es) on shutdown", cleared_warm)
+        except Exception as _warm_pool_exc:
+            logger.warning("Warm E2B sandbox pool cleanup failed: %s", _warm_pool_exc)
         if _sweep_task:
             _sweep_task.cancel()
             try:

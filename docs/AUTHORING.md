@@ -396,6 +396,16 @@ contexts:
 
 Supported predicates are `equals`/`eq`, `not_equals`/`neq`, `in`, `not_in`, `exists`, and `truthy`. Dotted input paths such as `candidate.source` are supported. Omitting `when` preserves the default behavior: the pack is mounted on every run.
 
+E2B hosts can also keep successfully prepared sandboxes warm for repeat runs of the same worker/template/context shape:
+
+```bash
+WORKEROS_E2B_WARM_POOL_ENABLED=1
+WORKEROS_E2B_WARM_POOL_SIZE_PER_KEY=1
+WORKEROS_E2B_WARM_POOL_MAX_AGE_SECONDS=900
+```
+
+Warm pooling reuses only read-only local context mounts. Workers with writeable or git-backed contexts keep the cold path so writeback and clone semantics stay unchanged. Per-run files (`inputs/`, `outputs/`, `result.json`, `.env.local`, `secrets.json`, `connections.json`) are removed before reuse, and the pool key changes when the worker bundle or local context pack changes.
+
 Working example:
 
 ```yaml
