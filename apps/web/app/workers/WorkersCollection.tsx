@@ -242,15 +242,6 @@ function patchTopLevelScalar(yaml: string, key: string, value: string): string {
   return `${line}\n${yaml.trimStart()}`;
 }
 
-/** Patch a top-level scalar with a RAW (unquoted) value — for YAML booleans/
- *  numbers where quoting would change the type (e.g. `enabled: false`). */
-function patchTopLevelRaw(yaml: string, key: string, raw: string): string {
-  const line = `${key}: ${raw}`;
-  const re = new RegExp(`^${key}:.*$`, "m");
-  if (re.test(yaml)) return yaml.replace(re, line);
-  return `${line}\n${yaml.trimStart()}`;
-}
-
 function coerceInputValue(value: string, type?: string): unknown {
   const kind = (type ?? "string").toLowerCase();
   if (kind === "number" || kind === "integer") {
@@ -927,33 +918,61 @@ function saveInputTemplates(workerId: string, templates: InputTemplate[]): void 
 // Operations > Inputs: a segmented named-template picker above the REAL
 // WorkerInputForm (single source of truth, same widget the /run page uses).
 function OpsInputsPanel({ w }: { w: WorkerSummary }) {
-  const [d] = useWorkerDetail(w.id);
+  const [d, applyDetail] = useWorkerDetail(w.id);
   const inputs = d?.config?.inputs ?? w.inputs ?? [];
   const [templates, setTemplates] = useState<InputTemplate[]>([]);
-  const [activeIdx, setActiveIdx] = useState(0); // 0 = "Default"
+  const [activeIdx, setActiveIdx] = useState(0); // 0 = "Default" (the saved backend recipe)
   const [values, setValues] = useState<Record<string, unknown>>({});
   const [fileNames, setFileNames] = useState<Record<string, string>>({});
+  const [savingDefault, setSavingDefault] = useState(false);
 
   useEffect(() => {
     setTemplates(loadInputTemplates(w.id));
   }, [w.id]);
 
-  // Seed values from the active template (or schema defaults for "Default").
+  // The saved backend default-inputs recipe (input_values). This is what
+  // scheduled/automated runs actually merge over the schema defaults
+  // (scheduler._effective_scheduled_inputs). gap #1: load it so "Default" is
+  // the persisted recipe, not a write-blind local guess.
+  const savedDefaults = (d?.input_values ?? {}) as Record<string, unknown>;
+
+  // Seed values from the active source:
+  //  - "Default" (idx 0): the saved backend recipe, falling back to schema defaults.
+  //  - a named template (idx > 0): a local convenience value-set.
   useEffect(() => {
     const tmpl = activeIdx > 0 ? templates[activeIdx - 1] : undefined;
     const next: Record<string, unknown> = {};
     for (const inp of inputs) {
-      next[inp.name] = tmpl?.values[inp.name] ?? (inp.default == null ? "" : inp.default);
+      const fromTemplate = tmpl?.values[inp.name];
+      const fromSaved = activeIdx === 0 ? savedDefaults[inp.name] : undefined;
+      next[inp.name] =
+        fromTemplate ?? fromSaved ?? (inp.default == null ? "" : inp.default);
     }
     setValues(next);
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [activeIdx, templates, d?.id]);
+  }, [activeIdx, templates, d?.id, d?.input_values]);
 
   const activeName = activeIdx > 0 ? templates[activeIdx - 1]?.name : "Default";
 
-  const saveActive = () => {
+  // Persist the "Default" set to the backend recipe column (input_values) via
+  // PATCH /workers/{id}. This is the gap #1 fix: scheduled runs now have saved
+  // values. Named templates remain a per-user local convenience layer.
+  const saveDefault = async () => {
+    setSavingDefault(true);
+    try {
+      const updated = await api.workers.updateInputValues(w.id, values);
+      applyDetail(updated);
+      toast.success("Default inputs saved. Scheduled and automated runs will use these.");
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Could not save default inputs");
+    } finally {
+      setSavingDefault(false);
+    }
+  };
+
+  const saveTemplate = () => {
     if (activeIdx === 0) {
-      const name = window.prompt("Name this input template", "Weekly default")?.trim();
+      const name = window.prompt("Name this input template", "Month-end close")?.trim();
       if (!name) return;
       const next = [...templates, { name, values }];
       setTemplates(next);
@@ -970,6 +989,16 @@ function OpsInputsPanel({ w }: { w: WorkerSummary }) {
 
   return (
     <div className="flex flex-col gap-4">
+      {/* gap #1 callout: makes the operator-blocking truth explicit. */}
+      <div
+        className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-4 py-3"
+        style={{ fontSize: 12.5, color: "var(--ink-soft)" }}
+      >
+        <strong style={{ color: "var(--ink)" }}>Default inputs</strong> are what
+        scheduled and automated (webhook / app-event) runs use. Save them here so an
+        unattended run never fires with an empty required field.
+      </div>
+
       {/* Segmented named-template picker (Default + saved templates + New). */}
       <div>
         <h4 style={h4}>Input templates</h4>
@@ -1020,9 +1049,32 @@ function OpsInputsPanel({ w }: { w: WorkerSummary }) {
           <span style={{ ...muted, fontSize: 12.5 }}>
             Editing {activeName ? `"${activeName}"` : "Default"}
           </span>
-          <button type="button" className="c-addbtn" style={pillBtn} onClick={saveActive}>
-            {activeIdx === 0 ? "Save as template" : "Save template"}
-          </button>
+          {activeIdx === 0 ? (
+            <>
+              {/* gap #1: persists to the backend recipe column. */}
+              <button
+                type="button"
+                className="c-addbtn"
+                style={pillBtn}
+                onClick={() => void saveDefault()}
+                disabled={savingDefault}
+              >
+                {savingDefault ? "Saving…" : "Save default inputs"}
+              </button>
+              <button
+                type="button"
+                className="c-vpill"
+                style={pillBtn}
+                onClick={saveTemplate}
+              >
+                Save as template
+              </button>
+            </>
+          ) : (
+            <button type="button" className="c-addbtn" style={pillBtn} onClick={saveTemplate}>
+              Save template
+            </button>
+          )}
         </div>
       )}
     </div>
@@ -1424,17 +1476,14 @@ function WorkerDetailActions({
           </DropdownMenuTrigger>
           <DropdownMenuContent align="end" className="w-44 p-1">
             <DropdownMenuItem onClick={() => setEditOpen(true)}>Edit</DropdownMenuItem>
-            {/* Pause/Resume — there is no dedicated endpoint yet (#788); enabled
-                toggles through the worker.yml PUT, the same path Tools/Brain use. */}
+            {/* Pause/Resume — gap #6 / #788: hit the real lifecycle endpoints
+                (POST /workers/{id}/pause|/resume). These set enabled AND re-enqueue
+                the schedule, which a raw worker.yml `enabled:` PUT does not do. */}
             <DropdownMenuItem
               onClick={() => {
-                if (!d) {
-                  toast.error("Worker detail still loading.");
-                  return;
-                }
                 const pausing = w.enabled !== false;
-                const yaml = patchTopLevelRaw(workerYml(d), "enabled", pausing ? "false" : "true");
-                persistYml(d, yaml)
+                const action = pausing ? api.workers.pause : api.workers.resume;
+                action(w.id)
                   .then((updated) => {
                     applyDetail(updated);
                     onUpdated({ ...w, enabled: !pausing });

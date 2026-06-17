@@ -272,6 +272,31 @@ export const api = {
       });
       return worker;
     },
+    // Round-09 gap #1: persist the per-worker default inputs (the recipe column
+    // `input_values_json`) via PATCH. This is what scheduled/automated runs merge
+    // over the schema defaults (scheduler._effective_scheduled_inputs). Without
+    // this, a scheduled worker with a required input has no saved value to fire with.
+    updateInputValues: async (id: string, input_values: Record<string, unknown>) => {
+      const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ input_values }),
+      });
+      return worker;
+    },
+    // Round-09 gap #6 / #788: pause/resume hit the real lifecycle endpoints that
+    // set enabled and re-enqueue the schedule, not a raw worker.yml `enabled:` PUT.
+    pause: async (id: string) => {
+      const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}/pause`, {
+        method: "POST",
+      });
+      return worker;
+    },
+    resume: async (id: string) => {
+      const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}/resume`, {
+        method: "POST",
+      });
+      return worker;
+    },
     shareLink: async (id: string) => {
       const link = await fetchJson<import("./types").StandaloneShareLink>(`/workers/${encodeURIComponent(id)}/share-link`, {
         method: "POST",
