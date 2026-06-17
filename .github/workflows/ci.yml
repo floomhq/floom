@@ -3,8 +3,7 @@ name: CI
 on:
   push:
     branches: [main]
-  pull_request:
-    branches: [main]
+  workflow_dispatch:
 
 # #938: least-privilege token — CI only reads the repo.
 permissions:
@@ -116,6 +115,9 @@ jobs:
   runtime-tests-windows:
     name: Runtime tests (Windows)
     runs-on: windows-latest
+    # Advisory until GitHub-hosted Windows availability is proven for this repo.
+    # The same suite is blocking in the contributor workflow on Ubuntu.
+    continue-on-error: true
 
     steps:
       - uses: actions/checkout@v4
