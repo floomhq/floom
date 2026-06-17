@@ -50,7 +50,7 @@ from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Dict, Iterable, List, Literal, NotRequired, Optional, Protocol, TypedDict
+from typing import Annotated, Any, Dict, Iterable, List, Literal, NotRequired, Optional, Protocol, TypedDict, Union
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -1537,10 +1537,15 @@ async def auth_middleware(request: Request, call_next):
                 status_code=401,
                 content={"detail": "Invalid or expired run token"},
             )
-        if not _RE_RUN_COMPOSIO_PROXY.match(path):
+        if not (
+            _RE_RUN_COMPOSIO_PROXY.match(path)
+            or _RE_RUN_LLM_PROXY.match(path)
+            or _RE_RUN_LLM_BATCH_PROXY.match(path)
+            or _RE_RUN_EMBEDDINGS_PROXY.match(path)
+        ):
             return _JSONResponse(
                 status_code=403,
-                content={"detail": "Run tokens are only valid for Composio proxy calls"},
+                content={"detail": "Run tokens are only valid for run-scoped platform proxy calls"},
             )
         path_run_id = path.split("/", 3)[2] if path.startswith("/runs/") else ""
         if path_run_id != run_id_from_token:
@@ -1623,6 +1628,9 @@ logger = logging.getLogger("floom.api")
 # auth is by X-Workeros-Run-Token, scoped to the run_id in the path).
 import re as _re
 _RE_RUN_COMPOSIO_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/composio-execute/[A-Z0-9_]+$")
+_RE_RUN_LLM_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/llm$")
+_RE_RUN_LLM_BATCH_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/llm/batch$")
+_RE_RUN_EMBEDDINGS_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/embeddings$")
 _RE_RUN_STREAM = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/stream$")
 _RE_WORKER_RUN_CREATE = _re.compile(r"^/workers/[^/]+/runs$")
 _RE_RUN_DETAIL = _re.compile(r"^/runs/([a-zA-Z0-9_-]+)$")
@@ -1664,6 +1672,18 @@ def _worker_call_token_allows_request(
         return depth < MAX_CALL_DEPTH
     run_match = _RE_RUN_DETAIL.match(path)
     if method != "GET" or run_match is None or repos is None:
+        parent_run_id = str(token_payload.get("parent_run_id") or "")
+        if (
+            method == "POST"
+            and parent_run_id
+            and (
+                _RE_RUN_LLM_PROXY.match(path)
+                or _RE_RUN_LLM_BATCH_PROXY.match(path)
+                or _RE_RUN_EMBEDDINGS_PROXY.match(path)
+            )
+        ):
+            path_run_id = path.split("/", 3)[2] if path.startswith("/runs/") else ""
+            return path_run_id == parent_run_id
         return False
     run_row = repos.runs.get_any(run_id=run_match.group(1))
     if not run_row:
@@ -4132,6 +4152,166 @@ class _ComposioProxyRequest(BaseModel):
     connected_account_id: Optional[str] = None
     user_id: Optional[str] = None
     arguments: Optional[Dict[str, Any]] = None
+
+
+class _ManagedLLMRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    messages: List[Dict[str, Any]]
+    model: Optional[str] = None
+    max_tokens: Optional[int] = Field(default=None, ge=1, le=24000)
+    temperature: Optional[float] = Field(default=None, ge=0, le=2)
+
+
+class _ManagedLLMBatchRequest(BaseModel):
+    requests: List[_ManagedLLMRequest] = Field(default_factory=list, min_length=1, max_length=50)
+    max_parallel: int = Field(default=8, ge=1, le=16)
+
+
+class _ManagedEmbeddingsRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    input: Union[str, List[str]]
+    model: Optional[str] = None
+
+
+def _platform_managed_llm_model() -> str:
+    value = (
+        os.environ.get("WORKEROS_MANAGED_LLM_MODEL")
+        or os.environ.get("WORKEROS_WORKER_AGENT_MODEL")
+        or os.environ.get("WORKEROS_CHAT_MODEL")
+        or ""
+    ).strip()
+    if value:
+        return value
+    from models import default_worker_agent_model as _default_worker_agent_model
+
+    return _default_worker_agent_model()
+
+
+def _platform_managed_embedding_model() -> str:
+    return (
+        os.environ.get("WORKEROS_MANAGED_EMBEDDING_MODEL")
+        or os.environ.get("WORKEROS_EMBEDDING_MODEL")
+        or os.environ.get("OPENAI_EMBEDDING_MODEL")
+        or "text-embedding-3-small"
+    ).strip()
+
+
+def _response_to_jsonable(response: Any) -> Any:
+    if hasattr(response, "model_dump"):
+        return response.model_dump()
+    if hasattr(response, "dict"):
+        return response.dict()
+    return jsonable_encoder(response)
+
+
+def _require_running_run_for_platform_proxy(run_id: str, repos: Repositories) -> Dict[str, Any]:
+    run_row = repos.runs.get_any(run_id=run_id)
+    if run_row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run_row.get("status") != RunStatus.RUNNING.value:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Run is not currently running (status={run_row.get('status')})",
+        )
+    return run_row
+
+
+def _authorize_run_platform_proxy(request: Request, run_id: str) -> None:
+    from run_token import validate_worker_call_token as _validate_worker_call_token
+    from run_token import verify_run_token as _verify_run_token
+
+    simple_token = request.headers.get("x-workeros-run-token", "")
+    if simple_token:
+        token_run_id = _verify_run_token(simple_token)
+        if token_run_id is None:
+            raise HTTPException(status_code=401, detail="Missing or invalid run token")
+        if token_run_id != run_id:
+            raise HTTPException(status_code=403, detail="Run token does not match request run_id")
+        return
+
+    authorization_header = request.headers.get("authorization", "")
+    bearer = authorization_header[7:].strip() if authorization_header.startswith("Bearer ") else ""
+    if bearer.startswith("wrt_"):
+        try:
+            payload = _validate_worker_call_token(bearer)
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        if str(payload.get("parent_run_id") or "") != run_id:
+            raise HTTPException(status_code=403, detail="Worker-call token does not match request run_id")
+        return
+
+    raise HTTPException(status_code=401, detail="Missing or invalid run token")
+
+
+def _managed_llm_completion(body: _ManagedLLMRequest) -> Any:
+    import llm as _llm
+
+    model = body.model or _platform_managed_llm_model()
+    if not _llm.provider_credentials_present(model):
+        raise HTTPException(status_code=503, detail="No managed LLM provider credentials configured")
+    data = body.model_dump(exclude_none=True)
+    data.pop("model", None)
+    messages = data.pop("messages")
+    try:
+        return _response_to_jsonable(_llm.completion(model=model, messages=messages, **data))
+    except Exception as exc:  # noqa: BLE001 - provider SDK exceptions vary
+        detail = _llm.safe_llm_error_message(exc, action="Managed LLM call")
+        raise HTTPException(status_code=502, detail=detail) from exc
+
+
+def _managed_embeddings(body: _ManagedEmbeddingsRequest) -> Any:
+    import llm as _llm
+
+    model = body.model or _platform_managed_embedding_model()
+    data = body.model_dump(exclude_none=True)
+    data.pop("model", None)
+    try:
+        return _response_to_jsonable(_llm.embedding(model=model, **data))
+    except Exception as exc:  # noqa: BLE001 - provider SDK exceptions vary
+        detail = _llm.safe_llm_error_message(exc, action="Managed embedding call")
+        raise HTTPException(status_code=502, detail=detail) from exc
+
+
+@app.post("/runs/{run_id}/llm")
+def managed_llm_proxy(
+    request: Request,
+    run_id: str,
+    body: _ManagedLLMRequest,
+    repos: Repositories = Depends(get_repos),
+) -> Any:
+    _authorize_run_platform_proxy(request, run_id)
+    _require_running_run_for_platform_proxy(run_id, repos)
+    return _managed_llm_completion(body)
+
+
+@app.post("/runs/{run_id}/llm/batch")
+def managed_llm_batch_proxy(
+    request: Request,
+    run_id: str,
+    body: _ManagedLLMBatchRequest,
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    from concurrent.futures import ThreadPoolExecutor
+
+    _authorize_run_platform_proxy(request, run_id)
+    _require_running_run_for_platform_proxy(run_id, repos)
+    with ThreadPoolExecutor(max_workers=min(body.max_parallel, len(body.requests))) as pool:
+        results = list(pool.map(_managed_llm_completion, body.requests))
+    return {"results": results}
+
+
+@app.post("/runs/{run_id}/embeddings")
+def managed_embeddings_proxy(
+    request: Request,
+    run_id: str,
+    body: _ManagedEmbeddingsRequest,
+    repos: Repositories = Depends(get_repos),
+) -> Any:
+    _authorize_run_platform_proxy(request, run_id)
+    _require_running_run_for_platform_proxy(run_id, repos)
+    return _managed_embeddings(body)
 
 
 @app.post("/runs/{run_id}/composio-execute/{tool_slug}")
