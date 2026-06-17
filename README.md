@@ -87,69 +87,20 @@ data/         SQLite DB + run artifacts
 
 ---
 
-## Workers
+## Core concepts
 
-Workers live in `workers/<name>/` and contain:
+- **Workers:** folders under `workers/<name>/` with `worker.yml` plus either a
+  script entrypoint (`run.py`) or an agent prompt (`SKILL.md`).
+- **Runs:** every execution records logs, outputs, tool calls, approval state,
+  and replay/rollback context.
+- **Contexts:** reusable file bundles attached to workers as reference material;
+  sensitive by default.
+- **Workspace history:** workers, contexts, and settings can be versioned in a
+  git-backed workspace for rollback.
 
-- `worker.yml` — manifest (inputs, outputs, secrets, trigger, runtime)
-- `run.py` — script-mode worker. It is launched as `python run.py` inside the sandbox: read inputs from `inputs.json` and **write `result.json`** in the form `{"status": "success", "outputs": { ... }, "artifacts": [ ... ]}` (use `"status": "error"` + `"error"` on failure). There is **no** in-process `run(inputs, context)` entrypoint — the old `hybrid` mode was removed (migration #603); a bare `def run(...)` that only `return`s a value produces no result.
-- `SKILL.md` — agent prompt (agent mode); mutually exclusive with `run.py`
-- `requirements.txt` — Python dependencies
-
-Minimal `run.py`:
-
-```python
-import json
-
-with open("inputs.json") as f:
-    inputs = json.load(f)
-
-with open("result.json", "w") as f:
-    json.dump({"status": "success", "outputs": {"greeting": f"Hello, {inputs.get('name', 'world')}"}}, f)
-```
-
-**Writing workers with an AI agent (Claude Code / Cursor):** see [docs/AGENT-COOKBOOK.md](docs/AGENT-COOKBOOK.md) for end-to-end recipes including porting Claude skill bundles.
-
-**Writing workers by hand:** see [docs/AUTHORING.md](docs/AUTHORING.md) for the full `worker.yml` schema, execution modes, secrets, connections, and triggers.
-
-### CLI deploy loop
-
-```bash
-npm i -g @floomhq/workeros
-workeros login
-workeros workers validate ./workers/<id>
-workeros workers push ./workers/<id>
-workeros run <id> --inputs-file inputs.json
-```
-
-### Example workers
-
-A few of the workers shipped in [`workers/`](workers/) — browse the directory for the full set:
-
-- **csv_enricher** — Enriches CSV rows using custom instructions (AI)
-- **research_brief** — Generates markdown research briefs on any topic (AI, requires approval)
-- **github-digest** — Summarises recent activity on a GitHub repo
-- **outbound-approval-demo** — Two-run human-in-the-loop approval pattern demo
-- **openblog** / **opendraft** — Bundled upstream content-generation engine demos
-- **gmail-summarize-latest**, **gmail-smart-replies** — Gmail automation templates (connect your own account)
-
----
-
-## Workspace & versioning
-
-Workers, contexts, and workspace settings can be versioned in a git-backed
-workspace so rollback writes a new commit and can be rolled forward again. To
-enable history, set `FLOOM_WORKERS_DIR` and `FLOOM_CONTEXTS_DIR` outside the
-source checkout. See [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for the
-setup notes.
-
----
-
-## Contexts (brain packs)
-
-Contexts are reusable file bundles you attach to workers as reference material.
-They are sensitive by default and excluded from git unless explicitly created as
-non-sensitive. See [docs/AUTHORING.md](docs/AUTHORING.md) for manifest usage.
+Write your first worker in [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md),
+then use [docs/AUTHORING.md](docs/AUTHORING.md) for the full manifest and
+runtime contract.
 
 ---
 

@@ -229,6 +229,31 @@ the Workers page.
 For the full schema, agent workers, approvals, triggers, secrets, and
 connections, read [AUTHORING.md](AUTHORING.md).
 
+### CLI deploy loop
+
+```bash
+npm i -g @floomhq/workeros
+workeros login
+workeros workers validate ./workers/<id>
+workeros workers push ./workers/<id>
+workeros run <id> --inputs-file inputs.json
+```
+
+### Example workers
+
+Browse [`workers/`](../workers/) for the full set. A few useful examples:
+
+- **csv_enricher:** enriches CSV rows using custom instructions.
+- **research_brief:** generates markdown research briefs and can require
+  approval.
+- **github-digest:** summarizes recent activity on a GitHub repo.
+- **outbound-approval-demo:** demonstrates a two-run human-in-the-loop approval
+  pattern.
+- **openblog** / **opendraft:** bundled upstream content-generation engine
+  demos.
+- **gmail-summarize-latest** / **gmail-smart-replies:** Gmail automation
+  templates.
+
 ## 4. Deploy safely
 
 For a self-hosted deployment:
