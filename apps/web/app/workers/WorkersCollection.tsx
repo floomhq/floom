@@ -41,7 +41,7 @@ import { Button } from "@/components/ui/button";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { ArrowRight, Brain, Lock, MoreHorizontal, Plus } from "lucide-react";
+import { ArrowRight, Brain, ChevronDown, Lock, MoreHorizontal, Plus } from "lucide-react";
 import { BRAIN_FILE_META, inferBrainFileType } from "@/lib/brain/file-type-icon";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
 import { Sparkline } from "@/components/Sparkline";
@@ -1162,7 +1162,30 @@ function OperationsTab({ w }: { w: WorkerSummary }) {
   const counts = useOperationsSubCounts(w);
   return (
     <div className="flex flex-col">
-      {/* Visual-editor-of-worker.yml framing + View-as-YAML deep-link to Source. */}
+      {/* R9 FIX 2: the Operations second-row tabs sit DIRECTLY under the primary
+          tab row, with no framing text and no gap wedged between the two rows.
+          The .c-ops-row-flush wrapper breaks out of the c-dbody padding so
+          .c-dtabs2 lines up flush beneath .c-dtabs. The "visual editor of
+          worker.yml" framing moved INTO the panel content (below both rows). */}
+      <div className="c-ops-row-flush">
+        <div className="c-dtabs2" role="tablist" aria-label="Operations">
+          {OPERATIONS_SUBTABS.map((key) => (
+            <button
+              key={key}
+              type="button"
+              role="tab"
+              aria-selected={sub === key}
+              className={`c-dtab2 ${sub === key ? "on" : ""}`}
+              onClick={() => setSub(key)}
+            >
+              {key}
+              {counts[key] != null && <span className="cb">{counts[key]}</span>}
+            </button>
+          ))}
+        </div>
+      </div>
+      {/* Visual-editor-of-worker.yml framing + View-as-YAML deep-link, now in the
+          panel body below the rows (not between them). */}
       <div className="c-ops-frame">
         <span>Visual editor of worker.yml</span>
         <Link
@@ -1177,22 +1200,7 @@ function OperationsTab({ w }: { w: WorkerSummary }) {
           View as YAML →
         </Link>
       </div>
-      <div className="c-dtabs2" role="tablist" aria-label="Operations">
-        {OPERATIONS_SUBTABS.map((key) => (
-          <button
-            key={key}
-            type="button"
-            role="tab"
-            aria-selected={sub === key}
-            className={`c-dtab2 ${sub === key ? "on" : ""}`}
-            onClick={() => setSub(key)}
-          >
-            {key}
-            {counts[key] != null && <span className="cb">{counts[key]}</span>}
-          </button>
-        ))}
-      </div>
-      <div style={{ paddingTop: 16 }}>
+      <div style={{ paddingTop: 12 }}>
         {sub === "Inputs" && <OpsInputsPanel w={w} />}
         {sub === "Alerts & webhooks" && <OpsAlertsPanel w={w} />}
         {sub === "Triggers" && <TriggersTab w={w} />}
@@ -1251,23 +1259,26 @@ function CustomizeTabsMenu({
   onToggle: (key: WorkerDetailTab) => void;
   onSelectTab: (workerId: string, key: WorkerDetailTab) => void;
 }) {
+  // R9: the advanced group is a clearly-visible affordance ON the primary tab
+  // row (an "Advanced ▾" button) — not a header-overflow control. Selecting an
+  // item pins that tab onto the row AND opens it. The chevron + label read as a
+  // tab group, so Source/Versions/Brain/Tools are obviously reachable.
   return (
     <DropdownMenu>
       <DropdownMenuTrigger
-        className="c-vpill inline-flex items-center gap-1.5"
-        style={customizePillStyle}
-        aria-label="Customize tabs"
-        title="Pin Source, Versions, Brain or Tools tabs"
+        className="c-dtab-adv inline-flex items-center gap-1"
+        aria-label="Advanced tabs"
+        title="Open Source, Versions, Brain or Tools"
       >
-        <Plus className="size-3.5" aria-hidden="true" />
-        Customize
+        Advanced
+        <ChevronDown className="size-3.5" aria-hidden="true" />
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" className="w-48 p-1">
         {/* base-ui MenuPrimitive.GroupLabel REQUIRES a Menu.Group ancestor —
             rendering DropdownMenuLabel bare crashes the detail pane. Wrap the
             label + items in DropdownMenuGroup. */}
         <DropdownMenuGroup>
-          <DropdownMenuLabel>Pinned tabs</DropdownMenuLabel>
+          <DropdownMenuLabel>Advanced tabs</DropdownMenuLabel>
           {ADVANCED_DETAIL_TABS.map((key) => (
             <DropdownMenuCheckboxItem
               key={key}
@@ -1900,17 +1911,6 @@ export default function WorkersCollection({
       const viewOnly = !canManageWorkers && isViewOnly(w);
       const actions = (
         <>
-          {/* R8 Customize control: replaces the binary Advanced toggle. A quiet,
-              muted "+ Customize" affordance opens a flat checkbox menu to pin
-              the advanced tabs (Source / Versions / Brain / Tools) into the tab bar.
-              Pins are a per-user GLOBAL preference (every worker), persisted to
-              localStorage — a user who pins Source always sees it. */}
-          <CustomizeTabsMenu
-            workerId={w.id}
-            pinned={pinnedTabs}
-            onToggle={togglePinnedTab}
-            onSelectTab={selectWorkerTab}
-          />
           <WorkerDetailActions
             w={w}
             canManage={canManageWorkers}
@@ -1949,11 +1949,13 @@ export default function WorkersCollection({
             </>
           ),
         },
-        // R8: operator-focused tab set — Overview + Runs always visible; the
-        // advanced tabs (Source / Versions / Brain / Tools) appear only when the user
-        // has pinned them via Customize. Pinned tabs render in canonical order
-        // after the base tabs. WORKER_DETAIL_TABS (typed constant) stays the
-        // 5-tab contract; the UI filters at render time without touching it.
+        // R9: operator-focused tab set — Overview/Runs/Operations always visible;
+        // the advanced tabs (Source / Versions / Brain / Tools) live in the
+        // "Advanced ▾" group ON the tab row (tabsTrailing). Picking one pins it
+        // onto the row (per-user GLOBAL preference, localStorage) and opens it,
+        // so an already-pinned advanced tab also renders inline after the base
+        // tabs. WORKER_DETAIL_TABS (typed constant) stays the full contract; the
+        // UI filters at render time without touching it.
         tabs: (() => {
           const visibleKeys: WorkerDetailTab[] = [
             ...BASE_DETAIL_TABS,
@@ -1973,6 +1975,17 @@ export default function WorkersCollection({
             };
           });
         })(),
+        // R9 FIX 1: the advanced group is a clearly-visible affordance ON the
+        // primary tab row (right-aligned), not a header-overflow "Customize"
+        // pill — Federico couldn't find the advanced tabs at all.
+        tabsTrailing: (
+          <CustomizeTabsMenu
+            workerId={w.id}
+            pinned={pinnedTabs}
+            onToggle={togglePinnedTab}
+            onSelectTab={selectWorkerTab}
+          />
+        ),
       };
     },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
@@ -2046,11 +2059,3 @@ const h4: React.CSSProperties = {
   margin: "0 0 9px",
 };
 const pillBtn: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5 };
-// R8 Customize control: quiet + muted (not accent — accent is links-only). It
-// sits next to the worker actions and stays unobtrusive but findable.
-const customizePillStyle: React.CSSProperties = {
-  padding: "6px 11px",
-  fontSize: 12.5,
-  background: "var(--bg-2)",
-  color: "var(--muted-foreground)",
-};

@@ -1,12 +1,14 @@
 "use client";
 
-import { useEffect, useRef } from "react";
+import { useEffect, useRef, type ReactNode } from "react";
 import { ChevronsLeft, X } from "lucide-react";
 import type { DetailHeader, DetailTab } from "@/lib/collection/types";
 
 interface DetailPaneProps {
   header: DetailHeader;
   tabs: DetailTab[];
+  /** Optional node rendered inside the tab row, after the tabs (right-aligned). */
+  tabsTrailing?: ReactNode;
   activeTab: string;
   onTab: (key: string) => void;
   onClose: () => void;
@@ -17,6 +19,7 @@ interface DetailPaneProps {
 export function DetailPane({
   header,
   tabs,
+  tabsTrailing,
   activeTab,
   onTab,
   onClose,
@@ -52,7 +55,7 @@ export function DetailPane({
       </div>
       {/* #1109: skip the tab bar when there is only one tab — it's a redundant
           label that duplicates the section header (e.g. "Developer > Developer"). */}
-      {tabs.length > 1 && (
+      {(tabs.length > 1 || tabsTrailing != null) && (
         <div className="c-dtabs" role="tablist">
           {tabs.map((t) => (
             <button
@@ -67,6 +70,7 @@ export function DetailPane({
               {t.count != null && <span className="cb">{t.count}</span>}
             </button>
           ))}
+          {tabsTrailing != null && <div className="c-dtabs-trailing">{tabsTrailing}</div>}
         </div>
       )}
       <div className="c-dbody" role="tabpanel">
