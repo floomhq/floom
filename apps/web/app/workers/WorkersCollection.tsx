@@ -55,6 +55,7 @@ import {
   type TriggerRow,
 } from "@/components/worker-form";
 import { WorkerInputForm, requiredRunInputErrors } from "@/components/run-page/WorkerInputForm";
+import { ShareModal } from "@/components/sharing/ShareModal";
 import { WorkerBrainEditor } from "@/components/worker/WorkerBrainEditor";
 import { WorkerToolsEditor } from "@/components/worker/WorkerToolsEditor";
 import { WorkerFeedbackPanel } from "@/components/worker/WorkerFeedbackPanel";
@@ -1303,6 +1304,7 @@ function WorkerDetailActions({
   const [d, applyDetail] = useWorkerDetail(w.id);
   const [runOpen, setRunOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
+  const [shareOpen, setShareOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [saving, setSaving] = useState(false);
   const [runInputs, setRunInputs] = useState<Record<string, unknown>>({});
@@ -1434,20 +1436,9 @@ function WorkerDetailActions({
             >
               {w.enabled === false ? "Resume" : "Pause"}
             </DropdownMenuItem>
-            {/* Share — reuse the real standalone share-link endpoint + clipboard. */}
-            <DropdownMenuItem
-              onClick={() => {
-                api.workers.shareLink(w.id)
-                  .then((link) => {
-                    const url = (link as { url?: string }).url ?? "";
-                    if (url && navigator.clipboard) void navigator.clipboard.writeText(url);
-                    toast.success(url ? "Share link copied" : "Share link created");
-                  })
-                  .catch((err: Error) => toast.error(err.message || "Could not create share link"));
-              }}
-            >
-              Share
-            </DropdownMenuItem>
+            {/* Share — opens the real Share modal (company access + grants +
+                anonymous public link with revoke), not a bare copy-link. */}
+            <DropdownMenuItem onClick={() => setShareOpen(true)}>Share</DropdownMenuItem>
             <DropdownMenuItem
               onClick={() => {
                 const next = workerStageKey(w) === "live" ? "draft" : "live";
@@ -1546,6 +1537,28 @@ function WorkerDetailActions({
           </form>
         </DialogContent>
       </Dialog>
+
+      <ShareModal
+        open={shareOpen}
+        onOpenChange={setShareOpen}
+        asset={{ type: "worker", name: w.name }}
+        companyAccess={{
+          visibility: d?.visibility ?? w.visibility ?? "private",
+          setVisibility: async (next) => {
+            const updated = await api.workers.setVisibility(w.id, next);
+            applyDetail(updated);
+            onUpdated({ ...w, visibility: updated.visibility });
+            return updated.visibility;
+          },
+          grantAsset: { type: "worker", id: w.id },
+        }}
+        publicLink={{
+          create: async () => (await api.workers.shareLink(w.id)).url,
+          revoke: async () => {
+            await api.workers.revokeShareLink(w.id);
+          },
+        }}
+      />
 
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
         <DialogContent className="sm:max-w-lg">

@@ -278,6 +278,11 @@ export const api = {
       });
       return link;
     },
+    // #766: revoke (disable) a worker's public share link. POSTing again rotates a fresh one.
+    revokeShareLink: (id: string) =>
+      fetchJson<{ revoked: boolean }>(`/workers/${encodeURIComponent(id)}/share-link`, {
+        method: "DELETE",
+      }),
     importFromShare: (token: string) =>
       fetchJson<{ worker_id: string; url: string }>("/workers/import-from-share", {
         method: "POST",
@@ -405,6 +410,16 @@ export const api = {
       return run;
     },
     logs: (id: string) => fetchJson<import("./types").LogEntry[]>(`/runs/${id}/logs`),
+    // #765: mint a read-only public share link for a run (owner only). Create-or-rotate.
+    shareLink: (id: string) =>
+      fetchJson<import("./types").StandaloneShareLink>(`/runs/${encodeURIComponent(id)}/share-link`, {
+        method: "POST",
+      }),
+    // #765/#766: revoke a run's public share link.
+    revokeShareLink: (id: string) =>
+      fetchJson<{ revoked: boolean }>(`/runs/${encodeURIComponent(id)}/share-link`, {
+        method: "DELETE",
+      }),
     cancel: (id: string) =>
       fetchJson<import("./types").ActionResponse>(`/runs/${id}/cancel`, {
         method: "POST",
@@ -638,6 +653,12 @@ export const api = {
       );
       return link;
     },
+    // #766: revoke a brain pack's public share link.
+    revokePackLink: (name: string) =>
+      fetchJson<{ revoked: boolean }>(
+        `/contexts/${encodeURIComponent(name)}/share-link`,
+        { method: "DELETE" }
+      ),
     delete: (name: string, force = false) =>
       fetchJson<{ status: string; referenced_by: string[] }>(
         `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
@@ -662,6 +683,12 @@ export const api = {
       );
       return link;
     },
+    // #766: revoke a brain file's public share link.
+    revokeFileLink: (name: string, path: string) =>
+      fetchJson<{ revoked: boolean }>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/share-link`,
+        { method: "DELETE" }
+      ),
     // #777: inspect a brain .db file — tables list, or a table's rows.
     sqlite: (name: string, path: string, table?: string) => {
       const qs = table ? `?table=${encodeURIComponent(table)}` : "";
