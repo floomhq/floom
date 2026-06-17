@@ -151,9 +151,9 @@ def test_stdio_mcp_server_compilation_uses_secret_env():
                 "label": "filesystem",
                 "transport": "stdio",
                 "command": "npx",
-                "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
+                "args": ["-y", "@modelcontextprotocol/server-filesystem", "workspace"],
                 "env": {"GITHUB_TOKEN": "secret:GITHUB_PAT", "MODE": "readonly"},
-                "cwd": "/workspace",
+                "cwd": "workspace",
                 "allowed_tools": ["read_file"],
             }
         }
@@ -163,9 +163,9 @@ def test_stdio_mcp_server_compilation_uses_secret_env():
 
     assert server.name == "filesystem"
     assert server.params.command == "npx"
-    assert server.params.args == ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
+    assert server.params.args == ["-y", "@modelcontextprotocol/server-filesystem", "workspace"]
     assert server.params.env == {"GITHUB_TOKEN": "token-123", "MODE": "readonly"}
-    assert server.params.cwd == "/workspace"
+    assert server.params.cwd == "workspace"
     assert server.tool_filter == {"allowed_tool_names": ["read_file"]}
 
 

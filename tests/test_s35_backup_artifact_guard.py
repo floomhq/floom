@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import shutil
+import shlex
 import sqlite3
 import subprocess
 import sys
@@ -16,6 +17,13 @@ ROOT = Path(__file__).resolve().parents[1]
 API_DIR = ROOT / "apps" / "api"
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
+
+
+def _bash_path(path: Path) -> str:
+    text = path.as_posix()
+    if os.name == "nt" and len(text) >= 3 and text[1:3] == ":/":
+        return f"/mnt/{text[0].lower()}{text[2:]}"
+    return text
 
 
 def test_prerun_disk_guard_blocks_when_free_space_below_threshold(monkeypatch):
@@ -127,6 +135,12 @@ def test_backup_script_writes_db_artifacts_and_manifest(tmp_path):
     data_dir.mkdir()
     ops_dir.mkdir()
     shutil.copy2(ROOT / "ops" / "rotate-artifacts.py", ops_dir / "rotate-artifacts.py")
+    script_copy = ops_dir / "backup-db.sh"
+    script_copy.write_text(
+        (ROOT / "ops" / "backup-db.sh").read_text(encoding="utf-8").replace("\r\n", "\n"),
+        encoding="utf-8",
+        newline="\n",
+    )
     db_path = data_dir / "floom.db"
     artifacts_dir = data_dir / "artifacts"
     backup_root = tmp_path / "backups"
@@ -148,19 +162,22 @@ def test_backup_script_writes_db_artifacts_and_manifest(tmp_path):
     conn.close()
 
     env = {
-        **os.environ,
-        "WORKEROS_ROOT": str(workeros_root),
-        "WORKEROS_API_DIR": str(api_dir),
+        "WORKEROS_ROOT": _bash_path(workeros_root),
+        "WORKEROS_API_DIR": _bash_path(api_dir),
         "FLOOM_DB": "../../data/floom.db",
         "FLOOM_ARTIFACTS_DIR": "../../data/artifacts",
-        "WORKEROS_BACKUP_ROOT": str(backup_root),
+        "WORKEROS_BACKUP_ROOT": _bash_path(backup_root),
         "WORKEROS_BACKUP_HOURLY": "48",
         "WORKEROS_BACKUP_DAILY": "7",
         "WORKEROS_BACKUP_WEEKLY": "4",
     }
+    bash_env = " ".join(
+        f"{key}={shlex.quote(value)}"
+        for key, value in env.items()
+        if key.startswith(("WORKEROS_", "FLOOM_"))
+    )
     result = subprocess.run(
-        ["bash", str(ROOT / "ops" / "backup-db.sh")],
-        env=env,
+        ["bash", "-lc", f"{bash_env} bash {shlex.quote(_bash_path(script_copy))}"],
         text=True,
         capture_output=True,
         check=True,
@@ -172,4 +189,4 @@ def test_backup_script_writes_db_artifacts_and_manifest(tmp_path):
     assert (backup / "floom.db.gz").is_file()
     assert (backup / "artifacts.tar.gz").is_file()
     assert (backup / "manifest.json").is_file()
-    assert f"wrote {backup}" in result.stdout
+    assert f"wrote {_bash_path(backup)}" in result.stdout

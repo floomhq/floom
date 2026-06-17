@@ -29,6 +29,7 @@ def _load_api(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_BLOBS_DIR", str(tmp_path / "blobs"))
     monkeypatch.setenv("FLOOM_SECRET", AUTH["x-floom-secret"])
+    monkeypatch.setenv("COMPOSIO_API_KEY", "cmp-test")
     monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
     monkeypatch.setenv("WORKEROS_USER_ID", "federico")
     monkeypatch.setenv("trusted_proxies", "*")
@@ -173,7 +174,7 @@ def test_workers_validation_does_not_echo_input(monkeypatch, tmp_path):
 def test_workers_oversize_json_rejected_413(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
-    payload = b'{"name":"' + (b"A" * (512 * 1024)) + b'"}'
+    payload = b'{"name":"' + (b"A" * (main.WORKER_FILES_BODY_LIMIT_BYTES + 1)) + b'"}'
 
     resp = client.post(
         "/workers",

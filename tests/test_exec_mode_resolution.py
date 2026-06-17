@@ -1,4 +1,5 @@
 import sys
+import subprocess
 from pathlib import Path
 
 import pytest
@@ -106,7 +107,14 @@ def test_pure_script_without_command_defaults_command_engine_211():
 
 def test_stock_worker_migration_dispatch_matrix():
     rows = {}
-    for path in sorted((ROOT / "workers").glob("*/worker.yml")):
+    result = subprocess.run(
+        ["git", "-C", str(ROOT), "ls-files", "workers/*/worker.yml"],
+        capture_output=True,
+        text=True,
+        check=True,
+    )
+    for rel_path in result.stdout.splitlines():
+        path = ROOT / rel_path
         contract = parse_worker_manifest(yaml.safe_load(path.read_text()))
         assert isinstance(contract, WorkerContract)
         config = worker_contract_to_worker_config(contract, path.parent.name)
