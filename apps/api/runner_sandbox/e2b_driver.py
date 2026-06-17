@@ -52,6 +52,7 @@ MAX_CONTEXT_TAR_MEMBER_BYTES = 100 * 1024 * 1024  # 100 MiB per member
 MAX_CONTEXT_TAR_TOTAL_BYTES = 250 * 1024 * 1024  # 250 MiB total per extraction
 E2B_COMMAND_REQUEST_TIMEOUT_BUFFER_SECONDS = 60
 E2B_INSTALL_COMMAND_MIN_REQUEST_TIMEOUT_SECONDS = 300
+MAX_WORKER_ERROR_OUTPUT_CHARS = 1000
 _OOM_EXIT_CODES = {137, -9}
 _OOM_MARKERS = (
     "code 137",
@@ -431,6 +432,49 @@ def _exception_text(exc: Exception) -> str:
     return " ".join(part for part in parts if part).strip()
 
 
+def _coerce_output_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, bytearray):
+        return bytes(value).decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _exception_exit_code(exc: Exception) -> int | None:
+    for attr in ("exit_code", "returncode", "code"):
+        value = getattr(exc, attr, None)
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _worker_output_snippet(stdout: Any = None, stderr: Any = None) -> str:
+    parts: list[str] = []
+    stderr_text = _coerce_output_text(stderr).strip()
+    stdout_text = _coerce_output_text(stdout).strip()
+    if stderr_text:
+        parts.append(f"stderr:\n{stderr_text}")
+    if stdout_text:
+        parts.append(f"stdout:\n{stdout_text}")
+    text = "\n\n".join(parts).strip()
+    if len(text) > MAX_WORKER_ERROR_OUTPUT_CHARS:
+        return text[:MAX_WORKER_ERROR_OUTPUT_CHARS].rstrip() + "..."
+    return text
+
+
+def _append_worker_output_to_error(error: str, stdout: Any = None, stderr: Any = None) -> str:
+    snippet = _worker_output_snippet(stdout=stdout, stderr=stderr)
+    if not snippet:
+        return error
+    return f"{error}\n\nWorker output:\n{snippet}"
+
+
 def _looks_like_timeout_exception(exc: Exception) -> bool:
     text = _exception_text(exc).lower()
     return any(
@@ -537,6 +581,9 @@ def _read_result_json(
     sandbox: Any,
     result_path: str,
     log_fn: Callable,
+    *,
+    worker_stdout: Any = None,
+    worker_stderr: Any = None,
 ) -> "tuple[Optional[Dict[str, Any]], Optional[WorkerResult]]":
     """Read and parse the worker's result.json from the sandbox.
 
@@ -561,9 +608,13 @@ def _read_result_json(
         log_fn(f"[e2b] No result.json at {result_path}: {exc}", "error")
         return None, WorkerResult(
             status="error",
-            error=(
-                "Worker did not write a result. Check run.py wrote "
-                "result.json before exiting (the file is missing)."
+            error=_append_worker_output_to_error(
+                (
+                    "Worker did not write a result. Check run.py wrote "
+                    "result.json before exiting (the file is missing)."
+                ),
+                stdout=worker_stdout,
+                stderr=worker_stderr,
             ),
             error_code="missing_result",
         )
@@ -600,9 +651,13 @@ def _read_result_json(
         log_fn(f"[e2b] result.json at {result_path} is not valid JSON: {exc}", "error")
         return None, WorkerResult(
             status="error",
-            error=(
-                "Worker wrote a result.json that is not valid JSON: "
-                f"{exc}. Ensure run.py serializes a JSON object."
+            error=_append_worker_output_to_error(
+                (
+                    "Worker wrote a result.json that is not valid JSON: "
+                    f"{exc}. Ensure run.py serializes a JSON object."
+                ),
+                stdout=worker_stdout,
+                stderr=worker_stderr,
             ),
             error_code="invalid_result_json",
         )
@@ -616,10 +671,14 @@ def _read_result_json(
         )
         return None, WorkerResult(
             status="error",
-            error=(
-                "Worker result.json must be a JSON object, got "
-                f"{type(result_data).__name__}. Wrap your data in an "
-                '"outputs" object.'
+            error=_append_worker_output_to_error(
+                (
+                    "Worker result.json must be a JSON object, got "
+                    f"{type(result_data).__name__}. Wrap your data in an "
+                    '"outputs" object.'
+                ),
+                stdout=worker_stdout,
+                stderr=worker_stderr,
             ),
             error_code="invalid_result_json",
         )
@@ -1428,30 +1487,32 @@ class E2BSandboxDriver(SandboxDriver):
             if _worker_call_token:
                 _cmd_envs["WORKEROS_RUN_TOKEN"] = _worker_call_token
                 _cmd_envs["WORKEROS_CALL_DEPTH"] = str(_self_depth)  # #994
-            proc = sandbox.commands.run(
-                command,
-                cwd=workdir,
-                envs=_cmd_envs,
-                on_stdout=on_stdout,
-                on_stderr=on_stderr,
-                timeout=float(effective_timeout_seconds),
-                request_timeout=_e2b_command_request_timeout(effective_timeout_seconds),
-            )
-
-            # E2B streams stdout/stderr through callbacks while the process is
-            # running. Keep the fallback for SDKs or test doubles that only
-            # return aggregate stdout/stderr after process exit.
-            if proc.stdout and not streamed_stdout:
-                _emit_command_output(proc.stdout, "info", "[e2b] ", log_fn)
-            if proc.stderr and not streamed_stderr:
-                _emit_command_output(proc.stderr, "warning", "[e2b] stderr: ", log_fn)
-
-            if proc.exit_code != 0:
-                if _looks_like_sandbox_oom(proc.exit_code, proc.stdout, proc.stderr):
-                    err = "Sandbox ran out of memory"
-                    stderr_snippet = (proc.stderr or proc.stdout or "")[:200].strip()
-                    if stderr_snippet:
-                        err += f": {stderr_snippet}"
+            try:
+                proc = sandbox.commands.run(
+                    command,
+                    cwd=workdir,
+                    envs=_cmd_envs,
+                    on_stdout=on_stdout,
+                    on_stderr=on_stderr,
+                    timeout=float(effective_timeout_seconds),
+                    request_timeout=_e2b_command_request_timeout(effective_timeout_seconds),
+                )
+            except Exception as exc:
+                exc_stdout = _coerce_output_text(getattr(exc, "stdout", None))
+                exc_stderr = _coerce_output_text(getattr(exc, "stderr", None))
+                if exc_stdout and not streamed_stdout:
+                    _emit_command_output(exc_stdout, "info", "[e2b] ", log_fn)
+                if exc_stderr and not streamed_stderr:
+                    _emit_command_output(exc_stderr, "warning", "[e2b] stderr: ", log_fn)
+                exc_exit_code = _exception_exit_code(exc)
+                if exc_exit_code is None:
+                    raise
+                if _looks_like_sandbox_oom(exc_exit_code, exc_stdout, exc_stderr):
+                    err = _append_worker_output_to_error(
+                        "Sandbox ran out of memory",
+                        stdout=exc_stdout,
+                        stderr=exc_stderr,
+                    )
                     log_fn(f"[e2b] {err}", "error")
                     return WorkerResult(
                         status="error",
@@ -1459,11 +1520,49 @@ class E2BSandboxDriver(SandboxDriver):
                         error_code="sandbox_oom",
                         retryable=False,
                     )
-                err = f"Worker exited with code {proc.exit_code}"
-                stderr_snippet = (proc.stderr or "")[:200].strip()
-                if stderr_snippet:
-                    err += f": {stderr_snippet}"
-                log_fn(f"[e2b] {err}", "error")
+                err = _append_worker_output_to_error(
+                    f"Worker exited with code {exc_exit_code}",
+                    stdout=exc_stdout,
+                    stderr=exc_stderr,
+                )
+                log_fn(f"[e2b] Worker exited with code {exc_exit_code}", "error")
+                return WorkerResult(
+                    status="error",
+                    error=err,
+                    error_code="execution_error",
+                    retryable=False,
+                )
+
+            # E2B streams stdout/stderr through callbacks while the process is
+            # running. Keep the fallback for SDKs or test doubles that only
+            # return aggregate stdout/stderr after process exit.
+            proc_stdout = _coerce_output_text(getattr(proc, "stdout", None))
+            proc_stderr = _coerce_output_text(getattr(proc, "stderr", None))
+            if proc_stdout and not streamed_stdout:
+                _emit_command_output(proc_stdout, "info", "[e2b] ", log_fn)
+            if proc_stderr and not streamed_stderr:
+                _emit_command_output(proc_stderr, "warning", "[e2b] stderr: ", log_fn)
+
+            if proc.exit_code != 0:
+                if _looks_like_sandbox_oom(proc.exit_code, proc_stdout, proc_stderr):
+                    err = _append_worker_output_to_error(
+                        "Sandbox ran out of memory",
+                        stdout=proc_stdout,
+                        stderr=proc_stderr,
+                    )
+                    log_fn(f"[e2b] {err}", "error")
+                    return WorkerResult(
+                        status="error",
+                        error=err,
+                        error_code="sandbox_oom",
+                        retryable=False,
+                    )
+                err = _append_worker_output_to_error(
+                    f"Worker exited with code {proc.exit_code}",
+                    stdout=proc_stdout,
+                    stderr=proc_stderr,
+                )
+                log_fn(f"[e2b] Worker exited with code {proc.exit_code}", "error")
                 return WorkerResult(
                     status="error",
                     error=err,
@@ -1475,7 +1574,13 @@ class E2BSandboxDriver(SandboxDriver):
             # failure mode (missing file / oversized / invalid JSON / not-a-dict
             # / non-dict outputs) — see _read_result_json (audit P1).
             result_path = f"{workdir}/result.json"
-            result_data, parse_error = _read_result_json(sandbox, result_path, log_fn)
+            result_data, parse_error = _read_result_json(
+                sandbox,
+                result_path,
+                log_fn,
+                worker_stdout="".join(streamed_stdout) or proc_stdout,
+                worker_stderr="".join(streamed_stderr) or proc_stderr,
+            )
             if parse_error is not None:
                 return parse_error
 
