@@ -24,7 +24,9 @@
     "test:web": "npm --prefix apps/web test",
     "build:mcp": "npm --prefix apps/mcp run build",
     "test:mcp": "npm --prefix apps/mcp test",
-    "test:api": "python -m pytest tests -q",
+    "test:api": "python -m pytest tests -q -n auto --dist loadscope",
+    "test:api:serial": "python -m pytest tests -q",
+    "test:api:full": "python -m pytest apps/api/tests -q",
     "test:crud": "python tests/crud_regression.py"
   }
 }
