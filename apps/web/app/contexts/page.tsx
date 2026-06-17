@@ -41,10 +41,6 @@ import { Button, buttonVariants } from "@/components/ui/button";
 import {
   DropdownMenu,
   DropdownMenuContent,
-  DropdownMenuGroup,
-  DropdownMenuItem,
-  DropdownMenuLabel,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import { cn } from "@/lib/utils";
@@ -2368,7 +2364,7 @@ function PreviewUnavailable({
 // instantly. Used for both packs and files (parameterized by `noun` + callbacks).
 // ===========================================================================
 
-function ShareControl({
+export function ShareControl({
   noun,
   onShare,
   onRevoke,
@@ -2426,10 +2422,13 @@ function ShareControl({
         {copied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5" />}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={6} className="w-80 p-1">
-        <DropdownMenuLabel className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+        {/* Custom interactive body (Create/Copy/Revoke buttons), not menu items,
+            so this uses plain styled markup rather than the menu-item primitives
+            (DropdownMenuLabel needs a Group parent in the base-ui kit). */}
+        <p className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
           Public share link
-        </DropdownMenuLabel>
-        <DropdownMenuSeparator className="-mx-1 my-1" />
+        </p>
+        <div className="mx-1 my-1 [border-bottom:var(--bd-div)]" />
         <div className="px-2 pb-1.5 pt-0.5 space-y-2">
           <p className="text-xs leading-5 text-muted-foreground">
             Anyone with the link can view and download this {noun}, no account needed.

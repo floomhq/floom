@@ -1,7 +1,16 @@
 import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
-import { render, screen } from "@testing-library/react";
-import { PackDetailPane } from "@/app/contexts/page";
+import { render, screen, waitFor } from "@testing-library/react";
+import userEvent from "@testing-library/user-event";
+import { PackDetailPane, ShareControl } from "@/app/contexts/page";
 import type { ContextDetail } from "@/lib/types";
+
+// Radix DropdownMenu needs these in jsdom to open on click.
+if (!(Element.prototype as { hasPointerCapture?: unknown }).hasPointerCapture) {
+  (Element.prototype as unknown as { hasPointerCapture: () => boolean }).hasPointerCapture = () => false;
+  (Element.prototype as unknown as { setPointerCapture: () => void }).setPointerCapture = () => {};
+  (Element.prototype as unknown as { releasePointerCapture: () => void }).releasePointerCapture = () => {};
+  (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = () => {};
+}
 
 // Round-09 r9 — Library (Context) item detail REAL build, structural proof of
 // the gaps closed against detail-context.md:
@@ -68,6 +77,31 @@ describe("Library item detail — header affordances (r9)", () => {
     expect(screen.queryByText(/never committed to git/i)).not.toBeInTheDocument();
     // Folder history is still offered for a git-tracked folder.
     expect(screen.getByText("Folder history")).toBeInTheDocument();
+  });
+});
+
+describe("(C) ShareControl menu — Copy AND Revoke (#766)", () => {
+  it("opens a menu with Create link, Revoke, and the honest copy text", async () => {
+    const user = userEvent.setup();
+    const onShare = vi.fn(async () => "https://workers.floom.dev/s/fls_x");
+    const onRevoke = vi.fn(async () => true);
+    render(<ShareControl noun="folder" onShare={onShare} onRevoke={onRevoke} />);
+    await user.click(screen.getByRole("button", { name: /share this folder/i }));
+    await waitFor(() => expect(screen.getByText("Public share link")).toBeInTheDocument());
+    // The fix: a Revoke affordance exists right next to the create/copy action.
+    expect(screen.getByRole("button", { name: /revoke/i })).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: /create link/i })).toBeInTheDocument();
+    expect(screen.getByText(/Anyone with the link can view and download/i)).toBeInTheDocument();
+  });
+
+  it("calls onRevoke when Revoke is clicked", async () => {
+    const user = userEvent.setup();
+    const onRevoke = vi.fn(async () => true);
+    render(<ShareControl noun="file" onShare={async () => "u"} onRevoke={onRevoke} />);
+    await user.click(screen.getByRole("button", { name: /share this file/i }));
+    await waitFor(() => expect(screen.getByRole("button", { name: /revoke/i })).toBeInTheDocument());
+    await user.click(screen.getByRole("button", { name: /revoke/i }));
+    await waitFor(() => expect(onRevoke).toHaveBeenCalledTimes(1));
   });
 });
 
