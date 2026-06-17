@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { reportError, logError } from "@/lib/notify";
 import type {
   WorkerSummary,
   WorkerDetail,
@@ -125,7 +126,8 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined, (d: WorkerDetai
         detailCache.set(id, d);
         if (alive) setDetail(d);
       })
-      .catch(() => {});
+      // #1446: per-worker detail; log only to avoid a toast per expanded worker.
+      .catch((err) => logError("Could not load worker details.", err));
     return () => {
       alive = false;
     };
@@ -596,7 +598,10 @@ function BrainTab({ w }: { w: WorkerSummary }) {
   const [packs, setPacks] = useState<{ name: string }[]>([]);
   const [busy, setBusy] = useState(false);
   const refreshPacks = useCallback(() => {
-    api.contexts.list().then(setPacks).catch(() => {});
+    api.contexts
+      .list()
+      .then(setPacks)
+      .catch((err) => reportError("Could not load knowledge packs.", err));
   }, []);
   useEffect(() => {
     refreshPacks();
@@ -1287,13 +1292,15 @@ export default function WorkersCollection({
           );
         }
       })
-      .catch(() => {});
+      // #1446: role lookup falls back to non-admin; log only, no toast (a
+      // permission-check failure should not nag the user).
+      .catch((err) => logError("Could not load your account role.", err));
     api.workers
       .list({ include_archived: true })
       .then((all) => {
         if (alive) setWorkers(all.filter((w) => !isSystemWorker(w)));
       })
-      .catch(() => {})
+      .catch((err) => reportError("Could not load workers.", err))
       .finally(() => {
         if (alive) setLoading(false);
       });

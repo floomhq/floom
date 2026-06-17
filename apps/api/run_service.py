@@ -52,6 +52,54 @@ def _semaphore_available_count() -> int:
     except AttributeError:
         return -1
 
+
+# ---------------------------------------------------------------------------
+# #1448: LLM-quota-aware scheduling. LLM calls happen INSIDE the E2B sandbox
+# (worker code), so the engine cannot intercept them. The lever it does control
+# is *run scheduling*: gate concurrent LLM-intensive runs under a shared
+# provider-quota budget so a few judge-heavy workers do not stack and 429 the
+# provider. A worker opts in via manifest `llm_intensive: true`; the budget is
+# WORKEROS_MAX_CONCURRENT_LLM_RUNS (defaults to the main cap = effectively off).
+# ---------------------------------------------------------------------------
+
+def _max_concurrent_llm_runs() -> int:
+    raw = os.environ.get("WORKEROS_MAX_CONCURRENT_LLM_RUNS", "")
+    if not raw:
+        return _max_concurrent_runs()
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return _max_concurrent_runs()
+
+
+_llm_execution_semaphore: Optional[threading.Semaphore] = None
+_llm_semaphore_lock = threading.Lock()
+
+
+def _get_llm_semaphore() -> threading.Semaphore:
+    global _llm_execution_semaphore
+    if _llm_execution_semaphore is None:
+        with _llm_semaphore_lock:
+            if _llm_execution_semaphore is None:
+                _llm_execution_semaphore = threading.Semaphore(_max_concurrent_llm_runs())
+    return _llm_execution_semaphore
+
+
+def _worker_is_llm_intensive(worker_id: str, repos: "Repositories") -> bool:
+    """Whether a worker declares heavy LLM use (manifest `llm_intensive`).
+
+    Reads the DB manifest (the source of truth the run was created against) so
+    the gate is consistent regardless of the on-disk registry state.
+    """
+    try:
+        rec = repos.workers.get_any(worker_id=worker_id)
+    except Exception:
+        return False
+    if not rec:
+        return False
+    manifest = rec.get("manifest") or {}
+    return bool(manifest.get("llm_intensive"))
+
 from dotenv import load_dotenv
 
 from contexts import context_scope_for_user, use_context_scope
@@ -148,8 +196,14 @@ def _schedule_retry(
     delay_seconds: int,
     user_id: str | None,
     repos: "Repositories",
+    trigger_source: str = "retry",
 ) -> None:
-    """Enqueue a retry run after *delay_seconds* in a daemon thread."""
+    """Enqueue a retry run after *delay_seconds* in a daemon thread.
+
+    trigger_source distinguishes the retry kind: "retry" for the worker retry
+    policy, "restart_retry" for #1434 restart recovery (used to bound recovery to
+    one attempt per lineage regardless of retry_attempt persistence).
+    """
 
     def _do_retry() -> None:
         if delay_seconds > 0:
@@ -161,7 +215,7 @@ def _schedule_retry(
                     user_id=user_id,
                     run_id=retry_run_id,
                     worker_id=worker_id,
-                    trigger_source="retry",
+                    trigger_source=trigger_source,
                     retry_of_run_id=original_run_id,
                     retry_attempt=attempt,
                 )
@@ -806,26 +860,32 @@ def _run_reaper_interval_seconds() -> int:
         return _RUN_REAPER_DEFAULT_INTERVAL_SECONDS
 
 
-def reap_abandoned_runs(
-    *,
-    repos: Repositories | None = None,
-    now: datetime | None = None,
-    timeout_seconds: int | None = None,
-    grace_seconds: int | None = None,
-) -> int:
-    """Fail stale `running` rows that no longer have a live executor.
+# #1434: auto-requeue config. A deploy/restart severs the in-process executor
+# thread, so in-flight runs are reaped as "abandoned". Instead of surfacing a
+# hard failure, auto-retry them a bounded number of times (the parent run still
+# records the abandonment; a fresh retry run carries the work to completion).
+def _auto_requeue_abandoned_enabled() -> bool:
+    return os.environ.get("WORKEROS_AUTO_REQUEUE_ABANDONED_RUNS", "1") not in _FALSEY
 
-    This is intentionally conservative: a row must be older than the normal run
-    timeout plus a grace margin, and its run id must not be present in the
-    current process' active execution registry. The repository update is also
-    status-gated, so repeated sweeps are harmless.
-    """
-    repos_obj = _repos(repos)
-    timeout = DEFAULT_TIMEOUT_SECONDS if timeout_seconds is None else max(0, int(timeout_seconds))
-    grace = _run_reaper_grace_seconds() if grace_seconds is None else max(0, int(grace_seconds))
-    now_dt = now or datetime.now(timezone.utc)
-    if now_dt.tzinfo is None:
-        now_dt = now_dt.replace(tzinfo=timezone.utc)
+
+def _max_restart_retries() -> int:
+    raw = os.environ.get("WORKEROS_MAX_RESTART_RETRIES", "")
+    if not raw:
+        return 1
+    try:
+        return max(0, int(raw))
+    except ValueError:
+        return 1
+
+
+def _fail_stale_running_rows(
+    repos_obj: Repositories,
+    *,
+    timeout: int,
+    grace: int,
+    now_dt: datetime,
+) -> list[dict[str, Any]]:
+    """Status-gated fail of stale `running` rows; returns the rows it failed."""
     cutoff_iso = (now_dt - timedelta(seconds=timeout + grace)).isoformat()
     active_ids = _active_run_ids()
 
@@ -858,7 +918,139 @@ def reap_abandoned_runs(
             timeout,
             grace,
         )
-    return len(failed)
+    return failed
+
+
+def _resolve_reaper_window(
+    timeout_seconds: int | None,
+    grace_seconds: int | None,
+    now: datetime | None,
+) -> tuple[int, int, datetime]:
+    timeout = DEFAULT_TIMEOUT_SECONDS if timeout_seconds is None else max(0, int(timeout_seconds))
+    grace = _run_reaper_grace_seconds() if grace_seconds is None else max(0, int(grace_seconds))
+    now_dt = now or datetime.now(timezone.utc)
+    if now_dt.tzinfo is None:
+        now_dt = now_dt.replace(tzinfo=timezone.utc)
+    return timeout, grace, now_dt
+
+
+def reap_abandoned_runs(
+    *,
+    repos: Repositories | None = None,
+    now: datetime | None = None,
+    timeout_seconds: int | None = None,
+    grace_seconds: int | None = None,
+) -> int:
+    """Fail stale `running` rows that no longer have a live executor.
+
+    This is intentionally conservative: a row must be older than the normal run
+    timeout plus a grace margin, and its run id must not be present in the
+    current process' active execution registry. The repository update is also
+    status-gated, so repeated sweeps are harmless.
+    """
+    repos_obj = _repos(repos)
+    timeout, grace, now_dt = _resolve_reaper_window(timeout_seconds, grace_seconds, now)
+    return len(_fail_stale_running_rows(repos_obj, timeout=timeout, grace=grace, now_dt=now_dt))
+
+
+def _requeue_abandoned_run(repos_obj: Repositories, row: dict[str, Any]) -> bool:
+    """Schedule a fresh retry for one reaped-abandoned run, if within budget.
+
+    Returns True if a retry was enqueued. Reuses the existing retry plumbing
+    (a new run with retry_of_run_id set), so it works identically on the SQLite
+    and Supabase repositories and is bounded by retry_attempt to avoid loops on a
+    worker that crashes the process on every boot.
+    """
+    run_id = str(row.get("run_id") or row.get("id") or "")
+    user_id = row.get("user_id")
+    if not run_id or not user_id:
+        return False
+    try:
+        run = repos_obj.runs.get_any(run_id=run_id)
+    except Exception:
+        run = None
+    if not run:
+        return False
+    worker_id = str(run.get("worker_id") or "")
+    if not worker_id:
+        return False
+    max_restart = _max_restart_retries()
+    if max_restart <= 0:
+        return False
+    # Bound recovery to one attempt per lineage. The retry run is tagged
+    # trigger_source="restart_retry"; if it too gets abandoned we do NOT recover
+    # it again. This is robust even though create() does not persist
+    # retry_attempt, so a misconfigured worker cannot loop the executor forever.
+    trigger_source = str(run.get("trigger_source") or "")
+    if trigger_source.startswith("restart_retry"):
+        return False
+    attempt = int(run.get("retry_attempt") or 0)
+    inputs = run.get("input_json")
+    if isinstance(inputs, str):
+        try:
+            inputs = json.loads(inputs or "{}")
+        except Exception:
+            inputs = {}
+    if not isinstance(inputs, dict):
+        inputs = {}
+    try:
+        _schedule_retry(
+            original_run_id=run_id,
+            worker_id=worker_id,
+            inputs=inputs,
+            attempt=attempt + 1,
+            delay_seconds=0,
+            user_id=str(user_id),
+            repos=repos_obj,
+            trigger_source="restart_retry",
+        )
+        repos_obj.runs.add_log(
+            user_id=str(user_id),
+            run_id=run_id,
+            level="info",
+            message=(
+                f"Auto-retrying after server restart (attempt {attempt + 1} of "
+                f"{max_restart}); a new run was enqueued to finish the work."
+            ),
+            timestamp=datetime.now(timezone.utc).isoformat(),
+            trace_id=None,
+        )
+        return True
+    except Exception as exc:
+        logger.warning("Failed to auto-requeue abandoned run %s: %s", run_id, exc)
+        return False
+
+
+def recover_abandoned_runs(
+    *,
+    repos: Repositories | None = None,
+    now: datetime | None = None,
+    timeout_seconds: int | None = None,
+    grace_seconds: int | None = None,
+) -> dict[str, int]:
+    """Reap stale `running` rows AND auto-requeue the ones within retry budget.
+
+    #1434: a deploy/restart kills the executor thread, so in-flight runs would
+    otherwise hard-fail ("abandoned"). This reaps them (so the orphaned row
+    leaves `running`) and then enqueues a bounded retry so the user's work
+    completes instead of dying on every deploy. Returns {"failed", "requeued"}.
+    """
+    repos_obj = _repos(repos)
+    timeout, grace, now_dt = _resolve_reaper_window(timeout_seconds, grace_seconds, now)
+    failed = _fail_stale_running_rows(repos_obj, timeout=timeout, grace=grace, now_dt=now_dt)
+    requeued = 0
+    if failed and _auto_requeue_abandoned_enabled():
+        for row in failed:
+            if _requeue_abandoned_run(repos_obj, row):
+                requeued += 1
+        if requeued:
+            logger.warning(
+                "Auto-requeued %d of %d abandoned run(s) after restart",
+                requeued,
+                len(failed),
+            )
+            _wake_drain()
+    return {"failed": len(failed), "requeued": requeued}
 
 # ---------------------------------------------------------------------------
 # Queue drain loop
@@ -928,6 +1120,21 @@ def _drain_one_batch() -> None:
             logger.debug("Queue drain: no free execution slots, pausing")
             break
 
+        # #1448: LLM-intensive runs additionally take an LLM-budget slot so a
+        # burst of judge-heavy workers cannot stack and 429 the shared provider
+        # quota. If that budget is full, leave THIS run queued, free the main
+        # slot, and keep draining other (non-heavy) runs - the heavy run is
+        # picked up when an LLM slot frees (releasing it wakes the drain).
+        llm_slot = False
+        if _worker_is_llm_intensive(worker_id, repos_obj):
+            llm_slot = _get_llm_semaphore().acquire(blocking=False)
+            if not llm_slot:
+                logger.debug(
+                    "Queue drain: LLM budget full, deferring llm-intensive run %s", run_id
+                )
+                _get_semaphore().release()
+                continue
+
         try:
             # Claim the run before spawning a worker thread so subsequent drain
             # passes cannot dispatch the same queued row twice. The repository
@@ -941,13 +1148,15 @@ def _drain_one_batch() -> None:
             if claimed is None:
                 logger.info("Queue drain: skipped run %s because another drainer claimed it", run_id)
                 _get_semaphore().release()
+                if llm_slot:
+                    _get_llm_semaphore().release()
                 continue
 
             # Slot acquired — dispatch the run in a thread.
             # The semaphore is released inside _run_thread_entry_with_semaphore.
             thread = threading.Thread(
                 target=_run_thread_entry_with_semaphore,
-                args=(run_id, worker_id, inputs, user_id, None),
+                args=(run_id, worker_id, inputs, user_id, None, llm_slot),
                 daemon=True,
                 name=f"workeros-run-{run_id}",
             )
@@ -976,6 +1185,8 @@ def _drain_one_batch() -> None:
                     rollback_exc,
                 )
             _get_semaphore().release()
+            if llm_slot:
+                _get_llm_semaphore().release()
 
 
 def start_drain_loop() -> None:
@@ -1010,7 +1221,9 @@ def _run_reaper_loop() -> None:
     logger.info("Run reaper loop started (interval=%ss)", interval)
     while not _run_reaper_stop.wait(timeout=interval):
         try:
-            reap_abandoned_runs()
+            # #1434: recover (reap + bounded auto-requeue) instead of a bare reap,
+            # so a run orphaned by a restart is retried rather than hard-failed.
+            recover_abandoned_runs()
         except Exception as exc:
             logger.warning("Run reaper sweep failed: %s", exc)
 
@@ -1184,8 +1397,15 @@ def fail_interrupted_runs_on_startup(
 
     The user_id parameter is kept for compatibility with older callers; the
     reaper operates across owners because server restarts are process-wide.
+
+    #1434: at process startup there is no live executor for ANY `running` row
+    (the active-run registry is empty), so recover immediately (timeout=0,
+    grace=0) rather than waiting out the timeout+grace window the periodic reaper
+    uses to avoid racing live runs. recover_abandoned_runs also auto-requeues the
+    orphaned runs within retry budget so a deploy does not silently kill them.
+    Returns the count failed (for back-compat with callers that expect an int).
     """
-    return reap_abandoned_runs(repos=repos)
+    return recover_abandoned_runs(repos=repos, timeout_seconds=0, grace_seconds=0)["failed"]
 
 
 _PENDING_APPROVAL_RESTART_ERROR = (
@@ -1862,11 +2082,14 @@ def _run_thread_entry_with_semaphore(
     inputs: Dict[str, Any],
     user_id: str | None = None,
     repos: Repositories | None = None,
+    llm_slot: bool = False,
 ) -> None:
     """Thread entry point used by the drain loop.
 
     The semaphore is already acquired before this thread is created.  We
     release it in the finally block so the next queued run can be dispatched.
+    #1448: llm_slot is True when this run also holds an LLM-budget slot
+    (llm-intensive worker); it is released alongside the main slot.
     """
     try:
         # #1026: re-establish the run's tenant/workspace scope on this thread
@@ -1902,5 +2125,8 @@ def _run_thread_entry_with_semaphore(
     finally:
         _unregister_active_run(run_id)
         _get_semaphore().release()
+        if llm_slot:
+            # #1448: free the LLM-budget slot so a deferred llm-intensive run can run.
+            _get_llm_semaphore().release()
         # Wake the drain loop so the next queued run can fill the freed slot.
         _wake_drain()

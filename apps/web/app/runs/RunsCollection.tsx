@@ -13,6 +13,7 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { StatusPill } from "@/components/collection/StatusPill";
 import { api } from "@/lib/api";
+import { reportError, logError } from "@/lib/notify";
 import { formatRelative } from "@/lib/formatters";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
@@ -48,7 +49,8 @@ function useRunDetail(id: string): RunDetail | undefined {
         detailCache.set(id, rd);
         if (alive) setD(rd);
       })
-      .catch(() => {});
+      // #1446: per-run detail; log only to avoid a toast per expanded run.
+      .catch((err) => logError("Could not load run details.", err));
     return () => {
       alive = false;
     };
@@ -222,7 +224,10 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
   useEffect(() => {
     void loadInitial();
     // Content tags are inherited from the parent worker (SPEC §11).
-    api.workers.list().then(setWorkers).catch(() => {});
+    api.workers
+      .list()
+      .then(setWorkers)
+      .catch((err) => reportError("Could not load workers for run filters.", err));
   }, [loadInitial]);
 
   // worker_id → its content tags, for tag filtering + the shared vocabulary.

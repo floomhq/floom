@@ -36,6 +36,7 @@ import {
 } from "@/lib/useChatStream";
 import { exportConversationMarkdown } from "@/lib/emily-chat-export";
 import { api } from "@/lib/api";
+import { reportError, logError } from "@/lib/notify";
 import type { ConversationSummary } from "@/lib/types";
 import type { AttachedFile, ChatMessage } from "@/lib/emily-chat-types";
 
@@ -260,7 +261,7 @@ function MessageCopyAction({ text }: { text: string }) {
         setCopied(true);
         window.setTimeout(() => setCopied(false), 1200);
       })
-      .catch(() => {});
+      .catch((err) => reportError("Could not copy to clipboard.", err));
   }, [text]);
 
   if (!text) return null;
@@ -846,7 +847,8 @@ export function EmilyDock({ className }: { className?: string }) {
           (overview?.stats?.paused_workers_count ?? 0) > 0;
         setIsNewWorkspace(!hasWorkers);
       })
-      .catch(() => {});
+      // #1446: only drives a cosmetic "new workspace" hint; log, no toast.
+      .catch((err) => logError("Could not load workspace overview.", err));
     return () => { alive = false; };
   }, []);
   // #1141: reset the dock conversation when navigating away from /chat?mode=create

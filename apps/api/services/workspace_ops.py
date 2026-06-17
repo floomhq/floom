@@ -358,3 +358,42 @@ def _safe_zip_rel(name: str) -> Optional[str]:
 
 def _active_workspace_id(request: Request) -> str:
     return requested_local_workspace_id(request) or DEFAULT_WORKSPACE_ID
+
+
+# #1444: the per-workspace worker-call fan-out limit. The setting is stored in
+# workspace_settings under "worker_call_fanout_limit"; the effective value is
+# always clamped to [1, MAX_WORKER_CALLS_PER_RUN] so a workspace can only ever
+# LOWER the limit below the hard ceiling, never raise it above it.
+WORKER_CALL_FANOUT_SETTING_KEY = "worker_call_fanout_limit"
+
+
+def resolve_workspace_fanout_limit(workspace_id: str) -> int:
+    """Return the effective worker-call fan-out cap for a workspace.
+
+    Defaults to the hard ceiling (run_token.MAX_WORKER_CALLS_PER_RUN) when the
+    setting is unset, malformed, or the lookup fails. A configured value is
+    clamped into [1, ceiling] so the workspace setting can only tighten, never
+    loosen, the runaway/cost guard.
+    """
+    from run_token import MAX_WORKER_CALLS_PER_RUN
+
+    ceiling = MAX_WORKER_CALLS_PER_RUN
+    try:
+        from db import get_db
+
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT value FROM workspace_settings WHERE workspace_id = ? AND key = ?",
+                (workspace_id, WORKER_CALL_FANOUT_SETTING_KEY),
+            ).fetchone()
+    except Exception:
+        return ceiling
+    if not row:
+        return ceiling
+    try:
+        value = int(str(row["value"]).strip())
+    except (TypeError, ValueError):
+        return ceiling
+    if value < 1:
+        return 1
+    return min(value, ceiling)

@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { api, API_BASE } from "@/lib/api";
+import { reportError } from "@/lib/notify";
 import type {
   CurrentUser,
   LocalWorkspaceListResponse,
@@ -1300,7 +1301,10 @@ function BehaviourSettingsInner({ canEdit }: { canEdit: boolean }) {
     api.workspace.setSetting(key, next ? "true" : "false").catch((err) => {
       toast.error((err as Error).message || "Could not save setting");
       // Re-sync from the server on failure.
-      api.workspace.getSettings().then(setValues).catch(() => {});
+      api.workspace
+        .getSettings()
+        .then(setValues)
+        .catch((err) => reportError("Could not load workspace settings.", err));
     });
   };
 
@@ -1335,6 +1339,7 @@ const MODEL_DEFAULT_FIELDS: {
   { key: "default_model", label: "Default model", placeholder: "e.g. claude-opus-4-8", type: "text", hint: "Used by new workers that don't pin a model." },
   { key: "max_output_tokens", label: "Max output tokens", placeholder: "e.g. 4096", type: "number", hint: "Per-run output ceiling." },
   { key: "spend_cap_usd", label: "Monthly spend cap (USD)", placeholder: "e.g. 100", type: "number", hint: "Soft cap for run costs this month." },
+  { key: "worker_call_fanout_limit", label: "Worker-call fan-out limit", placeholder: "e.g. 50 (max 50)", type: "number", hint: "Max child runs one run can spawn via worker-to-worker calls. Capped at 50." },
 ];
 
 // #791: workspace region / timezone / company domain, persisted to the

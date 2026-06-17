@@ -114,3 +114,108 @@ def test_reaper_skips_stale_running_run_with_active_execution_handle(repo_bundle
     row = repos.runs.get(user_id="user-a", run_id="run-active")
     assert row["status"] == RunStatus.RUNNING.value
     assert row["completed_at"] is None
+
+
+# --- #1434: auto-requeue abandoned runs after a restart -----------------------
+
+def _make_stale_running(repos, manifest, run_id, *, started, retry_attempt=0):
+    repos.runs.create(
+        user_id="user-a",
+        run_id=run_id,
+        worker_id="worker-a",
+        status=RunStatus.RUNNING.value,
+        started_at=started,
+        trigger_source="manual",
+        runner="e2b",
+        input_json={"q": "hello"},
+        retry_attempt=retry_attempt,
+    )
+
+
+def test_recover_requeues_abandoned_run_within_budget(repo_bundle, monkeypatch):
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    _create_worker(repos, manifest)
+    now = dt.datetime.now(dt.timezone.utc)
+    stale = (now - dt.timedelta(seconds=500)).isoformat()
+    _make_stale_running(repos, manifest, "run-stale", started=stale)
+
+    scheduled: list[dict] = []
+    monkeypatch.setattr(
+        run_service,
+        "_schedule_retry",
+        lambda **kw: scheduled.append(kw),
+    )
+    monkeypatch.setenv("WORKEROS_AUTO_REQUEUE_ABANDONED_RUNS", "1")
+    monkeypatch.setenv("WORKEROS_MAX_RESTART_RETRIES", "1")
+
+    result = run_service.recover_abandoned_runs(
+        repos=repos, now=now, timeout_seconds=300, grace_seconds=60
+    )
+
+    assert result == {"failed": 1, "requeued": 1}
+    # The orphaned row still records the abandonment (a fresh retry carries the work).
+    row = repos.runs.get(user_id="user-a", run_id="run-stale")
+    assert row["status"] == RunStatus.FAILED.value
+    # A retry was scheduled for the right run/worker, carrying the original inputs.
+    assert len(scheduled) == 1
+    assert scheduled[0]["original_run_id"] == "run-stale"
+    assert scheduled[0]["worker_id"] == "worker-a"
+    assert scheduled[0]["attempt"] == 1
+    assert scheduled[0]["inputs"] == {"q": "hello"}
+
+
+def test_recover_does_not_requeue_a_restart_retry(repo_bundle, monkeypatch):
+    """A run that is ITSELF a restart-recovery retry must not be recovered again,
+    so a worker that crashes the executor on every boot cannot loop forever. The
+    bound is on trigger_source (robust even though create() drops retry_attempt)."""
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    _create_worker(repos, manifest)
+    now = dt.datetime.now(dt.timezone.utc)
+    stale = (now - dt.timedelta(seconds=500)).isoformat()
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-restart-retry",
+        worker_id="worker-a",
+        status=RunStatus.RUNNING.value,
+        started_at=stale,
+        trigger_source="restart_retry",
+        runner="e2b",
+        input_json={"q": "hello"},
+    )
+
+    scheduled: list[dict] = []
+    monkeypatch.setattr(run_service, "_schedule_retry", lambda **kw: scheduled.append(kw))
+    monkeypatch.setenv("WORKEROS_MAX_RESTART_RETRIES", "1")
+
+    result = run_service.recover_abandoned_runs(
+        repos=repos, now=now, timeout_seconds=300, grace_seconds=60
+    )
+
+    assert result == {"failed": 1, "requeued": 0}
+    assert scheduled == []
+    assert repos.runs.get(user_id="user-a", run_id="run-restart-retry")["status"] == RunStatus.FAILED.value
+
+
+def test_recover_respects_disable_flag(repo_bundle, monkeypatch):
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    _create_worker(repos, manifest)
+    now = dt.datetime.now(dt.timezone.utc)
+    stale = (now - dt.timedelta(seconds=500)).isoformat()
+    _make_stale_running(repos, manifest, "run-stale", started=stale)
+
+    scheduled: list[dict] = []
+    monkeypatch.setattr(run_service, "_schedule_retry", lambda **kw: scheduled.append(kw))
+    monkeypatch.setenv("WORKEROS_AUTO_REQUEUE_ABANDONED_RUNS", "0")
+
+    result = run_service.recover_abandoned_runs(
+        repos=repos, now=now, timeout_seconds=300, grace_seconds=60
+    )
+
+    assert result == {"failed": 1, "requeued": 0}
+    assert scheduled == []
