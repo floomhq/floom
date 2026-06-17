@@ -46,6 +46,15 @@ export function workerStatusMetric(
     context: paused > 0 ? `${paused} paused` : "Running when triggered",
   };
 }
+
+// round-09 #7: runs_today is a count of RUNS, never distinct workers. The hero
+// copy used to read "N workers ran today", fabricating a worker count from the
+// runs metric (live: "30 workers ran today" with 1 worker + 3 runs). This pure
+// helper labels the runs_today metric honestly so the copy can never say
+// "worker". Covered by tests/overview-worker-metric.test.ts.
+export function runsTodayLabel(runsToday: number): "run" | "runs" {
+  return runsToday === 1 ? "run" : "runs";
+}
 import { api } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelative } from "@/lib/formatters";
@@ -508,7 +517,7 @@ export function OverviewDashboard({
             {runsToday > 0 && (
               <>
                 <b className="font-semibold text-[var(--text-primary)]">
-                  {runsToday} {runsToday === 1 ? "worker" : "workers"}
+                  {runsToday} {runsTodayLabel(runsToday)}
                 </b>{" "}
                 ran today
                 {needsYouCount > 0 ? "; " : "."}

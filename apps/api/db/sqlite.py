@@ -743,7 +743,7 @@ class SqliteWorkerRepository:
             "SELECT w.id, w.name, w.trigger_type, w.enabled, w.owner_id, sv.manifest_json "
             "FROM workers w "
             "LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id "
-        )
+        )  # w.owner_id is returned to the caller (round-09 #1 split-brain fix)
         with get_db() as conn:
             try:
                 role_row = conn.execute(
@@ -821,6 +821,12 @@ class SqliteWorkerRepository:
                 "name": r["name"],
                 "trigger_type": r["trigger_type"],
                 "enabled": bool(r["enabled"]),
+                # owner_id lets the caller distinguish a stock/example worker the
+                # operator genuinely OWNS (OSS seed-all → shown) from a seeded
+                # stock worker surfaced only by the stock-id / public-visibility
+                # padding that the owner-scoped grid never shows (cloud → hidden).
+                # Without it Emily's list diverged from the grid (round-09 #1).
+                "owner_id": r["owner_id"],
                 "manifest_json": r["manifest_json"],
             }
             for r in rows

@@ -59,6 +59,29 @@ export function humaniseAppName(s: string): string {
     .replace(/^[a-z]/, (c) => c.toUpperCase());
 }
 
+/**
+ * Headline count tiles for the Connections collection (round-09 #6).
+ *
+ * The page is ONE unified list (connection | mcp | secret), but a SECRET is not
+ * a connection: a "set" secret was mapped to statusKey "active", so counting
+ * "active" over the whole merged list rendered "43 active connections" when the
+ * workspace had 0 connections and 43 secrets. The fix scopes the connection
+ * health tiles (active / reauth / error) to connection+mcp items ONLY, and
+ * reports secrets as their own count — so the headline never claims a secret is
+ * an active connection. Pure + tested (tests/connections-unify.test.ts).
+ */
+export function collectionCounts(items: UnifiedConn[]): { value: number; label: string }[] {
+  const conns = items.filter((i) => i.kind === "connection" || i.kind === "mcp");
+  const secrets = items.filter((i) => i.kind === "secret");
+  return [
+    { value: conns.length, label: "connections" },
+    { value: secrets.length, label: "secrets" },
+    { value: conns.filter((i) => i.statusKey === "active").length, label: "active" },
+    { value: conns.filter((i) => i.statusKey === "reauth").length, label: "reauth" },
+    { value: conns.filter((i) => i.statusKey === "error").length, label: "error" },
+  ];
+}
+
 export function toUnified(connections: ConnectionItem[], secrets: SecretItem[]): UnifiedConn[] {
   const fromConns: UnifiedConn[] = connections.map((c) => {
     const isMcp = c.kind === "mcp";
