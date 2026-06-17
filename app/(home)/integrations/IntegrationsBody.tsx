@@ -11,9 +11,10 @@
  */
 
 import type { ReactNode } from "react";
-import { useCallback, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
+import { X } from "lucide-react";
 import { Hl, V3Shell } from "@/app/v3/V3Shell";
 import "@/app/v3/theme.css";
 import catalog from "./catalog.json";
@@ -95,11 +96,22 @@ function CardLogo({ entry }: { entry: CatalogEntry }) {
   );
 }
 
-function IntegrationCard({ entry }: { entry: CatalogEntry }) {
+function IntegrationCard({
+  entry,
+  onOpen,
+}: {
+  entry: CatalogEntry;
+  onOpen: (entry: CatalogEntry) => void;
+}) {
   const meta = FEATURED[entry.slug];
   return (
-    <article className="flex min-h-[120px] flex-col rounded-[16px] bg-card p-5 transition-colors hover:bg-secondary/60">
-      <div className="flex items-center justify-between gap-4">
+    <button
+      type="button"
+      onClick={() => onOpen(entry)}
+      className="flex min-h-[120px] flex-col rounded-[16px] bg-card p-5 text-left transition-colors hover:bg-secondary/60 focus:outline-none focus-visible:ring-1 focus-visible:ring-[var(--v3-accent)]"
+      aria-label={`View ${entry.name} details`}
+    >
+      <div className="flex w-full items-center justify-between gap-4">
         <CardLogo entry={entry} />
         {meta ? (
           <span className="rounded-full bg-secondary px-2.5 py-1 text-[10.5px] font-medium text-muted-foreground">
@@ -107,13 +119,93 @@ function IntegrationCard({ entry }: { entry: CatalogEntry }) {
           </span>
         ) : null}
       </div>
-      <h2 className="mt-4 truncate text-[15px] font-semibold tracking-[-0.012em]" title={entry.name}>
+      <h2 className="mt-4 w-full truncate text-[15px] font-semibold tracking-[-0.012em]" title={entry.name}>
         {entry.name}
       </h2>
       {meta ? (
         <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{meta.detail}</p>
       ) : null}
-    </article>
+    </button>
+  );
+}
+
+/* Detail popover — flat, hairline, squircle, near-black close, backdrop closes.
+   Shows the catalog data that exists (name, logo, category + one-line detail for
+   featured tools) and an honest note that triggers/endpoints surface on connect:
+   the catalog has no trigger/endpoint data, so we don't invent any. */
+function IntegrationModal({
+  entry,
+  onClose,
+}: {
+  entry: CatalogEntry;
+  onClose: () => void;
+}) {
+  const meta = FEATURED[entry.slug];
+
+  useEffect(() => {
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") onClose();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, [onClose]);
+
+  return (
+    <div
+      className="fixed inset-0 z-[70] flex items-center justify-center bg-black/28 px-4 py-8 backdrop-blur-sm"
+      role="dialog"
+      aria-modal="true"
+      aria-label={`${entry.name} details`}
+      onClick={onClose}
+    >
+      <motion.div
+        initial={{ opacity: 0, y: 8, scale: 0.98 }}
+        animate={{ opacity: 1, y: 0, scale: 1 }}
+        transition={{ duration: 0.22, ease: EASE }}
+        className="w-full max-w-[420px] rounded-[20px] bg-[var(--bg-app)] p-5 text-left"
+        onClick={(e) => e.stopPropagation()}
+      >
+        <div className="flex items-start justify-between gap-4">
+          <div className="flex items-center gap-3">
+            <CardLogo entry={entry} />
+            <div>
+              <h2 className="text-[18px] font-semibold tracking-[-0.018em]">{entry.name}</h2>
+              {meta ? (
+                <span className="mt-1 inline-flex rounded-full bg-secondary px-2.5 py-0.5 text-[10.5px] font-medium text-muted-foreground">
+                  {meta.category}
+                </span>
+              ) : null}
+            </div>
+          </div>
+          <button
+            type="button"
+            onClick={onClose}
+            aria-label="Close"
+            className="flex h-8 w-8 shrink-0 items-center justify-center rounded-[10px] bg-foreground text-background transition-opacity hover:opacity-85"
+          >
+            <X className="h-4 w-4" />
+          </button>
+        </div>
+
+        {meta ? (
+          <p className="mt-4 text-[13.5px] leading-relaxed text-muted-foreground">{meta.detail}</p>
+        ) : (
+          <p className="mt-4 text-[13.5px] leading-relaxed text-muted-foreground">
+            Connect {entry.name} so a worker can read the right context and act on your behalf, with approval gates.
+          </p>
+        )}
+
+        <div className="mt-5 border-t border-[rgba(16,17,20,.08)] pt-4">
+          <p className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+            Triggers &amp; endpoints
+          </p>
+          <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">
+            Available once connected. Floom exposes {entry.name}&apos;s actions to a worker after you
+            link it from the connections page, scoped to what that worker needs.
+          </p>
+        </div>
+      </motion.div>
+    </div>
   );
 }
 
@@ -132,6 +224,8 @@ const INITIAL_VISIBLE = 90;
 export function IntegrationsBody() {
   const [query, setQuery] = useState("");
   const [showAll, setShowAll] = useState(false);
+  const [selected, setSelected] = useState<CatalogEntry | null>(null);
+  const openEntry = useCallback((entry: CatalogEntry) => setSelected(entry), []);
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -216,7 +310,7 @@ export function IntegrationsBody() {
         <div className="pb-12">
           <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
             {visible.map((entry) => (
-              <IntegrationCard key={entry.slug} entry={entry} />
+              <IntegrationCard key={entry.slug} entry={entry} onOpen={openEntry} />
             ))}
           </div>
           {hasMore ? (
@@ -250,6 +344,10 @@ export function IntegrationsBody() {
           Browse workers
         </Link>
       </Reveal>
+
+      {selected ? (
+        <IntegrationModal entry={selected} onClose={() => setSelected(null)} />
+      ) : null}
     </V3Shell>
   );
 }
