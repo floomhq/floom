@@ -271,7 +271,44 @@ trigger:
 
 **Recommended:** `long_description`, `example_input`, `example_output`, `use_cases`, `how_it_works`, `version`, `tags`, `folder`. These power the Overview tab.
 
-**Conditional:** `limits` (agent mode), `secrets` (only the ones you read), `capabilities.network.egress` (set true if you call external APIs), `approvals` (only if you want human-in-the-loop).
+**Conditional:** `limits` (agent mode), `secrets` (only the ones you read), `capabilities.network.egress` (set true if you call external APIs), `approvals` (only if you want human-in-the-loop), `calls` (only if this worker invokes other workers).
+
+### Pre-defined inputs for automated triggers
+
+A manual run takes inputs from the Run form. Scheduled / webhook / app-event
+triggers have no form, so they use the worker's saved **input defaults**
+(`input_values`) — set via `workers.update` (MCP/API) or the worker's settings.
+Think of it as a reusable input template pinned per worker:
+
+- **Schedule (cron):** the scheduler injects `input_values` on every fire
+  (`scheduler.py: _effective_scheduled_inputs`). If a *required* input has no
+  pre-set value, that scheduled fire is **skipped** (and logged) rather than run
+  half-formed.
+- **Webhook / app event:** `input_values` act as defaults and are **merged** with
+  the incoming event payload — the payload wins where both set the same key.
+
+### Worker-to-worker calls (`calls:`)
+
+A worker can invoke other workers ("stacking"). Declare the allowlist at the top
+level of `worker.yml`:
+
+```yaml
+calls:
+  - data-enricher      # this worker may invoke ONLY these worker IDs
+  - report-writer
+```
+
+Scoping is enforced **server-side** (not on the honor system):
+
+- **Which workers:** a call to a worker not in `calls:` is rejected (403). The
+  allowlist is also baked into the run's **signed** worker-call token, so it can't
+  be forged from inside the sandbox.
+- **Chain depth:** a call chain is capped at **3 levels** (`MAX_CALL_DEPTH`) — A
+  calls B calls C, but C cannot reach a 4th. Prevents runaway recursion.
+- **Fan-out count:** a single run may spawn at most **50 child runs**
+  (`MAX_WORKER_CALLS_PER_RUN`) across all of its calls — a cost / runaway guard,
+  enforced at child-run creation. (A per-workspace, user-configurable limit
+  *within* this ceiling is planned — see the tracking issue.)
 
 ---
 
