@@ -2309,6 +2309,11 @@ class WorkerDetail(BaseModel):
     visibility: str = "private"
     starred: bool = False  # #782: per-user favorite flag
     permissions: AssetPermissions = Field(default_factory=AssetPermissions)
+    # Round-09 gap #1: the saved per-worker default inputs (recipe column
+    # `input_values_json`). Scheduled/automated runs merge these over schema
+    # defaults (scheduler._effective_scheduled_inputs). Surfaced so the
+    # Operations > Inputs panel can LOAD what is saved instead of writing blind.
+    input_values: Dict[str, Any] = Field(default_factory=dict)
 
 
 class PublicWorkerInput(BaseModel):

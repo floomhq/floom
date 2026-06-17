@@ -390,6 +390,11 @@ export interface WorkerDetail {
   // Text excerpt of the most recent successful run's result (≤500 chars).
   latest_output?: string | null;
   latest_output_run_id?: string | null;
+  // Round-09 gap #1: the saved per-worker default inputs (recipe column
+  // `input_values_json`). Scheduled/automated runs merge these over schema
+  // defaults. Surfaced so the Operations > Inputs panel can LOAD what is saved,
+  // not just write blind. Empty object when nothing is saved.
+  input_values?: Record<string, unknown>;
 }
 
 // A feedback comment left on a worker (SPEC §12). Anyone who can SEE the worker

@@ -660,6 +660,19 @@ def _build_worker_detail(
         repos=repos,
     )
 
+    # Round-09 gap #1: surface the saved default inputs (recipe column
+    # `input_values_json`) so the Operations > Inputs panel can LOAD what a
+    # scheduled/automated run will use, not write blind. Same recipe source the
+    # scheduler reads (_effective_scheduled_inputs). Falls back to empty on any
+    # recipe-fetch failure rather than failing the whole detail response.
+    saved_input_values: Dict[str, Any] = {}
+    try:
+        recipe = repos.workers.get_recipe(worker_id=worker_id)
+        if isinstance(recipe, dict) and isinstance(recipe.get("input_values"), dict):
+            saved_input_values = recipe["input_values"]
+    except Exception:
+        logger.debug("input_values recipe fetch failed for worker %s", worker_id, exc_info=True)
+
     return WorkerDetail(
         id=worker["id"],
         name=worker["name"],
@@ -698,6 +711,7 @@ def _build_worker_detail(
         owner_id=worker.get("owner_id"),
         visibility=str(worker.get("visibility") or "private"),
         permissions=_worker_permissions(worker, user_id=user_id, repos=repos, owner_aliases=owner_aliases),
+        input_values=saved_input_values,  # round-09 gap #1
     )
 
 
