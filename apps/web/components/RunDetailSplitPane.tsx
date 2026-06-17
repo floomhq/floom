@@ -324,6 +324,19 @@ function TimelineRow({ item }: { item: TimelineItem }) {
   );
 }
 
+// R9: the in-app run detail (the /runs Collection split-pane) reuses this
+// exact ai-elements (Tool / Task / StackTrace) step+tool-call renderer instead
+// of hand-rolling its own steps table. RunDetailSplitPane stays the single
+// source of truth for transcript rendering. `RunTranscript` is the thin export
+// wrapper that lets the Collection Logs tab render the same thing.
+export function RunTranscript({ run }: { run: RunDetail }) {
+  return <TranscriptView run={run} parts={partsFromRun(run)} />;
+}
+
+export function RunToolCalls({ run }: { run: RunDetail }) {
+  return <ToolCallsView calls={run.tool_calls ?? []} />;
+}
+
 function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
   if (run.status === "queued") {
     const positionMsg = run.queue_position != null && run.queue_position > 0
