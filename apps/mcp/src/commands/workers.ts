@@ -229,13 +229,17 @@ function validateNativeRuntimeContract(
 
 async function readOptionalText(path: string): Promise<string | undefined> {
   try {
-    return await readFile(path, "utf8");
+    return stripUtf8Bom(await readFile(path, "utf8"));
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "ENOENT") {
       return undefined;
     }
     throw error;
   }
+}
+
+function stripUtf8Bom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
 export async function loadWorkerSource(dirArg: string): Promise<{ source?: WorkerSource; errors: string[] }> {
@@ -248,7 +252,7 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
 
   let workerYml = "";
   try {
-    workerYml = await readFile(workerYmlPath, "utf8");
+    workerYml = stripUtf8Bom(await readFile(workerYmlPath, "utf8"));
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "ENOENT") {
       return { errors: [`Missing required file: ${workerYmlPath}`] };
@@ -409,7 +413,8 @@ function formatConnections(connections: unknown): string[] {
 function apiErrorDetail(error: WorkerosApiError): string {
   const body = error.body;
   if (body && typeof body === "object" && "detail" in body) {
-    return String((body as { detail: unknown }).detail);
+    const detail = (body as { detail: unknown }).detail;
+    return typeof detail === "string" ? detail : JSON.stringify(detail);
   }
   return error.message;
 }
