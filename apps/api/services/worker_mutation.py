@@ -310,12 +310,17 @@ def _mutate_worker_contexts(
     *,
     auth: AuthContext,
     repos: Repositories,
+    request: Request,
 ) -> WorkerDetail:
     """#790: apply a mutation to a worker's mounted contexts (attach/detach/
     set-writeable) by patching the DB manifest (drives detail + runs) and the
     on-disk worker.yml (survives reload), without a full YAML rewrite."""
     from models import WorkerDetail
     from worker_registry import WORKERS_DIR, invalidate_worker_cache
+    # #1455(b): attaching/detaching a context rewrites worker.yml + the manifest,
+    # so it is a worker write and takes the same workspace-context guard as the
+    # other mutations (it previously skipped it).
+    _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)

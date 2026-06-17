@@ -57,3 +57,62 @@ def test_fanout_constant_is_a_sane_ceiling():
 
     assert isinstance(MAX_WORKER_CALLS_PER_RUN, int)
     assert MAX_WORKER_CALLS_PER_RUN == 50
+
+
+# --- #1444: per-workspace configurable fan-out limit (within the 50 hard cap) ---
+
+def test_workspace_fanout_setting_validation():
+    """The setting accepts 1..ceiling and rejects anything outside that range,
+    so a workspace can lower but never raise the cap."""
+    from fastapi import HTTPException
+    from routers.workspace import _validate_workspace_setting
+    from run_token import MAX_WORKER_CALLS_PER_RUN
+
+    assert _validate_workspace_setting("worker_call_fanout_limit", "10") == "10"
+    assert (
+        _validate_workspace_setting("worker_call_fanout_limit", str(MAX_WORKER_CALLS_PER_RUN))
+        == str(MAX_WORKER_CALLS_PER_RUN)
+    )
+    for bad in ("0", "-1", str(MAX_WORKER_CALLS_PER_RUN + 1), "abc", ""):
+        try:
+            _validate_workspace_setting("worker_call_fanout_limit", bad)
+        except HTTPException as exc:
+            assert exc.status_code == 422
+        else:
+            raise AssertionError(f"expected rejection for {bad!r}")
+
+
+def test_resolve_workspace_fanout_limit_defaults_and_clamps(repo_bundle):
+    """Unset -> hard ceiling; a stored value is clamped into [1, ceiling]."""
+    from db import get_db, now_iso
+    from run_token import MAX_WORKER_CALLS_PER_RUN
+    from services.workspace_ops import (
+        WORKER_CALL_FANOUT_SETTING_KEY,
+        resolve_workspace_fanout_limit,
+    )
+
+    ws = "ws-fanout-test"
+    # Unset -> defaults to the hard ceiling.
+    assert resolve_workspace_fanout_limit(ws) == MAX_WORKER_CALLS_PER_RUN
+
+    def _set(value: str) -> None:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT INTO workspace_settings (workspace_id, key, value, updated_at)
+                VALUES (?, ?, ?, ?)
+                ON CONFLICT(workspace_id, key) DO UPDATE SET value = excluded.value
+                """,
+                (ws, WORKER_CALL_FANOUT_SETTING_KEY, value, now_iso()),
+            )
+
+    _set("5")
+    assert resolve_workspace_fanout_limit(ws) == 5
+    # Above the ceiling is clamped down (defence in depth even if validation is bypassed).
+    _set(str(MAX_WORKER_CALLS_PER_RUN + 100))
+    assert resolve_workspace_fanout_limit(ws) == MAX_WORKER_CALLS_PER_RUN
+    # Below 1 floors at 1; malformed falls back to the ceiling.
+    _set("0")
+    assert resolve_workspace_fanout_limit(ws) == 1
+    _set("not-an-int")
+    assert resolve_workspace_fanout_limit(ws) == MAX_WORKER_CALLS_PER_RUN

@@ -62,6 +62,7 @@ class _WorkerContextUpdateRequest(BaseModel):
 def attach_worker_context(
     worker_id: str,
     payload: _WorkerContextAttachRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
@@ -78,7 +79,7 @@ def attach_worker_context(
         contexts.append({"name": name, "writeable": payload.writeable})
         return contexts
 
-    return _mutate_worker_contexts(worker_id, _add, auth=auth, repos=repos)
+    return _mutate_worker_contexts(worker_id, _add, auth=auth, repos=repos, request=request)
 
 
 @worker_lifecycle_router.patch("/workers/{worker_id}/contexts/{context_name}", response_model=WorkerDetail)
@@ -86,6 +87,7 @@ def update_worker_context(
     worker_id: str,
     context_name: str,
     payload: _WorkerContextUpdateRequest,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
@@ -99,7 +101,7 @@ def update_worker_context(
                 found["hit"] = True
         return contexts
 
-    detail = _mutate_worker_contexts(worker_id, _update, auth=auth, repos=repos)
+    detail = _mutate_worker_contexts(worker_id, _update, auth=auth, repos=repos, request=request)
     if not found["hit"]:
         raise HTTPException(status_code=404, detail="Context not attached to this worker")
     return detail
@@ -109,6 +111,7 @@ def update_worker_context(
 def detach_worker_context(
     worker_id: str,
     context_name: str,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
@@ -120,7 +123,7 @@ def detach_worker_context(
         found["hit"] = len(kept) != len(contexts)
         return kept
 
-    detail = _mutate_worker_contexts(worker_id, _remove, auth=auth, repos=repos)
+    detail = _mutate_worker_contexts(worker_id, _remove, auth=auth, repos=repos, request=request)
     if not found["hit"]:
         raise HTTPException(status_code=404, detail="Context not attached to this worker")
     return detail

@@ -40,6 +40,10 @@ const PUBLIC_PAGE_PREFIXES = [
   "/c/", // branded claim short-link; rewritten to the API /c/{token} route,
   //       which 302s to the (auth-gated) /settings?…_claim= URL. The short-link
   //       hop itself carries no session, so it must stay public here.
+  "/start/", // #1447: channel-first onboarding sub-pages (#817), reachable pre-session.
+  //       Trailing slash keeps this from matching e.g. /startup-foo (OW-02).
+  "/auth/magic/", // #1447: magic-link token consumption. A logged-out visitor follows
+  //       the email link here to establish a session, so it must stay public.
 ];
 
 // Pages reachable WITHOUT a session cookie, matched EXACTLY (not by prefix).
@@ -49,12 +53,21 @@ const PUBLIC_PAGE_PREFIXES = [
 const PUBLIC_PAGE_EXACT = [
   "/privacy", // OW-02: legal page, public (no auth required)
   "/terms", // OW-02: legal page, public (no auth required)
+  "/start", // #1447: onboarding landing root. The "/start/" prefix above covers
+  //       sub-pages; this exact entry covers the bare /start (prefix needs a slash).
 ];
 
 // /api/proxy sub-paths that map to PUBLIC upstream endpoints and must stay
 // reachable without a Floom session (OAuth callbacks and signed approvals).
 const PUBLIC_PROXY_PATHS = ["/api/proxy/connections/callback"];
-const PUBLIC_PROXY_PREFIXES = ["/api/proxy/approvals/public/"];
+const PUBLIC_PROXY_PREFIXES = [
+  "/api/proxy/approvals/public/",
+  // #1447: magic-link CONSUMPTION (GET /auth/magic/{token}) is hit by a
+  // logged-out recipient to establish a session, so the proxy hop must be
+  // public. The token in the path is the secret. Issuance (POST
+  // /auth/magic-link) stays gated - it has no logged-out caller.
+  "/api/proxy/auth/magic/",
+];
 
 function isPublicPage(pathname: string): boolean {
   if (pathname === "/login") return true;

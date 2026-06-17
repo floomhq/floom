@@ -4,6 +4,7 @@ import { useEffect, useState } from "react";
 import { AlertTriangle, Copy, ExternalLink, Lock, X } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { reportError } from "@/lib/notify";
 import type { AssetVisibility } from "@/lib/types";
 import { Alert, AlertDescription, AlertTitle } from "@/components/ui/alert";
 import {
@@ -56,7 +57,7 @@ export function ShareModal({
     api.share
       .listGrants(grantAsset.type, grantAsset.id)
       .then(setGrants)
-      .catch(() => {});
+      .catch((err) => reportError("Could not load the share links.", err));
   }, [open, grantAsset]);
 
   const invite = async () => {

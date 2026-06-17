@@ -327,6 +327,7 @@ def set_worker_visibility(
 @worker_admin_router.post("/workers/{worker_id}/restore", response_model=WorkerDetail)
 def restore_worker(
     worker_id: str,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
@@ -338,6 +339,10 @@ def restore_worker(
     from worker_registry import WORKERS_DIR as _WORKERS_DIR, invalidate_worker_cache
     import re as _re
 
+    # #1455(b): archive/restore are worker writes, so they take the same
+    # workspace-context guard as create/update/delete - previously they skipped
+    # it, so the cloud header requirement was enforced inconsistently.
+    _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(
@@ -377,6 +382,7 @@ def restore_worker(
 @worker_admin_router.post("/workers/{worker_id}/archive", response_model=WorkerDetail)
 def archive_worker(
     worker_id: str,
+    request: Request,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> WorkerDetail:
@@ -390,6 +396,8 @@ def archive_worker(
     from worker_registry import WORKERS_DIR as _WORKERS_DIR, invalidate_worker_cache
     import re as _re
 
+    # #1455(b): same workspace-write guard as restore/create/update/delete.
+    _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
     worker = _get_visible_worker(

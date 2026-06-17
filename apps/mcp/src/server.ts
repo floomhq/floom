@@ -6,6 +6,7 @@ import { McpServer } from "@modelcontextprotocol/sdk/server/mcp.js";
 import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
 import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
+import { readCredentials } from "./lib/credentials.js";
 
 const DEFAULT_API_BASE = "https://workers-api.floom.dev";
 const TERMINAL_RUN_STATUSES = new Set([
@@ -46,16 +47,38 @@ function resolvePath(path: string): string {
   return `/api${path.startsWith("/") ? "" : "/"}${path}`;
 }
 
+// #1455: the workspace id resolved once at startup from readCredentials() (env
+// OR ~/.config/workeros/credentials.json). authHeader() is synchronous and runs
+// per-request, so we cache it here instead of reading the creds file each call.
+let resolvedWorkspaceId: string | undefined;
+
+// #1455: the cloud hard-requires x-workeros-workspace on worker WRITES
+// (WORKEROS_REQUIRE_WORKSPACE_HEADER_FOR_WRITES=1). The CLI's lib/api.ts always
+// sends it; this server used to omit it, so every MCP worker mutation 400'd on
+// cloud while reads/secrets/contexts (which fall back to the PAT's default
+// workspace) silently worked - a confusing partial failure. Mirror the CLI:
+// send the header whenever we know the id, in every auth mode.
+function activeWorkspaceId(): string | undefined {
+  return process.env.WORKEROS_WORKSPACE_ID?.trim() || resolvedWorkspaceId;
+}
+
 function authHeader(): Record<string, string> {
+  const headers: Record<string, string> = {};
   const token = process.env.WORKEROS_API_TOKEN?.trim();
   if (token) {
-    return { "x-floom-token": token };
+    headers["x-floom-token"] = token;
+  } else {
+    const secret = process.env.WORKEROS_API_SECRET?.trim();
+    if (!secret) {
+      throw new Error("WORKEROS_API_TOKEN or WORKEROS_API_SECRET is required");
+    }
+    headers["x-floom-secret"] = secret;
   }
-  const secret = process.env.WORKEROS_API_SECRET?.trim();
-  if (!secret) {
-    throw new Error("WORKEROS_API_TOKEN or WORKEROS_API_SECRET is required");
+  const workspace = activeWorkspaceId();
+  if (workspace) {
+    headers["x-workeros-workspace"] = workspace;
   }
-  return { "x-floom-secret": secret };
+  return headers;
 }
 
 function jsonResult(data: unknown, summary?: string): CallToolResult {
@@ -1692,6 +1715,16 @@ export function createServer(): McpServer {
 }
 
 export async function main(): Promise<void> {
+  // #1455: resolve the active workspace once (env or creds file) so authHeader()
+  // can attach x-workeros-workspace to every request, matching the CLI.
+  try {
+    const creds = await readCredentials();
+    if (creds?.workspace_id) {
+      resolvedWorkspaceId = creds.workspace_id;
+    }
+  } catch {
+    // Non-fatal: fall back to the WORKEROS_WORKSPACE_ID env read in authHeader().
+  }
   const server = createServer();
   const transport = new StdioServerTransport();
   await server.connect(transport);

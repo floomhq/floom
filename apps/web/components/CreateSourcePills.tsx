@@ -22,6 +22,7 @@
 import { useEffect, useState } from "react";
 import { Brain, FileText, Plus } from "lucide-react";
 import { api } from "@/lib/api";
+import { reportError } from "@/lib/notify";
 
 // Canonical starter sources mirrored from the landing hero. Kept here (not
 // fetched) because they describe intent, not necessarily existing folders.
@@ -43,7 +44,7 @@ export function CreateSourcePills({ onPick }: { onPick: (source: string) => void
       .then((rows) => {
         if (alive) setFolders(rows.map((r) => ({ name: r.name })));
       })
-      .catch(() => {});
+      .catch((err) => reportError("Could not load your knowledge folders.", err));
     return () => {
       alive = false;
     };
