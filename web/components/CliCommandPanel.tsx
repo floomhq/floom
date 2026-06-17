@@ -10,7 +10,12 @@ import { getPublicApiBase, getPublicApiHost } from "@/lib/api-base";
 import { getActiveWorkspaceId } from "@/lib/api";
 import { buildMcpJson } from "@/lib/mcp-config";
 
-const SECRET_STORAGE_KEYS = ["floom_secret", "FLOOM_SECRET", "workeros_api_secret"];
+// #1185: use sessionStorage (cleared when the tab closes) instead of
+// localStorage so the OSS API secret is not persisted across sessions where it
+// could be read by XSS or malicious browser extensions. Legacy localStorage
+// keys are purged on mount so existing stored secrets don't linger.
+const SECRET_SESSION_KEY = "workeros_api_secret";
+const SECRET_LEGACY_LS_KEYS = ["floom_secret", "FLOOM_SECRET", "workeros_api_secret"];
 const API_BASE = getPublicApiBase();
 const PROXY_BASE = "/api/proxy";
 
@@ -22,54 +27,21 @@ const MCP_TARGETS: { value: McpTarget; label: string; hint: string }[] = [
   { value: "cursor",   label: "Cursor",   hint: "~/.cursor/mcp.json" },
   { value: "vscode",   label: "VS Code",  hint: ".vscode/mcp.json" },
   { value: "windsurf", label: "Windsurf", hint: "~/.codeium/windsurf/mcp_config.json" },
-  { value: "generic",  label: "Generic",  hint: "prints snippet — paste manually" },
+  { value: "generic",  label: "Generic",  hint: "prints snippet; paste manually" },
 ];
 
-export function readStoredSecret(): string {
+function readStoredSecret(): string {
   if (typeof window === "undefined") return "";
-  try {
-    for (const key of SECRET_STORAGE_KEYS) {
-      const value = window.sessionStorage.getItem(key);
-      if (value && value.trim()) return value.trim();
+  // Migrate: purge any legacy localStorage values and re-store in sessionStorage.
+  for (const key of SECRET_LEGACY_LS_KEYS) {
+    const ls = window.localStorage.getItem(key);
+    if (ls && ls.trim()) {
+      window.sessionStorage.setItem(SECRET_SESSION_KEY, ls.trim());
+      window.localStorage.removeItem(key);
+      return ls.trim();
     }
-  } catch {}
-  for (const key of SECRET_STORAGE_KEYS) {
-    try {
-      const value = window.localStorage.getItem(key);
-      if (value && value.trim()) {
-        const trimmed = value.trim();
-        try {
-          window.sessionStorage.setItem("floom_secret", trimmed);
-        } catch {}
-        purgeLegacyStoredSecrets();
-        return trimmed;
-      }
-    } catch {}
   }
-  return "";
-}
-
-export function storeSecretInSession(value: string) {
-  if (typeof window === "undefined") return;
-  try {
-    window.sessionStorage.setItem("floom_secret", value);
-  } catch {}
-  purgeLegacyStoredSecrets();
-}
-
-export function clearStoredSecrets() {
-  if (typeof window === "undefined") return;
-  try {
-    for (const key of SECRET_STORAGE_KEYS) window.sessionStorage.removeItem(key);
-  } catch {}
-  purgeLegacyStoredSecrets();
-}
-
-function purgeLegacyStoredSecrets() {
-  if (typeof window === "undefined") return;
-  try {
-    for (const key of SECRET_STORAGE_KEYS) window.localStorage.removeItem(key);
-  } catch {}
+  return window.sessionStorage.getItem(SECRET_SESSION_KEY)?.trim() ?? "";
 }
 
 function maskSecret(secret: string): string {
@@ -212,7 +184,10 @@ export function CliCommandPanel() {
   }, []);
 
   function storeSecret(value: string) {
-    storeSecretInSession(value);
+    try {
+      // #1185: sessionStorage only — secret is not persisted across sessions.
+      window.sessionStorage.setItem(SECRET_SESSION_KEY, value);
+    } catch {}
     setStoredSecret(value);
   }
 
@@ -265,7 +240,11 @@ export function CliCommandPanel() {
   }
 
   function clearSecret() {
-    clearStoredSecrets();
+    try {
+      window.sessionStorage.removeItem(SECRET_SESSION_KEY);
+      // Also clear any remaining legacy localStorage keys.
+      for (const key of SECRET_LEGACY_LS_KEYS) window.localStorage.removeItem(key);
+    } catch {}
     setStoredSecret("");
     setRevealed(false);
   }
@@ -488,7 +467,7 @@ export function CliCommandPanel() {
           {/* API surface */}
           <TabsContent value="api" className="space-y-4">
             <p className="text-xs text-muted-foreground">
-              Call the HTTP API directly with your token. It is a full read+write API —
+              Call the HTTP API directly with your token. It is a full read+write API:
               create workers, start runs, approve, rotate secrets, and more.
             </p>
             <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2.5 space-y-1.5 text-sm">
@@ -595,7 +574,7 @@ function ApiEndpointList() {
         <h3 className="text-sm font-medium text-foreground">
           Endpoints{" "}
           <span className="font-normal text-muted-foreground">
-            ({API_ENDPOINT_COUNT} — {API_MUTATION_COUNT} write)
+            ({API_ENDPOINT_COUNT}, {API_MUTATION_COUNT} write)
           </span>
         </h3>
         <input

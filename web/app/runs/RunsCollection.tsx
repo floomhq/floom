@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import Papa from "papaparse";
@@ -13,31 +13,39 @@ import {
 } from "@/components/ui/dropdown-menu";
 import { StatusPill } from "@/components/collection/StatusPill";
 import { api } from "@/lib/api";
+import { useRuns } from "@/lib/query/hooks";
 import { formatRelative } from "@/lib/formatters";
+import { humanizeKey } from "@/lib/run-format";
 import type { RunSummary, RunDetail, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { InlineFileOpen } from "@/components/file-viewer/InlineFileOpen";
+import { InlineFileOpen, type InlineFile } from "@/components/file-viewer/InlineFileOpen";
+import { OutputRenderer } from "@/components/output-renderer";
+import { GenericOutput } from "@/components/generic-output";
 import { traceSteps } from "@/lib/runs/trace";
 import { RUN_DETAIL_TABS, type RunDetailTab } from "@/lib/runs/tabs";
+import { useRunLogStream } from "@/lib/useRunLogStream";
 import { contentTagOptions } from "@/lib/workers/derive";
 import {
   formatDuration,
   formatTrigger,
   triggerKey,
   runStatusPill,
-  dayLabel,
   runSortTime,
   runsToCsvRows,
+  inferOutputType,
 } from "@/lib/runs/format";
 
 const detailCache = new Map<string, RunDetail>();
 
-function useRunDetail(id: string): RunDetail | undefined {
+function useRunDetail(id: string, status?: string): RunDetail | undefined {
   const [d, setD] = useState<RunDetail | undefined>(detailCache.get(id));
+  // §2.1: never serve a cached entry for an active (running/queued) run so the
+  // detail re-fetches when the run completes and the OutputTab shows final output.
+  const isActive = status === "running" || status === "queued";
   useEffect(() => {
-    if (detailCache.has(id)) {
+    if (!isActive && detailCache.has(id)) {
       setD(detailCache.get(id));
       return;
     }
@@ -45,28 +53,84 @@ function useRunDetail(id: string): RunDetail | undefined {
     api.runs
       .get(id)
       .then((rd) => {
-        detailCache.set(id, rd);
+        if (!isActive) detailCache.set(id, rd);
         if (alive) setD(rd);
       })
       .catch(() => {});
     return () => {
       alive = false;
     };
-  }, [id]);
+  }, [id, isActive]);
   return d;
 }
 
-// SPEC §4 Output: result + files; files open INLINE (breadcrumb/Back/Download);
-// PNG artifacts render as images (shared InlineFileOpen, rule #5).
+// Humane RESULT render (rule #2): reuse the shared OutputRenderer/GenericOutput
+// (the same primitives the run page uses) so the result reads as markdown / text
+// / table / formatted values — NOT a raw JSON.stringify wall. A declared
+// output_schema renders per field; otherwise each output key is rendered by its
+// inferred type. A Preview/Raw toggle (rule #1 — same content, two view modes,
+// NOT a separate tab) flips this humane view to the raw JSON source in place.
+function ResultPreview({ d }: { d: RunDetail }) {
+  const output = d.output ?? {};
+  const hasSchema = (d.output_schema?.length ?? 0) > 0;
+  const keys = Object.keys(output);
+  if (!hasSchema && keys.length === 0) {
+    return <div style={muted}>Run completed with no structured output.</div>;
+  }
+  if (hasSchema) {
+    return (
+      <div style={{ display: "flex", flexDirection: "column", gap: 20 }}>
+        {d.output_schema.map((field) => (
+          <OutputRenderer key={field.name} field={field} runId={d.id} />
+        ))}
+      </div>
+    );
+  }
+  return (
+    <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
+      {keys.map((key) => (
+        <div key={key} style={{ display: "flex", flexDirection: "column", gap: 6 }}>
+          <p style={{ ...kvK, fontWeight: 500 }}>{humanizeKey(key)}</p>
+          <GenericOutput type={inferOutputType(output[key])} value={output[key]} />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+// SPEC §4 Output: files FIRST (§2.6), then the humane result with a Preview/Raw
+// toggle. Files open INLINE (breadcrumb/Back/Download); a SINGLE file auto-opens
+// (rule #3 — no folder-then-file clicking), and every file carries the same
+// Preview/Raw toggle (#1289) for code/markdown/text. PNG artifacts render as
+// images (shared InlineFileOpen, rule #5).
 function OutputTab({ r }: { r: RunSummary }) {
-  const d = useRunDetail(r.id);
+  const d = useRunDetail(r.id, r.status);
+  // rule #1: Preview (humane) vs Raw (JSON source) on the SAME result.
+  const [resultMode, setResultMode] = useState<"preview" | "raw">("preview");
   if (!d) return <LoadingState rows={4} />;
-  const files = (d.artifacts ?? []).map((a) => ({
+  const files: InlineFile[] = (d.artifacts ?? []).map((a) => ({
     id: a.id,
     name: a.name,
     url: api.runs.artifactUrl(d.id, a.id),
     sizeBytes: a.size_bytes,
   }));
+  // rule #3: one file → auto-open it inline; multiple → list with the first
+  // selectable but the content still one click away (no folder depth).
+  const autoOpenId = files.length === 1 ? files[0].id : undefined;
+  // Run artifacts are same-origin proxy URLs (auth injected server-side), so the
+  // Preview/Raw toggle can read text content directly from the download URL.
+  const loadArtifactText = async (file: InlineFile): Promise<string> => {
+    const res = await fetch(file.url);
+    if (!res.ok) throw new Error(`Could not read ${file.name}`);
+    return res.text();
+  };
+  // .npz array viewer: same same-origin proxy URL, fetched as raw bytes and
+  // parsed header-only client-side (no numpy, no array-data load).
+  const loadArtifactBlob = async (file: InlineFile): Promise<ArrayBuffer> => {
+    const res = await fetch(file.url);
+    if (!res.ok) throw new Error(`Could not read ${file.name}`);
+    return res.arrayBuffer();
+  };
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       {d.error && (
@@ -75,34 +139,107 @@ function OutputTab({ r }: { r: RunSummary }) {
           {d.error}
         </div>
       )}
-      <div>
-        <h4 style={h4}>Result</h4>
-        <pre style={code}>{JSON.stringify(d.output ?? {}, null, 2)}</pre>
-      </div>
+      {/* §2.6: files shown FIRST, before the result */}
       {files.length > 0 && (
         <div>
-          <h4 style={h4}>Files</h4>
-          <InlineFileOpen files={files} rootLabel="Output" />
+          <h4 style={h4}>{files.length === 1 ? "File" : "Files"}</h4>
+          <InlineFileOpen
+            files={files}
+            rootLabel="Output"
+            defaultOpenId={autoOpenId}
+            loadText={loadArtifactText}
+            loadBlob={loadArtifactBlob}
+          />
         </div>
       )}
+      <div>
+        <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 9 }}>
+          <h4 style={{ ...h4, margin: 0 }}>Result</h4>
+          {/* rule #1: same result, Preview/Raw toggle in place — not a Raw tab. */}
+          <div className="c-vtog" role="group" aria-label="Result view mode" style={{ marginLeft: "auto" }}>
+            <button
+              type="button"
+              className={resultMode === "preview" ? "on" : ""}
+              aria-pressed={resultMode === "preview"}
+              onClick={() => setResultMode("preview")}
+            >
+              Preview
+            </button>
+            <button
+              type="button"
+              className={resultMode === "raw" ? "on" : ""}
+              aria-pressed={resultMode === "raw"}
+              onClick={() => setResultMode("raw")}
+            >
+              Raw
+            </button>
+          </div>
+        </div>
+        {resultMode === "preview" ? (
+          <ResultPreview d={d} />
+        ) : (
+          <pre style={code}>{JSON.stringify(d.output ?? {}, null, 2)}</pre>
+        )}
+      </div>
     </div>
   );
 }
 
-// SPEC §4 Trace: steps + logs. Transcript carries no per-step timestamps (no
-// structured field), so durations come from the run-level timeline, not faked.
-function TraceTab({ r }: { r: RunSummary }) {
-  const d = useRunDetail(r.id);
+// SPEC §4 Logs (rule #4 — renamed from "Trace"): steps + log lines. Transcript
+// carries no per-step timestamps (no structured field), so durations come from
+// the run-level timeline, not faked.
+
+/** #1275: read token count from every location the backend might put it. */
+function resolveTokenCount(d: import("@/lib/types").RunDetail): number | null {
+  if (d.total_tokens != null) return d.total_tokens;
+  // Some workers surface usage in the output object under common key names.
+  const out = d.output ?? {};
+  for (const key of ["total_tokens", "tokens", "token_count"]) {
+    const v = out[key];
+    if (typeof v === "number") return v;
+  }
+  // Nested usage object (e.g. { usage: { total_tokens: N } })
+  const usage = out["usage"];
+  if (usage && typeof usage === "object" && !Array.isArray(usage)) {
+    const u = usage as Record<string, unknown>;
+    const t = u["total_tokens"] ?? u["tokens"];
+    if (typeof t === "number") return t;
+    const i = typeof u["input_tokens"] === "number" ? (u["input_tokens"] as number) : 0;
+    const o = typeof u["output_tokens"] === "number" ? (u["output_tokens"] as number) : 0;
+    if (i + o > 0) return i + o;
+  }
+  return null;
+}
+
+// §2.4/§2.5: Stream logs in real-time via GET /runs/{id}/logs/stream (SSE).
+// §2.1: While the run is in-progress, show the live stream instead of static data.
+// The hook replays full history on connect, so no separate REST fetch is needed
+// for logs. We still load the run detail (useRunDetail) for steps, tokens, and
+// raw JSON -- those are not in the log stream.
+function LogsTab({ r }: { r: RunSummary }) {
+  const d = useRunDetail(r.id, r.status);
+  // Live SSE log stream -- connects immediately and accumulates log lines.
+  const { logs: streamLogs, connected: logConnected, done: logDone } = useRunLogStream(r.id);
+
   if (!d) return <LoadingState rows={4} />;
   const steps = traceSteps(d.transcript);
-  const logs = d.logs ?? [];
+  // Prefer the live stream logs while the run is active or the stream is
+  // open; fall back to the static d.logs once the stream is done and the
+  // detail payload has fully loaded (completed/failed runs).
+  const isActive = r.status === "running" || r.status === "queued";
+  const logs = isActive || logConnected || (streamLogs.length > 0 && !logDone)
+    ? streamLogs
+    : (d.logs ?? []);
+  const tokenCount = resolveTokenCount(d);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 16 }}>
       <div style={kv}>
         <span style={kvK}>Duration</span>
         <span>{formatDuration(d.duration_ms)}</span>
         <span style={kvK}>Tokens</span>
-        <span style={{ fontFamily: "var(--font-mono)" }}>{d.total_tokens ?? "—"}</span>
+        <span style={{ fontFamily: "var(--font-mono)" }}>
+          {tokenCount != null ? tokenCount.toLocaleString() : "—" /* em-dash-ok: blank-value glyph */}
+        </span>
       </div>
       <div>
         <h4 style={h4}>Steps</h4>
@@ -122,63 +259,128 @@ function TraceTab({ r }: { r: RunSummary }) {
           {steps.length === 0 && <div style={{ ...muted, padding: 14 }}>No steps recorded.</div>}
         </div>
       </div>
-      {logs.length > 0 && (
-        <div>
-          <h4 style={h4}>Logs</h4>
+      <div>
+        <h4 style={h4}>
+          Logs
+          {/* Live indicator while stream is open and run is active */}
+          {logConnected && isActive && (
+            <span style={{ marginLeft: 8, color: "var(--accent, #3E6FE0)", fontWeight: 500, fontSize: 10 }}>
+              Live
+            </span>
+          )}
+        </h4>
+        {logs.length > 0 ? (
           <pre style={code}>
-            {logs.map((l) => `${l.timestamp} [${l.level}] ${l.message}`).join("\n")}
+            {logs
+              .map((l) => {
+                const ts = l.timestamp ? l.timestamp.replace("T", " ").replace(/\.\d+Z$/, "Z") : "";
+                const tid = l.trace_id ? ` [${l.trace_id.slice(0, 8)}]` : "";
+                return `${ts} [${l.level}]${tid} ${l.message}`;
+              })
+              .join("\n")}
           </pre>
-        </div>
-      )}
+        ) : isActive && logConnected ? (
+          <div style={{ ...muted, padding: 14 }}>Waiting for log output...</div>
+        ) : (
+          <div style={{ ...muted, padding: 14 }}>No logs recorded.</div>
+        )}
+      </div>
+      <details>
+        <summary className="c-vpill inline-flex cursor-pointer" style={{ padding: "6px 11px", fontSize: 12.5 }}>
+          View raw JSON
+        </summary>
+        <pre style={{ ...code, marginTop: 10 }}>{JSON.stringify(d, null, 2)}</pre>
+      </details>
     </div>
   );
 }
 
 // SPEC §4: Inputs — the run's input payload.
 function InputsTab({ r }: { r: RunSummary }) {
-  const d = useRunDetail(r.id);
+  const d = useRunDetail(r.id, r.status);
   if (!d) return <LoadingState rows={3} />;
   const input = d.input ?? {};
   if (Object.keys(input).length === 0) return <div style={muted}>This run took no inputs.</div>;
   return <pre style={code}>{JSON.stringify(input, null, 2)}</pre>;
 }
 
-// SPEC §4: Raw — the full run record.
-function RawTab({ r }: { r: RunSummary }) {
-  const d = useRunDetail(r.id);
-  if (!d) return <LoadingState rows={4} />;
-  return <pre style={code}>{JSON.stringify(d, null, 2)}</pre>;
-}
-
 // Tab key → its (named) component, keyed by RUN_DETAIL_TABS so the §4 contract
 // test guards the live tab set.
 const RUN_TAB_COMPONENT: Record<RunDetailTab, (props: { r: RunSummary }) => React.ReactNode> = {
   Output: OutputTab,
-  Trace: TraceTab,
+  Logs: LogsTab,
   Inputs: InputsTab,
-  Raw: RawTab,
 };
 
+const PAGE_SIZE = 50;
+
 export default function RunsCollection({ initialRuns }: { initialRuns: RunSummary[] }) {
+  // Cache-first first page (TanStack Query): /runs renders instantly from cache
+  // on return; a slow or failed refetch keeps the cached rows instead of going
+  // blank or flashing an error. Pagination (loadMore) and the bell refresh stay local.
+  const runsQuery = useRuns(
+    { limit: PAGE_SIZE, offset: 0 },
+    initialRuns.length > 0 ? initialRuns : undefined,
+  );
   const [runs, setRuns] = useState<RunSummary[]>(initialRuns);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
-  const [loading, setLoading] = useState(initialRuns.length === 0);
+  const [loadingMore, setLoadingMore] = useState(false);
+  const [hasMore, setHasMore] = useState(initialRuns.length === 0); // unknown until first fetch
+  const [offset, setOffset] = useState(0);
   const [now] = useState(() => Date.now());
 
-  const refresh = async (initial = false) => {
+  // Sync the cached first page into local state (which loadMore appends to).
+  useEffect(() => {
+    if (runsQuery.data) {
+      const sorted = [...runsQuery.data].sort((a, b) => runSortTime(b) - runSortTime(a));
+      setRuns(sorted);
+      setOffset(PAGE_SIZE);
+      setHasMore(runsQuery.data.length === PAGE_SIZE);
+    }
+  }, [runsQuery.data]);
+
+  // Skeleton only on a true cold start (no cache and no server data).
+  const loading = runsQuery.isLoading && runs.length === 0;
+
+  // Append the next page of runs (B37 — "Load more" pattern).
+  const loadMore = async () => {
+    if (loadingMore) return;
+    setLoadingMore(true);
     try {
-      const rows = await api.runs.list({ limit: 200 });
-      setRuns([...rows].sort((a, b) => runSortTime(b) - runSortTime(a)));
+      const rows = await api.runs.list({ limit: PAGE_SIZE, offset });
+      const sorted = [...rows].sort((a, b) => runSortTime(b) - runSortTime(a));
+      setRuns((prev) => {
+        // Deduplicate by id in case a new run appeared between pages.
+        const seen = new Set(prev.map((r) => r.id));
+        const novel = sorted.filter((r) => !seen.has(r.id));
+        return [...prev, ...novel].sort((a, b) => runSortTime(b) - runSortTime(a));
+      });
+      setOffset((o) => o + PAGE_SIZE);
+      setHasMore(rows.length === PAGE_SIZE);
     } catch {
-      // leave existing state intact on refresh errors
+      // leave existing rows intact
     } finally {
-      if (initial) setLoading(false);
+      setLoadingMore(false);
+    }
+  };
+
+  const refresh = async (initial = false) => {
+    if (initial) {
+      await runsQuery.refetch();
+    } else {
+      // Non-initial refresh re-fetches the current window size (keeps existing offset).
+      try {
+        const rows = await api.runs.list({ limit: Math.max(offset, PAGE_SIZE) });
+        setRuns([...rows].sort((a, b) => runSortTime(b) - runSortTime(a)));
+      } catch {
+        // leave existing state intact on refresh errors
+      }
     }
   };
 
   useEffect(() => {
-    void refresh(true);
-    // Content tags are inherited from the parent worker (SPEC §11).
+    // Runs first page comes from the cache-first query above; here we only need
+    // the workers list for content-tag filtering (SPEC §11).
     api.workers.list().then(setWorkers).catch(() => {});
   }, []);
 
@@ -255,11 +457,10 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
 
   const config: CollectionConfig<RunSummary> = {
     title: "Run history",
-    subtitle: "Worker executions.",
     items: sorted,
     loading,
     idOf: (r) => r.id,
-    view: { default: "grid", grid: true },
+    view: { default: "list", grid: true },
     searchOf: (r) => `${r.worker_name ?? r.worker_id} ${r.id} ${r.trigger_source}`,
     tagsOf: (r) =>
       ({
@@ -310,7 +511,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
         </DropdownMenuContent>
       </DropdownMenu>
     ),
-    group: (r) => dayLabel(r.created_at ?? r.started_at, now),
     columns: {
       template: "1.6fr 1fr .8fr 130px 1fr",
       headers: ["Worker", "Trigger", "Duration", "Status", "Started"],
@@ -320,6 +520,9 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     row: (r) => ({
       // V4 SPEC rule 3: no avatar for runs — non-person entity.
       primary: r.worker_name ?? r.worker_id,
+      // secondary shows status + relative time in compact (split-left) mode where
+      // c-cell children are hidden (#1132).
+      secondary: `${runStatusPill(r.status).label} · ${formatRelative(r.created_at ?? r.started_at ?? "")}`,
       cols: [
         formatTrigger(r.trigger_source),
         formatDuration(r.duration_ms),
@@ -337,7 +540,11 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       header: {
         // V4 SPEC rule 3: no avatar in detail header for runs.
         leading: undefined,
-        title: `Run · ${r.worker_name ?? r.worker_id}`,
+        title: (
+          <span title={`Run · ${r.worker_name ?? r.worker_id}`}>
+            {`Run · ${r.worker_name ?? r.worker_id}`}
+          </span>
+        ),
         sub: (
           <span className="c-dh-sub" style={{ margin: 0 }}>
             {formatTrigger(r.trigger_source)} · {formatDuration(r.duration_ms)} ·{" "}
@@ -359,11 +566,15 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
             >
               Share
             </button>
+            {/* #1274: confirm before replaying — avoids accidental duplicate runs. */}
             <button
               type="button"
               className="c-vpill"
               style={{ padding: "6px 11px" }}
-              onClick={() => void replay(r)}
+              onClick={() => {
+                if (!window.confirm("Re-run this worker with the same inputs?")) return;
+                void replay(r);
+              }}
             >
               Replay
             </button>
@@ -378,8 +589,35 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
       }),
     }),
     states: {
-      empty: { title: "No runs yet", help: "Runs appear here when your workers execute." },
+      // #1365 — add action CTA to runs empty state
+      empty: {
+        title: "No runs yet",
+        help: "Runs appear here when your workers execute.",
+        action: (
+          <Link
+            href="/workers/new"
+            className="c-addbtn"
+            style={{ display: "inline-block", marginTop: 8, padding: "6px 16px", fontSize: 13 }}
+          >
+            Create your first worker →
+          </Link>
+        ),
+      },
     },
+    // B37: "Load more" append footer — replaces numeric pagination.
+    footer: hasMore ? (
+      <div style={{ display: "flex", justifyContent: "center", paddingTop: 14 }}>
+        <button
+          type="button"
+          className="c-vpill"
+          style={{ padding: "8px 18px", fontSize: 13 }}
+          disabled={loadingMore}
+          onClick={() => void loadMore()}
+        >
+          {loadingMore ? "Loading…" : "Load more"}
+        </button>
+      </div>
+    ) : undefined,
   };
 
   return <Collection config={config} />;

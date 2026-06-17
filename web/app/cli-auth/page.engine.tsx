@@ -88,7 +88,7 @@ export function CliAuthContent({
         <p>Client: {clientName}</p>
         <p className="text-xs text-muted-foreground">
           Only approve if this code matches the one shown in your terminal. If it
-          does not match, deny — someone may be trying to hijack your login.
+          does not match, deny: someone may be trying to hijack your login.
         </p>
         <div className="space-y-2">
           <label className="text-xs font-medium text-muted-foreground" htmlFor="cli-auth-confirm-code">

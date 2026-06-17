@@ -14,6 +14,11 @@ const API_BASE =
 const SESSION_COOKIE = "workeros_cloud_session";
 const PROXY_PREFIX = "/api/proxy";
 
+// The OAuth login flow (/auth/login -> Supabase -> Google) redirects to the
+// configured Supabase project's /auth/v1/authorize endpoint, which is a THIRD
+// origin (neither the proxy nor the backend API). safeProxyLocation must let
+// that ONE configured origin through unchanged so the browser can navigate to
+// Supabase; every other external origin stays stripped (open-redirect guard).
 const SUPABASE_ORIGIN = (() => {
   const raw =
     process.env.WORKEROS_CLOUD_SUPABASE_URL ||
@@ -168,6 +173,10 @@ function safeProxyLocation(location: string | null, req: NextRequest): string | 
     return `${parsed.pathname}${parsed.search}${parsed.hash}`;
   }
 
+  // OAuth login: the backend 307s to the configured Supabase authorize URL.
+  // Pass that one trusted external origin through verbatim so the browser can
+  // complete the provider handshake. Without this the Location is dropped and
+  // the login page hangs on a 307 that points nowhere (fresh/incognito login).
   if (SUPABASE_ORIGIN && parsed.origin === SUPABASE_ORIGIN) {
     return parsed.toString();
   }

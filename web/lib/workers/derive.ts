@@ -68,6 +68,14 @@ export function workerSmartTags(w: WorkerSummary, opts: { starred: boolean; now:
   return out;
 }
 
+/** Maturity stage of a worker ("draft" | "live"), mirroring the API resolver:
+ *  explicit stage wins; stock/example/system default to live; else draft. */
+export function workerStageKey(w: WorkerSummary): "draft" | "live" {
+  if (w.stage === "draft" || w.stage === "live") return w.stage;
+  if (w.is_example || w.system) return "live";
+  return "draft";
+}
+
 export function workerTags(
   w: WorkerSummary,
   opts: { starred: boolean; now: number },
@@ -75,6 +83,7 @@ export function workerTags(
   return {
     smart: workerSmartTags(w, opts),
     status: [workerStatusKey(w)],
+    stage: [workerStageKey(w)],
     visibility: [w.visibility === "workspace" ? "shared" : "private"],
     content: w.tags ?? [],
   };

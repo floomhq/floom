@@ -1,13 +1,11 @@
 /**
- * #304 — Magic-link page: open redirect fix (cloud)
+ * #1188 — Magic-link page: open redirect fix
  *
  * Validates that the sanitizeRedirect logic rejects absolute URLs,
  * protocol-relative paths, and backslash-escaped paths, preventing
  * post-authentication open redirect attacks.
  *
- * Mirrors engine test magic-link-redirect-sanitize-1188.test.ts.
- *
- * Run: npx tsx tests/magic-link-redirect-sanitize-304.test.ts
+ * Run: npx tsx tests/magic-link-redirect-sanitize-1188.test.ts
  */
 import { readFileSync } from "fs";
 import { resolve } from "path";
@@ -173,19 +171,19 @@ function testSanitizeRedirectRejectsDoubleSlash(): void {
 // ---------------------------------------------------------------------------
 
 const tests: [string, () => void][] = [
-  ["#304 safe relative paths pass through unchanged", testSafeRelativePaths],
-  ["#304 absolute URLs are rejected → /overview", testRejectsAbsoluteUrls],
-  ["#304 protocol-relative //evil.com paths are rejected → /overview", testRejectsProtocolRelative],
-  ["#304 backslash-escaped /\\evil.com paths are rejected → /overview", testRejectsBackslashEscape],
-  ["#304 javascript: scheme paths are rejected → /overview", testRejectsJavascriptScheme],
-  ["#304 null/undefined/empty redirect_to returns /overview", testRejectsNullAndEmpty],
-  ["#304 page.tsx defines sanitizeRedirect function", testPageDefinesSanitizeRedirect],
-  ["#304 page.tsx calls sanitizeRedirect(result.redirect_to)", testPageCallsSanitizeRedirect],
-  ["#304 page.tsx does not bypass sanitization with direct router.replace", testPageDoesNotBypassSanitization],
-  ["#304 sanitizeRedirect explicitly rejects // protocol-relative prefix", testSanitizeRedirectRejectsDoubleSlash],
+  ["#1188 safe relative paths pass through unchanged", testSafeRelativePaths],
+  ["#1188 absolute URLs are rejected → /overview", testRejectsAbsoluteUrls],
+  ["#1188 protocol-relative //evil.com paths are rejected → /overview", testRejectsProtocolRelative],
+  ["#1188 backslash-escaped /\\evil.com paths are rejected → /overview", testRejectsBackslashEscape],
+  ["#1188 javascript: scheme paths are rejected → /overview", testRejectsJavascriptScheme],
+  ["#1188 null/undefined/empty redirect_to returns /overview", testRejectsNullAndEmpty],
+  ["#1188 page.tsx defines sanitizeRedirect function", testPageDefinesSanitizeRedirect],
+  ["#1188 page.tsx calls sanitizeRedirect(result.redirect_to)", testPageCallsSanitizeRedirect],
+  ["#1188 page.tsx does not bypass sanitization with direct router.replace", testPageDoesNotBypassSanitization],
+  ["#1188 sanitizeRedirect explicitly rejects // protocol-relative prefix", testSanitizeRedirectRejectsDoubleSlash],
 ];
 
-describe("#304 magic-link redirect sanitization", () => {
+describe("#1188 magic-link redirect sanitization", () => {
   for (const [name, fn] of tests) {
     test(name, () => {
       expect(() => fn()).not.toThrow();

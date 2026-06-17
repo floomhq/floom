@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
+import { usePathname } from "next/navigation";
 import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, PenSquare, Download, History, MoreHorizontal } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -17,6 +18,7 @@ import { useRouter } from "next/navigation";
 import { EmilyAvatar } from "./EmilyAvatar";
 import { MarkdownText } from "./MarkdownText";
 import { PromptInput } from "./PromptInput";
+import { PromptChips } from "@/components/PromptChips";
 import { CreateSourcePills } from "@/components/CreateSourcePills";
 import { FileChip } from "./FileChip";
 import { ToolCardRenderer } from "./cards/ToolCardRenderer";
@@ -169,13 +171,46 @@ const SUGGESTIONS = [
   "Show me yesterday's runs",
 ];
 
+// #1363 — Action-oriented suggestions shown when the workspace has no workers yet.
+const FIRST_RUN_SUGGESTIONS = [
+  "Build me a worker that sends a daily email digest",
+  "Build me a worker that posts Slack alerts for new HubSpot deals",
+];
+
+/** Compact pill row — shown above the composer when chat is active (not streaming). */
+function SuggestionPills({
+  onSuggest,
+  hidden,
+  pills = SUGGESTIONS,
+}: {
+  onSuggest: (text: string) => void;
+  hidden: boolean;
+  pills?: readonly string[];
+}) {
+  if (hidden) return null;
+  return (
+    <div className="flex flex-wrap gap-1.5 px-1 pb-1">
+      {pills.map((s) => (
+        <button
+          key={s}
+          type="button"
+          onClick={() => onSuggest(s)}
+          className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-2.5 py-0.5 text-[11px] text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+        >
+          {s}
+        </button>
+      ))}
+    </div>
+  );
+}
+
 // ── Typing indicator ──────────────────────────────────────────────────────────
 
 function TypingIndicator() {
   return (
-    <div className="flex items-start gap-2.5">
+    <div className="flex items-start gap-2">
       <EmilyAvatar size="sm" />
-      <div className="flex gap-1 py-2 px-1">
+      <div className="flex gap-1 py-1.5 px-1">
         {[0, 1, 2].map((i) => (
           <div
             key={i}
@@ -240,16 +275,16 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
   if (msg.role === "user") {
     return (
       <Message from="user">
-        <div className="flex max-w-[85%] flex-col items-end gap-1.5">
+        <div className="flex max-w-[85%] flex-col items-end gap-1">
           {msg.text && (
-            <MessageContent className="rounded-[var(--radius-card)] bg-muted/60 px-3.5 py-2.5 text-foreground">
+            <MessageContent className="rounded-[var(--radius-button)] bg-muted/60 px-3 py-2 text-foreground">
               <MessageResponse className="whitespace-pre-wrap">
                 <p>{msg.text}</p>
               </MessageResponse>
             </MessageContent>
           )}
           {msg.files && msg.files.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 justify-end">
+            <div className="flex flex-wrap gap-1 justify-end">
               {msg.files.map((f) => (
                 <FileChip key={f.id} file={f} />
               ))}
@@ -269,16 +304,16 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
   // assistant
   const text = assistantMessageText(msg);
   return (
-    <Message from="assistant" className="flex-row items-start gap-2.5">
+    <Message from="assistant" className="flex-row items-start gap-2">
       <EmilyAvatar size="sm" />
       {/* min-w-0 + overflow-hidden prevent long URLs and code from blowing out the rail */}
-      <div className="flex-1 min-w-0 overflow-hidden space-y-2.5">
+      <div className="flex-1 min-w-0 overflow-hidden space-y-2">
         {msg.parts?.map((part, i) => {
           if (part.type === "text") {
             return (
               <MessageContent key={i}>
                 <MessageResponse>
-                  <MarkdownText text={part.text} />
+                  <MarkdownText text={part.text} streaming={!!part.streaming} />
                 </MessageResponse>
               </MessageContent>
             );
@@ -288,7 +323,10 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
           }
           return null;
         })}
-        <MessageActions>
+        {/* #1219: copy on an Emily message is hover-only (matches the user
+            message). Revealed on hover/focus of the message row; focus-within
+            keeps it keyboard-accessible. */}
+        <MessageActions className="opacity-0 focus-within:opacity-100 group-hover/message:opacity-100">
           <MessageCopyAction text={text} />
         </MessageActions>
       </div>
@@ -296,46 +334,144 @@ function MessageRow({ msg }: { msg: ChatMessage }) {
   );
 }
 
-// ── Empty state ───────────────────────────────────────────────────────────────
+// ── Empty state (general chat) ────────────────────────────────────────────────
 
-function EmptyState({
+function ChatEmptyState({
   onSuggest,
-  createMode = false,
-  onAddSource,
+  isNewWorkspace = false,
 }: {
   onSuggest: (text: string) => void;
-  createMode?: boolean;
-  onAddSource?: (source: string) => void;
+  isNewWorkspace?: boolean;
 }) {
+  // #1363 — First-run opener: proactive builder message + action-oriented pills
+  const headline = isNewWorkspace
+    ? "Hi, describe what you want to automate and I’ll build the worker for you right now."
+    // take-base (round-09 copy). FLAG: brand-string conflict — base says "COO",
+    // main says "Chief of Staff". Defaulting to round-09; needs human brand call.
+    : "I am Emily, your COO";
+  const sub = isNewWorkspace
+    ? null
+    : "Ask me to create workers, check runs, or manage connections.";
+  const pills = isNewWorkspace ? FIRST_RUN_SUGGESTIONS : SUGGESTIONS;
+
   return (
     <div className="flex flex-col items-center justify-center h-full gap-4 px-6 text-center">
       <EmilyAvatar size="md" />
       <div>
-        <p className="text-sm font-medium">
-          {createMode ? "Describe the worker you want" : "I am Emily, your Chief of Staff"}
-        </p>
-        <p className="text-xs text-muted-foreground mt-1">
-          {createMode
-            ? "Tell me what it should do, then add the sources it can draw on."
-            : "Ask me to create workers, check runs, or manage connections."}
+        <p className="text-sm font-medium">{headline}</p>
+        {sub && <p className="text-xs text-muted-foreground mt-1">{sub}</p>}
+      </div>
+      <div className="flex flex-wrap gap-1.5 justify-center">
+        {pills.map((s) => (
+          <button
+            key={s}
+            type="button"
+            onClick={() => onSuggest(s)}
+            className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+          >
+            {s}
+          </button>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+// ── Create-worker hero (full-width hero for create mode, no messages) ─────────
+
+const CREATE_EXAMPLES = [
+  { label: "Granola → HubSpot daily",   prompt: "Summarise my Granola meetings and post action items to HubSpot CRM daily" },
+  { label: "GitHub PR digest 9am",       prompt: "Every morning at 9am, send me a digest of my unread GitHub PRs and open issues" },
+  { label: "Invoice → Sheets",           prompt: "Process any new email in label 'invoices', extract total amount, and add a row to Google Sheets" },
+  { label: "HubSpot deal → Slack",       prompt: "When a new deal is created in HubSpot, send a Slack message to #sales-channel" },
+] as const;
+
+function CreateWorkerHeroState({
+  input,
+  onInput,
+  onSubmit,
+  onAddSource,
+}: {
+  input: string;
+  onInput: (v: string) => void;
+  onSubmit: () => void;
+  onAddSource: (source: string) => void;
+}) {
+  return (
+    <div className="flex flex-col items-center justify-center min-h-full w-full px-6 py-12 gap-8">
+      {/* Headline */}
+      <div className="text-center space-y-2 max-w-xl">
+        <h1 className="text-2xl font-semibold tracking-tight text-foreground leading-tight">
+          Hire a new AI worker
+        </h1>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          Describe the job in plain English. Emily drafts the worker, picks the right
+          integrations, and opens the editor so you can review before running.
         </p>
       </div>
-      {createMode ? (
-        onAddSource ? <CreateSourcePills onPick={onAddSource} /> : null
-      ) : (
-        <div className="flex flex-wrap gap-1.5 justify-center">
-          {SUGGESTIONS.map((s) => (
+
+      {/* Composer card — wide and prominent */}
+      <div className="w-full max-w-2xl">
+        <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)] p-5 space-y-4">
+          <textarea
+            autoFocus
+            placeholder="Create me: a worker that…"
+            value={input}
+            onChange={(e) => onInput(e.target.value)}
+            onKeyDown={(e) => {
+              // #1313: Enter sends, Shift+Enter inserts a newline.
+              if (e.key === "Enter" && !e.shiftKey) {
+                e.preventDefault();
+                onSubmit();
+              }
+            }}
+            rows={5}
+            className="w-full resize-none bg-transparent text-sm leading-relaxed outline-none placeholder:text-muted-foreground/60"
+          />
+          <PromptChips prompt={input} />
+          <div className="h-px bg-[var(--border-default)]" />
+          <div className="flex flex-wrap items-center justify-between gap-3">
+            <CreateSourcePills onPick={onAddSource} />
+            <div className="flex items-center gap-2 shrink-0 ml-auto">
+              <Button
+                onClick={onSubmit}
+                disabled={!input.trim()}
+                className="h-9 px-5 text-sm"
+              >
+                Hire worker
+              </Button>
+              <kbd
+                className="hidden sm:inline-flex items-center gap-0.5 rounded [border:var(--bd-card)] bg-[var(--bg-2)] px-1.5 py-1 text-[10px] font-mono text-[var(--ink-mute)]"
+                aria-hidden="true"
+                title="Press Enter to send, Shift+Enter for a new line"
+              >
+                <span>↵</span>
+              </kbd>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      {/* Example cards */}
+      <div className="w-full max-w-2xl space-y-3">
+        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
+          Or start from a template
+        </p>
+        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+          {CREATE_EXAMPLES.map((ex) => (
             <button
-              key={s}
+              key={ex.label}
               type="button"
-              onClick={() => onSuggest(s)}
-              className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+              onClick={() => onInput(ex.prompt)}
+              className="flex flex-col items-start gap-1.5 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] px-4 py-3 text-left transition-colors hover:bg-[var(--active-nav-bg)]"
             >
-              {s}
+              <span className="text-sm font-medium text-foreground">{ex.label}</span>
+              <span className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{ex.prompt}</span>
+              <PromptChips prompt={ex.prompt} className="mt-0.5" />
             </button>
           ))}
         </div>
-      )}
+      </div>
     </div>
   );
 }
@@ -366,11 +502,13 @@ interface EmilyChatCoreProps {
   onHasMessagesChange?: (has: boolean) => void;
   /** Called whenever conversationId changes so host can highlight active chat without reading a ref in render. */
   onConversationIdChange?: (id: string | null) => void;
+  /** #1363 — when true, show a proactive first-run opener instead of the generic empty state. */
+  isNewWorkspace?: boolean;
 }
 
 const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
 
-function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpenRunDetails, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange }: EmilyChatCoreProps) {
+function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpenRunDetails, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange, isNewWorkspace = false }: EmilyChatCoreProps) {
   const {
     messages,
     conversationId,
@@ -380,7 +518,7 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
     sendMessage,
     newSession,
     loadConversation,
-  } = useChatStream();
+  } = useChatStream({ ephemeral: createMode });
   const router = useRouter();
   const [input, setInput] = useState(primeInput ?? "");
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
@@ -554,6 +692,22 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
       )
   );
 
+  // In full-page create mode with no messages, show the wide hero instead of the
+  // narrow chat thread. The hero shares the same input/submit path so sending
+  // from the hero immediately starts the conversation and reveals the thread.
+  if (fullPage && createMode && !hasMessages && !isHydrating) {
+    return (
+      <div className="h-full overflow-y-auto">
+        <CreateWorkerHeroState
+          input={input}
+          onInput={setInput}
+          onSubmit={handleSubmit}
+          onAddSource={handleAddSource}
+        />
+      </div>
+    );
+  }
+
   return (
     <div className={cn("flex flex-col h-full", fullPage && "max-w-2xl mx-auto w-full")}>
       {/* Controls: New chat + Export — shown on full-page; dock header renders them when hideControls */}
@@ -589,19 +743,20 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
         onScroll={handleScroll}
       >
         {!hasMessages ? (
-          isHydrating ? (
+          // Only show the "Loading conversation…" spinner on the full-page chat
+          // where the user explicitly navigated to Emily. In the dock the panel
+          // is present on every page (Approvals, Connections, etc.) so showing a
+          // loading status there is confusing — keep the empty/invite state instead
+          // and let messages appear once hydration finishes (#1273).
+          isHydrating && fullPage ? (
             <div className="flex h-full items-center justify-center px-6 text-center">
               <p className="text-xs text-muted-foreground">Loading conversation...</p>
             </div>
           ) : (
-            <EmptyState
-              onSuggest={(text) => { setInput(text); }}
-              createMode={createMode}
-              onAddSource={handleAddSource}
-            />
+            <ChatEmptyState onSuggest={(text) => { setInput(text); }} isNewWorkspace={isNewWorkspace} />
           )
         ) : (
-          <div className={cn("py-5 space-y-5", fullPage ? "px-6" : "px-4")}>
+          <div className={cn("py-4 space-y-4", fullPage ? "px-6" : "px-4")}>
             {messages.map((msg) => (
               <MessageRow key={msg.id} msg={msg} />
             ))}
@@ -635,7 +790,12 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
       {/* Input — error intentionally NOT repeated here; it already shows as an
           inline system note in the message thread (errorAlreadyVisible guard above). */}
       <div className={cn("shrink-0", fullPage ? "px-6 pb-6 pt-3" : "px-3 pb-3 pt-0")}>
-        <Separator className="mb-3" />
+        <Separator className="mb-2" />
+        {/* Suggestion pills: visible in active chat (not on empty state, not while streaming) */}
+        <SuggestionPills
+          onSuggest={(text) => { setInput(text); }}
+          hidden={!hasMessages || isStreaming}
+        />
         <PromptInput
           value={input}
           onChange={setInput}
@@ -645,7 +805,7 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
           disabled={isStreaming}
           placeholder={createMode ? "Create me: a worker that…" : "Message Emily..."}
         />
-        <p className="mt-1.5 text-center text-[10px] text-muted-foreground">
+        <p className="mt-1 text-center text-[10px] text-muted-foreground">
           Emily can make mistakes. Verify important results.
         </p>
       </div>
@@ -672,7 +832,6 @@ export function EmilyDock({ className }: { className?: string }) {
   const open = mode !== "collapsed";
   const cycleExpand = () =>
     setMode((m) => (m === "rail" ? "wide" : m === "wide" ? "full" : "rail"));
-  const collapseForRunDetails = useCallback(() => setMode("collapsed"), []);
   // actionsRef lets the dock header drive new/export/recent without prop-drilling
   const coreActionsRef = useRef<ChatCoreActions | null>(null);
   // hasMessages as state so the Export menu item disables correctly (can't read ref in render)
@@ -681,6 +840,32 @@ export function EmilyDock({ className }: { className?: string }) {
   const [coreConversationId, setCoreConversationId] = useState<string | null>(null);
   // Local state for recent chats popover in the header ⋯ menu
   const [recentItems, setRecentItems] = useState<import("@/lib/types").ConversationSummary[] | null>(null);
+  // #1363 — detect empty workspace so Emily shows a proactive first-run opener.
+  // Uses the existing overview stats endpoint (no new backend call).
+  const [isNewWorkspace, setIsNewWorkspace] = useState(false);
+  useEffect(() => {
+    let alive = true;
+    api.system.overview()
+      .then((overview) => {
+        if (!alive) return;
+        const hasWorkers = (overview?.stats?.active_workers_count ?? 0) > 0 ||
+          (overview?.stats?.paused_workers_count ?? 0) > 0;
+        setIsNewWorkspace(!hasWorkers);
+      })
+      .catch(() => {});
+    return () => { alive = false; };
+  }, []);
+  // #1141: reset the dock conversation when navigating away from /chat?mode=create
+  // so the Overview Emily panel shows a fresh context instead of the create-mode thread.
+  const pathname = usePathname();
+  const prevPathname = useRef<string | null>(null);
+  useEffect(() => {
+    const prev = prevPathname.current;
+    prevPathname.current = pathname;
+    if (prev !== null && prev.startsWith("/chat") && !pathname.startsWith("/chat")) {
+      coreActionsRef.current?.newSession();
+    }
+  }, [pathname]);
 
   return (
     <div
@@ -805,11 +990,11 @@ export function EmilyDock({ className }: { className?: string }) {
       {/* Chat content — ALWAYS mounted so useChatStream state survives collapse */}
       <div className={cn("flex-1 min-h-0 overflow-hidden", !open && "hidden")}>
         <EmilyChatCore
-          onOpenRunDetails={collapseForRunDetails}
           hideControls
           actionsRef={coreActionsRef}
           onHasMessagesChange={setCoreHasMessages}
           onConversationIdChange={setCoreConversationId}
+          isNewWorkspace={isNewWorkspace}
         />
       </div>
     </div>
@@ -883,8 +1068,12 @@ export function EmilyChatPage({
       <div className="flex h-14 shrink-0 items-center gap-2 [border-bottom:var(--bd-div)] px-4">
         <EmilyAvatar size="sm" />
         <div className="flex-1 min-w-0 flex items-center gap-1.5">
-          <p className="text-sm font-semibold leading-none">Emily</p>
-          <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
+          <p className="text-sm font-semibold leading-none">
+            {createMode ? "Hire a worker" : "Emily"}
+          </p>
+          {!createMode && (
+            <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
+          )}
         </div>
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">

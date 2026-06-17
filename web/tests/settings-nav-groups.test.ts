@@ -8,26 +8,28 @@ import {
 
 // §4 two-group settings nav — this model is what app/settings/page.tsx renders
 // its TabsList from, so these assertions guard the live strip.
+//
+// #1088 MECE fix: "Workspace token" is no longer a standalone nav item.
+// It lives as a sub-tab inside Developer to avoid token/credential overlap.
 
 describe("Settings nav groups (§4)", () => {
-  it("Workspace group is System·Channels·Assistant·Members·Version history·Workspace token·Danger", () => {
+  it("Workspace group is System·Channels·Assistant·Members·Version history·Danger", () => {
     expect(settingsGroup("workspace").map((i) => i.label)).toEqual([
       "System",
       "Channels",
       "Assistant",
       "Members",
       "Version history",
-      "Workspace token",
       "Danger",
     ]);
   });
 
-  it("Account group is Developer·Appearance", () => {
-    expect(settingsGroup("account").map((i) => i.label)).toEqual(["Developer", "Appearance"]);
+  it("Account group is Profile·Developer·Appearance", () => {
+    expect(settingsGroup("account").map((i) => i.label)).toEqual(["Profile", "Developer", "Appearance"]);
   });
 
   it("count strip reflects the live groups", () => {
-    expect(settingsCounts()).toBe("7 workspace · 2 account");
+    expect(settingsCounts()).toBe("6 workspace · 3 account");
   });
 
   it("group labels carry the name when known", () => {

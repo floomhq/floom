@@ -287,7 +287,7 @@ export default function AssistantPage() {
                     is a coworker who is around, not a config object. */}
                 <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
               </div>
-              <p className="text-xs text-muted-foreground">Chief of Staff</p>
+              <p className="text-xs text-muted-foreground">COO</p>
             </div>
           </div>
           <Link
@@ -321,7 +321,7 @@ export default function AssistantPage() {
           ) : null}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          How Emily works for this workspace — her persona, what she knows
+          How Emily works for this workspace: her persona, what she knows
           about your company, and the prompt she runs on. To get work done,
           just talk to her.
         </p>

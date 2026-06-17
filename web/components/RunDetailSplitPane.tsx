@@ -135,7 +135,15 @@ export function RunDetailSplitPane({
             </Button>
           </Link>
           {run.can_replay !== false && (
-            <Button variant="outline" size="sm" onClick={onReplay}>
+            /* #1274: confirm before replaying to prevent accidental duplicate runs. */
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (!window.confirm("Re-run this worker with the same inputs?")) return;
+                onReplay?.();
+              }}
+            >
               <RotateCcw className="size-3.5 mr-1.5" />
               Re-run
             </Button>

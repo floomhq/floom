@@ -25,7 +25,7 @@ export function ApprovalCard({ card }: { card: ApprovalCardType }) {
 
   const decide = async (decision: boolean) => {
     if (!card.approvalId) {
-      toast.error("This approval can't be resolved from chat — open the Approvals page.");
+      toast.error("This approval can't be resolved from chat; open the Approvals page.");
       return;
     }
     setBusy(true);
@@ -93,7 +93,7 @@ export function ApprovalCard({ card }: { card: ApprovalCardType }) {
       {isPending ? (
         <div className="space-y-2 px-3.5 pb-3">
           <input
-            className="w-full rounded-md [border:var(--bd-card)] bg-background px-2 py-1 text-xs"
+            className="w-full rounded-[var(--radius-input)] [border:var(--bd-card)] bg-background px-2 py-1 text-xs"
             placeholder="Add a comment (sent with reject; approve comments land with #769)"
             value={comment}
             onChange={(e) => setComment(e.target.value)}

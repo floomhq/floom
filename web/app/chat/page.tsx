@@ -12,7 +12,7 @@ import { EmilyChatPage } from "@/components/emily/EmilyChat";
 
 export const metadata = {
   title: "Emily - Floom",
-  description: "Chat with Emily, your AI Chief of Staff.",
+  description: "Chat with Emily, your AI COO.",
 };
 
 export default async function ChatPage({

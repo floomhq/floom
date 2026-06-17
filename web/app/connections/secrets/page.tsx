@@ -1,6 +1,7 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { KeyRound, TestTube2, Trash2, Plus, Check, X, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
-import type { SecretItem } from "@/lib/types";
+import type { SecretItem, WorkerSummary } from "@/lib/types";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { useIsAdmin } from "@/lib/use-is-admin";
@@ -31,6 +32,7 @@ function SecretsContent() {
   const searchParams = useSearchParams();
   const prefillName = searchParams.get("prefill") ?? "";
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
+  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [addingName, setAddingName] = useState(prefillName);
   const [addingValue, setAddingValue] = useState("");
@@ -48,11 +50,21 @@ function SecretsContent() {
   // workspace's vendors and operational gaps. Owner/admin only.
   const { isAdmin, pending: roleCheckPending } = useIsAdmin();
 
+  // #1226: name -> worker id for clickable used-by links
+  const workersByName = useMemo(
+    () => new Map(workers.map((w) => [w.name, w.id])),
+    [workers],
+  );
+
   const refresh = useCallback(async () => {
     if (!isAdmin) return;
     try {
-      const s = await api.secrets.list();
+      const [s, w] = await Promise.all([
+        api.secrets.list(),
+        api.workers.list().catch(() => [] as WorkerSummary[]),
+      ]);
       setSecrets(s);
+      setWorkers(w);
     } catch {
       toast.error("Failed to load secrets");
     } finally {
@@ -272,7 +284,24 @@ function SecretsContent() {
                         {s.used_by.length > 0 && (
                           <p className="text-xs text-muted-foreground mt-0.5">
                             <span className="opacity-70">Used by: </span>
-                            {usedByVisible.join(", ")}
+                            {usedByVisible.map((workerName, idx) => {
+                              const workerId = workersByName.get(workerName);
+                              return (
+                                <span key={workerName}>
+                                  {idx > 0 && ", "}
+                                  {workerId ? (
+                                    <Link
+                                      href={`/workers/${encodeURIComponent(workerId)}`}
+                                      className="underline underline-offset-2 hover:text-foreground"
+                                    >
+                                      {workerName}
+                                    </Link>
+                                   ) : (
+                                     workerName
+                                   )}
+                                </span>
+                              );
+                            })}
                             {!usedByExpanded && usedByHidden > 0 ? (
                               <button
                                 type="button"

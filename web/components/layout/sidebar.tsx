@@ -4,14 +4,16 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, Box, Brain, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight } from "lucide-react";
+import { Activity, Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
+import { useQueryClient } from "@tanstack/react-query";
+import { prefetchRouteData, prefetchIdleRoutes } from "@/lib/query/prefetch";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
+import { AlertsBell } from "@/components/overview/AlertsBell";
 import { api } from "@/lib/api";
-import { identifyPostHogUser, resetPostHogUser } from "@/lib/posthog";
 import type { CurrentUser } from "@/lib/types";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import {
@@ -45,7 +47,120 @@ export function FloomMark({ size = 28 }: { size?: number }) {
   );
 }
 
-// S24: Secrets removed from top-level nav; reachable as a third tab on
+// #1305: the app is WHITE-LABELED — the workspace IS the brand. The top-left
+// mark must be the WORKSPACE logo/avatar, never the Floom play-triangle.
+// DiceBear `shapes` avatar deterministically seeded by workspace name —
+// geometric, non-cartoonish, fits a serious B2B product.
+// Container uses var(--radius-button) (squircle), NOT a circle.
+function WorkspaceDiceBearAvatar({ name, size }: { name: string; size: number }) {
+  const seed = encodeURIComponent(resolveWorkspaceName(name) || name || "workspace");
+  const src = `https://api.dicebear.com/9.x/shapes/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf&backgroundType=gradientLinear&radius=0`;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      aria-hidden="true"
+      width={size}
+      height={size}
+      className="shrink-0 rounded-[var(--radius-button)] object-cover"
+      style={{ width: size, height: size }}
+    />
+  );
+}
+
+// #1306: user profile avatar fallback when /me returns no OAuth photo.
+// DiceBear `glass` style deterministically seeded by the user's email/name:
+// a calm geometric mark (no cartoon faces), consistent with the workspace
+// mark's squircle, flat, no-border treatment.
+function UserDiceBearAvatar({ seed, size }: { seed: string; size: number }) {
+  const safeSeed = encodeURIComponent(seed || "user");
+  const src = `https://api.dicebear.com/9.x/glass/svg?seed=${safeSeed}&radius=0`;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt="Profile avatar"
+      className="shrink-0 rounded-[var(--radius-button)] border-0 object-cover"
+      style={{ width: size, height: size }}
+    />
+  );
+}
+
+/** Active workspace name, resolved once from the workspace list (shared shape
+ *  with UserProfileFooter so the mark + footer stay in sync). */
+function useActiveWorkspaceName(): string {
+  const [name, setName] = useState("");
+  useEffect(() => {
+    let active = true;
+    api.workspace
+      .list()
+      .then((data) => {
+        const current =
+          data.workspaces.find((workspace) => workspace.id === data.active_id) ?? data.workspaces[0];
+        if (active && current) setName(current.name);
+      })
+      .catch(() => {
+        if (active) setName("");
+      });
+    return () => {
+      active = false;
+    };
+  }, []);
+  return name;
+}
+
+export function WorkspaceMark({
+  size = 22,
+  name,
+  logoUrl,
+}: {
+  size?: number;
+  name?: string;
+  /** Real workspace logo (e.g. from the Cloud wrapper). When omitted, the OSS
+   *  engine has no per-workspace logo, so a neutral monogram is shown. */
+  logoUrl?: string | null;
+}) {
+  const fetched = useActiveWorkspaceName();
+  const workspaceName = name ?? fetched;
+  const [imgOk, setImgOk] = useState(true);
+  const dim = { width: size, height: size } as const;
+
+  if (logoUrl && imgOk) {
+    return (
+      // eslint-disable-next-line @next/next/no-img-element
+      <img
+        src={logoUrl}
+        alt={resolveWorkspaceName(workspaceName)}
+        width={size}
+        height={size}
+        className="shrink-0 rounded-[var(--radius-button)] object-cover"
+        style={dim}
+        onError={() => setImgOk(false)}
+      />
+    );
+  }
+  // DiceBear shapes avatar — consistent with WorkspaceSwitcher mark.
+  // NOT round, NOT the Floom play-triangle.
+  return (
+    <WorkspaceDiceBearAvatar
+      name={workspaceName}
+      size={size}
+    />
+  );
+}
+
+/** Mobile top-bar workspace name (white-label — replaces the "Floom" wordmark). */
+function MobileWorkspaceName() {
+  const name = useActiveWorkspaceName();
+  return (
+    <span className="font-semibold text-base tracking-tight truncate">
+      {resolveWorkspaceName(name)}
+    </span>
+  );
+}
+
+// #1403: Secrets removed from top-level nav; reachable as a third tab on
 // /connections ("Connected" / "Browse" / "Secrets"). Connections + secrets
 // are the same mental model (credentials a worker can read) so they share
 // a surface.
@@ -62,11 +177,11 @@ type NavItem = {
 };
 
 // V4 SPEC §2: nav order per wireframe — no Assistant item (config lives in
-// Settings per v4). Overview · Workers · Brain · Runs · Approvals · Connections.
+// Settings per v4). Overview · Workers · Library · Runs · Approvals · Connections.
 const nav: NavItem[] = [
   { href: "/overview", label: "Overview", icon: Activity },
-  { href: "/workers", label: "Workers", icon: Box, hint: "Runs on triggers and schedules" },
-  { href: "/brain", label: "Brain", icon: Brain },
+  { href: "/workers", label: "Workers", icon: Box, hint: "Your AI workers" },
+  { href: "/library", label: "Library", icon: Library },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
   { href: "/connections", label: "Connections", icon: Plug },
@@ -76,6 +191,11 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
   // Shared source with /approvals: revalidates on focus + after any
   // approve/reject so the badge never drifts from the list (G5 P2).
   const pendingCount = useApprovalsCount();
+  // Data prefetch: warm the destination route's TanStack cache on hover/focus
+  // so the tab switch is instant. Link already prefetches the route's JS/RSC;
+  // this adds the DATA. Cache-first + idempotent (see prefetch.ts).
+  const queryClient = useQueryClient();
+  const warm = (href: string) => prefetchRouteData(queryClient, href);
 
   return (
     <nav className="flex-1 px-3 space-y-0.5">
@@ -89,6 +209,9 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
           <Link
             key={item.href}
             href={item.href}
+            prefetch
+            onMouseEnter={() => warm(item.href)}
+            onFocus={() => warm(item.href)}
             onClick={onNavigate}
             title={item.hint}
             className={cn(
@@ -118,28 +241,31 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
     openCommandPalette();
   };
   return (
-    <div className="px-3 pb-3 space-y-1.5">
+    <div className="px-3 pt-3 pb-3 space-y-1.5">
       {/* #902 (wireframe newbtn): creating a worker = a conversation with
           Emily — full-page chat in create mode, not a form. */}
       <Link
         href="/chat?mode=create"
         onClick={() => onNavigate?.()}
-        className="flex h-9 w-full items-center justify-center gap-2 rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-sm font-medium text-white transition-colors duration-150 hover:opacity-90"
+        className="flex h-9 w-full items-center justify-center gap-2 rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-sm font-medium text-[var(--primary-text)] transition-colors duration-150 hover:opacity-90"
       >
         <Plus className="w-4 h-4" />
         <span>New worker</span>
       </Link>
+      {/* #1315: differentiated grey background (var(--bg-2)) so the Search box
+          reads as an input, not a plain nav link. kbd chips sit on the lighter
+          card surface so they stay legible against the grey field. */}
       <button
         type="button"
         onClick={onSearch}
-        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[var(--bg-3)] hover:text-ink transition-colors duration-150"
+        className="flex h-8 w-full items-center gap-2 rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-2)] px-2.5 text-sm text-[var(--ink-mute)] hover:bg-[var(--bg-3)] hover:text-ink transition-colors duration-150"
         aria-label="Open command palette"
       >
         <Search className="w-4 h-4 opacity-70" />
         <span>Search...</span>
         <span className="ml-auto inline-flex items-center gap-0.5 text-[10px] tracking-widest text-[var(--ink-faint)]">
-          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-3)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</kbd>
-          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-3)] px-1 py-0.5 font-mono">K</kbd>
+          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-card)] px-1 py-0.5 text-[11px] leading-none font-sans" style={{ fontFamily: 'system-ui, -apple-system, "Segoe UI", sans-serif' }}>⌘</kbd>
+          <kbd className="rounded-[var(--radius-button)] [border:var(--bd-pill)] bg-[var(--bg-card)] px-1 py-0.5 font-mono">K</kbd>
         </span>
       </button>
     </div>
@@ -203,14 +329,26 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
   }, [pathname]);
 
   const pendingCount = useApprovalsCount();
+  // Data prefetch (collapsed icon rail uses this `warm`; the expanded nav warms
+  // inside NavLinks). After first paint, warm the highest-value routes once on
+  // idle so the first tab switch is already instant.
+  const queryClient = useQueryClient();
+  const warm = (href: string) => prefetchRouteData(queryClient, href);
+  useEffect(() => {
+    prefetchIdleRoutes(queryClient, pathname);
+    // Run once after mount; pathname/queryClient are stable enough for a
+    // one-shot idle warm (re-running on every nav would be a refetch storm).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   return (
     <>
       {/* ── Mobile top bar ─────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between [border-bottom:var(--bd-div)] bg-[var(--bg-app)] px-4 md:hidden">
-        <Link href="/overview" className="flex items-center gap-2">
-          <FloomMark size={22} />
-          <span className="font-semibold text-base tracking-tight">Floom</span>
+        {/* #1305: white-label — workspace mark + name, not the Floom brand. */}
+        <Link href="/overview" className="flex items-center gap-2 min-w-0">
+          <WorkspaceMark size={22} />
+          <MobileWorkspaceName />
         </Link>
         <div className="flex items-center gap-2">
           <button
@@ -221,6 +359,10 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
           >
             <Search className="w-5 h-5" />
           </button>
+          {/* #1292: global alerts bell on mobile (AppShell's pane-anchored bell
+              is desktop-only). Self-fetches needs-attention; dropdown opens
+              below-right of the trigger. */}
+          <AlertsBell />
           <ThemeModeButton className="theme-mode-button-compact" />
           <button
             type="button"
@@ -255,20 +397,15 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                 onClick={toggleCollapse}
                 className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
               >
-              <FloomMark size={22} />
+              {/* #1305: white-label — workspace mark, not the Floom brand. */}
+              <WorkspaceMark size={22} />
             </button>
           ) : (
             <>
-              {/* D-04: brand mark anchors the sidebar top. Without it the area
-                  above "New worker" reads as an empty/skeleton spot while the
-                  workspace switcher loads. */}
-              <Link
-                href="/overview"
-                aria-label="Floom home"
-                className="inline-flex size-7 shrink-0 items-center justify-center rounded-[var(--radius-button)] hover:bg-[var(--active-nav-bg)] transition-colors"
-              >
-                <FloomMark size={22} />
-              </Link>
+              {/* #1305: white-label — the WorkspaceSwitcher already renders the
+                  workspace mark + name as the top-left identity, so no separate
+                  Floom brand mark here (it would be a redundant second mark and
+                  leaks the Floom brand into a white-labeled app). */}
               <div className="min-w-0 flex-1">
                 <WorkspaceSwitcher />
               </div>
@@ -309,6 +446,9 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                 <Link
                   key={item.href}
                   href={item.href}
+                  prefetch
+                  onMouseEnter={() => warm(item.href)}
+                  onFocus={() => warm(item.href)}
                   title={item.label}
                   className={cn(
                     "relative inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] transition-[background,color] duration-150",
@@ -411,9 +551,7 @@ export function UserProfileFooter({
   onNavigate,
   avatarUrl,
 }: { onNavigate?: () => void; avatarUrl?: string | null } = {}) {
-  const pathname = usePathname();
   const router = useRouter();
-  const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
   const [user, setUser] = useState<CurrentUser | null>(null);
   const [workspaceName, setWorkspaceName] = useState("Floom workspace");
 
@@ -421,10 +559,7 @@ export function UserProfileFooter({
     let active = true;
     api.me()
       .then((currentUser) => {
-        if (active) {
-          setUser(currentUser);
-          identifyPostHogUser(currentUser);
-        }
+        if (active) setUser(currentUser);
       })
       .catch(() => {
         if (active) setUser(null);
@@ -454,7 +589,14 @@ export function UserProfileFooter({
   const primary = (user as (typeof user & { username?: string | null }) | null)?.username
     || user?.email || user?.display_name || "Local user";
   const secondary = workspaceName;
-  const initials = profileInitials(primary);
+  // #1306: prefer the explicit prop, else the OAuth photo off the fetched user
+  // (Google/GitHub `picture` / `avatar_url`). OSS /me returns neither, so this
+  // gracefully falls back to initials; the Cloud wrapper's /me supplies it.
+  const photoUrl =
+    avatarUrl
+    ?? (user as (CurrentUser & { picture?: string | null; avatar_url?: string | null }) | null)?.picture
+    ?? user?.avatar_url
+    ?? null;
 
   async function logout() {
     try {
@@ -462,7 +604,6 @@ export function UserProfileFooter({
     } catch {
       // Clearing the cookie is best-effort; navigate regardless.
     }
-    resetPostHogUser();
     onNavigate?.();
     router.replace("/login");
     router.refresh();
@@ -479,18 +620,23 @@ export function UserProfileFooter({
           )}
           aria-label="Profile menu"
         >
-          {/* M36: show Google avatar when avatarUrl is provided, else initials. */}
-          {avatarUrl ? (
+          {/* #1306 / M36: profile photo (Google/GitHub) when available, else
+              initials. Squared (rounded-square via the app radius token), no
+              border. */}
+          {photoUrl ? (
+            // eslint-disable-next-line @next/next/no-img-element
             <img
-              src={avatarUrl}
+              src={photoUrl}
               alt="Profile avatar"
-              className="size-7 shrink-0 rounded-[var(--radius-button)] object-cover"
+              className="size-7 shrink-0 rounded-[var(--radius-button)] border-0 object-cover"
               referrerPolicy="no-referrer"
             />
           ) : (
-            <div className="size-7 shrink-0 rounded-[var(--radius-button)] bg-muted text-foreground grid place-items-center text-[11px] font-medium">
-              {initials}
-            </div>
+            // #1306: no OAuth photo (OSS /me returns none): fall back to a
+            // DiceBear avatar deterministically seeded by the user's
+            // email/name, NOT bare initials. Squircle container, no border,
+            // matching the workspace mark approach.
+            <UserDiceBearAvatar seed={primary} size={28} />
           )}
           <div className="min-w-0 leading-tight text-left">
             <p className="text-xs font-medium text-foreground truncate">{primary}</p>
@@ -499,10 +645,17 @@ export function UserProfileFooter({
         </DropdownMenuTrigger>
         <DropdownMenuContent side="top" align="start" sideOffset={8} className="w-48 p-1">
           <DropdownMenuItem
+            render={<Link href="/settings?sel=profile" onClick={onNavigate} />}
+            className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+          >
+            <UserRound className="size-4" />
+            Edit profile
+          </DropdownMenuItem>
+          <DropdownMenuItem
             render={<Link href="/settings" onClick={onNavigate} />}
             className="flex items-center gap-2 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
           >
-            <Settings className={cn("size-4", settingsActive && "text-[var(--active-nav-text)]")} />
+            <Settings className="size-4" />
             Settings
           </DropdownMenuItem>
           <DropdownMenuSeparator />
@@ -519,17 +672,4 @@ export function UserProfileFooter({
       <ThemeModeButton />
     </div>
   );
-}
-
-function profileInitials(value: string) {
-  const local = value.includes("@") ? value.split("@", 1)[0] : value;
-  const parts = local
-    .split(/[\s._-]+/)
-    .map((part) => part.trim())
-    .filter(Boolean);
-  const letters = parts.length > 1 ? [parts[0][0], parts[1][0]] : [local[0], local[1]];
-  return letters
-    .filter(Boolean)
-    .join("")
-    .toUpperCase() || "LU";
 }

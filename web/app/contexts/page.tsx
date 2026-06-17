@@ -777,7 +777,7 @@ function ContextsPage() {
       {/* Page header */}
       <div className="flex items-start justify-between gap-4 shrink-0">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Brain</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Reusable folders of files your workers can read before they act.
           </p>
@@ -1361,7 +1361,7 @@ function PackDetailPane({
             {!readOnly && (
               <button
                 type="button"
-                title={(detail.sensitive ?? true) ? "Sensitive — not tracked by git. Click to enable git tracking." : "Git-tracked. Click to make sensitive (exclude from git)."}
+                title={(detail.sensitive ?? true) ? "Sensitive: not tracked by git. Click to enable git tracking." : "Git-tracked. Click to make sensitive (exclude from git)."}
                 onClick={async () => {
                   const next = !(detail.sensitive ?? true);
                   await api.contexts.setSensitive(detail.name, next);
@@ -2320,7 +2320,7 @@ function PreviewUnavailable({
 }) {
   return (
     <div className="flex h-full min-h-[260px] items-center justify-center p-6">
-      <div className="max-w-lg rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-5 text-sm shadow-sm">
+      <div className="max-w-lg rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-5 text-sm">
         <p className="font-medium text-foreground">{title}</p>
         <p className="mt-2 leading-6 text-muted-foreground">{detail}</p>
         <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -2404,7 +2404,7 @@ function FileHistoryMenu({
     try {
       const result = await api.contexts.restoreFileVersion(packName, filePath, v.sha);
       if (result.deleted) {
-        toast.error("This commit recorded the file as deleted — it has been removed.");
+        toast.error("This commit recorded the file as deleted; it has been removed.");
       } else {
         try {
           const text = await api.contexts.readTextFile(packName, filePath);

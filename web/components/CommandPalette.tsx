@@ -27,13 +27,14 @@ import {
   CommandShortcut,
 } from "@/components/ui/command";
 import { api } from "@/lib/api";
+import { useWorkers } from "@/lib/query/hooks";
 import type { WorkerSummary } from "@/lib/types";
 
 const NAV = [
   { href: "/overview", label: "Overview", icon: Activity, keywords: "home dashboard" },
   { href: "/workers", label: "Workers", icon: Box, keywords: "list jobs" },
   { href: "/runs", label: "Runs", icon: Clock, keywords: "history executions" },
-  { href: "/brain", label: "Brain", icon: Brain, keywords: "context folders files knowledge resources" },
+  { href: "/library", label: "Library", icon: Brain, keywords: "context folders files knowledge resources brain" },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, keywords: "review pending actions" },
   { href: "/connections/secrets", label: "Secrets", icon: KeyRound, keywords: "env tokens" },
   { href: "/connections", label: "Connections", icon: Plug, keywords: "integrations oauth" },
@@ -48,8 +49,12 @@ export function openCommandPalette() {
 
 export function CommandPalette() {
   const [open, setOpen] = useState(false);
-  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
-  const [workersLoaded, setWorkersLoaded] = useState(false);
+  // Source workers from the shared cache (TanStack Query) instead of an
+  // independent fetch — so the palette has the worker list instantly and a slow
+  // or failed backend call never leaves it empty (which made search return
+  // "No results" even for an exact worker name).
+  const workersQuery = useWorkers();
+  const workers: WorkerSummary[] = workersQuery.data ?? [];
   const router = useRouter();
 
   useEffect(() => {
@@ -70,21 +75,6 @@ export function CommandPalette() {
     return () => document.removeEventListener("keydown", onKey);
   }, []);
 
-  useEffect(() => {
-    if (open && !workersLoaded) {
-      api.workers
-        .list()
-        .then((rows) => {
-          setWorkers(rows);
-          setWorkersLoaded(true);
-        })
-        .catch(() => {
-          // Silently fail; nav + actions still work without the worker list.
-          setWorkersLoaded(true);
-        });
-    }
-  }, [open, workersLoaded]);
-
   const go = useCallback(
     (href: string) => {
       setOpen(false);
@@ -97,11 +87,11 @@ export function CommandPalette() {
     setOpen(false);
     try {
       await api.workers.reload();
-      setWorkersLoaded(false);
+      await workersQuery.refetch();
     } catch {
       // ignore
     }
-  }, []);
+  }, [workersQuery]);
 
   return (
     <CommandDialog open={open} onOpenChange={setOpen}>

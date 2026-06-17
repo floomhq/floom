@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   Check,
@@ -996,6 +997,7 @@ function McpRow({
   onTest: () => void;
   onToggle?: () => void;
 }) {
+  const router = useRouter();
   const [copied, setCopied] = useState(false);
 
   function copyUrl() {
@@ -1127,7 +1129,7 @@ function McpRow({
               variant="outline"
               size="sm"
               className="h-7 px-3 text-xs"
-              onClick={() => { window.location.href = `/connections/mcp/${conn.id}`; }}
+              onClick={() => { router.push(`/connections/mcp/${conn.id}`); }}
             >
               <ExternalLink className="size-3" />
               Open

@@ -120,7 +120,7 @@ export function SlackConnect() {
           <h2 className="text-sm font-medium">Connect to Slack</h2>
           {/* M41: Emily is a personal Chief-of-Staff, not a generic workspace bot. */}
           <p className="mt-0.5 text-xs text-muted-foreground">
-            Your personal AI assistant — DM Emily or @mention her in a channel. She can run workers, surface approvals, and answer questions.
+            Your personal AI assistant: DM Emily or @mention her in a channel. She can run workers, surface approvals, and answer questions.
           </p>
         </div>
         <Button
@@ -220,7 +220,7 @@ export function SlackConnect() {
             <li>2. Approve the requested permissions.</li>
             <li>
               3. <span className="font-medium text-foreground">DM Emily</span> or{" "}
-              <span className="font-medium text-foreground">@mention her</span> in a channel — e.g.{" "}
+              <span className="font-medium text-foreground">@mention her</span> in a channel, e.g.{" "}
               <span className="rounded bg-muted px-1 py-0.5 font-mono text-[11px] text-foreground">
                 show my pending approvals
               </span>
@@ -262,7 +262,7 @@ export function SlackConnect() {
               {/* Primary CTA: get the user back into Slack where the work happens. */}
               {installedTeams[0] ? (
                 <p className="text-xs text-muted-foreground">
-                  You&apos;re connected — DM your assistant in Slack to get started.{" "}
+                  You&apos;re connected. DM your assistant in Slack to get started.{" "}
                   <a
                     href={`https://app.slack.com/client/${installedTeams[0].team_id}`}
                     target="_blank"

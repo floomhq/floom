@@ -13,7 +13,6 @@ const API_BASE =
 const SESSION_COOKIE = "workeros_cloud_session";
 
 const ALLOWED_ACTIONS = new Set(["approve", "deny"]);
-const NO_STORE_HEADERS = { "Cache-Control": "private, no-store, max-age=0" };
 
 export async function POST(
   req: NextRequest,
@@ -21,20 +20,20 @@ export async function POST(
 ) {
   const { action } = await params;
   if (!ALLOWED_ACTIONS.has(action)) {
-    return NextResponse.json({ detail: "Unknown action" }, { status: 404, headers: NO_STORE_HEADERS });
+    return NextResponse.json({ detail: "Unknown action" }, { status: 404 });
   }
 
   const cookieStore = await cookies();
   const session = cookieStore.get(SESSION_COOKIE)?.value;
   if (!session) {
-    return NextResponse.json({ detail: "Not signed in" }, { status: 401, headers: NO_STORE_HEADERS });
+    return NextResponse.json({ detail: "Not signed in" }, { status: 401 });
   }
 
   let body: unknown;
   try {
     body = await req.json();
   } catch {
-    return NextResponse.json({ detail: "Invalid JSON" }, { status: 400, headers: NO_STORE_HEADERS });
+    return NextResponse.json({ detail: "Invalid JSON" }, { status: 400 });
   }
 
   const upstreamUrl = `${API_BASE}/auth/cli-${action}`;
@@ -50,7 +49,6 @@ export async function POST(
 
   const responseText = await upstream.text();
   const responseHeaders = new Headers();
-  responseHeaders.set("Cache-Control", "private, no-store, max-age=0");
   const ct = upstream.headers.get("content-type");
   if (ct) responseHeaders.set("content-type", ct);
   return new NextResponse(responseText, {

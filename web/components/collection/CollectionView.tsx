@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { Search, LayoutGrid, List as ListIcon, Plus, ChevronsRight, X } from "lucide-react";
+import { Search, LayoutGrid, List as ListIcon, Plus, ChevronsRight, X, ChevronLeft, ChevronRight } from "lucide-react";
 import {
   type CollectionConfig,
   type CollectionState,
@@ -14,6 +14,8 @@ import { CollectionList } from "./CollectionList";
 import { CollectionGrid } from "./CollectionGrid";
 import { DetailPane } from "./DetailSplit";
 import { EmptyState, LoadingState, ErrorState } from "./CollectionStates";
+
+const LIST_PAGE_SIZE = 25;
 
 export interface CollectionViewProps<T> {
   config: CollectionConfig<T>;
@@ -28,12 +30,19 @@ const PAGE_X = 28;
 export function CollectionView<T>({ config, state, onChange, onInvalidSel }: CollectionViewProps<T>) {
   const [listCollapsed, setListCollapsed] = useState(false);
   const [creating, setCreating] = useState(false); // +Add opens in the detail pane
+  const [page, setPage] = useState(0);
   const gridEnabled = config.view?.grid ?? false;
 
   const filtered = useMemo(
     () => filterItems(config.items, state, { searchOf: config.searchOf, tagsOf: config.tagsOf }),
     [config.items, config.searchOf, config.tagsOf, state],
   );
+
+  // Reset to page 0 when the filtered set changes (search/tag churn).
+  const filteredLen = filtered.length;
+  useEffect(() => {
+    setPage(0);
+  }, [filteredLen, state.q, state.tags]);
 
   const selected = useMemo(() => {
     if (!state.sel) return null;
@@ -129,10 +138,12 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
   };
   const bodyRef = useRef<HTMLDivElement>(null);
 
-  const header = (
+  const header = config.hideTitle ? null : (
     <div style={{ padding: `22px ${PAGE_X}px 0` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-        <div>
+      {/* #1266: min-w-0 + overflow:hidden keeps the row from spilling on narrow
+          viewports. c-counts is horizontally scrollable at ≤389px. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 18, minWidth: 0, overflow: "hidden" }}>
+        <div style={{ minWidth: 0, flexShrink: 1 }}>
           <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-0.02em" }}>
             {config.title}
           </div>
@@ -141,7 +152,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           )}
         </div>
         {config.counts && config.counts.length > 0 && (
-          <div className="c-counts" style={{ marginLeft: "auto" }}>
+          <div className="c-counts" style={{ marginLeft: "auto", flexShrink: 0 }}>
             {config.counts.map((c, i) => (
               <span className="ct" key={i}>
                 <b>{c.value}</b> {c.label}
@@ -207,6 +218,115 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
     </button>
   );
 
+  // Opens the +Add panel (or runs onSelect) — shared by the toolbar add button
+  // and a function-form banner (e.g. Brain's "+ New folder" drop-zone link).
+  const openAdd = () => {
+    if (config.add?.panel) {
+      patch({ sel: null, tab: null });
+      setListCollapsed(false);
+      setCreating(true);
+    } else {
+      config.add?.onSelect?.();
+    }
+  };
+  const resolvedBanner =
+    typeof config.banner === "function" ? config.banner(openAdd) : config.banner;
+
+  // ---- pagination (resting list only, not compact split-left) ----
+  const totalPages = Math.ceil(filtered.length / LIST_PAGE_SIZE);
+  const safePage = Math.min(page, Math.max(0, totalPages - 1));
+  const pagedItems = (compact: boolean) =>
+    compact ? filtered : filtered.slice(safePage * LIST_PAGE_SIZE, (safePage + 1) * LIST_PAGE_SIZE);
+
+  const pageControls = (compact: boolean) => {
+    if (compact || totalPages <= 1) return null;
+    const from = safePage * LIST_PAGE_SIZE + 1;
+    const to = Math.min((safePage + 1) * LIST_PAGE_SIZE, filtered.length);
+    return (
+      <div
+        style={{
+          display: "flex",
+          alignItems: "center",
+          justifyContent: "space-between",
+          marginTop: 16,
+          fontSize: 12.5,
+          color: "var(--muted-foreground)",
+        }}
+      >
+        <span>
+          {from}–{to} of {filtered.length}
+        </span>
+        <div style={{ display: "flex", gap: 4, alignItems: "center" }}>
+          <button
+            type="button"
+            aria-label="Previous page"
+            disabled={safePage === 0}
+            onClick={() => setPage((p) => Math.max(0, p - 1))}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "4px 8px",
+              borderRadius: "var(--radius-button)",
+              border: "var(--bd-card)",
+              background: "var(--bg-2)",
+              color: safePage === 0 ? "var(--muted-foreground)" : "var(--foreground)",
+              opacity: safePage === 0 ? 0.4 : 1,
+              cursor: safePage === 0 ? "default" : "pointer",
+              fontSize: 12,
+            }}
+          >
+            <ChevronLeft size={13} />
+          </button>
+          {Array.from({ length: totalPages }).map((_, i) => (
+            <button
+              key={i}
+              type="button"
+              aria-label={`Page ${i + 1}`}
+              aria-current={i === safePage ? "page" : undefined}
+              onClick={() => setPage(i)}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                justifyContent: "center",
+                minWidth: 28,
+                padding: "4px 6px",
+                borderRadius: "var(--radius-button)",
+                border: "var(--bd-card)",
+                background: i === safePage ? "var(--foreground)" : "var(--bg-2)",
+                color: i === safePage ? "var(--bg-1, var(--background))" : "var(--foreground)",
+                fontWeight: i === safePage ? 600 : 400,
+                cursor: "pointer",
+                fontSize: 12,
+              }}
+            >
+              {i + 1}
+            </button>
+          ))}
+          <button
+            type="button"
+            aria-label="Next page"
+            disabled={safePage >= totalPages - 1}
+            onClick={() => setPage((p) => Math.min(totalPages - 1, p + 1))}
+            style={{
+              display: "inline-flex",
+              alignItems: "center",
+              padding: "4px 8px",
+              borderRadius: "var(--radius-button)",
+              border: "var(--bd-card)",
+              background: "var(--bg-2)",
+              color: safePage >= totalPages - 1 ? "var(--muted-foreground)" : "var(--foreground)",
+              opacity: safePage >= totalPages - 1 ? 0.4 : 1,
+              cursor: safePage >= totalPages - 1 ? "default" : "pointer",
+              fontSize: 12,
+            }}
+          >
+            <ChevronRight size={13} />
+          </button>
+        </div>
+      </div>
+    );
+  };
+
   // ---- body content (list / grid / states) ----
   const listOrGrid = (compact: boolean) => {
     if (config.loading) return <LoadingState />;
@@ -216,33 +336,40 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
         <EmptyState
           title={config.states?.empty?.title ?? `No ${config.title.toLowerCase()} yet`}
           help={config.states?.empty?.help}
-          action={addButton}
+          icon={config.states?.empty?.icon}
+          action={config.states?.empty?.action ?? addButton}
         />
       );
     }
     const showGrid = !compact && !isOpen && gridEnabled && state.view === "grid";
     if (showGrid && config.card) {
       return (
-        <CollectionGrid
-          items={filtered}
-          idOf={config.idOf}
-          card={config.card}
-          selectedId={state.sel}
-          onSelect={open}
-        />
+        <>
+          <CollectionGrid
+            items={pagedItems(compact)}
+            idOf={config.idOf}
+            card={config.card}
+            selectedId={state.sel}
+            onSelect={open}
+          />
+          {pageControls(compact)}
+        </>
       );
     }
     return (
-      <CollectionList
-        items={filtered}
-        columns={config.columns}
-        idOf={config.idOf}
-        row={config.row}
-        group={config.group}
-        selectedId={state.sel}
-        onSelect={open}
-        compact={compact}
-      />
+      <>
+        <CollectionList
+          items={pagedItems(compact)}
+          columns={config.columns}
+          idOf={config.idOf}
+          row={config.row}
+          group={config.group}
+          selectedId={state.sel}
+          onSelect={open}
+          compact={compact}
+        />
+        {pageControls(compact)}
+      </>
     );
   };
 
@@ -275,8 +402,9 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           )}
           <div className="c-body" style={{ marginTop: 14 }}>
             <div className="c-listcol" ref={bodyRef} style={{ padding: `0 ${PAGE_X}px 26px` }}>
-              {config.banner}
+              {resolvedBanner}
               {listOrGrid(false)}
+              {config.footer}
             </div>
           </div>
         </>
@@ -297,7 +425,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
             </div>
             <div className="c-splitbar">{searchBox(true)}</div>
             <div className="lcin">
-              {config.banner}
+              {resolvedBanner}
               {listOrGrid(true)}
             </div>
           </div>

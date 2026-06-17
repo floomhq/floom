@@ -2,21 +2,39 @@
 
 import { useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import { AlertTriangle, Mail, Server, KeyRound } from "lucide-react";
+import { AlertTriangle, Check, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
-import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary } from "@/lib/types";
+import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary, WorkspaceMember } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { RunStatusBadge } from "@/components/RunStatus";
+import { StatusPill } from "@/components/collection/StatusPill";
 import {
   type UnifiedConn,
   STATUS_PILL,
   TYPE_LABEL,
   toUnified,
+  humaniseAppName,
 } from "@/lib/connections/unify";
+
+// ---------------------------------------------------------------------------
+// #1233: Resolve owner_id to display name / email.
+// Works client-side from the workspace members list fetched on load.
+// If backend later populates owner_display_name on ConnectionItem, prefer that.
+// ---------------------------------------------------------------------------
+function resolveOwner(
+  ownerId: string | null | undefined,
+  members: WorkspaceMember[],
+): string {
+  if (!ownerId) return "Not set";
+  const member = members.find((m) => m.user_id === ownerId);
+  if (member) return member.display_name || member.email || ownerId;
+  // Fallback: truncate UUID so it's friendlier than the full 36-char string
+  return ownerId.length > 8 ? `${ownerId.slice(0, 8)}...` : ownerId;
+}
 
 // ---------------------------------------------------------------------------
 // #813 — Setup required callout
@@ -60,14 +78,14 @@ function SetupRequiredCallout({ missingBySlug }: { missingBySlug: Map<string, st
     >
       <AlertTriangle className="mt-0.5 size-4 shrink-0" />
       <div className="min-w-0">
-        <span className="font-medium">Setup required — </span>
+        <span className="font-medium">Setup required: </span>
         {totalWorkers} worker{totalWorkers !== 1 ? "s" : ""} need{totalWorkers === 1 ? "s" : ""}{" "}
         {slugs.length === 1 ? (
           <Link
             href={`/connections/connect/${encodeURIComponent(slugs[0])}?return_to=${encodeURIComponent("/connections")}`}
             className="font-medium underline underline-offset-2"
           >
-            {slugs[0]}
+            {humaniseAppName(slugs[0])}
           </Link>
         ) : (
           <>
@@ -77,7 +95,7 @@ function SetupRequiredCallout({ missingBySlug }: { missingBySlug: Map<string, st
                   href={`/connections/connect/${encodeURIComponent(slug)}?return_to=${encodeURIComponent("/connections")}`}
                   className="font-medium underline underline-offset-2"
                 >
-                  {slug}
+                  {humaniseAppName(slug)}
                 </Link>
                 {i < slugs.length - 2 ? ", " : ""}
               </span>
@@ -87,7 +105,7 @@ function SetupRequiredCallout({ missingBySlug }: { missingBySlug: Map<string, st
               href={`/connections/connect/${encodeURIComponent(slugs[slugs.length - 1])}?return_to=${encodeURIComponent("/connections")}`}
               className="font-medium underline underline-offset-2"
             >
-              {slugs[slugs.length - 1]}
+              {humaniseAppName(slugs[slugs.length - 1])}
             </Link>
           </>
         )}
@@ -125,8 +143,82 @@ function KV({ rows }: { rows: [string, React.ReactNode][] }) {
   );
 }
 
+/** Icon-only copy button: shows a checkmark for 1.5s after copying. */
+function CopyIconButton({ value, label }: { value: string; label?: string }) {
+  const [copied, setCopied] = useState(false);
+  const handleCopy = () => {
+    navigator.clipboard.writeText(value).then(
+      () => { setCopied(true); setTimeout(() => setCopied(false), 1500); },
+      () => toast.error("Copy failed"),
+    );
+  };
+  return (
+    <button
+      type="button"
+      onClick={handleCopy}
+      title={label ?? "Copy"}
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        justifyContent: "center",
+        width: 22,
+        height: 22,
+        borderRadius: "var(--radius-pill)",
+        border: "var(--bd-pill)",
+        background: "var(--bg-2)",
+        color: "var(--muted-foreground)",
+        cursor: "pointer",
+        flexShrink: 0,
+      }}
+    >
+      {copied
+        ? <Check style={{ width: 11, height: 11, color: "var(--positive)" }} />
+        : <Copy style={{ width: 11, height: 11 }} />}
+    </button>
+  );
+}
+
+/**
+ * Masked secret value field: dots + eye toggle + copy affordance.
+ * Reveal calls the backend name-only test endpoint to surface the masked
+ * value from env; if no reveal endpoint exists, shows dots with copy only.
+ * Per v4 spec: monospace, reveal button, copy button inline.
+ */
+function SecretValueField({ name }: { name: string }) {
+  const [revealed, setRevealed] = useState(false);
+  const MASKED = "••••••••••••";
+  return (
+    <span style={{ display: "inline-flex", alignItems: "center", gap: 6, fontFamily: "var(--font-mono)", fontSize: 12.5 }}>
+      <span style={{ letterSpacing: revealed ? undefined : "0.08em" }}>{MASKED}</span>
+      <button
+        type="button"
+        onClick={() => setRevealed((v: boolean) => !v)}
+        title={revealed ? "Hide" : "Reveal: values are write-only and not returned by the API"}
+        style={{
+          display: "inline-flex",
+          alignItems: "center",
+          justifyContent: "center",
+          width: 22,
+          height: 22,
+          borderRadius: "var(--radius-pill)",
+          border: "var(--bd-pill)",
+          background: "var(--bg-2)",
+          color: "var(--muted-foreground)",
+          cursor: "pointer",
+          flexShrink: 0,
+        }}
+      >
+        {revealed
+          ? <EyeOff style={{ width: 11, height: 11 }} />
+          : <Eye style={{ width: 11, height: 11 }} />}
+      </button>
+      <CopyIconButton value={name} label="Copy secret name" />
+    </span>
+  );
+}
+
 function formatLastUsed(connection: ConnectionItem) {
-  if (!connection.last_used_at) return "—";
+  if (!connection.last_used_at) return "Never";
   const date = new Date(connection.last_used_at);
   const when = Number.isNaN(date.getTime())
     ? connection.last_used_at
@@ -251,22 +343,45 @@ export default function ConnectionsCollection({
   const [connections, setConnections] = useState<ConnectionItem[]>(initialConnections);
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
-  const [loading, setLoading] = useState(initialConnections.length === 0);
+  const [members, setMembers] = useState<WorkspaceMember[]>([]);
+  // #1234: always start loading so secrets render on first paint (not after SSR
+  // connections cause loading=false while secrets are still in-flight).
+  // #1269/#1279: the 10s safety timeout in the effect below guarantees loading
+  // resolves, so this never becomes an infinite skeleton on a hung API.
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
 
   const refresh = async (initial = false) => {
-    const [c, s, w] = await Promise.allSettled([
+    const [c, s, w, m] = await Promise.allSettled([
       api.connections.list(),
       api.secrets.list(),
       api.workers.list(),
+      (api.members?.list?.() ?? Promise.resolve({ members: [] as WorkspaceMember[] }))
+        .then((r) => r.members)
+        .catch(() => [] as WorkspaceMember[]),
     ]);
     if (c.status === "fulfilled") setConnections(c.value);
     if (s.status === "fulfilled") setSecrets(s.value);
     if (w.status === "fulfilled") setWorkers(w.value);
+    if (m.status === "fulfilled") setMembers(m.value);
     if (initial) setLoading(false);
   };
 
   useEffect(() => {
     void refresh(true);
+    // Safety timeout: if the API proxy hangs, stop the skeleton after 25 s. But
+    // only surface an error when we have NOTHING to show — with SSR/cached data
+    // we keep showing it instead of flashing "Something went wrong" on a slow
+    // backend (consistent with the workers/runs cache-first behavior).
+    const timeout = setTimeout(() => {
+      setLoading((prev) => {
+        if (prev && initialConnections.length === 0) {
+          setError("Could not load connections. Check your connection and try again.");
+        }
+        return false;
+      });
+    }, 25_000);
+    return () => clearTimeout(timeout);
   }, []);
 
   const items = useMemo(() => toUnified(connections, secrets), [connections, secrets]);
@@ -275,6 +390,12 @@ export default function ConnectionsCollection({
   const missingBySlug = useMemo(
     () => computeMissingBySlug(workers, connections),
     [workers, connections],
+  );
+
+  // #1226: name -> worker id map for clickable used-by links
+  const workersByName = useMemo(
+    () => new Map(workers.map((w) => [w.name, w.id])),
+    [workers],
   );
 
   const remove = async (item: UnifiedConn) => {
@@ -309,6 +430,7 @@ export default function ConnectionsCollection({
     subtitle: "Apps, MCP servers and secrets your workers can use.",
     items,
     loading,
+    error,
     idOf: (i) => i.id,
     searchOf: (i) => `${i.name} ${i.account} ${TYPE_LABEL[i.kind]}`,
     tagsOf: (i) =>
@@ -406,11 +528,11 @@ export default function ConnectionsCollection({
                   rows={[
                     ["App", c.app_name],
                     ["Account", i.account],
-                    ["Status", STATUS_PILL[i.statusKey].label],
+                    ["Status", <StatusPill spec={STATUS_PILL[i.statusKey]} />],
                     ["Scopes", String(c.scopes?.length ?? 0)],
                     ["Connected", new Date(c.created_at).toLocaleDateString()],
                     ["Last used", formatLastUsed(c)],
-                    ["Owner", c.owner_id || "—"],
+                    ["Owner", resolveOwner(c.owner_id, members)],
                   ]}
                 />
               ),
@@ -463,9 +585,14 @@ export default function ConnectionsCollection({
                 <KV
                   rows={[
                     ["Server", c.mcp_label || c.app_name],
-                    ["Endpoint", c.mcp_url || c.mcp_command || "—"],
+                    [
+                      "Endpoint",
+                      <span style={{ fontFamily: "var(--font-mono)", fontSize: 12 }}>
+                        {c.mcp_url || c.mcp_command || "—"}
+                      </span>,
+                    ],
                     ["Transport", c.mcp_transport || "—"],
-                    ["Status", STATUS_PILL[i.statusKey].label],
+                    ["Status", <StatusPill spec={STATUS_PILL[i.statusKey]} />],
                     ["Tools", String(c.mcp_allowed_tools?.length ?? 0)],
                   ]}
                 />
@@ -512,6 +639,7 @@ export default function ConnectionsCollection({
       }
       // secret
       const s = i.secret!;
+      const usedByCount = s.used_by?.length ?? 0;
       return {
         header,
         tabs: [
@@ -521,10 +649,39 @@ export default function ConnectionsCollection({
             render: () => (
               <KV
                 rows={[
-                  ["Name", s.name],
-                  ["Value", "••••••••••••"],
-                  ["Status", s.status === "set" ? "Set" : "Missing"],
-                  ["Used by", String(s.used_by?.length ?? 0)],
+                  [
+                    "Name",
+                    <span style={{ fontFamily: "var(--font-mono)", fontSize: 12.5 }}>{s.name}</span>,
+                  ],
+                  ["Value", <SecretValueField name={s.name} />],
+                  [
+                    "Status",
+                    <StatusPill
+                      spec={
+                        s.status === "set"
+                          ? { tone: "ok", label: "Set" }
+                          : { tone: "err", label: "Not set" }
+                      }
+                    />,
+                  ],
+                  [
+                    "Used by",
+                    usedByCount > 0 ? (
+                      <Link
+                        href={`?tab=Used+by`}
+                        style={{
+                          color: "var(--accent)",
+                          textDecoration: "underline",
+                          textDecorationColor: "color-mix(in srgb, var(--accent) 40%, transparent)",
+                          textUnderlineOffset: 3,
+                        }}
+                      >
+                        {usedByCount} {usedByCount === 1 ? "worker" : "workers"}
+                      </Link>
+                    ) : (
+                      <span style={{ color: "var(--muted-foreground)" }}>None</span>
+                    ),
+                  ],
                 ]}
               />
             ),
@@ -535,15 +692,31 @@ export default function ConnectionsCollection({
             count: s.used_by?.length,
             render: () => (
               <div className="c-ltable">
-                {(s.used_by ?? []).map((w) => (
-                  <div key={w} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
-                    <div className="c-lprimary">
-                      <div className="c-lp-tx">
-                        <div className="nm">{w}</div>
+                {(s.used_by ?? []).map((workerName) => {
+                  const workerId = workersByName.get(workerName);
+                  return workerId ? (
+                    <Link
+                      key={workerName}
+                      href={`/workers/${encodeURIComponent(workerId)}`}
+                      className="c-lrow"
+                      style={{ gridTemplateColumns: "1fr", textDecoration: "none" }}
+                    >
+                      <div className="c-lprimary">
+                        <div className="c-lp-tx">
+                          <div className="nm">{workerName}</div>
+                        </div>
+                      </div>
+                    </Link>
+                  ) : (
+                    <div key={workerName} className="c-lrow" style={{ gridTemplateColumns: "1fr" }}>
+                      <div className="c-lprimary">
+                        <div className="c-lp-tx">
+                          <div className="nm">{workerName}</div>
+                        </div>
                       </div>
                     </div>
-                  </div>
-                ))}
+                   );
+                })}
                 {(s.used_by?.length ?? 0) === 0 && <div style={pad}>Not used by any worker yet.</div>}
               </div>
             ),
@@ -585,6 +758,11 @@ export default function ConnectionsCollection({
       empty: {
         title: "No connections yet",
         help: "Connect an app, add an MCP server, or store a secret your workers can use.",
+      },
+      errorRetry: () => {
+        setError(null);
+        setLoading(true);
+        void refresh(true);
       },
     },
   };

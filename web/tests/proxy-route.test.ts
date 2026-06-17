@@ -94,13 +94,14 @@ describe("api proxy route", () => {
     expect(res.headers.get("location")).toBeNull();
   });
 
-  it("passes the configured Supabase OAuth redirect through unchanged", async () => {
+  it("passes the configured Supabase OAuth redirect through unchanged (fresh login)", async () => {
     process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
     process.env.WORKEROS_CLOUD_SUPABASE_URL = "https://sgizlsyygvlqosgwdimb.supabase.co";
-    const supabaseLocation =
-      "https://sgizlsyygvlqosgwdimb.supabase.co/auth/v1/authorize?provider=google&redirect_to=https%3A%2F%2Fworkeros-api.floom.dev%2Fauth%2Fcallback%3Fnext%3D%252Fapp";
+    // No session cookie: a fresh/incognito login has none, and /auth/* is unguarded.
+    const supaLocation =
+      "https://sgizlsyygvlqosgwdimb.supabase.co/auth/v1/authorize?provider=google&redirect_to=https%3A%2F%2Fworkeros-api.floom.dev%2Fauth%2Fcallback%3Fnext%3D%252Fapp&code_challenge=abc&code_challenge_method=s256";
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
-      new Response(null, { status: 307, headers: { location: supabaseLocation } }),
+      new Response(null, { status: 307, headers: { location: supaLocation } }),
     );
     const { GET } = await loadRoute();
 
@@ -110,10 +111,11 @@ describe("api proxy route", () => {
     );
 
     expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toBe(supabaseLocation);
+    // Forwarded verbatim so the browser can navigate to Supabase -> Google.
+    expect(res.headers.get("location")).toBe(supaLocation);
   });
 
-  it("strips non-configured Supabase-lookalike origins", async () => {
+  it("still strips a non-configured supabase-lookalike origin", async () => {
     process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
     process.env.WORKEROS_CLOUD_SUPABASE_URL = "https://sgizlsyygvlqosgwdimb.supabase.co";
     vi.spyOn(globalThis, "fetch").mockResolvedValue(

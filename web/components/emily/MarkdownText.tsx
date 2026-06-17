@@ -1,8 +1,11 @@
+"use client";
+
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import Link from "next/link";
 import { cn } from "@/lib/utils";
 import { sanitizeHref } from "@/lib/safe-url";
+import { useTextStream } from "@/lib/useTextStream";
 
 /**
  * MarkdownText -- renders assistant message text as real markdown.
@@ -12,14 +15,20 @@ import { sanitizeHref } from "@/lib/safe-url";
 export function MarkdownText({
   text,
   className,
+  streaming = false,
 }: {
   text: string;
   className?: string;
+  /** When true, animates token reveal with a typewriter effect. */
+  streaming?: boolean;
 }) {
+  const displayed = useTextStream(text, streaming, "typewriter");
   return (
     <div className={cn("text-sm leading-relaxed", className)}>
       <ReactMarkdown
         remarkPlugins={[remarkGfm]}
+        // Use `displayed` (animated) instead of `text` so streaming feels smooth
+        key={streaming ? undefined : text}
         components={{
           p: ({ children }) => (
             <p className="mb-1.5 last:mb-0">{children}</p>
@@ -77,9 +86,29 @@ export function MarkdownText({
               {children}
             </blockquote>
           ),
+          // GFM table overrides: without these, remark-gfm emits bare <table>/<td>
+          // with no padding, causing columns to collide ("Slack Weekly RecapScheduleEnabled").
+          table: ({ children }) => (
+            <div className="my-2 overflow-x-auto rounded-[var(--radius-button)] [border:var(--bd-card)]">
+              <table className="w-full border-collapse text-sm">{children}</table>
+            </div>
+          ),
+          thead: ({ children }) => <thead>{children}</thead>,
+          tbody: ({ children }) => <tbody>{children}</tbody>,
+          tr: ({ children }) => <tr className="[&:not(:last-child)]:[border-bottom:var(--bd-div)]">{children}</tr>,
+          th: ({ children }) => (
+            <th className="bg-muted px-3 py-1.5 text-left text-xs font-medium text-muted-foreground [border-bottom:var(--bd-div)]">
+              {children}
+            </th>
+          ),
+          td: ({ children }) => (
+            <td className="px-3 py-1.5 text-xs [&:not(:last-child)]:[border-right:var(--bd-div)]">
+              {children}
+            </td>
+          ),
         }}
       >
-        {text}
+        {displayed}
       </ReactMarkdown>
     </div>
   );

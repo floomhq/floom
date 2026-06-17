@@ -1,10 +1,11 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { useRouter, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useWorkers } from "@/lib/query/hooks";
 import type {
   WorkerSummary,
   WorkerDetail,
@@ -14,6 +15,7 @@ import type {
   VersionSummary,
   RunSummary,
   TriggerSpec,
+  WorkerInput,
 } from "@/lib/types";
 import { formatVersionRows } from "@/lib/workers/versions";
 import { WORKER_DETAIL_TABS, type WorkerDetailTab } from "@/lib/workers/tabs";
@@ -35,10 +37,11 @@ import { Button } from "@/components/ui/button";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
-import { FileText, Lock, MoreHorizontal } from "lucide-react";
+import { ArrowRight, Brain, Lock, MoreHorizontal, Plus } from "lucide-react";
+import { BRAIN_FILE_META, inferBrainFileType } from "@/lib/brain/file-type-icon";
 import { WorkerIconPills } from "@/components/WorkerIconPills";
+import { Sparkline } from "@/components/Sparkline";
 import { WorkerAsciiDiagram } from "@/components/WorkerAsciiDiagram";
-import { CodeBlock } from "@/components/file-viewer/code-block";
 import {
   FilesEditor,
   TriggersEditor,
@@ -47,16 +50,22 @@ import {
   replaceTriggerBlock,
   type TriggerRow,
 } from "@/components/worker-form";
+import { WorkerInputForm, requiredRunInputErrors } from "@/components/run-page/WorkerInputForm";
 import { WorkerBrainEditor } from "@/components/worker/WorkerBrainEditor";
 import { WorkerToolsEditor } from "@/components/worker/WorkerToolsEditor";
 import { WorkerFeedbackPanel } from "@/components/worker/WorkerFeedbackPanel";
+import { VersionDiffPanel } from "@/components/VersionDiffPanel";
 import {
   DropdownMenu,
+  DropdownMenuCheckboxItem,
   DropdownMenuContent,
+  DropdownMenuGroup,
   DropdownMenuItem,
+  DropdownMenuLabel,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  contextSpecName,
   patchBrainContexts,
   patchWorkerConnections,
   setContextWriteable,
@@ -66,11 +75,18 @@ import { can, isViewOnly, canLeaveFeedback, visibilityLabel, FEEDBACK_BACKEND_AV
 import {
   isSystemWorker,
   workerStatusPill,
+  workerStageKey,
   workerTags,
   contentTagOptions,
   orderedSourceFiles,
 } from "@/lib/workers/derive";
 import { getFavorites, saveFavorites } from "@/lib/workers/favorites";
+import {
+  ADVANCED_DETAIL_TABS,
+  BASE_DETAIL_TABS,
+  getPinnedTabs,
+  savePinnedTabs,
+} from "@/lib/workers/pinned-tabs";
 import { sortWorkersByRecentActivity } from "@/lib/worker-list-order";
 
 function rel(ts?: string | null): string {
@@ -85,6 +101,19 @@ function rel(ts?: string | null): string {
   return `${Math.round(h / 24)}d ago`;
 }
 
+/** Build the muted telemetry string for B17 worker card meta line. */
+function workerCardMeta(w: WorkerSummary): string | null {
+  const s = w.recent_stats;
+  if (!s) return null;
+  const parts: string[] = [];
+  if (s.last_run_at) parts.push(rel(s.last_run_at));
+  if (typeof s.runs_7d === "number" && s.runs_7d > 0) parts.push(`${s.runs_7d} run${s.runs_7d === 1 ? "" : "s"}`);
+  if (typeof s.success_rate_7d === "number" && s.runs_7d > 0) {
+    parts.push(`${Math.round(s.success_rate_7d * 100)}%`);
+  }
+  return parts.length > 0 ? parts.join(" · ") : null;
+}
+
 function displayBrandCopy(value?: string | null): string {
   const legacyAllCapsSuffix = new RegExp(`\\bWorker${"OS"}\\b`, "g");
   const legacyTitle = new RegExp(`\\bWorker${"os"}\\b`, "g");
@@ -94,24 +123,44 @@ function displayBrandCopy(value?: string | null): string {
 // ---- detail (lazy WorkerDetail, cached so tab switches don't refetch) ----
 const detailCache = new Map<string, WorkerDetail>();
 
-function useWorkerDetail(id: string): [WorkerDetail | undefined, (d: WorkerDetail) => void] {
-  const [detail, setDetail] = useState<WorkerDetail | undefined>(detailCache.get(id));
+// Returns [detail, apply] where detail is:
+//   undefined → still loading
+//   null      → load failed (show an error/empty state)
+//   WorkerDetail → loaded
+function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: WorkerDetail) => void] {
+  const [detail, setDetail] = useState<WorkerDetail | undefined | null>(detailCache.get(id));
   useEffect(() => {
     if (detailCache.has(id)) {
       setDetail(detailCache.get(id));
       return;
     }
     let alive = true;
-    api.workers
-      .get(id)
-      .then((d) => {
-        detailCache.set(id, d);
-        if (alive) setDetail(d);
-      })
-      .catch(() => {});
+    // Retry once before surfacing an error — a transiently slow backend should
+    // not strand the detail tabs on "Could not load" (#1279 + round-03 source-load).
+    const load = (attempt: number) => {
+      api.workers
+        .get(id)
+        .then((d) => {
+          detailCache.set(id, d);
+          if (alive) setDetail(d);
+        })
+        .catch(() => {
+          if (!alive) return;
+          if (attempt < 1) setTimeout(() => load(attempt + 1), 1500);
+          else setDetail(null); // null = failed to load → tabs show error, not a spinner
+        });
+    };
+    load(0);
+    // Safety timeout: if the API proxy hangs entirely, surface an error after 25 s
+    // (long enough to cover the retry above).
+    const timeout = setTimeout(() => {
+      if (alive && detail === undefined) setDetail(null);
+    }, 25_000);
     return () => {
       alive = false;
+      clearTimeout(timeout);
     };
+  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [id]);
   const apply = useCallback(
     (d: WorkerDetail) => {
@@ -121,6 +170,49 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined, (d: WorkerDetai
     [id],
   );
   return [detail, apply];
+}
+
+/**
+ * Project a fetched WorkerDetail into the WorkerSummary shape the list/cards
+ * need. Used when a deep-link / "Open worker" points at a worker that isn't in
+ * the (cache-first, 30s-stale) workers list yet, e.g. a worker Emily just
+ * created. We fetch it by id and merge a summary so the selection resolves
+ * instead of falsely toasting "Item not found … old ID format".
+ */
+function detailToSummary(d: WorkerDetail): WorkerSummary {
+  return {
+    id: d.id,
+    name: d.name,
+    description: d.description,
+    long_description: d.long_description,
+    use_cases: d.use_cases,
+    example_input: d.example_input,
+    example_output: d.example_output,
+    how_it_works: d.how_it_works,
+    is_example: d.is_example,
+    archived: d.archived,
+    enabled: d.enabled,
+    archive_reason: d.archive_reason,
+    stage: d.stage,
+    tags: d.tags ?? [],
+    folder: d.folder,
+    status: d.status,
+    trigger_type: d.trigger_type,
+    runner: d.runner,
+    triggers: [],
+    triggers_spec: d.triggers_spec ?? [],
+    // Summary `connections` is the list of app slugs; derive from the config.
+    connections: (d.config?.connections ?? [])
+      .map((c) => (typeof c === "string" ? c : (c as { app?: string }).app))
+      .filter((s): s is string => Boolean(s)),
+    missing_secrets: d.missing_secrets,
+    missing_connections: d.missing_connections,
+    inputs: d.config?.inputs,
+    public_link: d.public_link,
+    owner_id: d.owner_id,
+    visibility: d.visibility,
+    permissions: d.permissions,
+  } as WorkerSummary;
 }
 
 /** Build the worker.yml text from a detail (files take precedence). */
@@ -158,6 +250,14 @@ function coerceInputValue(value: string, type?: string): unknown {
 
 function Loading() {
   return <LoadingState rows={4} />;
+}
+
+function DetailError() {
+  return (
+    <div style={{ color: "var(--muted-foreground)", padding: "14px 0" }}>
+      Could not load details. Check your connection and try again.
+    </div>
+  );
 }
 
 function friendlyToken(value?: string | null): string {
@@ -234,17 +334,46 @@ function OverviewTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
-      <LatestOutput w={w} d={d} />
+      {/* #1290: "Latest output" removed — its purpose was unclear to operators
+          (Federico: "why is latest output shown?") and it only showed run status +
+          ID with no actual output text. The History tab shows the run list. */}
       <div>
         <h4 style={h4}>WHAT IT DOES</h4>
-        <AboutBody w={w} d={d} />
+        {/* #1279: useWorkerDetail can now return null (load failed); the overview
+            treats that the same as "not loaded yet" — AboutBody renders its empty state. */}
+        <AboutBody w={w} d={d ?? undefined} />
       </div>
     </div>
   );
 }
 
+/** One file-type chip for a brain context folder. Reuses the shared icon mapping. */
+function BrainContextChip({ name }: { name: string }) {
+  const meta = BRAIN_FILE_META[inferBrainFileType(name)];
+  const Icon = meta.Icon;
+  return (
+    <span
+      className="inline-flex h-7 items-center gap-1.5 rounded-[9px] px-1.5 pr-2 text-[12px] [border:var(--bd-card)]"
+      style={{ background: "var(--bg-2)" }}
+    >
+      <span
+        aria-hidden="true"
+        className="inline-flex h-5 w-5 shrink-0 items-center justify-center rounded-[5px]"
+        style={{
+          background: `color-mix(in srgb, ${meta.tint} 12%, transparent)`,
+          color: meta.tint,
+        }}
+      >
+        <Icon className="h-3 w-3" strokeWidth={2} />
+      </span>
+      <span className="max-w-[120px] truncate font-medium" style={{ color: "var(--ink)" }}>{name}</span>
+    </span>
+  );
+}
+
 function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
   const description = displayBrandCopy(w.long_description || w.description) || "No description yet.";
+  const contexts = d?.config?.contexts ?? [];
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 14 }}>
       <WorkerAsciiDiagram
@@ -256,6 +385,20 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
         outputs={(d?.config?.outputs ?? []).map((o) => ({ name: o.name, label: o.label, type: o.type }))}
       />
       <p style={{ margin: 0 }}>{description}</p>
+      {contexts.length > 0 && (
+        <div>
+          <h4 style={h4}>
+            <Brain className="inline-block size-[11px] align-[-1px] mr-1" aria-hidden="true" />
+            Company brain it uses
+          </h4>
+          <div style={{ display: "flex", flexWrap: "wrap", gap: 6 }}>
+            {contexts.map((spec) => {
+              const name = contextSpecName(spec);
+              return <BrainContextChip key={name} name={name} />;
+            })}
+          </div>
+        </div>
+      )}
       {d?.use_cases && d.use_cases.length > 0 && (
         <div>
           <h4 style={h4}>Use cases</h4>
@@ -277,8 +420,8 @@ function AboutBody({ w, d }: { w: WorkerSummary; d?: WorkerDetail }) {
 }
 
 
-// SPEC §4 History: recent runs w/ durations, link to Runs.
-function HistoryTab({ w }: { w: WorkerSummary }) {
+// Runs: recent runs w/ durations, link to the full Runs surface.
+function RunsTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
   const runs = d?.recent_runs ?? (w.last_run ? [w.last_run] : []);
   return (
@@ -316,9 +459,15 @@ function HistoryTab({ w }: { w: WorkerSummary }) {
 // SPEC §4 Versions: git log in the GLOBAL list style — message + `sha · author ·
 // age`, current marker, Diff (modal) + Restore (confirm). Endpoints BUILT.
 function VersionsTab({ w }: { w: WorkerSummary }) {
-  const [, applyDetail] = useWorkerDetail(w.id);
+  const [d, applyDetail] = useWorkerDetail(w.id);
   const [versions, setVersions] = useState<VersionSummary[] | null>(null);
-  const [diff, setDiff] = useState<{ id: string; content: string } | null>(null);
+  // #1249: store both version files AND current files so the modal can show a
+  // proper line-level diff (VersionDiffPanel) instead of a raw file view.
+  const [diff, setDiff] = useState<{
+    id: string;
+    versionFiles: { path: string; content: string }[];
+    currentFiles: { path: string; content: string }[];
+  } | null>(null);
   const [busy, setBusy] = useState(false);
   const [now] = useState(() => Date.now());
   const editable = can("edit", w);
@@ -329,20 +478,35 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
       .listVersions(w.id)
       .then((v) => alive && setVersions(v))
       .catch(() => alive && setVersions([]));
+    // Safety timeout: stop the skeleton after 10 s if the API proxy hangs.
+    const timeout = setTimeout(() => {
+      if (alive) setVersions((prev) => prev ?? []);
+    }, 10_000);
     return () => {
       alive = false;
+      clearTimeout(timeout);
     };
   }, [w.id]);
 
-  if (!versions) return <Loading />;
+  if (versions === null) return <Loading />;
   if (versions.length === 0) return <div style={muted}>No version history yet.</div>;
   const rows = formatVersionRows(versions, now);
 
   const showDiff = async (id: string) => {
     try {
       const v = await api.workers.getVersion(w.id, id);
-      const file = v.files?.find((f) => f.path === "worker.yml") ?? v.files?.[0];
-      setDiff({ id, content: file?.content ?? "" });
+      // Current files: prefer already-loaded detail; fall back to fetching the
+      // worker detail on demand (the cache will pick it up on the next render).
+      const currentFilesRaw =
+        d?.files
+          ?.filter((f) => !f.binary && f.content != null)
+          .map((f) => ({ path: f.path, content: f.content as string })) ??
+        [];
+      setDiff({
+        id,
+        versionFiles: (v.files ?? []).map((f) => ({ path: f.path, content: f.content })),
+        currentFiles: currentFilesRaw,
+      });
     } catch {
       toast.error("Could not load that version.");
     }
@@ -394,85 +558,62 @@ function VersionsTab({ w }: { w: WorkerSummary }) {
           </div>
         ))}
       </div>
+      {/* #1249: replaced CodeBlock (read-only full-file view) with VersionDiffPanel
+          which shows a proper line-level diff between this version and current. */}
       <Dialog open={!!diff} onOpenChange={(o) => !o && setDiff(null)}>
-        <DialogContent className="max-w-2xl max-h-[80vh] overflow-y-auto">
-          <DialogHeader>
+        <DialogContent className="max-w-3xl max-h-[80vh] overflow-y-auto p-0">
+          <DialogHeader className="px-6 pt-5 pb-3">
             <DialogTitle>Version {diff?.id.slice(0, 7)}</DialogTitle>
           </DialogHeader>
-          {diff && <CodeBlock text={diff.content} filePath="worker.yml" />}
+          {diff && (
+            <VersionDiffPanel
+              versionSha={diff.id.slice(0, 7)}
+              versionFiles={diff.versionFiles}
+              currentFiles={diff.currentFiles}
+              isRestoring={busy}
+              canRestore={editable && rows.find((r) => r.id === diff.id && !r.isCurrent) !== undefined}
+              onRestore={() => void restore(diff.id).then(() => setDiff(null))}
+            />
+          )}
         </DialogContent>
       </Dialog>
     </div>
   );
 }
 
-function sourceFileName(path: string): string {
-  return path.split("/").filter(Boolean).pop() || path;
-}
-
-type SourceEditorFile = {
-  path: string;
-  content: string;
-  binary?: boolean;
-  language?: string;
-  size?: number;
-};
-
-function sourceEditorFiles(files: WorkerFile[]): SourceEditorFile[] {
-  return files.map((f) => ({
-    path: f.path,
-    content: f.content ?? "",
-    binary: f.binary,
-    language: f.language,
-    size: f.size,
-  }));
-}
-
-function SourceFileTabs({
-  files,
-  activePath,
-  onSelect,
-}: {
-  files: WorkerFile[];
-  activePath: string;
-  onSelect: (path: string) => void;
-}) {
-  return (
-    <div className="c-dtabs c-source-file-tabs -mx-1 mb-3 px-1" role="tablist" aria-label="Source files">
-      {files.map((file) => (
-        <button
-          key={file.path}
-          type="button"
-          role="tab"
-          aria-selected={file.path === activePath}
-          className={`c-dtab ${file.path === activePath ? "on" : ""}`}
-          title={file.path}
-          onClick={() => onSelect(file.path)}
-        >
-          <FileText className="size-3.5 shrink-0" />
-          <span className="font-mono text-xs">{sourceFileName(file.path)}</span>
-        </button>
-      ))}
-    </div>
-  );
-}
-
+// §3.2/§3.3/§3.4 — Source tab: two-pane file-rail viewer (FilesEditor view mode)
+// with an "Edit source" button that opens FilesEditor in edit mode.
+// On Save: calls api.workers.updateFiles (PUT /workers/{id}/files).
+// Protected workers that clone on edit return a new WorkerDetail — applyDetail handles it.
 function SourceTab({ w }: { w: WorkerSummary }) {
   const [d, applyDetail] = useWorkerDetail(w.id);
-  const [active, setActive] = useState<string | null>(null);
+  const [selectedPath, setSelectedPath] = useState<string | null>(null);
   const [editOpen, setEditOpen] = useState(false);
-  const [draftFiles, setDraftFiles] = useState<SourceEditorFile[]>([]);
+  const [draftFiles, setDraftFiles] = useState<{ path: string; content: string; binary?: boolean; language?: string; size?: number }[]>([]);
   const [draftPath, setDraftPath] = useState<string>("worker.yml");
   const [saving, setSaving] = useState(false);
-  if (!d) return <Loading />;
+
+  if (d === undefined) return <Loading />;
+  if (d === null) return <DetailError />;
+
   const ordered = orderedSourceFiles(d.files ?? []);
   if (ordered.length === 0) return <div style={muted}>No source files.</div>;
-  const file = ordered.find((f) => f.path === active) ?? ordered[0];
+
   const editable = can("edit", d);
+  // Default selected path to first file if not yet set.
+  const activePath = selectedPath ?? ordered[0]?.path ?? null;
 
   function openEditor() {
-    setDraftFiles(sourceEditorFiles(ordered));
-    setDraftPath(file.path);
+    setDraftFiles(
+      ordered.map((f) => ({
+        path: f.path,
+        content: f.content ?? "",
+        binary: f.binary,
+        language: f.language,
+        size: f.size,
+      })),
+    );
+    setDraftPath(activePath ?? "worker.yml");
     setEditOpen(true);
   }
 
@@ -485,7 +626,7 @@ function SourceTab({ w }: { w: WorkerSummary }) {
         draftFiles.map((f) => ({ path: f.path, content: f.content ?? "" })),
       );
       applyDetail(updated);
-      setActive(draftPath);
+      setSelectedPath(draftPath);
       setEditOpen(false);
       toast.success("Source updated");
     } catch (err) {
@@ -497,19 +638,23 @@ function SourceTab({ w }: { w: WorkerSummary }) {
 
   return (
     <>
-      <div className="min-w-0">
-        <div className="mb-2 flex min-w-0 items-center gap-3">
-          <SourceFileTabs files={ordered} activePath={file.path} onSelect={setActive} />
-          {editable && (
-            <button type="button" className="c-vpill mb-3 shrink-0" style={pillBtn} onClick={openEditor}>
-              Edit
-            </button>
-          )}
+      {editable && (
+        <div className="mb-3 flex justify-end">
+          <button type="button" className="c-vpill" style={pillBtn} onClick={openEditor}>
+            Edit source
+          </button>
         </div>
-        <CodeBlock text={file.content ?? ""} filePath={file.path} language={file.language} surface="flat" />
-      </div>
+      )}
+      {/* §3.2: full two-pane file-rail + syntax-highlighted viewer (FilesEditor view mode).
+          This replaces the prior compact SourceFileTabs + CodeBlock layout. */}
+      <FilesEditor
+        mode="view"
+        files={ordered as WorkerFile[]}
+        selectedPath={activePath}
+        onSelect={(path) => setSelectedPath(path)}
+      />
       <Dialog open={editOpen} onOpenChange={setEditOpen}>
-        <DialogContent className="max-h-[90vh] max-w-6xl overflow-y-auto">
+        <DialogContent className="max-h-[90vh] sm:max-w-6xl overflow-y-auto">
           <DialogHeader>
             <DialogTitle>Edit source</DialogTitle>
             <DialogDescription>Update this worker&apos;s source files.</DialogDescription>
@@ -545,7 +690,8 @@ function BrainTab({ w }: { w: WorkerSummary }) {
   useEffect(() => {
     refreshPacks();
   }, [refreshPacks]);
-  if (!d) return <Loading />;
+  if (d === undefined) return <Loading />;
+  if (d === null) return <DetailError />;
   const editable = can("edit", d);
   const contexts = d.config?.contexts ?? [];
   // Per-worker memory folder convention: "<worker-id>-memory". Connecting it
@@ -600,7 +746,8 @@ function BrainTab({ w }: { w: WorkerSummary }) {
 function ToolsTab({ w }: { w: WorkerSummary }) {
   const [d, applyDetail] = useWorkerDetail(w.id);
   const [busy, setBusy] = useState(false);
-  if (!d) return <Loading />;
+  if (d === undefined) return <Loading />;
+  if (d === null) return <DetailError />;
   const editable = can("edit", d);
   const save = async (next: WorkerConnectionSpec[]) => {
     setBusy(true);
@@ -648,7 +795,8 @@ function TriggersTab({ w }: { w: WorkerSummary }) {
     if (d && rows === null) setRows(currentTriggerRows(d));
   }, [d, rows]);
 
-  if (!d || rows === null) return <Loading />;
+  if (d === undefined || rows === null) return <Loading />;
+  if (d === null) return <DetailError />;
   const editable = can("edit", d);
   const baseline = JSON.stringify(currentTriggerRows(d).map(stripRowId));
   const dirty = JSON.stringify(rows.map(stripRowId)) !== baseline;
@@ -711,66 +859,44 @@ function stripRowId(row: TriggerRow): Omit<TriggerRow, "id"> {
   return rest;
 }
 
-// SPEC §4 Config: Tools · Brain attach · Triggers · Limits in one tab.
+// Config: Tools · Brain attach · Triggers · runtime in one scroll.
 // ("paused" = enabled:false — there is no paused status; pause/resume is #788;
 // spend cap is #793; PATCH name/desc is #785; brain attach/detach is #790 —
 // today these route through the full worker-YAML PUT.)
 function ConfigTab({ w }: { w: WorkerSummary }) {
   const [d] = useWorkerDetail(w.id);
-  const [activeTab, setActiveTab] = useState<"Tools" | "Brain" | "Triggers">("Tools");
-  if (!d) return <Loading />;
+  // #1279: distinguish loading (undefined) from load-failure (null) so a hung
+  // API surfaces an error instead of an infinite skeleton.
+  if (d === undefined) return <Loading />;
+  if (d === null) return <DetailError />;
   const runtime = d.config?.runtime;
   const modelId = runtime?.model ?? d.config?.model;
-  const runtimeRows: Array<[string, React.ReactNode]> = [
-    [
-      "Runtime",
-      runtimeSummary({
-        runner: runtime?.runner ?? d.runner ?? w.runner,
-        runtime: runtime?.type ?? w.runtime,
-      }),
-    ],
-  ];
-  if (runtime?.mode) runtimeRows.push(["Mode", friendlyToken(runtime.mode)]);
-  if (runtime?.entrypoint) {
-    runtimeRows.push(["Entrypoint", <span key="entrypoint" className="font-mono text-xs">{runtime.entrypoint}</span>]);
-  }
-  if (modelId) runtimeRows.push(["Model", modelLabel(modelId)]);
-  const tabs = ["Tools", "Brain", "Triggers"] as const;
+  const runtimeLine = [
+    d.enabled === false ? "Paused" : "Enabled",
+    runtimeSummary({
+      runner: runtime?.runner ?? d.runner ?? w.runner,
+      runtime: runtime?.type ?? w.runtime,
+    }),
+    runtime?.mode ? friendlyToken(runtime.mode) : null,
+    runtime?.entrypoint ? `Entry ${runtime.entrypoint}` : null,
+    modelId ? modelLabel(modelId) : null,
+  ].filter(Boolean).join(" · ");
   return (
-    <div className="flex flex-col gap-5">
-      <div className="c-dtabs px-0 pt-0" role="tablist" aria-label="Config sections">
-        {tabs.map((tab) => (
-          <button
-            key={tab}
-            type="button"
-            role="tab"
-            aria-selected={activeTab === tab}
-            className={`c-dtab ${activeTab === tab ? "on" : ""}`}
-            onClick={() => setActiveTab(tab)}
-          >
-            {tab}
-          </button>
-        ))}
-      </div>
-      {activeTab === "Tools" && <ToolsTab w={w} />}
-      {activeTab === "Brain" && <BrainTab w={w} />}
-      {activeTab === "Triggers" && (
-        <div className="flex flex-col gap-5">
-          {/* W-02: editable trigger control (schedule / webhook / app-event / manual). */}
-          <TriggersTab w={w} />
-          <ConfigInfoGrid
-            rows={[
-              [
-                "Status",
-                // TODO(#788): pause/resume toggle — "paused" is enabled:false today.
-                <span key="status" className="c-vpill">{d.enabled === false ? "Paused" : "Enabled"}</span>,
-              ],
-            ]}
-          />
-          <ConfigInfoGrid rows={runtimeRows} />
-          {/* TODO(#793): monthly spend cap field. */}
-        </div>
-      )}
+    <div className="flex flex-col gap-7">
+      <p className="m-0 text-[12.5px] text-muted-foreground">{runtimeLine}</p>
+      <section>
+        <h4 style={h4}>Tools</h4>
+        <ToolsTab w={w} />
+      </section>
+      <section>
+        <h4 style={h4}>Library</h4>
+        <BrainTab w={w} />
+      </section>
+      <section>
+        <h4 style={h4}>Triggers</h4>
+        {/* W-02: editable trigger control (schedule / webhook / app-event / manual). */}
+        <TriggersTab w={w} />
+      </section>
       {FEEDBACK_BACKEND_AVAILABLE && (
         <section>
           <h4 style={h4}>Feedback</h4>
@@ -785,11 +911,69 @@ function ConfigTab({ w }: { w: WorkerSummary }) {
 // contract test guards the live tab set, not a parallel constant.
 const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }) => React.ReactNode> = {
   Overview: OverviewTab,
-  History: HistoryTab,
+  Runs: RunsTab,
+  Config: ConfigTab,
   Source: SourceTab,
   Versions: VersionsTab,
-  Config: ConfigTab,
 };
+
+/**
+ * R8 "Customize" control — a quiet, muted affordance next to the worker-detail
+ * tab row that lets a user pin the advanced tabs (Config / Source / Versions)
+ * into their tab bar. Pins are a per-user GLOBAL preference (every worker), not
+ * per-worker. Checking an item pins the tab AND selects it; unchecking removes
+ * it. Uses the shared DropdownMenu checkbox primitives (flat, tokens, squircle,
+ * no borders, no accent — accent is links-only).
+ */
+function CustomizeTabsMenu({
+  workerId,
+  pinned,
+  onToggle,
+  onSelectTab,
+}: {
+  workerId: string;
+  pinned: Set<WorkerDetailTab>;
+  onToggle: (key: WorkerDetailTab) => void;
+  onSelectTab: (workerId: string, key: WorkerDetailTab) => void;
+}) {
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className="c-vpill inline-flex items-center gap-1.5"
+        style={customizePillStyle}
+        aria-label="Customize tabs"
+        title="Pin Config, Source or Versions tabs"
+      >
+        <Plus className="size-3.5" aria-hidden="true" />
+        Customize
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" className="w-48 p-1">
+        {/* base-ui MenuPrimitive.GroupLabel REQUIRES a Menu.Group ancestor —
+            rendering DropdownMenuLabel bare crashes the detail pane. Wrap the
+            label + items in DropdownMenuGroup. */}
+        <DropdownMenuGroup>
+          <DropdownMenuLabel>Pinned tabs</DropdownMenuLabel>
+          {ADVANCED_DETAIL_TABS.map((key) => (
+            <DropdownMenuCheckboxItem
+              key={key}
+              checked={pinned.has(key)}
+              // base-ui fires onClick before state churn; closeOnClick stays open so
+              // the user can pin several tabs without reopening the menu.
+              closeOnClick={false}
+              onCheckedChange={(checked) => {
+                onToggle(key);
+                // Pinning selects the tab so the user lands on what they just added.
+                if (checked) onSelectTab(workerId, key);
+              }}
+            >
+              {key}
+            </DropdownMenuCheckboxItem>
+          ))}
+        </DropdownMenuGroup>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
 
 function WorkerDetailActions({
   w,
@@ -800,12 +984,15 @@ function WorkerDetailActions({
   onUpdated: (w: WorkerSummary) => void;
   canManage?: boolean;
 }) {
+  const router = useRouter();
   const [d, applyDetail] = useWorkerDetail(w.id);
   const [runOpen, setRunOpen] = useState(false);
   const [editOpen, setEditOpen] = useState(false);
   const [running, setRunning] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [runInputs, setRunInputs] = useState<Record<string, string>>({});
+  const [runInputs, setRunInputs] = useState<Record<string, unknown>>({});
+  const [runFileNames, setRunFileNames] = useState<Record<string, string>>({});
+  const [runErrors, setRunErrors] = useState<Record<string, string>>({});
   const [name, setName] = useState(w.name);
   const [description, setDescription] = useState(w.description ?? "");
 
@@ -813,12 +1000,13 @@ function WorkerDetailActions({
 
   useEffect(() => {
     if (!runOpen) return;
-    const next: Record<string, string> = {};
+    const next: Record<string, unknown> = {};
     for (const input of inputs) {
-      const fallback = input.default == null ? "" : String(input.default);
-      next[input.name] = runInputs[input.name] ?? fallback;
+      next[input.name] =
+        runInputs[input.name] ?? (input.default == null ? "" : input.default);
     }
     setRunInputs(next);
+    setRunErrors({});
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [runOpen, d?.id]);
 
@@ -831,17 +1019,32 @@ function WorkerDetailActions({
   async function submitRun(event: React.FormEvent) {
     event.preventDefault();
     if (running) return;
+    // Schema-driven required-field validation (same rule as the run page).
+    const errors = requiredRunInputErrors(inputs, runInputs);
+    if (Object.keys(errors).length > 0) {
+      setRunErrors(errors);
+      toast.error("Fill in the required inputs before running.");
+      return;
+    }
+    setRunErrors({});
     setRunning(true);
     try {
       const payload: Record<string, unknown> = {};
       for (const input of inputs) {
-        const raw = runInputs[input.name] ?? "";
-        if (raw !== "") payload[input.name] = coerceInputValue(raw, input.type);
+        const value = runInputs[input.name];
+        if (value === undefined || value === null) continue;
+        if (typeof value === "string") {
+          if (value.trim() === "") continue;
+          payload[input.name] = coerceInputValue(value, input.type);
+        } else {
+          // Booleans, uploaded-file shas, arrays/objects pass through as-is.
+          payload[input.name] = value;
+        }
       }
       const result = await api.workers.run(w.id, payload);
       toast.success("Run queued");
       setRunOpen(false);
-      if (result.run_id) window.location.href = `/runs?sel=${encodeURIComponent(result.run_id)}`;
+      if (result.run_id) router.push(`/runs?sel=${encodeURIComponent(result.run_id)}`);
     } catch (err) {
       toast.error(err instanceof Error ? err.message : "Could not run worker");
     } finally {
@@ -878,7 +1081,13 @@ function WorkerDetailActions({
   return (
     <>
       {(canManage || can("run", w)) && (
-        <button type="button" className="c-addbtn" style={pillBtn} onClick={() => setRunOpen(true)}>
+        <button
+          type="button"
+          className="c-addbtn"
+          style={pillBtn}
+          onClick={() => setRunOpen(true)}
+          title={w.enabled === false || (w as WorkerSummary & { paused?: boolean }).paused ? "This worker is paused; it may not run as expected" : undefined}
+        >
           Run
         </button>
       )}
@@ -887,44 +1096,96 @@ function WorkerDetailActions({
           <DropdownMenuTrigger className="c-vpill" style={pillBtn} aria-label="More worker actions">
             <MoreHorizontal className="size-3.5" />
           </DropdownMenuTrigger>
-          <DropdownMenuContent align="end" className="w-36 p-1">
+          <DropdownMenuContent align="end" className="w-44 p-1">
             <DropdownMenuItem onClick={() => setEditOpen(true)}>Edit</DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                const next = workerStageKey(w) === "live" ? "draft" : "live";
+                api.workers.setStage(w.id, next)
+                  .then((updated) => {
+                    toast.success(next === "live" ? "Marked as live" : "Marked as draft");
+                    onUpdated({ ...w, stage: updated.stage });
+                  })
+                  .catch((err: Error) => toast.error(err.message || "Could not update stage"));
+              }}
+            >
+              {workerStageKey(w) === "live" ? "Mark as draft" : "Mark as live"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              onClick={() => {
+                const isArchived = (w as WorkerSummary & { archived?: boolean }).archived;
+                const action = isArchived ? api.workers.restore : api.workers.archive;
+                action(w.id)
+                  .then(() => {
+                    toast.success(isArchived ? "Worker restored" : "Worker archived");
+                    onUpdated({ ...w });
+                  })
+                  .catch((err: Error) => toast.error(err.message || "Could not update worker"));
+              }}
+            >
+              {(w as WorkerSummary & { archived?: boolean }).archived ? "Restore" : "Archive"}
+            </DropdownMenuItem>
+            <DropdownMenuItem
+              className="text-destructive focus:text-destructive"
+              onClick={() => {
+                if (!window.confirm(`Delete "${w.name}"? This cannot be undone.`)) return;
+                api.workers.delete(w.id)
+                  .then(() => {
+                    toast.success("Worker deleted");
+                    onUpdated({ ...w, _deleted: true } as WorkerSummary & { _deleted?: boolean });
+                  })
+                  .catch((err: Error) => toast.error(err.message || "Could not delete worker"));
+              }}
+            >
+              Delete
+            </DropdownMenuItem>
           </DropdownMenuContent>
         </DropdownMenu>
       )}
 
       <Dialog open={runOpen} onOpenChange={setRunOpen}>
-        <DialogContent className="sm:max-w-lg">
-          <form onSubmit={(event) => void submitRun(event)} className="space-y-4">
-            <DialogHeader>
+        <DialogContent className="max-h-[88vh] overflow-hidden p-0 sm:max-w-xl">
+          <form onSubmit={(event) => void submitRun(event)} className="flex max-h-[88vh] flex-col">
+            <DialogHeader className="px-6 pt-6 pb-1">
               <DialogTitle>Run {w.name}</DialogTitle>
-              <DialogDescription>Provide inputs for this manual run.</DialogDescription>
+              <DialogDescription>
+                {inputs.length === 0
+                  ? "This worker takes no inputs. Run it now to start a manual run."
+                  : "Fill in the inputs below to start a manual run."}
+              </DialogDescription>
             </DialogHeader>
-            <div className="space-y-3">
-              {inputs.length === 0 ? (
-                <p className="rounded-[var(--radius-card)] bg-[var(--bg-2)] p-3 text-sm text-muted-foreground">
-                  This worker has no required inputs.
-                </p>
-              ) : (
-                inputs.map((input) => (
-                  <div key={input.name} className="space-y-1.5">
-                    <Label htmlFor={`run-${w.id}-${input.name}`}>{input.label || input.name}</Label>
-                    <Input
-                      id={`run-${w.id}-${input.name}`}
-                      value={runInputs[input.name] ?? ""}
-                      placeholder={input.placeholder || input.description || input.name}
-                      onChange={(event) =>
-                        setRunInputs((prev) => ({ ...prev, [input.name]: event.target.value }))
-                      }
-                    />
-                    {input.description ? (
-                      <p className="text-xs text-muted-foreground">{input.description}</p>
-                    ) : null}
-                  </div>
-                ))
+            <div className="flex-1 space-y-4 overflow-y-auto px-6 py-4">
+              {w.enabled === false && (
+                <div className="rounded-[var(--radius-card)] bg-[color-mix(in_srgb,var(--warning)_10%,transparent)] px-3 py-2 text-sm text-[var(--warning)]">
+                  This worker is paused. Running it manually may not behave as expected.
+                </div>
               )}
+              {/* Schema-driven form: renders the correct widget per input type
+                  (textarea, select, boolean checkbox, file/CSV, number, text)
+                  with labels, required markers, placeholders and validation,
+                  the same WorkerInputForm used by the /run page (single source
+                  of truth). */}
+              <WorkerInputForm
+                inputs={inputs}
+                values={runInputs}
+                fileNames={runFileNames}
+                validationErrors={runErrors}
+                onInputChange={(inputName, value) => {
+                  setRunInputs((prev) => ({ ...prev, [inputName]: value }));
+                  setRunErrors((prev) => {
+                    if (!prev[inputName]) return prev;
+                    const next = { ...prev };
+                    delete next[inputName];
+                    return next;
+                  });
+                }}
+                onFileUploaded={(inputName, sha256, fileName) => {
+                  setRunInputs((prev) => ({ ...prev, [inputName]: sha256 }));
+                  setRunFileNames((prev) => ({ ...prev, [inputName]: fileName }));
+                }}
+              />
             </div>
-            <DialogFooter>
+            <DialogFooter className="px-6 pb-6 pt-2">
               <Button type="button" variant="secondary" onClick={() => setRunOpen(false)}>
                 Cancel
               </Button>
@@ -943,8 +1204,10 @@ function WorkerDetailActions({
               <DialogTitle>Edit worker</DialogTitle>
               <DialogDescription>Update the worker identity without leaving the split detail.</DialogDescription>
             </DialogHeader>
-            {!d ? (
+            {d === undefined ? (
               <Loading />
+            ) : d === null ? (
+              <DetailError />
             ) : (
               <div className="space-y-3">
                 <div className="space-y-1.5">
@@ -981,6 +1244,51 @@ function WorkerDetailActions({
   );
 }
 
+// ---- #1092: Workers empty-state inline prompt --------------------------------
+
+/**
+ * A compact prompt input shown in the workers empty state so users can
+ * describe what they want done and jump straight into the Emily create flow.
+ */
+function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }) {
+  const [value, setValue] = useState("");
+  const inputRef = useRef<HTMLInputElement>(null);
+
+  function handleSubmit(event: React.FormEvent) {
+    event.preventDefault();
+    const trimmed = value.trim();
+    if (!trimmed) return;
+    onSubmit(trimmed);
+  }
+
+  return (
+    <form
+      onSubmit={handleSubmit}
+      className="mt-4 flex items-center gap-2 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2"
+      style={{ maxWidth: 380 }}
+    >
+      <input
+        ref={inputRef}
+        type="text"
+        className="min-w-0 flex-1 bg-transparent text-sm outline-none placeholder:text-muted-foreground"
+        placeholder="Describe the job you want done…"
+        value={value}
+        onChange={(e) => setValue(e.target.value)}
+        autoComplete="off"
+      />
+      <button
+        type="submit"
+        disabled={!value.trim()}
+        className="shrink-0 inline-flex h-7 w-7 items-center justify-center rounded-md bg-[var(--accent)] text-[var(--accent-foreground)] opacity-90 hover:opacity-100 disabled:opacity-30 transition-opacity"
+        aria-label="Create worker"
+      >
+        <ArrowRight className="size-3.5" />
+      </button>
+    </form>
+  );
+}
+
+
 /**
  * A host-injected top-level view (#1006). workeros-cloud passes its
  * cross-tenant "workspace-admin" view here so it can compose the engine
@@ -1007,11 +1315,111 @@ export default function WorkersCollection({
   extraViews?: WorkersExtraView[];
 }) {
   const router = useRouter();
+  // Cache-first workers list (TanStack Query): returning to /workers renders
+  // instantly from cache with no skeleton; a slow/failed refetch keeps showing
+  // the cached list instead of flashing "Something went wrong". Local `workers`
+  // state is kept in sync so the existing optimistic mutation handlers (delete,
+  // update, archive) still work.
+  const workersQuery = useWorkers(
+    { include_archived: true },
+    initialWorkers.length > 0 ? initialWorkers : undefined,
+  );
   const [workers, setWorkers] = useState<WorkerSummary[]>(initialWorkers);
   const [favorites, setFavorites] = useState<Set<string>>(new Set());
-  const [loading, setLoading] = useState(initialWorkers.length === 0);
   const [canManageWorkers, setCanManageWorkers] = useState(false);
   const [activeView, setActiveView] = useState<string>(WORKERS_VIEW_KEY);
+  // R8 — pinnable advanced tabs (replaces the binary Advanced toggle): the
+  // default tab bar stays Overview · Runs; the power-user tabs (Config, Source,
+  // Versions) are pinned per-user (global, all workers) via the "Customize"
+  // control. Persisted to localStorage so a user who pins Source always sees it.
+  const [pinnedTabs, setPinnedTabs] = useState<Set<WorkerDetailTab>>(new Set());
+  useEffect(() => {
+    setPinnedTabs(getPinnedTabs());
+  }, []);
+  const togglePinnedTab = useCallback((key: WorkerDetailTab) => {
+    setPinnedTabs((prev) => {
+      const next = new Set(prev);
+      if (next.has(key)) next.delete(key);
+      else next.add(key);
+      savePinnedTabs(next);
+      return next;
+    });
+  }, []);
+  // Selecting a tab = navigate to ?sel=<id>&tab=<key>; CollectionView reads the
+  // `tab` URL param to drive the active tab. replace() avoids a history entry.
+  const selectWorkerTab = useCallback(
+    (workerId: string, key: WorkerDetailTab) => {
+      router.replace(
+        `/workers?sel=${encodeURIComponent(workerId)}&tab=${encodeURIComponent(key)}`,
+      );
+    },
+    [router],
+  );
+
+  useEffect(() => {
+    if (workersQuery.data) {
+      setWorkers((prev) => {
+        const fresh = workersQuery.data!.filter((w) => !isSystemWorker(w));
+        // Preserve any on-demand-hydrated worker (see hydration effect below)
+        // that the cache-first list doesn't include yet, so a freshly-opened
+        // worker doesn't blink out when the background refetch resolves.
+        const freshIds = new Set(fresh.map((w) => w.id));
+        const carry = prev.filter((w) => !freshIds.has(w.id) && hydratedIdsRef.current.has(w.id));
+        return [...fresh, ...carry];
+      });
+    }
+  }, [workersQuery.data]);
+
+  // BUG FIX (open-worker "Item not found … old ID format"): the workers list is
+  // cache-first (staleTime 30s, refetchOnMount:false), so a deep-link or Emily
+  // "Open worker" to a worker that isn't in the cached list yet (e.g. one just
+  // created) resolves to null in CollectionView → false "not found" toast +
+  // cleared selection. The id format is fine (slugs match); the list is just
+  // stale. When ?sel points at an id we don't have, fetch it by id and merge a
+  // summary so the selection resolves. api.workers.get(id) resolves the same
+  // slug ids used everywhere, so this is robust to the link format.
+  const searchParams = useSearchParams();
+  const selParam = searchParams.get("sel");
+  const hydratedIdsRef = useRef<Set<string>>(new Set());
+  const hydratingIdRef = useRef<string | null>(null);
+  useEffect(() => {
+    if (!selParam) return;
+    if (workers.some((w) => w.id === selParam)) return; // already present
+    // Wait for the initial list load to settle before deciding it's missing,
+    // so we don't fire a redundant fetch during the first paint.
+    if (workersQuery.isLoading) return;
+    if (hydratingIdRef.current === selParam) return; // in flight
+    hydratingIdRef.current = selParam;
+    let alive = true;
+    api.workers
+      .get(selParam)
+      .then((d) => {
+        if (!alive) return;
+        hydratedIdsRef.current.add(d.id);
+        detailCache.set(d.id, d); // warm the detail-pane cache too
+        setWorkers((prev) =>
+          prev.some((w) => w.id === d.id) ? prev : [detailToSummary(d), ...prev],
+        );
+      })
+      .catch(() => {
+        // Genuinely missing/inaccessible worker → let CollectionView surface the
+        // existing "not found" toast (the real not-found path, not a stale list).
+      })
+      .finally(() => {
+        if (hydratingIdRef.current === selParam) hydratingIdRef.current = null;
+      });
+    return () => {
+      alive = false;
+    };
+  }, [selParam, workers, workersQuery.isLoading]);
+
+  // Skeleton only on a true cold start (no cache and no server data); a slow
+  // backend with cached data shows the cache, never the skeleton or the error.
+  const loading = workersQuery.isLoading && workers.length === 0;
+  const error =
+    workersQuery.isError && workers.length === 0
+      ? "Could not load workers. Check your connection and try again."
+      : null;
 
   useEffect(() => {
     let alive = true;
@@ -1026,15 +1434,6 @@ export default function WorkersCollection({
         }
       })
       .catch(() => {});
-    api.workers
-      .list({ include_archived: true })
-      .then((all) => {
-        if (alive) setWorkers(all.filter((w) => !isSystemWorker(w)));
-      })
-      .catch(() => {})
-      .finally(() => {
-        if (alive) setLoading(false);
-      });
     return () => {
       alive = false;
     };
@@ -1059,6 +1458,7 @@ export default function WorkersCollection({
     subtitle: "Your AI workers.",
     items: sortWorkersByRecentActivity(visible),
     loading,
+    error,
     idOf: (w) => w.id,
     searchPlaceholder: "Search workers or tags…",
     searchOf: (w) => `${w.name} ${displayBrandCopy(w.description)} ${(w.tags ?? []).join(" ")}`,
@@ -1074,6 +1474,10 @@ export default function WorkersCollection({
         { value: "running", label: "running" },
         { value: "failing", label: "failing" },
         { value: "needs-attention", label: "needs attention" },
+      ],
+      stage: [
+        { value: "draft", label: "Draft" },
+        { value: "live", label: "Live" },
       ],
       visibility: [
         { value: "private", label: "Private" },
@@ -1107,40 +1511,82 @@ export default function WorkersCollection({
         rel(w.recent_stats?.last_run_at),
       ],
       status: workerStatusPill(w),
-      menu: [{ label: "Open", onSelect: () => (window.location.href = `/workers?sel=${encodeURIComponent(w.id)}`) }],
+      menu: [{ label: "Open", onSelect: () => router.push(`/workers?sel=${encodeURIComponent(w.id)}`) }],
     }),
-    card: (w) => ({
-      // V4 SPEC rule 3: no avatar monogram. Lock is small+muted inline after name.
-      leading: undefined,
-      name: w.visibility === "private"
-        ? <span className="inline-flex min-w-0 items-center gap-1.5"><span className="truncate">{w.name}</span><Lock className="size-3 shrink-0 text-[var(--muted-foreground)]" /></span>
-        : w.name,
-      description: displayBrandCopy(w.description),
-      status: workerStatusPill(w),
-      toolLogos: <WorkerIconPills worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
-      star: { on: favorites.has(w.id), onToggle: () => toggleStar(w.id) },
-    }),
+    card: (w) => {
+      const meta = workerCardMeta(w);
+      const isDraft = workerStageKey(w) === "draft";
+      const isPrivate = w.visibility === "private";
+      return {
+        // V4 SPEC rule 3: no avatar monogram. Lock is small+muted inline after name.
+        // Draft = quiet muted pill (mess-control); live shows nothing (calm default).
+        leading: undefined,
+        name: (isPrivate || isDraft)
+          ? (
+            <span className="inline-flex min-w-0 items-center gap-1.5">
+              <span className="truncate">{w.name}</span>
+              {isPrivate && <Lock className="size-3 shrink-0 text-[var(--muted-foreground)]" />}
+              {isDraft && <span className="c-vpill shrink-0" style={{ color: "var(--muted-foreground)" }}>Draft</span>}
+            </span>
+          )
+          : w.name,
+        description: displayBrandCopy(w.description),
+        // B17: muted telemetry (last-run · run count · success rate) from recent_stats.
+        meta: meta ?? undefined,
+        status: workerStatusPill(w),
+        toolLogos: <WorkerIconPills worker={{ id: w.id, name: w.name, connections: w.connections }} max={3} />,
+        star: { on: favorites.has(w.id), onToggle: () => toggleStar(w.id) },
+        // #1117: mini run-history sparkline (hover only). Uses timeseries if the
+        // API returned it; falls back to undefined (sparkline hidden) if absent.
+        sparkline: w.timeseries && w.timeseries.length > 0
+          ? <Sparkline data={w.timeseries} width={56} height={22} tone="status" variant="bars" />
+          : undefined,
+        // #1308: removed View (redundant — clicking the card opens it) and
+        // Edit (opens the same split-pane; Config tab is one click away).
+        quickActions: [],
+      };
+    },
     detail: (w) => {
       const viewOnly = !canManageWorkers && isViewOnly(w);
       const actions = (
-        <WorkerDetailActions
-          w={w}
-          canManage={canManageWorkers}
-          onUpdated={(updated) =>
-            setWorkers((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)))
-          }
-        />
+        <>
+          {/* R8 Customize control: replaces the binary Advanced toggle. A quiet,
+              muted "+ Customize" affordance opens a flat checkbox menu to pin
+              the advanced tabs (Config / Source / Versions) into the tab bar.
+              Pins are a per-user GLOBAL preference (every worker), persisted to
+              localStorage — a user who pins Source always sees it. */}
+          <CustomizeTabsMenu
+            workerId={w.id}
+            pinned={pinnedTabs}
+            onToggle={togglePinnedTab}
+            onSelectTab={selectWorkerTab}
+          />
+          <WorkerDetailActions
+            w={w}
+            canManage={canManageWorkers}
+            onUpdated={(updated) => {
+              if ((updated as WorkerSummary & { _deleted?: boolean })._deleted) {
+                setWorkers((prev) => prev.filter((item) => item.id !== updated.id));
+              } else {
+                setWorkers((prev) => prev.map((item) => (item.id === updated.id ? { ...item, ...updated } : item)));
+              }
+            }}
+          />
+        </>
       );
       return {
         header: {
           // V4 SPEC rule 3: no avatar monogram in detail header. Lock inline after title.
           leading: undefined,
           title: w.visibility === "private"
-            ? <span className="inline-flex items-center gap-1.5">{w.name}<Lock className="size-3.5 shrink-0 text-[var(--muted-foreground)]" /></span>
+            ? <span className="inline-flex min-w-0 items-center gap-1.5"><span className="truncate">{w.name}</span><Lock className="size-3.5 shrink-0 text-[var(--muted-foreground)]" /></span>
             : w.name,
           actions,
           sub: (
             <>
+              {workerStageKey(w) === "draft" && (
+                <span className="c-vpill" style={{ color: "var(--muted-foreground)" }}>Draft</span>
+              )}
               <span className="c-vpill">{visibilityLabel(w.visibility)}</span>
               {viewOnly && (
                 <span className="c-vpill" style={{ color: "var(--warning)", borderColor: "var(--warning)" }}>
@@ -1153,23 +1599,48 @@ export default function WorkersCollection({
             </>
           ),
         },
-        // SPEC §4: tabs are DERIVED from WORKER_DETAIL_TABS so the contract test
-        // guards what actually renders (no drift between constant and component).
-        tabs: WORKER_DETAIL_TABS.map((key) => {
-          const Tab = WORKER_TAB_COMPONENT[key];
-          return {
-            key,
-            label: key,
-            count: key === "History" ? w.recent_stats?.runs_7d ?? (w.last_run ? 1 : undefined) : undefined,
-            render: () => <Tab w={w} />,
-          };
-        }),
+        // R8: operator-focused tab set — Overview + Runs always visible; the
+        // advanced tabs (Config / Source / Versions) appear only when the user
+        // has pinned them via Customize. Pinned tabs render in canonical order
+        // after the base tabs. WORKER_DETAIL_TABS (typed constant) stays the
+        // 5-tab contract; the UI filters at render time without touching it.
+        tabs: (() => {
+          const visibleKeys: WorkerDetailTab[] = [
+            ...BASE_DETAIL_TABS,
+            ...ADVANCED_DETAIL_TABS.filter((t) => pinnedTabs.has(t)),
+          ];
+          return visibleKeys.map((key) => {
+            const Tab = WORKER_TAB_COMPONENT[key];
+            return {
+              key,
+              label: key,
+              // #1251: badge matches the count listed in the Runs tab.
+              count: key === "Runs"
+                ? (detailCache.get(w.id)?.recent_runs?.length
+                    ?? (w.last_run ? 1 : undefined))
+                : undefined,
+              render: () => <Tab w={w} />,
+            };
+          });
+        })(),
       };
     },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
     add: { label: "Add", onSelect: () => router.push("/chat?mode=create") }, // #902: create = Emily flow
     states: {
-      empty: { title: "No workers yet", help: "Create your first worker to get started." },
+      // #1364 — improved help text + action CTA linking to /workers/new
+      empty: {
+        title: "No workers yet",
+        help: "Workers are AI agents that run on a schedule, webhook, or on demand, powered by your connected apps.",
+        action: (
+          <WorkersEmptyPrompt
+            onSubmit={(prompt) => router.push(`/chat?mode=create&q=${encodeURIComponent(prompt)}`)}
+          />
+        ),
+      },
+      errorRetry: () => {
+        void workersQuery.refetch();
+      },
     },
   };
 
@@ -1180,6 +1651,9 @@ export default function WorkersCollection({
 
   // Host path (cloud): a top-level switcher between the workers Collection and
   // each injected view. Reuses the app's tab styling (c-dtabs / c-dtab).
+  // The "Workers" tab label already names this view, so we suppress the
+  // Collection's own "Workers" H1 header to avoid the duplicated heading.
+  const tabSwitcherConfig = { ...config, hideTitle: true };
   const activeExtra = extraViews.find((v) => v.key === activeView);
   return (
     <div className="flex h-full min-h-0 flex-col">
@@ -1207,7 +1681,7 @@ export default function WorkersCollection({
         ))}
       </div>
       <div className="min-h-0 flex-1">
-        {activeExtra ? activeExtra.render() : <Collection config={config} />}
+        {activeExtra ? activeExtra.render() : <Collection config={tabSwitcherConfig} />}
       </div>
     </div>
   );
@@ -1222,3 +1696,11 @@ const h4: React.CSSProperties = {
   margin: "0 0 9px",
 };
 const pillBtn: React.CSSProperties = { padding: "6px 11px", fontSize: 12.5 };
+// R8 Customize control: quiet + muted (not accent — accent is links-only). It
+// sits next to the worker actions and stays unobtrusive but findable.
+const customizePillStyle: React.CSSProperties = {
+  padding: "6px 11px",
+  fontSize: 12.5,
+  background: "var(--bg-2)",
+  color: "var(--muted-foreground)",
+};

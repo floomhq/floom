@@ -9,6 +9,7 @@ import {
   setContextWriteable,
   toggleContext,
 } from "@/lib/worker-manifest";
+import { ChipPreviewDialog, type ChipPreviewTarget } from "@/components/worker/ChipPreviewDialog";
 
 interface WorkerBrainEditorProps {
   contexts: WorkerContextSpec[];
@@ -44,6 +45,8 @@ export function WorkerBrainEditor({
 }: WorkerBrainEditorProps) {
   const [attach, setAttach] = useState("");
   const [open, setOpen] = useState(false);
+  // #1303: read-only preview popup for a clicked brain-folder chip.
+  const [preview, setPreview] = useState<ChipPreviewTarget | null>(null);
   const listboxId = useId();
   const attachedNames = new Set(contexts.map(contextSpecName));
   const unattached = availablePacks.filter((p) => !attachedNames.has(p.name));
@@ -54,6 +57,8 @@ export function WorkerBrainEditor({
   return (
     <div>
       {showMemoryCta && (
+        // #1254: button shows "Connecting..." + spinner while busy so the user
+        // gets immediate visual feedback that the action is in progress.
         <button
           type="button"
           className="mb-3 flex w-full items-center gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2.5 text-left transition-colors hover:bg-[var(--bg-3)] disabled:opacity-60"
@@ -61,16 +66,37 @@ export function WorkerBrainEditor({
           onClick={() => void onAttachMemory?.()}
         >
           <span className="c-logo">
-            <Brain size={15} />
+            {busy ? (
+              <svg
+                className="animate-spin"
+                width="15"
+                height="15"
+                viewBox="0 0 24 24"
+                fill="none"
+                stroke="currentColor"
+                strokeWidth="2"
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                aria-hidden="true"
+              >
+                <path d="M21 12a9 9 0 1 1-6.219-8.56" />
+              </svg>
+            ) : (
+              <Brain size={15} />
+            )}
           </span>
           <span className="min-w-0 flex-1">
-            <span className="block text-sm text-foreground">Connect a memory folder</span>
-            <span className="block text-xs text-muted-foreground">
-              Give this worker a writeable <span className="font-mono">{memoryFolderName}</span> folder it
-              can read and write across runs.
+            <span className="block text-sm text-foreground">
+              {busy ? "Connecting..." : "Connect a memory folder"}
             </span>
+            {!busy && (
+              <span className="block text-xs text-muted-foreground">
+                Give this worker a writeable <span className="font-mono">{memoryFolderName}</span> folder it
+                can read and write across runs.
+              </span>
+            )}
           </span>
-          <Plus size={15} className="shrink-0 text-muted-foreground" />
+          {!busy && <Plus size={15} className="shrink-0 text-muted-foreground" />}
         </button>
       )}
       <div className="c-ltable">
@@ -79,14 +105,20 @@ export function WorkerBrainEditor({
           const writeable = contextSpecWritable(spec);
           return (
             <div key={name} className="c-lrow" style={{ gridTemplateColumns: "1fr auto auto", gap: 12 }}>
-              <div className="c-lprimary">
+              <button
+                type="button"
+                className="c-lprimary"
+                style={{ background: "none", border: 0, padding: 0, cursor: "pointer", textAlign: "left", display: "flex", alignItems: "center", gap: 10, minWidth: 0 }}
+                title={`Preview ${name}`}
+                onClick={() => setPreview({ kind: "brain", name })}
+              >
                 <span className="c-logo">
                   <Folder size={15} />
                 </span>
                 <div className="c-lp-tx">
-                  <div className="nm">{name}</div>
+                  <div className="nm" style={{ textDecoration: "underline", textUnderlineOffset: 2, textDecorationColor: "var(--border)" }}>{name}</div>
                 </div>
-              </div>
+              </button>
               {editable ? (
                 <div className="c-vtog" role="group" aria-label={`${name} access`}>
                   <button
@@ -124,7 +156,7 @@ export function WorkerBrainEditor({
           );
         })}
         {contexts.length === 0 && (
-          <div style={{ color: "var(--muted-foreground)", padding: 14 }}>No brain folders attached.</div>
+          <div style={{ color: "var(--muted-foreground)", padding: 14 }}>No library folders attached.</div>
         )}
       </div>
 
@@ -187,6 +219,8 @@ export function WorkerBrainEditor({
           </button>
         </div>
       )}
+
+      <ChipPreviewDialog target={preview} onOpenChange={(o) => !o && setPreview(null)} />
     </div>
   );
 }
