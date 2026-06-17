@@ -430,6 +430,16 @@ class ApprovalRepository(Protocol):
 
     def get_by_run_id(self, *, run_id: str) -> RowDict | None: ...
 
+    def get_by_follow_up_run_id(self, *, follow_up_run_id: str) -> RowDict | None:
+        """Return the approval whose ``follow_up_run_id`` matches (the engine-
+        spawned execution run for an approved decision), or ``None``.
+
+        #418: the authoritative signal that a run is the post-approval EXECUTE
+        phase. Only ``approve_run`` ever sets ``follow_up_run_id``, so this
+        cannot be spoofed by a caller-supplied input or trigger_source.
+        """
+        ...
+
     def list_pending(self, *, owner_id: str) -> list[RowDict]: ...
 
     def count_pending(self, *, owner_id: str) -> int: ...
