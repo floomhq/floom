@@ -1020,6 +1020,25 @@ def _normalize_memory_contexts(
     return normalized_contexts
 
 
+class WorkerResources(BaseModel):
+    memory_mb: Optional[int] = Field(default=None, ge=128)
+    cpu_count: Optional[int] = Field(default=None, ge=1)
+
+    @field_validator("memory_mb", mode="after")
+    @classmethod
+    def _clamp_memory_mb(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return None
+        return min(value, _ceiling_from_env("WORKEROS_MAX_WORKER_MEMORY_MB", 8192))
+
+    @field_validator("cpu_count", mode="after")
+    @classmethod
+    def _clamp_cpu_count(cls, value: Optional[int]) -> Optional[int]:
+        if value is None:
+            return None
+        return min(value, _ceiling_from_env("WORKEROS_MAX_WORKER_CPU_COUNT", 8))
+
+
 class WorkerRuntime(BaseModel):
     type: str
     entrypoint: str = "run.py"
@@ -1075,6 +1094,7 @@ class WorkerConfig(BaseModel):
     connections: List[WorkerConnectionSpec] = []  # Strings are deprecated legacy Composio app slugs.
     contexts: List[WorkerContextMountSpec] = []
     memory: WorkerMemoryConfig = Field(default_factory=WorkerMemoryConfig)
+    resources: WorkerResources = Field(default_factory=WorkerResources)
     outputs: List[WorkerOutput] = []
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
@@ -1473,6 +1493,7 @@ class WorkerContract(BaseModel):
     connections: List[WorkerConnectionSpec] = Field(default_factory=list)
     contexts: List[WorkerContextMountSpec] = Field(default_factory=list)
     memory: WorkerMemoryConfig = Field(default_factory=WorkerMemoryConfig)
+    resources: WorkerResources = Field(default_factory=WorkerResources)
     csv_required_columns: Optional[List[str]] = None
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
     calls: List[str] = Field(default_factory=list)  # worker IDs this worker is allowed to invoke
@@ -1785,6 +1806,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
             for context in (contract.contexts or contract.exec.contexts or [])
         ],
         memory=contract.memory,
+        resources=contract.resources,
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
         approvals=contract.approvals,

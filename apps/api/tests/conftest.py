@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import sys
 import os
+import tempfile
+import uuid
 from pathlib import Path
 
 import pytest
@@ -12,6 +14,7 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 os.environ.setdefault("WORKEROS_MIN_FREE_DISK_BYTES", "0")
+os.environ.setdefault("FLOOM_DB", str(Path(tempfile.gettempdir()) / f"workeros_pytest_{os.getpid()}_{uuid.uuid4().hex}.db"))
 
 
 @pytest.fixture(autouse=True)
