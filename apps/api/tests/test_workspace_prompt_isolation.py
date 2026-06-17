@@ -93,6 +93,24 @@ def test_default_workspace_uses_legacy_global_path(cs):
     assert chat_service.WORKSPACE_MD_PATH.read_text() == "DEFAULT-WS instructions"
 
 
+def test_workspace_root_follows_custom_workers_dir_when_workspace_dir_unset(monkeypatch, tmp_path):
+    """Workspace instructions and git versioning must share the same root.
+
+    Local/API smoke tests often isolate FLOOM_WORKERS_DIR without also setting
+    WORKEROS_WORKSPACE_DIR. In that mode git_service._git_workspace() resolves
+    to FLOOM_WORKERS_DIR.parent, so workspace.md must live there too.
+    """
+    monkeypatch.delenv("WORKEROS_WORKSPACE_DIR", raising=False)
+    monkeypatch.setenv("FLOOM_WORKERS_DIR", str(tmp_path / "workers"))
+    for name in list(sys.modules):
+        if name == "chat_service":
+            sys.modules.pop(name, None)
+    chat_service = importlib.import_module("chat_service")
+
+    assert chat_service._workspace_root() == tmp_path.resolve()
+    assert chat_service.WORKSPACE_MD_PATH == tmp_path.resolve() / "workspace.md"
+
+
 def test_traversal_or_bad_workspace_id_rejected(cs):
     chat_service, AuthContext, set_ctx = cs
     # a malformed/forged workspace suffix must NOT produce a per-workspace path
