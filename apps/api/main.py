@@ -1225,11 +1225,36 @@ _WORKER_FILES_PATH_RE = re.compile(r"^/workers/[^/]+/files$")
 _WORKER_SOURCE_PATH_RE = re.compile(r"^/workers/[^/]+$")
 
 
+def _normalized_request_path(request: Request) -> str:
+    """Return the route-local path, stripping any ASGI mount prefix.
+
+    B10: the cloud wrapper mounts this engine sub-app under ``/api``
+    (``parent.mount("/api", engine.app)``). When mounted, Starlette keeps the
+    full prefixed path in ``scope["path"]`` (and ``request.url.path``) while
+    recording the mount prefix in ``scope["root_path"]``. The body-size /
+    upload exemptions below match route-local paths (``/contexts/...``,
+    ``/workers/from-bundle``, ...), so without stripping the prefix every
+    contexts/approvals upload in the cloud fell through to the 256 KB JSON
+    default and 1 MB images 413'd.
+
+    Stripping ``root_path`` (the canonical ASGI mount mechanism) is
+    mount-prefix-agnostic — it works for any mount point and accumulates across
+    nested mounts — and is a no-op when not mounted, so the un-prefixed path is
+    unchanged. The boundary check (exact match or ``prefix + "/"``) prevents
+    over-stripping a sibling segment such as ``/apiary``.
+    """
+    path = request.scope.get("path") or request.url.path or "/"
+    root_path = (request.scope.get("root_path") or "").rstrip("/")
+    if root_path and (path == root_path or path.startswith(root_path + "/")):
+        return path[len(root_path):] or "/"
+    return path
+
+
 def _body_limit_for_request(request: Request) -> Optional[int]:
     method = request.method.upper()
     if method not in {"POST", "PUT", "PATCH"}:
         return None
-    path = request.url.path
+    path = _normalized_request_path(request)
     if path == "/workers/from-bundle":
         return FROM_BUNDLE_BODY_LIMIT_BYTES
     if path == "/workspace/import":
@@ -1271,7 +1296,7 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
 
 
 def _is_context_upload_request(request: Request) -> bool:
-    path = request.url.path
+    path = _normalized_request_path(request)
     return (
         request.method.upper() == "POST"
         and path.startswith("/contexts/")
