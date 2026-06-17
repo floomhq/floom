@@ -149,6 +149,9 @@ def _workspace_root() -> Path:
     custom = os.environ.get("WORKEROS_WORKSPACE_DIR", "").strip()
     if custom:
         return Path(custom).resolve()
+    workers_dir = os.environ.get("FLOOM_WORKERS_DIR", "").strip()
+    if workers_dir:
+        return Path(workers_dir).resolve().parent
     return Path(__file__).resolve().parents[3]
 
 WORKSPACE_MD_PATH = _workspace_root() / "workspace.md"
