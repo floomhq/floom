@@ -988,3 +988,66 @@ html.dark .grain {
   word-break: normal !important;
   overflow-wrap: normal !important;
 }
+
+/* ---------------------------------------------------------------------------
+   APPROVAL DETAIL / REVIEW (round-09 r9, approved share-approval design).
+   input-left / proposed-output-right + a multi-item dotted pager. Extends the
+   real stylesheet; reuses --ink/--muted/--accent/--bd-div tokens, no bespoke
+   per-page CSS, accent on links only, no borders (hairline dividers only),
+   no amber as a second accent (the awaiting pill uses the muted --pending dot).
+   --------------------------------------------------------------------------- */
+
+/* Pager bar: "Approval N of M" + dotted indicator + prev/next. */
+.c-appr-pager { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 0 14px; font-size:12.5px; color:var(--muted-foreground); }
+.c-appr-pager .where { display:inline-flex; align-items:center; gap:6px; min-width:0; }
+.c-appr-pager .where b { color:var(--ink-soft); font-weight:600; }
+.c-appr-pager .where .of { color:var(--muted-foreground); }
+.c-appr-pager .right { display:flex; align-items:center; gap:12px; flex:0 0 auto; }
+.c-appr-dots { display:flex; align-items:center; gap:5px; }
+.c-appr-dots i { width:6px; height:6px; border-radius:var(--radius-pill); background:var(--bg-3); display:inline-block; }
+.c-appr-dots i.on { background:var(--ink); }
+.c-appr-nav { display:flex; align-items:center; gap:4px; }
+.c-appr-pgbtn { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:var(--radius-button); color:var(--ink-soft); }
+.c-appr-pgbtn:hover:not(:disabled) { background:var(--bg-2); }
+.c-appr-pgbtn:disabled { opacity:.35; }
+
+/* Hero block: eyebrow + awaiting pill + confident title + meta line. */
+.c-appr-hero { padding:0 0 16px; }
+.c-appr-eyebrow { font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted-foreground); }
+.c-appr-wait { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--muted-foreground); }
+.c-appr-wait .dot { width:6px; height:6px; border-radius:var(--radius-pill); background:var(--pending); display:inline-block; }
+.c-appr-title { font-size:24px; line-height:1.18; font-weight:600; color:var(--ink); margin:8px 0 0; letter-spacing:-.01em; }
+.c-appr-meta { font-size:13px; color:var(--muted-foreground); line-height:1.55; margin:11px 0 0; }
+.c-appr-meta b { color:var(--ink-soft); font-weight:600; }
+
+/* Two-column grid: input LEFT, proposed output RIGHT, hairline divider between. */
+.c-appr-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0; }
+.c-appr-grid .col-left { padding-right:28px; }
+.c-appr-grid .col-right { padding-left:28px; border-left:var(--bd-div); }
+.c-appr-sech { font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted-foreground); margin:0 0 11px; }
+
+/* LEFT: comment box, attach affordance, who/why k/v, decide buttons. */
+.c-appr-comment { width:100%; min-height:84px; resize:vertical; border-radius:var(--radius-button); background:var(--bg-2); padding:11px 13px; font-size:13.5px; color:var(--ink); line-height:1.5; }
+.c-appr-comment::placeholder { color:var(--ink-faint); }
+.c-appr-attach { display:inline-flex; align-items:center; gap:7px; margin-top:11px; font-size:12.5px; color:var(--ink-soft); }
+.c-appr-attach:hover { color:var(--ink); }
+.c-appr-kv { display:grid; grid-template-columns:96px 1fr; gap:8px 14px; margin:16px 0 0; font-size:12.5px; }
+.c-appr-kv dt { color:var(--muted-foreground); }
+.c-appr-kv dd { color:var(--ink-soft); margin:0; min-width:0; overflow-wrap:anywhere; }
+.c-appr-kv dd a { color:var(--accent); }
+.c-appr-decide { display:flex; gap:9px; margin-top:20px; }
+
+/* RIGHT: the proposed output rendered AS ITSELF (email To/Subject/body), no box. */
+.c-appr-proposed { font-size:13.5px; color:var(--ink-soft); line-height:1.6; }
+.c-appr-proposed .addr { margin:0 0 14px; padding:0 0 12px; border-bottom:var(--bd-div); color:var(--ink-soft); }
+.c-appr-proposed .addr b { display:inline-block; min-width:62px; color:var(--muted-foreground); font-weight:500; }
+.c-appr-proposed .body p { margin:0 0 11px; }
+.c-appr-proposed .body p:last-child { margin-bottom:0; }
+
+.c-appr-foot { font-size:11.5px; color:var(--muted-foreground); margin:22px 0 0; padding:16px 0 0; border-top:var(--bd-div); }
+
+@media (max-width:760px) {
+  .c-appr-grid { grid-template-columns:1fr; }
+  .c-appr-grid .col-left { padding-right:0; padding-bottom:22px; margin-bottom:22px; border-bottom:var(--bd-div); }
+  .c-appr-grid .col-right { padding-left:0; border-left:0; }
+}
