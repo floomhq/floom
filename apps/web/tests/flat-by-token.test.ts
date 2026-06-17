@@ -231,26 +231,23 @@ describe("Phase 2 — Textarea primitive (v4 flat, APP-UI-V4-SPEC §1)", () => {
   });
 });
 
-// P5: OverviewDashboard metric tiles must use --bd-card token (spec rule #2).
-// The tiles must not have a hardcoded `border border-[var(--border-default)]`.
-describe("P5 — OverviewDashboard metric tiles are flat by token (spec rule #2)", () => {
-  it("cardClass uses --bd-card token, not border-[var(--border-default)]", () => {
-    // The metric tile cardClass const must use the full border shorthand token
-    // so `--bd-card:none` computes to 0px border width.
-    expect(overviewSrc).toContain("[border:var(--bd-card)]");
-    // Must NOT hardcode border-[var(--border-default)]
+// P5: OverviewDashboard must be flat by token (spec rule #2). The V4 "Brief /
+// digest" layout dropped the old metric-tile grid entirely in favour of a single
+// editorial column with hairline dividers only, so the assertions now guard the
+// flat language itself (no hardcoded borders) rather than the removed tiles.
+describe("P5 — OverviewDashboard is flat by token (spec rule #2)", () => {
+  it("uses no hardcoded border-default / border-strong utilities", () => {
+    // Separation is hairline (--bd-div) only; no hardcoded border colors.
+    expect(overviewSrc).not.toContain("border-[var(--border-default)]");
     expect(overviewSrc).not.toContain("border border-[var(--border-default)]");
   });
 
-  it("metric tile hover uses bg lift, not border-strong", () => {
-    // Hover must be a bg change, not a border-color change (spec §4 tiles)
+  it("uses no border-color hover (flat — hover is opacity/bg, never a border)", () => {
     expect(overviewSrc).not.toContain("hover:border-[var(--border-strong)]");
-    expect(overviewSrc).toContain("hover:bg-[var(--bg-2)]");
   });
 
-  it("metric tile grid has 2 cols at mobile (spec §5c: 2×2 tiles)", () => {
-    // Must not default to 1-col at small screens (grid-cols-1 md:grid-cols-2)
-    expect(overviewSrc).not.toContain("grid-cols-1 gap-3 md:grid-cols-2");
-    expect(overviewSrc).toContain("grid-cols-2");
+  it("hairline dividers use the --bd-div token, not a raw border utility", () => {
+    // The Recent-work / Needs-you strips separate rows with the divider token.
+    expect(overviewSrc).toContain("[border-top:var(--bd-div)]");
   });
 });
