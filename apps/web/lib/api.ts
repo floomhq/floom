@@ -708,14 +708,6 @@ export const api = {
       );
       return link;
     },
-    // #766: kill a pack's public /s/<token> link. Backend ships the DELETE
-    // endpoint; this is the missing client half so a Sensitive pack can be
-    // locked back down from the UI. Idempotent: { revoked: false } when no link.
-    revokePackLink: (name: string) =>
-      fetchJson<{ revoked: boolean }>(
-        `/contexts/${encodeURIComponent(name)}/share-link`,
-        { method: "DELETE" }
-      ),
     // #766: kill a single file's public /s/<token> link (same pair as the pack).
     revokeFileLink: (name: string, path: string) =>
       fetchJson<{ revoked: boolean }>(
