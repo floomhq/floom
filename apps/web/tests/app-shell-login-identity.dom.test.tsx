@@ -9,6 +9,10 @@ vi.mock("next/navigation", () => ({
 
 vi.mock("@/components/layout/sidebar", () => ({
   Sidebar: () => <aside>authed user identity</aside>,
+  // Merged tree: AppShell renders <BootSplash/> (base-engine feature) which
+  // consumes FloomMark from this module. Provide it so the full-module mock
+  // doesn't strip the export. (round-09 reconciliation: main test + base BootSplash.)
+  FloomMark: () => null,
 }));
 
 vi.mock("@/components/emily/EmilyChat", () => ({
