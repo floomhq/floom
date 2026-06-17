@@ -63,21 +63,6 @@ data/         SQLite DB + run artifacts
 
 ---
 
-## Docs
-
-- [Getting started](docs/GETTING-STARTED.md) — why Workeros exists, first run,
-  first worker, and safe self-hosting checklist.
-- [Authoring workers](docs/AUTHORING.md) — full `worker.yml` schema, execution
-  modes, secrets, connections, triggers, and approvals.
-- [Agent cookbook](docs/AGENT-COOKBOOK.md) — agent-assisted worker authoring
-  recipes.
-- [API overview](docs/API.md) — curated endpoint map plus the OpenAPI location.
-- [Troubleshooting](docs/TROUBLESHOOTING.md) — setup, runtime, and test fixes.
-- [Contributing](CONTRIBUTING.md) — local checks, first-contribution map, and PR
-  expectations.
-
----
-
 ## Core concepts
 
 - **Workers:** folders under `workers/<name>/` with `worker.yml` plus either a
@@ -92,6 +77,21 @@ data/         SQLite DB + run artifacts
 Write your first worker in [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md),
 then use [docs/AUTHORING.md](docs/AUTHORING.md) for the full manifest and
 runtime contract.
+
+---
+
+## Docs
+
+- [Getting started](docs/GETTING-STARTED.md) — why Workeros exists, first run,
+  first worker, and safe self-hosting checklist.
+- [Authoring workers](docs/AUTHORING.md) — full `worker.yml` schema, execution
+  modes, secrets, connections, triggers, and approvals.
+- [Agent cookbook](docs/AGENT-COOKBOOK.md) — agent-assisted worker authoring
+  recipes.
+- [API overview](docs/API.md) — curated endpoint map plus the OpenAPI location.
+- [Troubleshooting](docs/TROUBLESHOOTING.md) — setup, runtime, and test fixes.
+- [Contributing](CONTRIBUTING.md) — local checks, first-contribution map, and PR
+  expectations.
 
 ---
 
