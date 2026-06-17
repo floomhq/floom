@@ -3495,6 +3495,25 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
                 return None
             raise
 
+    def get_by_follow_up_run_id(self, *, follow_up_run_id: str) -> dict[str, Any] | None:
+        # #418: authoritative EXECUTE-phase signal. Only approve_run sets
+        # follow_up_run_id, so a matching approved row proves the engine
+        # authorised this run's side effect (cannot be spoofed by inputs).
+        try:
+            response = (
+                self._client.table(self._TABLE)
+                .select("*")
+                .eq("follow_up_run_id", follow_up_run_id)
+                .order("created_at", desc=True)
+                .limit(1)
+                .execute()
+            )
+            return _first_row(response)
+        except Exception as exc:
+            if _is_table_not_found(exc):
+                return None
+            raise
+
     def list_pending(self, *, owner_id: str) -> list[dict[str, Any]]:
         try:
             response = (
