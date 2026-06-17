@@ -597,6 +597,26 @@ def _tool_connections_add_mcp(args: Dict[str, Any], user_id: str) -> Dict[str, A
     allowed_tools = args.get("allowed_tools")
     if not label or not url:
         return {"ok": False, "error": "label and url are required"}
+    try:
+        from fastapi import HTTPException
+        from routers.connections import MCPConnectionCreateRequest, _normalize_mcp_connection_payload
+
+        normalized = _normalize_mcp_connection_payload(
+            MCPConnectionCreateRequest(
+                label=label,
+                url=url,
+                auth_secret=auth_secret,
+                allowed_tools=allowed_tools or [],
+            )
+        )
+    except HTTPException as exc:
+        return {"ok": False, "error": str(exc.detail)}
+    except Exception as exc:
+        return {"ok": False, "error": str(exc)}
+    label = normalized["label"]
+    url = normalized["url"]
+    auth_secret = normalized["auth_secret"]
+    allowed_tools = normalized["allowed_tools"]
     from db import get_db as _get_db, now_iso as _now_iso
     import uuid as _uuid
     conn_id = f"mcp_{_uuid.uuid4().hex[:12]}"

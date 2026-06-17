@@ -3,9 +3,11 @@ from __future__ import annotations
 import asyncio
 import importlib
 import json
+import socket
 import sys
 from types import SimpleNamespace
 from pathlib import Path
+from unittest.mock import patch
 
 import pytest
 
@@ -151,6 +153,39 @@ def test_connections_list_redacts_mcp_auth_secret_from_tool_result(booted):
     assert "RAW_BEARER_SECRET_NAME" not in encoded
     assert "mcp_auth_secret" not in conn
     assert conn["mcp_auth_configured"] is True
+
+
+def test_connections_add_mcp_tool_reuses_http_label_validation(booted):
+    chat_tools = importlib.import_module("services.chat_tool_impls")
+
+    result = chat_tools._tool_connections_add_mcp(
+        {"label": "bad label with spaces", "url": "https://mcp.example.com"},
+        "federico",
+    )
+
+    assert result["ok"] is False
+    assert "letters, digits, underscores, or hyphens" in result["error"]
+
+
+def test_connections_add_mcp_tool_reuses_http_ssrf_validation(booted):
+    chat_tools = importlib.import_module("services.chat_tool_impls")
+
+    blocked = chat_tools._tool_connections_add_mcp(
+        {"label": "evil", "url": "http://169.254.169.254/latest/meta-data"},
+        "federico",
+    )
+    assert blocked["ok"] is False
+    assert "not allowed" in blocked["error"].lower()
+
+    with patch(
+        "models.socket.getaddrinfo",
+        return_value=[(socket.AF_INET, socket.SOCK_STREAM, 6, "", ("93.184.216.34", 443))],
+    ):
+        allowed = chat_tools._tool_connections_add_mcp(
+            {"label": "good_mcp", "url": "https://mcp.example.com", "allowed_tools": ["search"]},
+            "federico",
+        )
+    assert allowed["ok"] is True
 
 
 def test_tool_event_metadata_keeps_legacy_safe_args_and_card_resource(booted):
