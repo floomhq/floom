@@ -739,6 +739,13 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         have?" never leaks another member's private workers. Reshape to the
         engine tool's row shape; manifest_json MUST be a JSON string (the tool
         json.loads it).
+
+        Round-09 #3: include ``owner_id`` so this matches the OSS sqlite
+        ``list_for_agent`` row shape. The engine chat tool's hide-helpers
+        (``_worker_hidden_from_api`` / ``_build_owned_tracked_ids``) and the
+        dashboard grid both key on owner_id; dropping it here left the cloud
+        Emily surface unable to attribute ownership the way the grid does
+        (the 1-vs-9 split-brain follow-up).
         """
         role = "admin" if (include_all_users and get_active_member_role() == "admin") else "member"
         records = self.list(user_id=user_id, role=role)
@@ -751,6 +758,10 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
                     "name": rec.get("name"),
                     "trigger_type": rec.get("trigger_type"),
                     "enabled": bool(rec.get("enabled", True)),
+                    # _worker_record_from_rows maps workers.user_id -> owner_id;
+                    # carry it through so the engine tool + grid hide helpers
+                    # attribute ownership identically on cloud.
+                    "owner_id": rec.get("owner_id"),
                     "manifest_json": json.dumps(manifest),
                 }
             )
