@@ -50,6 +50,15 @@ CODEX_BRIEF.md
 
 # Secrets
 .deploy-secret
+# #1436 defense-in-depth: never commit loose secret-bearing dumps even when they
+# land in the tree with a non-.env name (the audit found a *-env-setup.txt with
+# live prod secrets that the .env rules above did not catch).
+*env-setup*.txt
+*env-backup*
+*_env_backup*
+*.jwt
+# Local credential-hygiene audit/runbook (names which files hold secrets).
+/SECURITY-*credential*.md
 
 # OS
 .DS_Store
