@@ -57,7 +57,7 @@ import {
 import { WorkerInputForm } from "@/components/run-page/WorkerInputForm";
 import { ShareModal } from "@/components/sharing/ShareModal";
 import { WorkerBrainEditor } from "@/components/worker/WorkerBrainEditor";
-import { WorkerToolsEditor } from "@/components/worker/WorkerToolsEditor";
+import { WorkerToolsEditor, type ToolAppOption } from "@/components/worker/WorkerToolsEditor";
 import { WorkerFeedbackPanel } from "@/components/worker/WorkerFeedbackPanel";
 import { VersionDiffPanel } from "@/components/VersionDiffPanel";
 import {
@@ -70,6 +70,7 @@ import {
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu";
 import {
+  connectionSpecApp,
   contextSpecName,
   patchBrainContexts,
   patchWorkerConnections,
@@ -741,6 +742,76 @@ function BrainTab({ w }: { w: WorkerSummary }) {
 function ToolsTab({ w }: { w: WorkerSummary }) {
   const [d, applyDetail] = useWorkerDetail(w.id);
   const [busy, setBusy] = useState(false);
+  // B4: the Add-tool combobox is sourced from the workspace's connected apps
+  // (Federico: "we already have the list of connections") plus the integrations
+  // catalog, so the user picks from a searchable list instead of free-typing a
+  // slug. Per-app allowlist tools come from the catalog, cached per app.
+  const [availableApps, setAvailableApps] = useState<ToolAppOption[]>([]);
+  const [toolCache, setToolCache] = useState<Record<string, string[]>>({});
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      const apps = new Map<string, ToolAppOption>();
+      try {
+        const conns = await api.connections.list();
+        for (const c of conns) {
+          const slug = (c.app_name || "").toLowerCase();
+          if (slug) apps.set(slug, { slug, name: c.display_name || c.app_name });
+        }
+      } catch {
+        // Connections unreachable: fall back to catalog only.
+      }
+      try {
+        const catalog = await api.integrations.catalog({ limit: 200 });
+        for (const item of catalog.items) {
+          const slug = item.slug.toLowerCase();
+          if (!apps.has(slug)) apps.set(slug, { slug, name: item.name });
+        }
+      } catch {
+        // Catalog unreachable: connections-only is still useful.
+      }
+      if (!cancelled) {
+        setAvailableApps([...apps.values()].sort((a, b) => a.name.localeCompare(b.name)));
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  // Lazy-load + cache the known tools for each connected app so the allowlist
+  // multiselect shows real tool names. Returns synchronously from cache.
+  const connections = d?.config?.connections ?? [];
+  useEffect(() => {
+    let cancelled = false;
+    const slugs = connections
+      .map((s) => (connectionSpecApp(s) || "").toLowerCase())
+      .filter((slug) => slug && !(slug in toolCache));
+    if (slugs.length === 0) return;
+    (async () => {
+      for (const slug of slugs) {
+        try {
+          const tools = await api.integrations.catalogTools(slug);
+          if (cancelled) return;
+          setToolCache((prev) => ({ ...prev, [slug]: tools.map((t) => t.name) }));
+        } catch {
+          if (cancelled) return;
+          setToolCache((prev) => ({ ...prev, [slug]: [] }));
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [JSON.stringify(connections.map((s) => connectionSpecApp(s)))]);
+
+  const toolsForApp = useCallback(
+    (slug: string) => toolCache[slug.toLowerCase()] ?? [],
+    [toolCache],
+  );
+
   if (d === undefined) return <Loading />;
   if (d === null) return <DetailError />;
   const editable = can("edit", d);
@@ -760,6 +831,8 @@ function ToolsTab({ w }: { w: WorkerSummary }) {
       connections={d.config?.connections ?? []}
       editable={editable}
       busy={busy}
+      availableApps={availableApps}
+      toolsForApp={toolsForApp}
       onChange={(next) => void save(next)}
     />
   );
