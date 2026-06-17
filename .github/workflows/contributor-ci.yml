@@ -50,7 +50,7 @@ jobs:
           FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
           OPENAI_API_KEY: sk-test-${{ github.run_id }}
           COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
-        run: python -m pytest tests/ -v --tb=short -p no:warnings
+        run: python -m pytest tests/ -v --tb=short -p no:warnings -n auto --dist loadscope
 
   web-lint:
     name: Web lint (GitHub-hosted)

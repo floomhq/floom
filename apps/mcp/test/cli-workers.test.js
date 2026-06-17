@@ -210,6 +210,16 @@ test("workers validate rejects Composio CLI subprocess in E2B worker", async () 
   assert.match(result.stderr, /shells out to `composio execute`/);
 });
 
+test("workers validate rejects invalid trigger timezones before push", async () => {
+  const dir = await makeWorkerDir({
+    workerYml: `${scriptWorkerYml}trigger:\n  type: schedule\n  cron: "*/5 * * * *"\n  timezone: Foo/Bar-Not-A-Zone\n`,
+  });
+  const result = await runCli(["workers", "validate", dir]);
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /trigger\.timezone is not a valid IANA timezone/);
+});
+
 test("workers validate does not treat declared secrets as Composio tools", async () => {
   const dir = await makeWorkerDir({
     workerYml: `schema_version: "0.3"
@@ -307,6 +317,22 @@ test("workers push creates a new worker with POST /workers", async (t) => {
   assert.match(mock.bodies[0].worker_yml, /name: cli-test-worker/);
   assert.match(mock.bodies[0].run_py, /def run/);
   assert.equal(mock.bodies[0].skill_md, undefined);
+});
+
+test("workers push strips UTF-8 BOMs before sending source to the API", async (t) => {
+  const mock = await startMockApi({ existing: false });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+  const dir = await makeWorkerDir({
+    workerYml: `\ufeff${scriptWorkerYml}`,
+    run: `\ufeff${runPy}`,
+  });
+
+  const result = await runCli(["workers", "push", dir], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.equal(mock.bodies[0].worker_yml.charCodeAt(0), "s".charCodeAt(0));
+  assert.equal(mock.bodies[0].run_py.charCodeAt(0), "d".charCodeAt(0));
 });
 
 test("workers push updates an existing worker with PUT /workers/:id", async (t) => {
@@ -432,4 +458,26 @@ test("workers push does not call non-auth 403 an expired session", async (t) => 
   assert.match(result.stderr, /Request was forbidden/);
   assert.match(result.stdout, /Stock workers cannot be modified/);
   assert.doesNotMatch(result.stderr, /session expired/i);
+});
+
+test("workers push renders structured backend validation details and exits cleanly", async (t) => {
+  const mock = await startMockApi({
+    existing: true,
+    putStatus: 400,
+    putDetail: {
+      message: "Schema validation failed",
+      errors: [{ loc: "trigger.timezone", msg: "invalid timezone: Foo/Bar-Not-A-Zone", type: "value_error" }],
+    },
+  });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+  const dir = await makeWorkerDir();
+
+  const result = await runCli(["workers", "push", dir], { HOME: home });
+
+  assert.equal(result.code, 1);
+  assert.match(result.stderr, /API rejected worker source/);
+  assert.match(result.stderr, /Schema validation failed/);
+  assert.match(result.stderr, /trigger\.timezone/);
+  assert.doesNotMatch(result.stderr, /\[object Object\]/);
 });

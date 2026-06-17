@@ -91,6 +91,17 @@ logger = logging.getLogger("floom.api")
 workspace_router = APIRouter()
 
 
+def _workspace_md_git_rel(workspace, workspace_md_path) -> str:
+    try:
+        return workspace_md_path.relative_to(workspace).as_posix()
+    except ValueError:
+        return "workspace.md"
+
+
+def _workspace_git_versioning_disabled(git_ops, workspace) -> bool:
+    return bool(getattr(git_ops, "is_engine_source_checkout", lambda _p: False)(workspace))
+
+
 @workspace_router.get("/workspace/members", response_model=WorkspaceMembersResponse)
 def list_workspace_members(
     auth: AuthContext = Depends(get_auth_context),
@@ -675,16 +686,17 @@ def list_workspace_versions(
 
     from chat_service import WORKSPACE_MD_PATH
     workspace = _git_workspace()
-    try:
-        rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
-    except ValueError:
-        rel = "workspace.md"
+    if _workspace_git_versioning_disabled(_git_ops, workspace):
+        return []
+    rel = _workspace_md_git_rel(workspace, WORKSPACE_MD_PATH)
     rows = _git_ops.get_log(workspace, rel_path=rel, limit=min(limit, 100),
                             asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE, asset_id="default")
+    rows = [r for r in rows if _git_ops.get_file_at_sha(workspace, r["sha"], rel) is not None]
     if not rows and WORKSPACE_MD_PATH.is_file():
         _git_commit_workspace_md(message="baseline: snapshot existing workspace instructions")
         rows = _git_ops.get_log(workspace, rel_path=rel, limit=min(limit, 100),
                                 asset_type=_WORKSPACE_INSTRUCTIONS_ASSET_TYPE, asset_id="default")
+        rows = [r for r in rows if _git_ops.get_file_at_sha(workspace, r["sha"], rel) is not None]
     return [VersionSummary(**r) for r in rows]
 
 
@@ -760,10 +772,9 @@ def get_workspace_version(
 
     from chat_service import WORKSPACE_MD_PATH
     workspace = _git_workspace()
-    try:
-        rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
-    except ValueError:
-        rel = "workspace.md"
+    if _workspace_git_versioning_disabled(_git_ops, workspace):
+        raise HTTPException(status_code=404, detail="Workspace git versioning is disabled for this checkout")
+    rel = _workspace_md_git_rel(workspace, WORKSPACE_MD_PATH)
     content = _git_ops.get_file_at_sha(workspace, sha, rel)
     if content is None:
         raise HTTPException(status_code=404, detail="Version not found")
@@ -783,18 +794,13 @@ async def rollback_workspace_instructions(
     from chat_service import WORKSPACE_MD_PATH, set_workspace_md
     _require_workspace_write(auth)  # #804
     workspace = _git_workspace()
-    try:
-        rel = WORKSPACE_MD_PATH.relative_to(workspace).as_posix()
-    except ValueError:
-        rel = "workspace.md"
-    try:
-        _git_ops.checkout_path(workspace, sha, rel)
-    except _git_ops.GitOpsError as exc:
-        raise HTTPException(status_code=404, detail=f"Commit {sha!r} not found: {exc}") from exc
-
-    content = WORKSPACE_MD_PATH.read_text(encoding="utf-8") if WORKSPACE_MD_PATH.is_file() else ""
-    if content:
-        set_workspace_md(content)
+    if _workspace_git_versioning_disabled(_git_ops, workspace):
+        raise HTTPException(status_code=404, detail="Workspace git versioning is disabled for this checkout")
+    rel = _workspace_md_git_rel(workspace, WORKSPACE_MD_PATH)
+    content = _git_ops.get_file_at_sha(workspace, sha, rel)
+    if content is None:
+        raise HTTPException(status_code=404, detail=f"Version {sha!r} does not contain workspace.md")
+    set_workspace_md(content)
     author_name, author_email = _git_author(auth)
     _git_commit_workspace_md(message=f"workspace: rollback to {sha}", author_name=author_name, author_email=author_email)
     return PlainTextResponse(content, media_type="text/markdown")

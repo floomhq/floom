@@ -59,6 +59,14 @@ def _hot_cache_scope() -> tuple[str, str]:
     )
 
 
+def _safe_worker_config_for_listing(worker_id: str):
+    try:
+        return get_worker_config_for_run(worker_id)
+    except Exception:
+        logger.warning("workers list: ignoring invalid config for worker %s", worker_id, exc_info=True)
+        return None
+
+
 @worker_listing_router.get("/workers", response_model=List[WorkerListSummary])
 def list_workers(
     request: Request = None,
@@ -191,10 +199,13 @@ def list_workers(
         # Resolve status via the SHARED resolver so LIST and DETAIL agree
         # exactly for the same worker (full honesty ladder: missing-secret /
         # failed-run / disabled / never-run, see _resolve_worker_status).
-        config = get_worker_config_for_run(w["id"])
+        config = _safe_worker_config_for_listing(w["id"])
+        status_worker = w
+        if config is None and w.get("status") in (None, "healthy", "ready"):
+            status_worker = {**w, "status": "error"}
         is_archived = w.get("archived", False)
         status = _resolve_worker_status(
-            w,
+            status_worker,
             config=config,
             available_secret_names=available_secret_names,
             last_run_status=last_run.status if last_run else None,

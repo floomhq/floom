@@ -7,6 +7,10 @@ The open-source, self-hosted runtime for AI workers. Sandboxed by default.
 
 > Create a worker. Give it tools. Let it run. See everything.
 
+New here? Start with [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for the
+short path from "why Workeros exists" to your first worker and a safe self-hosted
+deployment checklist.
+
 ## Worker execution model
 
 Pure-script workers run in an **E2B sandbox by default** — isolated dependencies, no host process access, contained resource usage. Agent workers (`SKILL.md`) run through the API-hosted AgentDriver tool loop. There is no supported local in-process worker runner.
@@ -17,180 +21,31 @@ You pay only for sandbox execution time (E2B bills per second of run time), with
 
 ## Quick Start
 
-**Fastest path** — two scripts. You need an OpenAI key and an E2B key ([e2b.dev](https://e2b.dev)).
-
-### Prerequisites
-
-- Python 3.11 or newer.
-- Node.js 20 or newer, with npm.
-- Git.
-- An `OPENAI_API_KEY` for Emily, agent workers, and code generation.
-- An `E2B_API_KEY` for sandboxed script-worker execution.
-- On Windows, run setup and dev commands from PowerShell. If script execution is
-  blocked, run `Set-ExecutionPolicy -Scope CurrentUser RemoteSigned` once.
-
 **Linux / macOS**
 ```bash
-./scripts/setup.sh                # venv + deps + scaffolds apps/api/.env  (run once)
-# edit apps/api/.env → add OPENAI_API_KEY and E2B_API_KEY
-./scripts/dev.sh                  # starts backend (:8000) + frontend (:3000); Ctrl+C stops both
+./scripts/setup.sh
+# edit apps/api/.env and add OPENAI_API_KEY and E2B_API_KEY
+./scripts/dev.sh
 ```
 
-**Windows (PowerShell)**
+**Windows PowerShell**
 ```powershell
-.\scripts\setup.ps1               # venv + deps + scaffolds apps\api\.env  (run once)
-# edit apps\api\.env → add OPENAI_API_KEY and E2B_API_KEY
-.\scripts\dev.ps1                 # starts backend (:8000) + frontend (:3000); Ctrl+C stops both
+.\scripts\setup.ps1
+# edit apps\api\.env and add OPENAI_API_KEY and E2B_API_KEY
+.\scripts\dev.ps1
 ```
 
-Open [http://localhost:3000](http://localhost:3000) and sign in. That's the whole setup — no auth secret required for local dev, and the example workers are seeded on first boot. Everything below is **optional**: other model providers (Bedrock/Claude, Gemini, …), an operator secret, git-backed version history, and integrations.
+Requires Python 3.11+, Node.js 20+, Git, an OpenAI key, and an E2B key from
+[e2b.dev](https://e2b.dev). On Windows, run commands from PowerShell.
 
-Prefer to run things by hand (or need to debug one side)? The manual per-OS steps are below.
+Open [http://localhost:3000](http://localhost:3000) and sign in. That's the
+whole setup: no auth secret required for local dev, and the example workers are
+seeded on first boot.
 
-### Troubleshooting
-
-- **Frontend shows a cloud sign-in screen:** copy `apps/web/.env.example` to
-  `apps/web/.env`. The local frontend should point at `http://localhost:8000`.
-- **Port already in use:** stop the existing process on `3000` or `8000`, or set
-  `WORKEROS_API_PORT` before starting the backend.
-- **Backend restarts during worker runs:** start the API with `python main.py`,
-  not bare `uvicorn main:app --reload`; the checked-in entry point excludes
-  runtime artifact folders from reload watching.
-- **Workers fail before running:** confirm `E2B_API_KEY` is set in
-  `apps/api/.env`.
-- **Agent workers or Emily fail on model calls:** confirm `OPENAI_API_KEY` is set,
-  or configure the model-provider variables shown below.
-- **Version history is empty:** set `FLOOM_WORKERS_DIR` and `FLOOM_CONTEXTS_DIR`
-  to directories outside the engine checkout. The engine refuses to commit
-  worker history into its own source repo.
-
----
-
-### 1. Install backend dependencies
-
-**Linux / macOS**
-```bash
-cd apps/api
-python3.11 -m venv venv
-source venv/bin/activate
-pip install -r requirements.txt
-```
-
-**Windows**
-```powershell
-cd apps/api
-python -m venv venv
-venv\Scripts\activate
-pip install -r requirements.txt
-```
-
-### 2. Set up secrets
-
-```bash
-cp apps/api/.env.example apps/api/.env
-# Edit apps/api/.env and fill in at minimum: OPENAI_API_KEY, E2B_API_KEY
-```
-
-**Required:**
-- `OPENAI_API_KEY` — the default model provider (powers Emily, agent-mode workers, and codegen)
-- `E2B_API_KEY` — sandbox execution (get one at e2b.dev)
-
-**Model providers (OpenAI by default, or AWS Bedrock / Claude):**
-
-The backend is provider-agnostic: each model call is selected by a *model id* and
-routed through litellm. OpenAI is the zero-config default. To use another provider,
-point the per-role model vars at that provider's id and supply its credentials:
-
-| Env var | Role | Default |
-| --- | --- | --- |
-| `WORKEROS_WORKER_AGENT_MODEL` | tool-calling worker agents | `gpt-5.5` |
-| `WORKEROS_CHAT_MODEL` | Emily (chat assistant) | `gpt-5.4-mini` |
-| `WORKEROS_CODEGEN_MODEL` | worker codegen / draft / repair | `gpt-5.5` |
-| `WORKEROS_SUGGEST_MODEL` | worker-edit conflict check | codegen model |
-
-Example — AWS Bedrock (Claude Sonnet 4.6):
-
-```bash
-WORKEROS_WORKER_AGENT_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
-WORKEROS_CHAT_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
-WORKEROS_CODEGEN_MODEL=bedrock/us.anthropic.claude-sonnet-4-6
-AWS_ACCESS_KEY_ID=...
-AWS_SECRET_ACCESS_KEY=...
-AWS_REGION_NAME=us-west-2
-```
-
-Other litellm providers work the same way — set a role's model id to a provider-prefixed
-id and supply that provider's key. Tool-call reliability and prompt caching vary by
-provider (caching auto-applies on OpenAI and Anthropic/Bedrock only):
-
-| Provider | Model id example | Key |
-| --- | --- | --- |
-| Anthropic (direct) | `anthropic/claude-sonnet-4-6` | `ANTHROPIC_API_KEY` |
-| Google Gemini | `gemini/gemini-2.5-pro` | `GEMINI_API_KEY` |
-| Groq | `groq/llama-3.3-70b-versatile` | `GROQ_API_KEY` |
-
-Anthropic models on Bedrock require submitting the one-time "use case details" form
-in the Bedrock console (per region). Prompt caching of the static system prompt is
-applied automatically on Anthropic/Bedrock for both codegen and agent (worker +
-Emily) calls; OpenAI caches prefixes server-side.
-
-**Web search:** Emily and web-search workers use a provider-agnostic `web_search`
-function tool that works on every model (including Bedrock/Claude), not OpenAI's
-hosted tool. It defaults to free DuckDuckGo (no key); set `SERPER_API_KEY` for
-Google-quality results (serper.dev).
-
-**Recommended for production:**
-- `FLOOM_SECRET` — operator secret that gates all API requests. Omit entirely for unauthenticated local dev.
-
-**Optional integrations:**
-- `COMPOSIO_API_KEY` + `COMPOSIO_WEBHOOK_SIGNING_KEY` — Connections feature (OAuth apps, triggers)
-- `SLACK_CLIENT_ID` + `SLACK_CLIENT_SECRET` — Slack integration (Emily in Slack, magic sign-in links)
-- `WORKEROS_MAGIC_LINK_SECRET` — dedicated HMAC key for magic sign-in links; falls back to `FLOOM_SECRET` then a per-process key if unset
-
-**Version history (recommended):**
-- `FLOOM_WORKERS_DIR` + `FLOOM_CONTEXTS_DIR` — point these to a directory **outside the cloned repo** (e.g. `~/.workeros/workers` and `~/.workeros/contexts`) to enable git-backed version history and rollback. Left at their in-repo defaults, the engine **refuses to version into its own source checkout** (and logs a warning), so worker/context versions stay empty. See [Workspace & versioning](#workspace--versioning).
-- `WORKEROS_GIT_REMOTE` *(optional)* — a git remote (`https://{token}@github.com/{owner}/{repo}.git`) to push version history to. Unset = local history only.
-
-**Secrets encryption key (`.secrets.enc`):**
-
-Worker secrets are stored encrypted in `.secrets.enc` in your workspace. The decryption key is stored out-of-band:
-
-| Setup | Key location |
-|---|---|
-| Cloud (workeros.floom.dev) | Supabase Vault — managed automatically |
-| Self-hosted + GitHub remote | GitHub repo Variable `WORKEROS_SECRETS_KEY` — set automatically on first use |
-| Self-hosted, local git only | `~/.config/workeros/secrets.key` (mode 600) — generated automatically on first use |
-
-For local git setups, back up `~/.config/workeros/secrets.key`. Losing it means existing `.secrets.enc` is unreadable and secrets must be re-entered.
-
-### 3. Start the backend
-
-**Linux / macOS**
-```bash
-cd apps/api
-source venv/bin/activate
-python main.py
-```
-
-**Windows**
-```powershell
-cd apps/api
-venv\Scripts\activate
-python main.py
-```
-
-The API serves on `http://localhost:8000` with auto-reload. Start it with **`python main.py`**, not a bare `uvicorn main:app --reload`: `main.py` configures the reloader to exclude `data/` and the workers directory. Without that, every run — which stages a bundle under `data/run-bundles/` — would trip the file-watcher and **restart the API mid-execution**. For production, run without reload, e.g. `uvicorn main:app --host 0.0.0.0 --port 8000`.
-
-### 4. Start the frontend
-
-```bash
-cd apps/web
-cp .env.example .env   # points the web app at your local backend (http://localhost:8000)
-npm install
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000). **Without `apps/web/.env`, the web app falls back to the production cloud API** and you'll see the production sign-in screen instead of "Create your workspace" — so don't skip the `cp` step. On a fresh install the first sign-in creates your admin account.
+For manual setup, model provider configuration, optional integrations, and safe
+self-hosting notes, see [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md).
+For common setup/runtime issues, see
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
 ---
 
@@ -208,136 +63,49 @@ data/         SQLite DB + run artifacts
 
 ---
 
-## Workers
+## Core concepts
 
-Workers live in `workers/<name>/` and contain:
+- **Workers:** folders under `workers/<name>/` with `worker.yml` plus either a
+  script entrypoint (`run.py`) or an agent prompt (`SKILL.md`).
+- **Runs:** every execution records logs, outputs, tool calls, approval state,
+  and replay/rollback context.
+- **Contexts:** reusable file bundles attached to workers as reference material;
+  sensitive by default.
+- **Workspace history:** workers, contexts, and settings can be versioned in a
+  git-backed workspace for rollback.
 
-- `worker.yml` — manifest (inputs, outputs, secrets, trigger, runtime)
-- `run.py` — script-mode worker. It is launched as `python run.py` inside the sandbox: read inputs from `inputs.json` and **write `result.json`** in the form `{"status": "success", "outputs": { ... }, "artifacts": [ ... ]}` (use `"status": "error"` + `"error"` on failure). There is **no** in-process `run(inputs, context)` entrypoint — the old `hybrid` mode was removed (migration #603); a bare `def run(...)` that only `return`s a value produces no result.
-- `SKILL.md` — agent prompt (agent mode); mutually exclusive with `run.py`
-- `requirements.txt` — Python dependencies
-
-Minimal `run.py`:
-
-```python
-import json
-
-with open("inputs.json") as f:
-    inputs = json.load(f)
-
-with open("result.json", "w") as f:
-    json.dump({"status": "success", "outputs": {"greeting": f"Hello, {inputs.get('name', 'world')}"}}, f)
-```
-
-**Writing workers with an AI agent (Claude Code / Cursor):** see [docs/AGENT-COOKBOOK.md](docs/AGENT-COOKBOOK.md) for end-to-end recipes including porting Claude skill bundles.
-
-**Writing workers by hand:** see [docs/AUTHORING.md](docs/AUTHORING.md) for the full `worker.yml` schema, execution modes, secrets, connections, and triggers.
-
-### CLI deploy loop
-
-```bash
-npm i -g @floomhq/workeros
-workeros login
-workeros workers validate ./workers/<id>
-workeros workers push ./workers/<id>
-workeros run <id> --inputs-file inputs.json
-```
-
-### Example workers
-
-A few of the workers shipped in [`workers/`](workers/) — browse the directory for the full set:
-
-- **csv_enricher** — Enriches CSV rows using custom instructions (AI)
-- **research_brief** — Generates markdown research briefs on any topic (AI, requires approval)
-- **github-digest** — Summarises recent activity on a GitHub repo
-- **outbound-approval-demo** — Two-run human-in-the-loop approval pattern demo
-- **openblog** / **opendraft** — Bundled upstream content-generation engine demos
-- **gmail-summarize-latest**, **gmail-smart-replies** — Gmail automation templates (connect your own account)
+Write your first worker in [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md),
+then use [docs/AUTHORING.md](docs/AUTHORING.md) for the full manifest and
+runtime contract.
 
 ---
 
-## Workspace & versioning
+## Docs
 
-Every change to a worker, context, or workspace setting is committed to a **git "workspace" repo** — that's your version history. `workers.versions` / `contexts.versions` list the commits; rollback restores any of them (and writes a *new* commit, so you can roll forward again too).
-
-The workspace git root is the **parent of `FLOOM_WORKERS_DIR`**, which by default is this cloned repo. To avoid versioning into — and accidentally pushing to — its own source tree, **the engine refuses to commit when the workspace root is the engine checkout**, so with the defaults versioning is off and a one-time warning is logged.
-
-**To enable versioning**, point `FLOOM_WORKERS_DIR` and `FLOOM_CONTEXTS_DIR` at a directory **outside** the checkout that share a parent:
-
-```bash
-FLOOM_WORKERS_DIR=~/.workeros/workers
-FLOOM_CONTEXTS_DIR=~/.workeros/contexts
-```
-
-That shared parent (`~/.workeros`) becomes a local git repo with **no remote** — versioned locally, never pushed. Copy the shipped example workers into `FLOOM_WORKERS_DIR` once if you want them tracked. To also push history to your own git host (never the engine's repo), set `WORKEROS_GIT_REMOTE`.
-
----
-
-## Contexts (brain packs)
-
-Contexts are reusable file bundles you attach to workers as reference material, stored in `contexts/<name>/`. Manage them via the API/MCP (`contexts.create`, `contexts.write`, `contexts.read`, …) or the UI, then list a context under a worker's `contexts:` in `worker.yml`.
-
-Contexts are **sensitive by default** and excluded from git (they may hold credentials). To put one under version control, create it with `sensitive: false` — its history then appears in `contexts.versions` and is restorable via `contexts.rollback`, exactly like workers.
+- [Getting started](docs/GETTING-STARTED.md) — why Workeros exists, first run,
+  first worker, and safe self-hosting checklist.
+- [Authoring workers](docs/AUTHORING.md) — full `worker.yml` schema, execution
+  modes, secrets, connections, triggers, and approvals.
+- [Agent cookbook](docs/AGENT-COOKBOOK.md) — agent-assisted worker authoring
+  recipes.
+- [API overview](docs/API.md) — curated endpoint map plus the OpenAPI location.
+- [Troubleshooting](docs/TROUBLESHOOTING.md) — setup, runtime, and test fixes.
+- [Contributing](CONTRIBUTING.md) — local checks, first-contribution map, and PR
+  expectations.
 
 ---
 
 ## API
 
-Base URL: `http://localhost:8000`
-
-All endpoints require the `x-floom-secret` header (set `FLOOM_SECRET` in `.env`). Omit `FLOOM_SECRET` entirely to run in unauthenticated local dev mode.
-
-**Workers**
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/workers` | GET | List workers |
-| `/workers/{id}` | GET | Worker detail (includes `missing_secrets`, `missing_connections`) |
-| `/workers/reload` | POST | Reload workers from disk |
-| `/workers/{id}/runs` | POST | Trigger a run — returns 422 with named items if secrets/connections missing |
-| `/workers/import-from-share` | POST | Import a worker from a public share token |
-
-**Runs**
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/runs` | GET | List runs |
-| `/runs/{id}` | GET | Run detail (includes `tool_calls`, `approval_trail`, `can_replay`, `total_tokens`) |
-| `/runs/{id}/approve` | POST | Approve a pending run |
-| `/runs/{id}/reject` | POST | Reject a pending run |
-| `/approvals` | GET | List pending approvals |
-
-**Connections & Secrets**
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/connections` | GET | List connections |
-| `/connections/{id}` | GET | Connection detail |
-| `/connections/{id}/activity` | GET | Recent runs that used this connection |
-| `/connections/{id}/peek` | GET | Recent emails for active Gmail connections (trust signal) |
-| `/connections/secrets` | GET | List secret metadata |
-
-**Auth (multi-member mode)**
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/auth/magic-link` | POST | Issue a 15-minute personal sign-in URL (authenticated) |
-| `/auth/magic/{token}` | GET | Consume a magic-link token and create a session (unauthenticated) |
-
-**System**
-
-| Endpoint | Method | Description |
-|---|---|---|
-| `/composio-events` | POST | Signed Composio webhook receiver |
-| `/healthz` | GET | Health check |
-| `/system/overview` | GET | Overview stats, attention items, setup-incomplete alerts |
+For a curated endpoint map, see [docs/API.md](docs/API.md). For the exhaustive
+reference, start the API and open `http://localhost:8000/docs`.
 
 ---
 
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup,
-the repo layout, and PR guidelines.
+the first-contribution map, and PR guidelines.
 
 For quick local checks from the repo root:
 
