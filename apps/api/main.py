@@ -7269,40 +7269,21 @@ async def mcp_http_endpoint(
 ) -> JSONResponse:
     """MCP JSON-RPC 2.0 endpoint for /mcp-tools/serve.
 
-    #1295: previously returned a raw HTTP 500 on invalid (non-dict) bodies and
-    silently ignored JSON-RPC batch requests (arrays). Now:
-      - JSON parse errors → -32700 Parse error (was already handled).
-      - Non-dict, non-list body → -32600 Invalid Request with HTTP 400.
-      - Batch array → each item dispatched; responses collected; empty batch
-        returns HTTP 204 (notifications-only batch, per JSON-RPC spec).
+    RECONCILIATION (round-09 base ←→ main): main hardened the shared
+    ``_mcp_handle_request`` dispatcher to be JSON-RPC-2.0 spec-correct —
+    a non-object body, an invalid batch item, and an oversized batch all
+    return a Response *object* carrying error -32600 at HTTP 200 (transport
+    success, RPC-level error), and the batch cap is enforced ("Batch too
+    large"). Base's earlier #1295 handler instead returned HTTP 400 for a
+    non-dict body. We delegate to the dispatcher (main's spec-correct path),
+    which also covers base's batch / single-request guarantees. Parse errors
+    keep their HTTP 400 (the body is not JSON at all, so there is no envelope
+    to return).
     """
     try:
         body = await request.json()
     except Exception:
         return JSONResponse(_mcp_err(None, -32700, "Parse error"), status_code=400)
-
-    # #1295: handle JSON-RPC batch (array of request objects).
-    if isinstance(body, list):
-        responses = []
-        for item in body:
-            if not isinstance(item, dict):
-                responses.append(_mcp_err(None, -32600, "Invalid Request"))
-                continue
-            try:
-                result = await _mcp_handle_request(item, auth, repos, request)
-            except Exception as exc:
-                result = _mcp_err(item.get("id"), -32603, f"Internal error: {exc}")
-            # Notifications (no "id") must not be included in the batch response.
-            if result is not None and "id" in item:
-                responses.append(result)
-        if not responses:
-            return Response(status_code=204)
-        return JSONResponse(responses)
-
-    # #1295: non-dict body is not a valid JSON-RPC request.
-    if not isinstance(body, dict):
-        return JSONResponse(_mcp_err(None, -32600, "Invalid Request"), status_code=400)
-
     return JSONResponse(await _mcp_handle_request(body, auth, repos, request))
 
 
