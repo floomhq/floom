@@ -496,3 +496,66 @@ with open("result.json", "w", encoding="utf-8") as handle:
 
     if _Sandbox.host_root:
         shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
+
+
+def test_e2b_worker_command_exception_surfaces_stderr_traceback(tmp_path, monkeypatch):
+    _install_fake_e2b(monkeypatch, tmp_path)
+    original_run = _Commands.run
+
+    class CommandFailed(RuntimeError):
+        exit_code = 1
+        stdout = "worker booted\n"
+        stderr = (
+            "Traceback (most recent call last):\n"
+            '  File "/home/user/worker/run.py", line 1, in <module>\n'
+            "RuntimeError: nova exploded\n"
+        )
+
+    def run_with_command_exception(self, command: str, **kwargs):
+        if command.endswith("python3 run.py'") or command == "python3 run.py":
+            self.run_calls.append((command, kwargs))
+            raise CommandFailed("Command exited with code 1")
+        return original_run(self, command, **kwargs)
+
+    monkeypatch.setattr(_Commands, "run", run_with_command_exception)
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("raise RuntimeError('nova exploded')\n", encoding="utf-8")
+
+    config = WorkerConfig(
+        id="crashing-worker",
+        name="Crashing Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python3 run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        secrets=[],
+        memory=False,
+        outputs=[],
+    )
+    logs: list[tuple[str, str]] = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="crashing-worker",
+        run_id="run-crashing-worker",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+        trace_id="trace-crashing-worker",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    assert result.status == "error"
+    assert result.error_code == "execution_error"
+    assert "Worker exited with code 1" in result.error
+    assert "RuntimeError: nova exploded" in result.error
+    assert any("[e2b] stderr: Traceback" in msg for msg, _level in logs)
+    assert any("RuntimeError: nova exploded" in msg for msg, _level in logs)
+
+    if _Sandbox.host_root:
+        shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
