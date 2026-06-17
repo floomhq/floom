@@ -447,7 +447,7 @@ export interface PublicWorker {
 export interface StandaloneShareLink {
   token: string;
   url: string;
-  entity_type: "worker" | "brain_file" | "brain_pack";
+  entity_type: "worker" | "brain_file" | "brain_pack" | "run";
 }
 
 export interface PublicShareFile {
