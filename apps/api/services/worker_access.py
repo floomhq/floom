@@ -293,6 +293,47 @@ def _worker_for_mutation(
     return None
 
 
+def _get_worker_for_workspace_share_source(
+    worker_id: str,
+    *,
+    auth: Any,
+    repos: Repositories,
+    workspace_id: str,
+) -> Optional[Dict[str, Any]]:
+    """Resolve a worker that may be cloned/shared into the active workspace.
+
+    Cloud's share-to-workspace flow must not read the source with
+    ``repos.workers.get_any``: worker ids are globally visible and get_any is not
+    tenant-scoped. This helper intentionally uses the normal scoped worker
+    lookup, then verifies the row belongs to the active workspace before any
+    caller can read source files or skill-version contents.
+    """
+    safe_workspace_id = str(workspace_id or "").strip()
+    if not safe_workspace_id:
+        return None
+    worker = _get_db_worker(
+        worker_id,
+        user_id=str(getattr(auth, "user_id", "") or ""),
+        repos=repos,
+        role=getattr(auth, "role", None),
+    )
+    if worker is None:
+        return None
+    data = row_to_dict(worker)
+    source_workspace_id = str(data.get("workspace_id") or "").strip()
+    if source_workspace_id and source_workspace_id != safe_workspace_id:
+        return None
+    if _is_cloud_deploy() and not source_workspace_id:
+        return None
+
+    owner_id = str(data.get("owner_id") or "")
+    if owner_id and owner_id == str(getattr(auth, "user_id", "") or ""):
+        return data
+    if bool(getattr(auth, "is_admin", False)):
+        return data
+    return None
+
+
 def _archived_tracked_worker(worker_id: str) -> Optional[Dict[str, Any]]:
     """Return a tracked worker's filesystem record iff it is archived.
 

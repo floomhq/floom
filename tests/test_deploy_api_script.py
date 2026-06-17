@@ -7,6 +7,7 @@ service.
 
 from __future__ import annotations
 
+import os
 import subprocess
 from pathlib import Path
 
@@ -15,9 +16,17 @@ REPO_ROOT = Path(__file__).resolve().parents[1]
 DEPLOY_SCRIPT = REPO_ROOT / "ops" / "deploy-api.sh"
 
 
+def _bash_path(path: Path) -> str:
+    text = path.as_posix()
+    if os.name == "nt" and len(text) >= 3 and text[1:3] == ":/":
+        drive = text[0].lower()
+        return f"/mnt/{drive}{text[2:]}"
+    return text
+
+
 def test_deploy_script_is_valid_bash():
     result = subprocess.run(
-        ["bash", "-n", str(DEPLOY_SCRIPT)],
+        ["bash", "-n", _bash_path(DEPLOY_SCRIPT)],
         cwd=REPO_ROOT,
         capture_output=True,
         text=True,

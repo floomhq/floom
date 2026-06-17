@@ -15,6 +15,7 @@ import {
   WorkerosApiClient,
   createAuthenticatedClient,
 } from "../dist/lib/api.js";
+import { doctorCommand } from "../dist/commands/doctor.js";
 
 async function withTempHome(fn) {
   const home = await mkdtemp(join(tmpdir(), "workeros-cli-cloud-"));
@@ -141,6 +142,32 @@ async function startMockApi() {
   return { server, port: server.address().port, seen };
 }
 
+async function startMockDoctorApi() {
+  const seen = [];
+  const server = createServer((req, res) => {
+    seen.push({ method: req.method, url: req.url, headers: req.headers });
+    if (req.url === "/health") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ version: "test" }));
+      return;
+    }
+    if (req.url === "/api/system/info") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify({ ok: true }));
+      return;
+    }
+    if (req.url === "/api/runs?limit=1") {
+      res.writeHead(200, { "content-type": "application/json" });
+      res.end(JSON.stringify([]));
+      return;
+    }
+    res.writeHead(404).end();
+  });
+  server.listen(0);
+  await once(server, "listening");
+  return { server, port: server.address().port, seen };
+}
+
 test("cloud client sends JWT + X-Workeros-Workspace and rewrites /workers to /api/workers", async () => {
   await withTempHome(async () => {
     const supa = await startMockSupabase();
@@ -199,6 +226,42 @@ test("cloud client sends PAT + X-Workeros-Workspace and rewrites /workers to /ap
       assert.equal(workersCall.headers["authorization"], undefined);
       assert.equal(workersCall.headers["x-floom-secret"], undefined);
     } finally {
+      api.server.close();
+    }
+  });
+});
+
+test("doctor accepts cloud PAT credentials and uses shared client headers", async () => {
+  await withTempHome(async () => {
+    const api = await startMockDoctorApi();
+    const originalStdout = process.stdout.write.bind(process.stdout);
+    let stdout = "";
+    try {
+      process.env.WORKEROS_API_BASE = `http://127.0.0.1:${api.port}`;
+      process.env.WORKEROS_API_TOKEN = "floom_pat_doctor";
+      process.env.WORKEROS_WORKSPACE_ID = "ws_doctor";
+      process.stdout.write = (chunk) => {
+        stdout += typeof chunk === "string" ? chunk : chunk.toString();
+        return true;
+      };
+
+      const code = await doctorCommand({ json: true });
+      assert.equal(code, 0);
+      assert.equal(JSON.parse(stdout).ok, true);
+
+      const systemInfoCall = api.seen.find((r) => r.url === "/api/system/info");
+      assert.ok(systemInfoCall, "expected cloud-rewritten /api/system/info call");
+      assert.equal(systemInfoCall.headers["x-floom-token"], "floom_pat_doctor");
+      assert.equal(systemInfoCall.headers["x-workeros-workspace"], "ws_doctor");
+      assert.equal(systemInfoCall.headers["x-floom-secret"], undefined);
+
+      const runsCall = api.seen.find((r) => r.url === "/api/runs?limit=1");
+      assert.ok(runsCall, "expected cloud-rewritten /api/runs call");
+      assert.equal(runsCall.headers["x-floom-token"], "floom_pat_doctor");
+      assert.equal(runsCall.headers["x-workeros-workspace"], "ws_doctor");
+      assert.equal(runsCall.headers["x-floom-secret"], undefined);
+    } finally {
+      process.stdout.write = originalStdout;
       api.server.close();
     }
   });

@@ -5,7 +5,7 @@ import os
 import re
 import socket
 import warnings
-from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional, Union
+from typing import Any, Dict, Iterable, List, Literal, Mapping, Optional, Tuple, Union
 from urllib.parse import unquote, urlsplit
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 from enum import Enum
@@ -43,6 +43,19 @@ def _model_data(value: Any) -> Any:
     if hasattr(value, "model_dump"):
         return value.model_dump()
     return value
+
+
+def _validate_timezone_name(value: Optional[str]) -> Optional[str]:
+    if value is None or not value.strip():
+        return value
+    stripped = value.strip()
+    try:
+        from zoneinfo import ZoneInfo
+
+        ZoneInfo(stripped)
+    except Exception as exc:
+        raise ValueError(f"invalid timezone: {stripped!r}") from exc
+    return stripped
 
 
 # ---------------------------------------------------------------------------
@@ -314,6 +327,97 @@ def pin_safe_outbound_url(url: str, *, label: str = "URL") -> tuple[str, str]:
     from urllib.parse import urlunsplit as _urlunsplit
     pinned = _urlunsplit((parts.scheme, netloc_ip, parts.path, parts.query, parts.fragment))
     return stripped, pinned
+    return stripped, pinned
+
+
+def pinned_safe_outbound_httpx_target(
+    url: str,
+    *,
+    label: str = "URL",
+) -> Tuple[str, Dict[str, str], Dict[str, Any]]:
+    """Return a DNS-pinned httpx target for an outbound URL.
+
+    The URL is resolved and validated exactly once. Hostname URLs are rewritten
+    to dial the vetted IP literal, while the returned Host header and
+    ``sni_hostname`` extension preserve the original authority for HTTP and TLS.
+    """
+    stripped = (url or "").strip()
+
+    _once = unquote(stripped)
+    _twice = unquote(_once)
+    if any("\r" in s or "\n" in s for s in (stripped, _once, _twice)):
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: contains control characters (CRLF injection)"
+        )
+
+    if _allow_private_mcp_urls():
+        return stripped, {}, {}
+
+    parts = urlsplit(stripped)
+    scheme = parts.scheme.lower()
+    if scheme not in {"http", "https"}:
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: only http:// and https:// schemes are permitted"
+        )
+
+    host = parts.hostname
+    if not host:
+        raise UnsafeOutboundUrlError(f"{label} is not allowed: missing host")
+
+    try:
+        port = parts.port
+    except ValueError as exc:
+        raise UnsafeOutboundUrlError(f"{label} is not allowed: invalid port") from exc
+
+    try:
+        literal_ip = ipaddress.ip_address(host)
+    except ValueError:
+        literal_ip = None
+
+    if literal_ip is not None:
+        if _ip_is_disallowed(literal_ip):
+            raise UnsafeOutboundUrlError(
+                f"{label} is not allowed: points to an internal/loopback/link-local address"
+            )
+        return stripped, {}, {}
+
+    if host.lower() in {"localhost", "localhost.localdomain", "ip6-localhost", "ip6-loopback"}:
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: points to an internal/loopback/link-local address"
+        )
+
+    try:
+        resolved = _resolve_host_ips(host)
+    except (socket.gaierror, socket.timeout, OSError) as exc:
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: host could not be resolved ({host})"
+        ) from exc
+
+    if not resolved:
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: host could not be resolved ({host})"
+        )
+
+    for ip in resolved:
+        if _ip_is_disallowed(ip):
+            raise UnsafeOutboundUrlError(
+                f"{label} is not allowed: points to an internal/loopback/link-local address"
+            )
+
+    pinned_ip = resolved[0]
+    pinned_host = f"[{pinned_ip}]" if pinned_ip.version == 6 else str(pinned_ip)
+    port_suffix = f":{port}" if port is not None else ""
+    userinfo = ""
+    if "@" in parts.netloc:
+        userinfo = parts.netloc.rsplit("@", 1)[0] + "@"
+    pinned_url = parts._replace(netloc=f"{userinfo}{pinned_host}{port_suffix}").geturl()
+
+    host_header = f"[{host}]" if ":" in host and not host.startswith("[") else host
+    if port is not None:
+        host_header = f"{host_header}:{port}"
+    extensions = {"sni_hostname": host} if scheme == "https" else {}
+    return pinned_url, {"Host": host_header}, extensions
+    return pinned_url, {"Host": host_header}, extensions
 
 
 # ---------------------------------------------------------------------------
@@ -440,18 +544,10 @@ class WorkerTrigger(BaseModel):
     @field_validator("timezone")
     @classmethod
     def validate_timezone(cls, value: Optional[str]) -> Optional[str]:
-        """#1296: reject invalid IANA timezone names at parse time."""
-        if value is None or not value.strip():
-            return value
-        from cron_utils import is_valid_timezone
-
-        if not is_valid_timezone(value):
-            raise ValueError(
-                f"invalid timezone: {value!r}. "
-                "Use an IANA timezone name such as 'UTC', 'Europe/Berlin', "
-                "or 'America/New_York'."
-            )
-        return value
+        # #1296 + main DRY: reject invalid IANA timezone names at parse time.
+        # _validate_timezone_name (canonical, also used elsewhere in this module)
+        # is functionally equivalent to the base inline cron_utils check.
+        return _validate_timezone_name(value)
 
 
 class WorkerMCPConnection(BaseModel):
@@ -907,7 +1003,7 @@ WorkerContextMountSpec = Union[str, WorkerContextMount]
 
 
 class WorkerMemoryConfig(BaseModel):
-    enabled: bool = False
+    enabled: bool = True
     context: Optional[str] = None
 
     @model_validator(mode="before")
@@ -983,14 +1079,14 @@ def _normalize_memory_contexts(
         if normalized.name != memory_name:
             continue
         if normalized.source == "local":
-            normalized_contexts[idx] = {
-                "name": memory_name,
-                "writeable": True,
-                "source": "local",
-            }
+            normalized_contexts[idx] = WorkerContextMount(
+                name=memory_name,
+                writeable=True,
+                source="local",
+            )
         return normalized_contexts
 
-    normalized_contexts.append(memory_mount)
+    normalized_contexts.append(WorkerContextMount(**memory_mount))
     return normalized_contexts
 
 
@@ -1386,18 +1482,8 @@ class WorkerContractTrigger(BaseModel):
     @field_validator("timezone")
     @classmethod
     def validate_timezone(cls, value: Optional[str]) -> Optional[str]:
-        """#1296: reject invalid IANA timezone names at parse time."""
-        if value is None or not value.strip():
-            return value
-        from cron_utils import is_valid_timezone
-
-        if not is_valid_timezone(value):
-            raise ValueError(
-                f"invalid timezone: {value!r}. "
-                "Use an IANA timezone name such as 'UTC', 'Europe/Berlin', "
-                "or 'America/New_York'."
-            )
-        return value
+        # #1296 + main DRY: canonical _validate_timezone_name (see above).
+        return _validate_timezone_name(value)
 
     @model_validator(mode="after")
     def validate_composio(self) -> "WorkerContractTrigger":
@@ -1918,6 +2004,11 @@ class WorkerUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
 
+    @field_validator("cron_timezone")
+    @classmethod
+    def validate_cron_timezone(cls, value: Optional[str]) -> Optional[str]:
+        return _validate_timezone_name(value)
+
 
 class RunCreate(BaseModel):
     inputs: Dict[str, Any] = Field(default_factory=dict)
@@ -1950,6 +2041,8 @@ class RunSummary(BaseModel):
     duration_ms: Optional[int] = None
     error: Optional[str] = None  # operator-readable headline (never a raw traceback)
     error_code: Optional[str] = None
+    trigger_member_id: Optional[str] = None
+    trigger_member_email: Optional[str] = None
     # #1022: the run's actual input (the "mandate"/request that was searched),
     # parsed from input_json. Surfaced so GET /runs is a queryable request log
     # (run_id -> input) without an N+1 of per-run detail fetches. Returned only on

@@ -210,6 +210,22 @@ def test_mcp_missing_secret_raises(env):
         cap.make_mcp_server(conn, {}, cap.WORKSPACE_AGENT_POLICY)
 
 
+def test_stdio_mcp_legacy_unsafe_cwd_rejected_at_dial_time(env, monkeypatch):
+    cap = env["cap"]
+    from models import WorkerMCPConnection
+
+    class _FakeServer:
+        def __init__(self, **_kwargs):
+            raise AssertionError("unsafe cwd must be rejected before constructing MCPServerStdio")
+
+    import agents.mcp as mcp_mod
+    monkeypatch.setattr(mcp_mod, "MCPServerStdio", _FakeServer)
+
+    conn = WorkerMCPConnection(label="fs", transport="stdio", command="npx", cwd="../outside")
+    with pytest.raises(cap.MCPConnectionError, match="unsafe stdio cwd"):
+        cap.make_mcp_server(conn, {}, cap.WORKSPACE_AGENT_POLICY)
+
+
 # ---------------------------------------------------------------------------
 # Brain staging (owner-scoped, read-only)
 # ---------------------------------------------------------------------------

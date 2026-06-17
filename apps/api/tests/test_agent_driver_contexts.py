@@ -212,7 +212,8 @@ def test_memory_enabled_worker_reads_and_persists_learning_across_runs(driver_en
         outputs=[],
     )
     memory_name = "memory-memory-worker"
-    assert {"name": memory_name, "writeable": True, "source": "local"} in config.contexts
+    contexts = [c.model_dump() if hasattr(c, "model_dump") else c for c in config.contexts]
+    assert {"name": memory_name, "writeable": True, "source": "local"} in contexts
 
     driver = agent_driver_mod.AgentDriver()
     logs: list[tuple[str, str]] = []

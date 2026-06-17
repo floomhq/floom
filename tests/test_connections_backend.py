@@ -7,12 +7,14 @@ Run from repo root:
 import importlib
 import sys
 import json
+import socket
 import types
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
 from unittest.mock import patch
 
+import pytest
 from fastapi.testclient import TestClient
 
 
@@ -25,6 +27,34 @@ def _httpx_response(status_code: int, body: dict) -> types.SimpleNamespace:
     response = types.SimpleNamespace(status_code=status_code, headers={}, text=json.dumps(body))
     response.json = lambda: body
     return response
+
+
+def _addrinfo(ip: str):
+    family = socket.AF_INET6 if ":" in ip else socket.AF_INET
+    sockaddr = (ip, 0, 0, 0) if family == socket.AF_INET6 else (ip, 0)
+    return [(family, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", sockaddr)]
+
+
+class _FakeHttpxClient:
+    def __init__(self, *, post_responses=None, get_responses=None):
+        self.post_responses = list(post_responses or [])
+        self.get_responses = list(get_responses or [])
+        self.post_calls = []
+        self.get_calls = []
+
+    def __enter__(self):
+        return self
+
+    def __exit__(self, exc_type, exc, tb):
+        return False
+
+    def post(self, *args, **kwargs):
+        self.post_calls.append((args, kwargs))
+        return self.post_responses.pop(0)
+
+    def get(self, *args, **kwargs):
+        self.get_calls.append((args, kwargs))
+        return self.get_responses.pop(0)
 
 
 def _load_api(monkeypatch, tmp_path):
@@ -511,8 +541,8 @@ class TestMCPConnections:
         mock_check.assert_not_called()
         assert status_resp.json()["kind"] == "mcp"
 
-        with patch("httpx.post") as mock_post, patch("httpx.get") as mock_get:
-            mock_post.side_effect = [
+        fake_http = _FakeHttpxClient(
+            post_responses=[
                 _httpx_response(
                     200,
                     {
@@ -539,10 +569,12 @@ class TestMCPConnections:
                     },
                 ),
             ]
+        )
+        with patch("httpx.Client", return_value=fake_http):
             test_resp = client.post(f"/connections/{created['id']}/test", headers=AUTH_HEADERS)
         assert test_resp.status_code == 200
-        assert mock_post.call_count == 2
-        mock_get.assert_not_called()
+        assert len(fake_http.post_calls) == 2
+        assert fake_http.get_calls == []
         assert test_resp.json()["status"] == "valid"
         assert "2 tools" in test_resp.json()["reason"]
 
@@ -622,8 +654,8 @@ class TestMCPConnections:
         assert create_resp.status_code == 200, create_resp.text
         created = create_resp.json()
 
-        with patch("httpx.post") as mock_post:
-            mock_post.side_effect = [
+        fake_http = _FakeHttpxClient(
+            post_responses=[
                 _httpx_response(
                     200,
                     {
@@ -647,12 +679,59 @@ class TestMCPConnections:
                     },
                 ),
             ]
+        )
+        with patch("httpx.Client", return_value=fake_http):
             resp = client.post(f"/connections/{created['id']}/test", headers=AUTH_HEADERS)
 
         assert resp.status_code == 200
         body = resp.json()
         assert body["status"] == "failed"
         assert "Allowed-tool mismatch" in body["reason"]
+
+    def test_test_mcp_connection_pins_resolved_ip_for_probe(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+        import models
+
+        fake_http = _FakeHttpxClient(
+            post_responses=[
+                _httpx_response(
+                    200,
+                    {
+                        "jsonrpc": "2.0",
+                        "id": 1,
+                        "result": {
+                            "protocolVersion": "2024-11-05",
+                            "capabilities": {"tools": {}},
+                            "serverInfo": {"name": "filesystem", "version": "1.0"},
+                        },
+                    },
+                ),
+                _httpx_response(
+                    200,
+                    {"jsonrpc": "2.0", "id": 2, "result": {"tools": []}},
+                ),
+            ]
+        )
+
+        with patch.object(models.socket, "getaddrinfo", return_value=_addrinfo("93.184.216.34")):
+            create_resp = client.post(
+                "/connections/mcp",
+                headers=AUTH_HEADERS,
+                json={"label": "pinned", "url": "https://mcp.example.com:8443/mcp"},
+            )
+            assert create_resp.status_code == 200, create_resp.text
+            created = create_resp.json()
+            with patch("httpx.Client", return_value=fake_http):
+                resp = client.post(f"/connections/{created['id']}/test", headers=AUTH_HEADERS)
+
+        assert resp.status_code == 200
+        assert resp.json()["status"] == "valid"
+        first_url = fake_http.post_calls[0][0][0]
+        first_kwargs = fake_http.post_calls[0][1]
+        assert first_url == "https://93.184.216.34:8443/mcp"
+        assert first_kwargs["headers"]["Host"] == "mcp.example.com:8443"
+        assert first_kwargs["extensions"] == {"sni_hostname": "mcp.example.com"}
 
     def test_create_stdio_mcp_connection(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
@@ -667,7 +746,7 @@ class TestMCPConnections:
                 "command": "npx",
                 "args": ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"],
                 "env": {"GITHUB_TOKEN": "secret:GITHUB_PAT"},
-                "cwd": "/workspace",
+                "cwd": "workspace",
                 "allowed_tools": ["read_file"],
             },
         )
@@ -680,9 +759,28 @@ class TestMCPConnections:
         assert created["mcp_command"] == "npx"
         assert created["mcp_args"] == ["-y", "@modelcontextprotocol/server-filesystem", "/workspace"]
         assert created["mcp_env"] == {"GITHUB_TOKEN": "secret:GITHUB_PAT"}
-        assert created["mcp_cwd"] == "/workspace"
+        assert created["mcp_cwd"] == "workspace"
         assert created["mcp_auth_secret"] is None
         assert created["mcp_allowed_tools"] == ["read_file"]
+
+    @pytest.mark.parametrize("cwd", ["/workspace", "../workspace", "workspace/../secrets", "C:\\workspace", "~/.workeros"])
+    def test_create_stdio_mcp_connection_rejects_unsafe_cwd(self, monkeypatch, tmp_path, cwd):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+
+        resp = client.post(
+            "/connections/mcp",
+            headers=AUTH_HEADERS,
+            json={
+                "label": "filesystem",
+                "transport": "stdio",
+                "command": "npx",
+                "cwd": cwd,
+            },
+        )
+
+        assert resp.status_code == 400
+        assert "workspace-relative" in resp.json()["detail"]
 
     def test_create_mcp_connection_rejects_duplicate_label(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)

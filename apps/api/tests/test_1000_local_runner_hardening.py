@@ -11,6 +11,7 @@ Run: cd apps/api && python -m pytest tests/test_1000_local_runner_hardening.py -
 from __future__ import annotations
 
 import sys
+import os
 from pathlib import Path
 
 import pytest
@@ -54,7 +55,7 @@ def _run(args, tmp_path, monkeypatch, *, allow_local=False):
 
 class TestCommandValidation:
     def test_absolute_path_rejected(self, tmp_path, monkeypatch):
-        r = _run({"cmd": "/bin/sh", "args": []}, tmp_path, monkeypatch, allow_local=True)
+        r = _run({"cmd": sys.executable, "args": []}, tmp_path, monkeypatch, allow_local=True)
         assert r["ok"] is False and "absolute" in r["error"]
 
     def test_traversal_slash_rejected(self, tmp_path, monkeypatch):
@@ -75,7 +76,8 @@ class TestLocalRunnerGate:
         assert "disabled" in r["error"] and "E2B" in r["error"]
 
     def test_safe_command_runs_when_opted_in(self, tmp_path, monkeypatch):
-        r = _run({"cmd": "echo", "args": ["hello"]}, tmp_path, monkeypatch, allow_local=True)
-        # echo is a bare PATH name, not an interpreter — allowed to run
+        args = {"cmd": "cmd.exe", "args": ["/c", "echo", "hello"]} if os.name == "nt" else {"cmd": "echo", "args": ["hello"]}
+        r = _run(args, tmp_path, monkeypatch, allow_local=True)
+        # The command is a bare PATH name, not an interpreter with code flags.
         assert r.get("ok") is True, r
         assert "hello" in (r.get("stdout") or "")

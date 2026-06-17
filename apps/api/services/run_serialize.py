@@ -215,6 +215,8 @@ def _make_run_summary(row: Any) -> "RunSummary":
         duration_ms=d.get("duration_ms"),
         error=_operator_error_message(d.get("error"), d.get("error_code")),
         error_code=d.get("error_code"),
+        trigger_member_id=d.get("trigger_member_id"),
+        trigger_member_email=d.get("trigger_member_email"),
         input=run_input,
         inputs=run_input,
     )

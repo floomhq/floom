@@ -50,7 +50,7 @@ from datetime import datetime, timedelta, timezone
 from contextlib import asynccontextmanager
 from functools import lru_cache
 from pathlib import Path
-from typing import Annotated, Any, Dict, Iterable, List, Literal, NotRequired, Optional, Protocol, TypedDict
+from typing import Annotated, Any, Dict, Iterable, List, Literal, NotRequired, Optional, Protocol, TypedDict, Union
 
 from fastapi import BackgroundTasks, Body, Depends, FastAPI, File, Form, HTTPException, Path as PathParam, Query, Request, Response, UploadFile
 from fastapi.exceptions import RequestValidationError
@@ -831,6 +831,33 @@ async def _hourly_sweep_loop() -> None:
         await asyncio.sleep(_SWEEP_INTERVAL_SECONDS)
 
 
+def _backfill_worker_memory_packs(user_id: str) -> int:
+    from models import WorkerConfig
+    from runner_sandbox.memory_context import ensure_memory_context_pack
+
+    count = 0
+
+    def _log(message: str, level: str = "info") -> None:
+        if level == "warning":
+            logger.warning(message)
+        else:
+            logger.debug(message)
+
+    with use_context_scope(context_scope_for_user(user_id)):
+        for worker in discover_workers(use_cache=False):
+            if worker.get("status") == "error":
+                continue
+            try:
+                config = WorkerConfig(**(worker.get("config") or {}))
+                if ensure_memory_context_pack(config=config, user_id=user_id, log_fn=_log):
+                    count += 1
+            except Exception:
+                logger.warning("Skipping memory backfill for worker %s", worker.get("id"), exc_info=True)
+    if count:
+        logger.info("Backfilled %d worker memory packs", count)
+    return count
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI lifespan: startup + shutdown hooks."""
@@ -915,6 +942,10 @@ async def lifespan(app: FastAPI):
                 _reload_exc,
                 exc_info=True,
             )
+        try:
+            _backfill_worker_memory_packs(bootstrap_user_id)
+        except Exception as _memory_exc:
+            logger.warning("Startup worker memory backfill failed (non-fatal): %s", _memory_exc)
         fail_interrupted_runs_on_startup(user_id=bootstrap_user_id)
         # #1130: sweep for zombie runs from previous deployments / server restarts.
         # Unlike fail_interrupted_runs_on_startup (process-local tracking), this
@@ -1191,6 +1222,7 @@ def _rate_limit_for_path(path: str) -> tuple[int, float]:
 
 # #1024: PUT /workers/{id}/files — atomic file replace, may carry bundled data.
 _WORKER_FILES_PATH_RE = re.compile(r"^/workers/[^/]+/files$")
+_WORKER_SOURCE_PATH_RE = re.compile(r"^/workers/[^/]+$")
 
 
 def _body_limit_for_request(request: Request) -> Optional[int]:
@@ -1202,8 +1234,14 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
         return FROM_BUNDLE_BODY_LIMIT_BYTES
     if path == "/workspace/import":
         return WORKSPACE_IMPORT_BODY_LIMIT_BYTES
-    # #1024: worker file deploys bundle datasets; exempt from the 256 KB JSON cap.
-    if _WORKER_FILES_PATH_RE.match(path):
+    # Worker source writes may carry data-bundled modules, so they need the same
+    # bounded headroom as atomic file deploys without broadening worker run/admin
+    # subpaths.
+    if (
+        (method == "POST" and path == "/workers")
+        or (method in {"PUT", "PATCH"} and _WORKER_SOURCE_PATH_RE.match(path))
+        or (method == "PUT" and _WORKER_FILES_PATH_RE.match(path))
+    ):
         return WORKER_FILES_BODY_LIMIT_BYTES
     if path.startswith("/uploads"):
         return None
@@ -1499,10 +1537,15 @@ async def auth_middleware(request: Request, call_next):
                 status_code=401,
                 content={"detail": "Invalid or expired run token"},
             )
-        if not _RE_RUN_COMPOSIO_PROXY.match(path):
+        if not (
+            _RE_RUN_COMPOSIO_PROXY.match(path)
+            or _RE_RUN_LLM_PROXY.match(path)
+            or _RE_RUN_LLM_BATCH_PROXY.match(path)
+            or _RE_RUN_EMBEDDINGS_PROXY.match(path)
+        ):
             return _JSONResponse(
                 status_code=403,
-                content={"detail": "Run tokens are only valid for Composio proxy calls"},
+                content={"detail": "Run tokens are only valid for run-scoped platform proxy calls"},
             )
         path_run_id = path.split("/", 3)[2] if path.startswith("/runs/") else ""
         if path_run_id != run_id_from_token:
@@ -1534,8 +1577,13 @@ async def auth_middleware(request: Request, call_next):
             or path.startswith("/approvals/public/")
             or path.startswith("/workers/public/")
             or path.startswith("/runs/public/")  # #765: token-gated read-only run view
-            # #1338 #1329: public SSE stream for share-link viewers — token is a
-            # standalone run share token validated inside the route handler.
+            # #1338 #1329: public SSE stream for share-link viewers. The route
+            # handler (stream_run_parts) validates the token (RUN-share OR
+            # WORKER-share entity_type) and enforces ownership, so the middleware
+            # only needs to let the request reach it. _RE_RUN_STREAM (main) is the
+            # canonical path matcher; the token=fls_ guard (base) is kept as a
+            # belt-and-suspenders narrowing for the share-link query form.
+            or _RE_RUN_STREAM.match(path)
             or (
                 path.endswith("/stream")
                 and path.startswith("/runs/")
@@ -1591,6 +1639,10 @@ logger = logging.getLogger("floom.api")
 # auth is by X-Workeros-Run-Token, scoped to the run_id in the path).
 import re as _re
 _RE_RUN_COMPOSIO_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/composio-execute/[A-Z0-9_]+$")
+_RE_RUN_LLM_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/llm$")
+_RE_RUN_LLM_BATCH_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/llm/batch$")
+_RE_RUN_EMBEDDINGS_PROXY = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/embeddings$")
+_RE_RUN_STREAM = _re.compile(r"^/runs/[a-zA-Z0-9_-]+/stream$")
 _RE_WORKER_RUN_CREATE = _re.compile(r"^/workers/[^/]+/runs$")
 _RE_RUN_DETAIL = _re.compile(r"^/runs/([a-zA-Z0-9_-]+)$")
 
@@ -1631,6 +1683,18 @@ def _worker_call_token_allows_request(
         return depth < MAX_CALL_DEPTH
     run_match = _RE_RUN_DETAIL.match(path)
     if method != "GET" or run_match is None or repos is None:
+        parent_run_id = str(token_payload.get("parent_run_id") or "")
+        if (
+            method == "POST"
+            and parent_run_id
+            and (
+                _RE_RUN_LLM_PROXY.match(path)
+                or _RE_RUN_LLM_BATCH_PROXY.match(path)
+                or _RE_RUN_EMBEDDINGS_PROXY.match(path)
+            )
+        ):
+            path_run_id = path.split("/", 3)[2] if path.startswith("/runs/") else ""
+            return path_run_id == parent_run_id
         return False
     run_row = repos.runs.get_any(run_id=run_match.group(1))
     if not run_row:
@@ -3880,7 +3944,7 @@ def create_worker_run(
                 status_code=403,
                 detail=f"Worker {worker_id!r} is not in the caller's calls: list",
             )
-        from run_token import MAX_CALL_DEPTH
+        from run_token import MAX_CALL_DEPTH, MAX_WORKER_CALLS_PER_RUN
         depth = int(rtp.get("depth") or 0)
         if depth >= MAX_CALL_DEPTH:
             raise HTTPException(
@@ -3889,8 +3953,21 @@ def create_worker_run(
             )
         trigger_source, trigger_ref = _worker_call_run_metadata(auth)
         trigger_source = trigger_source or "worker_call"
+        # Fan-out cap: a single run may spawn at most MAX_WORKER_CALLS_PER_RUN child
+        # runs via worker-to-worker calls (cost + runaway guard, complements the
+        # depth cap above). trigger_ref is the parent run id.
+        if trigger_ref:
+            already_spawned = repos.runs.count_child_runs(parent_run_id=trigger_ref)
+            if already_spawned >= MAX_WORKER_CALLS_PER_RUN:
+                raise HTTPException(
+                    status_code=429,
+                    detail=(
+                        f"Worker call fan-out limit ({MAX_WORKER_CALLS_PER_RUN}) "
+                        "reached for this run; cannot spawn more child runs."
+                    ),
+                )
 
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     true_owner_id = _worker_owner_id(worker_id, repos) or str(worker.get("owner_id") or "")
@@ -4056,12 +4133,21 @@ def replay_run(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> Dict[str, str]:
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos, role=auth.role)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
     row = repos.runs.get(user_id=auth.user_id, run_id=run_id)
     if not row:
+        try:
+            candidate = repos.runs.get_any(run_id=run_id)
+        except Exception:
+            candidate = None
+        if not candidate or str(candidate.get("actor_user_id") or "") != str(auth.user_id):
+            raise HTTPException(status_code=404, detail="Run not found")
+        row = candidate
+    actor_user_id = row.get("actor_user_id")
+    if actor_user_id is not None and str(actor_user_id) != str(auth.user_id):
         raise HTTPException(status_code=404, detail="Run not found")
     if row["worker_id"] != worker_id:
         raise HTTPException(status_code=404, detail="Run not found")
@@ -4102,6 +4188,166 @@ class _ComposioProxyRequest(BaseModel):
     connected_account_id: Optional[str] = None
     user_id: Optional[str] = None
     arguments: Optional[Dict[str, Any]] = None
+
+
+class _ManagedLLMRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    messages: List[Dict[str, Any]]
+    model: Optional[str] = None
+    max_tokens: Optional[int] = Field(default=None, ge=1, le=24000)
+    temperature: Optional[float] = Field(default=None, ge=0, le=2)
+
+
+class _ManagedLLMBatchRequest(BaseModel):
+    requests: List[_ManagedLLMRequest] = Field(default_factory=list, min_length=1, max_length=50)
+    max_parallel: int = Field(default=8, ge=1, le=16)
+
+
+class _ManagedEmbeddingsRequest(BaseModel):
+    model_config = ConfigDict(extra="allow")
+
+    input: Union[str, List[str]]
+    model: Optional[str] = None
+
+
+def _platform_managed_llm_model() -> str:
+    value = (
+        os.environ.get("WORKEROS_MANAGED_LLM_MODEL")
+        or os.environ.get("WORKEROS_WORKER_AGENT_MODEL")
+        or os.environ.get("WORKEROS_CHAT_MODEL")
+        or ""
+    ).strip()
+    if value:
+        return value
+    from models import default_worker_agent_model as _default_worker_agent_model
+
+    return _default_worker_agent_model()
+
+
+def _platform_managed_embedding_model() -> str:
+    return (
+        os.environ.get("WORKEROS_MANAGED_EMBEDDING_MODEL")
+        or os.environ.get("WORKEROS_EMBEDDING_MODEL")
+        or os.environ.get("OPENAI_EMBEDDING_MODEL")
+        or "text-embedding-3-small"
+    ).strip()
+
+
+def _response_to_jsonable(response: Any) -> Any:
+    if hasattr(response, "model_dump"):
+        return response.model_dump()
+    if hasattr(response, "dict"):
+        return response.dict()
+    return jsonable_encoder(response)
+
+
+def _require_running_run_for_platform_proxy(run_id: str, repos: Repositories) -> Dict[str, Any]:
+    run_row = repos.runs.get_any(run_id=run_id)
+    if run_row is None:
+        raise HTTPException(status_code=404, detail="Run not found")
+    if run_row.get("status") != RunStatus.RUNNING.value:
+        raise HTTPException(
+            status_code=403,
+            detail=f"Run is not currently running (status={run_row.get('status')})",
+        )
+    return run_row
+
+
+def _authorize_run_platform_proxy(request: Request, run_id: str) -> None:
+    from run_token import validate_worker_call_token as _validate_worker_call_token
+    from run_token import verify_run_token as _verify_run_token
+
+    simple_token = request.headers.get("x-workeros-run-token", "")
+    if simple_token:
+        token_run_id = _verify_run_token(simple_token)
+        if token_run_id is None:
+            raise HTTPException(status_code=401, detail="Missing or invalid run token")
+        if token_run_id != run_id:
+            raise HTTPException(status_code=403, detail="Run token does not match request run_id")
+        return
+
+    authorization_header = request.headers.get("authorization", "")
+    bearer = authorization_header[7:].strip() if authorization_header.startswith("Bearer ") else ""
+    if bearer.startswith("wrt_"):
+        try:
+            payload = _validate_worker_call_token(bearer)
+        except ValueError as exc:
+            raise HTTPException(status_code=401, detail=str(exc)) from exc
+        if str(payload.get("parent_run_id") or "") != run_id:
+            raise HTTPException(status_code=403, detail="Worker-call token does not match request run_id")
+        return
+
+    raise HTTPException(status_code=401, detail="Missing or invalid run token")
+
+
+def _managed_llm_completion(body: _ManagedLLMRequest) -> Any:
+    import llm as _llm
+
+    model = body.model or _platform_managed_llm_model()
+    if not _llm.provider_credentials_present(model):
+        raise HTTPException(status_code=503, detail="No managed LLM provider credentials configured")
+    data = body.model_dump(exclude_none=True)
+    data.pop("model", None)
+    messages = data.pop("messages")
+    try:
+        return _response_to_jsonable(_llm.completion(model=model, messages=messages, **data))
+    except Exception as exc:  # noqa: BLE001 - provider SDK exceptions vary
+        detail = _llm.safe_llm_error_message(exc, action="Managed LLM call")
+        raise HTTPException(status_code=502, detail=detail) from exc
+
+
+def _managed_embeddings(body: _ManagedEmbeddingsRequest) -> Any:
+    import llm as _llm
+
+    model = body.model or _platform_managed_embedding_model()
+    data = body.model_dump(exclude_none=True)
+    data.pop("model", None)
+    try:
+        return _response_to_jsonable(_llm.embedding(model=model, **data))
+    except Exception as exc:  # noqa: BLE001 - provider SDK exceptions vary
+        detail = _llm.safe_llm_error_message(exc, action="Managed embedding call")
+        raise HTTPException(status_code=502, detail=detail) from exc
+
+
+@app.post("/runs/{run_id}/llm")
+def managed_llm_proxy(
+    request: Request,
+    run_id: str,
+    body: _ManagedLLMRequest,
+    repos: Repositories = Depends(get_repos),
+) -> Any:
+    _authorize_run_platform_proxy(request, run_id)
+    _require_running_run_for_platform_proxy(run_id, repos)
+    return _managed_llm_completion(body)
+
+
+@app.post("/runs/{run_id}/llm/batch")
+def managed_llm_batch_proxy(
+    request: Request,
+    run_id: str,
+    body: _ManagedLLMBatchRequest,
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    from concurrent.futures import ThreadPoolExecutor
+
+    _authorize_run_platform_proxy(request, run_id)
+    _require_running_run_for_platform_proxy(run_id, repos)
+    with ThreadPoolExecutor(max_workers=min(body.max_parallel, len(body.requests))) as pool:
+        results = list(pool.map(_managed_llm_completion, body.requests))
+    return {"results": results}
+
+
+@app.post("/runs/{run_id}/embeddings")
+def managed_embeddings_proxy(
+    request: Request,
+    run_id: str,
+    body: _ManagedEmbeddingsRequest,
+    repos: Repositories = Depends(get_repos),
+) -> Any:
+    _authorize_run_platform_proxy(request, run_id)
+    _require_running_run_for_platform_proxy(run_id, repos)
+    return _managed_embeddings(body)
 
 
 @app.post("/runs/{run_id}/composio-execute/{tool_slug}")
@@ -5197,6 +5443,23 @@ def _mcp_tool_error(message: str) -> Dict[str, Any]:
     }
 
 
+_MCP_SECRET_QUERY_RE = re.compile(
+    r"([?&](?:token|key|secret|signature|sig|code|api[_-]?key)=)([^&\s]+)",
+    re.IGNORECASE,
+)
+_MCP_SECRET_ASSIGNMENT_RE = re.compile(
+    r"\b((?:api[_-]?key|token|secret|password|authorization)\s*[:=]\s*)([^\s,;&\"'}]+)",
+    re.IGNORECASE,
+)
+_MCP_BEARER_RE = re.compile(r"\bBearer\s+[A-Za-z0-9._~+/=-]{8,}", re.IGNORECASE)
+
+
+def _mcp_redact_string(value: str) -> str:
+    redacted = _MCP_SECRET_QUERY_RE.sub(r"\1[redacted]", value)
+    redacted = _MCP_SECRET_ASSIGNMENT_RE.sub(r"\1[redacted]", redacted)
+    return _MCP_BEARER_RE.sub("Bearer [redacted]", redacted)
+
+
 def _mcp_redact(value: Any) -> Any:
     if isinstance(value, list):
         return [_mcp_redact(item) for item in value]
@@ -5208,6 +5471,8 @@ def _mcp_redact(value: Any) -> Any:
             else:
                 redacted[str(key)] = _mcp_redact(nested)
         return redacted
+    if isinstance(value, str):
+        return _mcp_redact_string(value)
     return value
 
 
@@ -5218,7 +5483,7 @@ def _mcp_text(data: Any, summary: Optional[str] = None) -> str:
 
 
 def _mcp_call_result(data: Any, summary: Optional[str] = None) -> Dict[str, Any]:
-    structured = jsonable_encoder(data)
+    structured = _mcp_redact(jsonable_encoder(data))
     if not isinstance(structured, dict):
         structured = {"data": structured}
     return {
@@ -5228,11 +5493,24 @@ def _mcp_call_result(data: Any, summary: Optional[str] = None) -> Dict[str, Any]
     }
 
 
+def _mcp_api_result(data: Any, status_code: int) -> Dict[str, Any]:
+    return _mcp_content(_mcp_text(data), status_code >= 400)
+
+
+def _mcp_max_batch_items() -> int:
+    raw = os.environ.get("WORKEROS_MCP_MAX_BATCH_ITEMS", "50")
+    try:
+        value = int(raw)
+    except (TypeError, ValueError):
+        value = 50
+    return min(max(value, 1), 200)
+
+
 def _mcp_http_error_result(exc: HTTPException) -> Dict[str, Any]:
     detail = exc.detail if isinstance(exc.detail, str) else json.dumps(jsonable_encoder(exc.detail), ensure_ascii=False)
     return {
-        "content": [{"type": "text", "text": detail}],
-        "structuredContent": {"status": exc.status_code, "detail": jsonable_encoder(exc.detail)},
+        "content": [{"type": "text", "text": _mcp_redact_string(detail)}],
+        "structuredContent": _mcp_redact({"status": exc.status_code, "detail": jsonable_encoder(exc.detail)}),
         "isError": True,
     }
 
@@ -5244,6 +5522,38 @@ def _mcp_json_schema(properties: Dict[str, Any], required: Optional[List[str]] =
         "required": required or [],
         "additionalProperties": False,
     }
+
+
+def _mcp_validate_arguments_against_schema(
+    tool_definitions: List[Dict[str, Any]],
+    tool_name: str,
+    arguments: Dict[str, Any],
+) -> Optional[str]:
+    tool = next((t for t in tool_definitions if t.get("name") == tool_name), None)
+    schema = tool.get("inputSchema") if isinstance(tool, dict) else None
+    if not isinstance(schema, dict):
+        return None
+    properties = schema.get("properties") if isinstance(schema.get("properties"), dict) else {}
+    required = schema.get("required") if isinstance(schema.get("required"), list) else []
+    for name in required:
+        if name not in arguments:
+            return f"Invalid params: missing {name}"
+    for name, value in arguments.items():
+        prop = properties.get(name)
+        if not isinstance(prop, dict):
+            continue
+        expected = prop.get("type")
+        if expected == "string" and not isinstance(value, str):
+            return f"Invalid params: {name} must be a string"
+        if expected == "boolean" and not isinstance(value, bool):
+            return f"Invalid params: {name} must be a boolean"
+        if expected == "integer" and (not isinstance(value, int) or isinstance(value, bool)):
+            return f"Invalid params: {name} must be an integer"
+        if expected == "object" and not isinstance(value, dict):
+            return f"Invalid params: {name} must be an object"
+        if expected == "array" and not isinstance(value, list):
+            return f"Invalid params: {name} must be an array"
+    return None
 
 
 def _workeros_remote_mcp_tool_definitions() -> List[Dict[str, Any]]:
@@ -5599,7 +5909,14 @@ def _mcp_call_secrets_set(arguments: Dict[str, Any], auth: AuthContext, repos: R
     # #1294: use _mcp_arg_str for `value` so falsy-but-valid values (0, False,
     # "0") are not silently coerced to empty and rejected as "required".
     key = _mcp_arg(arguments, "key").upper()
-    payload = SecretUpsertRequest(value=_mcp_arg_str(arguments, "value"))
+    # Union (round-09 #1294 base + main hardening): _mcp_arg_str preserves
+    # falsy non-None values (0/False/"") so they aren't silently coerced and
+    # rejected as "required"; main's try/except wraps pydantic ValidationError
+    # as a clean ValueError for the MCP tool boundary.
+    try:
+        payload = SecretUpsertRequest(value=_mcp_arg_str(arguments, "value"))
+    except ValidationError as exc:
+        raise ValueError(str(exc)) from exc
     data = upsert_secret(key, payload, auth=auth, repos=repos)
     return _mcp_call_result(data, "Secret saved.")
 
@@ -5747,6 +6064,8 @@ async def _call_workeros_remote_mcp_tool(tool_name: str, arguments: Dict[str, An
         if tool_name == "record_candidate_feedback":
             return _mcp_call_record_candidate_feedback(arguments, auth, repos)
         return _mcp_tool_error(f"Unknown tool: {tool_name or 'unknown'}")
+    except ValidationError:
+        raise
     except ValueError as exc:
         return _mcp_tool_error(str(exc))
     except HTTPException as exc:
@@ -5801,7 +6120,7 @@ async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Option
         auth = _workspace_agent_mcp_auth_context()
         tools = [
             t for t in _workeros_remote_mcp_tool_definitions()
-            if _mcp_access_error(t["name"], auth) is None
+            if _mcp_default_tool(t["name"]) is None or _mcp_access_error(t["name"], auth) is None
         ]
         return _mcp_result(request_id, {"tools": tools})
     if method != "tools/call":
@@ -5810,8 +6129,17 @@ async def _handle_workspace_agent_mcp_message(payload: Dict[str, Any]) -> Option
     params = payload.get("params") if isinstance(payload.get("params"), dict) else {}
     tool_name = str(params.get("name") or "")
     arguments = params.get("arguments") if isinstance(params.get("arguments"), dict) else {}
+    invalid_args = _mcp_validate_arguments_against_schema(
+        _workeros_remote_mcp_tool_definitions(),
+        tool_name,
+        arguments,
+    )
+    if invalid_args:
+        return _mcp_error(request_id, -32602, invalid_args)
     try:
         return _mcp_result(request_id, await _call_workeros_remote_mcp_tool(tool_name, arguments))
+    except ValidationError as exc:
+        return _mcp_error(request_id, -32602, f"Invalid params: {exc}")
     except Exception as exc:
         return _mcp_internal_error(request_id, exc, f"tools/call:{tool_name or 'unknown'}")
 
@@ -5841,6 +6169,8 @@ async def _workspace_agent_mcp_post(request: Request) -> Response:
         raise HTTPException(status_code=400, detail="Invalid MCP JSON payload") from exc
 
     if isinstance(payload, list):
+        if len(payload) > _mcp_max_batch_items():
+            return JSONResponse(_mcp_error(None, -32600, "Batch too large"))
         responses = []
         for item in payload:
             if not isinstance(item, dict):
@@ -6438,6 +6768,22 @@ _MCP_OFF_BY_DEFAULT_TOOLS: frozenset = frozenset({
 })
 
 
+def _mcp_default_tool_by_name() -> Dict[str, dict]:
+    return {str(tool["name"]): tool for tool in _MCP_DEFAULT_TOOLS}
+
+
+def _mcp_default_tool(name: str) -> Optional[dict]:
+    return _mcp_default_tool_by_name().get(name)
+
+
+def _mcp_visible_default_tools(auth: AuthContext) -> List[dict]:
+    return [
+        tool for tool in _MCP_DEFAULT_TOOLS
+        if _mcp_tool_served(str(tool["name"]))
+        and _mcp_access_error(str(tool["name"]), auth) is None
+    ]
+
+
 def _mcp_destructive_tools_enabled() -> bool:
     return os.environ.get("WORKEROS_MCP_ENABLE_DESTRUCTIVE") == "1"
 
@@ -6462,8 +6808,7 @@ def _mcp_tool_served(name: str) -> bool:
 
 def _mcp_access_error(name: str, auth: AuthContext) -> str | None:
     """Return an error string if this auth context may not call the tool."""
-    is_default_tool = any(t["name"] == name for t in _MCP_DEFAULT_TOOLS)
-    if is_default_tool and not _mcp_tool_served(name):
+    if _mcp_default_tool(name) is not None and not _mcp_tool_served(name):
         return f"Tool {name!r} is not enabled on this deployment"
     if name in _MCP_ADMIN_ONLY_TOOLS and not auth.is_admin:
         return f"Tool {name!r} requires admin role"
@@ -6497,80 +6842,80 @@ async def _mcp_dispatch(
     # --- workers ---
     if name == "workers.list":
         data, s = await _api_call("GET", "/workers", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.get":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.create":
         body = {k: a[k] for k in ("worker_yml", "run_py") if k in a}
         if "skill_md" in a: body["skill_md"] = a["skill_md"]
         data, s = await _api_call("POST", "/workers", request, body=body)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.update":
         body = {k: a[k] for k in a if k != "id"}
         data, s = await _api_call("PATCH", f"/workers/{_enc(a['id'])}", request, body=body)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.delete":
         data, s = await _api_call("DELETE", f"/workers/{_enc(a['id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.run":
         body = {"inputs": a.get("inputs") or {}, "trigger_source": a.get("trigger_source", "manual")}
         data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/runs", request, body=body)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.write_file":
         data, s = await _api_call("PUT", f"/workers/{_enc(a['id'])}/files", request, body={"files": a["files"]})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.logs":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/logs", request, params={"level": a.get("level"), "since": a.get("since"), "limit": a.get("limit", 200)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.stats":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/stats", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.timeseries":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/runs/timeseries", request, params={"days": a.get("days", 30)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.versions":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/versions", request, params={"limit": a.get("limit", 50)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.rollback":
         data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/rollback/{_enc(a['version_id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.archive":
         data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/archive", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.restore":
         data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/restore", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.reload":
         data, s = await _api_call("POST", "/workers/reload", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.sample_input":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/sample-input", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.alerts.list":
         data, s = await _api_call("GET", f"/workers/{_enc(a['id'])}/alerts", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.alerts.create":
         body = {k: a[k] for k in a if k != "id"}
         data, s = await _api_call("POST", f"/workers/{_enc(a['id'])}/alerts", request, body=body)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workers.alerts.delete":
         data, s = await _api_call("DELETE", f"/workers/{_enc(a['id'])}/alerts/{_enc(a['alert_id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- runs ---
     if name == "runs.list":
         data, s = await _api_call("GET", "/runs", request, params={"worker_id": a.get("worker_id"), "status": a.get("status"), "limit": a.get("limit", 50), "offset": a.get("offset", 0)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "runs.get":
         data, s = await _api_call("GET", f"/runs/{_enc(a['id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "runs.cancel":
         data, s = await _api_call("POST", f"/runs/{_enc(a['id'])}/cancel", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "runs.replay":
         data, s = await _api_call("POST", f"/workers/{_enc(a['worker_id'])}/runs/{_enc(a['run_id'])}/replay", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "runs.watch":
         run_id = a["id"]
         timeout = _mcp_watch_timeout_seconds(a.get("timeout_ms"))  # #834: 30s cap
@@ -6580,57 +6925,57 @@ async def _mcp_dispatch(
             await asyncio.sleep(1.5)
             run_data, s = await _api_call("GET", f"/runs/{_enc(run_id)}", request)
             if s >= 400:
-                return _mcp_content(json.dumps(run_data, indent=2, default=str), True)
+                return _mcp_api_result(run_data, s)
             if run_data.get("status") in ("completed", "failed", "cancelled"):
-                return _mcp_content(json.dumps(run_data, indent=2, default=str), run_data.get("status") == "failed")
+                return _mcp_content(_mcp_text(run_data), run_data.get("status") == "failed")
         return _mcp_content(f"Run {run_id!r} did not complete within {timeout:.0f}s", is_error=True)
 
     # --- secrets ---
     if name == "secrets.list":
         data, s = await _api_call("GET", "/secrets", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "secrets.set":
         data, s = await _api_call("POST", f"/secrets/{_enc(a['key'])}", request, body={"value": a["value"]})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "secrets.delete":
         data, s = await _api_call("DELETE", f"/secrets/{_enc(a['key'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "secrets.test":
         data, s = await _api_call("POST", f"/secrets/{_enc(a['key'])}/test", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- connections ---
     if name == "connections.list":
         data, s = await _api_call("GET", "/connections", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "connections.add_mcp":
         data, s = await _api_call("POST", "/connections/mcp", request, body=a)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "connections.delete":
         data, s = await _api_call("DELETE", f"/connections/{_enc(a['connection_id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "connections.status":
         data, s = await _api_call("GET", f"/connections/{_enc(a['connection_id'])}/status", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "connections.test":
         data, s = await _api_call("POST", f"/connections/{_enc(a['connection_id'])}/test", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- contexts ---
     if name == "contexts.list":
         data, s = await _api_call("GET", "/contexts", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "contexts.create":
         data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}", request, body={"writeable": a.get("writeable", False), "sensitive": a.get("sensitive", True)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "contexts.read":
         encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
         data, s = await _api_call("GET", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "contexts.write":
         encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
         data, s = await _api_call("PUT", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request, body={"content": a["content"]})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "record_candidate_feedback":
         body = {k: a[k] for k in ("run_id", "candidate_id", "rank", "feedback_text", "outcome") if k in a}
         if "scope" in a:
@@ -6638,81 +6983,97 @@ async def _mcp_dispatch(
         if "reporter" in a:
             body["reporter"] = a["reporter"]
         data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}/record-candidate-feedback", request, body=body)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "contexts.delete":
         qs = "?force=true" if a.get("force") else ""
         data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}{qs}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "contexts.delete_file":
         encoded_path = "/".join(_enc(p) for p in a["path"].split("/"))
         data, s = await _api_call("DELETE", f"/contexts/{_enc(a['name'])}/files/{encoded_path}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "contexts.versions":
         data, s = await _api_call("GET", f"/contexts/{_enc(a['name'])}/versions", request, params={"limit": a.get("limit", 50)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "contexts.rollback":
         data, s = await _api_call("POST", f"/contexts/{_enc(a['name'])}/rollback/{_enc(a['version_id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- triggers ---
     if name == "triggers.list":
         data, s = await _api_call("GET", "/integrations/triggers", request, params={"worker_id": a.get("worker_id"), "app": a.get("app")})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- approvals ---
     if name == "approvals.list":
         data, s = await _api_call("GET", "/approvals", request, params={"limit": a.get("limit", 50)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "approvals.approve":
         data, s = await _api_call("POST", f"/runs/{_enc(a['run_id'])}/approve", request, body={"comment": a.get("comment")})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "approvals.reject":
         data, s = await _api_call("POST", f"/runs/{_enc(a['run_id'])}/reject", request, body={"comment": a.get("comment")})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- workspace ---
     if name == "workspace.chat":
-        data, s = await _api_call("POST", "/chat", request, body={"message": a["message"], "source": "mcp", "conversation_id": a.get("conversation_id")})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        message = str(a.get("message") or "").strip()
+        if not message:
+            return _mcp_content("Tool argument 'message' is required", is_error=True)
+        if len(message) > 20000:
+            return _mcp_content("Tool argument 'message' is too long", is_error=True)
+        conversation_id = _workspace_agent_mcp_conversation_id(a.get("conversation_id"))
+        reply = await _collect_workspace_agent_reply_for_langdock(
+            message=message,
+            user_id=auth.user_id,
+            conversation_id=conversation_id,
+        )
+        return _mcp_call_result(
+            {
+                "reply": reply or "(No reply)",
+                "conversation_id": conversation_id,
+            },
+            "Workspace agent reply.",
+        )
     if name == "workspace.instructions.get":
         data, s = await _api_call("GET", "/workspace", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workspace.instructions.set":
         data, s = await _api_call("PUT", "/workspace", request, body={"content": a["content"]})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workspace.versions":
         data, s = await _api_call("GET", "/workspace/versions", request, params={"limit": a.get("limit", 20)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "workspace.rollback":
         data, s = await _api_call("POST", f"/workspace/rollback/{_enc(a['version_id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- system ---
     if name == "system.overview":
         data, s = await _api_call("GET", "/system/overview", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "system.stats":
         data, s = await _api_call("GET", "/stats", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "system.info":
         data, s = await _api_call("GET", "/system/info", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "system.alerts":
         data, s = await _api_call("GET", "/system/alerts", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- integrations ---
     if name == "integrations.catalog":
         data, s = await _api_call("GET", "/integrations/catalog", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- conversations ---
     if name == "conversations.list":
         data, s = await _api_call("GET", "/conversations", request, params={"limit": a.get("limit", 20)})
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
     if name == "conversations.get":
         data, s = await _api_call("GET", f"/conversations/{_enc(a['id'])}", request)
-        return _mcp_content(json.dumps(data, indent=2, default=str), s >= 400)
+        return _mcp_api_result(data, s)
 
     # --- custom tools management ---
     if name == "tools_list":
@@ -6806,23 +7167,41 @@ async def _mcp_dispatch(
                 is_error=False,
             )
         if run["status"] == "failed":
-            return _mcp_content(run.get("error") or "Worker run failed", is_error=True)
+            return _mcp_content(_mcp_text(run.get("error") or "Worker run failed"), is_error=True)
         output = run.get("output_json") or run.get("output") or {}
-        return _mcp_content(json.dumps(output, indent=2, default=str))
+        return _mcp_content(_mcp_text(output))
 
     return _mcp_content(f"Unknown tool: {name!r}", is_error=True)
 
 
 async def _mcp_handle_request(
-    body: dict,
+    body: Any,
     auth: AuthContext,
     repos: "Repositories",
     request: Request | None = None,
-) -> dict:
+) -> Any:
     """Core MCP JSON-RPC 2.0 dispatcher. Called by /mcp-tools/serve and by the cloud /mcp/{workspace_id}."""
+    if isinstance(body, list):
+        if not body:
+            return _mcp_err(None, -32600, "Invalid JSON-RPC request")
+        if len(body) > _mcp_max_batch_items():
+            return _mcp_err(None, -32600, "Batch too large")
+        responses = []
+        for item in body:
+            if not isinstance(item, dict):
+                responses.append(_mcp_err(None, -32600, "Invalid JSON-RPC request"))
+                continue
+            responses.append(await _mcp_handle_request(item, auth, repos, request))
+        return responses
+
+    if not isinstance(body, dict):
+        return _mcp_err(None, -32600, "Invalid JSON-RPC request")
+
     rpc_id = body.get("id")
     method = body.get("method", "")
     params = body.get("params") or {}
+    if not isinstance(params, dict):
+        return _mcp_err(rpc_id, -32602, "Invalid params")
 
     if method == "initialize":
         return _mcp_ok(rpc_id, {
@@ -6835,10 +7214,7 @@ async def _mcp_handle_request(
         custom = repos.mcp_tools.list(user_id=auth.user_id)
         # #833: only advertise tools this deployment serves and this caller
         # may invoke — same predicate tools/call enforces.
-        tools = [
-            t for t in _MCP_DEFAULT_TOOLS
-            if _mcp_tool_served(t["name"]) and _mcp_access_error(t["name"], auth) is None
-        ] + [
+        tools = _mcp_visible_default_tools(auth) + [
             {"name": t["name"], "description": t["description"], "inputSchema": t["input_schema"]}
             for t in custom
         ]
@@ -6848,6 +7224,20 @@ async def _mcp_handle_request(
         if request is None:
             return _mcp_err(rpc_id, -32603, "Internal error: request context unavailable")
         tool_name = params.get("name", "")
+        if not isinstance(tool_name, str) or not tool_name:
+            return _mcp_err(rpc_id, -32602, "Invalid params")
+        raw_arguments = params.get("arguments")
+        arguments = {} if raw_arguments is None else raw_arguments
+        if not isinstance(arguments, dict):
+            return _mcp_err(rpc_id, -32602, "Invalid params")
+        default_tool = _mcp_default_tool(tool_name)
+        invalid_args = (
+            _mcp_validate_arguments_against_schema([default_tool], tool_name, arguments)
+            if default_tool is not None
+            else None
+        )
+        if invalid_args:
+            return _mcp_err(rpc_id, -32602, invalid_args)
         # #833: audit trail for every MCP tool invocation.
         logger.info(
             "mcp tools/call: tool=%r user=%s role=%s auth_method=%s",
@@ -6856,13 +7246,16 @@ async def _mcp_handle_request(
         denied = _mcp_access_error(tool_name, auth)
         if denied is not None:
             return _mcp_ok(rpc_id, _mcp_content(denied, is_error=True))
-        result = await _mcp_dispatch(
-            tool_name,
-            params.get("arguments") or {},
-            auth,
-            repos,
-            request,
-        )
+        try:
+            result = await _mcp_dispatch(tool_name, arguments, auth, repos, request)
+        except KeyError as exc:
+            missing = str(exc).strip("'") or "required argument"
+            return _mcp_err(rpc_id, -32602, f"Invalid params: missing {missing}")
+        except ValidationError as exc:
+            return _mcp_err(rpc_id, -32602, f"Invalid params: {exc}")
+        except Exception:
+            logger.exception("MCP serve tools/call failed: tool=%r", tool_name)
+            return _mcp_err(rpc_id, -32603, "Internal error")
         return _mcp_ok(rpc_id, result)
 
     return _mcp_err(rpc_id, -32601, f"Method not found: {method!r}")

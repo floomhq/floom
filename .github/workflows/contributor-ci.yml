@@ -1,0 +1,93 @@
+name: Contributor CI
+
+on:
+  pull_request:
+    branches: [main]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  python-lint:
+    name: Python lint (GitHub-hosted)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+      - name: Install ruff
+        run: python -m pip install ruff==0.15.17
+      - name: Ruff check
+        run: ruff check .
+
+  runtime-tests:
+    name: Runtime tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: pip
+          cache-dependency-path: apps/api/requirements.txt
+      - name: Install dependencies
+        run: python -m pip install -r apps/api/requirements.txt pytest pytest-asyncio
+      - name: Run root runtime tests
+        env:
+          WORKEROS_DEPLOY: local
+          WORKEROS_ROOT: ${{ github.workspace }}
+          FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          OPENAI_API_KEY: sk-test-${{ github.run_id }}
+          COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
+        run: python -m pytest tests/ -v --tb=short -p no:warnings -n auto --dist loadscope
+
+  web-lint:
+    name: Web lint (GitHub-hosted)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/web
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/web/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Lint
+        run: npm run lint
+
+  mcp-tests:
+    name: MCP tests (GitHub-hosted)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: apps/mcp
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "24"
+          cache: npm
+          cache-dependency-path: apps/mcp/package-lock.json
+      - name: Install dependencies
+        run: npm ci
+      - name: Unit tests
+        run: npm test

@@ -9,6 +9,7 @@ import json
 import logging
 import os
 import io
+import re
 import shlex
 import shutil
 import tarfile
@@ -21,8 +22,9 @@ from urllib.parse import urlsplit
 
 from .base import SandboxDriver
 from .cancellation import run_cancel_requested
+from .e2b_upload import upload_tree_tarball
 from .memory_context import ensure_memory_context_pack
-from models import WorkerConfig, WorkerResult
+from models import WorkerConfig, WorkerResult, assert_safe_outbound_url
 import contexts as _contexts_module
 from contexts import CONTEXTS_DIR, context_scope_for_user, normalize_context_mount, use_context_scope
 from runner_utils import ARTIFACTS_DIR
@@ -50,6 +52,7 @@ MAX_CONTEXT_TAR_MEMBER_BYTES = 100 * 1024 * 1024  # 100 MiB per member
 MAX_CONTEXT_TAR_TOTAL_BYTES = 250 * 1024 * 1024  # 250 MiB total per extraction
 E2B_COMMAND_REQUEST_TIMEOUT_BUFFER_SECONDS = 60
 E2B_INSTALL_COMMAND_MIN_REQUEST_TIMEOUT_SECONDS = 300
+MAX_WORKER_ERROR_OUTPUT_CHARS = 1000
 _OOM_EXIT_CODES = {137, -9}
 _OOM_MARKERS = (
     "code 137",
@@ -65,6 +68,15 @@ _OOM_MARKERS = (
 )
 _active_sandboxes: dict[str, Any] = {}
 _active_sandboxes_lock = threading.Lock()
+
+
+def _safe_git_context_url(source: str) -> str:
+    repo_url = source.removeprefix("git+").strip()
+    if urlsplit(repo_url).scheme.lower() != "https":
+        raise ValueError("Git context URL must use https://")
+    return assert_safe_outbound_url(repo_url, label="Git context URL")
+
+
 _DEFAULT_E2B_DENY_OUT = (
     # NOTE: "0.0.0.0/8" intentionally omitted — E2B's network-policy API rejects it
     # ("400: invalid denied CIDR 0.0.0.0/8"), which kills sandbox creation for any
@@ -269,6 +281,69 @@ def _split_env_values(raw_value: str | None) -> list[str]:
     return [item.strip() for item in raw_value.split(",") if item.strip()]
 
 
+def _env_truthy(name: str) -> bool:
+    return (os.environ.get(name) or "").strip().lower() in {"1", "true", "yes", "on"}
+
+
+_DEFAULT_E2B_PYTHON_BAKED_PACKAGES = {
+    "boto3",
+    "google-auth",
+    "httpx",
+    "litellm",
+    "numpy",
+    "openai",
+    "python-dotenv",
+    "requests",
+}
+
+
+def _python_baked_package_names() -> set[str]:
+    configured = _split_env_values(os.environ.get("WORKEROS_E2B_PYTHON_BAKED_PACKAGES"))
+    if not configured:
+        return set(_DEFAULT_E2B_PYTHON_BAKED_PACKAGES)
+    return {name.strip().lower().replace("_", "-") for name in configured if name.strip()}
+
+
+def _requirement_name(line: str) -> str | None:
+    text = line.strip()
+    if not text or text.startswith("#"):
+        return None
+    if text.startswith(("-", "git+", "http://", "https://", ".")):
+        return ""
+    match = re.match(r"^([A-Za-z0-9_.-]+)", text)
+    if not match:
+        return ""
+    return match.group(1).lower().replace("_", "-")
+
+
+def _requirements_covered_by_baked_template(requirements_path: Path) -> tuple[bool, list[str]]:
+    baked = _python_baked_package_names()
+    missing: list[str] = []
+    for raw_line in requirements_path.read_text(encoding="utf-8").splitlines():
+        name = _requirement_name(raw_line)
+        if name is None:
+            continue
+        if not name or name not in baked:
+            missing.append(raw_line.strip())
+    return not missing, missing
+
+
+def _runtime_kind(config: WorkerConfig | None) -> str:
+    runtime_type = (getattr(getattr(config, "runtime", None), "type", "") or "").strip().lower()
+    if runtime_type.startswith("node") or runtime_type in {"javascript", "typescript", "js", "ts"}:
+        return "node"
+    return "python"
+
+
+def _e2b_template_for_config(config: WorkerConfig | None) -> str | None:
+    kind = _runtime_kind(config)
+    if kind == "node":
+        value = os.environ.get("WORKEROS_E2B_NODE_TEMPLATE_ID")
+    else:
+        value = os.environ.get("WORKEROS_E2B_PYTHON_TEMPLATE_ID")
+    return (value or os.environ.get("WORKEROS_E2B_DEFAULT_TEMPLATE_ID") or "").strip() or None
+
+
 def _configured_e2b_api_keys() -> list[str]:
     """Return E2B keys in use order without logging or exposing values."""
     raw_keys: list[str] = []
@@ -357,6 +432,49 @@ def _exception_text(exc: Exception) -> str:
     return " ".join(part for part in parts if part).strip()
 
 
+def _coerce_output_text(value: Any) -> str:
+    if value is None:
+        return ""
+    if isinstance(value, bytes):
+        return value.decode("utf-8", errors="replace")
+    if isinstance(value, bytearray):
+        return bytes(value).decode("utf-8", errors="replace")
+    return str(value)
+
+
+def _exception_exit_code(exc: Exception) -> int | None:
+    for attr in ("exit_code", "returncode", "code"):
+        value = getattr(exc, attr, None)
+        if value is None:
+            continue
+        try:
+            return int(value)
+        except (TypeError, ValueError):
+            continue
+    return None
+
+
+def _worker_output_snippet(stdout: Any = None, stderr: Any = None) -> str:
+    parts: list[str] = []
+    stderr_text = _coerce_output_text(stderr).strip()
+    stdout_text = _coerce_output_text(stdout).strip()
+    if stderr_text:
+        parts.append(f"stderr:\n{stderr_text}")
+    if stdout_text:
+        parts.append(f"stdout:\n{stdout_text}")
+    text = "\n\n".join(parts).strip()
+    if len(text) > MAX_WORKER_ERROR_OUTPUT_CHARS:
+        return text[:MAX_WORKER_ERROR_OUTPUT_CHARS].rstrip() + "..."
+    return text
+
+
+def _append_worker_output_to_error(error: str, stdout: Any = None, stderr: Any = None) -> str:
+    snippet = _worker_output_snippet(stdout=stdout, stderr=stderr)
+    if not snippet:
+        return error
+    return f"{error}\n\nWorker output:\n{snippet}"
+
+
 def _looks_like_timeout_exception(exc: Exception) -> bool:
     text = _exception_text(exc).lower()
     return any(
@@ -422,6 +540,7 @@ def _create_sandbox_with_key_fallback(
     api_keys: list[str],
     timeout: int,
     envs: dict[str, str],
+    template: str | None = None,
     network: dict[str, Any] | None = None,
     log_fn: Callable[[str, str], None],
 ) -> Any:
@@ -430,12 +549,15 @@ def _create_sandbox_with_key_fallback(
 
     for index, api_key in enumerate(api_keys, start=1):
         try:
-            return sandbox_cls.create(
-                api_key=api_key,
-                timeout=timeout,
-                envs=envs,
-                network=network,
-            )
+            create_kwargs: dict[str, Any] = {
+                "api_key": api_key,
+                "timeout": timeout,
+                "envs": envs,
+                "network": network,
+            }
+            if template:
+                create_kwargs["template"] = template
+            return sandbox_cls.create(**create_kwargs)
         except Exception as exc:
             if not _is_e2b_quota_or_rate_limit_error(exc):
                 raise
@@ -459,6 +581,9 @@ def _read_result_json(
     sandbox: Any,
     result_path: str,
     log_fn: Callable,
+    *,
+    worker_stdout: Any = None,
+    worker_stderr: Any = None,
 ) -> "tuple[Optional[Dict[str, Any]], Optional[WorkerResult]]":
     """Read and parse the worker's result.json from the sandbox.
 
@@ -483,9 +608,13 @@ def _read_result_json(
         log_fn(f"[e2b] No result.json at {result_path}: {exc}", "error")
         return None, WorkerResult(
             status="error",
-            error=(
-                "Worker did not write a result. Check run.py wrote "
-                "result.json before exiting (the file is missing)."
+            error=_append_worker_output_to_error(
+                (
+                    "Worker did not write a result. Check run.py wrote "
+                    "result.json before exiting (the file is missing)."
+                ),
+                stdout=worker_stdout,
+                stderr=worker_stderr,
             ),
             error_code="missing_result",
         )
@@ -522,9 +651,13 @@ def _read_result_json(
         log_fn(f"[e2b] result.json at {result_path} is not valid JSON: {exc}", "error")
         return None, WorkerResult(
             status="error",
-            error=(
-                "Worker wrote a result.json that is not valid JSON: "
-                f"{exc}. Ensure run.py serializes a JSON object."
+            error=_append_worker_output_to_error(
+                (
+                    "Worker wrote a result.json that is not valid JSON: "
+                    f"{exc}. Ensure run.py serializes a JSON object."
+                ),
+                stdout=worker_stdout,
+                stderr=worker_stderr,
             ),
             error_code="invalid_result_json",
         )
@@ -538,10 +671,14 @@ def _read_result_json(
         )
         return None, WorkerResult(
             status="error",
-            error=(
-                "Worker result.json must be a JSON object, got "
-                f"{type(result_data).__name__}. Wrap your data in an "
-                '"outputs" object.'
+            error=_append_worker_output_to_error(
+                (
+                    "Worker result.json must be a JSON object, got "
+                    f"{type(result_data).__name__}. Wrap your data in an "
+                    '"outputs" object.'
+                ),
+                stdout=worker_stdout,
+                stderr=worker_stderr,
             ),
             error_code="invalid_result_json",
         )
@@ -887,18 +1024,11 @@ def _extract_context_tar(raw_tar: bytes, target_dir: Path) -> None:
 
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
-    bundle_path = config.runtime.bundle_path if config and config.runtime else None
-    if bundle_path:
-        raw_path = Path(bundle_path)
-        target = raw_path if raw_path.is_absolute() else WORKERS_DIR.parent.joinpath(raw_path)
-        resolved = target.resolve()
-        allowed_root = WORKERS_DIR.parent.resolve()
-        try:
-            resolved.relative_to(allowed_root)
-        except ValueError:
-            raise ValueError(f"Path traversal attempt: {resolved}")
-        return resolved
-    return _safe_path(WORKERS_DIR, worker_id)
+    # Keep E2B parity with run_service and agent_driver: bundle_path drift and
+    # bare relative cloud paths must resolve through the single shared guard.
+    from runner_utils import _resolve_worker_bundle_dir
+
+    return _resolve_worker_bundle_dir(WORKERS_DIR, worker_id, config, _safe_path)
 
 
 class E2BSandboxDriver(SandboxDriver):
@@ -1105,11 +1235,20 @@ class E2BSandboxDriver(SandboxDriver):
         # still receive only declared user secrets plus callback vars.
         _worker_author_env = _worker_author_platform_env() if worker_id == _WORKER_AUTHOR_ID else {}
         _sandbox_envs.update(_worker_author_env)
+        sandbox_template = _e2b_template_for_config(config)
+        python_template_deps_baked = _env_truthy("WORKEROS_E2B_PYTHON_DEPS_BAKED")
+        node_template_deps_baked = _env_truthy("WORKEROS_E2B_NODE_DEPS_BAKED")
+        if sandbox_template:
+            log_fn(
+                f"[e2b] Using configured {_runtime_kind(config)} template for sandbox startup",
+                "info",
+            )
         sandbox = _create_sandbox_with_key_fallback(
             Sandbox,
             api_keys=api_keys,
             timeout=sandbox_timeout,
             envs=_sandbox_envs,
+            template=sandbox_template,
             network=_e2b_network_policy(config, api_url=_sandbox_api_url_val),
             log_fn=log_fn,
         )
@@ -1121,37 +1260,19 @@ class E2BSandboxDriver(SandboxDriver):
 
             # Upload bundle files (read-only worker code; never contains inputs/).
             made_dirs = {workdir}
-            for fpath in worker_dir.rglob("*"):
-                rel = fpath.relative_to(worker_dir)
-                # #995: never follow symlinks — a crafted bundle could symlink
-                # `x -> /etc/passwd` / the host api.env and exfiltrate host
-                # files into the sandbox. Skip the link entirely.
-                if fpath.is_symlink():
-                    log_fn(f"[e2b] Skipping symlink in bundle: {rel.as_posix()}", "warning")
-                    continue
-                # Skip any stale inputs/ dir that may exist in older bundles.
-                if rel.parts and rel.parts[0] == "inputs":
-                    continue
-                if (
-                    "__pycache__" in rel.parts
+            upload_tree_tarball(
+                sandbox,
+                worker_dir,
+                workdir,
+                skip=lambda _path, rel: (
+                    (rel.parts and rel.parts[0] == "inputs")
+                    or "__pycache__" in rel.parts
                     or rel.suffix == ".pyc"
                     or (rel.parts and rel.parts[0] in {".pytest_cache", ".ruff_cache"})
-                ):
-                    continue
-                dest = f"{workdir}/{rel.as_posix()}"
-                if fpath.is_dir():
-                    if dest not in made_dirs:
-                        sandbox.files.make_dir(dest)
-                        made_dirs.add(dest)
-                    continue
-                parent = f"{workdir}/{rel.parent.as_posix()}" if rel.parent.as_posix() != "." else workdir
-                if parent not in made_dirs:
-                    sandbox.files.make_dir(parent)
-                    made_dirs.add(parent)
-                content = fpath.read_bytes()
-                sandbox.files.write(dest, content)
-                log_fn(f"[e2b] Uploaded {rel.as_posix()}", "debug")
-
+                ),
+                log_fn=log_fn,
+                label="worker bundle",
+            )
             # Write workeros.py into the workdir so workers with calls: can do
             # `from workeros import call_worker`. Only uploaded when the worker
             # declares calls: — keeps the sandbox clean for workers that don't need it.
@@ -1240,45 +1361,67 @@ class E2BSandboxDriver(SandboxDriver):
             # install hook for non-Python bundles.
             req_path = worker_dir / "requirements.txt"
             if req_path.exists() and req_path.read_text().strip():
-                log_fn("[e2b] Installing requirements.txt...", "info")
-                install_result = sandbox.commands.run(
-                    f"pip install -q -r {workdir}/requirements.txt",
-                    timeout=install_timeout,
-                    request_timeout=_e2b_install_request_timeout(install_timeout),
-                )
-                if install_result.exit_code != 0:
-                    err = (
-                        f"pip install failed (exit {install_result.exit_code}): "
-                        f"{(install_result.stderr or '')[:500]}"
+                requirements_covered = False
+                if python_template_deps_baked:
+                    requirements_covered, missing_requirements = _requirements_covered_by_baked_template(req_path)
+                    if not requirements_covered:
+                        log_fn(
+                            "[e2b] Python template deps-baked is enabled, but requirements.txt "
+                            "contains packages not in the baked package list; running pip install "
+                            f"for this worker ({', '.join(missing_requirements[:5])})",
+                            "warning",
+                        )
+                if python_template_deps_baked and requirements_covered:
+                    log_fn(
+                        "[e2b] Skipping requirements.txt install; configured template marks Python deps as baked",
+                        "info",
                     )
-                    log_fn(f"[e2b] {err}", "error")
-                    return WorkerResult(
-                        status="error",
-                        error=err,
-                        error_code="install_failed",
+                else:
+                    log_fn("[e2b] Installing requirements.txt...", "info")
+                    install_result = sandbox.commands.run(
+                        f"pip install -q -r {workdir}/requirements.txt",
+                        timeout=install_timeout,
+                        request_timeout=_e2b_install_request_timeout(install_timeout),
                     )
-                log_fn("[e2b] Requirements installed", "info")
+                    if install_result.exit_code != 0:
+                        err = (
+                            f"pip install failed (exit {install_result.exit_code}): "
+                            f"{(install_result.stderr or '')[:500]}"
+                        )
+                        log_fn(f"[e2b] {err}", "error")
+                        return WorkerResult(
+                            status="error",
+                            error=err,
+                            error_code="install_failed",
+                        )
+                    log_fn("[e2b] Requirements installed", "info")
 
             pkg_path = worker_dir / "package.json"
             if pkg_path.exists() and pkg_path.read_text().strip():
-                log_fn("[e2b] Installing package.json (npm)...", "info")
-                npm_install_result = sandbox.commands.run(
-                    f"cd {workdir} && npm install --omit=dev --no-audit --no-fund --loglevel=error",
-                    timeout=install_timeout,
-                    request_timeout=_e2b_install_request_timeout(install_timeout),
-                )
-                if npm_install_result.exit_code != 0:
-                    err = (
-                        f"npm install failed (exit {npm_install_result.exit_code}): "
-                        f"{(npm_install_result.stderr or npm_install_result.stdout or '')[:500]}"
+                if node_template_deps_baked:
+                    log_fn(
+                        "[e2b] Skipping npm install; configured template marks Node deps as baked",
+                        "info",
                     )
-                    log_fn(f"[e2b] {err}", "error")
-                    return WorkerResult(
-                        status="error",
-                        error=err,
-                        error_code="install_failed",
+                else:
+                    log_fn("[e2b] Installing package.json (npm)...", "info")
+                    npm_install_result = sandbox.commands.run(
+                        f"cd {workdir} && npm install --omit=dev --no-audit --no-fund --loglevel=error",
+                        timeout=install_timeout,
+                        request_timeout=_e2b_install_request_timeout(install_timeout),
                     )
-                log_fn("[e2b] npm install complete", "info")
+                    if npm_install_result.exit_code != 0:
+                        err = (
+                            f"npm install failed (exit {npm_install_result.exit_code}): "
+                            f"{(npm_install_result.stderr or npm_install_result.stdout or '')[:500]}"
+                        )
+                        log_fn(f"[e2b] {err}", "error")
+                        return WorkerResult(
+                            status="error",
+                            error=err,
+                            error_code="install_failed",
+                        )
+                    log_fn("[e2b] npm install complete", "info")
 
             # Bedrock via litellm needs boto3, which the sandbox image doesn't ship.
             # Only the platform-privileged worker-author runs an LLM call *inside*
@@ -1287,21 +1430,27 @@ class E2BSandboxDriver(SandboxDriver):
             # so `litellm.APIConnectionError: No module named 'boto3'` can't bite.
             _author_model = _worker_author_env.get("WORKEROS_CODEGEN_MODEL", "")
             if "bedrock" in _author_model.lower():
-                log_fn("[e2b] Installing boto3 (Bedrock runtime dep)...", "info")
-                _boto_res = sandbox.commands.run(
-                    "pip install -q boto3",
-                    timeout=install_timeout,
-                )
-                if _boto_res.exit_code != 0:
-                    err = (
-                        f"boto3 install failed (exit {_boto_res.exit_code}): "
-                        f"{(_boto_res.stderr or '')[:300]}"
+                if python_template_deps_baked:
+                    log_fn(
+                        "[e2b] Skipping boto3 install; configured template marks Python deps as baked",
+                        "info",
                     )
-                    log_fn(f"[e2b] {err}", "error")
-                    return WorkerResult(
-                        status="error", error=err, error_code="install_failed"
+                else:
+                    log_fn("[e2b] Installing boto3 (Bedrock runtime dep)...", "info")
+                    _boto_res = sandbox.commands.run(
+                        "pip install -q boto3",
+                        timeout=install_timeout,
                     )
-                log_fn("[e2b] boto3 installed", "info")
+                    if _boto_res.exit_code != 0:
+                        err = (
+                            f"boto3 install failed (exit {_boto_res.exit_code}): "
+                            f"{(_boto_res.stderr or '')[:300]}"
+                        )
+                        log_fn(f"[e2b] {err}", "error")
+                        return WorkerResult(
+                            status="error", error=err, error_code="install_failed"
+                        )
+                    log_fn("[e2b] boto3 installed", "info")
 
             _refresh_sandbox_lifetime(
                 sandbox,
@@ -1338,30 +1487,32 @@ class E2BSandboxDriver(SandboxDriver):
             if _worker_call_token:
                 _cmd_envs["WORKEROS_RUN_TOKEN"] = _worker_call_token
                 _cmd_envs["WORKEROS_CALL_DEPTH"] = str(_self_depth)  # #994
-            proc = sandbox.commands.run(
-                command,
-                cwd=workdir,
-                envs=_cmd_envs,
-                on_stdout=on_stdout,
-                on_stderr=on_stderr,
-                timeout=float(effective_timeout_seconds),
-                request_timeout=_e2b_command_request_timeout(effective_timeout_seconds),
-            )
-
-            # E2B streams stdout/stderr through callbacks while the process is
-            # running. Keep the fallback for SDKs or test doubles that only
-            # return aggregate stdout/stderr after process exit.
-            if proc.stdout and not streamed_stdout:
-                _emit_command_output(proc.stdout, "info", "[e2b] ", log_fn)
-            if proc.stderr and not streamed_stderr:
-                _emit_command_output(proc.stderr, "warning", "[e2b] stderr: ", log_fn)
-
-            if proc.exit_code != 0:
-                if _looks_like_sandbox_oom(proc.exit_code, proc.stdout, proc.stderr):
-                    err = "Sandbox ran out of memory"
-                    stderr_snippet = (proc.stderr or proc.stdout or "")[:200].strip()
-                    if stderr_snippet:
-                        err += f": {stderr_snippet}"
+            try:
+                proc = sandbox.commands.run(
+                    command,
+                    cwd=workdir,
+                    envs=_cmd_envs,
+                    on_stdout=on_stdout,
+                    on_stderr=on_stderr,
+                    timeout=float(effective_timeout_seconds),
+                    request_timeout=_e2b_command_request_timeout(effective_timeout_seconds),
+                )
+            except Exception as exc:
+                exc_stdout = _coerce_output_text(getattr(exc, "stdout", None))
+                exc_stderr = _coerce_output_text(getattr(exc, "stderr", None))
+                if exc_stdout and not streamed_stdout:
+                    _emit_command_output(exc_stdout, "info", "[e2b] ", log_fn)
+                if exc_stderr and not streamed_stderr:
+                    _emit_command_output(exc_stderr, "warning", "[e2b] stderr: ", log_fn)
+                exc_exit_code = _exception_exit_code(exc)
+                if exc_exit_code is None:
+                    raise
+                if _looks_like_sandbox_oom(exc_exit_code, exc_stdout, exc_stderr):
+                    err = _append_worker_output_to_error(
+                        "Sandbox ran out of memory",
+                        stdout=exc_stdout,
+                        stderr=exc_stderr,
+                    )
                     log_fn(f"[e2b] {err}", "error")
                     return WorkerResult(
                         status="error",
@@ -1369,11 +1520,49 @@ class E2BSandboxDriver(SandboxDriver):
                         error_code="sandbox_oom",
                         retryable=False,
                     )
-                err = f"Worker exited with code {proc.exit_code}"
-                stderr_snippet = (proc.stderr or "")[:200].strip()
-                if stderr_snippet:
-                    err += f": {stderr_snippet}"
-                log_fn(f"[e2b] {err}", "error")
+                err = _append_worker_output_to_error(
+                    f"Worker exited with code {exc_exit_code}",
+                    stdout=exc_stdout,
+                    stderr=exc_stderr,
+                )
+                log_fn(f"[e2b] Worker exited with code {exc_exit_code}", "error")
+                return WorkerResult(
+                    status="error",
+                    error=err,
+                    error_code="execution_error",
+                    retryable=False,
+                )
+
+            # E2B streams stdout/stderr through callbacks while the process is
+            # running. Keep the fallback for SDKs or test doubles that only
+            # return aggregate stdout/stderr after process exit.
+            proc_stdout = _coerce_output_text(getattr(proc, "stdout", None))
+            proc_stderr = _coerce_output_text(getattr(proc, "stderr", None))
+            if proc_stdout and not streamed_stdout:
+                _emit_command_output(proc_stdout, "info", "[e2b] ", log_fn)
+            if proc_stderr and not streamed_stderr:
+                _emit_command_output(proc_stderr, "warning", "[e2b] stderr: ", log_fn)
+
+            if proc.exit_code != 0:
+                if _looks_like_sandbox_oom(proc.exit_code, proc_stdout, proc_stderr):
+                    err = _append_worker_output_to_error(
+                        "Sandbox ran out of memory",
+                        stdout=proc_stdout,
+                        stderr=proc_stderr,
+                    )
+                    log_fn(f"[e2b] {err}", "error")
+                    return WorkerResult(
+                        status="error",
+                        error=err,
+                        error_code="sandbox_oom",
+                        retryable=False,
+                    )
+                err = _append_worker_output_to_error(
+                    f"Worker exited with code {proc.exit_code}",
+                    stdout=proc_stdout,
+                    stderr=proc_stderr,
+                )
+                log_fn(f"[e2b] Worker exited with code {proc.exit_code}", "error")
                 return WorkerResult(
                     status="error",
                     error=err,
@@ -1385,7 +1574,13 @@ class E2BSandboxDriver(SandboxDriver):
             # failure mode (missing file / oversized / invalid JSON / not-a-dict
             # / non-dict outputs) — see _read_result_json (audit P1).
             result_path = f"{workdir}/result.json"
-            result_data, parse_error = _read_result_json(sandbox, result_path, log_fn)
+            result_data, parse_error = _read_result_json(
+                sandbox,
+                result_path,
+                log_fn,
+                worker_stdout="".join(streamed_stdout) or proc_stdout,
+                worker_stderr="".join(streamed_stderr) or proc_stderr,
+            )
             if parse_error is not None:
                 return parse_error
 
@@ -1472,7 +1667,10 @@ class E2BSandboxDriver(SandboxDriver):
                 made_dirs.add(sandbox_target)
 
                 if source.startswith("git+"):
-                    repo_url = source.removeprefix("git+")
+                    try:
+                        repo_url = _safe_git_context_url(source)
+                    except ValueError as exc:
+                        return f"Invalid git context {name!r}: {exc}"
                     log_fn(f"[e2b] Cloning git context {name!r}", "info")
                     result = sandbox.commands.run(
                         "git clone --depth 1 "
@@ -1491,22 +1689,17 @@ class E2BSandboxDriver(SandboxDriver):
                     log_fn(f"[e2b] context {name!r} not found locally", "warning")
                     continue
 
-                for fpath in local_dir.rglob("*"):
-                    if "__pycache__" in fpath.parts or fpath.is_symlink():
-                        continue
-                    rel = fpath.relative_to(local_dir)
-                    dest = f"{sandbox_target}/{rel.as_posix()}"
-                    if fpath.is_dir():
-                        if dest not in made_dirs:
-                            sandbox.files.make_dir(dest)
-                            made_dirs.add(dest)
-                        continue
-                    parent = f"{sandbox_target}/{rel.parent.as_posix()}" if rel.parent.as_posix() != "." else sandbox_target
-                    if parent not in made_dirs:
-                        sandbox.files.make_dir(parent)
-                        made_dirs.add(parent)
-                    sandbox.files.write(dest, fpath.read_bytes())
-                    log_fn(f"[e2b] Uploaded context {name}/{rel.as_posix()}", "debug")
+                try:
+                    upload_tree_tarball(
+                        sandbox,
+                        local_dir,
+                        sandbox_target,
+                        skip=lambda _path, rel: "__pycache__" in rel.parts,
+                        log_fn=log_fn,
+                        label=f"context {name}",
+                    )
+                except RuntimeError as exc:
+                    return str(exc)
         return None
 
     def _persist_writeable_contexts(

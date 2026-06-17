@@ -319,19 +319,13 @@ V0: python. Later: node, bash, browser.
 
 # 9. Worker Code Contract
 
-Each worker exposes a `run(inputs, context)` function.
+Script workers are process entrypoints. The runner executes `exec.command`
+from the worker working directory, writes the run payload to `inputs.json`, and
+expects the process to write `result.json` in that same working directory before
+exiting. Declared secrets are exposed as environment variables. Declared
+connection identifiers are exposed through `connections.json`.
 
-Context includes:
-
-```python
-context["log"]("message")
-context["secrets"]
-context["run_id"]
-context["worker_id"]
-context["artifact_dir"]
-```
-
-Return value on success:
+`result.json` on success:
 
 ```python
 {
@@ -341,7 +335,7 @@ Return value on success:
 }
 ```
 
-Return value on failure:
+`result.json` on failure:
 
 ```python
 {"status": "error", "error": "Missing input: notes"}
@@ -387,6 +381,20 @@ Simple scheduler loop in FastAPI. No complex recurrence UI.
 ## 11.3 Webhook Trigger (V0.5)
 
 Each worker gets a webhook URL: `POST /webhooks/{worker_id}`. Request body becomes run input.
+
+## 11.4 Pre-defined Inputs (automated triggers)
+
+Schedule/webhook/event triggers have no Run form, so they use the worker's saved
+`input_values` defaults. The scheduler injects them and **skips** a fire whose
+*required* inputs are unset; webhook/event payloads are **merged** over the
+defaults (payload wins). See AUTHORING.md for details.
+
+## 11.5 Worker-to-Worker Calls
+
+A worker may invoke other workers via a top-level `calls:` allowlist in
+`worker.yml`. Enforced server-side (and in a signed call token): only allowlisted
+worker IDs are callable, chain depth is capped at `MAX_CALL_DEPTH` (3), and a
+single run may spawn at most `MAX_WORKER_CALLS_PER_RUN` (50) child runs.
 
 ---
 
