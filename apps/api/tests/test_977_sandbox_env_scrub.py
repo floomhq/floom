@@ -12,7 +12,10 @@ from __future__ import annotations
 
 import subprocess
 import sys
+import os
 from pathlib import Path
+
+import pytest
 
 API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
@@ -50,6 +53,7 @@ class TestScrubCommandShape:
         assert "python run.py && echo done" in cmd
 
 
+@pytest.mark.skipif(os.name == "nt", reason="scrub command is POSIX shell syntax for the E2B runtime")
 class TestScrubActuallyStripsEnv:
     """Execute the scrubbed command in a real shell and read the child env."""
 

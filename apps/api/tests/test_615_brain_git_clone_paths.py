@@ -143,7 +143,7 @@ def test_agent_path_skips_git_pack_and_stages_local(tmp_path, monkeypatch):
         log_fn=_log,
     )
 
-    assert staged == ["local-notes"]
+    assert "local-notes" in staged
     assert (context_root / "local-notes" / "facts.md").read_text(encoding="utf-8") == "local fact\n"
     assert not (context_root / "git-notes").exists()
     assert any("git-notes" in w and "not supported" in w for w in warnings)

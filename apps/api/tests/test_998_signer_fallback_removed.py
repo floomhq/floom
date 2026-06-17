@@ -29,7 +29,9 @@ def test_no_dev_secret_constant_anywhere_in_signers():
 
 
 def test_webhook_legacy_token_fails_closed_without_secret(monkeypatch):
-    monkeypatch.delenv("FLOOM_SECRET", raising=False)
+    # main.py loads the repo .env in local mode; keep this explicitly empty so
+    # python-dotenv cannot repopulate a developer signing secret.
+    monkeypatch.setenv("FLOOM_SECRET", "")
     for name in ("webhook_service",):
         sys.modules.pop(name, None)
     ws = importlib.import_module("webhook_service")
@@ -38,7 +40,9 @@ def test_webhook_legacy_token_fails_closed_without_secret(monkeypatch):
 
 
 def test_webhook_verify_rejects_legacy_token_without_secret(monkeypatch):
-    monkeypatch.delenv("FLOOM_SECRET", raising=False)
+    # main.py loads the repo .env in local mode; keep this explicitly empty so
+    # python-dotenv cannot repopulate a developer signing secret.
+    monkeypatch.setenv("FLOOM_SECRET", "")
     monkeypatch.setenv("WORKEROS_WEBHOOK_LEGACY_GRACE", "1")
     sys.modules.pop("webhook_service", None)
     ws = importlib.import_module("webhook_service")
@@ -60,7 +64,9 @@ def test_main_share_token_signers_raise_503_without_secret(monkeypatch, tmp_path
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(tmp_path / "workers"))
     (tmp_path / "workers").mkdir()
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
-    monkeypatch.delenv("FLOOM_SECRET", raising=False)
+    # main.py loads the repo .env in local mode; keep this explicitly empty so
+    # python-dotenv cannot repopulate a developer signing secret.
+    monkeypatch.setenv("FLOOM_SECRET", "")
     for name in list(sys.modules):
         if name in ("main", "models", "worker_registry", "run_service", "chat_service") or name.startswith(("routers", "services", "core", "db", "auth", "contexts")):
             sys.modules.pop(name, None)
