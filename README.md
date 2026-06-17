@@ -7,6 +7,10 @@ The open-source, self-hosted runtime for AI workers. Sandboxed by default.
 
 > Create a worker. Give it tools. Let it run. See everything.
 
+New here? Start with [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for the
+short path from "why Workeros exists" to your first worker and a safe self-hosted
+deployment checklist.
+
 ## Worker execution model
 
 Pure-script workers run in an **E2B sandbox by default** — isolated dependencies, no host process access, contained resource usage. Agent workers (`SKILL.md`) run through the API-hosted AgentDriver tool loop. There is no supported local in-process worker runner.
@@ -48,6 +52,9 @@ Open [http://localhost:3000](http://localhost:3000) and sign in. That's the whol
 Prefer to run things by hand (or need to debug one side)? The manual per-OS steps are below.
 
 ### Troubleshooting
+
+See [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) for the full setup,
+runtime, and test troubleshooting index.
 
 - **Frontend shows a cloud sign-in screen:** copy `apps/web/.env.example` to
   `apps/web/.env`. The local frontend should point at `http://localhost:8000`.
@@ -337,7 +344,7 @@ All endpoints require the `x-floom-secret` header (set `FLOOM_SECRET` in `.env`)
 ## Contributing
 
 Contributions are welcome. See [CONTRIBUTING.md](CONTRIBUTING.md) for local setup,
-the repo layout, and PR guidelines.
+the first-contribution map, and PR guidelines.
 
 For quick local checks from the repo root:
 
