@@ -241,6 +241,14 @@ class RunRepository(Protocol):
 
     def get_any(self, *, run_id: str) -> RowDict | None: ...
 
+    def count_child_runs(self, *, parent_run_id: str) -> int:
+        """Number of child runs spawned by a parent run via worker-to-worker calls.
+
+        Child runs carry the parent's run id in ``trigger_ref``. Used to enforce
+        the per-run fan-out cap (run_token.MAX_WORKER_CALLS_PER_RUN).
+        """
+        ...
+
     def create(self, *, user_id: str, **fields: Any) -> RowDict: ...
 
     def update(self, *, user_id: str, run_id: str, **fields: Any) -> RowDict | None: ...

@@ -2061,6 +2061,18 @@ class SqliteRunRepository:
             ).fetchone()
         return _row_dict(row) if row else None
 
+    def count_child_runs(self, *, parent_run_id: str) -> int:
+        # Child runs spawned via worker-to-worker calls carry the parent run id in
+        # trigger_ref. Used to enforce the per-run fan-out cap at child creation.
+        if not parent_run_id:
+            return 0
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT COUNT(*) FROM runs WHERE trigger_ref = ?",
+                (parent_run_id,),
+            ).fetchone()
+        return int(row[0]) if row else 0
+
     def create(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
         worker_id = fields["worker_id"]
         run_id = fields["run_id"]
