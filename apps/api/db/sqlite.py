@@ -3392,6 +3392,17 @@ class SqliteApprovalRepository:
             ).fetchone()
         return _row_dict(row) if row else None
 
+    def get_by_follow_up_run_id(self, *, follow_up_run_id: str) -> dict[str, Any] | None:
+        # #418: authoritative EXECUTE-phase signal. Only approve_run sets
+        # follow_up_run_id, so a matching approved row proves the engine
+        # authorised this run's side effect.
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT * FROM approvals WHERE follow_up_run_id = ? ORDER BY created_at DESC LIMIT 1",
+                (follow_up_run_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
     def list_pending(self, *, owner_id: str) -> list[dict[str, Any]]:
         with get_db() as conn:
             rows = conn.execute(
