@@ -175,7 +175,7 @@ export function V3Composer({
           }}
           placeholder={placeholder}
           rows={compact ? 1 : 2}
-          className={`relative w-full resize-none bg-transparent px-1 text-left leading-relaxed placeholder:text-muted-foreground ${compact ? "pb-2 pt-0 text-[14px]" : "pb-6 pt-1 text-[15.5px]"}`}
+          className={`relative w-full resize-none border-0 bg-transparent px-1 text-left leading-relaxed outline-none placeholder:text-muted-foreground focus:border-0 focus:outline-none focus:ring-0 ${compact ? "pb-2 pt-0 text-[14px]" : "pb-6 pt-1 text-[15.5px]"}`}
           style={
             value
               ? { color: "transparent", caretColor: "var(--text-primary)", WebkitTextFillColor: "transparent" }
