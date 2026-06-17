@@ -1,31 +1,22 @@
 "use client";
 
 /**
- * /integrations — restored to the curated-card design (closer to /v3/templates):
- * a card grid with logo + category + name + one-line detail, in the v3 card
- * grammar (flat, 8px radius, hover bg shift). Replaces the dense 8–10 column
- * logo-tile catalog grid. Curated set mirrors the historical pre-#207 layout
- * (pulled from 535fa8b4^:app/(home)/integrations/page.tsx); the hero + close
- * keep the current product-page polish (Reveal motion, one <Hl>).
+ * /integrations — the full catalog (~1,000+ tools) in the curated card grammar.
+ *
+ * Every entry from catalog.json renders as a flat card (logo + name), in the
+ * same card style as /v3/templates: 16px radius, hover bg shift. A small set of
+ * featured tools carry a category chip + one-line detail; the rest show logo +
+ * name. Searchable across the full catalog. Hero + close keep the product-page
+ * polish (Reveal motion, one <Hl>).
  */
 
 import type { ReactNode } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { motion } from "motion/react";
 import { Hl, V3Shell } from "@/app/v3/V3Shell";
 import "@/app/v3/theme.css";
-import {
-  GCalLogo,
-  GitHubSVG,
-  GmailLogo,
-  GranolaLogo,
-  HubSpotLogo,
-  LinkedInLogo,
-  NotionLogo,
-  SalesforceLogo,
-  SheetsLogo,
-  SlackLogo,
-} from "@/components/landing-icons";
+import catalog from "./catalog.json";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
@@ -42,7 +33,7 @@ function Reveal({
     <motion.div
       initial={{ opacity: 0, y: 16 }}
       whileInView={{ opacity: 1, y: 0 }}
-      viewport={{ once: true, amount: 0.25, margin: "0px 0px -8% 0px" }}
+      viewport={{ once: true, amount: 0.1, margin: "0px 0px -8% 0px" }}
       transition={{ duration: 0.55, delay, ease: EASE }}
       className={className}
     >
@@ -51,77 +42,110 @@ function Reveal({
   );
 }
 
-type Logo = () => ReactNode;
+type CatalogEntry = { slug: string; name: string; logo: string };
 
-function GoogleDriveLogo() {
-  return (
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-      <path
-        fill="#1E8E3E"
-        d="M12.01 1.485c-2.082 0-3.754.02-3.743.047.01.02 1.708 3.001 3.774 6.62l3.76 6.574h3.76c2.081 0 3.753-.02 3.742-.047-.005-.02-1.708-3.001-3.775-6.62l-3.76-6.574zm-4.76 1.73a789.828 789.861 0 0 0-3.63 6.319L0 15.868l1.89 3.298 1.885 3.297 3.62-6.335 3.618-6.33-1.88-3.287C8.1 4.704 7.255 3.22 7.25 3.214zm2.259 12.653-.203.348c-.114.198-.96 1.672-1.88 3.287a423.93 423.948 0 0 1-1.698 2.97c-.01.026 3.24.042 7.222.042h7.244l1.796-3.157c.992-1.734 1.85-3.23 1.906-3.323l.104-.167h-7.249z"
-      />
-    </svg>
-  );
-}
+const CATALOG = catalog as CatalogEntry[];
 
-function LinearLogo() {
-  return (
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-      <path
-        fill="#5E6AD2"
-        d="M2.886 4.18A11.982 11.982 0 0 1 11.99 0C18.624 0 24 5.376 24 12.009c0 3.64-1.62 6.903-4.18 9.105L2.887 4.18ZM1.817 5.626l16.556 16.556c-.524.33-1.075.62-1.65.866L.951 7.277c.247-.575.537-1.126.866-1.65ZM.322 9.163l14.515 14.515c-.71.172-1.443.282-2.195.322L0 11.358a12 12 0 0 1 .322-2.195Zm-.17 4.862 9.823 9.824a12.02 12.02 0 0 1-9.824-9.824Z"
-      />
-    </svg>
-  );
-}
-
-function ApolloLogo() {
-  return (
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-      <path
-        fill="#5C2D91"
-        d="M12 0C5.372 0 0 5.373 0 12c0 6.628 5.372 12 12 12 6.627 0 12-5.372 12-12a12.014 12.014 0 0 0-.473-3.343.6.6 0 0 0-1.127.409h-.002c.265.943.402 1.928.402 2.934a10.73 10.73 0 0 1-3.163 7.637A10.729 10.729 0 0 1 12 22.8a10.73 10.73 0 0 1-7.637-3.163A10.728 10.728 0 0 1 1.2 12a10.73 10.73 0 0 1 3.163-7.637A10.728 10.728 0 0 1 12 1.2c2.576 0 5.013.896 6.958 2.54a1.466 1.466 0 1 0 .862-.84A11.953 11.953 0 0 0 12 0Zm-1.44 5.88-4.2 10.902h2.63l.687-1.848h3.969l-.719-2.042h-2.613l1.7-4.691 3.024 8.58h2.631L13.47 5.88Z"
-      />
-    </svg>
-  );
-}
-
-function GoogleDocsLogo() {
-  return (
-    <svg viewBox="0 0 24 24" width="22" height="22" aria-hidden="true">
-      <path
-        fill="#4285F4"
-        d="M14.727 6.727H14V0H4.91c-.905 0-1.637.732-1.637 1.636v20.728c0 .904.732 1.636 1.636 1.636h14.182c.904 0 1.636-.732 1.636-1.636V6.727h-6zm-.545 10.455H7.09v-1.364h7.09v1.364zm2.727-3.273H7.091v-1.364h9.818v1.364zm0-3.273H7.091V9.273h9.818v1.363zM14.727 6h6l-6-6v6z"
-      />
-    </svg>
-  );
-}
-
-type Integration = {
-  name: string;
-  category: "Communication" | "Google Workspace" | "CRM" | "Knowledge" | "Product" | "Data";
-  detail: string;
-  Logo: Logo;
+/* Featured tools carry a category chip + one-line detail. Matched by slug so the
+   curated grammar surfaces for the tools workers reach for most; everything else
+   in the catalog renders as a clean logo + name card. */
+const FEATURED: Record<string, { category: string; detail: string }> = {
+  granola_mcp: { category: "Knowledge", detail: "Meeting notes and call context" },
+  gmail: { category: "Google Workspace", detail: "Read, draft, and send email" },
+  googlecalendar: { category: "Google Workspace", detail: "Meetings, schedules, and prep" },
+  googledrive: { category: "Google Workspace", detail: "Docs, files, and shared context" },
+  slack: { category: "Communication", detail: "Ask, approve, and receive finished work" },
+  notion: { category: "Knowledge", detail: "Pages, playbooks, and internal docs" },
+  linear: { category: "Product", detail: "Issues, projects, and status updates" },
+  github: { category: "Product", detail: "Repos, PRs, issues, and engineering reports" },
+  hubspot: { category: "CRM", detail: "Contacts, companies, deals, and notes" },
+  salesforce: { category: "CRM", detail: "Accounts, opportunities, and CRM updates" },
+  linkedin: { category: "CRM", detail: "Prospect research and sales context" },
+  apollo: { category: "Data", detail: "Lead enrichment and prospect lists" },
+  googlesheets: { category: "Google Workspace", detail: "Reports, lists, and structured outputs" },
+  googledocs: { category: "Google Workspace", detail: "Briefs, drafts, and source documents" },
 };
 
-const INTEGRATIONS: Integration[] = [
-  { name: "Granola", category: "Knowledge", detail: "Meeting notes and call context", Logo: GranolaLogo },
-  { name: "Gmail", category: "Google Workspace", detail: "Read, draft, and send email", Logo: GmailLogo },
-  { name: "Google Calendar", category: "Google Workspace", detail: "Meetings, schedules, and prep", Logo: GCalLogo },
-  { name: "Google Drive", category: "Google Workspace", detail: "Docs, files, and shared context", Logo: GoogleDriveLogo },
-  { name: "Slack", category: "Communication", detail: "Ask, approve, and receive finished work", Logo: SlackLogo },
-  { name: "Notion", category: "Knowledge", detail: "Pages, playbooks, and internal docs", Logo: NotionLogo },
-  { name: "Linear", category: "Product", detail: "Issues, projects, and status updates", Logo: LinearLogo },
-  { name: "GitHub", category: "Product", detail: "Repos, PRs, issues, and engineering reports", Logo: GitHubSVG },
-  { name: "HubSpot", category: "CRM", detail: "Contacts, companies, deals, and notes", Logo: HubSpotLogo },
-  { name: "Salesforce", category: "CRM", detail: "Accounts, opportunities, and CRM updates", Logo: SalesforceLogo },
-  { name: "LinkedIn", category: "CRM", detail: "Prospect research and sales context", Logo: LinkedInLogo },
-  { name: "Apollo", category: "Data", detail: "Lead enrichment and prospect lists", Logo: ApolloLogo },
-  { name: "Google Sheets", category: "Google Workspace", detail: "Reports, lists, and structured outputs", Logo: SheetsLogo },
-  { name: "Google Docs", category: "Google Workspace", detail: "Briefs, drafts, and source documents", Logo: GoogleDocsLogo },
-];
+function CardLogo({ entry }: { entry: CatalogEntry }) {
+  const [imgError, setImgError] = useState(false);
+  const handleError = useCallback(() => setImgError(true), []);
+  return (
+    <span className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-background">
+      {imgError || !entry.logo ? (
+        <span
+          className="flex h-6 w-6 items-center justify-center rounded-[6px] bg-secondary text-[11px] font-semibold text-muted-foreground"
+          aria-hidden="true"
+        >
+          {entry.name.charAt(0).toUpperCase()}
+        </span>
+      ) : (
+        <img
+          src={entry.logo}
+          alt=""
+          aria-hidden="true"
+          width={24}
+          height={24}
+          loading="lazy"
+          decoding="async"
+          onError={handleError}
+          className="h-6 w-6 object-contain"
+        />
+      )}
+    </span>
+  );
+}
+
+function IntegrationCard({ entry }: { entry: CatalogEntry }) {
+  const meta = FEATURED[entry.slug];
+  return (
+    <article className="flex min-h-[120px] flex-col rounded-[16px] bg-card p-5 transition-colors hover:bg-secondary/60">
+      <div className="flex items-center justify-between gap-4">
+        <CardLogo entry={entry} />
+        {meta ? (
+          <span className="rounded-full bg-secondary px-2.5 py-1 text-[10.5px] font-medium text-muted-foreground">
+            {meta.category}
+          </span>
+        ) : null}
+      </div>
+      <h2 className="mt-4 truncate text-[15px] font-semibold tracking-[-0.012em]" title={entry.name}>
+        {entry.name}
+      </h2>
+      {meta ? (
+        <p className="mt-1.5 text-[13px] leading-relaxed text-muted-foreground">{meta.detail}</p>
+      ) : null}
+    </article>
+  );
+}
+
+/* Featured tools lead the grid; the rest follow alphabetically (catalog order). */
+const SORTED = [...CATALOG].sort((a, b) => {
+  const af = FEATURED[a.slug] ? 0 : 1;
+  const bf = FEATURED[b.slug] ? 0 : 1;
+  if (af !== bf) return af - bf;
+  return a.name.localeCompare(b.name);
+});
+
+// Render an initial batch; reveal the full catalog on demand (and always when
+// searching) to keep first paint fast across 1,000+ cards.
+const INITIAL_VISIBLE = 90;
 
 export function IntegrationsBody() {
+  const [query, setQuery] = useState("");
+  const [showAll, setShowAll] = useState(false);
+
+  const filtered = useMemo(() => {
+    const q = query.trim().toLowerCase();
+    if (!q) return SORTED;
+    return SORTED.filter(
+      (e) => e.name.toLowerCase().includes(q) || e.slug.toLowerCase().includes(q),
+    );
+  }, [query]);
+
+  const isSearching = query.trim().length > 0;
+  const visible =
+    isSearching || showAll ? filtered : filtered.slice(0, INITIAL_VISIBLE);
+  const hasMore = !isSearching && !showAll && filtered.length > INITIAL_VISIBLE;
+
   return (
     <V3Shell active="integrations">
       {/* hero — centered, one highlight, product type scale */}
@@ -140,31 +164,74 @@ export function IntegrationsBody() {
           transition={{ duration: 0.5, delay: 0.08, ease: EASE }}
           className="mx-auto mt-4 max-w-[460px] text-[15.5px] text-muted-foreground"
         >
-          Floom connects to 1,000+ tools so a worker can read the right context,
-          produce the output, and ask for approval where your team already works.
+          Floom connects to {CATALOG.length.toLocaleString()}+ tools so a worker can read the
+          right context, produce the output, and ask for approval where your team already works.
         </motion.p>
       </div>
 
-      {/* card grid — templates-page grammar */}
-      <Reveal className="grid gap-3.5 pb-16 sm:grid-cols-2 lg:grid-cols-3">
-        {INTEGRATIONS.map(({ name, category, detail, Logo }) => (
-          <article
-            key={name}
-            className="flex min-h-[156px] flex-col rounded-[16px] bg-card p-5 transition-colors hover:bg-secondary/60"
+      {/* search + count */}
+      <div className="mb-6 flex flex-col gap-3 sm:flex-row sm:items-center sm:justify-between">
+        <p className="text-[13px] text-muted-foreground">
+          {isSearching ? (
+            <>
+              <span className="font-semibold text-foreground">{filtered.length.toLocaleString()}</span>{" "}
+              {filtered.length === 1 ? "result" : "results"}
+            </>
+          ) : (
+            <>
+              <span className="font-semibold text-foreground">{CATALOG.length.toLocaleString()}+</span>{" "}
+              integrations
+            </>
+          )}
+        </p>
+        <div className="relative w-full sm:w-72">
+          <svg
+            className="pointer-events-none absolute left-3 top-1/2 h-3.5 w-3.5 -translate-y-1/2 text-muted-foreground"
+            viewBox="0 0 16 16"
+            fill="none"
+            stroke="currentColor"
+            strokeWidth="1.5"
+            aria-hidden="true"
           >
-            <div className="flex items-center justify-between gap-4">
-              <span className="flex h-10 w-10 items-center justify-center rounded-[10px] bg-background [&_svg]:h-6 [&_svg]:w-6">
-                <Logo />
-              </span>
-              <span className="rounded-full bg-secondary px-2.5 py-1 text-[10.5px] font-medium text-muted-foreground">
-                {category}
-              </span>
+            <circle cx="6.5" cy="6.5" r="4.5" />
+            <path d="M10.5 10.5l3 3" strokeLinecap="round" />
+          </svg>
+          <input
+            type="search"
+            value={query}
+            onChange={(e) => setQuery(e.target.value)}
+            placeholder="Search integrations…"
+            aria-label="Search integrations"
+            className="h-9 w-full rounded-[10px] bg-secondary pl-8 pr-3 text-[13px] text-foreground placeholder:text-muted-foreground focus:outline-none focus:ring-1 focus:ring-[var(--v3-accent)]"
+          />
+        </div>
+      </div>
+
+      {/* card grid — templates-page grammar, full catalog */}
+      {filtered.length === 0 ? (
+        <p className="py-16 text-center text-[14px] text-muted-foreground">
+          No integrations found for &ldquo;{query}&rdquo;.
+        </p>
+      ) : (
+        <div className="pb-12">
+          <div className="grid gap-3.5 sm:grid-cols-2 lg:grid-cols-3">
+            {visible.map((entry) => (
+              <IntegrationCard key={entry.slug} entry={entry} />
+            ))}
+          </div>
+          {hasMore ? (
+            <div className="mt-8 flex justify-center">
+              <button
+                type="button"
+                onClick={() => setShowAll(true)}
+                className="inline-flex h-10 items-center rounded-[10px] bg-secondary px-5 text-[13px] font-medium text-foreground transition-colors hover:bg-[var(--bg-3)]"
+              >
+                Show all {CATALOG.length.toLocaleString()} integrations
+              </button>
             </div>
-            <h2 className="mt-5 text-[16px] font-semibold tracking-[-0.012em]">{name}</h2>
-            <p className="mt-2 text-[13px] leading-relaxed text-muted-foreground">{detail}</p>
-          </article>
-        ))}
-      </Reveal>
+          ) : null}
+        </div>
+      )}
 
       {/* close — product-style centered CTA */}
       <Reveal className="flex flex-col items-center gap-4 pb-10 text-center">
