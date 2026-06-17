@@ -30,7 +30,6 @@ import {
   SlackLogo,
 } from "@/components/landing-icons";
 import { V3Composer } from "./V3Composer";
-import { ChannelActions } from "./ChannelActions";
 import { V3TemplateCard } from "./V3TemplateCard";
 import { getTemplate } from "@/components/landing-ref/data";
 import { Hl, V3Shell } from "./V3Shell";
@@ -373,15 +372,6 @@ export function V3Body() {
                 {p.label}
               </button>
             ))}
-          </motion.div>
-          <motion.div
-            initial={{ opacity: 0 }}
-            animate={{ opacity: 1 }}
-            transition={{ duration: 0.5, delay: 0.46 }}
-            className="mx-auto mt-8 flex flex-col items-center text-[12px] text-muted-foreground/90"
-          >
-            <span>Works without the dashboard too.</span>
-            <ChannelActions />
           </motion.div>
         </section>
 

@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import Image from "next/image";
 import Link from "next/link";
 import { Monitor, Moon, Sun } from "lucide-react";
+import { McpHeaderButton } from "./ChannelActions";
 import "./theme.css";
 
 /* theme mode: same contract as the app's ThemeModeButton (key, values, cycle
@@ -100,6 +101,7 @@ export function V3Shell({
                 {label}
               </Link>
             ))}
+            <McpHeaderButton />
             <button
               type="button"
               aria-label={`Theme: ${MODE_LABELS[mode]}. Click to switch.`}
