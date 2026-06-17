@@ -858,6 +858,34 @@ def _backfill_worker_memory_packs(user_id: str) -> int:
     return count
 
 
+def _table_has_column(conn, table_name: str, column_name: str) -> bool:
+    try:
+        rows = conn.execute(f"PRAGMA table_info({table_name})").fetchall()
+    except Exception:
+        return False
+    for row in rows:
+        try:
+            name = row["name"]
+        except Exception:
+            name = row[1] if len(row) > 1 else None
+        if name == column_name:
+            return True
+    return False
+
+
+def _migrate_hybrid_worker_modes(conn) -> int:
+    rows_updated = 0
+    for table_name in ("skill_versions", "workers"):
+        if not _table_has_column(conn, table_name, "manifest_json"):
+            continue
+        rows_updated += conn.execute(
+            f"UPDATE {table_name} SET manifest_json = "
+            "REPLACE(manifest_json, '\"mode\": \"hybrid\"', '\"mode\": \"pure-script\"') "
+            "WHERE manifest_json LIKE '%\"mode\": \"hybrid\"%'"
+        ).rowcount
+    return rows_updated
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI):
     """FastAPI lifespan: startup + shutdown hooks."""
@@ -874,10 +902,7 @@ async def lifespan(app: FastAPI):
     # the deprecation was enforced.
     try:
         with get_db() as _mig_conn:
-            _rows_updated = _mig_conn.execute(
-                "UPDATE workers SET manifest_json = REPLACE(manifest_json, '\"mode\": \"hybrid\"', '\"mode\": \"pure-script\"') "
-                "WHERE manifest_json LIKE '%\"mode\": \"hybrid\"%'"
-            ).rowcount
+            _rows_updated = _migrate_hybrid_worker_modes(_mig_conn)
             if _rows_updated:
                 logger.info("Migration #603: converted %d workers from exec.mode=hybrid to pure-script", _rows_updated)
     except Exception as _mig_exc:
