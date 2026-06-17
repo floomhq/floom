@@ -1253,13 +1253,14 @@ export function createServer(): McpServer {
       inputSchema: {
         name: z.string().min(1).describe("Context name (slug, e.g. 'company-docs')."),
         writeable: z.boolean().default(false).describe("Whether the context is writeable by workers at runtime."),
+        sensitive: z.boolean().default(true).describe("Sensitive contexts are excluded from git versioning. Set false to enable versions and rollback."),
       },
       annotations: { readOnlyHint: false, destructiveHint: false, idempotentHint: false, openWorldHint: true },
     },
-    async ({ name, writeable }) =>
+    async ({ name, writeable, sensitive }) =>
       callTool(async () =>
         jsonResult(
-          await request("POST", `/contexts/${encodeURIComponent(name)}`, { writeable }),
+          await request("POST", `/contexts/${encodeURIComponent(name)}`, { writeable, sensitive }),
           "Context created.",
         ),
       ),
