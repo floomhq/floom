@@ -96,6 +96,37 @@ function readEntrypoint(manifest: Record<string, unknown>): string | undefined {
   return nonEmptyString(manifest.entrypoint);
 }
 
+function isValidTimeZone(value: string): boolean {
+  try {
+    new Intl.DateTimeFormat("en-US", { timeZone: value }).format(new Date(0));
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+function validateTriggerTimezone(trigger: unknown, path: string): string[] {
+  if (!isRecord(trigger)) return [];
+  const timezone = nonEmptyString(trigger.timezone);
+  if (!timezone || isValidTimeZone(timezone)) return [];
+  return [`${path}.timezone is not a valid IANA timezone: ${timezone}`];
+}
+
+function validateTimezones(manifest: Record<string, unknown>): string[] {
+  const errors: string[] = [];
+  errors.push(...validateTriggerTimezone(manifest.trigger, "trigger"));
+  const cronTimezone = nonEmptyString(manifest.cron_timezone);
+  if (cronTimezone && !isValidTimeZone(cronTimezone)) {
+    errors.push(`cron_timezone is not a valid IANA timezone: ${cronTimezone}`);
+  }
+  if (Array.isArray(manifest.triggers)) {
+    manifest.triggers.forEach((trigger, index) => {
+      errors.push(...validateTriggerTimezone(trigger, `triggers[${index}]`));
+    });
+  }
+  return errors;
+}
+
 function declaredComposioConnections(manifest: Record<string, unknown>): Map<string, Set<string> | null> {
   const result = new Map<string, Set<string> | null>();
   const raw = manifest.connections;
@@ -229,13 +260,17 @@ function validateNativeRuntimeContract(
 
 async function readOptionalText(path: string): Promise<string | undefined> {
   try {
-    return await readFile(path, "utf8");
+    return stripUtf8Bom(await readFile(path, "utf8"));
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "ENOENT") {
       return undefined;
     }
     throw error;
   }
+}
+
+function stripUtf8Bom(text: string): string {
+  return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
 export async function loadWorkerSource(dirArg: string): Promise<{ source?: WorkerSource; errors: string[] }> {
@@ -248,7 +283,7 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
 
   let workerYml = "";
   try {
-    workerYml = await readFile(workerYmlPath, "utf8");
+    workerYml = stripUtf8Bom(await readFile(workerYmlPath, "utf8"));
   } catch (error) {
     if (error && typeof error === "object" && "code" in error && (error as { code?: string }).code === "ENOENT") {
       return { errors: [`Missing required file: ${workerYmlPath}`] };
@@ -291,6 +326,7 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
   if (!runtime) {
     errors.push("worker.yml must include a runtime field (runtime, runtime.type, exec.runtime, or exec.runtime.type)");
   }
+  errors.push(...validateTimezones(manifest));
 
   const entrypoint = readEntrypoint(manifest);
   if (entrypoint === "run.py" && !hasRunPy) {
@@ -409,7 +445,8 @@ function formatConnections(connections: unknown): string[] {
 function apiErrorDetail(error: WorkerosApiError): string {
   const body = error.body;
   if (body && typeof body === "object" && "detail" in body) {
-    return String((body as { detail: unknown }).detail);
+    const detail = (body as { detail: unknown }).detail;
+    return typeof detail === "string" ? detail : JSON.stringify(detail);
   }
   return error.message;
 }
@@ -443,6 +480,9 @@ function emitApiError(error: unknown): number {
   }
   if (error instanceof WorkerosApiError && error.status && error.status >= 500) {
     return emitError(`API error: ${message}`, "Check API status, then retry. Report: https://github.com/floomhq/workeros/issues");
+  }
+  if (error instanceof WorkerosApiError && error.status && error.status >= 400) {
+    return emitError(`API rejected worker source: ${apiErrorDetail(error)}`, "Fix the worker files and retry: floom workers validate <dir>");
   }
   throw error;
 }

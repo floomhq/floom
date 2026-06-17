@@ -1331,7 +1331,7 @@ async def request_body_size_middleware(request: Request, call_next):
         # Context uploads are multipart streams. Returning a 413 from middleware
         # before the body is consumed can make edge proxies surface a 502 while
         # the client continues sending the multipart body. Let the route's
-        # bounded streaming reader enforce the same 25 MB file cap and return
+        # bounded streaming reader enforce the same context file cap and return
         # the friendly JSON 413 from inside the request handler.
         return await call_next(request)
 

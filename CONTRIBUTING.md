@@ -100,10 +100,29 @@ template. Maintainers will use the CI result as the merge gate.
 
 ## Picking an issue
 
-Good first contributions are small, testable fixes: docs gaps, focused API
-regressions, worker examples, MCP CLI polish, or frontend states that already
-have an established pattern. For behavior changes, include the smallest test
-that would have failed before the fix.
+Good first contributions are small, testable fixes. Pick one of these lanes:
+
+- **Docs:** clarify setup, add examples, improve troubleshooting, or fix stale
+  references.
+- **Worker examples:** add or improve one worker bundle under `workers/` with a
+  focused use case and sample inputs.
+- **API/runtime:** fix a narrow bug and add the smallest pytest that fails before
+  the change.
+- **MCP/CLI:** improve validation, help text, or command behavior with a package
+  test.
+- **Web:** polish a contained UI state that already has an established component
+  pattern.
+
+Avoid first PRs that combine backend, frontend, worker examples, and docs in one
+change. Smaller PRs are easier to review and easier to merge.
+
+If you are not sure where to start:
+
+1. Run the app with [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md).
+2. Scan issues labeled `good first issue` or `docs`.
+3. Reproduce the problem locally.
+4. Add the smallest test or documentation change that proves the fix.
+5. Open the PR with the commands you ran.
 
 ## Pull requests
 
@@ -119,6 +138,9 @@ that would have failed before the fix.
 
 Open a GitHub issue for ordinary bugs. For anything security-sensitive, follow
 [SECURITY.md](SECURITY.md) and report it privately instead.
+
+For common local setup and runtime issues, check
+[docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md) before filing.
 
 ## License
 

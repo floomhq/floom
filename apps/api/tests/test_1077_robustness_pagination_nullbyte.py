@@ -83,19 +83,30 @@ trigger:
 """
 
 
-@pytest.fixture
-def client(monkeypatch, tmp_path):
-    workers_dir = tmp_path / "workers"
-    workers_dir.mkdir()
-    for name in ("probe-a", "probe-b", "probe-c"):
-        wdir = workers_dir / name
-        wdir.mkdir()
-        (wdir / "worker.yml").write_text(_worker_yml(name), encoding="utf-8")
-        (wdir / "run.py").write_text("print('hi')\n", encoding="utf-8")
-        (wdir / "requirements.txt").write_text("", encoding="utf-8")
+def _invalid_timezone_worker_yml(name: str) -> str:
+    return f"""\
+schema_version: '0.3'
+name: {name}
+title: {name}
+description: invalid timezone poison worker.
+version: 0.1.0
+exec:
+  entry: run.py
+  runtime: python311
+  runner: e2b
+  command: python run.py
+secrets:
+- POISON_API_KEY
+trigger:
+  type: schedule
+  cron: "*/5 * * * *"
+  timezone: Foo/Bar-Not-A-Zone
+"""
 
+
+def _install_api(monkeypatch, tmp_path, workers_dir: Path, *, secret: str):
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
-    monkeypatch.setenv("FLOOM_SECRET", "test-secret-1077")
+    monkeypatch.setenv("FLOOM_SECRET", secret)
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
@@ -126,6 +137,21 @@ def client(monkeypatch, tmp_path):
     workers = main.discover_workers()
     with main.get_db() as conn:
         main._persist_discovered_workers(conn, workers, user_id="federico")
+    return main, db
+
+
+@pytest.fixture
+def client(monkeypatch, tmp_path):
+    workers_dir = tmp_path / "workers"
+    workers_dir.mkdir()
+    for name in ("probe-a", "probe-b", "probe-c"):
+        wdir = workers_dir / name
+        wdir.mkdir()
+        (wdir / "worker.yml").write_text(_worker_yml(name), encoding="utf-8")
+        (wdir / "run.py").write_text("print('hi')\n", encoding="utf-8")
+        (wdir / "requirements.txt").write_text("", encoding="utf-8")
+
+    main, db = _install_api(monkeypatch, tmp_path, workers_dir, secret="test-secret-1077")
 
     from fastapi.testclient import TestClient
     with TestClient(main.app, headers={"x-floom-secret": "test-secret-1077"}) as c:
@@ -154,3 +180,37 @@ def test_workers_limit_and_offset_are_honored(client):
 def test_workers_invalid_pagination_is_422(client, qs):
     resp = client.get(f"/workers?shape=list&{qs}")
     assert resp.status_code == 422, resp.text
+
+
+def test_malformed_worker_manifest_does_not_break_workers_or_secrets(monkeypatch, tmp_path):
+    workers_dir = tmp_path / "workers"
+    workers_dir.mkdir()
+    for name, yml in {
+        "valid-worker": _worker_yml("valid-worker"),
+        "poison-badtz": _invalid_timezone_worker_yml("poison-badtz"),
+    }.items():
+        wdir = workers_dir / name
+        wdir.mkdir()
+        (wdir / "worker.yml").write_text(yml, encoding="utf-8")
+        (wdir / "run.py").write_text("print('hi')\n", encoding="utf-8")
+        (wdir / "requirements.txt").write_text("", encoding="utf-8")
+
+    main, db = _install_api(monkeypatch, tmp_path, workers_dir, secret="test-secret-1451")
+
+    from fastapi.testclient import TestClient
+    with TestClient(main.app, headers={"x-floom-secret": "test-secret-1451"}) as c:
+        workers_resp = c.get("/workers?shape=list")
+        secrets_resp = c.get("/secrets")
+
+    assert workers_resp.status_code == 200, workers_resp.text
+    worker_ids = {w["id"] for w in workers_resp.json()}
+    assert "valid-worker" in worker_ids
+    assert "poison-badtz" in worker_ids
+
+    poison = next(w for w in workers_resp.json() if w["id"] == "poison-badtz")
+    assert poison["status"] == "error"
+    assert poison["missing_secrets"] == []
+
+    assert secrets_resp.status_code == 200, secrets_resp.text
+    assert "POISON_API_KEY" not in {s["name"] for s in secrets_resp.json()}
+    db.get_repositories.cache_clear()
