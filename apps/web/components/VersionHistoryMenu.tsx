@@ -48,6 +48,7 @@ export function VersionHistoryMenu({
   onRestore,
   onOpen,
   buttonClassName,
+  label = "Versions",
 }: {
   versions: VersionSummary[];
   loading: boolean;
@@ -56,6 +57,9 @@ export function VersionHistoryMenu({
   onRestore: (version: VersionSummary) => void;
   onOpen?: () => void;
   buttonClassName?: string;
+  /** Trigger label. Defaults to "Versions" (per-file); the library pack passes
+   *  "Folder history" so per-file and whole-folder history read as a pair. */
+  label?: string;
 }) {
   return (
     <DropdownMenu
@@ -67,7 +71,7 @@ export function VersionHistoryMenu({
         className={cn(buttonVariants({ variant: "ghost", size: "sm" }), buttonClassName)}
       >
         <History className="size-3.5" />
-        Versions
+        {label}
       </DropdownMenuTrigger>
       <DropdownMenuContent align="end" sideOffset={6} className="w-80 p-1">
         <DropdownMenuGroup>
