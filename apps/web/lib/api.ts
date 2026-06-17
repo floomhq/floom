@@ -687,6 +687,20 @@ export const api = {
       );
       return link;
     },
+    // #766: kill a pack's public /s/<token> link. Backend ships the DELETE
+    // endpoint; this is the missing client half so a Sensitive pack can be
+    // locked back down from the UI. Idempotent: { revoked: false } when no link.
+    revokePackLink: (name: string) =>
+      fetchJson<{ revoked: boolean }>(
+        `/contexts/${encodeURIComponent(name)}/share-link`,
+        { method: "DELETE" }
+      ),
+    // #766: kill a single file's public /s/<token> link (same pair as the pack).
+    revokeFileLink: (name: string, path: string) =>
+      fetchJson<{ revoked: boolean }>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/share-link`,
+        { method: "DELETE" }
+      ),
     // #777: inspect a brain .db file — tables list, or a table's rows.
     sqlite: (name: string, path: string, table?: string) => {
       const qs = table ? `?table=${encodeURIComponent(table)}` : "";
