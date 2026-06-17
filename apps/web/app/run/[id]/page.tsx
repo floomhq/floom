@@ -22,8 +22,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { WorkerAvatar } from "@/components/WorkerAvatar";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { WorkerInputForm, requiredRunInputErrors } from "@/components/run-page/WorkerInputForm";
 import { RunPanel } from "@/components/run-page/RunPanel";
@@ -66,11 +66,9 @@ function WorkerIdentityPanel({ worker }: { worker: WorkerDetail }) {
     <div className="space-y-3">
       {/* Avatar + name */}
       <div className="flex items-center gap-3">
-        <WorkerAvatar
-          name={worker.name}
-          size="size-10"
-          className="rounded-[var(--radius-squircle)]"
-        />
+        <span className="c-logo shrink-0">
+          <Layers className="size-4 text-[var(--ink-soft)]" />
+        </span>
         <div className="min-w-0">
           <p className="font-semibold text-[var(--ink)] truncate">{worker.name}</p>
           {worker.config.trigger?.type && (
@@ -276,9 +274,9 @@ export default function RunWorkerPage() {
           style={{ width: "100%", maxWidth: 420 }}
         >
           <div className="p-5 space-y-6">
-            <WorkerIdentityPanel worker={worker} />
-
-            <div className="h-px bg-[var(--border-soft)]" />
+            <div className="[border-bottom:var(--bd-div)] pb-6">
+              <WorkerIdentityPanel worker={worker} />
+            </div>
 
             {/* Input form */}
             <WorkerInputForm
