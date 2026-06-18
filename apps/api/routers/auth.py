@@ -203,7 +203,10 @@ def auth_issue_magic_link(
     # restart and ties a security-critical signing key to process lifetime. Refuse
     # issuance instead of silently minting links only this process can validate;
     # consumption of already-issued links is unaffected.
-    if _magic_link_secret() == _MAGIC_LINK_FALLBACK_SECRET:
+    if not (
+        os.environ.get("WORKEROS_MAGIC_LINK_SECRET", "").strip()
+        or os.environ.get("FLOOM_SECRET", "").strip()
+    ):
         raise HTTPException(
             status_code=503,
             detail="Magic links require WORKEROS_MAGIC_LINK_SECRET or FLOOM_SECRET to be configured",

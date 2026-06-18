@@ -7,14 +7,14 @@ import { getSetCookies, withSecureFlag } from "@/lib/secure-set-cookie";
 const ORIGINAL_NODE_ENV = process.env.NODE_ENV;
 
 beforeEach(() => {
-  process.env.NODE_ENV = "production";
+  Reflect.set(process.env, "NODE_ENV", "production");
 });
 
 afterAll(() => {
   if (ORIGINAL_NODE_ENV === undefined) {
-    delete process.env.NODE_ENV;
+    Reflect.deleteProperty(process.env, "NODE_ENV");
   } else {
-    process.env.NODE_ENV = ORIGINAL_NODE_ENV;
+    Reflect.set(process.env, "NODE_ENV", ORIGINAL_NODE_ENV);
   }
 });
 

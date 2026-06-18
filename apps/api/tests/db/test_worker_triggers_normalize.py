@@ -130,6 +130,69 @@ def test_reconcile_resets_next_run_at_when_cron_changes(repo_bundle):
     assert rows2[0]["next_run_at"] is None
 
 
+def test_schedule_trigger_claim_is_atomic_and_cleared_on_advance(repo_bundle):
+    repos, db, manifest = repo_bundle
+    _make_worker(repos, manifest)
+
+    rows = repos.workers.reconcile_triggers(
+        worker_id="w1", triggers=[{"type": "schedule", "cron": "0 9 * * *"}]
+    )
+    trigger_id = rows[0]["id"]
+    repos.workers.set_trigger_next_run_at(
+        trigger_id=trigger_id, next_run_at="2000-01-01T00:00:00+00:00"
+    )
+
+    assert repos.workers.claim_schedule_trigger(
+        trigger_id=trigger_id,
+        now_iso="2026-06-18T00:00:00+00:00",
+        locked_until="2026-06-18T00:03:00+00:00",
+    ) is True
+    assert repos.workers.claim_schedule_trigger(
+        trigger_id=trigger_id,
+        now_iso="2026-06-18T00:00:01+00:00",
+        locked_until="2026-06-18T00:04:00+00:00",
+    ) is False
+
+    repos.workers.set_trigger_next_run_at(
+        trigger_id=trigger_id, next_run_at="2026-06-19T00:00:00+00:00"
+    )
+    with db.get_db() as conn:
+        locked_until = conn.execute(
+            "SELECT locked_until FROM worker_triggers WHERE id = ?",
+            (trigger_id,),
+        ).fetchone()[0]
+
+    assert locked_until is None
+
+
+def test_schedule_trigger_mark_fired_clears_claim(repo_bundle):
+    repos, db, manifest = repo_bundle
+    _make_worker(repos, manifest)
+
+    rows = repos.workers.reconcile_triggers(
+        worker_id="w1", triggers=[{"type": "schedule", "cron": "0 9 * * *"}]
+    )
+    trigger_id = rows[0]["id"]
+    assert repos.workers.claim_schedule_trigger(
+        trigger_id=trigger_id,
+        now_iso="2026-06-18T00:00:00+00:00",
+        locked_until="2026-06-18T00:03:00+00:00",
+    )
+
+    repos.workers.mark_trigger_fired(
+        trigger_id=trigger_id,
+        last_fired_at="2026-06-18T00:00:00+00:00",
+        next_run_at="2026-06-19T00:00:00+00:00",
+    )
+    with db.get_db() as conn:
+        locked_until = conn.execute(
+            "SELECT locked_until FROM worker_triggers WHERE id = ?",
+            (trigger_id,),
+        ).fetchone()[0]
+
+    assert locked_until is None
+
+
 # ---------------------------------------------------------------------------
 # Scheduler: two schedule triggers both fire
 # ---------------------------------------------------------------------------

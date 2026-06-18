@@ -1652,10 +1652,35 @@ class SqliteWorkerRepository:
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
+    def claim_schedule_trigger(
+        self,
+        *,
+        trigger_id: str,
+        now_iso: str,
+        locked_until: str,
+    ) -> bool:
+        with get_db() as conn:
+            cur = conn.execute(
+                """
+                UPDATE worker_triggers
+                SET locked_until = ?, updated_at = ?
+                WHERE id = ?
+                  AND type = 'schedule'
+                  AND enabled = 1
+                  AND (locked_until IS NULL OR locked_until <= ?)
+                """,
+                (locked_until, now_iso, trigger_id, now_iso),
+            )
+            return cur.rowcount > 0
+
     def set_trigger_next_run_at(self, *, trigger_id: str, next_run_at: str | None) -> None:
         with get_db() as conn:
             conn.execute(
-                "UPDATE worker_triggers SET next_run_at = ?, updated_at = ? WHERE id = ?",
+                """
+                UPDATE worker_triggers
+                SET next_run_at = ?, locked_until = NULL, updated_at = ?
+                WHERE id = ?
+                """,
                 (next_run_at, now_iso(), trigger_id),
             )
 
@@ -1670,7 +1695,7 @@ class SqliteWorkerRepository:
             conn.execute(
                 """
                 UPDATE worker_triggers
-                SET last_fired_at = ?, next_run_at = ?, updated_at = ?
+                SET last_fired_at = ?, next_run_at = ?, locked_until = NULL, updated_at = ?
                 WHERE id = ?
                 """,
                 (last_fired_at, next_run_at, now_iso(), trigger_id),
@@ -2772,6 +2797,94 @@ class SqliteRunRepository:
                 WHERE r.status = 'running'
                   AND COALESCE(r.started_at, r.created_at) < ?
                   {exclude_clause}
+                ORDER BY COALESCE(r.started_at, r.created_at) ASC
+                """,
+                tuple(params),
+            ).fetchall()
+            failed: list[dict[str, Any]] = []
+            for row in rows:
+                normalized_error, normalized_error_code = _normalize_failed_error_fields(
+                    run_id=row["id"],
+                    error=error,
+                    error_code=error_code,
+                )
+                started_at = row["started_at"] or row["created_at"]
+                duration_ms = None
+                if started_at:
+                    try:
+                        import datetime as _dt
+
+                        started = _dt.datetime.fromisoformat(started_at)
+                        completed = _dt.datetime.fromisoformat(completed_at)
+                        duration_ms = int((completed - started).total_seconds() * 1000)
+                    except Exception:
+                        duration_ms = None
+                cursor = conn.execute(
+                    """
+                    UPDATE runs
+                    SET status = ?, error = ?, error_code = ?, completed_at = ?, duration_ms = ?
+                    WHERE id = ? AND status = 'running'
+                    """,
+                    (
+                        RunStatus.FAILED.value,
+                        normalized_error,
+                        normalized_error_code,
+                        completed_at,
+                        duration_ms,
+                        row["id"],
+                    ),
+                )
+                if cursor.rowcount:
+                    failed.append(
+                        {
+                            "id": row["id"],
+                            "run_id": row["id"],
+                            "user_id": row["user_id"],
+                            "started_at": row["started_at"],
+                            "created_at": row["created_at"],
+                            "completed_at": completed_at,
+                        }
+                    )
+        return failed
+
+    def fail_stale_running_without_sandbox_logs(
+        self,
+        *,
+        cutoff_iso: str,
+        exclude_run_ids: Iterable[str] = (),
+        error: str,
+        error_code: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fail running rows that were claimed but never reached sandbox startup logs."""
+        completed_at = now_iso()
+        excluded = [str(run_id) for run_id in exclude_run_ids if str(run_id)]
+        exclude_clause = ""
+        params: list[Any] = [cutoff_iso]
+        if excluded:
+            placeholders = ",".join("?" for _ in excluded)
+            exclude_clause = f"AND r.id NOT IN ({placeholders})"
+            params.extend(excluded)
+
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT r.id, r.started_at, r.created_at, w.owner_id AS user_id
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE r.status = 'running'
+                  AND COALESCE(r.started_at, r.created_at) < ?
+                  {exclude_clause}
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM logs l
+                      WHERE l.run_id = r.id
+                        AND (
+                            l.message LIKE '[e2b] Preparing sandbox%'
+                            OR l.message LIKE '[e2b] Spawning sandbox%'
+                            OR l.message LIKE '[e2b] Sandbox ready%'
+                            OR l.message LIKE '[e2b] Running worker%'
+                        )
+                  )
                 ORDER BY COALESCE(r.started_at, r.created_at) ASC
                 """,
                 tuple(params),
@@ -4124,6 +4237,45 @@ class SqliteWorkspaceMemberRepository:
                 "WHERE workspace_id = ? AND user_id = ?",
                 (now, workspace_id, new_owner_id),
             )
+            worker_ids = [
+                str(row["id"])
+                for row in conn.execute(
+                    "SELECT id FROM workers WHERE workspace_id = ? AND owner_id = ?",
+                    (workspace_id, actor_id),
+                ).fetchall()
+            ]
+            if worker_ids:
+                placeholders = ", ".join("?" for _ in worker_ids)
+                try:
+                    conn.execute(
+                        f"UPDATE runs SET user_id = ? WHERE user_id = ? AND worker_id IN ({placeholders})",
+                        (new_owner_id, actor_id, *worker_ids),
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "no such column: user_id" not in str(exc).lower():
+                        raise
+                conn.execute(
+                    f"UPDATE runs SET actor_user_id = ? WHERE actor_user_id = ? AND worker_id IN ({placeholders})",
+                    (new_owner_id, actor_id, *worker_ids),
+                )
+            conn.execute(
+                "UPDATE workers SET owner_id = ? WHERE workspace_id = ? AND owner_id = ?",
+                (new_owner_id, workspace_id, actor_id),
+            )
+            conn.execute(
+                "UPDATE brain_packs SET owner_id = ? WHERE workspace_id = ? AND owner_id = ?",
+                (new_owner_id, workspace_id, actor_id),
+            )
+            conn.execute(
+                "UPDATE asset_grants SET owner_id = ? WHERE owner_id = ? "
+                "AND asset_id IN (SELECT id FROM workers WHERE workspace_id = ? UNION SELECT id FROM brain_packs WHERE workspace_id = ?)",
+                (new_owner_id, actor_id, workspace_id, workspace_id),
+            )
+            conn.execute(
+                "UPDATE worker_short_links SET owner_id = ? WHERE owner_id = ? "
+                "AND worker_id IN (SELECT id FROM workers WHERE workspace_id = ?)",
+                (new_owner_id, actor_id, workspace_id),
+            )
         member = self.get(workspace_id=workspace_id, user_id=new_owner_id)
         if member is None:
             raise RuntimeError("failed to transfer ownership")
@@ -4488,6 +4640,29 @@ class SqliteUserRepository:
 
     def delete(self, *, user_id: str) -> bool:
         with get_db() as conn:
+            resource_checks = (
+                ("workers", "owner_id"),
+                ("runs", "actor_user_id"),
+                ("runs", "user_id"),
+                ("secrets", "user_id"),
+                ("composio_connections", "user_id"),
+                ("brain_packs", "owner_id"),
+                ("asset_versions", "user_id"),
+                ("mcp_tools", "user_id"),
+                ("asset_grants", "owner_id"),
+            )
+            for table, column in resource_checks:
+                try:
+                    row = conn.execute(
+                        f"SELECT 1 FROM {table} WHERE {column} = ? LIMIT 1",
+                        (user_id,),
+                    ).fetchone()
+                except sqlite3.OperationalError:
+                    continue
+                if row is not None:
+                    raise ValueError(
+                        f"cannot delete user {user_id!r}; {table}.{column} resources still exist"
+                    )
             cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         return cursor.rowcount > 0
 

@@ -15,10 +15,10 @@ import {
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 
+import { useEmilyFullscreen } from "./emily-fullscreen";
 import { EmilyAvatar } from "./EmilyAvatar";
 import { MarkdownText } from "./MarkdownText";
 import { PromptInput } from "./PromptInput";
-import { PromptChips } from "@/components/PromptChips";
 import { CreateSourcePills } from "@/components/CreateSourcePills";
 import { FileChip } from "./FileChip";
 import { ToolCardRenderer } from "./cards/ToolCardRenderer";
@@ -35,6 +35,7 @@ import {
   useChatStream,
 } from "@/lib/useChatStream";
 import { exportConversationMarkdown } from "@/lib/emily-chat-export";
+import { readStoredConversationId } from "@/lib/emily-chat-storage";
 import { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
 // Re-export so the create-mode wiring + its tests share one source of truth.
 export { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
@@ -51,12 +52,21 @@ import type { AttachedFile, ChatMessage } from "@/lib/emily-chat-types";
 function RecentChats({
   activeConversationId,
   onLoadConversation,
+  openSignal,
 }: {
   activeConversationId: string | null;
   onLoadConversation: (id: string) => void;
+  /** Increment to programmatically open the popover (e.g. the create-mode
+   *  "find it in Recent chats" link). */
+  openSignal?: number;
 }) {
   const [open, setOpen] = useState(false);
   const [items, setItems] = useState<ConversationSummary[] | null>(null);
+
+  // Open when the host bumps openSignal (skip the initial mount value of 0).
+  useEffect(() => {
+    if (openSignal) setOpen(true);
+  }, [openSignal]);
 
   useEffect(() => {
     if (!open) return;
@@ -128,18 +138,21 @@ function ChatControls({
   canExport,
   activeConversationId,
   onLoadConversation,
+  recentOpenSignal,
 }: {
   onNew: () => void;
   onExport: () => void;
   canExport: boolean;
   activeConversationId: string | null;
   onLoadConversation: (id: string) => void;
+  recentOpenSignal?: number;
 }) {
   return (
     <div className="flex items-center gap-1">
       <RecentChats
         activeConversationId={activeConversationId}
         onLoadConversation={onLoadConversation}
+        openSignal={recentOpenSignal}
       />
       <Button
         size="sm"
@@ -386,20 +399,20 @@ function ChatEmptyState({
 
 // ── Create-worker hero (full-width hero for create mode, no messages) ─────────
 
+// Round-09 (Federico 2026-06-18): "The new worker should literally just be an
+// Emily chat with some pills. It's literally an Emily chat. That's it. Don't make
+// it anything more." Earlier rounds kept layering chrome on top (a greeting card,
+// then example CARDS with integration badges + an "Or start from an example"
+// section) which made it read as a launcher, not a chat. Stripped to: heading +
+// one-line subtext + 2-3 suggestion PILLS + the previous-chat note (when a prior
+// chat exists) + the SAME Emily composer the thread uses. Clicking a pill primes
+// the composer with that prompt. Nothing more.
 const CREATE_EXAMPLES = [
-  { label: "Granola → HubSpot daily",   prompt: "Summarise my Granola meetings and post action items to HubSpot CRM daily" },
-  { label: "GitHub PR digest 9am",       prompt: "Every morning at 9am, send me a digest of my unread GitHub PRs and open issues" },
-  { label: "Invoice → Sheets",           prompt: "Process any new email in label 'invoices', extract total amount, and add a row to Google Sheets" },
-  { label: "HubSpot deal → Slack",       prompt: "When a new deal is created in HubSpot, send a Slack message to #sales-channel" },
+  "Summarise my Granola meetings → HubSpot daily",
+  "Send me a GitHub PR digest at 9am",
+  "Score new CRM contacts against a job brief",
 ] as const;
 
-// Round-09 (Federico 2026-06-17): the old "Hire a new AI worker" hero was a
-// form-y card — a bespoke <textarea> + a "Hire worker" button + a divider — that
-// read as a FORM, not as talking to the assistant ("super unclean, should be more
-// native Emily"). Rebuilt below as an Emily-native conversational opener: her
-// avatar greeting + the REAL PromptInput composer (the same one the chat thread
-// uses — auto-resize, attachments, source pills, Enter-to-submit). Describe the
-// job → Emily drafts the worker → review. No reinvented composer.
 function CreateWorkerHeroState({
   input,
   onInput,
@@ -407,6 +420,8 @@ function CreateWorkerHeroState({
   onAddSource,
   attachedFiles,
   onFilesChange,
+  hasPreviousChat,
+  onOpenRecent,
 }: {
   input: string;
   onInput: (v: string) => void;
@@ -414,26 +429,27 @@ function CreateWorkerHeroState({
   onAddSource: (source: string) => void;
   attachedFiles: AttachedFile[];
   onFilesChange: (files: AttachedFile[]) => void;
+  /** True when a non-create Emily chat is still active (its id is persisted). */
+  hasPreviousChat: boolean;
+  /** Opens the Recent chats popover so the user can jump back to that chat. */
+  onOpenRecent: () => void;
 }) {
-  const assistantName = useAssistantName();
   return (
-    <div className="flex flex-col items-center justify-center min-h-full w-full px-6 py-12 gap-8">
-      {/* Greeting — Emily speaks, this is a conversation not a form */}
-      <div className="flex flex-col items-center text-center space-y-3 max-w-xl">
+    <div className="flex flex-col items-center justify-center min-h-full w-full px-6 py-12 gap-6">
+      {/* Heading + one-line subtext — it IS the Emily chat, primed for create */}
+      <div className="flex flex-col items-center text-center space-y-2 max-w-xl">
         <EmilyAvatar size="md" />
-        <div className="space-y-1.5">
-          <h1 className="text-xl font-semibold tracking-tight text-foreground leading-tight">
-            What should I get done for you?
-          </h1>
-          <p className="text-sm text-muted-foreground leading-relaxed">
-            Describe the job in plain English. {assistantName} drafts the worker,
-            picks the right integrations, and opens it so you can review before running.
-          </p>
-        </div>
+        <h1 className="text-xl font-semibold tracking-tight text-foreground leading-tight">
+          Hire a new worker
+        </h1>
+        <p className="text-sm text-muted-foreground leading-relaxed">
+          Describe the job in one sentence. I&apos;ll draft the worker, wire the
+          tools and brain, then open it for your review.
+        </p>
       </div>
 
-      {/* The REAL Emily composer — same component as the chat thread. Enter
-          submits, Shift+Enter adds a newline, attachments + source pills work. */}
+      {/* The SAME Emily composer the chat thread uses (auto-resize, attachments,
+          source pills, Enter-to-submit). Indistinguishable from chatting. */}
       <div className="w-full max-w-2xl space-y-2">
         <PromptInput
           value={input}
@@ -443,31 +459,40 @@ function CreateWorkerHeroState({
           attachedFiles={attachedFiles}
           placeholder="Create me: a worker that…"
         />
+        {/* Suggestion pills — click to prime the composer with that prompt */}
+        <div className="flex flex-wrap justify-center gap-1.5 px-1 pt-1">
+          {CREATE_EXAMPLES.map((s) => (
+            <button
+              key={s}
+              type="button"
+              onClick={() => onInput(s)}
+              className="rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-muted/40 px-3 py-1 text-xs text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
+            >
+              {s}
+            </button>
+          ))}
+        </div>
         <div className="px-1">
           <CreateSourcePills onPick={onAddSource} />
         </div>
       </div>
 
-      {/* Example prompts — fill the same composer, still a conversation */}
-      <div className="w-full max-w-2xl space-y-3">
-        <p className="text-xs font-medium uppercase tracking-wide text-muted-foreground">
-          Or start from an example
+      {/* Previous-chat note (Federico spec): if the user was chatting with Emily
+          before, the create-mode chat is a fresh ephemeral thread; tell them the
+          old one is still there. */}
+      {hasPreviousChat && (
+        <p className="text-xs text-muted-foreground">
+          Your previous chat is still running.{" "}
+          <button
+            type="button"
+            onClick={onOpenRecent}
+            className="font-medium text-foreground underline-offset-2 hover:underline"
+          >
+            find it in Recent chats
+          </button>
+          .
         </p>
-        <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
-          {CREATE_EXAMPLES.map((ex) => (
-            <button
-              key={ex.label}
-              type="button"
-              onClick={() => onInput(ex.prompt)}
-              className="flex flex-col items-start gap-1.5 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] px-4 py-3 text-left transition-colors hover:bg-[var(--active-nav-bg)]"
-            >
-              <span className="text-sm font-medium text-foreground">{ex.label}</span>
-              <span className="text-xs text-muted-foreground line-clamp-2 leading-relaxed">{ex.prompt}</span>
-              <PromptChips prompt={ex.prompt} className="mt-0.5" />
-            </button>
-          ))}
-        </div>
-      </div>
+      )}
     </div>
   );
 }
@@ -526,6 +551,15 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
   const [showScrollButton, setShowScrollButton] = useState(false);
   const openedRunDetailsRef = useRef(new Set<string>());
   const runDetailsNavReadyRef = useRef(false);
+  // Create-mode is an ephemeral chat, so it never persists its own id. If a
+  // non-create Emily chat was already running its id is in localStorage — detect
+  // it (client-only, after mount) to show the "previous chat is still running"
+  // note. `recentOpenSignal` bumps to pop the Recent chats list from that note.
+  const [hasPreviousChat, setHasPreviousChat] = useState(false);
+  const [recentOpenSignal, setRecentOpenSignal] = useState(0);
+  useEffect(() => {
+    if (createMode) setHasPreviousChat(Boolean(readStoredConversationId()));
+  }, [createMode]);
 
   // Track whether the user is near the bottom of the scroll container.
   // We use a ref (not state) so the scroll handler doesn't trigger re-renders.
@@ -701,15 +735,39 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
   // from the hero immediately starts the conversation and reveals the thread.
   if (fullPage && createMode && !hasMessages && !isHydrating) {
     return (
-      <div className="h-full overflow-y-auto">
-        <CreateWorkerHeroState
-          input={input}
-          onInput={setInput}
-          onSubmit={handleSubmit}
-          onAddSource={handleAddSource}
-          attachedFiles={attachedFiles}
-          onFilesChange={setAttachedFiles}
-        />
+      <div className="flex h-full flex-col">
+        {/* Controls row carries Recent chats so the "previous chat is still
+            running, find it in Recent chats" note has somewhere to point. The
+            dock renders its own controls (hideControls), so only show here when
+            this core owns its controls. */}
+        {!hideControls && (
+          <div className="flex shrink-0 items-center justify-end gap-1 [border-bottom:var(--bd-div)]/60 px-6 py-2">
+            <ChatControls
+              onNew={handleNew}
+              onExport={handleExport}
+              canExport={hasMessages}
+              activeConversationId={conversationId}
+              onLoadConversation={(id) => {
+                loadConversation(id);
+                isNearBottomRef.current = true;
+                setShowScrollButton(false);
+              }}
+              recentOpenSignal={recentOpenSignal}
+            />
+          </div>
+        )}
+        <div className="flex-1 overflow-y-auto">
+          <CreateWorkerHeroState
+            input={input}
+            onInput={setInput}
+            onSubmit={handleSubmit}
+            onAddSource={handleAddSource}
+            attachedFiles={attachedFiles}
+            onFilesChange={setAttachedFiles}
+            hasPreviousChat={hasPreviousChat}
+            onOpenRecent={() => setRecentOpenSignal((n) => n + 1)}
+          />
+        </div>
       </div>
     );
   }
@@ -824,30 +882,38 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
 
 // ── Dock component (right-side persistent rail) ───────────────────────────────
 
-// Emily dock width progression (SPEC §12): collapsed ↔ rail ↔ wide ↔ full-screen
-// overlay, via the expand control + collapse button.
-type DockMode = "collapsed" | "rail" | "wide" | "full";
+// Emily dock width (SPEC §12): collapsed ↔ rail ↔ wide, an in-rail widen. TRUE
+// fullscreen (Emily fills the main content area, sidebar stays) is a separate
+// state owned by EmilyFullscreenContext (consumed by AppShell to hide the page
+// pane). The `full` overlay mode was removed — it covered the nav too, which is
+// not what Federico wanted.
+type DockMode = "collapsed" | "rail" | "wide";
 
-// Widths per APP-UI-V4-SPEC §2: rail 330px (collapse 46px), widen 560px, full.
+// Widths per APP-UI-V4-SPEC §2: rail 330px (collapse 46px), widen 560px.
 const DOCK_WIDTH: Record<DockMode, string> = {
   collapsed: "w-[46px]",
   rail: "w-full md:w-[330px]",
   wide: "w-full md:w-[560px] md:max-w-[52vw]",
-  full: "fixed inset-0 z-50 w-full", // full-screen overlay
 };
 
 export function EmilyDock({ className }: { className?: string }) {
   const assistantName = useAssistantName();
   const [mode, setMode] = useState<DockMode>("rail");
-  const open = mode !== "collapsed";
-  const isFull = mode === "full";
-  // Cycle the dock width: rail → wide → full → rail. The header control widens;
-  // a dedicated Close control (full mode only) restores the right-rail directly.
-  const cycleExpand = () =>
-    setMode((m) => (m === "rail" ? "wide" : m === "wide" ? "full" : "rail"));
-  // Round-09 (Federico 2026-06-17): in full-screen, exit must be one click back
-  // to the rail (not a 2-step cycle through "wide").
-  const exitFull = () => setMode("rail");
+  // True fullscreen lives in shared context (AppShell hides the page pane and
+  // this dock flex-grows to fill the main area — the left sidebar stays put).
+  const { fullscreen: isFull, setFullscreen } = useEmilyFullscreen();
+  const open = mode !== "collapsed" || isFull;
+  // Round-09 (Federico 2026-06-17): the PRIMARY expand control is TRUE
+  // fullscreen — one click in (Emily takes over the main area, nav stays), one
+  // click out (back to the right rail). No multi-step cycle through "wide".
+  const enterFull = () => {
+    setMode((m) => (m === "collapsed" ? "rail" : m));
+    setFullscreen(true);
+  };
+  const exitFull = () => setFullscreen(false);
+  const toggleFull = () => (isFull ? exitFull() : enterFull());
+  // Secondary in-rail widen (rail ↔ wide), only when NOT fullscreen.
+  const toggleWiden = () => setMode((m) => (m === "wide" ? "rail" : "wide"));
   // actionsRef lets the dock header drive new/export/recent without prop-drilling
   const coreActionsRef = useRef<ChatCoreActions | null>(null);
   // hasMessages as state so the Export menu item disables correctly (can't read ref in render)
@@ -887,12 +953,19 @@ export function EmilyDock({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex h-full flex-col bg-background shrink-0 overflow-hidden",
-        mode !== "full" && "[border-left:var(--bd-div)]",
-        DOCK_WIDTH[mode],
+        "flex h-full flex-col bg-background overflow-hidden [border-left:var(--bd-div)]",
+        // Fullscreen: flex-grow to fill the main area (page pane is hidden by
+        // AppShell), sidebar stays to the left. Otherwise: fixed-width rail.
+        isFull ? "flex-1 min-w-0" : cn("shrink-0", DOCK_WIDTH[mode]),
         className
       )}
-      aria-label={open ? `Emily dock (${mode})` : "Emily dock (collapsed)"}
+      aria-label={
+        isFull
+          ? "Emily dock (fullscreen)"
+          : open
+            ? `Emily dock (${mode})`
+            : "Emily dock (collapsed)"
+      }
     >
       {/* Collapsed strip — shown only when collapsed */}
       {!open && (
@@ -922,26 +995,41 @@ export function EmilyDock({ className }: { className?: string }) {
               aria-label="Online"
             />
           </div>
-          {/* Fullscreen / shrink toggle — the make-fullscreen control lives here
-              in the right sidebar (Federico 2026-06-17). Maximize widens toward
-              full; Minimize steps back. */}
+          {/* Secondary in-rail widen (rail ↔ wide) — only when NOT fullscreen.
+              Lets Federico nudge the rail wider without taking over the page. */}
+          {!isFull && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="hidden size-7 p-0 text-muted-foreground hover:bg-[var(--active-nav-bg)] hover:text-foreground md:inline-flex"
+              onClick={toggleWiden}
+              title={mode === "wide" ? `Narrow ${assistantName}` : `Widen ${assistantName}`}
+              aria-label={mode === "wide" ? `Narrow ${assistantName}` : `Widen ${assistantName}`}
+            >
+              {mode === "wide" ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
+            </Button>
+          )}
+          {/* PRIMARY make-fullscreen toggle — true one-click fullscreen: Emily
+              takes over the main content area, the left nav stays (Federico
+              2026-06-17). High-contrast so the affordance is clearly visible in
+              BOTH light and night mode (the muted icon was hard to see). */}
           <Button
             size="sm"
             variant="ghost"
-            className="size-7 p-0 text-muted-foreground hover:text-foreground"
-            onClick={cycleExpand}
-            title={isFull ? `Shrink ${assistantName}` : `Expand ${assistantName}`}
+            className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
+            onClick={toggleFull}
+            title={isFull ? `Exit full screen` : `Full screen ${assistantName}`}
             aria-label={isFull ? `Shrink ${assistantName}` : `Expand ${assistantName}`}
           >
-            {isFull ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+            {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
           </Button>
           {/* Full-screen CLOSE control (Federico 2026-06-17): only in full mode,
-              one click exits the overlay straight back to the right rail. */}
+              one click exits fullscreen straight back to the right rail. */}
           {isFull && (
             <Button
               size="sm"
               variant="ghost"
-              className="size-7 p-0 text-muted-foreground hover:text-foreground"
+              className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
               onClick={exitFull}
               title="Close full screen"
               aria-label="Close full screen"

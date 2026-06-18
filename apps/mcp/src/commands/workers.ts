@@ -1,4 +1,4 @@
-import { readFile } from "node:fs/promises";
+import { readdir, readFile, stat } from "node:fs/promises";
 import { join, resolve } from "node:path";
 import { inspect } from "node:util";
 import { parse as parseYaml } from "yaml";
@@ -32,6 +32,7 @@ type WorkerSource = {
   workerYml: string;
   runPy?: string;
   skillMd?: string;
+  files: Array<{ path: string; content: string }>;
   workerId: string;
   displayName: string;
   runtime: string;
@@ -42,6 +43,10 @@ type WorkerSourcePayload = {
   worker_yml: string;
   run_py: string;
   skill_md?: string;
+};
+
+type WorkerFilesPayload = {
+  files: Array<{ path: string; content: string }>;
 };
 
 function emitError(message: string, hint: string, json?: boolean): number {
@@ -273,6 +278,69 @@ function stripUtf8Bom(text: string): string {
   return text.charCodeAt(0) === 0xfeff ? text.slice(1) : text;
 }
 
+const IGNORED_BUNDLE_DIRS = new Set([
+  ".git",
+  ".hg",
+  ".svn",
+  "__pycache__",
+  ".pytest_cache",
+  ".mypy_cache",
+  ".ruff_cache",
+  ".venv",
+  "venv",
+  "node_modules",
+]);
+
+const IGNORED_BUNDLE_FILES = new Set([".DS_Store"]);
+const SECRET_BUNDLE_FILE_RE = /(^|\/)(?:\.env(?:\..*)?|credentials\.json|.*\.(?:pem|key|p12|pfx))$/i;
+
+function toBundlePath(root: string, absolutePath: string): string {
+  return absolutePath.slice(root.length + 1).replaceAll("\\", "/");
+}
+
+function looksBinary(buffer: Buffer): boolean {
+  return buffer.includes(0);
+}
+
+async function collectWorkerFiles(dir: string): Promise<{ files: Array<{ path: string; content: string }>; errors: string[] }> {
+  const files: Array<{ path: string; content: string }> = [];
+  const errors: string[] = [];
+
+  async function walk(current: string): Promise<void> {
+    const entries = await readdir(current, { withFileTypes: true });
+    for (const entry of entries) {
+      if (entry.isDirectory() && IGNORED_BUNDLE_DIRS.has(entry.name)) continue;
+      if (entry.isFile() && IGNORED_BUNDLE_FILES.has(entry.name)) continue;
+      const absolute = join(current, entry.name);
+      if (entry.isDirectory()) {
+        await walk(absolute);
+        continue;
+      }
+      if (!entry.isFile()) continue;
+      const info = await stat(absolute);
+      const relPath = toBundlePath(dir, absolute);
+      if (SECRET_BUNDLE_FILE_RE.test(relPath)) {
+        errors.push(`${relPath} looks like credential material; store credentials in Workeros secrets instead`);
+        continue;
+      }
+      if (info.size > 5 * 1024 * 1024) {
+        errors.push(`${relPath} is larger than 5MB; use runtime download/storage for large assets`);
+        continue;
+      }
+      const content = await readFile(absolute);
+      if (looksBinary(content)) {
+        errors.push(`${relPath} appears to be binary; workers push currently supports UTF-8 bundle files`);
+        continue;
+      }
+      files.push({ path: relPath, content: stripUtf8Bom(content.toString("utf8")) });
+    }
+  }
+
+  await walk(dir);
+  files.sort((a, b) => a.path.localeCompare(b.path));
+  return { files, errors };
+}
+
 export async function loadWorkerSource(dirArg: string): Promise<{ source?: WorkerSource; errors: string[] }> {
   const dir = resolve(dirArg);
   const errors: string[] = [];
@@ -305,6 +373,8 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
 
   const runPy = await readOptionalText(runPyPath);
   const skillMd = await readOptionalText(skillMdPath);
+  const collected = await collectWorkerFiles(dir);
+  errors.push(...collected.errors);
   const hasRunPy = Boolean(runPy?.trim());
   const hasSkillMd = Boolean(skillMd?.trim());
 
@@ -349,6 +419,7 @@ export async function loadWorkerSource(dirArg: string): Promise<{ source?: Worke
       workerYml,
       runPy,
       skillMd,
+      files: collected.files,
       workerId,
       displayName,
       runtime,
@@ -364,6 +435,15 @@ function sourcePayload(source: WorkerSource): WorkerSourcePayload {
     run_py: source.runPy ?? "",
     ...(source.skillMd !== undefined ? { skill_md: source.skillMd } : {}),
   };
+}
+
+function filesPayload(source: WorkerSource): WorkerFilesPayload {
+  return { files: source.files };
+}
+
+function hasNonLegacyBundleFiles(source: WorkerSource): boolean {
+  const legacyPaths = new Set(["worker.yml", "run.py", "SKILL.md"]);
+  return source.files.some((file) => !legacyPaths.has(file.path));
 }
 
 function emitValidationErrors(errors: string[]): number {
@@ -525,17 +605,30 @@ export async function workersPushCommand(dir: string): Promise<number> {
 
     if (!exists) {
       await client.requestJson("POST", "/workers", { body: payload });
+      if (hasNonLegacyBundleFiles(source)) {
+        try {
+          await client.requestJson("PUT", `/workers/${encodeURIComponent(source.workerId)}/files`, { body: filesPayload(source) });
+        } catch (error) {
+          if (error instanceof WorkerosApiError && (error.status === 404 || error.status === 405)) {
+            return emitError(
+              "This Workeros API created the worker but does not support full worker bundle uploads.",
+              `PUT /workers/${source.workerId}/files returned HTTP ${error.status}. Upgrade the API before pushing workers with data/ or lib/ files.`,
+            );
+          }
+          throw error;
+        }
+      }
       log.ok(`Created ${source.workerId}`);
       return 0;
     }
 
     try {
-      await client.requestJson("PUT", `/workers/${encodeURIComponent(source.workerId)}`, { body: payload });
+      await client.requestJson("PUT", `/workers/${encodeURIComponent(source.workerId)}/files`, { body: filesPayload(source) });
     } catch (error) {
       if (error instanceof WorkerosApiError && (error.status === 404 || error.status === 405)) {
         return emitError(
-          "This Workeros API does not support in-place worker source updates.",
-          `PUT /workers/${source.workerId} returned HTTP ${error.status}. Upgrade the API or use a new worker id.`,
+          "This Workeros API does not support full worker bundle updates.",
+          `PUT /workers/${source.workerId}/files returned HTTP ${error.status}. Upgrade the API or use a new worker id.`,
         );
       }
       throw error;

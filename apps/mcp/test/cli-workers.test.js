@@ -152,7 +152,7 @@ async function startMockApi({ existing = false, putStatus = 200, putDetail = "Un
       return;
     }
 
-    if (request.method === "PUT" && url.pathname === "/workers/cli-test-worker") {
+    if (request.method === "PUT" && url.pathname === "/workers/cli-test-worker/files") {
       const body = await readBody(request);
       bodies.push(body);
       if (putStatus !== 200) {
@@ -319,6 +319,31 @@ test("workers push creates a new worker with POST /workers", async (t) => {
   assert.equal(mock.bodies[0].skill_md, undefined);
 });
 
+test("workers push uploads full bundle after creating a worker with extra files", async (t) => {
+  const mock = await startMockApi({ existing: false });
+  t.after(() => mock.server.close());
+  const home = await makeTempHome(mock.baseUrl);
+  const dir = await makeWorkerDir();
+  await mkdir(join(dir, "data"), { recursive: true });
+  await mkdir(join(dir, "lib"), { recursive: true });
+  await writeFile(join(dir, "data", "cities.json"), `{"cities":["phoenix"]}\n`);
+  await writeFile(join(dir, "lib", "helper.py"), `def city():\n    return "phoenix"\n`);
+
+  const result = await runCli(["workers", "push", dir], { HOME: home });
+
+  assert.equal(result.code, 0);
+  assert.match(result.stdout, /Created cli-test-worker/);
+  assert.deepEqual(mock.seen, [
+    "GET /workers/cli-test-worker",
+    "POST /workers",
+    "PUT /workers/cli-test-worker/files",
+  ]);
+  const files = new Map(mock.bodies[1].files.map((file) => [file.path, file.content]));
+  assert.match(files.get("worker.yml"), /name: cli-test-worker/);
+  assert.match(files.get("data/cities.json"), /phoenix/);
+  assert.match(files.get("lib/helper.py"), /def city/);
+});
+
 test("workers push strips UTF-8 BOMs before sending source to the API", async (t) => {
   const mock = await startMockApi({ existing: false });
   t.after(() => mock.server.close());
@@ -335,7 +360,7 @@ test("workers push strips UTF-8 BOMs before sending source to the API", async (t
   assert.equal(mock.bodies[0].run_py.charCodeAt(0), "d".charCodeAt(0));
 });
 
-test("workers push updates an existing worker with PUT /workers/:id", async (t) => {
+test("workers push updates an existing worker with PUT /workers/:id/files", async (t) => {
   const mock = await startMockApi({ existing: true });
   t.after(() => mock.server.close());
   const home = await makeTempHome(mock.baseUrl);
@@ -347,11 +372,12 @@ test("workers push updates an existing worker with PUT /workers/:id", async (t) 
   assert.match(result.stdout, /Updated cli-test-worker/);
   assert.deepEqual(mock.seen, [
     "GET /workers/cli-test-worker",
-    "PUT /workers/cli-test-worker",
+    "PUT /workers/cli-test-worker/files",
   ]);
-  assert.match(mock.bodies[0].worker_yml, /entrypoint: SKILL.md/);
-  assert.equal(mock.bodies[0].run_py, "");
-  assert.match(mock.bodies[0].skill_md, /CLI Test Worker/);
+  const files = new Map(mock.bodies[0].files.map((file) => [file.path, file.content]));
+  assert.match(files.get("worker.yml"), /entrypoint: SKILL.md/);
+  assert.equal(files.has("run.py"), false);
+  assert.match(files.get("SKILL.md"), /CLI Test Worker/);
 });
 
 test("workers show renders structured connections for humans", async (t) => {
@@ -377,10 +403,10 @@ test("workers push reports unsupported in-place source updates", async (t) => {
   const result = await runCli(["workers", "push", dir], { HOME: home });
 
   assert.equal(result.code, 1);
-  assert.match(result.stderr, /does not support in-place worker source updates/);
+  assert.match(result.stderr, /does not support full worker bundle updates/);
   assert.deepEqual(mock.seen, [
     "GET /workers/cli-test-worker",
-    "PUT /workers/cli-test-worker",
+    "PUT /workers/cli-test-worker/files",
   ]);
 });
 

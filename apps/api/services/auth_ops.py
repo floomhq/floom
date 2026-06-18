@@ -280,11 +280,16 @@ def _magic_link_secret() -> str:
     FLOOM_SECRET (shared operator secret). Never raises — falls back to a
     module-level random key so local installs without env vars still work.
     """
-    return (
+    key = (
         os.environ.get("WORKEROS_MAGIC_LINK_SECRET", "").strip()
         or os.environ.get("FLOOM_SECRET", "").strip()
-        or _MAGIC_LINK_FALLBACK_SECRET
     )
+    if not key:
+        raise HTTPException(
+            status_code=503,
+            detail="Magic links require WORKEROS_MAGIC_LINK_SECRET or FLOOM_SECRET to be configured",
+        )
+    return key
 
 
 def _issue_magic_link(*, user_id: str, ttl_seconds: int = 900) -> str:

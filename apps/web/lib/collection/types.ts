@@ -112,6 +112,9 @@ export interface CollectionStates {
     help?: string;
     icon?: import("react").ComponentType<{ size?: number }>;
     action?: ReactNode;
+    /** Render the empty state as a bounded dashed drop-zone box (drop-led
+     *  surfaces such as the Library). */
+    dropzone?: boolean;
   };
   errorRetry?: () => void;
 }
@@ -129,6 +132,13 @@ export interface CollectionConfig<T> {
    * tab switcher already labels the "Workers" tab — a second H1 is redundant).
    */
   hideTitle?: boolean;
+  /**
+   * Optional node rendered immediately below the title header and above the
+   * control bar (search + filters). Used for a section tab strip that must be
+   * consistent across sibling surfaces (e.g. the Integrations Connected / Browse
+   * / MCP / Secrets tabs). Rendered only in the resting list view, not detail.
+   */
+  headerSlot?: ReactNode;
   items: T[];
   loading?: boolean;
   error?: string | null;

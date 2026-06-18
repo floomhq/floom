@@ -647,7 +647,7 @@ function WorkerYamlPreviewContent({ content }: { content: string }) {
     ["Trigger", triggerLabel(parsed.trigger)],
     ["Runtime", runtimeLabel(parsed.exec ?? parsed.runtime)],
     ["Inputs", countLabel(parsed.inputs, "input")],
-    ["Connections", countLabel(parsed.connections, "connection")],
+    ["Integrations", countLabel(parsed.connections, "connection")],
     ["Brain resources", countLabel(parsed.contexts, "brain resource")],
     ["Secrets", countLabel(parsed.secrets, "secret")],
   ].filter(([, value]) => value);
@@ -669,7 +669,7 @@ function WorkerYamlPreviewContent({ content }: { content: string }) {
         ))}
       </dl>
       <YamlList title="Inputs" items={parsed.inputs} getLabel={(item) => itemLabel(item)} />
-      <YamlList title="Connections" items={parsed.connections} getLabel={(item) => itemLabel(item)} />
+      <YamlList title="Integrations" items={parsed.connections} getLabel={(item) => itemLabel(item)} />
       <YamlList title="Brain resources" items={parsed.contexts} getLabel={(item) => contextItemLabel(item)} />
     </div>
   );
