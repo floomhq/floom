@@ -95,10 +95,10 @@ async function openDetail() {
 }
 
 describe("R9 Phase 2 FIX 1 — default-inputs persistence (gap #1)", () => {
-  it("Operations > Inputs loads the saved recipe and persists Default via updateInputValues", async () => {
+  it("Setup > Inputs loads the saved recipe and persists Default via updateInputValues", async () => {
     await openDetail();
-    fireEvent.click(screen.getByRole("tab", { name: "Operations" }));
-    // Inputs is the default Operations sub-tab; the Month field loads the saved
+    fireEvent.click(screen.getByRole("tab", { name: "Setup" }));
+    // Inputs is the default Setup sub-tab; the Month field loads the saved
     // recipe value (input_values.month = "2026-05"), proving load-of-saved (the
     // gap #1 fix: Default reflects the persisted backend recipe, not blind).
     await waitFor(() => {
