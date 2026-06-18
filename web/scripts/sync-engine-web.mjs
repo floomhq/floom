@@ -112,6 +112,10 @@ export const OVERLAY_FILES = [
   "tests/cloud-invite-install.test.ts",
   "tests/fl-batch-6.test.ts",
   "tests/login-secrets-render-987-988.dom.test.tsx",
+  // Cloud parallel of the engine emily-fullscreen behavior test: the cloud
+  // dashboard renders CloudAppChrome (overlay), not the engine AppShell, so its
+  // fullscreen page-pane-hide needs its own guard (Federico 2026-06-17).
+  "tests/cloud-emily-fullscreen-r9.dom.test.tsx",
   "lib/api.ts",
   "lib/server-api.ts",
   "lib/posthog.ts",
