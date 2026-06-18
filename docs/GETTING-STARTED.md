@@ -124,6 +124,35 @@ Other litellm providers work the same way:
 | Google Gemini | `gemini/gemini-2.5-pro` | `GEMINI_API_KEY` |
 | Groq | `groq/llama-3.3-70b-versatile` | `GROQ_API_KEY` |
 
+Vertex AI Gemini uses Google Application Default Credentials instead of
+`GEMINI_API_KEY`. For local development, install from the normal requirements
+file, then set a Vertex model id and Google auth environment:
+
+```bash
+WORKEROS_WORKER_AGENT_MODEL=vertex_ai/gemini-3.5-flash
+WORKEROS_CHAT_MODEL=vertex_ai/gemini-3.5-flash
+WORKEROS_CODEGEN_MODEL=vertex_ai/gemini-3.5-flash
+VERTEX_PROJECT=your-gcp-project
+VERTEXAI_PROJECT=your-gcp-project
+VERTEX_LOCATION=global
+VERTEXAI_LOCATION=global
+GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/application-default-or-wif.json
+```
+
+If `GOOGLE_APPLICATION_CREDENTIALS` points at an AWS workload identity
+federation config, Google auth also needs AWS credentials and a region in the
+backend process environment:
+
+```bash
+AWS_ACCESS_KEY_ID=...
+AWS_SECRET_ACCESS_KEY=...
+AWS_REGION=us-west-2
+AWS_DEFAULT_REGION=us-west-2
+```
+
+Without those AWS variables, local machines may try the AWS instance metadata
+endpoint (`169.254.169.254`) and Vertex calls will fail before reaching Gemini.
+
 Emily and web-search workers use a provider-agnostic `web_search` function tool.
 It defaults to DuckDuckGo; set `SERPER_API_KEY` for Google-quality results.
 
