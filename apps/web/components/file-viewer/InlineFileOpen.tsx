@@ -4,12 +4,17 @@ import { useEffect, useMemo, useRef, useState, type DragEvent } from "react";
 import { ArrowLeft, Download, Folder as FolderIcon, Pencil, Plus, Save, Upload, X } from "lucide-react";
 import { isImageFile } from "@/lib/runs/trace";
 import { SqliteTableView } from "@/components/file-viewer/SqliteTableView";
+import { NpzArrayView } from "@/components/file-viewer/NpzArrayView";
 import { CodeBlock } from "@/components/file-viewer/code-block";
 import { MarkdownRenderer } from "@/components/contexts/markdown-renderer";
 import type { SqliteView } from "@/lib/types";
 
 function isDbFile(name: string): boolean {
   return /\.(db|sqlite|sqlite3)$/i.test(name);
+}
+
+function isNpzFile(name: string): boolean {
+  return /\.npz$/i.test(name);
 }
 
 function isMarkdownFile(name: string): boolean {
@@ -87,17 +92,26 @@ export function InlineFileOpen({
   files,
   rootLabel,
   emptyLabel = "No files.",
+  defaultOpenId,
   loadText,
   onRename,
   onMoveItem,
   onCreateSubfolder,
   onSaveText,
   loadSqlite,
+  loadBlob,
   onUpload,
 }: {
   files: InlineFile[];
   rootLabel: string;
   emptyLabel?: string;
+  /**
+   * Open this file inline on mount (rule #3 — don't make the operator click a
+   * folder/file first). When a run produces a single file, the caller passes its
+   * id so the content shows immediately, with the same Preview/Raw toggle and a
+   * Back link to the file list.
+   */
+  defaultOpenId?: string;
   /** Text-content loader (Brain: readTextFile). Omitted → download-only fallback. */
   loadText?: (file: InlineFile) => Promise<string>;
   /** #770: when provided, each row offers an inline rename (never a native prompt). */
@@ -111,13 +125,21 @@ export function InlineFileOpen({
   /** #777: load a .db file's tables/rows for the inline SQLite viewer. */
   loadSqlite?: (file: InlineFile, table?: string) => Promise<SqliteView>;
   /**
+   * Fetch a binary artifact's raw bytes for the inline `.npz` array viewer.
+   * The bytes are parsed header-only (no numpy, no array-data load). Omitted →
+   * `.npz` falls back to the download-only message.
+   */
+  loadBlob?: (file: InlineFile) => Promise<ArrayBuffer>;
+  /**
    * When provided, the list view becomes a drag-and-drop dropzone (and exposes
    * a Browse button). `dirPrefix` is the current navigated subfolder ("" = root)
    * so dropped files land where the operator is looking. Omitted → read-only.
    */
   onUpload?: (files: File[], dirPrefix: string) => Promise<void>;
 }) {
-  const [openId, setOpenId] = useState<string | null>(null);
+  const [openId, setOpenId] = useState<string | null>(
+    defaultOpenId && files.some((f) => f.id === defaultOpenId) ? defaultOpenId : null,
+  );
   const [text, setText] = useState<string | null>(null);
   const [loading, setLoading] = useState(false);
   const [renamingId, setRenamingId] = useState<string | null>(null);
@@ -128,6 +150,9 @@ export function InlineFileOpen({
   const [dropTarget, setDropTarget] = useState<string | null>(null);
   const [draggingRow, setDraggingRow] = useState<InlineDragItem | null>(null);
   const [orderedIds, setOrderedIds] = useState<string[]>([]);
+  // When an image fails to load (e.g. transient proxy error), fall back to the
+  // download affordance instead of leaving a broken-image icon.
+  const [imageError, setImageError] = useState(false);
   const [uploading, setUploading] = useState(false);
   const [creatingFolder, setCreatingFolder] = useState(false);
   const [subfolderName, setSubfolderName] = useState("");
@@ -251,8 +276,13 @@ export function InlineFileOpen({
     }
   };
 
-  const canLoadText = !!loadText && !!open && !open.binary && !isImageFile(open.name);
+  const canLoadText =
+    !!loadText && !!open && !open.binary && !isImageFile(open.name) && !isNpzFile(open.name) && !isDbFile(open.name);
   const canEditText = !!onSaveText && canLoadText;
+  // Reset the per-file image-error flag whenever a different file is opened.
+  useEffect(() => {
+    setImageError(false);
+  }, [openId]);
   useEffect(() => {
     setText(null);
     setEditing(false);
@@ -376,12 +406,18 @@ export function InlineFileOpen({
             </a>
           )}
         </div>
-        {isImageFile(open.name) && safeOpenUrl ? (
+        {/* union: require a same-origin safe URL (main) AND not-yet-errored
+            (base) so a broken image falls back to the download view. */}
+        {isImageFile(open.name) && safeOpenUrl && !imageError ? (
+          // Images render inline (clicking an image file shows the image, not a
+          // download-only fallback). safeOpenUrl is the same-origin proxy URL, so
+          // auth is injected server-side and the <img> loads directly.
           // eslint-disable-next-line @next/next/no-img-element
           <img
             src={safeOpenUrl}
             alt={open.name}
-            style={{ maxWidth: "100%", borderRadius: "var(--r-card, 16px)", display: "block" }}
+            onError={() => setImageError(true)}
+            style={{ maxWidth: "100%", height: "auto", borderRadius: "var(--r-card, 16px)", display: "block" }}
           />
         ) : canLoadText ? (
           loading ? (
@@ -448,11 +484,17 @@ export function InlineFileOpen({
         ) : isDbFile(open.name) && loadSqlite ? (
           // #777: inline SQLite table viewer (Brain supplies the loader).
           <SqliteTableView load={(table) => loadSqlite(open, table)} />
+        ) : isNpzFile(open.name) && loadBlob ? (
+          // .npz array viewer: parse the ZIP + npy headers client-side (no numpy,
+          // no array-data load) and show a flat name/shape/dtype/size table.
+          <NpzArrayView load={() => loadBlob(open)} />
         ) : (
           <div style={{ color: "var(--muted-foreground)", padding: 14 }}>
             {isDbFile(open.name)
               ? "SQLite database; use Download to open this file."
-              : "Preview isn't available inline yet; use Download to open this file."}
+              : isNpzFile(open.name)
+                ? "NumPy archive; use Download to open this file."
+                : "Preview isn't available inline yet; use Download to open this file."}
             {/* TODO(#815): richer artifact preview. */}
           </div>
         )}

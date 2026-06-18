@@ -1,11 +1,25 @@
-// Drive-pattern Share modal model (APP-UI-V4-SPEC §5, rule #8).
+// Share-modal model (APP-UI-V4-SPEC §5, rule #8).
 //
-// Sharing = others can VIEW & DUPLICATE — never collaborate live. "General
-// access" is Private | Workspace ONLY; there is NO "public" level (killed
-// deliberately, rule #8). The invite/grants row (#767), people-with-access list
-// (#768) and per-asset public-link toggle (#766) are backend-pending — the model
-// marks them so the UI can show honest disabled affordances, not dead buttons.
+// Sharing = others can VIEW & DUPLICATE — never collaborate live. Company access
+// is Private | Workspace ONLY; there is NO "public" company-access level (killed
+// deliberately, rule #8). "Public" is a SEPARATE, anonymous link (the standalone
+// share-link backend, #765/#766) framed as "anyone outside your workspace".
+//
+// All three backends are now LIVE: specific-people grants (#767/#768), per-asset
+// public share-link create/revoke (#765/#766), and workspace visibility. The
+// previous "Backend pending" affordances are gone.
 import type { AssetVisibility } from "@/lib/types";
+
+/** The asset types the Share modal renders. */
+export type ShareAssetType =
+  | "worker"
+  | "run"
+  | "brain_pack"
+  | "brain_file"
+  | "approval";
+
+/** Backend grant asset_type — coarser than the UI asset type. */
+export type ShareGrantAssetType = "worker" | "run" | "brain" | "workspace";
 
 export interface GeneralAccessOption {
   value: Extract<AssetVisibility, "private" | "workspace">;
@@ -13,14 +27,14 @@ export interface GeneralAccessOption {
   description: string;
 }
 
-// Order + copy for the General access selector. No "public" entry by design.
+// Order + copy for the Company access selector. No "public" entry by design.
 export const GENERAL_ACCESS_OPTIONS: GeneralAccessOption[] = [
-  { value: "private", label: "Private", description: "Only you can access this." },
+  { value: "private", label: "Private", description: "Only you and invited teammates can view and duplicate this." },
   {
     value: "workspace",
     label: "Workspace",
     description:
-      "Transfers this worker to the workspace. Members can view and run it; only admins can edit it.",
+      "Transfers this worker to the workspace. Members can view and run it; admins configure secrets and connections.",
   },
 ];
 
@@ -37,7 +51,7 @@ export function generalAccessLabel(v: AssetVisibility | undefined): string {
   }
 }
 
-/** One-line summary shown under the selector. Always view-and-duplicate. */
+/** One-line summary shown under the Company-access selector. View-and-duplicate. */
 export function shareSummary(v: AssetVisibility | undefined): string {
   switch (v) {
     case "workspace":
@@ -46,13 +60,23 @@ export function shareSummary(v: AssetVisibility | undefined): string {
       return "Only invited people can view and duplicate this.";
     case "private":
     default:
-      return "Only you can access this.";
+      return "Only you and invited teammates can view and duplicate this.";
   }
 }
 
-// Backend gaps surfaced in the modal as honest disabled affordances.
-export const SHARE_GAPS = {
-  invite: 767, // specific-people grants (invite by email)
-  peopleList: 768, // people-with-access listing
-  publicLinkToggle: 766, // per-asset enable/disable/revoke public link
-} as const;
+/** Per-asset description of what a PUBLIC (anonymous, no-sign-in) link exposes. */
+export function publicLinkScope(type: ShareAssetType): string {
+  switch (type) {
+    case "run":
+      return "They can view this run, including inputs, steps, tool calls, output, and cost.";
+    case "brain_pack":
+      return "They can view and duplicate this brain pack.";
+    case "brain_file":
+      return "They can view and duplicate this file.";
+    case "approval":
+      return "Anyone with this link can review, approve, or reject this pending approval.";
+    case "worker":
+    default:
+      return "They can view the worker, inspect its files, and duplicate it.";
+  }
+}

@@ -149,10 +149,10 @@ const API_ENDPOINT_GROUPS: {
 ];
 
 const METHOD_BADGE: Record<ApiMethod, string> = {
-  GET: "bg-emerald-500/12 text-emerald-700 dark:text-emerald-300",
-  POST: "bg-blue-500/12 text-blue-700 dark:text-blue-300",
+  GET: "bg-[color-mix(in_srgb,var(--positive)_12%,transparent)] text-[var(--positive)]",
+  POST: "bg-[var(--accent-soft)] text-[var(--accent)]",
   PATCH: "bg-[var(--accent-soft)] text-[var(--accent)]",
-  DELETE: "bg-rose-500/12 text-rose-700 dark:text-rose-300",
+  DELETE: "bg-[color-mix(in_srgb,var(--negative)_12%,transparent)] text-[var(--negative)]",
 };
 
 const API_ENDPOINT_COUNT = API_ENDPOINT_GROUPS.reduce(

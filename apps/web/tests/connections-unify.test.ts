@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { toUnified, connStatusKey, STATUS_PILL } from "@/lib/connections/unify";
+import { toUnified, connStatusKey, STATUS_PILL, collectionCounts } from "@/lib/connections/unify";
 import type { ConnectionItem, SecretItem } from "@/lib/types";
 
 const conn = (over: Partial<ConnectionItem>): ConnectionItem => ({
@@ -70,5 +70,44 @@ describe("toUnified — one list, type is a tag (SPEC §1a)", () => {
     expect(out[0].statusKey).toBe("active");
     expect(out[1].statusKey).toBe("error");
     expect(out[1].detail).toBe("used by 0");
+  });
+});
+
+describe("collectionCounts (round-09 #6 — secrets are NOT connections)", () => {
+  // Live bug: 0 connections + 43 secrets rendered "43 total · 43 active" under a
+  // page titled "Connections", reading as "43 active connections". The headline
+  // counts must reflect REAL connections only; secrets get their own count and
+  // never inflate the connection status tiles.
+  it("counts secrets separately and never as active connections", () => {
+    const items = toUnified(
+      [],
+      Array.from({ length: 43 }, (_, i) => secret({ name: `S${i}`, status: "set" })),
+    );
+    const counts = collectionCounts(items);
+    const byLabel = Object.fromEntries(counts.map((c) => [c.label, c.value]));
+
+    // No real connections exist.
+    expect(byLabel.connections).toBe(0);
+    // The 43 secrets are reported as secrets, not as connections.
+    expect(byLabel.secrets).toBe(43);
+    // CRITICAL: the "active" connection tile must NOT count the 43 secrets.
+    expect(byLabel.active ?? 0).toBe(0);
+  });
+
+  it("counts connection health over connections only, secrets separately", () => {
+    const items = toUnified(
+      [
+        conn({ id: "c1", status: "active" }),
+        conn({ id: "c2", status: "expired" }), // reauth
+        conn({ id: "m1", kind: "mcp", status: "active" }),
+      ],
+      [secret({ name: "A", status: "set" }), secret({ name: "B", status: "missing" })],
+    );
+    const byLabel = Object.fromEntries(collectionCounts(items).map((c) => [c.label, c.value]));
+
+    expect(byLabel.connections).toBe(3); // 2 connection + 1 mcp
+    expect(byLabel.secrets).toBe(2);
+    expect(byLabel.active).toBe(2); // c1 + m1, NOT the "set" secret
+    expect(byLabel.reauth).toBe(1); // c2
   });
 });

@@ -26,8 +26,12 @@ class WorkerRepository(Protocol):
         Supabase) supply their own implementation. *user_id* is the effective
         visibility user id; stock_worker_ids are passed in (caller owns the
         PUBLIC/PROTECTED sets) to avoid a db<-main import cycle. Each row carries
-        at least id, name, trigger_type, enabled, manifest_json; the caller
-        shapes the agent output and applies system/example hiding.
+        at least id, name, trigger_type, enabled, owner_id, manifest_json; the
+        caller shapes the agent output and applies system/example hiding.
+        ``owner_id`` lets the caller exclude seeded stock/example/test workers the
+        operator does NOT own so Emily's list matches the owner-scoped dashboard
+        grid (round-09 #1 split-brain fix); a backend that cannot supply it may
+        omit it and the caller falls back to the prior behaviour.
         """
         ...
 
@@ -429,6 +433,16 @@ class ApprovalRepository(Protocol):
     def get_public(self, *, approval_id: str) -> RowDict | None: ...
 
     def get_by_run_id(self, *, run_id: str) -> RowDict | None: ...
+
+    def get_by_follow_up_run_id(self, *, follow_up_run_id: str) -> RowDict | None:
+        """Return the approval whose ``follow_up_run_id`` matches (the engine-
+        spawned execution run for an approved decision), or ``None``.
+
+        #418: the authoritative signal that a run is the post-approval EXECUTE
+        phase. Only ``approve_run`` ever sets ``follow_up_run_id``, so this
+        cannot be spoofed by a caller-supplied input or trigger_source.
+        """
+        ...
 
     def list_pending(self, *, owner_id: str) -> list[RowDict]: ...
 

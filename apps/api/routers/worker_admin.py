@@ -53,6 +53,7 @@ from services.worker_mutation import (
     _patch_worker_yml_field,
     _require_worker_write_workspace_context,
     _set_db_manifest_archived,
+    _set_db_manifest_stage,
 )
 from services.worker_registry_ops import _git_commit_worker
 from services.worker_serialize import _build_worker_detail, _iter_worker_dir_files
@@ -434,6 +435,65 @@ def archive_worker(
     # invalidate_worker_cache() only clears the filesystem discovery cache.
     mutation_user_id = str(worker.get("owner_id") or auth.user_id) if auth.is_admin else auth.user_id
     _set_db_manifest_archived(worker_id, archived=True, user_id=mutation_user_id, repos=repos)
+    invalidate_worker_cache()
+    return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
+
+
+class _WorkerStageUpdate(BaseModel):
+    stage: str  # "draft" | "live"
+
+
+@worker_admin_router.put("/workers/{worker_id}/stage", response_model=WorkerDetail)
+def set_worker_stage(
+    worker_id: str,
+    payload: _WorkerStageUpdate,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> WorkerDetail:
+    """Set a worker's maturity stage ("draft" | "live").
+
+    Pure label, orthogonal to archived/enabled/visibility — it never gates
+    execution, scheduling, or access. Lets the operator separate WIP workers
+    from the ones they rely on (mess-control). Writes worker.yml for restart
+    durability and mirrors the DB manifest in lockstep, exactly like archive.
+    """
+    from worker_registry import WORKERS_DIR as _WORKERS_DIR, invalidate_worker_cache
+    import re as _re
+
+    stage = str(payload.stage or "").strip().lower()
+    if stage not in ("draft", "live"):
+        raise HTTPException(status_code=422, detail="stage must be 'draft' or 'live'")
+
+    worker_id = _canonical_worker_id(worker_id)
+    _raise_if_protected_worker_mutation(worker_id)
+    worker = _get_visible_worker(
+        worker_id,
+        user_id=auth.user_id,
+        repos=repos,
+        role=_worker_repo_role(auth),
+    )
+    if not worker:
+        raise HTTPException(status_code=404, detail="Worker not found")
+    if not auth.is_admin and str(worker.get("owner_id") or "") != str(auth.user_id):
+        raise HTTPException(status_code=403, detail="You cannot change this worker's stage")
+
+    worker_yml_path = _WORKERS_DIR / worker_id / "worker.yml"
+    if not worker_yml_path.exists():
+        raise HTTPException(status_code=404, detail="Worker not found")
+    try:
+        raw_yml = worker_yml_path.read_text(encoding="utf-8")
+        # Replace an existing `stage: <value>` line; otherwise append the field.
+        updated, n = _re.subn(r"(?m)^(stage:\s*).*$", rf"\1{stage}", raw_yml)
+        if n == 0:
+            if not updated.endswith("\n"):
+                updated += "\n"
+            updated += f"stage: {stage}\n"
+        worker_yml_path.write_text(updated, encoding="utf-8")
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=f"Failed to update worker.yml: {exc}") from exc
+    # Mirror into the DB manifest — the API resolves stage from there, not disk.
+    mutation_user_id = str(worker.get("owner_id") or auth.user_id) if auth.is_admin else auth.user_id
+    _set_db_manifest_stage(worker_id, stage=stage, user_id=mutation_user_id, repos=repos)
     invalidate_worker_cache()
     return _build_worker_detail(worker_id, user_id=auth.user_id, repos=repos)
 

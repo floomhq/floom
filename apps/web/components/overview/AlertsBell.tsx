@@ -305,13 +305,15 @@ export function AlertsBell({ items: itemsProp, onRefresh }: AlertsBellProps) {
           ref={panelRef}
           role="dialog"
           aria-label="Worker notifications"
-          className="absolute right-0 top-full z-50 mt-2 w-[380px] rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--paper)] shadow-[var(--shadow-pop)] outline-none"
+          className="absolute right-0 top-full z-50 mt-2 w-[380px] rounded-[var(--radius-card)] bg-[var(--paper)] shadow-[var(--shadow-pop)] outline-none"
         >
-          <div className="[border-bottom:var(--bd-div)] px-4 py-3">
+          <div className="px-4 py-3">
             <p className="text-sm font-semibold text-[var(--ink)]">
               {count > 0 ? `${count} item${count === 1 ? "" : "s"} need attention` : "Notifications"}
             </p>
           </div>
+          {/* soft hairline separator — bg only, no border */}
+          <div className="h-px bg-[var(--line-soft)]" aria-hidden="true" />
 
           <div className="max-h-[400px] overflow-y-auto">
             {items.length === 0 ? (
@@ -320,65 +322,68 @@ export function AlertsBell({ items: itemsProp, onRefresh }: AlertsBellProps) {
                 <p className="text-sm text-[var(--ink-soft)]">All workers running normally</p>
               </div>
             ) : (
-              <div className="[&>*+*]:[border-top:var(--bd-div)]">
-                {failures.map((item) => (
-                  <div key={`failure-${item.worker_id}`} className="px-4 py-3">
-                    <div className="flex items-start gap-3">
-                      <AlertTriangle
-                        className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]"
-                        aria-hidden="true"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-[var(--ink)]">
-                          {item.worker_name || humanizeSlug(item.worker_id, "Worker")} is failing
-                        </p>
-                        <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
-                          {item.recent_failure_count !== null &&
-                          item.recent_failure_count !== undefined
-                            ? `${item.recent_failure_count} failures in 24h`
-                            : item.message}
-                          {item.last_failed_at
-                            ? ` · last failed ${formatRelative(item.last_failed_at)}`
-                            : ""}
-                          {item.cause ? ` · ${item.cause}` : ""}
-                        </p>
-                        <div className="mt-2 flex flex-wrap gap-1.5">
-                          {item.worker_id && (
+              <div>
+                {failures.map((item, idx) => (
+                  <div key={`failure-${item.worker_id}`}>
+                    {idx > 0 && <div className="h-px bg-[var(--line-soft)] mx-4" aria-hidden="true" />}
+                    <div className="px-4 py-3">
+                      <div className="flex items-start gap-3">
+                        <AlertTriangle
+                          className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]"
+                          aria-hidden="true"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-[var(--ink)]">
+                            {item.worker_name || humanizeSlug(item.worker_id, "Worker")} is failing
+                          </p>
+                          <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+                            {item.recent_failure_count !== null &&
+                            item.recent_failure_count !== undefined
+                              ? `${item.recent_failure_count} failures in 24h`
+                              : item.message}
+                            {item.last_failed_at
+                              ? ` · last failed ${formatRelative(item.last_failed_at)}`
+                              : ""}
+                            {item.cause ? ` · ${item.cause}` : ""}
+                          </p>
+                          <div className="mt-2 flex flex-wrap gap-1.5">
+                            {item.worker_id && (
+                              <Link
+                                href={`/workers?sel=${encodeURIComponent(item.worker_id)}`}
+                                onClick={() => setOpen(false)}
+                                className="inline-flex h-6 items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                              >
+                                View worker
+                              </Link>
+                            )}
                             <Link
-                              href={`/workers?sel=${encodeURIComponent(item.worker_id)}`}
+                              href={`/runs?worker=${item.worker_id}&status=failed`}
                               onClick={() => setOpen(false)}
-                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
                             >
-                              View worker
+                              View logs
                             </Link>
-                          )}
-                          <Link
-                            href={`/runs?worker=${item.worker_id}&status=failed`}
-                            onClick={() => setOpen(false)}
-                            className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
-                          >
-                            View logs
-                          </Link>
-                          {item.worker_id && (
-                            <button
-                              type="button"
-                              onClick={() => retry(item.worker_id!)}
-                              disabled={busy === `retry:${item.worker_id}`}
-                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors disabled:opacity-40"
-                            >
-                              Retry
-                            </button>
-                          )}
-                          {item.worker_id && (
-                            <button
-                              type="button"
-                              onClick={() => disable(item.worker_id!)}
-                              disabled={busy === `disable:${item.worker_id}`}
-                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors disabled:opacity-40"
-                            >
-                              Disable
-                            </button>
-                          )}
+                            {item.worker_id && (
+                              <button
+                                type="button"
+                                onClick={() => retry(item.worker_id!)}
+                                disabled={busy === `retry:${item.worker_id}`}
+                                className="inline-flex h-6 items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors disabled:opacity-40"
+                              >
+                                Retry
+                              </button>
+                            )}
+                            {item.worker_id && (
+                              <button
+                                type="button"
+                                onClick={() => disable(item.worker_id!)}
+                                disabled={busy === `disable:${item.worker_id}`}
+                                className="inline-flex h-6 items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors disabled:opacity-40"
+                              >
+                                Disable
+                              </button>
+                            )}
+                          </div>
                         </div>
                       </div>
                     </div>
@@ -386,113 +391,122 @@ export function AlertsBell({ items: itemsProp, onRefresh }: AlertsBellProps) {
                 ))}
 
                 {connections.length > 0 && (
-                  <div className="px-4 py-3">
-                    <div className="flex items-start gap-3">
-                      <Plug
-                        className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ink-soft)]"
-                        aria-hidden="true"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-[var(--ink)]">
-                          {connections.length}{" "}
-                          {connections.length === 1 ? "connection needs" : "connections need"} re-auth
-                        </p>
-                        <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
-                          {connections
-                            .map((item) =>
-                              formatProviderName(
-                                item.provider_display_name ||
-                                  item.provider_names?.[0] ||
-                                  item.provider_slug,
-                              ),
-                            )
-                            .join(", ")}
-                        </p>
-                        <div className="mt-2">
-                          <Link
-                            href="/connections"
-                            onClick={() => setOpen(false)}
-                            className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
-                          >
-                            Reconnect all
-                          </Link>
+                  <>
+                    {(failures.length > 0) && <div className="h-px bg-[var(--line-soft)] mx-4" aria-hidden="true" />}
+                    <div className="px-4 py-3">
+                      <div className="flex items-start gap-3">
+                        <Plug
+                          className="mt-0.5 h-4 w-4 shrink-0 text-[var(--ink-soft)]"
+                          aria-hidden="true"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-[var(--ink)]">
+                            {connections.length}{" "}
+                            {connections.length === 1 ? "connection needs" : "connections need"} re-auth
+                          </p>
+                          <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+                            {connections
+                              .map((item) =>
+                                formatProviderName(
+                                  item.provider_display_name ||
+                                    item.provider_names?.[0] ||
+                                    item.provider_slug,
+                                ),
+                              )
+                              .join(", ")}
+                          </p>
+                          <div className="mt-2">
+                            <Link
+                              href="/connections"
+                              onClick={() => setOpen(false)}
+                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                            >
+                              Reconnect all
+                            </Link>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
+                  </>
                 )}
 
                 {setupItems.length > 0 && (
-                  <div className="px-4 py-3">
-                    <div className="flex items-start gap-3">
-                      <KeyRound
-                        className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]"
-                        aria-hidden="true"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-[var(--ink)]">
-                          {setupItems.length} worker{setupItems.length === 1 ? "" : "s"} need setup
-                        </p>
-                        <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
-                          {setupItems.map((item) => item.worker_name || item.worker_id).join(", ")}
-                        </p>
-                        <div className="mt-2 flex flex-col gap-1">
-                          {setupItems.map((item) => {
-                            const workerLabel = item.worker_name || humanizeSlug(item.worker_id, "Worker");
-                            return item.kind === "missing_connection" ? (
-                              <Link
-                                key={item.worker_id}
-                                href={`/connections?worker=${encodeURIComponent(item.worker_id ?? "")}`}
-                                onClick={() => setOpen(false)}
-                                className="inline-flex h-7 items-center justify-between gap-2 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
-                              >
-                                <span className="truncate text-[var(--ink-soft)]">{workerLabel}</span>
-                                <span className="shrink-0">Add connection →</span>
-                              </Link>
-                            ) : (
-                              <Link
-                                key={item.worker_id}
-                                href={`/connections/secrets?return_to=${encodeURIComponent(`/workers?sel=${item.worker_id ?? ""}`)}`}
-                                onClick={() => setOpen(false)}
-                                className="inline-flex h-7 items-center justify-between gap-2 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
-                              >
-                                <span className="truncate text-[var(--ink-soft)]">{workerLabel}</span>
-                                <span className="shrink-0">Add secret →</span>
-                              </Link>
-                            );
-                          })}
+                  <>
+                    {(failures.length > 0 || connections.length > 0) && <div className="h-px bg-[var(--line-soft)] mx-4" aria-hidden="true" />}
+                    <div className="px-4 py-3">
+                      <div className="flex items-start gap-3">
+                        <KeyRound
+                          className="mt-0.5 h-4 w-4 shrink-0 text-[var(--warning)]"
+                          aria-hidden="true"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-[var(--ink)]">
+                            {setupItems.length} worker{setupItems.length === 1 ? "" : "s"} need setup
+                          </p>
+                          <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+                            {setupItems.map((item) => item.worker_name || item.worker_id).join(", ")}
+                          </p>
+                          <div className="mt-2 flex flex-col gap-1">
+                            {setupItems.map((item) => {
+                              const workerLabel = item.worker_name || humanizeSlug(item.worker_id, "Worker");
+                              return item.kind === "missing_connection" ? (
+                                <Link
+                                  key={item.worker_id}
+                                  href={`/connections?worker=${encodeURIComponent(item.worker_id ?? "")}`}
+                                  onClick={() => setOpen(false)}
+                                  className="inline-flex h-7 items-center justify-between gap-2 rounded-[var(--radius-button)] bg-[var(--bg-2)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                                >
+                                  <span className="truncate text-[var(--ink-soft)]">{workerLabel}</span>
+                                  <span className="shrink-0">Add connection →</span>
+                                </Link>
+                              ) : (
+                                <Link
+                                  key={item.worker_id}
+                                  href={`/connections/secrets?return_to=${encodeURIComponent(`/workers?sel=${item.worker_id ?? ""}`)}`}
+                                  onClick={() => setOpen(false)}
+                                  className="inline-flex h-7 items-center justify-between gap-2 rounded-[var(--radius-button)] bg-[var(--bg-2)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                                >
+                                  <span className="truncate text-[var(--ink-soft)]">{workerLabel}</span>
+                                  <span className="shrink-0">Add secret →</span>
+                                </Link>
+                              );
+                            })}
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
+                  </>
                 )}
 
                 {pendingApprovals > 0 && (
-                  <div className="px-4 py-3">
-                    <div className="flex items-start gap-3">
-                      <CheckCircle
-                        className="mt-0.5 h-4 w-4 shrink-0 text-[var(--primary)]"
-                        aria-hidden="true"
-                      />
-                      <div className="min-w-0 flex-1">
-                        <p className="text-sm font-medium text-[var(--ink)]">
-                          {pendingApprovals} approval{pendingApprovals === 1 ? "" : "s"} awaiting
-                        </p>
-                        <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
-                          Workers are waiting for your decision before executing.
-                        </p>
-                        <div className="mt-2">
-                          <Link
-                            href="/approvals"
-                            onClick={() => setOpen(false)}
-                            className="inline-flex h-6 items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--paper)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
-                          >
-                            Review approvals
-                          </Link>
+                  <>
+                    {(failures.length > 0 || connections.length > 0 || setupItems.length > 0) && <div className="h-px bg-[var(--line-soft)] mx-4" aria-hidden="true" />}
+                    <div className="px-4 py-3">
+                      <div className="flex items-start gap-3">
+                        <CheckCircle
+                          className="mt-0.5 h-4 w-4 shrink-0 text-[var(--primary)]"
+                          aria-hidden="true"
+                        />
+                        <div className="min-w-0 flex-1">
+                          <p className="text-sm font-medium text-[var(--ink)]">
+                            {pendingApprovals} approval{pendingApprovals === 1 ? "" : "s"} awaiting
+                          </p>
+                          <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
+                            Workers are waiting for your decision before executing.
+                          </p>
+                          <div className="mt-2">
+                            <Link
+                              href="/approvals"
+                              onClick={() => setOpen(false)}
+                              className="inline-flex h-6 items-center rounded-[var(--radius-button)] bg-[var(--bg-2)] px-2.5 text-[11px] font-medium text-[var(--ink)] hover:bg-[var(--bg-2)] transition-colors"
+                            >
+                              Review approvals
+                            </Link>
+                          </div>
                         </div>
                       </div>
                     </div>
-                  </div>
+                  </>
                 )}
               </div>
             )}

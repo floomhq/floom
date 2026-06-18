@@ -68,7 +68,7 @@ export function CreateSourcePills({ onPick }: { onPick: (source: string) => void
             type="button"
             onClick={() => onPick(f.name)}
             className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--bg-2)] py-1 pl-2 pr-2.5 text-xs text-foreground transition-colors hover:bg-muted"
-            title={`Use the ${f.name} brain folder`}
+            title={`Use the ${f.name} library folder`}
           >
             <Brain className="size-3.5 shrink-0 text-muted-foreground" />
             <span className="leading-none">{f.name}</span>

@@ -84,6 +84,7 @@ function BrainPreview({ name }: { name: string }) {
       emptyLabel="This folder has no files yet."
       loadText={(file) => api.contexts.readTextFile(name, file.id)}
       loadSqlite={(file, table) => api.contexts.sqlite(name, file.id, table)}
+      loadBlob={async (file) => (await api.contexts.fetchFileBlob(name, file.id)).arrayBuffer()}
     />
   );
 }
@@ -168,7 +169,7 @@ export function ChipPreviewDialog({
               {target?.kind === "integration" ? target.app : target?.name}
             </DialogTitle>
             <DialogDescription className="text-xs text-muted-foreground">
-              {target?.kind === "integration" ? "Actions this tool can run" : "Files in this brain folder"}
+              {target?.kind === "integration" ? "Actions this tool can run" : "Files in this library folder"}
             </DialogDescription>
           </div>
           {target?.kind === "integration" && (

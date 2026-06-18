@@ -21,11 +21,9 @@ RejectRequest that chat_service imports.
 
 from __future__ import annotations
 
-import hashlib
 import hmac
 import json
 import logging
-import os
 import re
 from typing import Any, Dict, List, Optional
 
@@ -44,6 +42,11 @@ from fastapi.responses import StreamingResponse
 from pydantic import BaseModel
 
 from auth import AuthContext, get_auth_context
+from core.approval_signing import (
+    _approval_public_payload,
+    approval_public_token,
+    try_approval_public_token,
+)
 from core.urls import _frontend_base_url
 from core.utils import row_to_dict
 from db import Repositories, get_repos
@@ -280,7 +283,21 @@ def _approval_response(
     # `type` mirrors preview_type for the v4 frontend's preview dispatcher.
     if response.get("preview_type") is not None:
         response["type"] = response.get("preview_type")
-    response["public_link"] = _approval_public_link_for_owner(dict(approval))
+    # take-base (round-09 cloud-safe signer): standalone share/review link for the
+    # authenticated owner. The token is the same deterministic HMAC the
+    # /approvals/public/* routes verify. DEGRADE, never 503: try_approval_public_token
+    # returns None when no signer secret is configured (cloud strips FLOOM_SECRET;
+    # base adds the dedicated WORKEROS_APPROVAL_SIGNING_SECRET so cloud links still
+    # work). The authenticated owner always gets their approvals list/detail; only
+    # the optional share link is omitted. (Main's _approval_public_link_for_owner
+    # also degrades but is FLOOM_SECRET-only → no cloud share link.)
+    token = try_approval_public_token(dict(approval))
+    response["public_link"] = (
+        f"{_frontend_base_url()}/approvals/review"
+        f"?id={response.get('id')}&token={token}"
+        if token
+        else None
+    )
     return response
 
 
@@ -317,24 +334,18 @@ def _publish_approval_terminal_status(
     _sse_publish(run_id, event)
 
 
-def _approval_public_payload(approval: Dict[str, Any]) -> str:
-    return ".".join(
-        str(approval.get(key) or "")
-        for key in ("id", "run_id", "owner_id")
-    )
-
-
-def _approval_public_token(approval: Dict[str, Any]) -> str:
-    # #998: never sign/verify a public share token with a public constant —
-    # a missing secret would let anyone forge share links. Fail closed.
-    secret = (os.environ.get("FLOOM_SECRET") or "").strip()
-    if not secret:
-        raise HTTPException(status_code=503, detail="Server signing secret not configured")
-    return hmac.new(
-        secret.encode("utf-8"),
-        _approval_public_payload(approval).encode("utf-8"),
-        hashlib.sha256,
-    ).hexdigest()
+# The approval public-share signer (token mint + secret resolution) now lives in
+# core.approval_signing as the single source of truth: `approval_public_token`
+# (fail-closed mint, for the verify path below) and `try_approval_public_token`
+# (degrade-to-None, for the owner's list/detail serializer above).
+# `_approval_public_payload` is re-exported there for the existence-oracle dummy
+# compare in _load_public_approval.
+#
+# Backward-compat alias: main.py re-exports `_approval_public_token` from this
+# module (and #998's test asserts it fail-closes with 503 when no signer). The
+# canonical name is now `approval_public_token`; keep the underscore alias so
+# the re-export and existing callers keep working.
+_approval_public_token = approval_public_token
 
 
 def _approval_public_link_for_owner(approval: Dict[str, Any]) -> str | None:
@@ -373,7 +384,11 @@ def _load_public_approval(
         # present-but-wrong-token approval are indistinguishable (no oracle).
         hmac.compare_digest(token or "", "0" * 64)
         raise _PUBLIC_APPROVAL_DENIED
-    expected = _approval_public_token(dict(approval))
+    # Fail-closed mint: the verify path must NEVER accept a token when no signer
+    # is configured (no unsigned/forgeable link). This raises 503 if neither
+    # WORKEROS_APPROVAL_SIGNING_SECRET nor FLOOM_SECRET is set — correct, because
+    # there is no valid token to compare against without a real signer.
+    expected = approval_public_token(dict(approval))
     if not token or not hmac.compare_digest(token, expected):
         # Identical response to the not-found case — no existence oracle.
         raise _PUBLIC_APPROVAL_DENIED
@@ -692,18 +707,27 @@ def approve_run(
     )
 
     # We won the claim — now (and only now) spawn the single follow-up run.
+    # #418: create the run in a NON-QUEUED holding status (RUNNING) so the
+    # background drain loop (which only dispatches QUEUED runs) cannot pick it up
+    # before its approval linkage is attached. Otherwise the execute-phase run
+    # could be dispatched in the window before attach_follow_up, and
+    # _is_engine_approved_execution_run would misclassify it as the propose
+    # phase (re-gating it / skipping the side effect).
     try:
         follow_up_run_id = create_run(
             worker_id,
             follow_up_inputs,
             trigger_source="approval",
+            status=RunStatus.RUNNING.value,
             user_id=auth.user_id,
             repos=repos,
         )
     except Exception as exc:
         raise HTTPException(status_code=500, detail=f"Failed to spawn follow-up run: {exc}") from exc
 
-    # Attach the follow-up run id to the (already-approved) approval row.
+    # Attach the follow-up run id to the (already-approved) approval row BEFORE
+    # the run is made dispatchable, so the execute-phase signal is authoritative
+    # by the time any executor reads it.
     attach = getattr(repos.approvals, "attach_follow_up", None)
     if callable(attach):
         attach(
@@ -712,6 +736,15 @@ def approve_run(
             follow_up_run_id=follow_up_run_id,
             edited_output_json=edited_output_json,
         )
+
+    # Now flip the follow-up run to QUEUED and wake the drain loop. The linkage
+    # above is committed first, so the run is recognised as execute-phase the
+    # instant it becomes dispatchable.
+    repos.runs.update_status(
+        user_id=auth.user_id,
+        run_id=follow_up_run_id,
+        status=RunStatus.QUEUED.value,
+    )
 
     # Kick off the follow-up run
     start_run(follow_up_run_id, worker_id, follow_up_inputs, user_id=auth.user_id, repos=repos)

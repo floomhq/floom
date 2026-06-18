@@ -5,14 +5,17 @@
 import type { RunSummary, RunStatus } from "@/lib/types";
 import type { PillTone } from "@/lib/collection/types";
 
-// #1130: cap duration display — anything beyond 24h is a zombie/timed-out run.
-const ZOMBIE_THRESHOLD_MS = 24 * 60 * 60 * 1000;
-
 export function formatDuration(ms?: number): string {
   if (ms == null) return "—";
   if (ms < 1000) return `${ms}ms`;
   if (ms < 60000) return `${(ms / 1000).toFixed(1)}s`;
-  if (ms >= ZOMBIE_THRESHOLD_MS) return "Timed out";
+  // #1252: "Timed out" is a status label — it must not appear in the Duration
+  // column. Show the real elapsed time regardless of how long the run took.
+  if (ms >= 60 * 60 * 1000) {
+    const h = Math.floor(ms / 3600000);
+    const m = Math.round((ms % 3600000) / 60000);
+    return m > 0 ? `${h}h ${m}m` : `${h}h`;
+  }
   const m = Math.floor(ms / 60000);
   const s = Math.round((ms % 60000) / 1000);
   return `${m}m ${s}s`;
@@ -70,6 +73,22 @@ export function dayLabel(iso: string | undefined, now: number): string {
 
 export function runSortTime(r: RunSummary): number {
   return Date.parse(r.created_at ?? r.started_at ?? "") || 0;
+}
+
+/**
+ * Infer a GenericOutput render type from a raw value when the run carries no
+ * declared output_schema. Mirrors the run-page logic (RunPanel/RunDetailSplitPane)
+ * so the run-history OutputTab renders a humane result, not a JSON dump.
+ */
+export function inferOutputType(value: unknown): string {
+  if (typeof value === "object" && value !== null) return "json";
+  if (typeof value === "string") {
+    const t = value.trim();
+    if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) return "json";
+    if (/^#{1,3}\s|\n[-*]\s|\|.+\|/.test(t)) return "markdown";
+    return "text";
+  }
+  return "text";
 }
 
 /** Flatten runs into CSV rows (pure; the unparse/download stays in the view). */

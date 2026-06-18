@@ -1,11 +1,18 @@
 """Public/shared worker + brain routes: signed-link projection, short-links,
-share-link mint/revoke, standalone-share resolution, and share import.
+share-link mint/revoke, standalone-share resolution, share import, and the
+shareable-link run path (run-meta, public run trigger, public SSE stream).
 
 GET /workers/public/{id} (HMAC-token public projection), POST/GET worker
 short-links, POST /workers/import-from-share, the /contexts/{name}[/files/...]
 share-link mint/revoke pairs, and the /s/{token} standalone-share resolver +
 file download. Extracted verbatim from main.py (only contexts imports made
 lazy-in-handler per the purged-module convention).
+
+NEW (#1338 #1329): two endpoints for the /run/[id] shareable-link page:
+  GET  /workers/public/{id}/run-meta?token=<hmac>  — identity + schema (no secrets)
+  POST /workers/public/{id}/runs                   — body {inputs, token}, runs as owner
+The public SSE path is GET /runs/{run_id}/stream?token=<fls_token> wired in
+routers/runs.py so it shares the existing stream implementation.
 
 All domain logic comes from services (public_worker / share_links /
 context_access / public_view / worker_access / worker_registry_ops / run_access);
@@ -16,7 +23,7 @@ is purged in lockstep with main by the worker/context test fixtures.
 from __future__ import annotations
 
 from pathlib import Path
-from typing import Any, Dict
+from typing import Any, Dict, List, Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query, Request, Response
 from fastapi.responses import FileResponse, JSONResponse
@@ -24,7 +31,16 @@ from pydantic import BaseModel, Field
 
 from auth import AuthContext, get_auth_context
 from db import Repositories, get_repos
-from models import DraftFile, PublicWorker, RunCreate, WorkerConfig, _ImportFromShareRequest
+from models import (
+    ActionResponse,
+    DraftFile,
+    PublicWorker,
+    PublicWorkerInput,
+    PublicWorkerOutput,
+    RunCreate,
+    WorkerConfig,
+    _ImportFromShareRequest,
+)
 from services.context_access import (
     _assert_context_file_shareable,
     _assert_context_pack_shareable,
@@ -320,3 +336,5 @@ def get_standalone_share(
     repos: Repositories = Depends(get_repos),
 ) -> JSONResponse:
     return _json_noindex(_standalone_share_payload(token, repos))
+
+

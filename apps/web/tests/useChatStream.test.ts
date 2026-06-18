@@ -207,7 +207,7 @@ describe("Emily chat tool cards", () => {
     if (card?.kind !== "run") throw new Error("expected run card");
     expect(card.toolName).toBe("runs.get");
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
-    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_123&tab=Trace");
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_123&tab=Logs");
   });
 
   it("recovers View run from the live nested runs.get result shape", () => {
@@ -258,11 +258,11 @@ describe("Emily chat tool cards", () => {
         id: "open_run",
         label: "View run",
         method: "GET",
-        href: "/runs?sel=run_live_123&tab=Trace",
+        href: "/runs?sel=run_live_123&tab=Logs",
       },
     ]);
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
-    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_live_123&tab=Trace");
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_live_123&tab=Logs");
   });
 
   it("keeps run auto-open href stable after finish reconciliation", () => {
@@ -314,7 +314,7 @@ describe("Emily chat tool cards", () => {
     if (card?.kind !== "run") throw new Error("expected run card");
     expect(card.status).toBe("completed");
     expect(shouldAutoOpenRunDetails(card)).toBe(true);
-    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_live_456&tab=Trace");
+    expect(getAutoOpenRunDetailsHref(card)).toBe("/runs?sel=run_live_456&tab=Logs");
   });
 
   it("preserves run stream handles while reconciling worker-run card progress", () => {

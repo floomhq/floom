@@ -102,7 +102,7 @@ function LiveTranscript({
       </div>
 
       {streamUnavailable && isActive && (
-        <div className="flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-button)] border border-amber-200 dark:border-amber-800 bg-amber-50/60 dark:bg-amber-950/20 px-4 py-3">
+        <div className="flex flex-wrap items-start justify-between gap-3 rounded-[var(--radius-button)] bg-[color-mix(in_srgb,var(--warning)_8%,transparent)] px-4 py-3">
           <p className="text-sm text-[var(--ink)]">
             {streamError || "Stream connection dropped. Refresh to re-check."}
           </p>
@@ -139,7 +139,7 @@ function LiveTranscript({
           return (
             <div
               key={`${part.type}-${index}`}
-              className="rounded-[var(--radius-button)] border border-border bg-muted/40 p-3"
+              className="rounded-[var(--radius-button)] bg-muted/40 p-3"
             >
               <p className="mb-1 text-[11px] font-medium uppercase text-muted-foreground">
                 {part.type === "reasoning" ? "Reasoning" : "Text"}

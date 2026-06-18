@@ -1,51 +1,34 @@
 "use client";
 
-// S44: accepts server-fetched initialData to eliminate client-side fetch round-trip.
-// S45: sparklines on metric tiles, alerts moved to AlertsBell in header.
-// W8: worker icons in activity + upcoming list rows.
-import { useCallback, useEffect, useMemo, useState } from "react";
+// V4 "Brief / digest" (Federico-approved, scored winner). Mockup: /tmp/ov-variant-4.png.
+//
+// The most reduced overview. A single editorial column:
+//   1. Time-aware greeting ("Good evening, {firstName}") + date line.
+//   2. "Work done this week" label + the BIG near-black number (heavier/larger
+//      than the greeting — the number reclaims visual primacy) + inline sparkline.
+//   3. A one-sentence plain-language summary (2-line cap) composed from the same
+//      overview aggregates (delta %, success %, hours saved, runs today, needs-you
+//      count). The "need your input" phrase is an accent LINK to the needs-you list.
+//   4. A "needs you" list (lowercase hairline label) of attention items.
+//   5. A quiet hairline "Recent work" strip — the last ~3 runs, one line each
+//      (worker + outcome + time), hairline dividers, no cards/borders. This kills
+//      the "too empty" risk on a fresh / quiet workspace.
+//
+// Data layer (useOverview cache-first hook) is owned by a parallel lane, not
+// touched here. Only the presentational layout changed. The empty-workspace
+// ActivationPanel path is preserved.
+import { type ReactNode, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
-import {
-  ArrowUp,
-  CalendarClock,
-} from "lucide-react";
 
-import { api } from "@/lib/api";
+import { useOverview as useOverviewQuery } from "@/lib/query/hooks";
 import type {
-  OverviewSparklineBucket,
   SystemOverview,
   SystemOverviewAttentionItem,
   SystemOverviewRunItem,
-  SystemOverviewScheduledItem,
 } from "@/lib/types";
-import { Sparkline } from "@/components/Sparkline";
-import { Skeleton } from "@/components/ui/skeleton";
-import {
-  formatDuration,
-  formatRelative,
-  formatRelativeFuture,
-  formatTimeOfDay,
-} from "@/lib/formatters";
-import { cn } from "@/lib/utils";
-import { workerIcon } from "@/lib/worker-icon";
-import { BrandLogo } from "@/components/connections/BrandLogo";
-import { ActivationPanel } from "@/components/overview/ActivationPanel";
 
-export type { SystemOverviewAttentionItem };
-
-// Spec rule 2: flat-by-token — all borders from CSS variables, never hardcoded.
-// --bd-card is `none` per design tokens; use the full border shorthand so the
-// computed border width is 0px when the token is none.
-const cardClass =
-  "rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
-const listClass =
-  "overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-list)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]";
-
-function metricTrend(current: number, previous: number) {
-  if (previous <= 0) return null;
-  return Math.round(((current - previous) / previous) * 100);
-}
-
+// Retained pure helper (covered by tests/overview-worker-metric.test.ts). The
+// hero's supporting-stats line shows the "workers on duty" count via this.
 export function workerStatusMetric(
   stats:
     | Pick<SystemOverview["stats"], "active_workers_count" | "paused_workers_count">
@@ -55,17 +38,33 @@ export function workerStatusMetric(
   const active = stats?.active_workers_count ?? 0;
   const paused = stats?.paused_workers_count ?? 0;
   if (active === 0 && paused > 0) {
-    return {
-      value: paused,
-      label: "Workers paused",
-      context: "All workers paused",
-    };
+    return { value: paused, label: "Workers paused", context: "All workers paused" };
   }
   return {
     value: active,
-    label: "Workers active",
-    context: `${paused} paused`,
+    label: "Workers on duty",
+    context: paused > 0 ? `${paused} paused` : "Running when triggered",
   };
+}
+
+// round-09 #7: runs_today is a count of RUNS, never distinct workers. The hero
+// copy used to read "N workers ran today", fabricating a worker count from the
+// runs metric (live: "30 workers ran today" with 1 worker + 3 runs). This pure
+// helper labels the runs_today metric honestly so the copy can never say
+// "worker". Covered by tests/overview-worker-metric.test.ts.
+export function runsTodayLabel(runsToday: number): "run" | "runs" {
+  return runsToday === 1 ? "run" : "runs";
+}
+import { api } from "@/lib/api";
+import { Skeleton } from "@/components/ui/skeleton";
+import { formatRelative } from "@/lib/formatters";
+import { ActivationPanel } from "@/components/overview/ActivationPanel";
+
+export type { SystemOverviewAttentionItem };
+
+function metricTrend(current: number, previous: number) {
+  if (previous <= 0) return null;
+  return Math.round(((current - previous) / previous) * 100);
 }
 
 function humanizeSlug(value: string | null | undefined, fallback: string) {
@@ -75,229 +74,121 @@ function humanizeSlug(value: string | null | undefined, fallback: string) {
   return normalized.replace(/\b[a-z]/g, (letter) => letter.toUpperCase());
 }
 
+const providerNameAliases: Record<string, string> = {
+  github: "GitHub",
+  googlecalendar: "Google Calendar",
+  "google-calendar": "Google Calendar",
+  googledrive: "Google Drive",
+  "google-drive": "Google Drive",
+  hubspot: "HubSpot",
+  notion: "Notion",
+  salesforce: "Salesforce",
+  slack: "Slack",
+  gmail: "Gmail",
+};
 
-function formatTriggerSource(value: string | null | undefined) {
-  if (!value) return "schedule";
-  const normalized = value.toLowerCase();
-  if (normalized.includes("cron") || normalized.includes("schedule")) return "schedule";
-  if (normalized.includes("manual")) return "manual";
-  if (normalized.includes("webhook")) return "webhook";
-  return humanizeSlug(value, "schedule").toLowerCase();
+function formatProviderName(value: string | null | undefined) {
+  if (!value) return "Connection";
+  const key = value.toLowerCase().replace(/[\s_]+/g, "-");
+  return (
+    providerNameAliases[key] ??
+    providerNameAliases[key.replace(/-/g, "")] ??
+    humanizeSlug(value, "Connection")
+  );
 }
 
-function MetricCard({
-  value,
-  label,
-  context,
-  trend,
-  warning,
-  loading,
-  sparkline,
-  href,
-}: {
-  value: number | string;
-  label: string;
-  context: string;
-  trend?: number | null;
-  warning?: boolean;
-  loading: boolean;
-  sparkline?: OverviewSparklineBucket[];
-  /** Wireframe §4: tiles navigate (runs/workers). */
-  href?: string;
-}) {
-  const hasSparkline = Boolean(sparkline && sparkline.length > 0);
-  const className = cn(
-    cardClass,
-    "flex min-h-[152px] flex-col overflow-hidden",
-    href && "cursor-pointer transition-colors hover:bg-[var(--bg-2)]",
-  );
-  const body = (
-    <>
-      {/* Stat at the top */}
-      <div className="px-[18px] pt-[18px]">
-        {loading ? (
-          <Skeleton className="h-7 w-16 rounded-[var(--radius-button)]" />
-        ) : (
-          <div className="text-[26px] font-semibold leading-tight text-[var(--text-primary)]">{value}</div>
-        )}
-        <div className="mt-1 flex items-center gap-1.5">
-          {warning ? (
-            <span
-              className="size-1.5 rounded-[var(--radius-pill)] bg-[var(--warning)]"
-              aria-label="Has failures"
-            />
-          ) : null}
-          <p className="text-[13px] font-medium text-[var(--text-primary)]">{label}</p>
-        </div>
-        <p className="mt-1 flex items-center gap-1 text-[12.5px] text-[var(--text-muted)]">
-          {trend !== null && trend !== undefined && trend > 0 ? (
-            <ArrowUp className="size-3 opacity-50" aria-hidden="true" />
-          ) : null}
-          <span className={trend !== null && trend !== undefined ? "opacity-70" : undefined}>
-            {context}
-          </span>
-        </p>
-      </div>
-      {(loading || hasSparkline) && (
-        <div className="mt-auto h-12">
-          {loading ? (
-            <Skeleton className="h-full w-full rounded-none" />
-          ) : (
-            <Sparkline
-              data={sparkline as OverviewSparklineBucket[]}
-              width={240}
-              height={40}
-              variant="area"
-              className="h-full w-full"
-            />
-          )}
-        </div>
-      )}
-    </>
-  );
-  return href ? (
-    <Link href={href} className={className}>
-      {body}
-    </Link>
-  ) : (
-    <div className={className}>{body}</div>
-  );
+function useOverview(initialData: SystemOverview | null) {
+  // Cache-first via TanStack Query. Returning to /overview within the cache
+  // window renders instantly from cache; initialData seeds the cache so even the
+  // first paint has no skeleton. (Data layer owned by the caching lane.)
+  const q = useOverviewQuery(initialData);
+  return {
+    data: q.data ?? null,
+    loading: q.isLoading && !q.data,
+    reload: () => q.refetch(),
+  };
+}
+
+// Time-aware greeting + first name. The greeting word depends on the viewer's
+// local clock, which only exists client-side, computing it during SSR would
+// hydrate-mismatch. We stamp it once in a client effect (mirrors how the old
+// code initialized `now`). Until then we render the neutral "Hello" with no
+// name so the first paint is stable.
+function useGreeting() {
+  const [greeting, setGreeting] = useState("Hello");
+  const [firstName, setFirstName] = useState<string | null>(null);
+
+  useEffect(() => {
+    const hour = new Date().getHours();
+    if (hour < 12) setGreeting("Good morning");
+    else if (hour < 18) setGreeting("Good afternoon");
+    else setGreeting("Good evening");
+  }, []);
+
+  useEffect(() => {
+    let cancelled = false;
+    (async () => {
+      try {
+        const me = await api.me();
+        if (cancelled) return;
+        const source = me.display_name || me.email || "";
+        // First token of the display name; for an email fall back to the local
+        // part before the first separator.
+        const raw = me.display_name
+          ? source.trim().split(/\s+/)[0]
+          : source.split("@")[0]?.split(/[._-]/)[0] ?? "";
+        const name = raw
+          ? raw.charAt(0).toUpperCase() + raw.slice(1)
+          : null;
+        if (name) setFirstName(name);
+      } catch {
+        // No name available: greeting renders without one ("Good afternoon").
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, []);
+
+  return { greeting, firstName };
+}
+
+// Stable "today" stamp for the greeting subline date. Set once client-side to
+// avoid SSR locale/timezone hydration mismatch.
+function useTodayLabel() {
+  const [label, setLabel] = useState("");
+  useEffect(() => {
+    setLabel(
+      new Date().toLocaleDateString([], {
+        weekday: "long",
+        month: "long",
+        day: "numeric",
+      }),
+    );
+  }, []);
+  return label;
 }
 
 function statusMeta(status: string) {
   const normalized = status.toLowerCase();
   if (["success", "completed", "approved"].includes(normalized)) {
-    return { label: "Completed", color: "var(--success)" };
+    return { label: "delivered", color: "var(--success)", positive: true };
   }
   if (["error", "failed", "rejected", "cancelled", "timeout"].includes(normalized)) {
-    return { label: "Failed", color: "var(--warning)" };
+    return { label: "failed", color: "var(--warning)", positive: false };
   }
   if (normalized === "queued") {
-    return { label: "Queued", color: "var(--text-muted)" };
+    return { label: "queued", color: "var(--text-muted)", positive: false };
   }
   if (normalized === "pending_approval") {
-    return { label: "Awaiting approval", color: "var(--text-muted)" };
+    return { label: "awaiting approval", color: "var(--text-muted)", positive: false };
   }
-  return { label: "Running", color: "var(--info)" };
+  return { label: "running", color: "var(--accent)", positive: false };
 }
 
-function useOverview(initialData: SystemOverview | null) {
-  // S44: start with server-fetched data — no loading flash on first render.
-  const [data, setData] = useState<SystemOverview | null>(initialData);
-  const [loading, setLoading] = useState(initialData === null);
-
-  // Explicit reload (e.g. triggered by the bell button): shows the skeleton so
-  // the user gets clear feedback that a refresh is in progress.
-  const reload = useCallback(async () => {
-    setLoading(true);
-    try {
-      const result = await api.system.overview();
-      setData(result);
-    } catch (error) {
-      console.error(error);
-    } finally {
-      setLoading(false);
-    }
-  }, []);
-
-  // Silent revalidation: fetches fresh data but never flashes the skeleton
-  // because we already have something to paint (avoids a jarring blink when
-  // switching back to the tab).
-  const revalidate = useCallback(async () => {
-    try {
-      const result = await api.system.overview();
-      setData(result);
-    } catch {
-      // Ignore — silently stale is better than a skeleton on focus.
-    }
-  }, []);
-
-  useEffect(() => {
-    let cancelled = false;
-    async function loadOnce() {
-      // Only show the skeleton when we have nothing to paint. With
-      // server-fetched initialData we revalidate silently in the background so
-      // the overview never strands a stale status (e.g. a run that finished
-      // after SSR still showing "Running" while /runs shows "Completed").
-      if (initialData === null) setLoading(true);
-      try {
-        const result = await api.system.overview();
-        if (!cancelled) setData(result);
-      } catch (error) {
-        console.error(error);
-      } finally {
-        if (!cancelled) setLoading(false);
-      }
-    }
-    loadOnce();
-    return () => {
-      cancelled = true;
-    };
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
-
-  // Re-fetch silently when the tab regains focus so cross-view status stays
-  // consistent (navigating /runs → /overview, or returning to the tab, shows
-  // the latest run statuses) without flashing the skeleton on every tab switch.
-  useEffect(() => {
-    window.addEventListener("focus", revalidate);
-    return () => window.removeEventListener("focus", revalidate);
-  }, [revalidate]);
-
-  return { data, loading, reload };
-}
-
-function useOverviewVisibleRows() {
-  const [rows, setRows] = useState(6);
-
-  useEffect(() => {
-    function updateRows() {
-      const height = window.innerHeight;
-      if (height < 820) {
-        setRows(4);
-      } else if (height < 940) {
-        setRows(6);
-      } else {
-        setRows(8);
-      }
-    }
-    updateRows();
-    window.addEventListener("resize", updateRows);
-    return () => window.removeEventListener("resize", updateRows);
-  }, []);
-
-  return rows;
-}
-
-// W8: small leading icon for each row — matches the squircle style from
-// WorkerIconPills but at xs scale (size-5). Resolves via workerIcon() exactly
-// as worker cards do: connection brand → category glyph → hash fallback.
-// Overview run/scheduled items carry only id + name (no connections/tags),
-// so the resolver uses name-keyword matching then stable-hash fallback.
-function WorkerRowIcon({ workerId, workerName }: { workerId: string; workerName?: string | null }) {
-  const resolved = workerIcon({ id: workerId, name: workerName || undefined });
-  return (
-    <span
-      className="inline-flex shrink-0 items-center justify-center size-5 bg-[var(--accent-soft)] text-[var(--accent)] [border:var(--bd-card)]"
-      style={{ borderRadius: "var(--radius-squircle)" }}
-      aria-hidden="true"
-    >
-      {resolved.kind === "brand" ? (
-        <BrandLogo icon={resolved.slug} className="size-3" />
-      ) : (
-        <resolved.Icon className="size-3" />
-      )}
-    </span>
-  );
-}
-
-// Group consecutive runs by worker_id + status so repeated failures ("Granola
-// to HubSpot … Failed" × 5) collapse into a single row with a count badge.
-// We keep groups in chronological order (most-recent first) and navigate to the
-// most-recent run in the group on click.
-type ActivityGroup = {
-  run: SystemOverviewRunItem; // representative (most-recent) run
-  count: number;
-};
+// Group consecutive runs by worker_id + status so repeated outcomes collapse
+// into one row with a ×N count (matches prior behaviour).
+type ActivityGroup = { run: SystemOverviewRunItem; count: number };
 
 function groupRuns(runs: SystemOverviewRunItem[]): ActivityGroup[] {
   const groups: ActivityGroup[] = [];
@@ -312,74 +203,56 @@ function groupRuns(runs: SystemOverviewRunItem[]): ActivityGroup[] {
   return groups;
 }
 
-function WorkerActivity({
+// Quiet hairline "Recent work" strip: the last ~3 runs, one line each
+// (worker name + outcome + relative time), hairline dividers, NO card/border.
+// This is the anti-empty fix — it keeps the brief from reading "too empty" on a
+// fresh or quiet workspace. Reuses recent_runs.
+function RecentWork({
   runs,
   loading,
-  visibleRows,
 }: {
   runs: SystemOverviewRunItem[];
   loading: boolean;
-  visibleRows: number;
 }) {
-  // Dedupe consecutive repeated failures/outcomes, then cap to visibleRows.
-  const grouped = groupRuns(runs).slice(0, visibleRows);
+  const grouped = groupRuns(runs).slice(0, 3);
+  if (!loading && grouped.length === 0) return null;
   return (
-    <section className="flex min-h-0 flex-col">
-      <div className="mb-3 flex items-center justify-between shrink-0">
-        <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Recent activity</h2>
-        <Link href="/runs" className="text-[12.5px] text-[var(--accent)] hover:underline">
+    <section className="pt-8">
+      <div className="flex items-center justify-between pb-1">
+        <h2 className="text-[12.5px] font-medium text-[var(--text-muted)]">Recent work</h2>
+        <Link href="/runs" className="text-[12.5px] font-medium text-[var(--accent)] hover:underline">
           See all
         </Link>
       </div>
       {loading ? (
-        <div className={cn(listClass, "space-y-2 p-2")}>
-          {Array.from({ length: 6 }).map((_, index) => (
-            <Skeleton key={index} className="h-[52px] w-full rounded-[var(--radius-button)]" />
+        <div className="space-y-2 py-2">
+          {Array.from({ length: 3 }).map((_, index) => (
+            <Skeleton key={index} className="h-[34px] w-full rounded-[var(--radius-button)]" />
           ))}
         </div>
-      ) : runs.length === 0 ? (
-        <div className={cn(listClass, "flex min-h-[220px] flex-1 items-center justify-center px-6 py-10 text-center text-sm text-[var(--text-muted)]")}>
-          No runs yet.
-        </div>
       ) : (
-        <div className={cn(listClass, "flex-1 min-h-0 overflow-y-auto [&>*+*]:[border-top:var(--bd-div)]")}>
+        <div className="[&>*+*]:[border-top:var(--bd-div)]">
           {grouped.map(({ run, count }) => {
             const meta = statusMeta(run.status);
+            const when = run.started_at ? formatRelative(run.started_at) : "queued";
             return (
               <Link
                 key={run.run_id}
                 href={`/runs?sel=${run.run_id}`}
-                className="flex min-h-[52px] items-center gap-3 px-[18px] py-2 transition-colors hover:bg-[var(--active-nav-bg)]"
+                className="flex items-baseline gap-3 py-[13px] transition-colors hover:opacity-80"
               >
-                <WorkerRowIcon workerId={run.worker_id} workerName={run.worker_name} />
-                <div className="min-w-0 flex-1">
-                  <span className="truncate text-sm font-medium text-[var(--text-primary)]">
-                    {run.worker_name || humanizeSlug(run.worker_id, "Worker")}
+                <span className="min-w-0 flex-1 truncate text-sm font-medium text-[var(--text-primary)]">
+                  {run.worker_name || humanizeSlug(run.worker_id, "Worker")}
+                </span>
+                <span className="shrink-0 text-[12.5px]" style={{ color: meta.color }}>
+                  {meta.label}
+                </span>
+                {count > 1 && (
+                  <span className="shrink-0 text-[11px] font-medium text-[var(--text-muted)]">
+                    x{count}
                   </span>
-                  <p className="mt-0.5 flex flex-wrap items-center gap-1 text-xs text-[var(--text-muted)]">
-                    <span>{run.started_at ? formatRelative(run.started_at) : "Queued"}</span>
-                    <span aria-hidden="true">·</span>
-                    <span>{formatDuration(run.duration_ms)}</span>
-                  </p>
-                </div>
-                <div className="flex shrink-0 items-center gap-1.5">
-                  {/* Count badge when the same worker repeated the same outcome */}
-                  {count > 1 && (
-                    <span className="text-[11px] font-medium text-[var(--text-muted)]">
-                      ×{count}
-                    </span>
-                  )}
-                  {/* V4 SPEC §4: status pill right-aligned */}
-                  <span
-                    className="rounded-[var(--radius-pill)] px-2 py-0.5 text-[11px] font-medium leading-none"
-                    style={{
-                      color: meta.color,
-                      background: `color-mix(in srgb, ${meta.color} 12%, transparent)`,
-                    }}
-                  >
-                    {meta.label}
-                  </span>
-                </div>
+                )}
+                <span className="shrink-0 text-[12.5px] text-[var(--ink-faint)]">{when}</span>
               </Link>
             );
           })}
@@ -389,99 +262,126 @@ function WorkerActivity({
   );
 }
 
-function ComingUp({
-  items,
+// Map a needs-attention item to a human label + action link, mirroring the
+// AlertsBell action routing (View worker / Reconnect / Add connection).
+function attentionAction(item: SystemOverviewAttentionItem): {
+  title: string;
+  detail: string;
+  actionLabel: string;
+  href: string;
+} {
+  const kind = item.kind ?? item.type;
+  const workerLabel = item.worker_name || humanizeSlug(item.worker_id, "Worker");
+  if (["connection_expired", "connection_expiring"].includes(kind)) {
+    const provider = formatProviderName(
+      item.provider_display_name || item.provider_names?.[0] || item.provider_slug,
+    );
+    return {
+      title: `${provider} needs reconnect`,
+      detail: item.message || "Connection expired",
+      actionLabel: "Reconnect",
+      href: "/connections",
+    };
+  }
+  if (kind === "missing_connection") {
+    return {
+      title: `${workerLabel} needs a connection`,
+      detail: item.message || "Add a connection to run",
+      actionLabel: "Add",
+      href: `/connections?worker=${encodeURIComponent(item.worker_id ?? "")}`,
+    };
+  }
+  if (item.type === "setup_incomplete") {
+    return {
+      title: `${workerLabel} needs setup`,
+      detail: item.message || "Add a secret to run",
+      actionLabel: "Set up",
+      href: `/connections/secrets?return_to=${encodeURIComponent(`/workers?sel=${item.worker_id ?? ""}`)}`,
+    };
+  }
+  // Default: failing worker.
+  return {
+    title: `${workerLabel} failed`,
+    detail:
+      item.recent_failure_count
+        ? `${item.recent_failure_count} failures in 24h`
+        : item.message || "Run failed",
+    actionLabel: "Fix",
+    href: item.worker_id ? `/runs?worker=${item.worker_id}&status=failed` : "/runs",
+  };
+}
+
+// "needs you" list: attention items only (failing workers, expired connections,
+// missing setup). Lowercase hairline label (NOT all-caps), a small warning dot,
+// title + one-line detail, and an accent action link (Fix / Reconnect / Set up).
+// "Coming up" / scheduled runs are intentionally dropped in the V4 brief — they
+// live behind the bell. Rendered with id="needs-you" so the summary sentence's
+// "need your input" link can anchor to it.
+function NeedsYou({
+  attention,
   loading,
-  visibleRows,
 }: {
-  items: SystemOverviewScheduledItem[];
+  attention: SystemOverviewAttentionItem[];
   loading: boolean;
-  visibleRows: number;
 }) {
-  const visibleItems = items.slice(0, Math.max(3, visibleRows - 1));
+  const needs = attention.slice(0, 3);
+  if (loading) {
+    return (
+      <section id="needs-you" className="pt-7">
+        <div className="space-y-2 py-2">
+          {Array.from({ length: 2 }).map((_, index) => (
+            <Skeleton key={index} className="h-[40px] w-full rounded-[var(--radius-button)]" />
+          ))}
+        </div>
+      </section>
+    );
+  }
+  if (needs.length === 0) return <span id="needs-you" />;
   return (
-    <section className="flex min-h-0 flex-col">
-      <div className="mb-3 flex items-center justify-between shrink-0">
-        <h2 className="text-[15px] font-semibold text-[var(--text-primary)]">Coming up today</h2>
-        <Link href="/runs" className="text-[12.5px] text-[var(--accent)] hover:underline">
-          See all
-        </Link>
-      </div>
-      {loading ? (
-        <div className={cn(listClass, "space-y-2 p-2")}>
-          {Array.from({ length: 3 }).map((_, index) => (
-            <Skeleton key={index} className="h-[56px] w-full rounded-[var(--radius-button)]" />
-          ))}
-        </div>
-      ) : items.length === 0 ? (
-        <div className={cn(listClass, "flex min-h-[220px] flex-1 flex-col items-center justify-center px-6 py-10 text-center")}>
-          <CalendarClock className="mb-3 size-8 text-[var(--text-muted)]" aria-hidden="true" />
-          <p className="max-w-48 text-sm font-medium text-[var(--text-primary)]">
-            No runs scheduled in the next 24 hours
-          </p>
-          <Link
-            href="/workers"
-            className="mt-3 text-xs font-medium text-[var(--text-primary)] hover:underline"
-          >
-            Schedule a worker →
-          </Link>
-        </div>
-      ) : (
-        <div className={cn(listClass, "flex-1 min-h-0 overflow-y-auto [&>*+*]:[border-top:var(--bd-div)]")}>
-          {visibleItems.map((item) => (
-            <Link
-              key={`${item.worker_id}-${item.next_fire_at}`}
-              href={`/workers?sel=${item.worker_id}`}
-              className="grid min-h-[56px] grid-cols-[52px_1fr] gap-3 px-[18px] py-2 transition-colors hover:bg-[var(--active-nav-bg)]"
+    <section id="needs-you" className="pt-7 [box-shadow:inset_0_1px_0_var(--line-soft)]">
+      <div className="pt-7 pb-1 text-[12.5px] font-medium text-[var(--text-muted)]">needs you</div>
+      <div className="[&>*+*]:[border-top:var(--bd-div)]">
+        {needs.map((item, idx) => {
+          const a = attentionAction(item);
+          return (
+            <div
+              key={`needs-${item.worker_id ?? item.connection_id ?? idx}`}
+              className="flex items-start gap-3 py-[15px]"
             >
-              <span className="text-sm font-medium text-[var(--text-primary)]">
-                {formatTimeOfDay(item.next_fire_at)}
-              </span>
-              <span className="min-w-0">
-                <span className="flex items-center gap-1.5">
-                  <WorkerRowIcon workerId={item.worker_id} workerName={item.worker_name} />
-                  <span
-                    className={cn(
-                      "block truncate text-sm",
-                      // Paused workers are de-emphasized (muted), not struck
-                      // through — strikethrough reads as cancelled/done for an
-                      // item that is otherwise listed as upcoming.
-                      item.paused
-                        ? "text-[var(--text-muted)]"
-                        : "text-[var(--text-primary)]",
-                    )}
-                  >
-                    {item.worker_name || humanizeSlug(item.worker_id, "Worker")}
-                  </span>
-                  {item.paused && (
-                    <span className="shrink-0 rounded-[var(--radius-pill)] [border:var(--bd-card)] px-1.5 py-px text-[10px] font-medium leading-none text-[var(--text-muted)]">
-                      Paused
-                    </span>
-                  )}
-                </span>
-                <span className="block text-xs text-[var(--text-muted)]">
-                  {formatRelativeFuture(item.next_fire_at)} · {formatTriggerSource(item.trigger_source || item.trigger_label)}
-                </span>
-              </span>
-            </Link>
-          ))}
-        </div>
-      )}
+              <span
+                className="mt-[7px] size-[7px] shrink-0 rounded-[var(--radius-pill)] bg-[var(--warning)]"
+                aria-hidden="true"
+              />
+              <div className="min-w-0 flex-1">
+                <div className="truncate text-sm font-semibold text-[var(--text-primary)]">
+                  {a.title}
+                </div>
+                <div className="mt-0.5 truncate text-[12.5px] text-[var(--text-muted)]">
+                  {a.detail}
+                </div>
+              </div>
+              <Link
+                href={a.href}
+                className="shrink-0 text-[12.5px] font-medium text-[var(--accent)] hover:underline"
+              >
+                {a.actionLabel}
+              </Link>
+            </div>
+          );
+        })}
+      </div>
     </section>
   );
 }
-
 
 export function OverviewDashboard({
   initialData = null,
 }: {
   initialData?: import("@/lib/types").SystemOverview | null;
 }) {
-  // #1292: the needs-attention surface is now owned by the global AlertsBell
-  // (rendered in AppShell), which self-fetches the overview. The dashboard no
-  // longer derives/bubbles attention items or exposes a reload ref for the bell.
   const { data, loading } = useOverview(initialData);
-  const visibleRows = useOverviewVisibleRows();
+  const { greeting, firstName } = useGreeting();
+  const todayLabel = useTodayLabel();
 
   const completedThisWeek =
     data?.stats.work_shipped_7d ??
@@ -489,85 +389,40 @@ export function OverviewDashboard({
     0;
   const previousWeek = data?.stats.work_shipped_previous_7d ?? 0;
   const workTrend = metricTrend(completedThisWeek, previousWeek);
-  const nextScheduledAt = data?.stats.next_scheduled_at ?? data?.scheduled_today?.[0]?.next_fire_at ?? null;
-  const nextScheduled = nextScheduledAt
-    ? `Next at ${formatTimeOfDay(nextScheduledAt)}`
-    : "No scheduled runs";
+
+  // Aggregates that feed the one-sentence summary.
+  const successRate = data?.stats.success_rate_7d ?? null;
+  const successPct =
+    successRate !== null ? Math.round(successRate * (successRate <= 1 ? 100 : 1)) : null;
   const runsToday = data?.stats.runs_today ?? data?.stats.runs_24h ?? 0;
-  const completedToday = data?.stats.completed_today;
-  const failedToday = data?.stats.failed_today;
-  const hasRunBreakdown = completedToday !== undefined || failedToday !== undefined;
+  const needsYouCount = data?.needs_attention?.length ?? 0;
 
-  // One run-series sparkline belongs on the flagship run-completion tile.
-  const runs7dSparkline = useMemo(
-    () => data?.stats.runs_7d_sparkline ?? [],
-    [data?.stats.runs_7d_sparkline],
-  );
-  const overviewStats = data?.stats;
-  const workerMetric = useMemo(() => workerStatusMetric(overviewStats), [overviewStats]);
+  // No `hours_saved` field exists in SystemOverviewStats. Estimate ~15 min of
+  // manual work saved per finished task (rounded to whole hours). Honest,
+  // derived, and omitted when there is no work to estimate from.
+  const estHoursSaved =
+    completedThisWeek > 0 ? Math.max(1, Math.round((completedThisWeek * 15) / 60)) : 0;
 
-  const metrics = useMemo(
-    () => [
-      {
-        value: completedThisWeek,
-        label: "Runs completed",
-        href: "/runs",
-        // Backend scopes this to active, real workers (excludes paused/example/
-        // system/listener churn) so the flagship metric reflects real outcomes,
-        // not failing internal listeners. Failing listeners stay in Needs
-        // attention, not here.
-        context:
-          workTrend !== null
-            ? `${workTrend >= 0 ? "+" : ""}${workTrend}% vs last week`
-            : "Last 7 days",
-        trend: workTrend,
-        sparkline: runs7dSparkline,
-      },
-      {
-        value: runsToday,
-        label: "Runs today",
-        href: "/runs",
-        // completed/failed breakdown is scoped to active, real workers (matches
-        // "Runs completed" above); the runsToday total is raw activity volume.
-        context: hasRunBreakdown
-          ? `${completedToday ?? 0} ok · ${failedToday ?? 0} failed`
-          : "Last 24h",
-        warning: Boolean(failedToday),
-      },
-      {
-        value: workerMetric.value,
-        label: workerMetric.label,
-        href: "/workers",
-        context: workerMetric.context,
-      },
-      {
-        value: data?.stats.scheduled_24h_count ?? data?.scheduled_today?.length ?? 0,
-        label: "Coming up today",
-        href: "/runs",
-        context: nextScheduled,
-      },
-    ],
-    [
-      completedThisWeek,
-      completedToday,
-      data,
-      failedToday,
-      hasRunBreakdown,
-      nextScheduled,
-      runsToday,
-      workTrend,
-      runs7dSparkline,
-      workerMetric,
-    ],
-  );
+  // 7d run-series for the inline hero sparkline. Plot the per-bucket totals as a
+  // thin stroke-only accent polyline (spec: "thin stroke-only SVG polyline").
+  const sparkPoints = useMemo(() => {
+    const buckets = data?.stats.runs_7d_sparkline ?? [];
+    if (buckets.length < 2) return null;
+    const counts = buckets.map((b) => b.total);
+    const max = Math.max(...counts, 1);
+    const w = 150;
+    const h = 44;
+    const stepX = w / (counts.length - 1);
+    return counts
+      .map((v, i) => {
+        const x = i * stepX;
+        const y = h - 4 - (v / max) * (h - 8);
+        return `${x.toFixed(0)},${y.toFixed(0)}`;
+      })
+      .join(" ");
+  }, [data?.stats.runs_7d_sparkline]);
 
-  // #1362 — Activation panel: when there are no active workers AND no runs this
-  // week, and we are done loading, replace the metric grid with the onboarding
-  // composer so new workspaces get a useful first-run experience instead of a
-  // wall of zeroes.
-  // ADDITIVE: new early-return branch; all code below this block is untouched,
-  // so merging with #1345/#1359/#1360 (which modify the metric grid / sections)
-  // is safe — those changes land inside the else path.
+  // Empty-workspace path preserved: no active workers AND no work this week.
   const isEmptyWorkspace =
     !loading &&
     (data?.stats.active_workers_count ?? 0) === 0 &&
@@ -581,30 +436,124 @@ export function OverviewDashboard({
     );
   }
 
+  // One-sentence plain-language summary, composed from the same aggregates.
+  // Capped at 2 lines via max-w + line-clamp. The "need your input" phrase is
+  // an accent LINK anchoring to the #needs-you list below. Each clause is only
+  // emitted when its underlying number is real.
+  const summaryParts: ReactNode[] = [];
+  if (workTrend !== null && workTrend > 0) {
+    summaryParts.push(
+      <span key="trend">
+        Up <b className="font-semibold text-[var(--text-primary)]">{workTrend}%</b> on last week
+      </span>,
+    );
+  }
+  if (successPct !== null) {
+    summaryParts.push(
+      <span key="success">
+        <b className="font-semibold text-[var(--text-primary)]">{successPct}%</b> of runs succeeded
+      </span>,
+    );
+  }
+  if (estHoursSaved > 0) {
+    summaryParts.push(
+      <span key="saved">
+        roughly <b className="font-semibold text-[var(--text-primary)]">{estHoursSaved} hours</b> were
+        saved
+      </span>,
+    );
+  }
+
   return (
-    <div className="flex flex-col flex-1 pb-6 pt-1 lg:min-h-[620px] lg:overflow-hidden">
-      {/* Hero — compact */}
-      <section className="pb-4">
-        <h1 className="text-[23px] font-semibold leading-tight tracking-normal text-[var(--text-primary)]">Work done</h1>
-        <p className="mt-1 text-sm text-[var(--text-muted)]">
-          {completedThisWeek} {completedThisWeek === 1 ? "run" : "runs"} completed in the last 7 days.
-        </p>
-      </section>
+    <div className="flex flex-col flex-1 min-h-0 pb-6 pt-1">
+      <div className="w-full max-w-[640px]">
+        {/* 1. Greeting + date line. */}
+        <div className="text-[26px] font-semibold leading-tight tracking-[-0.01em] text-[var(--text-primary)]">
+          {greeting}
+          {firstName ? `, ${firstName}` : ""}
+        </div>
+        <div className="mt-1 text-[13px] text-[var(--text-muted)]">{todayLabel}</div>
 
-      {/* Metric tiles with sparklines — S45 */}
-      {/* Spec §5c: 2×2 grid at <880px, 4-col at xl. Using `sm:` (640px) as the
-          first breakpoint keeps the 2×2 layout on all mobile/tablet sizes. */}
-      <div className="grid grid-cols-2 gap-4 xl:grid-cols-4">
-        {metrics.map((metric) => (
-          <MetricCard key={metric.label} {...metric} loading={loading} />
-        ))}
-      </div>
+        {/* 2. Label + the big near-black number (heavier/larger than the
+            greeting — reclaims visual primacy) + inline sparkline.
+            O2/OV-ASCII: wrapped in the same framed-card treatment as the
+            WorkerAsciiDiagram (bg-[var(--bg-2)], radius-card, px-5 py-4)
+            so the overview hero has the same surface vocabulary as the
+            worker-detail "WHAT IT DOES" panel. */}
+        <div
+          className="mt-9 bg-[var(--bg-2)] px-5 py-4"
+          style={{ borderRadius: "var(--radius-card)" }}
+        >
+          <div className="text-[13px] text-[var(--text-muted)]">Work done this week</div>
+          <div className="mt-1 flex items-end gap-5">
+            {loading ? (
+              <Skeleton className="h-[60px] w-[96px] rounded-[var(--radius-button)]" />
+            ) : (
+              <div className="text-[64px] font-bold leading-none tracking-[-0.03em] text-[var(--text-primary)]">
+                {completedThisWeek}
+              </div>
+            )}
+            {sparkPoints && (
+              <svg
+                width="150"
+                height="44"
+                viewBox="0 0 150 44"
+                className="mb-2 block"
+                aria-hidden="true"
+              >
+                <polyline
+                  fill="none"
+                  stroke="var(--accent)"
+                  strokeWidth="2.5"
+                  strokeLinecap="round"
+                  strokeLinejoin="round"
+                  points={sparkPoints}
+                />
+              </svg>
+            )}
+          </div>
+        </div>
 
-      {/* Activity + Coming up — 2-col; grows to fill remaining viewport height
-          so the page doesn't leave a whitespace band at the bottom. */}
-      <div className="mt-7 grid grid-cols-1 gap-7 lg:grid-cols-[1.4fr_1fr] lg:flex-1 lg:min-h-0">
-        <WorkerActivity runs={data?.recent_runs ?? []} loading={loading} visibleRows={visibleRows} />
-        <ComingUp items={data?.scheduled_today ?? []} loading={loading} visibleRows={visibleRows} />
+        {/* 3. One-sentence plain-language summary (2-line cap). */}
+        {!loading && (summaryParts.length > 0 || runsToday > 0 || needsYouCount > 0) && (
+          <p className="mt-6 max-w-[560px] line-clamp-2 text-[15px] leading-relaxed text-[var(--text-muted)]">
+            {summaryParts.map((part, i) => (
+              <span key={i}>
+                {i === 0 ? part : <>{i === summaryParts.length - 1 ? " and " : ", "}{part}</>}
+              </span>
+            ))}
+            {summaryParts.length > 0 ? ". " : ""}
+            {runsToday > 0 && (
+              <>
+                <b className="font-semibold text-[var(--text-primary)]">
+                  {runsToday} {runsTodayLabel(runsToday)}
+                </b>{" "}
+                ran today
+                {needsYouCount > 0 ? "; " : "."}
+              </>
+            )}
+            {needsYouCount > 0 && (
+              <>
+                {runsToday > 0
+                  ? `${needsYouCount === 1 ? "one" : needsYouCount} now `
+                  : `${needsYouCount === 1 ? "One worker" : `${needsYouCount} workers`} now `}
+                <Link
+                  href="#needs-you"
+                  className="font-medium text-[var(--accent)] hover:underline"
+                >
+                  {needsYouCount === 1 ? "needs your input" : "need your input"}
+                </Link>
+                .
+              </>
+            )}
+          </p>
+        )}
+
+        {/* 4. "needs you" list (lowercase hairline label). */}
+        <NeedsYou attention={data?.needs_attention ?? []} loading={loading} />
+
+        {/* 5. Quiet hairline "Recent work" strip — kills the "too empty" risk. */}
+        <RecentWork runs={data?.recent_runs ?? []} loading={loading} />
       </div>
     </div>
   );

@@ -788,7 +788,7 @@ function runCardFromResult(
                 id: "open_run",
                 label: "View run",
                 method: "GET" as const,
-                href: `/runs?sel=${encodeURIComponent(runId)}&tab=Trace`,
+                href: `/runs?sel=${encodeURIComponent(runId)}&tab=Logs`,
               },
             ]
           : event.actions;
@@ -1035,7 +1035,7 @@ export function shouldAutoOpenRunDetails(card: ToolCard): card is RunCard {
 
 export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
   return shouldAutoOpenRunDetails(card) && card.runId
-    ? `/runs?sel=${encodeURIComponent(card.runId)}&tab=Trace`
+    ? `/runs?sel=${encodeURIComponent(card.runId)}&tab=Logs`
     : null;
 }
 
