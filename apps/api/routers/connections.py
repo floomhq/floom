@@ -17,6 +17,7 @@ the connection test fixtures, so the bindings refresh per reload.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -52,10 +53,58 @@ from services.worker_access import _list_visible_workers, _worker_connection_slu
 logger = logging.getLogger("floom.api")
 
 connections_router = APIRouter()
+_CONNECTION_LIST_CACHE_TTL_SECONDS = 10.0
+_connection_list_cache_lock = threading.Lock()
+_connection_list_cache: Dict[str, tuple[float, List["ConnectionItem"]]] = {}
+
+
+def _connection_list_cache_get(user_id: str) -> List["ConnectionItem"] | None:
+    now = time.monotonic()
+    with _connection_list_cache_lock:
+        item = _connection_list_cache.get(user_id)
+        if item is None:
+            return None
+        expires_at, value = item
+        if expires_at <= now:
+            _connection_list_cache.pop(user_id, None)
+            return None
+        return copy.deepcopy(value)
+
+
+def _connection_list_cache_set(user_id: str, value: List["ConnectionItem"]) -> None:
+    now = time.monotonic()
+    with _connection_list_cache_lock:
+        if len(_connection_list_cache) >= 256:
+            for key, (expires_at, _) in list(_connection_list_cache.items()):
+                if expires_at <= now:
+                    _connection_list_cache.pop(key, None)
+            if len(_connection_list_cache) >= 256:
+                _connection_list_cache.pop(next(iter(_connection_list_cache)))
+        _connection_list_cache[user_id] = (
+            now + _CONNECTION_LIST_CACHE_TTL_SECONDS,
+            copy.deepcopy(value),
+        )
+
+
+def _connection_list_cache_clear(user_id: str | None = None) -> None:
+    with _connection_list_cache_lock:
+        if user_id:
+            _connection_list_cache.pop(user_id, None)
+        else:
+            _connection_list_cache.clear()
 
 
 def _invalidate_connections_cache(user_id: str) -> None:
-    """Drop the connections list hot-cache entry for this user after a mutation."""
+    """Drop the connections list cache entries for this user after a mutation.
+
+    Reconcile note (round-09 onto main): the live ``list_connections`` cache is
+    the per-router ``_connection_list_cache`` introduced by the new-main perf
+    commit (0a65db45). R9 independently added a shared ``hot_cache``-backed cache
+    with this invalidation helper. To avoid a split-brain cache where one path
+    clears only one store, this helper now clears BOTH so every R9 and new-main
+    invalidation callsite invalidates the cache that actually backs reads.
+    """
+    _connection_list_cache_clear(user_id)
     hot_cache.delete(("connections", user_id))
 
 def _connection_row_for_user(
@@ -175,6 +224,18 @@ def _normalize_composio_connection_status(status: Optional[str]) -> str:
     if normalized in _COMPOSIO_ACTIVE_STATUSES:
         return "active"
     return normalized
+
+
+def _callback_persisted_status(existing_status: str, remote_status: str) -> str:
+    """Return callback status using only persisted/remote state.
+
+    The browser-visible OAuth callback query string is not proof that Composio
+    activated the account. It can decide redirect UX, but it must not promote a
+    stored connection to active.
+    """
+    if remote_status and remote_status != "not_found":
+        return remote_status
+    return existing_status
 
 
 def _account_label_from_info(info: Dict[str, Any]) -> str:
@@ -765,13 +826,12 @@ def list_connections(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[ConnectionItem]:
-    cache_key = ("connections", auth.user_id)
-    cached = hot_cache.get(cache_key)
+    cached = _connection_list_cache_get(auth.user_id)
     if cached is not None:
         return cached
-
     rows = repos.connections.list(user_id=auth.user_id)
     if not rows:
+        _connection_list_cache_set(auth.user_id, [])
         return []
     now = datetime.now(timezone.utc)
     last_used = _connections_last_used(auth.user_id, repos)  # #802
@@ -808,7 +868,7 @@ def list_connections(
         ):
             continue
         result.append(_public_connection_item(d))
-    hot_cache.set(cache_key, result)
+    _connection_list_cache_set(auth.user_id, result)
     return result
 
 
@@ -902,7 +962,6 @@ def initiate_connection(
         created_at=now,
         updated_at=now,
     )
-
     _invalidate_connections_cache(auth.user_id)
     return ConnectionInitResponse(
         id=conn_id,
@@ -1027,16 +1086,7 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
         except Exception:
             remote_status = ""
 
-        callback_status = _normalize_composio_connection_status(status)
-        final_status = (
-            "active"
-            if callback_status == "active" and remote_status in ("", "initiated", "pending", "unknown", "not_found")
-            else remote_status
-            if remote_status and remote_status != "not_found"
-            else callback_status
-            if callback_status
-            else existing["status"]
-        )
+        final_status = _callback_persisted_status(str(existing.get("status") or ""), remote_status)
         now = now_iso()
         repos.connections.update(
             user_id=existing["user_id"],
@@ -1045,6 +1095,7 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
             composio_connection_id=callback_connection_id,
             updated_at=now,
         )
+        _connection_list_cache_clear(str(existing["user_id"]))
 
         # N5-1 dedupe: now that the OAuth round-trip is complete we can learn the
         # real account identity (e.g. the Gmail address) from Composio. If the
@@ -1064,7 +1115,7 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
     # Invalidate the connections list cache for the owner so the next list
     # request reflects the updated OAuth status.
     if existing:
-        hot_cache.delete(("connections", existing["user_id"]))
+        _invalidate_connections_cache(str(existing["user_id"]))
     redirect_qs = "connected=1"
     if landing_app:
         redirect_qs += f"&app={urllib.parse.quote(landing_app)}"
@@ -1128,6 +1179,7 @@ def _dedupe_connection_account(
             updated_at=now,
         )
         repos.connections.delete(user_id=user_id, composio_id=new_id)
+        _connection_list_cache_clear(str(user_id))
         landing_id = canonical["id"]
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Connection dedupe failed for %s: %s", connection_id, exc)

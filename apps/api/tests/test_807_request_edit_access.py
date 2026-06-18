@@ -58,6 +58,7 @@ def client_main(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(tmp_path / "workers"))
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_SECRET", SECRET)
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("WORKEROS_USER_ID", "admin-807")
     for name in list(sys.modules):

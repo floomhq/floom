@@ -29,6 +29,7 @@ def _load_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_SECRET", SECRET)
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
     for name in list(sys.modules):
         if name == "main" or name == "db" or name.startswith("db.") or name == "auth" or name.startswith("auth."):
             sys.modules.pop(name, None)

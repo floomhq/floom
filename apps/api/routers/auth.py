@@ -17,6 +17,7 @@ from __future__ import annotations
 import os
 import secrets as _secrets_mod
 import secrets as pysecrets
+import threading
 import uuid as _uuid_mod
 from typing import List
 
@@ -66,6 +67,7 @@ import logging
 logger = logging.getLogger("floom.api")
 
 auth_router = APIRouter()
+_AUTH_SETUP_FALLBACK_LOCK = threading.Lock()
 
 
 @auth_router.post("/auth/setup", response_model=_UserOut, status_code=201)
@@ -76,8 +78,6 @@ def auth_setup(
 ) -> _UserOut:
     """Create the first admin account. Returns 409 if any user already exists."""
     user_repo, session_repo, _ = _require_multi_member_repos(repos)
-    if user_repo.count() > 0:
-        raise HTTPException(status_code=409, detail="workspace already set up")
     username = payload.username.strip()
     if not username:
         raise HTTPException(status_code=422, detail="username required")
@@ -91,13 +91,28 @@ def auth_setup(
     else:
         user_id = str(_uuid_mod.uuid4())
     pw_hash = _bcrypt_hash(password)
-    row = user_repo.create(
-        user_id=user_id,
-        username=username,
-        display_name=payload.display_name,
-        password_hash=pw_hash,
-        role="admin",
-    )
+    create_first_admin = getattr(user_repo, "create_first_admin", None)
+    if callable(create_first_admin):
+        row = create_first_admin(
+            user_id=user_id,
+            username=username,
+            display_name=payload.display_name,
+            password_hash=pw_hash,
+        )
+    else:
+        with _AUTH_SETUP_FALLBACK_LOCK:
+            if user_repo.count() > 0:
+                row = None
+            else:
+                row = user_repo.create(
+                    user_id=user_id,
+                    username=username,
+                    display_name=payload.display_name,
+                    password_hash=pw_hash,
+                    role="admin",
+                )
+    if row is None:
+        raise HTTPException(status_code=409, detail="workspace already set up")
     # Claim the bootstrap (local-default) identity's seed workers, connections,
     # and secrets for this first admin, so they OWN the seed data and can run it
     # (a run uses the owner's connections). Without this the admin owns nothing
@@ -188,7 +203,7 @@ def auth_issue_magic_link(
     # restart and ties a security-critical signing key to process lifetime. Refuse
     # issuance instead of silently minting links only this process can validate;
     # consumption of already-issued links is unaffected.
-    if _magic_link_secret() is _MAGIC_LINK_FALLBACK_SECRET:
+    if _magic_link_secret() == _MAGIC_LINK_FALLBACK_SECRET:
         raise HTTPException(
             status_code=503,
             detail="Magic links require WORKEROS_MAGIC_LINK_SECRET or FLOOM_SECRET to be configured",
@@ -415,7 +430,11 @@ def create_token(
         # table — this happens in dev mode (ghost auth, no setup done).
         # Surface a clear 409 rather than a raw 500.
         import sqlite3 as _sqlite3
-        if isinstance(_pat_exc, _sqlite3.IntegrityError):
+        missing_schema = (
+            isinstance(_pat_exc, _sqlite3.OperationalError)
+            and "no such table" in str(_pat_exc).lower()
+        )
+        if isinstance(_pat_exc, _sqlite3.IntegrityError) or missing_schema:
             raise HTTPException(
                 status_code=409,
                 detail="Personal access tokens require a real user account. "
