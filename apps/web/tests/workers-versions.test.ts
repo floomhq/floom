@@ -69,11 +69,11 @@ describe("formatVersionRows", () => {
 });
 
 describe("WORKER_DETAIL_TABS (§4 contract)", () => {
-  it("is the round-09 set: primary Overview/Runs/Operations then advanced Source/Versions/Brain/Tools, in order", () => {
+  it("is the round-09 set: primary Overview/Runs/Setup then advanced Source/Versions/Brain/Tools, in order", () => {
     expect([...WORKER_DETAIL_TABS]).toEqual([
       "Overview",
       "Runs",
-      "Operations",
+      "Setup",
       "Source",
       "Versions",
       "Brain",
