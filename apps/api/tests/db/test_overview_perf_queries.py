@@ -161,3 +161,42 @@ def test_overview_perf_queries_return_grouped_and_bounded_rows(monkeypatch, tmp_
         "today-fail-b",
     }
     _close_db()
+
+
+def test_overview_terminal_runs_are_bounded_per_worker(monkeypatch, tmp_path):
+    db = _load_db(monkeypatch, tmp_path / "overview-terminal-limit.db")
+    repos = db.get_repositories()
+    _create_worker(repos, "active")
+    _create_worker(repos, "visible")
+
+    for idx in range(12):
+        minute = idx + 1
+        _create_run(
+            repos,
+            f"active-fail-{idx:02d}",
+            "active",
+            "failed",
+            f"2026-06-15T00:{minute:02d}:00+00:00",
+        )
+        _create_run(
+            repos,
+            f"visible-fail-{idx:02d}",
+            "visible",
+            "failed",
+            f"2026-06-15T01:{minute:02d}:00+00:00",
+        )
+
+    terminal = repos.runs.overview_terminal_runs(
+        user_id="federico",
+        worker_ids=["active", "visible"],
+        since="2026-06-01T00:00:00+00:00",
+        per_worker_limit=3,
+    )
+
+    by_worker: dict[str, list[str]] = {"active": [], "visible": []}
+    for row in terminal:
+        by_worker[row["worker_id"]].append(row["id"])
+
+    assert by_worker["active"] == ["active-fail-11", "active-fail-10", "active-fail-09"]
+    assert by_worker["visible"] == ["visible-fail-11", "visible-fail-10", "visible-fail-09"]
+    _close_db()
