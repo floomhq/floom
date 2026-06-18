@@ -538,7 +538,7 @@ def _slack_events_enabled() -> bool:
 
 def _slack_signature_tolerance_seconds() -> int:
     try:
-        return max(0, int(os.environ.get("SLACK_SIGNATURE_TOLERANCE_SECONDS", "300")))
+        return max(30, int(os.environ.get("SLACK_SIGNATURE_TOLERANCE_SECONDS", "300")))
     except ValueError:
         return 300
 
@@ -553,7 +553,7 @@ def _verify_slack_signature(body: bytes, request: Request, signing_secret: str) 
     except ValueError:
         return False
     tolerance = _slack_signature_tolerance_seconds()
-    if tolerance > 0 and abs(time.time() - ts) > tolerance:
+    if abs(time.time() - ts) > tolerance:
         return False
     base = b"v0:" + timestamp.encode("utf-8") + b":" + body
     expected = "v0=" + hmac.new(signing_secret.encode("utf-8"), base, hashlib.sha256).hexdigest()
