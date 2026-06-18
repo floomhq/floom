@@ -456,6 +456,8 @@ export const api = {
       until?: string;
       limit?: number;
       offset?: number;
+      before_created_at?: string;
+      before_id?: string;
     }) => {
       const qs = new URLSearchParams();
       if (params?.worker_id) qs.append("worker_id", params.worker_id);
@@ -464,6 +466,8 @@ export const api = {
       if (params?.until) qs.append("until", params.until);
       if (params?.limit) qs.append("limit", String(params.limit));
       if (params?.offset) qs.append("offset", String(params.offset));
+      if (params?.before_created_at) qs.append("before_created_at", params.before_created_at);
+      if (params?.before_id) qs.append("before_id", params.before_id);
       const rows = await fetchJson<import("@/lib/types").RunSummary[]>(`/runs?${qs.toString()}`);
       return rows;
     },
