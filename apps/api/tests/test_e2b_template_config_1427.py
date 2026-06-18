@@ -63,6 +63,29 @@ def test_memory_specific_template_overrides_runtime_template(monkeypatch):
     assert _e2b_template_for_config(_config("python311", resources={"memory_mb": 2048})) == "tpl-python-2gb"
 
 
+def test_memory_cpu_specific_template_overrides_memory_template(monkeypatch):
+    from runner_sandbox.e2b_driver import _e2b_template_for_config
+
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_4096", "tpl-python-4gb")
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_4096_CPU_4", "tpl-python-4gb-4cpu")
+
+    assert (
+        _e2b_template_for_config(_config("python311", resources={"memory_mb": 4096, "cpu_count": 4}))
+        == "tpl-python-4gb-4cpu"
+    )
+
+
+def test_cpu_memory_specific_template_alias_is_supported(monkeypatch):
+    from runner_sandbox.e2b_driver import _e2b_template_for_config
+
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_CPU_4_MEMORY_4096", "tpl-python-4cpu-4gb")
+
+    assert (
+        _e2b_template_for_config(_config("python311", resources={"memory_mb": 4096, "cpu_count": 4}))
+        == "tpl-python-4cpu-4gb"
+    )
+
+
 def test_worker_template_cache_key_can_select_cached_template(monkeypatch, tmp_path):
     import json
 
@@ -155,3 +178,43 @@ def test_node_template_builder_defaults_to_2gb(monkeypatch):
 
     assert captured["memory_mb"] == 2048
     assert captured["cpu_count"] == 2
+
+
+def test_python_template_builder_prefers_runtime_specific_env(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeTemplate:
+        def from_python_image(self, _image):
+            return self
+
+        def apt_install(self, _packages):
+            return self
+
+        def pip_install(self, _packages):
+            return self
+
+        @staticmethod
+        def build(_template, **kwargs):
+            captured.update(kwargs)
+            return {"template_id": "tpl-python"}
+
+    fake_e2b = types.SimpleNamespace(
+        Template=FakeTemplate,
+        default_build_logger=lambda: None,
+    )
+    monkeypatch.setitem(sys.modules, "e2b", fake_e2b)
+    monkeypatch.setenv("WORKEROS_E2B_TEMPLATE_MEMORY_MB", "1024")
+    monkeypatch.setenv("WORKEROS_E2B_TEMPLATE_CPU_COUNT", "1")
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_MB", "4096")
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_CPU_COUNT", "4")
+
+    module_path = Path(__file__).resolve().parents[3] / "ops" / "e2b" / "python-base" / "template.py"
+    spec = importlib.util.spec_from_file_location("python_template_under_test", module_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    module.build_template()
+
+    assert captured["memory_mb"] == 4096
+    assert captured["cpu_count"] == 4

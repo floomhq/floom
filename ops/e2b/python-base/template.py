@@ -28,6 +28,14 @@ COMMON_PYTHON_PACKAGES = [
 ]
 
 
+def _int_env(*names: str, default: int) -> int:
+    for name in names:
+        value = os.environ.get(name)
+        if value:
+            return int(value)
+    return default
+
+
 def build_template() -> object:
     template = (
         Template()
@@ -38,8 +46,8 @@ def build_template() -> object:
     return Template.build(
         template,
         alias=os.environ.get("WORKEROS_E2B_PYTHON_TEMPLATE_ALIAS", "workeros-python-base"),
-        cpu_count=int(os.environ.get("WORKEROS_E2B_TEMPLATE_CPU_COUNT", "2")),
-        memory_mb=int(os.environ.get("WORKEROS_E2B_TEMPLATE_MEMORY_MB", "2048")),
+        cpu_count=_int_env("WORKEROS_E2B_PYTHON_TEMPLATE_CPU_COUNT", "WORKEROS_E2B_TEMPLATE_CPU_COUNT", default=2),
+        memory_mb=_int_env("WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_MB", "WORKEROS_E2B_TEMPLATE_MEMORY_MB", default=2048),
         skip_cache=(os.environ.get("SKIP_CACHE") or "").lower() in {"1", "true", "yes", "on"},
         on_build_logs=default_build_logger(),
     )
