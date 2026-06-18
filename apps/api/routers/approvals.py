@@ -64,6 +64,44 @@ logger = logging.getLogger("floom.api")
 
 approvals_router = APIRouter()
 
+
+# ---------------------------------------------------------------------------
+# #798 LAZY approval expiry
+# ---------------------------------------------------------------------------
+# expires_at is stored on creation and previewed, and an hourly sweep
+# (_expire_stale_approvals) flips stale rows. But between sweeps a row can be
+# past its expires_at while still status='pending' in the DB. The lazy guard
+# below closes that window on the read AND action paths: any pending row past
+# its expires_at is flipped to 'expired' (persisted) the moment it is read or
+# someone tries to action it, so an expired approval can never be approved/
+# rejected to fire its side effect, and never surfaces as 'pending'.
+
+
+def _is_row_past_expiry(approval: Dict[str, Any]) -> bool:
+    """True iff this approval is still pending but past its expires_at."""
+    if (approval.get("status") or "") != "pending":
+        return False
+    expires_at = approval.get("expires_at")
+    if not expires_at:
+        return False
+    from db import now_iso
+    return str(expires_at) < now_iso()
+
+
+def _lazy_expire(approval_id: str, repos: Repositories) -> bool:
+    """Flip one stale pending approval to 'expired' (and move its run off
+    pending_approval) if it is past expires_at. Returns True iff flipped.
+
+    Best-effort persistence: a DB hiccup here must not 500 a list/read, but on
+    the action paths the caller re-checks the row status after this so an
+    un-persisted expiry still refuses the action."""
+    from db import now_iso
+    try:
+        return repos.approvals.expire_if_stale(approval_id=approval_id, now_iso_str=now_iso())
+    except Exception:
+        logger.warning("lazy approval expiry failed for %s (non-fatal)", approval_id, exc_info=True)
+        return False
+
 _ANNOTATION_MAX_TEXT_ITEMS = 200
 _ANNOTATION_MAX_IMAGE_ITEMS = 30
 _ANNOTATION_MAX_PINS_PER_IMAGE = 50
@@ -198,6 +236,14 @@ def list_approvals(
     status_filter = (status or "pending").lower()
     if status_filter == "pending":
         rows = repos.approvals.list_pending(owner_id=auth.user_id, limit=limit)
+        # #798 LAZY: any row past expires_at is flipped to 'expired' now and
+        # dropped from the pending result (it must not surface as pending). If
+        # any flip happened, re-fetch so the returned list is consistent.
+        stale = [r for r in rows if _is_row_past_expiry(dict(r))]
+        if stale:
+            for r in stale:
+                _lazy_expire(str(dict(r).get("id") or ""), repos)
+            rows = repos.approvals.list_pending(owner_id=auth.user_id, limit=limit)
     else:
         # For non-pending statuses, query directly
         with get_db() as conn:
@@ -451,6 +497,13 @@ def _load_public_approval(
     if not token or not hmac.compare_digest(token, expected):
         # Identical response to the not-found case — no existence oracle.
         raise _PUBLIC_APPROVAL_DENIED
+    # #798 LAZY: flip + re-read a stale pending approval so the signed-link GET
+    # surfaces it as 'expired', and the public approve/reject paths that load it
+    # here see the expired status (their downstream approve_run/_load_typed_approval
+    # guards refuse it too).
+    if _is_row_past_expiry(approval):
+        _lazy_expire(approval_id, repos)
+        approval = repos.approvals.get_public(approval_id=approval_id) or approval
     return dict(approval)
 
 
@@ -647,6 +700,14 @@ def _load_typed_approval(
     approval = repos.approvals.get(owner_id=user_id, approval_id=approval_id)
     if approval is None:
         raise HTTPException(status_code=404, detail="Approval not found")
+    # #798 LAZY: refuse to action an approval whose expires_at has passed. Flip
+    # it to 'expired' (persisted) and re-read so the side effect can never fire
+    # on a stale approval, even if the hourly sweep hasn't run yet.
+    if _is_row_past_expiry(approval):
+        _lazy_expire(approval_id, repos)
+        approval = repos.approvals.get(owner_id=user_id, approval_id=approval_id) or approval
+    if (approval.get("status") or "") == "expired":
+        raise HTTPException(status_code=409, detail="Approval expired")
     if approval.get("status") != "pending":
         raise HTTPException(status_code=409, detail="Approval already decided")
     decision_input: Dict[str, Any] = {}
@@ -686,6 +747,15 @@ def approve_run(
     approval_row = repos.approvals.get_by_run_id(run_id=run_id)
     if approval_row is None:
         raise HTTPException(status_code=404, detail="Approval record not found")
+    # #798 LAZY: refuse + flip an expired approval BEFORE any follow-up run is
+    # created. This is the #418 fire-exactly-once guard for expiry: no
+    # follow_up_run_id is ever stamped for an expired approval, so the engine's
+    # EXECUTE-phase signal can never authorise its side effect.
+    if _is_row_past_expiry(approval_row):
+        _lazy_expire(str(approval_row.get("id") or ""), repos)
+        approval_row = repos.approvals.get_by_run_id(run_id=run_id) or approval_row
+    if (approval_row.get("status") or "") == "expired":
+        raise HTTPException(status_code=409, detail="Approval expired")
     if approval_row.get("status") != "pending":
         raise HTTPException(status_code=409, detail="Approval already decided")
 
@@ -844,6 +914,14 @@ def reject_run(
     approval_row = repos.approvals.get_by_run_id(run_id=run_id)
     if approval_row is None:
         raise HTTPException(status_code=404, detail="Approval record not found")
+    # #798 LAZY: an expired approval cannot be rejected either — it surfaces as
+    # 'expired', not 'pending'. (Reject has no side effect, but the status must
+    # be honest and consistent with approve.)
+    if _is_row_past_expiry(approval_row):
+        _lazy_expire(str(approval_row.get("id") or ""), repos)
+        approval_row = repos.approvals.get_by_run_id(run_id=run_id) or approval_row
+    if (approval_row.get("status") or "") == "expired":
+        raise HTTPException(status_code=409, detail="Approval expired")
     if approval_row.get("status") != "pending":
         raise HTTPException(status_code=409, detail="Approval already decided")
 
