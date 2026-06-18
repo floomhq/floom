@@ -25,7 +25,6 @@ import threading
 import time
 import urllib.parse
 import uuid as _uuid_mod
-from datetime import datetime, timedelta, timezone
 from pathlib import PurePosixPath, PureWindowsPath
 from typing import Any, Dict, List, Literal, Optional, TypedDict
 
@@ -56,6 +55,7 @@ connections_router = APIRouter()
 
 def _invalidate_connections_cache(user_id: str) -> None:
     """Drop the connections list hot-cache entry for this user after a mutation."""
+    hot_cache.delete(_connections_cache_key(user_id))
     hot_cache.delete(("connections", user_id))
 
 def _connection_row_for_user(
@@ -165,8 +165,6 @@ def _parse_json_string_list(value: Optional[str]) -> List[str]:
     return [item for item in parsed if isinstance(item, str) and item.strip()]
 
 
-_CONNECTION_LIST_REFRESH_STATUSES = {"initiated", "pending"}
-_CONNECTION_LIST_REFRESH_INTERVAL = timedelta(seconds=30)
 _COMPOSIO_ACTIVE_STATUSES = {"active", "valid", "connected", "enabled", "success"}
 
 
@@ -217,68 +215,15 @@ def _cache_connection_account_info(
     return info
 
 
-def _connection_list_refresh_due(row: Dict[str, Any], now: datetime) -> bool:
-    if (row.get("kind") or "composio") != "composio":
-        return False
-
-    status = str(row.get("status") or "").lower()
-    if status not in _CONNECTION_LIST_REFRESH_STATUSES:
-        return False
-
-    updated_at = _parse_iso8601(row.get("updated_at"))
-    if updated_at is None or now - updated_at < _CONNECTION_LIST_REFRESH_INTERVAL:
-        return False
-
-    last_checked_at = _parse_iso8601(row.get("last_checked_at"))
-    if last_checked_at is not None and now - last_checked_at < _CONNECTION_LIST_REFRESH_INTERVAL:
-        return False
-
-    return True
-
-
 def _refresh_connection_status_for_list(
     row: Dict[str, Any],
     *,
     user_id: str,
     repos: Repositories,
-    now: datetime,
+    now: object = None,
 ) -> Dict[str, Any]:
-    if not _connection_list_refresh_due(row, now):
-        return row
-
-    checked_at = now.isoformat()
-    try:
-        from composio_client import check_status
-
-        remote_status = _normalize_composio_connection_status(
-            check_status(row["composio_connection_id"])
-        )
-    except Exception as exc:
-        logger.warning("Could not refresh Composio status for %s during list: %s", row.get("id"), exc)
-        updated = repos.connections.update(
-            user_id=user_id,
-            composio_id=row["id"],
-            last_checked_at=checked_at,
-            last_check_status="failed",
-            last_check_error=str(exc)[:500],
-        )
-        return row_to_dict(updated) if updated else row
-
-    updates: Dict[str, Any] = {
-        "last_checked_at": checked_at,
-        "last_check_status": remote_status or "unknown",
-        "last_check_error": None,
-    }
-    if remote_status and remote_status != "not_found" and remote_status != str(row.get("status") or "").lower():
-        updates["status"] = remote_status
-        updates["updated_at"] = checked_at
-
-    updated = repos.connections.update(
-        user_id=user_id,
-        composio_id=row["id"],
-        **updates,
-    )
-    return row_to_dict(updated) if updated else row
+    """Compatibility shim: list responses never block on remote status refresh."""
+    return row
 
 
 def _redact_connection_account_label(value: Optional[str]) -> Optional[str]:
@@ -742,8 +687,9 @@ def _connections_last_used(user_id: str, repos: Repositories) -> Dict[str, tuple
                 [user_id, *worker_ids],
             ).fetchall()
         for row in rows:
-            wid = row[0] if isinstance(row, (list, tuple)) else row.get("worker_id")
-            ts = row[1] if isinstance(row, (list, tuple)) else row.get("last_run_at")
+            row_data = row_to_dict(row)
+            wid = row_data.get("worker_id")
+            ts = row_data.get("last_run_at")
             if not wid or not ts:
                 continue
             ts = str(ts)
@@ -760,12 +706,20 @@ def _connections_last_used(user_id: str, repos: Repositories) -> Dict[str, tuple
     return last_used
 
 
+def _connections_cache_key(user_id: str) -> tuple[str, str, str]:
+    return (
+        "connections",
+        os.environ.get("WORKEROS_DB") or os.environ.get("FLOOM_DB") or "",
+        user_id,
+    )
+
+
 @connections_router.get("/connections", response_model=List[ConnectionItem])
 def list_connections(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[ConnectionItem]:
-    cache_key = ("connections", auth.user_id)
+    cache_key = _connections_cache_key(auth.user_id)
     cached = hot_cache.get(cache_key)
     if cached is not None:
         return cached
@@ -773,13 +727,11 @@ def list_connections(
     rows = repos.connections.list(user_id=auth.user_id)
     if not rows:
         return []
-    now = datetime.now(timezone.utc)
     last_used = _connections_last_used(auth.user_id, repos)  # #802
 
     refreshed: List[Dict[str, Any]] = []
     for row in rows:
         d = row_to_dict(row)
-        d = _refresh_connection_status_for_list(d, user_id=auth.user_id, repos=repos, now=now)
         d["scopes"] = _parse_scopes_json(d.pop("scopes_json", None))
         used = last_used.get(str(d.get("app_name") or "").lower())
         if used:
