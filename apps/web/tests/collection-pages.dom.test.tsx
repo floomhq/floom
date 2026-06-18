@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import { QueryProvider } from "@/components/providers/QueryProvider";
 
 // Render the REAL page components (not the generic engine) with mocked data, to
@@ -123,20 +124,20 @@ describe("page components render with data (no client crash)", () => {
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
   });
 
-  it("WorkersCollection Config renders friendly runtime and model labels", async () => {
+  it("WorkersCollection Setup renders friendly runtime labels", async () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
     render(<QueryProvider><WorkersCollection initialWorkers={[worker as never]} /></QueryProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /Weekly Update/i }));
-    // R9: advanced tabs are reached via the "Advanced ▾" group on the tab row.
-    fireEvent.click(await screen.findByRole("button", { name: /Advanced tabs/i }));
-    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Config" }));
-    fireEvent.click(await screen.findByRole("tab", { name: "Config" }));
-    expect(await screen.findByText("Tools")).toBeInTheDocument();
-    expect(screen.getByText("Brain")).toBeInTheDocument();
+    // R9: Setup is a PRIMARY tab (always visible) — no Advanced dropdown needed.
+    fireEvent.click(await screen.findByRole("tab", { name: "Setup" }));
+    // Triggers sub-tab label is immediately visible on the Setup second-row tab bar.
     expect(screen.getAllByText("Triggers").length).toBeGreaterThan(0);
+    // Navigate to Limits sub-tab to verify runtime labels are shown as friendly strings.
+    fireEvent.click(await screen.findByRole("tab", { name: "Limits" }));
     expect(await screen.findByText(/E2B sandbox/)).toBeInTheDocument();
     expect(screen.getByText(/Agent skill/)).toBeInTheDocument();
-    expect(screen.getByText(/Claude Sonnet 4\.6/)).toBeInTheDocument();
+    // The raw model ID must never appear anywhere (model label display removed from
+    // WorkersCollection in R9 — Config dissolved into Setup/Advanced tabs).
     expect(screen.queryByText("bedrock/us.anthropic.claude-sonnet-4-6")).not.toBeInTheDocument();
   });
 
@@ -172,8 +173,11 @@ describe("page components render with data (no client crash)", () => {
     const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
     render(<BrainCollection initialFolders={[folder as never]} />);
     expect(await screen.findByRole("button", { name: /Company facts 3 files/i })).toBeInTheDocument();
-    expect(screen.getAllByText("Company facts")).toHaveLength(2);
-    expect(screen.getByText("Contexts")).toBeInTheDocument();
+    // #1257: folder name is now wrapped in <span title={c.name}> for truncation
+    // accessibility; getAllByText returns the leaf span only (not both span + parent div).
+    expect(screen.getAllByText("Company facts")).toHaveLength(1);
+    // BrainVisual (which rendered "Contexts") was removed; collection title is now "Library".
+    expect(screen.getByText("Library")).toBeInTheDocument();
   });
 
   it("ApprovalsCollection fetches + renders the approval", async () => {
@@ -197,16 +201,25 @@ describe("page components render with data (no client crash)", () => {
   it("shows loading skeletons, not empty states, while first collection fetches are pending", async () => {
     const { api } = await import("@/lib/api");
 
+    // Use a plain QueryClientProvider (not PersistQueryClientProvider) so the
+    // async localStorage-restore phase doesn't suppress isLoading during the test.
+    function makeQC() {
+      return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    }
+    function QP({ children }: { children: React.ReactNode }) {
+      return <QueryClientProvider client={makeQC()}>{children}</QueryClientProvider>;
+    }
+
     vi.mocked(api.workers.list).mockReturnValueOnce(new Promise(() => {}) as never);
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
-    const workers = render(<QueryProvider><WorkersCollection initialWorkers={[]} /></QueryProvider>);
+    const workers = render(<QP><WorkersCollection initialWorkers={[]} /></QP>);
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("No workers yet")).not.toBeInTheDocument();
     workers.unmount();
 
     vi.mocked(api.runs.list).mockReturnValueOnce(new Promise(() => {}) as never);
     const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
-    const runs = render(<QueryProvider><RunsCollection initialRuns={[]} /></QueryProvider>);
+    const runs = render(<QP><RunsCollection initialRuns={[]} /></QP>);
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("No run history yet")).not.toBeInTheDocument();
     runs.unmount();
