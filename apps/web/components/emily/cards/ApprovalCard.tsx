@@ -65,8 +65,8 @@ export function ApprovalCard({ card }: { card: ApprovalCardType }) {
         isPending
           ? "[border:var(--bd-card)] bg-muted/30"
           : approved
-          ? "[border:var(--bd-card)] bg-green-50/30 dark:bg-green-950/20"
-          : "[border:var(--bd-card)] bg-red-50/30 dark:bg-red-950/20"
+          ? "[border:var(--bd-card)] bg-[color-mix(in_srgb,var(--positive)_8%,transparent)]"
+          : "[border:var(--bd-card)] bg-[color-mix(in_srgb,var(--negative)_8%,transparent)]"
       )}
     >
       <div className="flex items-start gap-2.5 px-3.5 py-2.5">
@@ -84,9 +84,9 @@ export function ApprovalCard({ card }: { card: ApprovalCardType }) {
             waiting
           </Badge>
         ) : approved ? (
-          <CheckCircle2 className="size-4 shrink-0 text-green-600" />
+          <CheckCircle2 className="size-4 shrink-0 text-[var(--positive)]" />
         ) : (
-          <XCircle className="size-4 shrink-0 text-red-500" />
+          <XCircle className="size-4 shrink-0 text-[var(--negative)]" />
         )}
       </div>
 
@@ -127,8 +127,8 @@ export function ApprovalCard({ card }: { card: ApprovalCardType }) {
             className={cn(
               "text-[10px] font-normal",
               approved
-                ? "bg-green-500/10 text-green-700 [border:var(--bd-card)]"
-                : "bg-red-500/10 text-red-600 [border:var(--bd-card)]"
+                ? "bg-[color-mix(in_srgb,var(--positive)_12%,transparent)] text-[color-mix(in_srgb,var(--positive)_78%,var(--ink))] [border:var(--bd-card)]"
+                : "bg-[color-mix(in_srgb,var(--negative)_12%,transparent)] text-[color-mix(in_srgb,var(--negative)_78%,var(--ink))] [border:var(--bd-card)]"
             )}
           >
             {approved ? "Approved" : "Rejected"}
