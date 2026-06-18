@@ -254,6 +254,7 @@ class RunRepository(Protocol):
         user_id: str,
         worker_ids: list[str],
         since: str,
+        per_worker_limit: int = 10,
     ) -> list[RowDict]: ...
 
     def get(self, *, user_id: str, run_id: str) -> RowDict | None: ...

@@ -2087,25 +2087,37 @@ class SqliteRunRepository:
         user_id: str,
         worker_ids: list[str],
         since: str,
+        per_worker_limit: int = 10,
     ) -> list[dict[str, Any]]:
         if not worker_ids:
             return []
+        per_worker_limit = max(1, min(int(per_worker_limit or 10), 100))
         worker_sql = self._in_clause(worker_ids)
         status_sql = self._in_clause(self._TERMINAL_STATUSES)
         with get_db() as conn:
             rows = conn.execute(
                 f"""
-                SELECT r.id, r.worker_id, r.status, r.trigger_source, r.created_at,
-                       r.started_at, r.completed_at, r.duration_ms, r.error, r.error_code
-                FROM runs r
-                JOIN workers w ON w.id = r.worker_id
-                WHERE w.owner_id = ?
-                  AND r.worker_id IN ({worker_sql})
-                  AND r.status IN ({status_sql})
-                  AND r.created_at >= ?
-                ORDER BY r.created_at DESC, r.id DESC
+                SELECT id, worker_id, status, trigger_source, created_at,
+                       started_at, completed_at, duration_ms, error, error_code
+                FROM (
+                    SELECT
+                        r.id, r.worker_id, r.status, r.trigger_source, r.created_at,
+                        r.started_at, r.completed_at, r.duration_ms, r.error, r.error_code,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY r.worker_id
+                            ORDER BY r.created_at DESC, r.id DESC
+                        ) AS row_number
+                    FROM runs r
+                    JOIN workers w ON w.id = r.worker_id
+                    WHERE w.owner_id = ?
+                      AND r.worker_id IN ({worker_sql})
+                      AND r.status IN ({status_sql})
+                      AND r.created_at >= ?
+                )
+                WHERE row_number <= ?
+                ORDER BY created_at DESC, id DESC
                 """,
-                (user_id, *worker_ids, *self._TERMINAL_STATUSES, since),
+                (user_id, *worker_ids, *self._TERMINAL_STATUSES, since, per_worker_limit),
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
