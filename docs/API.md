@@ -8,6 +8,10 @@ If `FLOOM_SECRET` is set, API requests require:
 x-floom-secret: <your secret>
 ```
 
+Shared-secret requests are member-scoped by default. Set
+`WORKEROS_SHARED_SECRET_ROLE=admin` only for deployments that intentionally need
+legacy admin-equivalent shared-secret access.
+
 If `FLOOM_SECRET` is unset, local development runs without the operator secret.
 For the exhaustive route reference, start the API and open
 `http://localhost:8000/docs`.

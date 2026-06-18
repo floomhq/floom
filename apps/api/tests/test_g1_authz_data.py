@@ -38,8 +38,10 @@ def _load_main(monkeypatch, tmp_path, *, secret: str | None = None):
     monkeypatch.setenv("WORKEROS_INSECURE_COOKIES", "1")
     if secret is None:
         monkeypatch.delenv("FLOOM_SECRET", raising=False)
+        monkeypatch.delenv("WORKEROS_SHARED_SECRET_ROLE", raising=False)
     else:
         monkeypatch.setenv("FLOOM_SECRET", secret)
+        monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
     # Purge the full first-party app module graph, not just main/db/auth. The
     # FastAPI routers (routers.*) bind get_auth_context / get_repos / the auth
     # provider at IMPORT time; if a prior test file reloaded `main` (e.g.

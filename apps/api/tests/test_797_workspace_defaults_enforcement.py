@@ -60,6 +60,7 @@ def client_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(tmp_path))
     monkeypatch.setenv("FLOOM_SECRET", SECRET)
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     for name in list(sys.modules):
         if name in ("main", "models", "worker_registry", "run_service", "chat_service") or name.startswith(("routers", "services", "core", "db", "auth", "contexts", "runner_sandbox")):

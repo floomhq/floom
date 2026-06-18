@@ -2129,7 +2129,7 @@ class E2BSandboxDriver(SandboxDriver):
         sandbox: Any,
         workdir: str,
         config: Optional[WorkerConfig],
-        inputs: Dict[str, Any],
+        inputs: Dict[str, Any] | None = None,
         made_dirs: set[str],
         log_fn: Callable[[str, str], None],
         user_id: str | None = None,
@@ -2137,6 +2137,7 @@ class E2BSandboxDriver(SandboxDriver):
     ) -> str | None:
         if not config or not config.contexts:
             return None
+        inputs = inputs or {}
 
         contexts_root = f"{workdir}/context"
         made_context_root = False
