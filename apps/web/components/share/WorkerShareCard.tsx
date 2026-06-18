@@ -16,7 +16,7 @@ import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-import { Clock, FileText, Layers, MousePointerClick, Webhook, Zap } from "lucide-react";
+import { Clock, Layers, MousePointerClick, Webhook, Zap } from "lucide-react";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { GenericOutput } from "@/components/generic-output";
 import { SHARE_CARD_BODY_HEIGHT } from "@/components/share/ShareCardShell";
@@ -97,7 +97,6 @@ type FileTab = "skill" | "yaml" | "output";
 
 export function WorkerShareCard({ worker, authed = false, token }: { worker: PublicWorker; authed?: boolean; token?: string }) {
   const router = useRouter();
-  const [flipped, setFlipped] = useState(false);
   const [tab, setTab] = useState<FileTab>("skill");
   const [importing, setImporting] = useState(false);
   const [importedId, setImportedId] = useState<string | null>(null);
@@ -122,229 +121,112 @@ export function WorkerShareCard({ worker, authed = false, token }: { worker: Pub
   const ctaHref = authed ? undefined : "/login";
   const ctaLabel = importedId ? "View worker" : importing ? "Importing..." : "Add to workspace";
 
+  const importButton = authed && token ? (
+    <button
+      type="button"
+      onClick={() => void handleImport()}
+      disabled={importing || importedId != null}
+      className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] hover:opacity-90 disabled:opacity-60"
+    >
+      {ctaLabel}
+    </button>
+  ) : (
+    <Link
+      href={ctaHref ?? "/login"}
+      className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
+    >
+      {ctaLabel}
+    </Link>
+  );
+
+  // S8: the standalone worker share is the worker's FILES — its skill file and
+  // worker.yml (+ an example output when present). One compact identity line,
+  // then the files front-and-center. No flip, no heavy summary card, no boxed
+  // chrome: flat, files-first, separated by a soft inset surface.
   return (
-    <div className="px-7 pb-4">
-      <p className="mb-2.5 pt-5 font-mono text-[11px] text-[var(--ink-faint)]">
-        Click &ldquo;See files&rdquo; to flip · click a tab to switch file
-      </p>
-      <div style={{ perspective: 1200, height: SHARE_CARD_BODY_HEIGHT }}>
-        <div
-          className="relative h-full w-full transition-transform duration-500"
-          style={{ transformStyle: "preserve-3d", transform: flipped ? "rotateY(180deg)" : "none" }}
-        >
-          {/* FRONT */}
-          <div
-            className="absolute inset-0 flex flex-col overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]"
-            style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden" }}
-          >
-            <div className="min-h-0 flex-1 overflow-y-auto">
-              {/* Title */}
-              <div className="flex items-start gap-4 px-5 py-4">
-                <span className="c-logo shrink-0" style={{ width: 36, height: 36 }}>
-                  <Layers className="size-4 text-[var(--ink-soft)]" />
-                </span>
-                <div className="min-w-0 flex-1">
-                  <div className="mb-1 flex flex-wrap items-center gap-2">
-                    <h1 className="text-lg font-semibold tracking-tight">{worker.name}</h1>
-                    {worker.is_example && (
-                      <span className="inline-flex items-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/40 px-1.5 py-0.5 text-[10px] text-muted-foreground">
-                        Example
-                      </span>
-                    )}
-                  </div>
-                  {worker.description && (
-                    <p className="text-sm leading-relaxed text-[var(--ink-soft)]">{worker.description}</p>
-                  )}
-                  <div className="mt-2 flex items-center gap-1.5 text-xs text-[var(--ink-soft)]">
-                    <TriggerIcon className="size-3.5" />
-                    <span>{triggerLabel}</span>
-                  </div>
-                </div>
-              </div>
-
-              {/* What it does */}
-              {worker.use_cases && worker.use_cases.length > 0 && (
-                <div className="[border-top:var(--bd-div)] px-5 py-4">
-                  <p className="mb-2.5 text-[11px] font-medium uppercase tracking-wide text-[var(--ink-soft)]">
-                    What it does
-                  </p>
-                  <ul className="flex flex-col gap-1.5">
-                    {worker.use_cases.map((uc) => (
-                      <li key={uc} className="flex gap-2.5 text-sm leading-relaxed">
-                        <span className="mt-2 size-1 shrink-0 rounded-[var(--radius-pill)] bg-[var(--ink-soft)]" aria-hidden />
-                        <span>{uc}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-
-              {/* Tools */}
-              {tools.length > 0 && (
-                <div className="[border-top:var(--bd-div)] px-5 py-4">
-                  <p className="mb-2.5 text-[11px] font-medium uppercase tracking-wide text-[var(--ink-soft)]">Tools</p>
-                  <div className="flex flex-wrap gap-2">
-                    {tools.map((slug) => (
-                      <span
-                        key={slug}
-                        className="inline-flex items-center gap-1.5 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--card-glass)] px-2.5 py-1 text-xs"
-                      >
-                        <BrandLogo icon={slug} className="size-3.5" />
-                        <span className="capitalize">{slug.replace(/-/g, " ")}</span>
-                      </span>
-                    ))}
-                  </div>
-                </div>
-              )}
-
-              {/* Example / last result — GENERIC renderer */}
-              {hasExample && (
-                <div className="[border-top:var(--bd-div)] px-5 py-4">
-                  <p className="mb-2.5 text-[11px] font-medium uppercase tracking-wide text-[var(--ink-soft)]">
-                    Example result
-                  </p>
-                  <GenericOutput
-                    type={exampleType(worker)}
-                    value={worker.example_output}
-                    className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] p-3"
-                  />
-                </div>
-              )}
-            </div>
-
-            {/* Pinned CTA */}
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 [border-top:var(--bd-div)] bg-[var(--bg-2)] px-5 py-3">
-              <p className="text-xs leading-relaxed text-[var(--ink-soft)]">
-                {authed
-                  ? "Import this worker into your workspace and connect its tools."
-                  : "Add this worker to your workspace and connect its tools."}
-              </p>
-              <div className="flex shrink-0 gap-2">
-                <button
-                  type="button"
-                  onClick={() => setFlipped(true)}
-                  className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--card-glass)] px-3.5 text-[13px] font-medium hover:bg-[var(--bg-2)]"
-                >
-                  <FileText className="size-3.5" />
-                  See files
-                </button>
-                {authed && token ? (
-                  <button
-                    type="button"
-                    onClick={() => void handleImport()}
-                    disabled={importing || importedId != null}
-                    className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] hover:opacity-90 disabled:opacity-60"
-                  >
-                    {ctaLabel}
-                  </button>
-                ) : (
-                  <Link
-                    href={ctaHref ?? "/login"}
-                    className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
-                  >
-                    {ctaLabel}
-                  </Link>
-                )}
-              </div>
-            </div>
+    <div className="px-7 pb-5 pt-5">
+      {/* Compact identity */}
+      <div className="mb-3 flex items-start gap-3">
+        <span className="c-logo shrink-0" style={{ width: 32, height: 32 }}>
+          <Layers className="size-4 text-[var(--ink-soft)]" />
+        </span>
+        <div className="min-w-0 flex-1">
+          <div className="flex flex-wrap items-center gap-2">
+            <h1 className="text-base font-semibold tracking-tight">{worker.name}</h1>
+            {worker.is_example && (
+              <span className="text-[10px] uppercase tracking-wide text-[var(--ink-faint)]">Example</span>
+            )}
           </div>
-
-          {/* BACK */}
-          <div
-            className="absolute inset-0 flex flex-col overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)]"
-            style={{ backfaceVisibility: "hidden", WebkitBackfaceVisibility: "hidden", transform: "rotateY(180deg)" }}
-          >
-            {/* Back header */}
-            <div className="flex shrink-0 items-center justify-between [border-bottom:var(--bd-div)] px-4 py-3">
-              <div className="flex items-center gap-2.5">
-                <button
-                  type="button"
-                  onClick={() => setFlipped(false)}
-                  aria-label="Back to overview"
-                  className="inline-flex size-7 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] hover:bg-[var(--bg-2)]"
-                >
-                  <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.5">
-                    <polyline points="15 18 9 12 15 6" />
-                  </svg>
-                </button>
-                <span className="text-[13px] font-semibold">Worker files</span>
-              </div>
-              {authed && token ? (
-                <button
-                  type="button"
-                  onClick={() => void handleImport()}
-                  disabled={importing || importedId != null}
-                  className="inline-flex h-7 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-xs font-medium text-[var(--primary-text)] hover:opacity-90 disabled:opacity-60"
-                >
-                  {ctaLabel}
-                </button>
-              ) : (
-                <Link
-                  href={ctaHref ?? "/login"}
-                  className="inline-flex h-7 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-xs font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
-                >
-                  {ctaLabel}
-                </Link>
-              )}
-            </div>
-
-            {/* TOP TAB BAR */}
-            <div className="flex shrink-0 [border-bottom:var(--bd-div)] bg-[var(--bg-2)]">
-              {([
-                ["skill", "SKILL.md"],
-                ["yaml", "worker.yml"],
-                ...(hasExample ? ([["output", "output"]] as const) : []),
-              ] as [FileTab, string][]).map(([key, labelText]) => (
-                <button
-                  key={key}
-                  type="button"
-                  onClick={() => setTab(key)}
-                  className={`px-4 py-2 font-mono text-xs transition-colors ${
-                    tab === key
-                      ? "bg-[var(--bg-card)] font-medium text-[var(--ink)]"
-                      : "text-[var(--ink-soft)] hover:bg-[var(--bg-card)] hover:text-[var(--ink)]"
-                  }`}
-                >
-                  {labelText}
-                </button>
-              ))}
-            </div>
-
-            {/* FILE PANE — only the active file, scrolls within itself */}
-            <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--bg-card)]">
-              {tab === "skill" && (
-                <FilePane meta="Markdown">
-                  <GenericOutput type="markdown" value={buildSkillMd(worker)} className="px-5 py-4" />
-                </FilePane>
-              )}
-              {tab === "yaml" && (
-                <FilePane meta="YAML">
-                  <pre className="overflow-x-auto px-5 py-4 font-mono text-[11px] leading-relaxed text-[var(--ink-soft)]">
-                    {buildWorkerYml(worker)}
-                  </pre>
-                </FilePane>
-              )}
-              {tab === "output" && hasExample && (
-                <FilePane meta="Example output">
-                  <GenericOutput type={exampleType(worker)} value={worker.example_output} className="px-5 py-4" />
-                </FilePane>
-              )}
-            </div>
+          {worker.description && (
+            <p className="mt-0.5 text-[13px] leading-relaxed text-[var(--ink-soft)]">{worker.description}</p>
+          )}
+          <div className="mt-1.5 flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--ink-soft)]">
+            <span className="inline-flex items-center gap-1.5">
+              <TriggerIcon className="size-3.5" />
+              {triggerLabel}
+            </span>
+            {tools.map((slug) => (
+              <span key={slug} className="inline-flex items-center gap-1.5">
+                <BrandLogo icon={slug} className="size-3.5" />
+                <span className="capitalize">{slug.replace(/-/g, " ")}</span>
+              </span>
+            ))}
           </div>
         </div>
       </div>
-    </div>
-  );
-}
 
-function FilePane({ meta, children }: { meta: string; children: React.ReactNode }) {
-  return (
-    <div>
-      <div className="flex items-center gap-2 [border-bottom:var(--bd-div)] bg-[var(--bg-2)] px-4 py-2">
-        <FileText className="size-3.5 text-[var(--ink-soft)]" />
-        <span className="font-mono text-[11px] text-[var(--ink-soft)]">{meta}</span>
+      {/* FILES — the center of the share. Soft inset surface, hairline tab bar. */}
+      <div
+        className="flex flex-col overflow-hidden rounded-[var(--radius-card)] bg-[var(--bg-2)]"
+        style={{ height: SHARE_CARD_BODY_HEIGHT }}
+      >
+        {/* Tab bar */}
+        <div className="flex shrink-0 [border-bottom:var(--bd-div)]">
+          {([
+            ["skill", "SKILL.md"],
+            ["yaml", "worker.yml"],
+            ...(hasExample ? ([["output", "output"]] as const) : []),
+          ] as [FileTab, string][]).map(([key, labelText]) => (
+            <button
+              key={key}
+              type="button"
+              onClick={() => setTab(key)}
+              className={`px-4 py-2.5 font-mono text-xs transition-colors ${
+                tab === key
+                  ? "bg-[var(--bg-card)] font-medium text-[var(--ink)]"
+                  : "text-[var(--ink-soft)] hover:text-[var(--ink)]"
+              }`}
+            >
+              {labelText}
+            </button>
+          ))}
+        </div>
+
+        {/* Active file — white "paper" sheet, scrolls within itself */}
+        <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--bg-card)]">
+          {tab === "skill" && (
+            <GenericOutput type="markdown" value={buildSkillMd(worker)} className="px-5 py-4" />
+          )}
+          {tab === "yaml" && (
+            <pre className="overflow-x-auto px-5 py-4 font-mono text-[11px] leading-relaxed text-[var(--ink-soft)]">
+              {buildWorkerYml(worker)}
+            </pre>
+          )}
+          {tab === "output" && hasExample && (
+            <GenericOutput type={exampleType(worker)} value={worker.example_output} className="px-5 py-4" />
+          )}
+        </div>
       </div>
-      {children}
+
+      {/* CTA */}
+      <div className="mt-4 flex flex-wrap items-center justify-between gap-3">
+        <p className="text-xs leading-relaxed text-[var(--ink-soft)]">
+          {authed
+            ? "Import this worker into your workspace and connect its tools."
+            : "Add this worker to your workspace and connect its tools."}
+        </p>
+        {importButton}
+      </div>
     </div>
   );
 }

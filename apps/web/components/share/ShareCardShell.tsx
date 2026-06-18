@@ -35,7 +35,7 @@ export function FloomMark({ size = 22, label = "Floom" }: { size?: number; label
 /** Standalone top nav for a share page: Floom mark on the left, a slot on the right. */
 export function ShareNav({ right }: { right?: ReactNode }) {
   return (
-    <div className="flex items-center justify-between rounded-t-[var(--radius-card)] [border-bottom:var(--bd-div)] bg-[var(--bg-card)] px-5 py-3">
+    <div className="flex items-center justify-between rounded-t-[var(--radius-card)] [border-bottom:var(--bd-div)] px-5 py-3">
       <FloomMark />
       {right}
     </div>
@@ -59,7 +59,7 @@ export function ShareCardShell({
 }) {
   return (
     <div className="mx-auto w-full px-3 py-10" style={{ maxWidth }}>
-      <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-app)] shadow-[var(--shadow-pop)]">
+      <div className="rounded-[var(--radius-card)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
         <ShareNav right={navRight} />
         {children}
       </div>

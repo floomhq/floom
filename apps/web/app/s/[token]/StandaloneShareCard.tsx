@@ -98,11 +98,18 @@ export function StandaloneShareCard({
 
   const downloadHref = `/s/${encodeURIComponent(token)}/download`;
 
-  // Worker shares reuse the v6 worker flip-card (DRY).
+  // Worker shares reuse the simplified, files-first worker card (DRY).
   if (share.entity_type === "worker" && share.worker) {
     return (
       <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 680 }}>
-        <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
+        <div className="rounded-[var(--radius-card)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
+          {/* Nav — same Floom header the file/pack shares carry */}
+          <div className="flex items-center justify-between rounded-t-[var(--radius-card)] [border-bottom:var(--bd-div)] px-5 py-3">
+            <FloomMark />
+            <Link href={ctaHref} className="text-sm text-[var(--ink-soft)] no-underline hover:text-[var(--ink)]">
+              {ctaLabel}
+            </Link>
+          </div>
           <WorkerShareCard worker={share.worker} authed={authed} token={token} />
         </div>
       </div>
@@ -142,9 +149,9 @@ export function StandaloneShareCard({
 
   return (
     <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 760 }}>
-      <div className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
+      <div className="rounded-[var(--radius-card)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
         {/* Nav */}
-        <div className="flex items-center justify-between rounded-t-[var(--radius-card)] [border-bottom:var(--bd-div)] bg-[var(--bg-card)] px-5 py-3">
+        <div className="flex items-center justify-between rounded-t-[var(--radius-card)] [border-bottom:var(--bd-div)] px-5 py-3">
           <FloomMark />
           <Link href={ctaHref} className="text-sm text-[var(--ink-soft)] no-underline hover:text-[var(--ink)]">
             {ctaLabel}
@@ -180,9 +187,10 @@ export function StandaloneShareCard({
             )}
           </div>
 
-          {/* ONE card, fixed height — content swaps in place */}
+          {/* ONE inset surface, fixed height — content swaps in place. Flat:
+             separated from the card by a soft fill, not a border. */}
           <div
-            className="flex flex-col overflow-hidden rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]"
+            className="flex flex-col overflow-hidden rounded-[var(--radius-card)] bg-[var(--bg-2)]"
             style={{ height: SHARE_CARD_BODY_HEIGHT }}
           >
             {openFile ? (
@@ -250,7 +258,7 @@ function PackView({
             {share.description && (
               <p className="mb-3 text-sm leading-relaxed text-[var(--ink-soft)]">{share.description}</p>
             )}
-            <div className="flex flex-wrap gap-2">
+            <div className="flex flex-wrap items-center gap-x-3 gap-y-1 text-xs text-[var(--ink-soft)]">
               <Metric label="Files" value={share.pack?.file_count ?? share.files.length} />
               {folderCount > 0 && <Metric label="Folders" value={folderCount} />}
               {share.pack?.total_size_bytes != null && (
@@ -272,7 +280,7 @@ function PackView({
                   key={`folder-${node.name}`}
                   type="button"
                   onClick={() => onOpenFolder(node.name)}
-                  className="flex items-center gap-3 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3 py-2.5 text-left hover:bg-[rgba(107,104,97,0.07)]"
+                  className="flex items-center gap-3 rounded-[var(--radius-button)] bg-[var(--bg-card)] px-3 py-2.5 text-left hover:bg-[var(--bg-3)]"
                 >
                   <Folder className="size-3.5 shrink-0 text-[var(--ink-soft)]" />
                   <div className="min-w-0 flex-1">
@@ -288,7 +296,7 @@ function PackView({
                   key={`file-${node.file.path}`}
                   type="button"
                   onClick={() => onOpenFile(node.file.path)}
-                  className="flex items-center gap-3 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3 py-2.5 text-left hover:bg-[rgba(107,104,97,0.07)]"
+                  className="flex items-center gap-3 rounded-[var(--radius-button)] bg-[var(--bg-card)] px-3 py-2.5 text-left hover:bg-[var(--bg-3)]"
                 >
                   <FileText className="size-3.5 shrink-0 text-[var(--ink-soft)]" />
                   <div className="min-w-0 flex-1">
@@ -298,9 +306,7 @@ function PackView({
                       {node.file.display_type ? ` · ${node.file.display_type}` : ""}
                     </p>
                   </div>
-                  <span className="shrink-0 rounded-[var(--radius-button)] [border:var(--bd-card)] px-2.5 py-1 text-[11px] text-[var(--ink-soft)]">
-                    Open
-                  </span>
+                  <span className="shrink-0 text-[11px] text-[var(--ink-soft)]">Open</span>
                 </button>
               ),
             )}
@@ -339,9 +345,10 @@ function FileView({
   const content = file.content_text ?? "";
   return (
     <>
-      {/* File header */}
+      {/* File header — S7: a file reads as a distinct "paper" sheet (white)
+         against the soft inset surface, not plain text. */}
       <div className="flex shrink-0 items-center gap-3 [border-bottom:var(--bd-div)] bg-[var(--bg-card)] px-5 py-3.5">
-        <div className="flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)]">
+        <div className="flex size-9 shrink-0 items-center justify-center rounded-[var(--radius-button)] bg-[var(--bg-2)]">
           <FileText className="size-4 text-[var(--ink-soft)]" />
         </div>
         <div className="min-w-0 flex-1">
@@ -354,7 +361,7 @@ function FileView({
           <a
             href={file.download_url}
             download
-            className="inline-flex size-7 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] text-[var(--ink-soft)] no-underline hover:bg-[var(--bg-2)]"
+            className="inline-flex size-7 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] no-underline hover:bg-[var(--bg-2)]"
             title="Download"
           >
             <Download className="size-3.5" />
@@ -386,7 +393,7 @@ function FileView({
         </Link>
         <a
           href={downloadHref}
-          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3.5 text-[13px] font-medium no-underline hover:bg-[var(--bg-2)]"
+          className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--bg-card)] px-3.5 text-[13px] font-medium no-underline hover:bg-[var(--bg-3)]"
         >
           <Download className="size-3.5" />
           Download
@@ -401,9 +408,9 @@ function FileView({
 
 function Metric({ label, value }: { label: string; value: string | number }) {
   return (
-    <span className="inline-flex items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-app)] px-3 py-1.5 text-xs">
-      <span className="text-[var(--ink-soft)]">{label}</span>
-      <span className="font-medium">{value}</span>
+    <span className="inline-flex items-center gap-1.5">
+      <span className="font-medium text-[var(--ink)]">{value}</span>
+      <span>{label}</span>
     </span>
   );
 }
