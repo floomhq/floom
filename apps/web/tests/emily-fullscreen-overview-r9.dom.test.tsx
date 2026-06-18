@@ -5,8 +5,10 @@
 //      the AppShell level where the page pane and the dock are sibling flex
 //      children — the layer the earlier "verified the control exists" passes
 //      never actually exercised.
-//   2. Overview content column no longer hard-caps at 640px (the dead-gap cause)
-//      — it fills the pane up to a wider sensible cap.
+//   2. Overview content column no longer carries ANY fixed width cap (the
+//      dead-gap cause) — it fills the pane (the AppShell max-w-7xl wrapper +
+//      Emily-dock boundary bound the width). Only the prose paragraph keeps its
+//      own readable max-w-[560px] line-length.
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
@@ -93,7 +95,7 @@ describe("Emily fullscreen — AppShell hides the page pane, keeps the sidebar",
   });
 });
 
-describe("Overview — content column fills the container (no dead 640px cap)", () => {
+describe("Overview — content column fills the container (no fixed width cap)", () => {
   beforeEach(() => {
     vi.stubGlobal(
       "matchMedia",
@@ -101,7 +103,7 @@ describe("Overview — content column fills the container (no dead 640px cap)", 
     );
   });
 
-  it("the overview content column is not hard-capped at the narrow 640px width", async () => {
+  it("the overview content column carries no fixed width cap so it fills the pane, while the prose keeps its readable line-length", async () => {
     // Drive the real component with seeded data so it renders the brief layout.
     vi.doMock("@/lib/query/hooks", () => ({
       useOverview: () => ({
@@ -128,9 +130,21 @@ describe("Overview — content column fills the container (no dead 640px cap)", 
     const { OverviewDashboard } = await import("@/components/overview/OverviewDashboard");
     const { container } = render(<OverviewDashboard />);
 
-    // The greeting/stats/lists column must NOT carry the old narrow 640px cap.
+    // The content column wraps the greeting. Find it and assert it FILLS the
+    // pane: width w-full and NO fixed max-width cap (no max-w-[640px] /
+    // max-w-[920px] / any max-w-[Npx]). A fixed cap is exactly what left the
+    // ~377px dead gap before the Emily panel.
+    const greeting = screen.getByText(/Good (morning|afternoon|evening)/i);
+    const column = greeting.parentElement as HTMLElement;
+    expect(column.className).toContain("w-full");
+    expect(column.className).not.toMatch(/max-w-\[\d+px\]/);
+    // Belt-and-braces: the old narrow 640px and the interim 920px caps are gone
+    // from the whole subtree.
     expect(container.querySelector(".max-w-\\[640px\\]")).toBeNull();
-    // It should carry the widened cap so it fills the pane.
-    expect(container.querySelector(".max-w-\\[920px\\]")).not.toBeNull();
+    expect(container.querySelector(".max-w-\\[920px\\]")).toBeNull();
+
+    // The prose summary paragraph KEEPS its own readable line-length so text
+    // lines don't sprawl across the full pane.
+    expect(container.querySelector(".max-w-\\[560px\\]")).not.toBeNull();
   });
 });

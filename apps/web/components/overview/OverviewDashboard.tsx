@@ -454,13 +454,16 @@ export function OverviewDashboard({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 pb-6 pt-1">
-      {/* Content column fills the available pane width up to a sensible cap so it
-          no longer leaves a dead gap before the Emily panel (Federico
-          2026-06-17: "the overview is not properly filling the container"). The
-          640px cap stopped well short of the pane; raised so it fills on typical
-          widths while staying readable on very wide screens. The summary
-          paragraph keeps its own tighter max-w so prose lines stay legible. */}
-      <div className="w-full max-w-[920px]">
+      {/* Content column FILLS the pane width (Federico 2026-06-17: "the overview
+          is not properly filling the container"). The previous fixed
+          max-w-[920px] cap stopped ~377px short of the Emily-panel boundary on a
+          1920px screen, leaving a dead gap. The pane already bounds the width:
+          the AppShell wraps page content in `max-w-7xl mx-auto px-…` between the
+          sidebar and the Emily dock, so the stats card, needs-you list, and
+          recent-work list now extend to fill that pane. Only the summary
+          paragraph keeps its own tighter max-w-[560px] so prose lines stay
+          legible. */}
+      <div className="w-full">
         {/* 1. Greeting + date line. */}
         <div className="text-[26px] font-semibold leading-tight tracking-[-0.01em] text-[var(--text-primary)]">
           {greeting}
