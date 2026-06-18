@@ -148,6 +148,60 @@ def test_slack_oauth_callback_persists_team_install_without_leaking_token(monkey
     assert "xoxb-installed-token" not in status.text
 
 
+def test_slack_oauth_callback_preserves_return_to_query_params(monkeypatch, tmp_path):
+    main, _env_file = _load_api(monkeypatch, tmp_path)
+    monkeypatch.setenv("SLACK_CLIENT_ID", "123.abc")
+    monkeypatch.setenv("SLACK_CLIENT_SECRET", "client-secret")
+    monkeypatch.setenv("SLACK_SIGNING_SECRET", "signing-secret")
+
+    class FakeResponse:
+        def __init__(self, payload):
+            self._payload = payload
+            self.ok = True
+            self.status_code = 200
+
+        def json(self):
+            return self._payload
+
+    monkeypatch.setattr(
+        main.requests,
+        "post",
+        lambda *_args, **_kwargs: FakeResponse({
+            "ok": True,
+            "access_token": "xoxb-installed-token",
+            "team": {"id": "T123", "name": "test-games"},
+            "enterprise": None,
+            "authed_user": {"id": "U111"},
+        }),
+    )
+    monkeypatch.setattr(
+        main.requests,
+        "get",
+        lambda *_args, **_kwargs: FakeResponse({
+            "ok": True,
+            "team_id": "T123",
+            "team": "test-games",
+            "user_id": "U999",
+        }),
+    )
+
+    with TestClient(main.app, headers=AUTH_HEADERS, follow_redirects=False) as client:
+        install_response = client.post(
+            "/slack/oauth/install",
+            json={"return_to": "/assistant?from_install=slack"},
+        )
+        state = urllib.parse.parse_qs(
+            urllib.parse.urlparse(install_response.json()["install_url"]).query
+        )["state"][0]
+        callback = client.get("/slack/oauth/callback", params={"code": "oauth-code", "state": state})
+
+    assert callback.status_code in {302, 307}
+    assert (
+        callback.headers["location"]
+        == "https://workers.example.test/assistant?from_install=slack&slack_connected=1&team_id=T123"
+    )
+
+
 def test_slack_oauth_install_uses_env_scopes(monkeypatch, tmp_path):
     main, _env_file = _load_api(monkeypatch, tmp_path)
     monkeypatch.setenv("SLACK_CLIENT_ID", "123.abc")

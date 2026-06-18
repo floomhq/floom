@@ -117,6 +117,23 @@ def _slack_oauth_callback_url() -> str:
     return f"{_public_api_base_url()}/slack/oauth/callback"
 
 
+def _append_slack_oauth_success_params(return_to: str, *, team_id: str) -> str:
+    safe_return_to = return_to if return_to.startswith("/") and not return_to.startswith("//") else "/assistant"
+    parsed = urllib.parse.urlsplit(safe_return_to)
+    query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    query.extend([
+        ("slack_connected", "1"),
+        ("team_id", team_id),
+    ])
+    return urllib.parse.urlunsplit((
+        "",
+        "",
+        parsed.path or "/assistant",
+        urllib.parse.urlencode(query),
+        parsed.fragment,
+    ))
+
+
 def _slack_events_url() -> str:
     return f"{_public_api_base_url()}/slack/events"
 
@@ -523,8 +540,8 @@ def slack_oauth_callback(code: str = "", state: str = "", error: str = ""):
     )
 
     return_to_val = str(state_payload.get("return_to") or "/assistant")
-    safe_return_to = return_to_val if return_to_val.startswith("/") and not return_to_val.startswith("//") else "/assistant"
-    return RedirectResponse(url=f"{frontend_url}{safe_return_to}?slack_connected=1&team_id={urllib.parse.quote(team_id)}")
+    return_to = _append_slack_oauth_success_params(return_to_val, team_id=team_id)
+    return RedirectResponse(url=f"{frontend_url}{return_to}")
 
 
 # ---------------------------------------------------------------------------
