@@ -1048,20 +1048,24 @@ def approve_destructive_action(
     approval = _load_typed_approval(approval_id, auth.user_id, "destructive_delete", repos)
     decision_input: Dict[str, Any] = json.loads(approval.get("decision_input_json") or "{}")
     path = decision_input.get("path", "")
-    description = _execute_destructive_delete(path, auth.user_id, repos)
 
     annotations_json = _annotations_json_or_none(
         annotations if annotations is not None else body.annotations
     )
-    repos.approvals.approve(
+    claimed = repos.approvals.approve(
         owner_id=auth.user_id,
         run_id=approval["run_id"],
+        approval_id=approval_id,
         decided_at=now_iso(),
         annotations_json=annotations_json,
         # #769: forward the approve reason for the destructive-delete path too
         # (mirrors reject_destructive_action; was previously dropped).
         reason=reason if reason is not None else getattr(body, "reason", None),
     )
+    if claimed is None:
+        raise HTTPException(status_code=409, detail="Approval already decided")
+
+    description = _execute_destructive_delete(path, auth.user_id, repos)
 
     _sse_publish(approval["run_id"], {
         "type": "approval_decided",
@@ -1085,13 +1089,16 @@ def reject_destructive_action(
     approval = _load_typed_approval(approval_id, auth.user_id, "destructive_delete", repos)
     decision_input: Dict[str, Any] = json.loads(approval.get("decision_input_json") or "{}")
     annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
-    repos.approvals.reject(
+    claimed = repos.approvals.reject(
         owner_id=auth.user_id,
         run_id=approval["run_id"],
+        approval_id=approval_id,
         decided_at=now_iso(),
         reason=body.reason,
         annotations_json=annotations_json,
     )
+    if claimed is None:
+        raise HTTPException(status_code=409, detail="Approval already decided")
 
     _sse_publish(approval["run_id"], {
         "type": "approval_decided",
@@ -1119,13 +1126,15 @@ def approve_agent_tool_approval(
     from db import now_iso
     approval = _load_typed_approval(approval_id, auth.user_id, "agent_tool", repos)
     edited_output_json = json.dumps(body.edited_output) if body.edited_output is not None else None
-    repos.approvals.approve(
+    claimed = repos.approvals.approve(
         owner_id=auth.user_id,
         run_id=approval["run_id"],
         approval_id=approval_id,
         decided_at=now_iso(),
         edited_output_json=edited_output_json,
     )
+    if claimed is None:
+        raise HTTPException(status_code=409, detail="Approval already decided")
 
     _sse_publish(approval["run_id"], {
         "type": "approval_decided",
@@ -1152,7 +1161,7 @@ def reject_agent_tool_approval(
     from db import now_iso
     approval = _load_typed_approval(approval_id, auth.user_id, "agent_tool", repos)
     annotations_json = _annotations_json_or_none(getattr(body, "annotations", None))
-    repos.approvals.reject(
+    claimed = repos.approvals.reject(
         owner_id=auth.user_id,
         run_id=approval["run_id"],
         approval_id=approval_id,
@@ -1160,6 +1169,8 @@ def reject_agent_tool_approval(
         reason=body.reason,
         annotations_json=annotations_json,
     )
+    if claimed is None:
+        raise HTTPException(status_code=409, detail="Approval already decided")
 
     _sse_publish(approval["run_id"], {
         "type": "approval_decided",

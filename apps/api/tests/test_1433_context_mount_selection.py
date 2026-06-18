@@ -149,6 +149,45 @@ def test_e2b_uploads_only_contexts_selected_by_run_inputs(monkeypatch, tmp_path)
     assert any("Skipping context 'search-data'" in msg for _level, msg in logs)
 
 
+def test_context_mount_predicates_see_worker_input_defaults(monkeypatch, tmp_path):
+    contexts_root = tmp_path / "contexts"
+    (contexts_root / "default-data").mkdir(parents=True)
+    (contexts_root / "default-data" / "small.txt").write_text("small\n", encoding="utf-8")
+    monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_root))
+
+    import contexts as contexts_mod
+    import runner_sandbox.memory_context as memory_context_mod
+    import runner_sandbox.e2b_driver as e2b_driver_mod
+
+    importlib.reload(contexts_mod)
+    importlib.reload(memory_context_mod)
+    importlib.reload(e2b_driver_mod)
+
+    config = SimpleNamespace(
+        inputs=[SimpleNamespace(name="operation", default="profile")],
+        contexts=[
+            {"name": "default-data", "when": {"input": "operation", "equals": "profile"}},
+        ],
+        memory=SimpleNamespace(enabled=False),
+    )
+    sandbox = _FakeSandbox()
+    mounted: set[str] = set()
+
+    err = e2b_driver_mod.E2BSandboxDriver()._upload_contexts_to_sandbox(
+        sandbox=sandbox,
+        workdir="/home/user/worker",
+        config=config,
+        inputs={},
+        made_dirs=set(),
+        log_fn=lambda *_args: None,
+        user_id="alice",
+        mounted_contexts=mounted,
+    )
+
+    assert err is None
+    assert mounted == {"default-data"}
+
+
 def test_warm_pool_reuses_alive_sandbox_and_clears_pool(monkeypatch):
     import runner_sandbox.e2b_driver as e2b_driver_mod
 
@@ -227,13 +266,9 @@ def test_warm_pool_key_disabled_for_mutable_or_git_contexts(monkeypatch, tmp_pat
     ) == (None, None)
 
 
-def test_warm_pool_key_changes_with_selected_contexts(monkeypatch, tmp_path):
+def test_context_selection_changes_with_run_inputs(monkeypatch, tmp_path):
     import runner_sandbox.e2b_driver as e2b_driver_mod
 
-    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
-    worker_dir = tmp_path / "worker"
-    worker_dir.mkdir()
-    (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
     cfg = SimpleNamespace(
         runtime=SimpleNamespace(command="python run.py", type="python"),
         contexts=[
@@ -242,27 +277,46 @@ def test_warm_pool_key_changes_with_selected_contexts(monkeypatch, tmp_path):
         ],
     )
 
-    search_key, search_err = e2b_driver_mod._warm_pool_key(
+    search_contexts, search_err = e2b_driver_mod._selected_contexts_for_inputs(
+        cfg,
+        {"operation": "search"},
+    )
+    profile_contexts, profile_err = e2b_driver_mod._selected_contexts_for_inputs(
+        cfg,
+        {"operation": "profile"},
+    )
+    assert search_err is None
+    assert profile_err is None
+    assert [context["name"] for context in search_contexts] == ["search-data"]
+    assert [context["name"] for context in profile_contexts] == ["profile-data"]
+
+
+def test_warm_pool_disabled_for_run_inputs_and_secrets(monkeypatch, tmp_path):
+    import runner_sandbox.e2b_driver as e2b_driver_mod
+
+    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+    cfg = SimpleNamespace(runtime=SimpleNamespace(command="python run.py", type="python"), contexts=[])
+
+    assert e2b_driver_mod._warm_pool_key(
         worker_id="w",
         user_id="u",
         worker_dir=worker_dir,
         config=cfg,
         inputs={"operation": "search"},
         sandbox_template="tmpl",
-    )
-    profile_key, profile_err = e2b_driver_mod._warm_pool_key(
+    ) == (None, None)
+    assert e2b_driver_mod._warm_pool_key(
         worker_id="w",
         user_id="u",
         worker_dir=worker_dir,
         config=cfg,
-        inputs={"operation": "profile"},
+        inputs={},
+        secrets={"API_KEY": "secret"},
         sandbox_template="tmpl",
-    )
-    assert search_err is None
-    assert profile_err is None
-    assert search_key
-    assert profile_key
-    assert search_key != profile_key
+    ) == (None, None)
 
 
 def test_warm_pool_key_changes_when_local_context_changes(monkeypatch, tmp_path):
@@ -312,9 +366,46 @@ def test_warm_pool_key_changes_when_local_context_changes(monkeypatch, tmp_path)
     assert first_key != second_key
 
 
+def test_warm_pool_key_changes_when_bundle_content_changes_same_size(monkeypatch, tmp_path):
+    import runner_sandbox.e2b_driver as e2b_driver_mod
+
+    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    run_py = worker_dir / "run.py"
+    run_py.write_text("print('aa')\n", encoding="utf-8")
+    cfg = SimpleNamespace(runtime=SimpleNamespace(command="python run.py", type="python"), contexts=[])
+
+    first_key, first_err = e2b_driver_mod._warm_pool_key(
+        worker_id="w",
+        user_id="u",
+        worker_dir=worker_dir,
+        config=cfg,
+        inputs={},
+        sandbox_template="tmpl",
+    )
+    run_py.write_text("print('bb')\n", encoding="utf-8")
+    second_key, second_err = e2b_driver_mod._warm_pool_key(
+        worker_id="w",
+        user_id="u",
+        worker_dir=worker_dir,
+        config=cfg,
+        inputs={},
+        sandbox_template="tmpl",
+    )
+
+    assert first_err is None
+    assert second_err is None
+    assert first_key
+    assert second_key
+    assert first_key != second_key
+
+
 def test_cleanup_run_state_removes_run_scoped_files():
     import runner_sandbox.e2b_driver as e2b_driver_mod
 
     sandbox = _FakeSandbox()
     assert e2b_driver_mod._cleanup_run_state(sandbox, "/home/user/worker", log_fn=lambda *_args: None) is True
-    assert sandbox.commands.runs[-1]["command"] == "rm -rf inputs outputs result.json .env.local secrets.json connections.json"
+    command = str(sandbox.commands.runs[-1]["command"])
+    assert "find . -mindepth 1 -maxdepth 1 -not -name context" in command
+    assert "find /tmp -mindepth 1 -maxdepth 1" in command

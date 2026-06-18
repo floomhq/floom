@@ -9,7 +9,10 @@ workers directory), never on ``main``.
 from __future__ import annotations
 
 import logging
+import base64
+import hashlib
 import os
+import secrets
 from pathlib import Path
 from typing import TYPE_CHECKING, Callable, Optional
 
@@ -185,6 +188,39 @@ def _git_workspace_key(user_id: str) -> str:
     return _git_ops.get_active_workspace_id() or user_id
 
 
+_GITHUB_PAT_ENC_PREFIX = "enc:v1:"
+
+
+def _github_pat_encryption_key() -> bytes:
+    secret = (
+        os.environ.get("WORKEROS_GITHUB_PAT_ENCRYPTION_SECRET", "").strip()
+        or os.environ.get("FLOOM_SECRET", "").strip()
+    )
+    if not secret:
+        raise RuntimeError(
+            "GitHub PAT storage requires WORKEROS_GITHUB_PAT_ENCRYPTION_SECRET or FLOOM_SECRET"
+        )
+    return hashlib.sha256(f"workeros-github-pat:{secret}".encode("utf-8")).digest()
+
+
+def _encrypt_github_pat(pat: str) -> str:
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    nonce = secrets.token_bytes(12)
+    ciphertext = AESGCM(_github_pat_encryption_key()).encrypt(nonce, pat.encode("utf-8"), None)
+    return _GITHUB_PAT_ENC_PREFIX + base64.urlsafe_b64encode(nonce + ciphertext).decode("ascii")
+
+
+def _decrypt_github_pat(value: str) -> str:
+    if not value.startswith(_GITHUB_PAT_ENC_PREFIX):
+        return value
+    from cryptography.hazmat.primitives.ciphers.aead import AESGCM
+
+    raw = base64.urlsafe_b64decode(value[len(_GITHUB_PAT_ENC_PREFIX):].encode("ascii"))
+    nonce, ciphertext = raw[:12], raw[12:]
+    return AESGCM(_github_pat_encryption_key()).decrypt(nonce, ciphertext, None).decode("utf-8")
+
+
 def _git_cfg_get(user_id: str) -> dict | None:
     from db import get_db
 
@@ -196,13 +232,20 @@ def _git_cfg_get(user_id: str) -> dict | None:
                FROM git_workspace_config WHERE user_id = ?""",
             (key,),
         ).fetchone()
-    return dict(row) if row else None
+    if not row:
+        return None
+    data = dict(row)
+    if data.get("github_pat"):
+        data["github_pat"] = _decrypt_github_pat(str(data["github_pat"]))
+    return data
 
 
 def _git_cfg_upsert(user_id: str, **fields: str) -> None:
     from db import get_db
 
     key = _git_workspace_key(user_id)
+    if "github_pat" in fields and fields["github_pat"]:
+        fields = {**fields, "github_pat": _encrypt_github_pat(str(fields["github_pat"]))}
     with get_db() as conn:
         existing = conn.execute(
             "SELECT 1 FROM git_workspace_config WHERE user_id = ?", (key,)

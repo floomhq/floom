@@ -159,6 +159,8 @@ UNKNOWN_RUN_ERROR_MESSAGE = (
 # scope for the duration of execution — reconstructed from the persisted run
 # row, since there is no live context to copy. Default: no-op.
 _run_execution_context_provider: Optional[Callable[[str], "contextlib.AbstractContextManager[Any]"]] = None
+_scheduled_retry_keys: set[tuple[str, int, str]] = set()
+_scheduled_retry_lock = threading.Lock()
 
 
 def set_run_execution_context_provider(
@@ -204,6 +206,17 @@ def _schedule_retry(
     policy, "restart_retry" for #1434 restart recovery (used to bound recovery to
     one attempt per lineage regardless of retry_attempt persistence).
     """
+    retry_key = (original_run_id, int(attempt), trigger_source)
+    with _scheduled_retry_lock:
+        if retry_key in _scheduled_retry_keys:
+            logger.info(
+                "Retry #%d for run %s (%s) is already scheduled; skipping duplicate",
+                attempt,
+                original_run_id,
+                trigger_source,
+            )
+            return
+        _scheduled_retry_keys.add(retry_key)
 
     def _do_retry() -> None:
         if delay_seconds > 0:
@@ -229,6 +242,9 @@ def _schedule_retry(
                 "Failed to schedule retry #%d for run %s: %s",
                 attempt, original_run_id, exc,
             )
+        finally:
+            with _scheduled_retry_lock:
+                _scheduled_retry_keys.discard(retry_key)
 
     t = threading.Thread(target=_do_retry, daemon=True, name=f"retry-{original_run_id}")
     t.start()
