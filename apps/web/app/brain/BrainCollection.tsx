@@ -620,6 +620,9 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
         title: "Drop files here to get started",
         help: "Drag any docs, PDFs, or notes onto this page and a folder is created for them automatically. Your workers read these before they act.",
         action: <EmptyStateActions onBrowse={openBrowse} onNewFolder={openNewFolder} />,
+        // B6: the empty state is itself a clearly-bounded dashed drop-zone box,
+        // so the drop target is visible at rest (not only on drag-over).
+        dropzone: true,
       },
     },
   };

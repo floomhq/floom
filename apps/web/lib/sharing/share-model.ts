@@ -64,6 +64,14 @@ export function shareSummary(v: AssetVisibility | undefined): string {
   }
 }
 
+/**
+ * Always-shown clarification that a public link is unlisted: it works for
+ * anyone who has the URL, but is never indexed, searched, or listed anywhere.
+ * Rendered once per Public-link section (independent of asset type).
+ */
+export const PUBLIC_LINK_UNLISTED_NOTE =
+  "Unlisted: anyone with the link can open it, but it's not searchable or listed anywhere.";
+
 /** Per-asset description of what a PUBLIC (anonymous, no-sign-in) link exposes. */
 export function publicLinkScope(type: ShareAssetType): string {
   switch (type) {
