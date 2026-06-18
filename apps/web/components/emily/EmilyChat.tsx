@@ -478,11 +478,11 @@ function CreateWorkerHeroState({
       </div>
 
       {/* Previous-chat note (Federico spec): if the user was chatting with Emily
-          before, the create-mode chat is a fresh ephemeral thread — tell them the
+          before, the create-mode chat is a fresh ephemeral thread; tell them the
           old one is still there. */}
       {hasPreviousChat && (
         <p className="text-xs text-muted-foreground">
-          Your previous chat is still running —{" "}
+          Your previous chat is still running.{" "}
           <button
             type="button"
             onClick={onOpenRecent}
@@ -737,7 +737,7 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
     return (
       <div className="flex h-full flex-col">
         {/* Controls row carries Recent chats so the "previous chat is still
-            running — find it in Recent chats" note has somewhere to point. The
+            running, find it in Recent chats" note has somewhere to point. The
             dock renders its own controls (hideControls), so only show here when
             this core owns its controls. */}
         {!hideControls && (
