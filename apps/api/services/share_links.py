@@ -175,7 +175,7 @@ def _revoke_standalone_share_link(
 # Worker short-links: the per-worker /w/<short_id> redirect store (sibling of the
 # standalone share-link table above; one short_id per (worker, owner)).
 def _mint_worker_short_id() -> str:
-    return f"fls_{pysecrets.token_urlsafe(8).replace('-', '').replace('_', '')[:10]}"
+    return f"fls_{pysecrets.token_urlsafe(18).replace('-', '').replace('_', '')[:24]}"
 
 
 def _ensure_worker_short_links_table() -> None:
@@ -247,7 +247,7 @@ def _worker_short_link_response(worker: Dict[str, Any]) -> Dict[str, str]:
 
 def _load_short_link_public_worker(short_id: str, repos: "Repositories") -> Dict[str, Any]:
     from db import get_db
-    if not re.fullmatch(r"fls_[A-Za-z0-9]{6,64}", short_id or ""):
+    if not re.fullmatch(r"fls_[A-Za-z0-9]{24,64}", short_id or ""):
         raise HTTPException(status_code=404, detail="Short link not found")
     _ensure_worker_short_links_table()
     with get_db() as conn:
