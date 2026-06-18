@@ -195,7 +195,7 @@ def test_list_connections_does_not_refresh_composio_status(monkeypatch):
                     "id": "conn-1",
                     "app_name": "gmail",
                     "composio_connection_id": "ca_123",
-                    "status": "pending",
+                    "status": "active",
                     "created_at": "2026-06-18T00:00:00+00:00",
                     "updated_at": "2026-06-18T00:00:00+00:00",
                     "scopes_json": '["gmail.readonly"]',
@@ -226,15 +226,15 @@ def test_list_connections_does_not_refresh_composio_status(monkeypatch):
 
     repos = SimpleNamespace(connections=ConnectionsRepo())
     auth = SimpleNamespace(user_id="user-a")
-    monkeypatch.setattr(connections.hot_cache, "get", lambda _key: None)
-    monkeypatch.setattr(connections.hot_cache, "set", lambda _key, _value: None)
+    monkeypatch.setattr(connections, "_connection_list_cache_get", lambda _user_id: None)
+    monkeypatch.setattr(connections, "_connection_list_cache_set", lambda _user_id, _value: None)
     monkeypatch.setattr(connections, "_connections_last_used", lambda *_args, **_kwargs: {})
     monkeypatch.setattr("composio_client.check_status", fail_check_status)
 
     result = connections.list_connections(auth=auth, repos=repos)
 
     assert len(result) == 1
-    assert result[0].status == "pending"
+    assert result[0].status == "active"
     assert result[0].scopes == ["gmail.readonly"]
 
 

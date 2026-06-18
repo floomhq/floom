@@ -329,7 +329,7 @@ def _is_relative_to_path(path: Path, root: Path) -> bool:
 def _relative_posix_path(path: Path, root: Path) -> str:
     if not _is_relative_to_path(path, root):
         raise ValueError(f"Path traversal attempt: {path}")
-    return PurePosixPath(os.path.relpath(str(path), str(root))).as_posix()
+    return Path(os.path.relpath(str(path), str(root))).as_posix()
 
 
 def context_dir(name: str) -> Path:
