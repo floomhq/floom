@@ -243,44 +243,44 @@ def _run_email_html(
     brand_mark = (
         f'<img src="{logo_url}" width="120" height="42" alt="{brand}" style="display:block;border:0;outline:none;height:42px;width:120px;max-width:120px;">'
         if logo_url
-        else f'<span style="font-size:20px;font-weight:700;color:#181716;">{brand}</span>'
+        else f'<span style="font-size:20px;font-weight:700;color:#16171A;">{brand}</span>'
     )
     footer_contact = (
-        f' &middot; <a href="mailto:{support_email}" style="color:#6f6960;text-decoration:underline;">{support_email}</a>'
+        f' &middot; <a href="mailto:{support_email}" style="color:#3E6FE0;text-decoration:underline;">{support_email}</a>'
         if support_email
         else ""
     )
     is_failed = status_label.lower() == "failed"
-    status_color = "#b4231f" if is_failed else "#1f7a4d"
+    status_color = "#E5533D" if is_failed else "#2F8F5B"
     rows = [
-        ("Worker", f"{worker_name} <span style=\"color:#6f6960;\">({worker_id})</span>"),
-        ("Run ID", f"<span style=\"font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;\">{run_id}</span>"),
+        ("Worker", f"{worker_name} <span style=\"color:#6B7280;\">({worker_id})</span>"),
+        ("Run ID", f"<span style=\"font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;\">{run_id}</span>"),
         ("Status", f"<span style=\"color:{status_color};font-weight:650;\">{status_label}</span>"),
         ("Time", timestamp),
     ]
     if error:
-        rows.append(("Error", f"<span style=\"font-family:ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:#b4231f;\">{error}</span>"))
+        rows.append(("Error", f"<span style=\"font-family:'Geist Mono',ui-monospace,SFMono-Regular,Menlo,monospace;font-size:13px;color:#E5533D;\">{error}</span>"))
     row_html = "".join(
-        f"<tr><td style=\"padding:6px 0;font-size:13px;color:#6f6960;width:96px;vertical-align:top;\">{label}</td>"
-        f"<td style=\"padding:6px 0;font-size:14px;color:#181716;\">{value}</td></tr>"
+        f"<tr><td style=\"padding:6px 0;font-size:13px;color:#6B7280;width:96px;vertical-align:top;\">{label}</td>"
+        f"<td style=\"padding:6px 0;font-size:14px;color:#16171A;\">{value}</td></tr>"
         for label, value in rows
     )
     return f"""<!doctype html>
 <html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><meta name="color-scheme" content="light only"><title>{brand}</title></head>
-<body style="margin:0;padding:0;background:#fbfaf7;font-family:'Inter',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#181716;-webkit-font-smoothing:antialiased;">
-<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#fbfaf7;"><tr><td align="center" style="padding:40px 16px;">
+<body style="margin:0;padding:0;background:#FBFBFC;font-family:'Geist',-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,Helvetica,Arial,sans-serif;color:#16171A;-webkit-font-smoothing:antialiased;">
+<table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0" style="background:#FBFBFC;"><tr><td align="center" style="padding:40px 16px;">
 <table role="presentation" width="560" cellpadding="0" cellspacing="0" border="0" style="max-width:560px;width:100%;">
-<tr><td style="background:#f1eee8;border:1px solid #ded8cf;border-bottom:none;border-radius:14px 14px 0 0;padding:26px 36px;border-top:2px solid #181716;">
+<tr><td style="background:#F2F3F5;border:1px solid rgba(20,23,26,0.08);border-bottom:none;border-radius:16px 16px 0 0;padding:26px 36px;">
 <a href="{frontend_url}" style="text-decoration:none;display:inline-block;">{brand_mark}</a>
 </td></tr>
-<tr><td style="background:#fffefb;border:1px solid #ded8cf;border-top:none;border-radius:0 0 14px 14px;padding:36px 40px 40px;">
-<p style="margin:0 0 10px;font-size:11px;line-height:1.4;font-weight:650;letter-spacing:0.12em;text-transform:uppercase;color:#6f6960;">Worker run</p>
-<h1 style="margin:0 0 22px;font-size:22px;line-height:1.25;font-weight:650;color:#181716;">{worker_name} {status_label}</h1>
+<tr><td style="background:#FFFFFF;border:1px solid rgba(20,23,26,0.08);border-top:none;border-radius:0 0 16px 16px;padding:36px 40px 40px;">
+<p style="margin:0 0 10px;font-size:11px;line-height:1.4;font-weight:650;letter-spacing:0.12em;text-transform:uppercase;color:#6B7280;">Worker run</p>
+<h1 style="margin:0 0 22px;font-size:22px;line-height:1.25;font-weight:650;color:#16171A;">{worker_name} {status_label}</h1>
 <table role="presentation" width="100%" cellpadding="0" cellspacing="0" border="0">{row_html}</table>
-<p style="font-size:13px;line-height:1.55;margin:24px 0 0;color:#6f6960;">You're receiving this because a worker run finished in your {brand} workspace.</p>
+<p style="font-size:13px;line-height:1.55;margin:24px 0 0;color:#6B7280;">You're receiving this because a worker run finished in your {brand} workspace.</p>
 </td></tr>
-<tr><td style="padding:28px 4px 4px;font-size:12px;line-height:1.6;color:#6f6960;">
-<a href="{frontend_url}" style="color:#181716;font-weight:650;text-decoration:none;">{brand}</a>{footer_contact}
+<tr><td style="padding:28px 4px 4px;font-size:12px;line-height:1.6;color:#6B7280;">
+<a href="{frontend_url}" style="color:#16171A;font-weight:650;text-decoration:none;">{brand}</a>{footer_contact}
 </td></tr>
 </table>
 </td></tr></table>
