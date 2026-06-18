@@ -1809,6 +1809,92 @@ class SqliteRunRepository:
                 total = offset + len(rows) + (1 if len(rows) >= limit else 0)
         return [_row_dict(row) for row in rows], int(total or 0)
 
+    def list_operator_visible(
+        self,
+        *,
+        user_id: str,
+        worker_id: str | None = None,
+        statuses: list[str] | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 50,
+        before_created_at: str | None = None,
+        before_id: str | None = None,
+        offset: int = 0,
+        include_system: bool = False,
+    ) -> tuple[list[dict[str, Any]], int]:
+        from core.config import _INTERNAL_WORKER_ID_PREFIXES, _SYSTEM_WORKER_IDS
+        from services.run_access import _OPERATOR_TRIGGER_SOURCES
+
+        with get_db() as conn:
+            has_actor_user_id = self._has_actor_user_id_column(conn)
+        if has_actor_user_id:
+            where = ["(COALESCE(r.actor_user_id, w.owner_id) = ? OR w.owner_id = ?)"]
+            params: list[Any] = [user_id, user_id]
+            actor_select = "r.actor_user_id,"
+        else:
+            where = ["w.owner_id = ?"]
+            params = [user_id]
+            actor_select = "NULL AS actor_user_id,"
+        if worker_id:
+            where.append("r.worker_id = ?")
+            params.append(worker_id)
+        if statuses:
+            where.append(f"r.status IN ({', '.join('?' for _ in statuses)})")
+            params.extend(statuses)
+        if since:
+            where.append("r.created_at >= ?")
+            params.append(since)
+        if until:
+            where.append("r.created_at <= ?")
+            params.append(until)
+        if before_created_at and before_id:
+            where.append("(r.created_at < ? OR (r.created_at = ? AND r.id < ?))")
+            params.extend([before_created_at, before_created_at, before_id])
+
+        if _SYSTEM_WORKER_IDS:
+            where.append(f"r.worker_id NOT IN ({', '.join('?' for _ in _SYSTEM_WORKER_IDS)})")
+            params.extend(sorted(_SYSTEM_WORKER_IDS))
+        where.append("r.worker_id NOT LIKE '.%'")
+        for prefix in sorted(_INTERNAL_WORKER_ID_PREFIXES):
+            where.append("r.worker_id NOT LIKE ?")
+            params.append(f"{prefix}%")
+        if not include_system:
+            allowed_sources = sorted(_OPERATOR_TRIGGER_SOURCES)
+            where.append(
+                "(TRIM(COALESCE(r.trigger_source, '')) = '' "
+                f"OR LOWER(TRIM(r.trigger_source)) IN ({', '.join('?' for _ in allowed_sources)}))"
+            )
+            params.extend(allowed_sources)
+
+        where_sql = " AND ".join(where)
+        select_sql = f"""
+            SELECT r.id, r.worker_id,
+                   COALESCE(JSON_EXTRACT(sv.manifest_json, '$.title'), w.name) AS worker_name,
+                   {actor_select}
+                   r.status, r.trigger_source, r.input_json, r.created_at, r.started_at,
+                   r.completed_at, r.duration_ms, r.error, r.error_code,
+                   r.quality_warning
+            FROM runs r
+            JOIN workers w ON w.id = r.worker_id
+            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
+            WHERE {where_sql}
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT ?
+        """
+        query_params: tuple[Any, ...]
+        if offset > 0 and not (before_created_at and before_id):
+            select_sql += " OFFSET ?"
+            query_params = (*params, limit + 1, offset)
+        else:
+            query_params = (*params, limit + 1)
+        with get_db() as conn:
+            rows = conn.execute(select_sql, query_params).fetchall()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        cheap_total = offset + len(page_rows) + (1 if has_more else 0)
+        return [_row_dict(row) for row in page_rows], int(cheap_total)
+
     @staticmethod
     def _in_clause(values: list[str] | tuple[str, ...]) -> str:
         return ", ".join("?" for _ in values)
@@ -2509,6 +2595,58 @@ class SqliteRunRepository:
                 params,
             ).fetchall()
         return [_row_dict(row) for row in rows]
+
+    def list_artifacts_for_runs(
+        self,
+        *,
+        user_id: str,
+        run_ids: list[str],
+        limit_per_run: int | None = _DEFAULT_RUN_ARTIFACT_LIMIT,
+    ) -> dict[str, list[dict[str, Any]]]:
+        unique_run_ids = list(dict.fromkeys(str(run_id) for run_id in run_ids if run_id))
+        if not unique_run_ids:
+            return {}
+        bounded_limit = _bounded_positive_int(
+            limit_per_run,
+            default=_DEFAULT_RUN_ARTIFACT_LIMIT,
+            maximum=_DEFAULT_RUN_ARTIFACT_LIMIT,
+        )
+        placeholders = ", ".join("?" for _ in unique_run_ids)
+        with get_db() as conn:
+            has_actor_user_id = self._has_actor_user_id_column(conn)
+            scope_sql = (
+                "(COALESCE(r.actor_user_id, w.owner_id) = ? OR w.owner_id = ?)"
+                if has_actor_user_id
+                else "w.owner_id = ?"
+            )
+            scope_params: tuple[Any, ...] = (user_id, user_id) if has_actor_user_id else (user_id,)
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM (
+                    SELECT
+                        a.*,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY a.run_id
+                            ORDER BY a.created_at, a.name
+                        ) AS artifact_rank
+                    FROM artifacts a
+                    JOIN runs r ON r.id = a.run_id
+                    JOIN workers w ON w.id = r.worker_id
+                    WHERE a.run_id IN ({placeholders})
+                      AND {scope_sql}
+                )
+                WHERE artifact_rank <= ?
+                ORDER BY run_id, created_at, name
+                """,
+                (*unique_run_ids, *scope_params, bounded_limit),
+            ).fetchall()
+        grouped: dict[str, list[dict[str, Any]]] = {run_id: [] for run_id in unique_run_ids}
+        for row in rows:
+            data = _row_dict(row)
+            data.pop("artifact_rank", None)
+            grouped.setdefault(str(data.get("run_id") or ""), []).append(data)
+        return grouped
 
     def clear_all(self, *, user_id: str) -> int:
         run_ids = [row["id"] for row in self.list_all_ids(user_id=user_id)]
@@ -3403,7 +3541,8 @@ class SqliteApprovalRepository:
             ).fetchone()
         return _row_dict(row) if row else None
 
-    def list_pending(self, *, owner_id: str) -> list[dict[str, Any]]:
+    def list_pending(self, *, owner_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        bounded_limit = _bounded_positive_int(limit, default=100, maximum=200)
         with get_db() as conn:
             rows = conn.execute(
                 """
@@ -3412,8 +3551,9 @@ class SqliteApprovalRepository:
                 LEFT JOIN workers w ON w.id = a.worker_id
                 WHERE a.owner_id = ? AND a.status = 'pending'
                 ORDER BY a.created_at ASC
+                LIMIT ?
                 """,
-                (owner_id,),
+                (owner_id, bounded_limit),
             ).fetchall()
         return [_row_dict(row) for row in rows]
 

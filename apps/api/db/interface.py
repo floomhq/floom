@@ -183,6 +183,21 @@ class RunRepository(Protocol):
         include_total: bool = True,
     ) -> tuple[list[RowDict], int]: ...
 
+    def list_operator_visible(
+        self,
+        *,
+        user_id: str,
+        worker_id: str | None = None,
+        statuses: list[str] | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 50,
+        before_created_at: str | None = None,
+        before_id: str | None = None,
+        offset: int = 0,
+        include_system: bool = False,
+    ) -> tuple[list[RowDict], int]: ...
+
     def overview_status_rollup(
         self,
         *,
@@ -322,6 +337,14 @@ class RunRepository(Protocol):
         limit: int | None = 1_000,
     ) -> list[RowDict]: ...
 
+    def list_artifacts_for_runs(
+        self,
+        *,
+        user_id: str,
+        run_ids: list[str],
+        limit_per_run: int | None = 1_000,
+    ) -> dict[str, list[RowDict]]: ...
+
     def clear_all(self, *, user_id: str) -> int: ...
 
     def list_all_ids(self, *, user_id: str) -> list[RowDict]: ...
@@ -444,7 +467,7 @@ class ApprovalRepository(Protocol):
         """
         ...
 
-    def list_pending(self, *, owner_id: str) -> list[RowDict]: ...
+    def list_pending(self, *, owner_id: str, limit: int = 100) -> list[RowDict]: ...
 
     def count_pending(self, *, owner_id: str) -> int: ...
 
