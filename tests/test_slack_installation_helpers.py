@@ -178,3 +178,16 @@ def test_slack_return_to_is_limited_to_install_destinations():
     assert slack_oauth._safe_return_path("/admin/billing") == "/slack/installed"
     assert slack_oauth._safe_return_path("https://evil.example/phish") == "/slack/installed"
     assert slack_oauth._safe_return_path("//evil.example/phish") == "/slack/installed"
+
+
+def test_slack_oauth_success_params_preserve_existing_query():
+    from apps.api.routes import slack_oauth
+
+    assert (
+        slack_oauth._append_success_params(
+            "/assistant?from_install=slack#done",
+            team_id="T123",
+            claim="claim-abc",
+        )
+        == "/assistant?from_install=slack&slack_connected=1&team_id=T123&claim=claim-abc#done"
+    )

@@ -64,6 +64,17 @@ def _safe_return_path(path: str | None, fallback: str = "/slack/installed") -> s
     return urllib.parse.urlunsplit(("", "", parsed.path, parsed.query, parsed.fragment))
 
 
+def _append_success_params(return_to: str, *, team_id: str, claim: str) -> str:
+    parsed = urllib.parse.urlsplit(return_to)
+    query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    query.extend([
+        ("slack_connected", "1"),
+        ("team_id", team_id),
+        ("claim", claim),
+    ])
+    return urllib.parse.urlunsplit(("", "", parsed.path, urllib.parse.urlencode(query), parsed.fragment))
+
+
 @router.get("/slack/install/start")
 async def slack_install_start(request: Request) -> RedirectResponse:
     if not slack_db.install_enabled():
@@ -164,8 +175,10 @@ async def slack_oauth_callback(
         user_agent=request.headers.get("user-agent"),
         metadata={"bot_token_fp": slack_db.fingerprint(bot_token), "status": installation.get("status")},
     )
-    query = urllib.parse.urlencode({"team_id": team_id, "claim": claim_token})
-    return RedirectResponse(url=f"{frontend}{return_to}?{query}", status_code=302)
+    return RedirectResponse(
+        url=f"{frontend}{_append_success_params(return_to, team_id=team_id, claim=claim_token)}",
+        status_code=302,
+    )
 
 
 @router.post("/slack/install/claim")
