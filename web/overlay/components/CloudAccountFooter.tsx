@@ -96,12 +96,12 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
     : user?.email
       ? "Signed in"
       : "Floom";
-  // #1306: show the real Google/GitHub photo when present and still loading;
-  // fall back to a DiceBear `glass` mark on error or when no picture is
-  // provided (mirrors the engine sidebar UserDiceBearAvatar — a calm geometric
-  // mark, squircle, flat, no border), not bare initials.
+  // #1306 / G5: show the real Google/GitHub photo when present; fall back to a
+  // flat squircle with a single initial — NO DiceBear, NO gradient, NO circle.
+  // Design-system: squircle (radius-button), flat bg-[var(--bg-2)] ink-soft
+  // initial, no border, no network fetch on fallback.
   const avatarUrl = user?.picture && !avatarFailed ? user.picture : null;
-  const dicebearUrl = `https://api.dicebear.com/9.x/glass/svg?seed=${encodeURIComponent(primary || "user")}&radius=0`;
+  const avatarInitial = (primary || "U").trim()[0]?.toUpperCase() ?? "U";
 
   async function logout() {
     try {
@@ -127,10 +127,8 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
           )}
           aria-label="Profile menu"
         >
-          {/* #1306: squared avatar (radius-button / 9px), NO border — matches
-              the worker/employee card mark. Photo for Google/GitHub logins,
-              DiceBear glass mark otherwise (and on photo load error), mirroring
-              the engine sidebar UserDiceBearAvatar. */}
+          {/* #1306 / G5: real photo for OAuth logins; flat squircle initial
+              otherwise. No DiceBear, no gradient, no circle — DS rule. */}
           {avatarUrl ? (
             <img
               src={avatarUrl}
@@ -140,11 +138,12 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
               className="size-7 shrink-0 rounded-[var(--radius-button)] object-cover"
             />
           ) : (
-            <img
-              src={dicebearUrl}
-              alt="Profile avatar"
-              className="size-7 shrink-0 rounded-[var(--radius-button)] border-0 object-cover"
-            />
+            <span
+              aria-hidden="true"
+              className="size-7 shrink-0 inline-flex items-center justify-center rounded-[var(--radius-button)] bg-[var(--bg-2)] text-[var(--ink-soft)] font-medium select-none text-[13px]"
+            >
+              {avatarInitial}
+            </span>
           )}
           <div className="min-w-0 leading-tight text-left">
             <p className="truncate text-xs font-medium text-foreground">{primary}</p>
