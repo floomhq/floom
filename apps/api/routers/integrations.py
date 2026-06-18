@@ -31,6 +31,38 @@ from services.composio import _raise_composio_unavailable
 logger = logging.getLogger("floom.api")
 
 integrations_router = APIRouter()
+_catalog_cache: Dict[str, tuple[float, Any]] = {}
+_catalog_cache_lock = threading.Lock()
+_tools_cache: Dict[str, tuple[float, Any]] = {}
+_tools_cache_lock = threading.Lock()
+_CATALOG_CACHE_TTL_SECONDS = 3600.0
+_TOOLS_CACHE_TTL_SECONDS = 3600.0
+_TRIGGER_CACHE_TTL_SECONDS = 6 * 3600.0
+
+
+def _cache_get(cache: Dict[str, tuple[float, Any]], lock: threading.Lock, key: str) -> Any | None:
+    now = time.monotonic()
+    with lock:
+        item = cache.get(key)
+        if item is None:
+            return None
+        expires_at, value = item
+        if expires_at <= now:
+            cache.pop(key, None)
+            return None
+        return value
+
+
+def _cache_set(cache: Dict[str, tuple[float, Any]], lock: threading.Lock, key: str, value: Any, ttl: float) -> None:
+    now = time.monotonic()
+    with lock:
+        if len(cache) >= 128:
+            for old_key, (expires_at, _) in list(cache.items()):
+                if expires_at <= now:
+                    cache.pop(old_key, None)
+            if len(cache) >= 128:
+                cache.pop(next(iter(cache)))
+        cache[key] = (now + ttl, value)
 
 
 class IntegrationCatalogItem(BaseModel):
@@ -71,6 +103,11 @@ def integrations_catalog(
     When ``category`` contains multiple comma-separated slugs, results from each
     slug are fetched separately and merged (union, de-duplicated by app slug).
     """
+    cache_key = f"catalog:{page}:{limit}:{search}:{category}"
+    cached = _cache_get(_catalog_cache, _catalog_cache_lock, cache_key)
+    if cached is not None:
+        return IntegrationCatalogResponse(**cached)
+
     from composio_client import ComposioConfigurationError, list_catalog_apps
 
     # Split comma-separated categories for OR-merge support.
@@ -131,6 +168,7 @@ def integrations_catalog(
     except Exception as exc:
         logger.exception("Failed to load Composio catalog")
         _raise_composio_unavailable(exc)
+    _cache_set(_catalog_cache, _catalog_cache_lock, cache_key, result, _CATALOG_CACHE_TTL_SECONDS)
     return IntegrationCatalogResponse(**result)
 
 
@@ -154,11 +192,16 @@ def integrations_catalog_tools(
     """
     from composio_client import list_toolkit_tools
     effective_limit = max(1, min(200, limit))
+    cache_key = f"tools:{slug}:{effective_limit}"
+    cached = _cache_get(_tools_cache, _tools_cache_lock, cache_key)
+    if cached is not None:
+        return [CatalogToolItem(**item) for item in cached]
     try:
         items = list_toolkit_tools(slug, limit=effective_limit)
     except Exception as exc:
         logger.warning("Failed to fetch toolkit tools for %s: %s", slug, exc)
         items = []
+    _cache_set(_tools_cache, _tools_cache_lock, cache_key, items, _TOOLS_CACHE_TTL_SECONDS)
     return [CatalogToolItem(**item) for item in items]
 
 
@@ -208,12 +251,21 @@ def list_integration_triggers(
         from composio_client import list_triggers
         items = list_triggers()
     except Exception as exc:
+        with _trigger_catalog_lock:
+            stale_items = _trigger_catalog_cache.get("items")
+        if stale_items is not None:
+            logger.warning("Failed to refresh Composio trigger catalog; returning stale cache: %s", exc)
+            items = stale_items
+            if app:
+                app_lower = app.lower()
+                items = [item for item in items if _trigger_item_app_slug(item) == app_lower]
+            return {"items": items}
         logger.exception("Failed to fetch Composio trigger catalog")
         _raise_composio_unavailable(exc)
 
     with _trigger_catalog_lock:
         _trigger_catalog_cache["items"] = items
-        _trigger_catalog_cache["expires_at"] = now + 3600
+        _trigger_catalog_cache["expires_at"] = now + _TRIGGER_CACHE_TTL_SECONDS
 
     if app:
         app_lower = app.lower()
