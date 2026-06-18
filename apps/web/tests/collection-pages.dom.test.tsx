@@ -1,7 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
-import { QueryProvider } from "@/components/providers/QueryProvider";
+import type { ReactNode } from "react";
 
 // Render the REAL page components (not the generic engine) with mocked data, to
 // prove they mount + render rows without client-side crashes. This is the layer
@@ -12,6 +12,11 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/",
 }));
+
+function TestQueryProvider({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
 
 const worker = {
   id: "w1",
@@ -120,13 +125,13 @@ beforeEach(() => {
 describe("page components render with data (no client crash)", () => {
   it("WorkersCollection renders the worker", async () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
-    render(<QueryProvider><WorkersCollection initialWorkers={[worker as never]} /></QueryProvider>);
+    render(<TestQueryProvider><WorkersCollection initialWorkers={[worker as never]} /></TestQueryProvider>);
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
   });
 
   it("WorkersCollection Setup renders friendly runtime labels", async () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
-    render(<QueryProvider><WorkersCollection initialWorkers={[worker as never]} /></QueryProvider>);
+    render(<TestQueryProvider><WorkersCollection initialWorkers={[worker as never]} /></TestQueryProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /Weekly Update/i }));
     // R9: Setup is a PRIMARY tab (always visible) — no Advanced dropdown needed.
     fireEvent.click(await screen.findByRole("tab", { name: "Setup" }));
@@ -143,7 +148,7 @@ describe("page components render with data (no client crash)", () => {
 
   it("RunsCollection renders the run + Export action", async () => {
     const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
-    render(<QueryProvider><RunsCollection initialRuns={[run as never]} /></QueryProvider>);
+    render(<TestQueryProvider><RunsCollection initialRuns={[run as never]} /></TestQueryProvider>);
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /export/i })).toBeInTheDocument();
     expect(screen.queryByText("Export CSV")).not.toBeInTheDocument();
@@ -151,27 +156,27 @@ describe("page components render with data (no client crash)", () => {
 
   it("RunsCollection renders runs returned by the client API when server data is empty", async () => {
     const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
-    render(<QueryProvider><RunsCollection initialRuns={[]} /></QueryProvider>);
+    render(<TestQueryProvider><RunsCollection initialRuns={[]} /></TestQueryProvider>);
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
     expect(screen.queryByText("No runs yet")).not.toBeInTheDocument();
   });
 
   it("ConnectionsCollection renders the connection", async () => {
     const { default: ConnectionsCollection } = await import("@/app/connections/ConnectionsCollection");
-    render(<ConnectionsCollection initialConnections={[connection as never]} />);
+    render(<TestQueryProvider><ConnectionsCollection initialConnections={[connection as never]} /></TestQueryProvider>);
     expect(await screen.findByText("GitHub")).toBeInTheDocument();
   });
 
   it("ConnectionsCollection renders connections returned by the client API when server data is empty", async () => {
     const { default: ConnectionsCollection } = await import("@/app/connections/ConnectionsCollection");
-    render(<ConnectionsCollection initialConnections={[]} />);
+    render(<TestQueryProvider><ConnectionsCollection initialConnections={[]} /></TestQueryProvider>);
     expect(await screen.findByText("GitHub")).toBeInTheDocument();
     expect(screen.queryByText("No connections yet")).not.toBeInTheDocument();
   });
 
   it("BrainCollection renders the folder", async () => {
     const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
-    render(<BrainCollection initialFolders={[folder as never]} />);
+    render(<TestQueryProvider><BrainCollection initialFolders={[folder as never]} /></TestQueryProvider>);
     expect(await screen.findByRole("button", { name: /Company facts 3 files/i })).toBeInTheDocument();
     // #1257: folder name is now wrapped in <span title={c.name}> for truncation
     // accessibility; getAllByText returns the leaf span only (not both span + parent div).
@@ -182,7 +187,7 @@ describe("page components render with data (no client crash)", () => {
 
   it("ApprovalsCollection fetches + renders the approval", async () => {
     const { default: ApprovalsCollection } = await import("@/app/approvals/ApprovalsCollection");
-    render(<ApprovalsCollection />);
+    render(<TestQueryProvider><ApprovalsCollection /></TestQueryProvider>);
     expect(await screen.findByText("Reverse Match CRM")).toBeInTheDocument();
   });
 
@@ -192,7 +197,7 @@ describe("page components render with data (no client crash)", () => {
     vi.mocked(api.workers.list).mockResolvedValueOnce([{ ...worker, tags: ["email"] }] as never);
 
     const { default: ApprovalsCollection } = await import("@/app/approvals/ApprovalsCollection");
-    render(<ApprovalsCollection />);
+    render(<TestQueryProvider><ApprovalsCollection /></TestQueryProvider>);
 
     expect(await screen.findByText("No pending approvals")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /email/i })).not.toBeInTheDocument();
@@ -226,21 +231,21 @@ describe("page components render with data (no client crash)", () => {
 
     vi.mocked(api.connections.list).mockReturnValueOnce(new Promise(() => {}) as never);
     const { default: ConnectionsCollection } = await import("@/app/connections/ConnectionsCollection");
-    const connections = render(<ConnectionsCollection initialConnections={[]} />);
+    const connections = render(<TestQueryProvider><ConnectionsCollection initialConnections={[]} /></TestQueryProvider>);
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("No connections yet")).not.toBeInTheDocument();
     connections.unmount();
 
     vi.mocked(api.contexts.list).mockReturnValueOnce(new Promise(() => {}) as never);
     const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
-    const brain = render(<BrainCollection initialFolders={[]} />);
+    const brain = render(<TestQueryProvider><BrainCollection initialFolders={[]} /></TestQueryProvider>);
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("No folders yet")).not.toBeInTheDocument();
     brain.unmount();
 
     vi.mocked(api.approvals.list).mockReturnValueOnce(new Promise(() => {}) as never);
     const { default: ApprovalsCollection } = await import("@/app/approvals/ApprovalsCollection");
-    const approvals = render(<ApprovalsCollection />);
+    const approvals = render(<TestQueryProvider><ApprovalsCollection /></TestQueryProvider>);
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("No pending approvals")).not.toBeInTheDocument();
     approvals.unmount();

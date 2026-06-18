@@ -26,6 +26,16 @@ describe("next.config redirects", () => {
         destination: "/workers?sel=:id&tab=Config",
         permanent: true,
       },
+      {
+        source: "/brain",
+        destination: "/library",
+        permanent: true,
+      },
+      {
+        source: "/brain/:path*",
+        destination: "/library/:path*",
+        permanent: true,
+      },
     ]);
   });
 

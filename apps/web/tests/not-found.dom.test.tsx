@@ -10,7 +10,6 @@ describe("branded not-found page", () => {
 
     expect(screen.getByRole("heading", { name: "Page not found" })).toBeInTheDocument();
     expect(screen.getByText("Floom")).toBeInTheDocument();
-    expect(screen.getByRole("link", { name: /Back to Overview/i })).toHaveAttribute("href", "/overview");
-    expect(screen.getByRole("link", { name: "Sign in" })).toHaveAttribute("href", "/login");
+    expect(screen.getByRole("link", { name: "Go to app" })).toHaveAttribute("href", "/overview");
   });
 });
