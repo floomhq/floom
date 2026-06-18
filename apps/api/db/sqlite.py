@@ -3541,6 +3541,55 @@ class SqliteApprovalRepository:
             ).fetchone()
         return _row_dict(row) if row else None
 
+    def expire_if_stale(self, *, approval_id: str, now_iso_str: str) -> bool:
+        """#798 LAZY: atomically flip ONE pending approval that is past its
+        expires_at to 'expired', and move its paused run off pending_approval.
+
+        Returns True iff this call performed the flip. The UPDATE is guarded by
+        ``status = 'pending' AND expires_at < ?`` so it is idempotent and
+        race-safe: only the row that is still pending and actually stale is
+        touched, and a concurrent caller (or the hourly sweep) can never
+        double-expire. Mirrors _expire_stale_approvals' per-row logic so there
+        is one definition of "expired" across the lazy and swept paths.
+        """
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                UPDATE approvals
+                SET status = 'expired',
+                    decided_at = ?,
+                    reason = COALESCE(reason, 'Approval expired')
+                WHERE id = ? AND status = 'pending'
+                  AND expires_at IS NOT NULL AND expires_at < ?
+                """,
+                (now_iso_str, approval_id, now_iso_str),
+            )
+            if cursor.rowcount <= 0:
+                return False
+            run_row = conn.execute(
+                "SELECT run_id FROM approvals WHERE id = ?",
+                (approval_id,),
+            ).fetchone()
+            run_id = run_row["run_id"] if run_row else None
+            if run_id:
+                conn.execute(
+                    """
+                    UPDATE runs
+                    SET status = ?,
+                        error = COALESCE(NULLIF(error, ''), ?),
+                        error_code = COALESCE(NULLIF(error_code, ''), ?)
+                    WHERE id = ? AND status = ?
+                    """,
+                    (
+                        RunStatus.FAILED.value,
+                        "Approval expired before a decision was recorded.",
+                        "approval_expired",
+                        run_id,
+                        RunStatus.PENDING_APPROVAL.value,
+                    ),
+                )
+        return True
+
     def list_pending(self, *, owner_id: str, limit: int = 100) -> list[dict[str, Any]]:
         bounded_limit = _bounded_positive_int(limit, default=100, maximum=200)
         with get_db() as conn:
