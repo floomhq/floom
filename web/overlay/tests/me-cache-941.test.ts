@@ -23,6 +23,14 @@ function forgedCookie(): string {
   return Buffer.from(payload).toString("base64url");
 }
 
+function unsignedJwt(claims: Record<string, unknown>): string {
+  return [
+    Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url"),
+    Buffer.from(JSON.stringify(claims)).toString("base64url"),
+    "sig",
+  ].join(".");
+}
+
 beforeEach(() => {
   cookieValue = undefined;
   vi.stubEnv("SUPABASE_URL", "https://test-project.supabase.co");
@@ -59,5 +67,40 @@ describe("cloud /api/me — #941 cache + #935 verification", () => {
     const { GET } = await import("../app/api/me/route");
     const res = await GET();
     await expect(res.json()).resolves.toEqual({ user: null });
+  });
+
+  it("returns the current user for a backend-resolved encrypted v2 session", async () => {
+    vi.stubEnv("SUPABASE_URL", "");
+    vi.stubEnv("NEXT_PUBLIC_SUPABASE_URL", "");
+    vi.stubEnv("WORKEROS_CLOUD_SUPABASE_URL", "");
+    vi.stubEnv("WORKEROS_API_BASE", "https://workeros-api.test");
+    const token = unsignedJwt({
+      sub: "user-123",
+      exp: Math.floor(Date.now() / 1000) + 3600,
+      email: "fede@floom.dev",
+      user_metadata: { full_name: "Federico De Ponte", picture: "https://example.test/p.png" },
+    });
+    cookieValue = "v2.gAAAAencrypted";
+    vi.mocked(globalThis.fetch).mockResolvedValueOnce(
+      new Response(
+        JSON.stringify({
+          access_token: token,
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+        }),
+        { status: 200, headers: { "content-type": "application/json" } },
+      ),
+    );
+
+    const { GET } = await import("../app/api/me/route");
+    const res = await GET();
+
+    await expect(res.json()).resolves.toEqual({
+      user: expect.objectContaining({
+        user_id: "user-123",
+        email: "fede@floom.dev",
+        display_name: "Federico De Ponte",
+        picture: "https://example.test/p.png",
+      }),
+    });
   });
 });

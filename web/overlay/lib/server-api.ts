@@ -1,4 +1,5 @@
 import { cookies } from "next/headers";
+import { resolveSessionPayload } from "@/lib/verify-session";
 import type {
   ConnectionItem,
   ContextSummary,
@@ -14,21 +15,6 @@ const API_BASE =
 const SESSION_COOKIE = "workeros_cloud_session";
 const ACTIVE_WORKSPACE_COOKIE = "workeros_active_workspace";
 
-function normalizeCookieValue(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-function decodeBase64Url(value: string): string {
-  value = normalizeCookieValue(value);
-  const padded = value + "=".repeat((4 - (value.length % 4)) % 4);
-  const normalized = padded.replace(/-/g, "+").replace(/_/g, "/");
-  return Buffer.from(normalized, "base64").toString("utf-8");
-}
-
 async function authHeaders(): Promise<Record<string, string>> {
   const cookieStore = await cookies();
   const rawSession = cookieStore.get(SESSION_COOKIE)?.value;
@@ -36,14 +22,15 @@ async function authHeaders(): Promise<Record<string, string>> {
     throw new Error("Cloud session cookie missing");
   }
 
-  const payload = JSON.parse(decodeBase64Url(rawSession)) as { access_token?: string };
-  if (!payload.access_token) {
+  const session = await resolveSessionPayload(rawSession, `${SESSION_COOKIE}=${rawSession}`);
+  const accessToken = session?.payload.access_token;
+  if (!accessToken) {
     throw new Error("Cloud session access token missing");
   }
 
   const headers: Record<string, string> = {
     "content-type": "application/json",
-    Authorization: `Bearer ${payload.access_token}`,
+    Authorization: `Bearer ${accessToken}`,
   };
   const activeWorkspace = cookieStore.get(ACTIVE_WORKSPACE_COOKIE)?.value;
   if (activeWorkspace) {

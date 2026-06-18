@@ -41,9 +41,13 @@ function walk(dir, base = dir, acc = []) {
   for (const entry of readdirSync(dir, { withFileTypes: true })) {
     const full = join(dir, entry.name);
     if (entry.isDirectory()) walk(full, base, acc);
-    else if (entry.isFile()) acc.push(relative(base, full));
+    else if (entry.isFile()) acc.push(toPosix(relative(base, full)));
   }
   return acc;
+}
+
+function toPosix(path) {
+  return path.replace(/\\/g, "/");
 }
 
 function read(p) {
@@ -64,8 +68,8 @@ function main() {
     // prior build state of web/.
     runSyncToTmp(tmp);
 
-    const overlaySet = new Set(OVERLAY_FILES);
-    const staleSet = new Set(ENGINE_STALE_REMOVED);
+    const overlaySet = new Set(OVERLAY_FILES.map(toPosix));
+    const staleSet = new Set(ENGINE_STALE_REMOVED.map(toPosix));
 
     // 1) Every engine source file (minus overlay-overwritten + stale-removed)
     //    must appear identically in the synced tree.

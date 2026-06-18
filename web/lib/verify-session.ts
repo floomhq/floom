@@ -23,6 +23,21 @@ export type SessionPayload = {
   user_id: string;
 };
 
+export type SessionResolution = {
+  payload: SessionPayload;
+  setCookieHeaders: string[];
+};
+
+const SESSION_COOKIE = "workeros_cloud_session";
+
+function getApiBase(): string {
+  return (
+    process.env.WORKEROS_API_BASE ||
+    process.env.NEXT_PUBLIC_WORKEROS_API_BASE ||
+    "https://workeros-api.floom.dev"
+  );
+}
+
 function normalizeCookieValue(value: string): string {
   const trimmed = value.trim();
   if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
@@ -64,6 +79,68 @@ export function parseSessionPayload(raw: string | undefined): SessionPayload | n
   }
 }
 
+function getSetCookieHeaders(res: Response): string[] {
+  const headers = res.headers as Headers & {
+    getSetCookie?: () => string[];
+    raw?: () => Record<string, string[]>;
+  };
+  if (typeof headers.getSetCookie === "function") {
+    return headers.getSetCookie().filter(Boolean);
+  }
+  const raw = typeof headers.raw === "function" ? headers.raw() : undefined;
+  if (raw?.["set-cookie"]) return raw["set-cookie"].filter(Boolean);
+  const single = res.headers.get("set-cookie");
+  return single ? [single] : [];
+}
+
+async function resolveViaBackend(
+  raw: string,
+  cookieHeader?: string | null,
+): Promise<SessionResolution | null> {
+  try {
+    const res = await fetch(`${getApiBase()}/auth/session-token`, {
+      method: "GET",
+      headers: {
+        cookie: cookieHeader || `${SESSION_COOKIE}=${raw}`,
+      },
+      cache: "no-store",
+    });
+    if (!res.ok) return null;
+    const body = await res.json().catch(() => null) as {
+      access_token?: unknown;
+      expires_at?: unknown;
+    } | null;
+    const accessToken = typeof body?.access_token === "string" ? body.access_token : "";
+    if (!accessToken) return null;
+    const claims = decodeJwt(accessToken);
+    const userId = typeof claims.sub === "string" ? claims.sub : "";
+    const expiresAt = Number(body?.expires_at || claims.exp || 0);
+    if (!userId || !Number.isFinite(expiresAt)) return null;
+    if (expiresAt <= Math.floor(Date.now() / 1000) + 30) return null;
+    return {
+      payload: {
+        access_token: accessToken,
+        expires_at: expiresAt,
+        user_id: userId,
+      },
+      setCookieHeaders: getSetCookieHeaders(res),
+    };
+  } catch {
+    return null;
+  }
+}
+
+export async function resolveSessionPayload(
+  raw: string | undefined,
+  cookieHeader?: string | null,
+): Promise<SessionResolution | null> {
+  if (!raw) return null;
+  const normalized = normalizeCookieValue(raw);
+  const parsed = parseSessionPayload(normalized);
+  if (parsed) return { payload: parsed, setCookieHeaders: [] };
+  return resolveViaBackend(normalized, cookieHeader);
+}
+
 export function getSupabaseUrl(): string | null {
   const url = (
     process.env.SUPABASE_URL ||
@@ -98,8 +175,9 @@ export function resetJwksCacheForTests(): void {
 export async function verifySession(
   raw: string | undefined,
 ): Promise<{ payload: SessionPayload; verified: boolean } | null> {
-  const payload = parseSessionPayload(raw);
-  if (!payload) return null;
+  const resolved = await resolveSessionPayload(raw);
+  if (!resolved) return null;
+  const payload = resolved.payload;
 
   const supabaseUrl = getSupabaseUrl();
   if (!supabaseUrl) {

@@ -6,14 +6,17 @@ import { NextRequest } from "next/server";
 import { SignJWT, exportJWK, generateKeyPair } from "jose";
 import {
   parseSessionPayload,
+  resolveSessionPayload,
   resetJwksCacheForTests,
   verifySession,
 } from "@/lib/verify-session";
 
 const SUPABASE_URL = "https://test-project.supabase.co";
+const API_BASE = "https://workeros-api.test";
 
 let privateKey: CryptoKey;
 let publicJwks: { keys: Record<string, unknown>[] };
+let backendSessionToken: string | null = null;
 
 async function makeKeys() {
   const pair = await generateKeyPair("ES256");
@@ -44,6 +47,22 @@ function cookieFor(accessToken: string, userId = "user-123", expiresIn = 3600): 
 function mockJwksFetch() {
   vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
+    if (url.includes("/auth/session-token")) {
+      const token = backendSessionToken ?? (await signToken());
+      return new Response(
+        JSON.stringify({
+          access_token: token,
+          expires_at: Math.floor(Date.now() / 1000) + 3600,
+        }),
+        {
+          status: 200,
+          headers: {
+            "content-type": "application/json",
+            "set-cookie": "workeros_cloud_session=v2.refreshed; Path=/; HttpOnly",
+          },
+        },
+      );
+    }
     if (url.includes("/.well-known/jwks.json")) {
       return new Response(JSON.stringify(publicJwks), {
         status: 200,
@@ -56,8 +75,10 @@ function mockJwksFetch() {
 
 beforeEach(async () => {
   await makeKeys();
+  backendSessionToken = null;
   resetJwksCacheForTests();
   vi.stubEnv("SUPABASE_URL", SUPABASE_URL);
+  vi.stubEnv("WORKEROS_API_BASE", API_BASE);
   mockJwksFetch();
 });
 
@@ -70,6 +91,33 @@ describe("#935 verifySession", () => {
   it("accepts a properly signed Supabase JWT", async () => {
     const token = await signToken();
     const result = await verifySession(cookieFor(token));
+    expect(result).not.toBeNull();
+    expect(result!.verified).toBe(true);
+    expect(result!.payload.user_id).toBe("user-123");
+  });
+
+  it("resolves encrypted v2 cookies through the backend session-token endpoint", async () => {
+    backendSessionToken = await signToken();
+    const result = await resolveSessionPayload("v2.gAAAAencrypted");
+
+    expect(result).not.toBeNull();
+    expect(result!.payload.access_token).toBe(backendSessionToken);
+    expect(result!.payload.user_id).toBe("user-123");
+    expect(result!.setCookieHeaders).toContain(
+      "workeros_cloud_session=v2.refreshed; Path=/; HttpOnly",
+    );
+    expect(globalThis.fetch).toHaveBeenCalledWith(
+      `${API_BASE}/auth/session-token`,
+      expect.objectContaining({
+        headers: { cookie: "workeros_cloud_session=v2.gAAAAencrypted" },
+      }),
+    );
+  });
+
+  it("verifies encrypted v2 cookies after backend resolution", async () => {
+    backendSessionToken = await signToken();
+    const result = await verifySession("v2.gAAAAencrypted");
+
     expect(result).not.toBeNull();
     expect(result!.verified).toBe(true);
     expect(result!.payload.user_id).toBe("user-123");
@@ -153,6 +201,18 @@ describe("#935 middleware integration", () => {
     expect(csp.split(";").find((d) => d.trim().startsWith("script-src"))).not.toContain(
       "unsafe-inline",
     );
+  });
+
+  it("allows a valid encrypted v2 session cookie", async () => {
+    const { middleware } = await import("@/middleware");
+    backendSessionToken = await signToken();
+    const validReq = new NextRequest("https://workeros.floom.dev/app/workers", {
+      headers: { cookie: "workeros_cloud_session=v2.gAAAAencrypted" },
+    });
+
+    const validRes = await middleware(validReq);
+
+    expect(validRes.headers.get("x-middleware-next")).toBe("1");
   });
 });
 

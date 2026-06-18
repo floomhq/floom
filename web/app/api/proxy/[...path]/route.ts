@@ -1,6 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { cookies } from "next/headers";
 import { getSetCookies, withSecureFlag } from "@/lib/secure-set-cookie";
+import { resolveSessionPayload } from "@/lib/verify-session";
 
 // PR S19 (I-1, I-6): draft-and-create makes up to 3 OpenAI calls with
 // YAML retry. On hard prompts that's 30-60s. Default 10s Vercel timeout
@@ -32,96 +33,6 @@ const SUPABASE_ORIGIN = (() => {
   }
 })();
 
-function normalizeCookieValue(value: string): string {
-  const trimmed = value.trim();
-  if (trimmed.length >= 2 && trimmed.startsWith('"') && trimmed.endsWith('"')) {
-    return trimmed.slice(1, -1);
-  }
-  return trimmed;
-}
-
-function decodeBase64Url(value: string): string {
-  value = normalizeCookieValue(value);
-  const padded = value + "=".repeat((4 - (value.length % 4)) % 4);
-  const normalized = padded.replace(/-/g, "+").replace(/_/g, "/");
-  return Buffer.from(normalized, "base64").toString("utf-8");
-}
-
-// How many seconds before access_token expiry we proactively refresh.
-const REFRESH_GRACE_SECONDS = 60;
-
-/**
- * Decode the session cookie and return the parsed payload, or null on any
- * error.  Does NOT verify the JWT signature — that is the backend's job;
- * the proxy just needs the `expires_at` to know when to refresh.
- */
-function parseSessionCookie(
-  raw: string,
-): { access_token: string; refresh_token?: string; expires_at?: number } | null {
-  try {
-    const payload = JSON.parse(decodeBase64Url(raw)) as {
-      access_token?: string;
-      refresh_token?: string;
-      expires_at?: number;
-    };
-    if (typeof payload.access_token !== "string" || !payload.access_token) return null;
-    return {
-      access_token: payload.access_token,
-      refresh_token: payload.refresh_token,
-      expires_at: typeof payload.expires_at === "number" ? payload.expires_at : undefined,
-    };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Call the backend's /auth/refresh endpoint to rotate the access+refresh
- * token pair.  The backend reads the workeros_cloud_session cookie from the
- * request and responds with a Set-Cookie carrying the new session.
- * Returns the new set-cookie header values so the proxy can forward them
- * to the browser, and the fresh access token for the proxied request.
- */
-async function refreshSessionCookie(
-  req: NextRequest,
-): Promise<{ accessToken: string; setCookieHeaders: string[] } | null> {
-  const refreshUrl = `${API_BASE}/auth/refresh`;
-  // Forward the current cookie so the backend can read the refresh_token.
-  const cookieHeader = req.headers.get("cookie") ?? "";
-  try {
-    const res = await fetch(refreshUrl, {
-      method: "POST",
-      headers: { cookie: cookieHeader },
-    });
-    if (!res.ok) return null;
-    // Extract the new access_token from the Set-Cookie the backend returned.
-    const setCookieHeaders: string[] = [];
-    const rawSetCookies = getSetCookies(res);
-    for (const h of rawSetCookies) {
-      if (h) setCookieHeaders.push(h);
-    }
-    // Parse the updated session cookie to get the fresh access_token.
-    const setCookieForSession = rawSetCookies.find((h) =>
-      h.startsWith(`${SESSION_COOKIE}=`),
-    );
-    if (!setCookieForSession) return null;
-    const rawValue = setCookieForSession.split(";")[0].slice(SESSION_COOKIE.length + 1);
-    const parsed = parseSessionCookie(rawValue);
-    if (!parsed) return null;
-    return { accessToken: parsed.access_token, setCookieHeaders };
-  } catch {
-    return null;
-  }
-}
-
-/**
- * Return a valid access token for the proxied request, refreshing the
- * Supabase session first if the stored access_token is expired or within
- * REFRESH_GRACE_SECONDS of expiry.
- *
- * When a refresh is performed the caller receives the Set-Cookie headers
- * that must be forwarded to the browser so the cookie jar stays in sync.
- */
 async function getAccessToken(
   req: NextRequest,
 ): Promise<{ token: string | null; refreshedCookies: string[] }> {
@@ -129,29 +40,15 @@ async function getAccessToken(
   const raw = cookieStore.get(SESSION_COOKIE)?.value;
   if (!raw) return { token: null, refreshedCookies: [] };
 
-  const session = parseSessionCookie(raw);
-  if (!session) return { token: null, refreshedCookies: [] };
-
-  const nowSeconds = Math.floor(Date.now() / 1000);
-  const needsRefresh =
-    session.expires_at !== undefined &&
-    session.expires_at - nowSeconds <= REFRESH_GRACE_SECONDS;
-
-  if (needsRefresh) {
-    const refreshed = await refreshSessionCookie(req);
-    if (refreshed) {
-      return { token: refreshed.accessToken, refreshedCookies: refreshed.setCookieHeaders };
-    }
-    // Refresh failed (revoked token, network error, …).  If the existing
-    // access token is still structurally present but expired, return null so
-    // the proxy returns 401 and the UI routes the user to /login.
-    if (session.expires_at !== undefined && session.expires_at <= nowSeconds) {
-      return { token: null, refreshedCookies: [] };
-    }
-    // Refresh failed but token not yet expired — let the backend validate it.
-  }
-
-  return { token: session.access_token, refreshedCookies: [] };
+  const resolved = await resolveSessionPayload(
+    raw,
+    req.headers.get("cookie") ?? `${SESSION_COOKIE}=${raw}`,
+  );
+  if (!resolved) return { token: null, refreshedCookies: [] };
+  return {
+    token: resolved.payload.access_token,
+    refreshedCookies: resolved.setCookieHeaders,
+  };
 }
 
 function safeProxyLocation(location: string | null, req: NextRequest): string | null {

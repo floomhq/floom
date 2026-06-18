@@ -6,7 +6,7 @@ import logging
 import os
 import time
 from collections import defaultdict
-from collections.abc import Iterable, Mapping
+from collections.abc import Callable, Iterable, Mapping
 from datetime import date, datetime, timedelta, timezone
 from pathlib import Path
 from typing import Any
@@ -465,6 +465,17 @@ def _first_row(response: Any) -> dict[str, Any] | None:
     return rows[0] if rows else None
 
 
+def _is_missing_column_error(exc: Exception, column: str) -> bool:
+    text = str(exc).lower()
+    column = column.lower()
+    return column in text and (
+        "42703" in text
+        or "does not exist" in text
+        or "schema cache" in text
+        or "could not find" in text
+    )
+
+
 def _bytea_literal(value: bytes | str | bytearray | memoryview | None) -> str | None:
     if value is None:
         return None
@@ -619,6 +630,18 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             return builder.eq("workspace_id", workspace_id)
         return builder
 
+    def _execute_skill_versions_scoped(self, builder_factory: Callable[[], Any]) -> Any:
+        try:
+            return self._scope_skill_versions(builder_factory()).execute()
+        except Exception as exc:
+            if not _is_missing_column_error(exc, "workspace_id"):
+                raise
+            _repo_logger.warning(
+                "skill_versions.workspace_id is missing; running unscoped compatibility query. "
+                "Apply supabase migration 0040_skill_versions_workspace_scope.sql.",
+            )
+            return builder_factory().execute()
+
     def _assert_skill_version_write_allowed(
         self,
         *,
@@ -626,13 +649,24 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         workspace_id: str | None,
         user_id: str,
     ) -> None:
-        existing = _first_row(
-            self._client.table("skill_versions")
-            .select("id,user_id,workspace_id")
-            .eq("id", skill_version_id)
-            .limit(1)
-            .execute()
-        )
+        try:
+            existing = _first_row(
+                self._client.table("skill_versions")
+                .select("id,user_id,workspace_id")
+                .eq("id", skill_version_id)
+                .limit(1)
+                .execute()
+            )
+        except Exception as exc:
+            if not _is_missing_column_error(exc, "workspace_id"):
+                raise
+            existing = _first_row(
+                self._client.table("skill_versions")
+                .select("id,user_id")
+                .eq("id", skill_version_id)
+                .limit(1)
+                .execute()
+            )
         if existing is None:
             return
         existing_workspace_id = existing.get("workspace_id")
@@ -650,8 +684,9 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         last_error: Exception | None = None
         for attempt in range(2):
             try:
-                builder = self._client.table("skill_versions").select("*").in_("id", ids)
-                response = self._scope_skill_versions(builder).execute()
+                response = self._execute_skill_versions_scoped(
+                    lambda: self._client.table("skill_versions").select("*").in_("id", ids)
+                )
                 break
             except Exception as exc:
                 last_error = exc
@@ -906,12 +941,12 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             disk_files = _read_worker_files_from_disk(worker_id)
             if not disk_files:
                 return
-            builder = (
-                self._client.table("skill_versions")
+            resp = self._execute_skill_versions_scoped(
+                lambda: self._client.table("skill_versions")
                 .select("manifest_json")
                 .eq("id", skill_version_id)
+                .limit(1)
             )
-            resp = self._scope_skill_versions(builder).limit(1).execute()
             rows = resp.data or []
             if not rows:
                 return
@@ -921,10 +956,11 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             if manifest.get("_files") == disk_files:
                 return
             manifest["_files"] = disk_files
-            update_builder = self._client.table("skill_versions").update(
-                {"manifest_json": manifest}
-            ).eq("id", skill_version_id)
-            self._scope_skill_versions(update_builder).execute()
+            self._execute_skill_versions_scoped(
+                lambda: self._client.table("skill_versions")
+                .update({"manifest_json": manifest})
+                .eq("id", skill_version_id)
+            )
             _repo_logger.info(
                 "#269 captured %d on-disk file(s) into _files for worker %s",
                 len(disk_files),
@@ -1142,11 +1178,11 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
                 payload["manifest_json"] = _json_storage_value(manifest_json, {})
             if bundle_path is not None:
                 payload["bundle_path"] = bundle_path
-            builder = self._client.table("skill_versions").update(payload).eq(
-                "id",
-                worker["skill_version_id"],
+            self._execute_skill_versions_scoped(
+                lambda: self._client.table("skill_versions")
+                .update(payload)
+                .eq("id", worker["skill_version_id"])
             )
-            self._scope_skill_versions(builder).execute()
         payload: dict[str, Any] = {}
         for key in (
             "name",
@@ -1427,8 +1463,9 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         return int(getattr(response, "count", 0) or 0)
 
     def delete_skill_version(self, *, skill_version_id: str) -> None:
-        builder = self._client.table("skill_versions").delete().eq("id", skill_version_id)
-        self._scope_skill_versions(builder).execute()
+        self._execute_skill_versions_scoped(
+            lambda: self._client.table("skill_versions").delete().eq("id", skill_version_id)
+        )
 
     def get_recipe(
         self,

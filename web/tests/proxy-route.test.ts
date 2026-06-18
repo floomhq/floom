@@ -10,7 +10,21 @@ vi.mock("next/headers", () => ({
 }));
 
 function sessionCookie(): string {
-  return Buffer.from(JSON.stringify({ access_token: "jwt-test" })).toString("base64url");
+  return Buffer.from(
+    JSON.stringify({
+      access_token: "jwt-test",
+      expires_at: Math.floor(Date.now() / 1000) + 3600,
+      user_id: "user-123",
+    }),
+  ).toString("base64url");
+}
+
+function unsignedJwt(claims: Record<string, unknown>): string {
+  return [
+    Buffer.from(JSON.stringify({ alg: "none" })).toString("base64url"),
+    Buffer.from(JSON.stringify(claims)).toString("base64url"),
+    "sig",
+  ].join(".");
 }
 
 async function loadRoute() {
@@ -72,6 +86,43 @@ describe("api proxy route", () => {
     );
 
     expect(res.headers.get("location")).toBe("/api/proxy/workers/abc?tab=source");
+  });
+
+  it("uses backend session-token resolution for encrypted v2 cookies", async () => {
+    process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
+    cookieState.value = "v2.gAAAAencrypted";
+    const token = unsignedJwt({
+      sub: "user-123",
+      exp: Math.floor(Date.now() / 1000) + 3600,
+    });
+    const fetchMock = vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
+      const url = String(input);
+      if (url.endsWith("/auth/session-token")) {
+        return new Response(
+          JSON.stringify({
+            access_token: token,
+            expires_at: Math.floor(Date.now() / 1000) + 3600,
+          }),
+          { status: 200, headers: { "content-type": "application/json" } },
+        );
+      }
+      return new Response(JSON.stringify({ ok: true }), {
+        status: 200,
+        headers: { "content-type": "application/json" },
+      });
+    });
+    const { GET } = await loadRoute();
+
+    await GET(new NextRequest("https://workers.floom.dev/api/proxy/workers"), {
+      params: Promise.resolve({ path: ["workers"] }),
+    });
+
+    expect(fetchMock).toHaveBeenCalledWith(
+      "https://workeros-api.floom.dev/api/workers",
+      expect.objectContaining({
+        headers: expect.objectContaining({ Authorization: `Bearer ${token}` }),
+      }),
+    );
   });
 
   it("strips external upstream locations", async () => {

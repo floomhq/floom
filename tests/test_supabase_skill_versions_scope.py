@@ -12,14 +12,17 @@ class _Response:
 
 
 class _Query:
-    def __init__(self, rows: list[dict[str, Any]]) -> None:
+    def __init__(self, rows: list[dict[str, Any]], *, missing_workspace_column: bool = False) -> None:
         self.rows = rows
+        self.missing_workspace_column = missing_workspace_column
+        self.selected = ""
         self.filters: list[tuple[str, Any]] = []
         self.in_filters: list[tuple[str, set[Any]]] = []
         self.delete_mode = False
         self.limit_value: int | None = None
 
-    def select(self, *_args: Any, **_kwargs: Any) -> "_Query":
+    def select(self, *args: Any, **_kwargs: Any) -> "_Query":
+        self.selected = str(args[0]) if args else ""
         return self
 
     def delete(self) -> "_Query":
@@ -39,6 +42,13 @@ class _Query:
         return self
 
     def execute(self) -> _Response:
+        if self.missing_workspace_column and (
+            any(key == "workspace_id" for key, _value in self.filters)
+            or "workspace_id" in self.selected
+        ):
+            raise RuntimeError(
+                "PostgREST error 42703: column skill_versions.workspace_id does not exist"
+            )
         rows = self.rows
         for key, value in self.filters:
             rows = [row for row in rows if row.get(key) == value]
@@ -53,12 +63,18 @@ class _Query:
 
 
 class _Client:
-    def __init__(self, rows: list[dict[str, Any]]) -> None:
+    def __init__(
+        self,
+        rows: list[dict[str, Any]],
+        *,
+        missing_workspace_column: bool = False,
+    ) -> None:
         self.rows = rows
+        self.missing_workspace_column = missing_workspace_column
 
     def table(self, name: str) -> _Query:
         assert name == "skill_versions"
-        return _Query(self.rows)
+        return _Query(self.rows, missing_workspace_column=self.missing_workspace_column)
 
 
 def test_skill_version_lookup_is_workspace_scoped():
@@ -102,3 +118,40 @@ def test_skill_version_write_guard_rejects_cross_workspace_collision():
             assert "different workspace" in str(exc)
         else:
             raise AssertionError("cross-workspace skill_version collision must be rejected")
+
+
+def test_skill_version_lookup_falls_back_when_prod_schema_lacks_workspace_id():
+    rows = [{"id": "sv_legacy", "manifest_json": {"name": "legacy"}}]
+    repo = SupabaseWorkerRepository(
+        client=_Client(rows, missing_workspace_column=True)  # type: ignore[arg-type]
+    )
+
+    with active_workspace("ws_a", "admin"):
+        result = repo._skill_versions_by_id(["sv_legacy"])
+
+    assert result == {"sv_legacy": rows[0]}
+
+
+def test_skill_version_write_guard_falls_back_when_prod_schema_lacks_workspace_id():
+    rows = [{"id": "sv_legacy", "user_id": "user_a"}]
+    repo = SupabaseWorkerRepository(
+        client=_Client(rows, missing_workspace_column=True)  # type: ignore[arg-type]
+    )
+
+    with active_workspace("ws_a", "admin"):
+        repo._assert_skill_version_write_allowed(
+            skill_version_id="sv_legacy",
+            workspace_id="ws_a",
+            user_id="user_a",
+        )
+
+
+def test_skill_versions_workspace_scope_migration_adds_column():
+    migration = (
+        "supabase/migrations/0040_skill_versions_workspace_scope.sql"
+    )
+    with open(migration, encoding="utf-8") as handle:
+        sql = handle.read().lower()
+
+    assert "alter table public.skill_versions" in sql
+    assert "add column if not exists workspace_id" in sql

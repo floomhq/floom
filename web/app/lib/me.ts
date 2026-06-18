@@ -57,7 +57,15 @@ export function parseCurrentUser(rawCookieValue: string | undefined | null): Cur
   }
   if (!payload.access_token) return null;
 
-  const jwt = parseJwt(payload.access_token);
+  return parseCurrentUserFromAccessToken(payload.access_token);
+}
+
+export function parseCurrentUserFromAccessToken(
+  accessToken: string | undefined | null,
+): CurrentUser | null {
+  if (!accessToken) return null;
+
+  const jwt = parseJwt(accessToken);
   if (!jwt) return null;
 
   const userMetadata = readRecord(jwt.user_metadata);
