@@ -1652,10 +1652,35 @@ class SqliteWorkerRepository:
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
+    def claim_schedule_trigger(
+        self,
+        *,
+        trigger_id: str,
+        now_iso: str,
+        locked_until: str,
+    ) -> bool:
+        with get_db() as conn:
+            cur = conn.execute(
+                """
+                UPDATE worker_triggers
+                SET locked_until = ?, updated_at = ?
+                WHERE id = ?
+                  AND type = 'schedule'
+                  AND enabled = 1
+                  AND (locked_until IS NULL OR locked_until <= ?)
+                """,
+                (locked_until, now_iso, trigger_id, now_iso),
+            )
+            return cur.rowcount > 0
+
     def set_trigger_next_run_at(self, *, trigger_id: str, next_run_at: str | None) -> None:
         with get_db() as conn:
             conn.execute(
-                "UPDATE worker_triggers SET next_run_at = ?, updated_at = ? WHERE id = ?",
+                """
+                UPDATE worker_triggers
+                SET next_run_at = ?, locked_until = NULL, updated_at = ?
+                WHERE id = ?
+                """,
                 (next_run_at, now_iso(), trigger_id),
             )
 
@@ -1670,7 +1695,7 @@ class SqliteWorkerRepository:
             conn.execute(
                 """
                 UPDATE worker_triggers
-                SET last_fired_at = ?, next_run_at = ?, updated_at = ?
+                SET last_fired_at = ?, next_run_at = ?, locked_until = NULL, updated_at = ?
                 WHERE id = ?
                 """,
                 (last_fired_at, next_run_at, now_iso(), trigger_id),

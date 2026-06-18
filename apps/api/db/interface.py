@@ -143,6 +143,14 @@ class WorkerRepository(Protocol):
 
     def list_due_schedule_triggers(self, *, now_iso: str) -> list[RowDict]: ...
 
+    def claim_schedule_trigger(
+        self,
+        *,
+        trigger_id: str,
+        now_iso: str,
+        locked_until: str,
+    ) -> bool: ...
+
     def set_trigger_next_run_at(self, *, trigger_id: str, next_run_at: str | None) -> None: ...
 
     def mark_trigger_fired(
