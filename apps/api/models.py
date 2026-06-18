@@ -2178,6 +2178,7 @@ class RunDetail(BaseModel):
     approval_trail: Optional["ApprovalEntry"] = None
     can_replay: bool = False
     total_tokens: Optional[int] = None
+    total_cost_usd: Optional[float] = None  # stored per-run spend (#793/#795); null/0 hidden in UI
     error: Optional[str] = None  # operator-readable headline (never a raw traceback)
     error_raw: Optional[str] = None  # raw error/traceback for the debug "Raw" tab; redacted of secrets
     error_code: Optional[str] = None
@@ -2331,6 +2332,13 @@ class WorkerDetail(BaseModel):
     webhook_url: Optional[str] = None  # Full webhook URL (only when trigger includes webhook)
     files: List[WorkerFile] = Field(default_factory=list)  # All files in the worker dir
     triggers_spec: List[TriggerSpec] = Field(default_factory=list)  # structured trigger objects (all triggers)
+    # Scheduler bookkeeping for scheduled/cron workers, persisted on the workers
+    # row and maintained by scheduler.mark_scheduled_run. next_run_at = next due
+    # ISO time (croniter); last_fired_at = when the scheduler last started a run
+    # (workers.last_scheduled_run_at). Both null for non-scheduled / never-fired
+    # workers, so the detail pane only renders them for cron workers.
+    next_run_at: Optional[str] = None
+    last_fired_at: Optional[str] = None
     # #556: specific secrets/connections required by the worker that are not yet configured.
     missing_secrets: List[str] = Field(default_factory=list)
     missing_connections: List[str] = Field(default_factory=list)
