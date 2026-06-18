@@ -28,7 +28,7 @@ def build_template() -> object:
         template,
         alias=os.environ.get("WORKEROS_E2B_NODE_TEMPLATE_ALIAS", "workeros-node-base"),
         cpu_count=int(os.environ.get("WORKEROS_E2B_TEMPLATE_CPU_COUNT", "2")),
-        memory_mb=int(os.environ.get("WORKEROS_E2B_TEMPLATE_MEMORY_MB", "1024")),
+        memory_mb=int(os.environ.get("WORKEROS_E2B_TEMPLATE_MEMORY_MB", "2048")),
         skip_cache=(os.environ.get("SKIP_CACHE") or "").lower() in {"1", "true", "yes", "on"},
         on_build_logs=default_build_logger(),
     )

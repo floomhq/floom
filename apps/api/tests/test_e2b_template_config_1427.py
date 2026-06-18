@@ -2,7 +2,9 @@
 
 from __future__ import annotations
 
+import importlib.util
 import sys
+import types
 from pathlib import Path
 
 API_DIR = Path(__file__).resolve().parents[1]
@@ -88,3 +90,68 @@ def test_worker_resources_are_clamped_by_operator_policy(monkeypatch):
 
     assert resources.memory_mb == 1024
     assert resources.cpu_count == 2
+
+
+def test_schema_03_accepts_exec_resources_alias():
+    from models import parse_worker_manifest, worker_contract_to_worker_config
+
+    contract = parse_worker_manifest(
+        {
+            "schema_version": "0.3",
+            "name": "heavy-worker",
+            "title": "Heavy Worker",
+            "description": "Loads a large model.",
+            "version": "0.1.0",
+            "entrypoint": "run.py",
+            "exec": {
+                "runtime": "python311",
+                "runner": "e2b",
+                "entry": "run.py",
+                "command": "python run.py",
+                "resources": {"memory_mb": 2048, "cpu_count": 2},
+            },
+            "trigger": {"type": "manual"},
+        }
+    )
+
+    config = worker_contract_to_worker_config(contract, "heavy-worker")
+
+    assert config.resources.memory_mb == 2048
+    assert config.resources.cpu_count == 2
+
+
+def test_node_template_builder_defaults_to_2gb(monkeypatch):
+    captured: dict[str, object] = {}
+
+    class FakeTemplate:
+        def from_node_image(self, _image):
+            return self
+
+        def apt_install(self, _packages):
+            return self
+
+        def npm_install(self, _packages):
+            return self
+
+        @staticmethod
+        def build(_template, **kwargs):
+            captured.update(kwargs)
+            return {"template_id": "tpl-node"}
+
+    fake_e2b = types.SimpleNamespace(
+        Template=FakeTemplate,
+        default_build_logger=lambda: None,
+    )
+    monkeypatch.setitem(sys.modules, "e2b", fake_e2b)
+    monkeypatch.delenv("WORKEROS_E2B_TEMPLATE_MEMORY_MB", raising=False)
+
+    module_path = Path(__file__).resolve().parents[3] / "ops" / "e2b" / "node-base" / "template.py"
+    spec = importlib.util.spec_from_file_location("node_template_under_test", module_path)
+    assert spec and spec.loader
+    module = importlib.util.module_from_spec(spec)
+    spec.loader.exec_module(module)
+
+    module.build_template()
+
+    assert captured["memory_mb"] == 2048
+    assert captured["cpu_count"] == 2

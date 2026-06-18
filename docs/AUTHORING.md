@@ -417,6 +417,10 @@ WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_2048=tpl-python-2gb
 WORKEROS_E2B_NODE_TEMPLATE_MEMORY_2048=tpl-node-2gb
 ```
 
+`resources` is the canonical top-level location. `exec.resources` is also
+accepted for manifests that keep runtime-related fields together; the parser
+lifts it to the same worker resource configuration.
+
 E2B memory/CPU is a template-build property, so an unconfigured resource request logs a warning and falls back to the normal runtime template. Operators can also register content-addressed worker templates with:
 
 ```bash
