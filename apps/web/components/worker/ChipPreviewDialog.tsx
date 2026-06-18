@@ -155,7 +155,15 @@ export function ChipPreviewDialog({
   const open = target !== null;
   return (
     <Dialog open={open} onOpenChange={onOpenChange}>
-      <DialogContent className="flex max-h-[80vh] w-full max-w-lg flex-col gap-0 overflow-hidden p-0">
+      <DialogContent
+        className="flex max-h-[80vh] w-full max-w-lg flex-col gap-0 overflow-hidden p-0"
+        // GAP-POPCLOSE: this preview opens from inside the worker-detail dialog,
+        // so it is a NESTED dialog. Base UI drops the backdrop for nested dialogs,
+        // which is what stopped click-outside-to-close. Force the backdrop and
+        // close on backdrop click so clicking around the box dismisses it.
+        forceRenderOverlay
+        onOverlayClick={() => onOpenChange(false)}
+      >
         <DialogHeader className="flex-row items-center gap-3 [border-bottom:var(--bd-div)] px-4 py-3">
           <span className="flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-card)]">
             {target?.kind === "integration" ? (
