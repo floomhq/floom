@@ -331,7 +331,7 @@ function CatalogRow({
 
           {isConnected ? (
             <>
-              <span className="flex items-center gap-1 text-xs font-medium text-green-600">
+              <span className="flex items-center gap-1 text-xs font-medium text-[var(--positive)]">
                 <CheckCircle2 className="h-3.5 w-3.5" />
                 Connected
               </span>
