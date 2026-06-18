@@ -37,7 +37,9 @@ function Mark({ size = 22 }: { size?: number }) {
   return (
     <span className="relative inline-flex shrink-0 items-center justify-center" style={{ width: size, height: size }}>
       <Image src="/floom-mark.svg" alt="" width={size} height={size} className="floom-mark-light" />
-      <Image src="/floom-logo-1024-inverted.png" alt="" width={size} height={size} className="floom-mark-dark rounded-[5px]" />
+      {/* LND-12: dark-mode mark is a light squircle (not the black-bg PNG that
+          vanished on night mode). */}
+      <Image src="/floom-mark-dark.svg" alt="" width={size} height={size} className="floom-mark-dark" />
     </span>
   );
 }
@@ -91,12 +93,14 @@ export function V3Shell({
             <Mark />
             Floom
           </Link>
-          <div className="flex items-center gap-0.5 text-[13px] text-muted-foreground">
+          {/* LND-3: one consistent flex — single gap, all three items the same
+              32px height, no ad-hoc per-item margins. */}
+          <div className="flex items-center gap-1.5 text-[13px] text-muted-foreground">
             {NAV.map(([label, href]) => (
               <Link
                 key={href}
                 href={href}
-                className={`hidden rounded-[10px] px-3 py-1.5 transition-colors hover:bg-secondary hover:text-foreground sm:block ${active === label.toLowerCase() ? "text-foreground" : ""}`}
+                className={`hidden h-8 items-center rounded-[10px] px-3 transition-colors hover:bg-secondary hover:text-foreground sm:inline-flex ${active === label.toLowerCase() ? "text-foreground" : ""}`}
               >
                 {label}
               </Link>
@@ -107,14 +111,14 @@ export function V3Shell({
               aria-label={`Theme: ${MODE_LABELS[mode]}. Click to switch.`}
               title={`Theme: ${MODE_LABELS[mode]}`}
               onClick={cycleMode}
-              className="ml-1 flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors hover:bg-secondary hover:text-foreground"
+              className="flex h-8 w-8 items-center justify-center rounded-[10px] transition-colors hover:bg-secondary hover:text-foreground"
             >
               {mode === "night" ? <Moon className="h-3.5 w-3.5" /> : mode === "day" ? <Sun className="h-3.5 w-3.5" /> : <Monitor className="h-3.5 w-3.5" />}
             </button>
             {/* #821: session-aware — Dashboard when a session exists. */}
             <Link
               href={authed ? "/app/overview" : "/login"}
-              className="ml-1 rounded-[10px] bg-foreground px-3 py-1.5 font-medium text-background transition-opacity hover:opacity-85"
+              className="inline-flex h-8 items-center rounded-[10px] bg-foreground px-3.5 text-[12.5px] font-medium text-background transition-opacity hover:opacity-85"
             >
               {authed ? "Open app →" : "Sign in"}
             </Link>
