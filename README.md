@@ -114,6 +114,26 @@ Requests are capped by `WORKEROS_MAX_WORKER_MEMORY_MB` in the engine, defaulting
 to 8192 MB. If a worker requests a size without a matching template env var, the
 engine logs a warning and uses the normal runtime template.
 
+LLM-heavy workers, such as NovaSearch judge runs, should declare
+`llm_intensive: true` in `worker.yml`. Set the shared provider-concurrency cap on
+the Railway `workeros-cloud-api` service so those runs queue instead of stacking
+into Vertex/Gemini 429s:
+
+```bash
+WORKEROS_MAX_CONCURRENT_LLM_RUNS=1
+```
+
+For pooled provider quota and shared 429 backoff, deploy the engine's
+`ops/llm-gateway` LiteLLM service with Redis, then set:
+
+```bash
+WORKEROS_LLM_GATEWAY_URL=https://<gateway-host>/v1
+WORKEROS_LLM_GATEWAY_KEY=<litellm-virtual-key>
+```
+
+Leaving the gateway vars unset is the kill switch; workers call their configured
+provider directly. The scheduling cap is still useful without the gateway.
+
 ## Tenancy model
 
 - Single Supabase project shared across all users
