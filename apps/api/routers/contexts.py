@@ -257,7 +257,7 @@ def rollback_context(
     repos: Repositories = Depends(get_repos),
 ):
     """Restore a brain pack to its state at a given git commit SHA."""
-    from contexts import set_context_metadata
+    from contexts import refresh_context_summary_metadata, set_context_metadata
     import git_ops as _git_ops
 
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id)
@@ -278,7 +278,8 @@ def rollback_context(
         author_email=author_email,
     )
     set_context_metadata(safe_name, owner_id=auth.user_id)
-    return _context_detail(safe_name, _metadata, repos=repos, user_id=auth.user_id)
+    refresh_context_summary_metadata(safe_name)
+    return _context_detail(safe_name, repos=repos, user_id=auth.user_id)
 
 
 @contexts_router.get("/contexts", response_model=List[ContextSummary])
@@ -328,7 +329,7 @@ def create_context(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextDetail:
-    from contexts import context_dir, load_context_metadata, set_context_metadata
+    from contexts import context_dir, load_context_metadata, refresh_context_summary_metadata, set_context_metadata
 
     context_user_id = _context_actor_user_id(auth.user_id)
     safe_name = _context_name_or_400(name)
@@ -348,6 +349,7 @@ def create_context(
         owner_id=context_user_id,
         category=(payload.category if payload else None),  # #780
     )
+    refresh_context_summary_metadata(safe_name)
     # Materialize the access-control mirror row (default private) so the Share
     # control + permission checks work immediately. Members STEP 4.
     _ensure_brain_pack_row(safe_name, owner_id=context_user_id, repos=repos)
@@ -646,7 +648,7 @@ def delete_context_file(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextDetail:
-    from contexts import context_dir, set_context_file_metadata
+    from contexts import context_dir, refresh_context_summary_metadata, set_context_file_metadata
 
     context_user_id = _context_actor_user_id(auth.user_id)
     safe_name, metadata = _require_context_for_user(name, user_id=context_user_id)
@@ -663,6 +665,7 @@ def delete_context_file(
         except OSError:
             break
     set_context_file_metadata(safe_name, rel, tags=[], file_metadata={}, owner_id=context_user_id)
+    refresh_context_summary_metadata(safe_name)
     author_name, author_email = _git_author(auth)
     _git_commit_context(safe_name, rel, message=f"context {safe_name}: delete {rel}", author_name=author_name, author_email=author_email)
     return _context_detail(safe_name, repos=repos, user_id=context_user_id)
@@ -733,7 +736,7 @@ def move_context_file(
     DELETE old + PUT new loses version history; this renames on disk and
     commits both paths so git records it as a rename.
     """
-    from contexts import context_dir, context_file_metadata, load_context_metadata, set_context_file_metadata
+    from contexts import context_dir, context_file_metadata, load_context_metadata, refresh_context_summary_metadata, set_context_file_metadata
 
     context_user_id = _context_actor_user_id(auth.user_id)
     safe_name, _metadata = _require_context_for_user(name, user_id=context_user_id)
@@ -758,6 +761,7 @@ def move_context_file(
         owner_id=context_user_id,
     )
     set_context_file_metadata(safe_name, old_rel, tags=[], file_metadata={}, owner_id=context_user_id)
+    refresh_context_summary_metadata(safe_name)
     # prune now-empty source dirs
     for parent in src.parents:
         if parent == context_dir(safe_name):
@@ -787,7 +791,7 @@ async def upload_context_files(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> ContextUploadResponse:
-    from contexts import context_dir, context_total_size, set_context_metadata
+    from contexts import context_dir, refresh_context_summary_metadata, set_context_metadata
 
     context_user_id = _context_actor_user_id(auth.user_id)
     safe_name = _context_name_or_400(name)
@@ -843,14 +847,16 @@ async def upload_context_files(
                 user_id=context_user_id,
                 tags=upload_tags,
                 file_metadata=upload_metadata,
+                refresh_summary=False,
             )
         )
         written_paths.append(rel)
+    summary = refresh_context_summary_metadata(safe_name)
     author_name, author_email = _git_author(auth)
     _git_commit_context(safe_name, message=f"context {safe_name}: upload {len(written_paths)} file(s)", author_name=author_name, author_email=author_email)
     return ContextUploadResponse(
         files=written,
-        total_size_bytes=context_total_size(context_dir(safe_name)),
+        total_size_bytes=int(summary.get("total_size_bytes") or 0),
     )
 
 
