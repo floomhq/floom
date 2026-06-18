@@ -802,13 +802,16 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
           onSuggest={(text) => { setInput(text); }}
           hidden={!hasMessages || isStreaming}
         />
+        {/* B15: keep the textarea editable while Emily streams — only the SEND
+            action is gated on isStreaming (sendDisabled), so the user can draft
+            their next message during a response. */}
         <PromptInput
           value={input}
           onChange={setInput}
           onSubmit={handleSubmit}
           onFilesChange={setAttachedFiles}
           attachedFiles={attachedFiles}
-          disabled={isStreaming}
+          sendDisabled={isStreaming}
           placeholder={createMode ? "Create me: a worker that…" : `Message ${assistantName}...`}
         />
         <p className="mt-1 text-center text-[10px] text-muted-foreground">
