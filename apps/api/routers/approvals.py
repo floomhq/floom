@@ -182,14 +182,22 @@ class RejectRequest(BaseModel):
 @approvals_router.get("/approvals")
 def list_approvals(
     status: Optional[str] = Query(None, description="Filter by status (default: pending)"),
+    limit: int = Query(100, ge=1, le=200),
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
     """List approval requests for the authenticated user."""
     from db import get_db
+    try:
+        limit = int(limit)
+    except (TypeError, ValueError):
+        limit = 100
+    limit = max(1, min(limit, 200))
+    if not isinstance(status, str):
+        status = None
     status_filter = (status or "pending").lower()
     if status_filter == "pending":
-        rows = repos.approvals.list_pending(owner_id=auth.user_id)
+        rows = repos.approvals.list_pending(owner_id=auth.user_id, limit=limit)
     else:
         # For non-pending statuses, query directly
         with get_db() as conn:
@@ -202,11 +210,13 @@ def list_approvals(
                     LEFT JOIN workers w ON w.id = a.worker_id
                     WHERE a.owner_id = ? AND a.status = ?
                     ORDER BY a.created_at DESC
+                    LIMIT ?
                     """,
-                    (auth.user_id, status_filter),
+                    (auth.user_id, status_filter, limit),
                 ).fetchall()
             ]
-    return [_approval_response(dict(row), repos) for row in rows]
+    artifacts_by_run = _approval_artifacts_by_run_for_response(rows, repos)
+    return [_approval_response(dict(row), repos, artifacts_by_run=artifacts_by_run) for row in rows]
 
 
 @approvals_router.get("/approvals/count")
@@ -252,12 +262,61 @@ def _approval_artifacts_for_response(
     return artifacts
 
 
+def _approval_artifacts_by_run_for_response(
+    approvals: list[Dict[str, Any]],
+    repos: Repositories,
+) -> dict[str, list[Dict[str, Any]]]:
+    owner_ids = {str(row.get("owner_id") or "") for row in approvals}
+    owner_ids.discard("")
+    run_ids = [str(row.get("run_id") or "") for row in approvals if row.get("run_id")]
+    if len(owner_ids) != 1 or not run_ids:
+        return {}
+    owner_id = next(iter(owner_ids))
+    list_artifacts_for_runs = getattr(repos.runs, "list_artifacts_for_runs", None)
+    if list_artifacts_for_runs is None:
+        return {
+            run_id: _approval_artifacts_for_response({"owner_id": owner_id, "run_id": run_id}, repos)
+            for run_id in run_ids
+        }
+    try:
+        grouped = list_artifacts_for_runs(user_id=owner_id, run_ids=run_ids)
+    except Exception:
+        logger.exception("Failed to batch-load approval artifacts")
+        return {}
+    result: dict[str, list[Dict[str, Any]]] = {}
+    for run_id, rows in grouped.items():
+        artifacts: list[Dict[str, Any]] = []
+        for row in rows:
+            if _is_sensitive_artifact_row(row):
+                continue
+            art = row_to_dict(row)
+            artifacts.append(
+                {
+                    "id": art.get("id"),
+                    "run_id": art.get("run_id"),
+                    "name": art.get("name"),
+                    "type": art.get("type"),
+                    "path": art.get("path"),
+                    "relative_path": art.get("relative_path"),
+                    "size_bytes": art.get("size_bytes"),
+                    "created_at": art.get("created_at"),
+                }
+            )
+        result[str(run_id)] = artifacts
+    return result
+
+
 def _approval_response(
     approval: Dict[str, Any],
     repos: Repositories,
+    *,
+    artifacts_by_run: Optional[dict[str, list[Dict[str, Any]]]] = None,
 ) -> Dict[str, Any]:
     response = dict(approval)
-    response["artifacts"] = _approval_artifacts_for_response(response, repos)
+    if artifacts_by_run is not None:
+        response["artifacts"] = artifacts_by_run.get(str(response.get("run_id") or ""), [])
+    else:
+        response["artifacts"] = _approval_artifacts_for_response(response, repos)
     # X4: surface the structured reviewer feedback (highlight+comment / screenshot
     # pins) as a parsed object so the owner sees it on the run/approval, not just
     # the free-text reason. The raw JSON column is dropped from the response.
