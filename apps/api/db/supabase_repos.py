@@ -2442,18 +2442,30 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             }
         ).execute()
 
-    def list_logs(self, *, user_id: str, run_id: str) -> list[dict[str, Any]]:
+    def list_logs(
+        self, *, user_id: str, run_id: str, limit: int | None = 10_000
+    ) -> list[dict[str, Any]]:
+        # #1470 perf: interface declares an optional ``limit`` (default 10_000).
+        # Accept + apply it so this impl matches the engine's RunRepository
+        # Protocol; no current router passes it, but a contract gap here would
+        # TypeError the moment one does.
         if self.get(user_id=user_id, run_id=run_id) is None:
             return []
-        response = (
+        builder = (
             self._client.table("run_logs")
             .select("level,message,timestamp,trace_id")
             .eq("user_id", user_id)
             .eq("run_id", run_id)
             .order("timestamp")
-            .execute()
         )
-        return _response_rows(response)
+        if limit is not None:
+            try:
+                bounded = int(limit)
+            except (TypeError, ValueError):
+                bounded = 10_000
+            if bounded > 0:
+                builder = builder.limit(bounded)
+        return _response_rows(builder.execute())
 
     def list_logs_for_worker(
         self,
@@ -2519,19 +2531,75 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             }
         ).execute()
 
-    def list_artifacts(self, *, user_id: str, run_id: str) -> list[dict[str, Any]]:
+    def list_artifacts(
+        self, *, user_id: str, run_id: str, limit: int | None = 1_000
+    ) -> list[dict[str, Any]]:
+        # #1470 perf: interface declares an optional ``limit`` (default 1_000).
+        # Accept + apply so this impl matches the engine's RunRepository
+        # Protocol.
         if self.get(user_id=user_id, run_id=run_id) is None:
             return []
-        response = (
+        builder = (
             self._client.table("artifacts")
             .select("*")
             .eq("user_id", user_id)
             .eq("run_id", run_id)
             .order("created_at")
             .order("name")
-            .execute()
         )
-        return _response_rows(response)
+        if limit is not None:
+            try:
+                bounded = int(limit)
+            except (TypeError, ValueError):
+                bounded = 1_000
+            if bounded > 0:
+                builder = builder.limit(bounded)
+        return _response_rows(builder.execute())
+
+    def list_artifacts_for_runs(
+        self,
+        *,
+        user_id: str,
+        run_ids: list[str],
+        limit_per_run: int | None = 1_000,
+    ) -> dict[str, list[dict[str, Any]]]:
+        # #1470 perf: batched artifact fetch for the approvals/run list so the
+        # router avoids an N+1 of per-run list_artifacts(). The engine calls
+        # this via getattr() (router falls back to per-run reads when absent),
+        # so a missing impl degrades rather than 500s — but supplying it keeps
+        # the cloud on the batched fast path. Returns {run_id: [artifacts...]}
+        # for every requested run id (empty list when a run has none).
+        unique_run_ids = list(dict.fromkeys(str(r) for r in run_ids if r))
+        grouped: dict[str, list[dict[str, Any]]] = {rid: [] for rid in unique_run_ids}
+        if not unique_run_ids:
+            return grouped
+        try:
+            bounded = int(limit_per_run) if limit_per_run is not None else 1_000
+        except (TypeError, ValueError):
+            bounded = 1_000
+        if bounded <= 0:
+            bounded = 1_000
+        # PostgREST has no SQL window function, so fetch all artifacts for the
+        # (workspace-scoped) run set ordered deterministically, then cap each
+        # run's list client-side to mirror the engine's per-run ROW_NUMBER cap.
+        builder = (
+            self._client.table("artifacts")
+            .select("*")
+            .eq("user_id", user_id)
+            .in_("run_id", unique_run_ids)
+            .order("run_id")
+            .order("created_at")
+            .order("name")
+        )
+        rows = _response_rows(builder.execute())
+        for row in rows:
+            rid = str(row.get("run_id") or "")
+            bucket = grouped.get(rid)
+            if bucket is None:
+                continue
+            if len(bucket) < bounded:
+                bucket.append(row)
+        return grouped
 
     def clear_all(self, *, user_id: str) -> int:
         run_ids = [row["id"] for row in self.list_all_ids(user_id=user_id)]
@@ -3429,6 +3497,21 @@ def _is_table_not_found(exc: Exception) -> bool:
     return "relation" in msg and "does not exist" in msg or "42p01" in msg
 
 
+def _is_undefined_column(exc: Exception) -> bool:
+    """Return True when a PostgREST error indicates a column does not exist yet.
+
+    Used so signature-complete adapters can degrade gracefully on schemas that
+    predate a column (e.g. approvals.expires_at before migration 0038) instead
+    of 500ing a best-effort caller.
+    """
+    msg = str(exc).lower()
+    return (
+        ("column" in msg and "does not exist" in msg)
+        or "42703" in msg
+        or "could not find" in msg and "column" in msg
+    )
+
+
 class SupabaseApprovalRepository(_BaseSupabaseRepository):
     """Supabase-backed HITL approval repository.
 
@@ -3443,8 +3526,9 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
     def create(self, *, owner_id: str, **fields: Any) -> dict[str, Any]:
         allowed = {
             "id", "run_id", "worker_id", "status", "label", "preview",
-            "created_at", "decided_at", "reason",
+            "created_at", "decided_at", "reason", "expires_at",  # #798 BE-EXPIRY
             "decision_input_json", "edited_output_json", "follow_up_run_id",
+            "annotations_json",
         }
         row: dict[str, Any] = {k: v for k, v in fields.items() if k in allowed}
         row["owner_id"] = owner_id
@@ -3525,7 +3609,18 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
                 return None
             raise
 
-    def list_pending(self, *, owner_id: str) -> list[dict[str, Any]]:
+    def list_pending(self, *, owner_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        # #1470 perf: the engine's GET /approvals route caps the pending list
+        # and passes ``limit`` (interface.py: list_pending(*, owner_id, limit)).
+        # This impl previously omitted the kwarg, so every cloud call raised
+        # ``TypeError: list_pending() got an unexpected keyword argument
+        # 'limit'`` -> 500 on /api/approvals. Accept + apply the bound; mirror
+        # the engine's 1..200 clamp so a bad caller value cannot over-fetch.
+        try:
+            bounded = int(limit)
+        except (TypeError, ValueError):
+            bounded = 100
+        bounded = max(1, min(bounded, 200))
         try:
             response = (
                 self._client.table(self._TABLE)
@@ -3533,6 +3628,7 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
                 .eq("owner_id", owner_id)
                 .eq("status", "pending")
                 .order("created_at")
+                .limit(bounded)
                 .execute()
             )
             return _response_rows(response)
@@ -3555,6 +3651,71 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
             if _is_table_not_found(exc):
                 return 0
             raise
+
+    def expire_if_stale(self, *, approval_id: str, now_iso_str: str) -> bool:
+        """#798 LAZY (BE-EXPIRY): atomically flip ONE pending approval past its
+        ``expires_at`` to 'expired' and move its paused run off
+        pending_approval. Returns True iff this call performed the flip.
+
+        Mirrors SqliteApprovalRepository.expire_if_stale: the UPDATE is guarded
+        by ``status='pending' AND expires_at < now`` so it is idempotent and
+        race-safe (PostgREST returns the touched rows, so only the caller that
+        actually flipped the row gets data back). If the deployed approvals
+        table predates the ``expires_at`` column (migration 0038), the guard
+        matches nothing and this is a safe no-op -> approvals simply never lazy-
+        expire on that schema, matching prior cloud behaviour rather than 500ing
+        the read/action path that calls this best-effort.
+        """
+        try:
+            response = (
+                self._client.table(self._TABLE)
+                .update(
+                    {
+                        "status": "expired",
+                        "decided_at": now_iso_str,
+                    }
+                )
+                .eq("id", approval_id)
+                .eq("status", "pending")
+                .not_.is_("expires_at", "null")
+                .lt("expires_at", now_iso_str)
+                .execute()
+            )
+        except Exception as exc:
+            # Table or expires_at column absent on this schema -> nothing to
+            # expire. Never 500 the lazy/best-effort caller (router wraps this
+            # in try/except, but be defensive here too).
+            if _is_table_not_found(exc) or _is_undefined_column(exc):
+                return False
+            raise
+        flipped_rows = getattr(response, "data", None) or []
+        if not flipped_rows:
+            return False
+        # Move the paused run off pending_approval so it is not stuck forever.
+        flipped = flipped_rows[0]
+        run_id = flipped.get("run_id")
+        owner_id = flipped.get("owner_id")
+        if run_id and owner_id:
+            try:
+                self._client.table("runs").update(
+                    {
+                        "status": RunStatus.FAILED.value,
+                        "error": "Approval expired before a decision was recorded.",
+                        "error_code": "approval_expired",
+                    }
+                ).eq("id", run_id).eq(
+                    "status", RunStatus.PENDING_APPROVAL.value
+                ).execute()
+            except Exception:
+                # The approval is already flipped to 'expired' (the authoritative
+                # signal); a run-status hiccup must not undo that or 500 the
+                # caller. The hourly sweep / next read re-attempts run cleanup.
+                _repo_logger.warning(
+                    "expire_if_stale: run %s status flip failed (non-fatal)",
+                    run_id,
+                    exc_info=True,
+                )
+        return True
 
     def approve(
         self,
