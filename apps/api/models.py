@@ -1321,6 +1321,7 @@ class WorkerContractExec(BaseModel):
     inputs: List[WorkerContractField] = Field(default_factory=list)
     secrets: List[str] = Field(default_factory=list)
     contexts: List[WorkerContextMountSpec] = Field(default_factory=list)
+    resources: WorkerResources = Field(default_factory=WorkerResources)
     outputs: List[WorkerContractField] = Field(default_factory=list)
 
     @field_validator("mode", mode="before")
@@ -1504,6 +1505,10 @@ class WorkerContract(BaseModel):
         if isinstance(value, dict) and not str(value.get("description") or "").strip():
             fallback = str(value.get("title") or value.get("name") or "Workeros worker").strip()
             value = {**value, "description": fallback[:500]}
+        if isinstance(value, dict) and "resources" not in value:
+            exec_block = value.get("exec")
+            if isinstance(exec_block, dict) and isinstance(exec_block.get("resources"), dict):
+                value = {**value, "resources": exec_block["resources"]}
         return value
 
     @field_validator("name")
