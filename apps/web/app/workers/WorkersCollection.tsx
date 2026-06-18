@@ -89,6 +89,7 @@ import {
   orderedSourceFiles,
 } from "@/lib/workers/derive";
 import { getFavorites, saveFavorites } from "@/lib/workers/favorites";
+import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
 import {
   ADVANCED_DETAIL_TABS,
   BASE_DETAIL_TABS,
@@ -988,9 +989,8 @@ function inputTemplatesKey(workerId: string): string {
   return `floom.workerDetail.inputTemplates.${workerId}`;
 }
 function loadInputTemplates(workerId: string): InputTemplate[] {
-  if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(inputTemplatesKey(workerId));
+    const raw = safeStorageGet("local", inputTemplatesKey(workerId));
     const parsed = raw ? (JSON.parse(raw) as unknown) : [];
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
@@ -1002,12 +1002,7 @@ function loadInputTemplates(workerId: string): InputTemplate[] {
   }
 }
 function saveInputTemplates(workerId: string, templates: InputTemplate[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(inputTemplatesKey(workerId), JSON.stringify(templates));
-  } catch {
-    /* ignore quota / privacy-mode */
-  }
+  safeStorageSet("local", inputTemplatesKey(workerId), JSON.stringify(templates));
 }
 
 // Operations > Inputs: a segmented named-template picker above the REAL

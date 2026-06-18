@@ -3,6 +3,8 @@
 // fetch() calls are NOT auto-prefixed by basePath, so Cloud sets
 // NEXT_PUBLIC_API_PROXY_BASE="/app/api/proxy". Keeping this an env seam lets the
 // Cloud wrapper consume this file unmodified (no fork).
+import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
+
 export const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 const WEB_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
@@ -18,18 +20,17 @@ function activeWorkspaceCookie(value: string, maxAge: number): string {
 }
 
 export function getActiveWorkspaceId(): string | null {
-  if (typeof window === "undefined" || !window.localStorage) return null;
-  const value = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+  const value = safeStorageGet("local", ACTIVE_WORKSPACE_STORAGE_KEY);
   return value || "local-default";
 }
 
 export function setActiveWorkspaceId(workspaceId: string | null) {
-  if (typeof window === "undefined" || !window.localStorage) return;
+  if (typeof window === "undefined") return;
   if (!workspaceId) {
-    window.localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+    safeStorageRemove("local", ACTIVE_WORKSPACE_STORAGE_KEY);
     window.document.cookie = activeWorkspaceCookie("", 0);
   } else {
-    window.localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, workspaceId);
+    safeStorageSet("local", ACTIVE_WORKSPACE_STORAGE_KEY, workspaceId);
     window.document.cookie = activeWorkspaceCookie(encodeURIComponent(workspaceId), 31536000);
   }
 }
