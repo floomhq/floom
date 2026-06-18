@@ -100,7 +100,7 @@ export function WorkerInputForm({
           <Label className="text-sm">
             {inp.label || humanizeOptionLabel(inp.name)}
             {inp.required && (
-              <span className="text-red-500 ml-0.5">*</span>
+              <span className="text-[var(--negative)] ml-0.5">*</span>
             )}
           </Label>
           {inp.description && (
@@ -191,7 +191,7 @@ export function WorkerInputForm({
           )}
 
           {validationErrors[inp.name] && (
-            <p className="text-xs text-red-600">{validationErrors[inp.name]}</p>
+            <p className="text-xs text-[var(--negative)]">{validationErrors[inp.name]}</p>
           )}
         </div>
       ))}

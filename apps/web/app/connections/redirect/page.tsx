@@ -157,8 +157,8 @@ function RedirectInner() {
 
             ) : phase === "done" ? (
               <>
-                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-green-50">
-                  <CheckCircle2 className="size-5 text-green-600" />
+                <div className="mx-auto mt-6 flex size-10 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--positive)_8%,transparent)]">
+                  <CheckCircle2 className="size-5 text-[var(--positive)]" />
                 </div>
                 <h1 className="mt-4 text-xl font-semibold">Connected!</h1>
                 <p className="mt-2 text-sm text-muted-foreground">

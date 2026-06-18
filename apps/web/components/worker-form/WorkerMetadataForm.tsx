@@ -36,7 +36,7 @@ export function WorkerMetadataForm({
       <CardContent className="space-y-4">
         <div className="space-y-1.5">
           <Label className="text-sm">
-            Worker ID {!isEdit && <span className="text-red-500">*</span>}
+            Worker ID {!isEdit && <span className="text-[var(--negative)]">*</span>}
           </Label>
           {isEdit ? (
             <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/50 px-3 py-2">
@@ -56,7 +56,7 @@ export function WorkerMetadataForm({
                 className={`[border:var(--bd-card)] font-mono ${idError ? "[border:var(--bd-input)]" : ""}`}
                 placeholder="my-worker"
               />
-              {idError && <p className="text-xs text-red-500">{idError}</p>}
+              {idError && <p className="text-xs text-[var(--negative)]">{idError}</p>}
             </>
           )}
         </div>
