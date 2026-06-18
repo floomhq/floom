@@ -96,6 +96,15 @@ function allowedHosts(req: NextRequest): Set<string> {
     if (h) hosts.add(h.split(",")[0].trim().toLowerCase());
   };
   add(req.nextUrl.host);
+  // The /app rewrite on workeros.floom.dev fronts this function: Vercel rewrites
+  // the browser's POST to workeros-cloud-dashboard.vercel.app, so req.nextUrl.host
+  // is the internal host while the browser's Origin is workeros.floom.dev. Trust
+  // the forwarded user-facing host (Vercel sets x-forwarded-host) so a same-origin
+  // mutation through the rewrite passes CSRF instead of 403ing. Mirrors the engine
+  // middleware (engine/apps/web/middleware.ts). CSRF_TRUSTED_ORIGINS stays as the
+  // explicit allow-list belt-and-suspenders.
+  add(req.headers.get("x-forwarded-host"));
+  add(req.headers.get("host"));
   for (const entry of (process.env.CSRF_TRUSTED_ORIGINS || "").split(",")) {
     const v = entry.trim();
     if (!v) continue;
