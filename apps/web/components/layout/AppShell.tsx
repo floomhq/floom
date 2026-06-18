@@ -2,6 +2,7 @@
 
 import { useEffect, useState } from "react";
 import { usePathname } from "next/navigation";
+import { cn } from "@/lib/utils";
 import { Ambient } from "@/components/Ambient";
 import { CommandPalette } from "@/components/CommandPalette";
 import { IconSprite } from "@/components/IconSprite";
@@ -9,6 +10,7 @@ import { Toaster } from "@/components/ui/sonner";
 import { Sidebar } from "@/components/layout/sidebar";
 import { DeepLinkRouter } from "@/components/layout/DeepLinkRouter";
 import { EmilyDock, EmilyMobileSheet } from "@/components/emily/EmilyChat";
+import { EmilyFullscreenProvider, useEmilyFullscreen } from "@/components/emily/emily-fullscreen";
 import { AlertsBell } from "@/components/overview/AlertsBell";
 import { BootSplash } from "@/components/layout/BootSplash";
 
@@ -111,23 +113,65 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
   }
 
   return (
-    <>
+    <EmilyFullscreenProvider>
       <BootSplash />
       <IconSprite />
       <Ambient />
       <DeepLinkRouter />
       <Sidebar />
+      <StandardShellBody fullBleed={fullBleed} isDesktop={isDesktop}>
+        {children}
+      </StandardShellBody>
+      <CommandPalette />
+      <Toaster position="bottom-right" closeButton />
+    </EmilyFullscreenProvider>
+  );
+}
+
+// Inner body that consumes the Emily fullscreen context. When Emily is in true
+// fullscreen, the page pane (<main>) is hidden so Emily flex-grows to fill the
+// whole main area (everything to the RIGHT of the left sidebar, which stays
+// visible — Federico 2026-06-17 spec). The GlobalAlertsBell also hides with the
+// pane since there is no page content to anchor it to.
+function StandardShellBody({
+  children,
+  fullBleed,
+  isDesktop,
+}: {
+  children: React.ReactNode;
+  fullBleed: boolean;
+  isDesktop: boolean;
+}) {
+  const { fullscreen } = useEmilyFullscreen();
+  // Fullscreen only applies on desktop where the dock is a flex sibling of the
+  // page pane. On mobile the bottom-sheet owns its own overlay.
+  const emilyFull = fullscreen && isDesktop;
+
+  return (
+    <>
       {/* Main content between sidebar and Emily dock.
           fullBleed pages (collection pages) own their own internal layout and
           must fill the full viewport height (they skip the max-w-7xl wrapper).
-          Standard pages scroll in the overflow-y-auto container. (#1101) */}
+          Standard pages scroll in the overflow-y-auto container. (#1101)
+          When Emily is fullscreen the pane is hidden (display:none, stays mounted
+          so page state survives) and Emily fills the row. */}
       {fullBleed ? (
-        <main className="relative z-10 flex-1 min-w-0 h-full overflow-hidden flex flex-col">
+        <main
+          className={cn(
+            "relative z-10 flex-1 min-w-0 h-full overflow-hidden flex-col",
+            emilyFull ? "hidden" : "flex",
+          )}
+        >
           <GlobalAlertsBell />
           {children}
         </main>
       ) : (
-        <main className="relative z-10 flex-1 min-w-0 h-full overflow-y-auto">
+        <main
+          className={cn(
+            "relative z-10 flex-1 min-w-0 h-full overflow-y-auto",
+            emilyFull && "hidden",
+          )}
+        >
           {/* Zero-height sticky bar keeps the bell pinned to the pane's
               top-right while the page content scrolls underneath it. */}
           <div className="pointer-events-none sticky top-0 z-30 hidden h-0 md:block">
@@ -140,8 +184,6 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
       )}
       {/* Emily dock: fixed-height right rail — scrolls internally, never bleeds to body */}
       {isDesktop ? <EmilyDock /> : <EmilyMobileSheet />}
-      <CommandPalette />
-      <Toaster position="bottom-right" closeButton />
     </>
   );
 }
