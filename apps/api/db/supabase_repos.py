@@ -3756,6 +3756,7 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
             .eq("run_id", run_id)
             .eq("owner_id", owner_id)
             .eq("status", "pending")
+            .or_(f"expires_at.is.null,expires_at.gte.{decided_at}")
             .execute()
         )
         if not (getattr(response, "data", None) or []):
@@ -3806,6 +3807,7 @@ class SupabaseApprovalRepository(_BaseSupabaseRepository):
             .eq("run_id", run_id)
             .eq("owner_id", owner_id)
             .eq("status", "pending")
+            .or_(f"expires_at.is.null,expires_at.gte.{decided_at}")
             .execute()
         )
         if not (getattr(response, "data", None) or []):

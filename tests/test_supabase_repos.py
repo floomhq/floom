@@ -74,12 +74,7 @@ class _FakeTable:
             rows = [
                 row
                 for row in rows
-                if any(
-                    len(clause) == 3
-                    and clause[1] == "eq"
-                    and str(row.get(clause[0])) == clause[2]
-                    for clause in clauses
-                )
+                if any(_matches_or_clause(row, clause) for clause in clauses)
             ]
         if self.update_values is not None:
             # UPDATE: mutate the matching rows in place (so a sibling table()
@@ -593,7 +588,21 @@ def test_supabase_repositories_enforce_rls_between_users():
 # ---------------------------------------------------------------------------
 
 
-def _pending_approval(run_id="run_280", owner_id="user_280"):
+def _matches_or_clause(row: dict, clause: list[str]) -> bool:
+    if len(clause) != 3:
+        return False
+    key, op, value = clause
+    if op == "eq":
+        return str(row.get(key)) == value
+    if op == "is" and value == "null":
+        return row.get(key) is None
+    if op == "gte":
+        actual = row.get(key)
+        return actual is not None and str(actual) >= value
+    return False
+
+
+def _pending_approval(run_id="run_280", owner_id="user_280", expires_at=None):
     return {
         "id": "apr_280",
         "run_id": run_id,
@@ -602,6 +611,7 @@ def _pending_approval(run_id="run_280", owner_id="user_280"):
         "worker_id": "wk_280",
         "status": "pending",
         "created_at": _now_iso(),
+        "expires_at": expires_at,
     }
 
 
@@ -645,6 +655,49 @@ def test_reject_then_approve_returns_none():
     racing_approve = repo.approve(owner_id="user_280", run_id="run_280", decided_at=_now_iso())
 
     assert racing_approve is None  # an approve cannot win after a reject already decided
+
+
+def test_approve_refuses_expired_pending_approval_atomically():
+    client = _FakeClient([_pending_approval(expires_at="2020-01-01T00:00:00+00:00")])
+    repo = SupabaseApprovalRepository(client=client)
+
+    claimed = repo.approve(
+        owner_id="user_280",
+        run_id="run_280",
+        decided_at="2026-06-18T00:00:00+00:00",
+    )
+
+    assert claimed is None
+    assert client.rows[0]["status"] == "pending"
+
+
+def test_reject_refuses_expired_pending_approval_atomically():
+    client = _FakeClient([_pending_approval(expires_at="2020-01-01T00:00:00+00:00")])
+    repo = SupabaseApprovalRepository(client=client)
+
+    claimed = repo.reject(
+        owner_id="user_280",
+        run_id="run_280",
+        decided_at="2026-06-18T00:00:00+00:00",
+    )
+
+    assert claimed is None
+    assert client.rows[0]["status"] == "pending"
+
+
+def test_approve_allows_unexpired_or_null_expiry():
+    for expiry in (None, "2999-01-01T00:00:00+00:00"):
+        client = _FakeClient([_pending_approval(expires_at=expiry)])
+        repo = SupabaseApprovalRepository(client=client)
+
+        claimed = repo.approve(
+            owner_id="user_280",
+            run_id="run_280",
+            decided_at="2026-06-18T00:00:00+00:00",
+        )
+
+        assert claimed is not None
+        assert claimed["status"] == "approved"
 
 
 def test_attach_follow_up_records_run_id_on_approved_row():

@@ -279,6 +279,31 @@ def test_cloud_webhook_rate_limit_uses_trusted_edge_ip(monkeypatch, tmp_path):
     assert keys == ["worker-1:203.0.113.88"]
 
 
+def test_cloud_webhook_missing_token_fails_before_config_load(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+
+    called = {"config": False, "create_run": False}
+
+    def _unexpected_config_load(_worker_id):
+        called["config"] = True
+        return None
+
+    def _unexpected_create_run(*_args, **_kwargs):
+        called["create_run"] = True
+        return "run-never"
+
+    monkeypatch.setattr(main.engine_main, "get_worker_config_for_run", _unexpected_config_load)
+    monkeypatch.setattr(main.engine_main, "create_run", _unexpected_create_run)
+    monkeypatch.setattr(main.engine_main, "_check_webhook_rate_limit", lambda _key: True)
+
+    response = client.post("/api/webhooks/worker-1", json={"ok": True})
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Missing webhook token"
+    assert called == {"config": False, "create_run": False}
+
+
 # ---------------------------------------------------------------------------
 # P2-A / P2-B: /metrics and /system/info must be admin-only
 # ---------------------------------------------------------------------------
