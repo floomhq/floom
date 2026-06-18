@@ -138,6 +138,8 @@ def list_runs(
     until: Optional[str] = None,
     limit: int = Query(50, ge=1, le=200),
     offset: int = Query(0, ge=0),
+    before_created_at: Optional[str] = Query(None),
+    before_id: Optional[str] = Query(None),
     include_system: bool = Query(
         False,
         description="Include internal/system runs (audit, test, smoke). Hidden by default.",
@@ -147,6 +149,16 @@ def list_runs(
 ) -> List[RunSummary]:
     started = time.perf_counter()
     limit = _effective_runs_limit(request, limit)
+    try:
+        offset = int(offset)
+    except (TypeError, ValueError):
+        offset = 0
+    if not isinstance(before_created_at, str):
+        before_created_at = None
+    if not isinstance(before_id, str):
+        before_id = None
+    if not isinstance(include_system, bool):
+        include_system = False
     statuses = _resolve_run_status_filters(status)
     since_dt = _parse_iso8601(since) if since else None
     if since and since_dt is None:
@@ -156,6 +168,11 @@ def list_runs(
         raise HTTPException(status_code=400, detail="Invalid until value")
     if since_dt and until_dt and since_dt > until_dt:
         raise HTTPException(status_code=400, detail="since must be before until")
+    before_dt = _parse_iso8601(before_created_at) if before_created_at else None
+    if before_created_at and before_dt is None:
+        raise HTTPException(status_code=400, detail="Invalid before_created_at value")
+    if (before_created_at and not before_id) or (before_id and not before_created_at):
+        raise HTTPException(status_code=400, detail="before_created_at and before_id must be supplied together")
 
     workspace_key = (
         request.headers.get("x-workeros-workspace")
@@ -173,12 +190,19 @@ def list_runs(
         until,
         limit,
         offset,
+        before_created_at,
+        before_id,
         include_system,
     )
     cached = hot_cache.get(cache_key)
     if cached is not None:
         visible_rows, visible_total = cached
         response.headers["X-Total-Count"] = str(visible_total)
+        response.headers["X-Has-More"] = "true" if visible_total > offset + len(visible_rows) else "false"
+        if visible_rows:
+            last = visible_rows[-1]
+            response.headers["X-Next-Before-Created-At"] = str(getattr(last, "created_at", "") or "")
+            response.headers["X-Next-Before-Id"] = str(getattr(last, "id", "") or "")
         duration_ms = (time.perf_counter() - started) * 1000
         response.headers["Server-Timing"] = f"runs;dur={duration_ms:.1f};desc=\"hit\""
         logger.info(
@@ -204,12 +228,19 @@ def list_runs(
         until=until_dt.isoformat() if until_dt else None,
         limit=limit,
         offset=offset,
+        before_created_at=before_dt.isoformat() if before_dt else None,
+        before_id=before_id,
         include_system=include_system,
-        exact_total=os.environ.get("WORKEROS_DEPLOY") != "cloud",
+        exact_total=False,
     )
     result = [_make_run_summary(r) for r in visible_rows]
     hot_cache.set(cache_key, (result, visible_total))
     response.headers["X-Total-Count"] = str(visible_total)
+    response.headers["X-Has-More"] = "true" if visible_total > offset + len(result) else "false"
+    if result:
+        last = result[-1]
+        response.headers["X-Next-Before-Created-At"] = last.created_at or ""
+        response.headers["X-Next-Before-Id"] = last.id
     duration_ms = (time.perf_counter() - started) * 1000
     response.headers["Server-Timing"] = f"runs;dur={duration_ms:.1f};desc=\"miss\""
     logger.info(

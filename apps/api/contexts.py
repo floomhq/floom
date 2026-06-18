@@ -717,20 +717,47 @@ def context_file_metadata(root: Path, path: Path, pack_metadata: dict[str, Any] 
     return result
 
 
+def context_tree_summary(root: Path) -> dict[str, Any]:
+    file_count = 0
+    total_size = 0
+    latest = None
+    for path in iter_context_files(root):
+        stat = path.stat()
+        file_count += 1
+        total_size += stat.st_size
+        latest = stat.st_mtime if latest is None else max(latest, stat.st_mtime)
+    if latest is None and root.exists():
+        latest = root.stat().st_mtime
+    return {
+        "file_count": file_count,
+        "total_size_bytes": total_size,
+        "updated_at": (
+            datetime.fromtimestamp(latest, timezone.utc).isoformat()
+            if latest is not None
+            else None
+        ),
+    }
+
+
+def refresh_context_summary_metadata(name: str) -> dict[str, Any]:
+    safe_name = validate_context_name(name)
+    root = context_dir(safe_name)
+    summary = context_tree_summary(root)
+    metadata = load_context_metadata()
+    pack = metadata.get(safe_name, {})
+    pack["summary"] = summary
+    pack["updated_at"] = now_iso()
+    metadata[safe_name] = pack
+    save_context_metadata(metadata)
+    return summary
+
+
 def context_total_size(root: Path) -> int:
-    return sum(path.stat().st_size for path in iter_context_files(root))
+    return int(context_tree_summary(root)["total_size_bytes"])
 
 
 def context_updated_at(root: Path) -> str | None:
-    latest = None
-    for path in iter_context_files(root):
-        mtime = path.stat().st_mtime
-        latest = mtime if latest is None else max(latest, mtime)
-    if latest is None and root.exists():
-        latest = root.stat().st_mtime
-    if latest is None:
-        return None
-    return datetime.fromtimestamp(latest, timezone.utc).isoformat()
+    return context_tree_summary(root)["updated_at"]
 
 
 def normalize_context_mount(raw: Any) -> dict[str, Any]:

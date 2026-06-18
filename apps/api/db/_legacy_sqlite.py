@@ -2090,6 +2090,25 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_runs_actor_created
         ON runs(actor_user_id, created_at DESC);
     """,
+    # -- migration 83: operator runs list pagination indexes (#1470) ----------
+    """
+    CREATE INDEX IF NOT EXISTS idx_runs_actor_source_created_id
+        ON runs(actor_user_id, trigger_source, created_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_runs_worker_source_created_id
+        ON runs(worker_id, trigger_source, created_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_workers_owner_id_id
+        ON workers(owner_id, id);
+    """,
+    # -- migration 84: connection list filter/sort index (#1470) ------------
+    """
+    CREATE INDEX IF NOT EXISTS idx_composio_connections_user_kind_app
+        ON composio_connections(user_id, kind, app_name);
+    """,
+    # -- migration 85: approval inbox list index (#1470) ---------------------
+    """
+    CREATE INDEX IF NOT EXISTS idx_approvals_owner_status_created
+        ON approvals(owner_id, status, created_at);
+    """,
 ]
 
 
