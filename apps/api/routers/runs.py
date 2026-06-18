@@ -104,6 +104,20 @@ logger = logging.getLogger("floom.api")
 runs_router = APIRouter()
 
 
+def _run_total_cost_usd(raw: Any) -> Optional[float]:
+    """Coerce the stored ``runs.total_cost_usd`` (#793/#795) to a float for the run
+    detail response. Returns None for missing/unparseable/zero values so the detail
+    pane hides the cost line until a real spend is recorded (the column defaults to
+    0.0 and is only populated once a run reaches a terminal status)."""
+    if raw is None:
+        return None
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return None
+    return value if value > 0 else None
+
+
 def _hot_cache_scope() -> tuple[str, str]:
     return (
         os.environ.get("WORKEROS_DB") or os.environ.get("FLOOM_DB") or "",
@@ -865,6 +879,7 @@ def get_run(
         approval_trail=_approval_trail,
         can_replay=_can_replay,
         total_tokens=_total_tokens,
+        total_cost_usd=_run_total_cost_usd(run.get("total_cost_usd")),
         error=_operator_error_message(run.get("error"), run.get("error_code")),
         # Raw error/traceback kept only for the debug "Raw" tab, secrets redacted.
         # Surfaced separately so it is never the operator-facing headline. We keep

@@ -43,13 +43,29 @@ function DialogContent({
   className,
   children,
   showCloseButton = true,
+  onOverlayClick,
+  forceRenderOverlay = false,
   ...props
 }: DialogPrimitive.Popup.Props & {
   showCloseButton?: boolean
+  /**
+   * Optional explicit click handler on the backdrop. Closes the dialog directly
+   * on a backdrop click, sidestepping Base UI's outside-press heuristics.
+   * Omitted by default, so non-nested dialogs are unaffected.
+   */
+  onOverlayClick?: (event: React.MouseEvent<HTMLDivElement>) => void
+  /**
+   * Force the backdrop to render even when this dialog is nested inside another
+   * open dialog. Base UI skips the backdrop for nested dialogs by default
+   * (`enabled: forceRender || !nested`), which removes the surface an outside
+   * click needs to land on — so a nested dialog can only be closed via its X.
+   * Setting this restores click-outside-to-close for nested dialogs.
+   */
+  forceRenderOverlay?: boolean
 }) {
   return (
     <DialogPortal>
-      <DialogOverlay />
+      <DialogOverlay onClick={onOverlayClick} forceRender={forceRenderOverlay} />
       <DialogPrimitive.Popup
         data-slot="dialog-content"
         className={cn(
