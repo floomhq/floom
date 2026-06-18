@@ -46,6 +46,10 @@ yarn-error.log*
 .venv/
 __pycache__/
 
+# vertex WIF credential — materialized at boot from VERTEX_WIF_CONFIG_B64
+# (keyless external_account config; kept out of git regardless)
+/ops/vertex/wif-config.json
+
 # vercel
 .vercel
 
