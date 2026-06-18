@@ -2,6 +2,12 @@ import Link from "next/link";
 import { OAUTH_LOGIN_URL, OAUTH_LOGIN_URL_GITHUB } from "@/lib/api";
 import { LoginEmailPanel } from "@/components/LoginEmailPanel";
 import { Hl, V3Shell } from "@/app/v3/V3Shell";
+import {
+  FileTextIcon,
+  GitHubSVG,
+  MailIcon,
+  UsersIcon,
+} from "@/components/landing-icons";
 
 export const metadata = {
   title: "Sign in · Floom Workers",
@@ -9,16 +15,21 @@ export const metadata = {
 
 // Illustrative activity data shown pre-auth to demonstrate worker runs.
 // No real user data — purely a proof-of-concept showcase.
+// LND-13: each row carries a semantic worker icon so the run-row squircle reads
+// as that worker (not a single blank/washed-out generic glyph). GitHub Digest
+// gets the real GitHub mark; the rest get monochrome glyphs that pick up the
+// squircle's high-contrast ink color (see WorkerRowIcon).
 const ACTIVITY_ROWS: {
   name: string;
   result: string;
   status: "done" | "running";
   time: string;
+  icon: React.ReactNode;
 }[] = [
-  { name: "Lead research", result: "14 qualified leads", status: "done", time: "4m ago" },
-  { name: "Post-call follow-up", result: "Sent to 3 contacts", status: "done", time: "11m ago" },
-  { name: "Pipeline report", result: "Gathering data", status: "running", time: "now" },
-  { name: "GitHub Digest", result: "14 PRs summarized", status: "done", time: "22m ago" },
+  { name: "Lead research", result: "14 qualified leads", status: "done", time: "4m ago", icon: <UsersIcon /> },
+  { name: "Post-call follow-up", result: "Sent to 3 contacts", status: "done", time: "11m ago", icon: <MailIcon /> },
+  { name: "Pipeline report", result: "Gathering data", status: "running", time: "now", icon: <FileTextIcon /> },
+  { name: "GitHub Digest", result: "14 PRs summarized", status: "done", time: "22m ago", icon: <GitHubSVG /> },
 ];
 
 export default async function LoginPage({
@@ -88,8 +99,9 @@ export default async function LoginPage({
                   borderTop: i > 0 ? "1px solid rgba(16,17,20,.055)" : undefined,
                 }}
               >
-                {/* Real-app run-row icon: 20px accent-soft squircle, accent glyph (no monogram avatar) */}
-                <WorkerRowIcon />
+                {/* Real-app run-row icon: 20px accent-soft squircle, high-contrast
+                    ink glyph per worker (no monogram avatar) */}
+                <WorkerRowIcon icon={row.icon} />
 
                 {/* Name + result — matches dashboard run row (name + sub-line) */}
                 <div className="min-w-0 flex-1">
@@ -192,24 +204,32 @@ export default async function LoginPage({
 }
 
 // Run-row icon: mirrors the dashboard WorkerRowIcon — 20px accent-soft squircle
-// with a small accent-colored glyph. No monogram avatar (real app has none).
-function WorkerRowIcon() {
+// with a per-worker glyph. No monogram avatar (real app has none).
+//
+// LND-13: the glyph previously used `color: var(--accent)`, which resolves to a
+// near-black ink in the light landing theme and a low-contrast blue-on-blue in
+// the dark theme — both rendered the small 12px glyph as a washed-out / near
+// blank smudge. The glyph now inherits `--text-primary` (near-black on the
+// light paper squircle, near-white on the dark-theme squircle) so it always
+// contrasts the tile, and renders at 13px so the mark is legible. The two
+// brand/icon styles in `landing-icons` are handled together via the `[&_svg]`
+// sizing rule (stroke glyphs inherit currentColor; the GitHub fill mark inherits
+// it too because its path uses `fill="currentColor"`).
+function WorkerRowIcon({ icon }: { icon: React.ReactNode }) {
   return (
     <span
-      className="inline-flex shrink-0 items-center justify-center"
+      className="inline-flex shrink-0 items-center justify-center [&_svg]:h-[13px] [&_svg]:w-[13px]"
       style={{
         width: 20,
         height: 20,
         borderRadius: "var(--radius-squircle)",
         background: "var(--accent-soft)",
-        color: "var(--accent)",
-        border: "1px solid color-mix(in srgb, var(--accent) 22%, transparent)",
+        color: "var(--text-primary)",
+        border: "1px solid color-mix(in srgb, var(--text-primary) 14%, transparent)",
       }}
       aria-hidden="true"
     >
-      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
-        <path d="M3 12h4l3 8 4-16 3 8h4" />
-      </svg>
+      {icon}
     </span>
   );
 }
