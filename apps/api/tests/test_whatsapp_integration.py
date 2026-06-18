@@ -795,7 +795,7 @@ def test_claim_sends_emily_welcome_to_bound_sender(monkeypatch, tmp_path):
     assert len(welcomes) == 1, f"expected one welcome send, got {sent}"
     to, msg = welcomes[0]
     assert "Emily" in msg
-    assert "chief of staff" in msg.lower()
+    assert "coo" in msg.lower()
     assert "connected" in msg.lower()
     # WhatsApp dialect: single-asterisk emphasis only, never markdown bold (**).
     assert "**" not in msg

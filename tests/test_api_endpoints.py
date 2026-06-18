@@ -1157,34 +1157,45 @@ class TestRound8ApprovalMisconfigDiagnostic(unittest.TestCase):
         self.assertIn("Run awaiting approval", messages)
 
     def test_approval_followup_does_not_synthesize_second_gate(self):
+        # #418: the follow-up (EXECUTE-phase) run must not synthesize a second
+        # gate. The follow-up is now identified AUTHORITATIVELY from the
+        # approvals table (follow_up_run_id), not the caller-controllable
+        # trigger_source — so this test goes through the real approve path
+        # rather than spoofing trigger_source="approval".
         from models import WorkerResult
         import run_service
 
         worker = _create_approval_worker()
-        run_id = run_service.create_run(
-            worker["id"],
-            {"decision": "approved", "approved_output": {"message": "ready"}},
-            trigger_source="approval",
-        )
+        run_id = run_service.create_run(worker["id"], {})
 
-        class FakeDriver:
-            def run(self, **_kwargs):
-                return WorkerResult(status="success", outputs={"message": "sent"})
+        class ProposeThenComplete:
+            def run(self, **kwargs):
+                if (kwargs.get("inputs") or {}).get("decision") == "approved":
+                    return WorkerResult(status="success", outputs={"message": "sent"})
+                return WorkerResult(
+                    status="success",
+                    outputs={"message": "ready"},
+                    decision_required={"label": "Approve", "preview": "ready"},
+                )
 
-        with patch.object(run_service, "get_sandbox_driver", return_value=FakeDriver()):
-            run_service.execute_run(run_id, worker["id"], {"decision": "approved"})
+        with patch.object(run_service, "get_sandbox_driver", return_value=ProposeThenComplete()):
+            run_service.execute_run(run_id, worker["id"], {})  # phase 1 -> pending
+            approve = client.post(f"/runs/{run_id}/approve")
+            self.assertEqual(approve.status_code, 200, approve.text)
+            follow_up_run_id = approve.json()["run_id"]
+            run_service.execute_run(follow_up_run_id, worker["id"], {})  # execute phase
 
-        run = client.get(f"/runs/{run_id}")
+        run = client.get(f"/runs/{follow_up_run_id}")
         self.assertEqual(run.status_code, 200, run.text)
         self.assertEqual(run.json()["status"], "completed")
 
         with db.get_db() as conn:
-            approval_count = conn.execute(
+            followup_approval_count = conn.execute(
                 "SELECT COUNT(*) FROM approvals WHERE run_id = ?",
-                (run_id,),
+                (follow_up_run_id,),
             ).fetchone()[0]
         self.assertEqual(
-            approval_count,
+            followup_approval_count,
             0,
             "approval follow-up run should not create another pending approval",
         )

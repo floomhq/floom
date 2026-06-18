@@ -45,7 +45,7 @@ describe("traceSteps", () => {
 });
 
 describe("RUN_DETAIL_TABS (§4 contract)", () => {
-  it("is exactly Output · Trace · Inputs", () => {
-    expect([...RUN_DETAIL_TABS]).toEqual(["Output", "Trace", "Inputs"]);
+  it("is exactly Output · Logs · Inputs (Raw is a Preview/Raw toggle, not a tab)", () => {
+    expect([...RUN_DETAIL_TABS]).toEqual(["Output", "Logs", "Inputs"]);
   });
 });

@@ -176,7 +176,8 @@
   --bd-btn: none;
   --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.04);
   --shadow-md: none;
-  --shadow-pop: 0 16px 36px hsl(0 0% 0% / 0.10), 0 0 0 1px var(--border-default);
+  /* #1337: ring removed — elevation reads from shadow depth alone, no 1px border ring */
+  --shadow-pop: 0 16px 36px hsl(0 0% 0% / 0.12);
   --shadow-btn: 0 1px 0 hsl(0 0% 0% / 0.06);
   --focus: 0 0 0 2px var(--paper), 0 0 0 4px var(--ink);
   --sidebar-glass: var(--bg-app);
@@ -285,9 +286,10 @@ html.dark {
   --glass-bg-strong: oklch(0.213 0 0);
   --glass-edge: rgba(255,255,255,.10);
   --edge: none;
-  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.3), 0 0 0 1px var(--line);
-  --shadow-md: 0 4px 12px hsl(0 0% 0% / 0.4), 0 0 0 1px var(--line);
-  --shadow-pop: 0 16px 36px hsl(0 0% 0% / 0.5), 0 0 0 1px var(--line);
+  /* #1337: ring removed from all shadow tokens — elevation reads from shadow depth alone */
+  --shadow-sm: 0 1px 2px hsl(0 0% 0% / 0.3);
+  --shadow-md: 0 4px 12px hsl(0 0% 0% / 0.4);
+  --shadow-pop: 0 16px 36px hsl(0 0% 0% / 0.55);
   --shadow-btn: 0 1px 0 hsl(0 0% 0% / 0.4);
   --sidebar-glass: oklch(0.19 0 0);
   --sidebar-glass-shadow: 0 1px 0 hsl(0 0% 0% / 0.3);
@@ -347,6 +349,19 @@ html.dark {
 @keyframes floom-shimmer {
   0%   { background-position: -200% 0; }
   100% { background-position: 200% 0; }
+}
+
+/* Cold-start boot splash: one calm pulse on the Floom mark (BootSplash.tsx).
+   Subtle, not a spinner. Respects reduced-motion. */
+@keyframes floom-boot-pulse {
+  0%, 100% { opacity: 0.55; transform: scale(0.98); }
+  50%      { opacity: 1;    transform: scale(1); }
+}
+.floom-boot-pulse {
+  animation: floom-boot-pulse 1.6s ease-in-out infinite;
+}
+@media (prefers-reduced-motion: reduce) {
+  .floom-boot-pulse { animation: none; }
 }
 
 .skeleton-shimmer {
@@ -726,11 +741,17 @@ html.dark .grain {
    ========================================================================== */
 
 /* count strip — inline on the right of the title row (SPEC §11) */
-.c-counts { display:flex; align-items:center; color:var(--muted-foreground); font-size:12.5px; flex-wrap:wrap; }
-.c-counts .ct { display:flex; align-items:baseline; gap:5px; padding:0 14px; border-right:var(--bd-div); }
+.c-counts { display:flex; align-items:center; color:var(--muted-foreground); font-size:12.5px; flex-wrap:nowrap; overflow-x:auto; scrollbar-width:none; }
+.c-counts::-webkit-scrollbar { display:none; }
+.c-counts .ct { display:flex; align-items:baseline; gap:5px; padding:0 14px; border-right:var(--bd-div); white-space:nowrap; flex:0 0 auto; }
 .c-counts .ct:first-child { padding-left:0; }
 .c-counts .ct:last-child { border-right:0; }
 .c-counts .ct b { color:var(--ink); font-weight:600; font-size:14px; }
+/* #1266: on very small screens (<390px) hide secondary counts (active/attention)
+   to keep the header single-line — primary "X workers" count always shows. */
+@media (max-width:389px) {
+  .c-counts .ct:not(:first-child) { display:none; }
+}
 
 /* control bar */
 .c-toolbar { display:flex; align-items:center; gap:10px; }
@@ -739,8 +760,13 @@ html.dark .grain {
 .c-srch input::placeholder { color:var(--muted-foreground); }
 /* Joined segmented control on bg-2 track — ONE visual unit, no gap between segments */
 .c-vtog { display:inline-flex; border:var(--bd-input); border-radius:var(--radius-button); padding:2px; background:var(--bg-2); }
-.c-vtog button { width:30px; height:26px; border-radius:8px; color:var(--muted-foreground); display:flex; align-items:center; justify-content:center; transition:background .1s,color .1s; }
-.c-vtog button.on { background:var(--bg-card,#fff); color:var(--ink); box-shadow:0 1px 2px rgba(0,0,0,.07); }
+/* Segmented toggle button. min-width keeps icon-only toggles (list/grid) square
+   while text toggles (Preview/Raw — #1289 / run-output #1) size to their label
+   instead of clipping inside a fixed 30px box. */
+.c-vtog button { min-width:30px; height:26px; padding:0 10px; font-size:12px; border-radius:8px; color:var(--muted-foreground); display:flex; align-items:center; justify-content:center; transition:background .1s,color .1s; }
+/* FLAT (design system: --shadow-card none): active segment is a fill + ink, no
+   drop-shadow (run-output feedback #5). */
+.c-vtog button.on { background:var(--bg-card,#fff); color:var(--ink); }
 @media (max-width:640px) {
   .c-toolbar { flex-wrap:wrap; }
   .c-toolbar .c-srch { flex:1 0 100%; max-width:none; }
@@ -749,15 +775,14 @@ html.dark .grain {
 }
 .c-addbtn { display:flex; align-items:center; gap:6px; background:var(--primary); color:var(--primary-text); border-radius:var(--radius-button); padding:9px 14px; font-weight:500; font-size:13px; white-space:nowrap; }
 
-/* tag bar — small chips, single scrollable row, families divided */
+/* tag bar — single-row filter toggle + horizontally-scrollable chips */
 /* Wrapper provides the right-edge fade mask (spec §3: "fades out at right edge, no hard cut"). */
 .c-tagbar-wrap { position:relative; overflow:hidden; }
 .c-tagbar-wrap::after { content:''; position:absolute; top:0; right:0; bottom:0; width:40px; pointer-events:none; background:linear-gradient(to right, transparent, var(--bg-app)); }
 .dark .c-tagbar-wrap::after { background:linear-gradient(to right, transparent, var(--bg-app)); }
-.c-tagbar-stack { display:flex; flex-direction:column; gap:9px; min-width:0; }
-.c-filterbar { display:flex; gap:7px; align-items:center; min-width:0; }
-.c-filter-toggle { padding-right:10px; }
-.c-tagbar { display:flex; flex-wrap:nowrap; gap:10px; align-items:center; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+.c-filterbar { display:flex; flex-wrap:nowrap; gap:7px; align-items:center; min-width:0; overflow:hidden; }
+.c-filter-toggle { flex:0 0 auto; padding-right:10px; }
+.c-tagbar { display:flex; flex-wrap:nowrap; gap:10px; align-items:center; overflow-x:auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; flex:1 1 0; min-width:0; }
 .c-tagbar::-webkit-scrollbar { height:0; display:none; }
 .c-tgroup { display:flex; gap:5px; align-items:center; flex:0 0 auto; }
 .c-tgroup + .c-tgroup { padding-left:10px; border-left:var(--bd-div); }
@@ -773,7 +798,7 @@ html.dark .grain {
 .c-lrow { display:grid; gap:14px; align-items:center; padding:0 18px; min-height:64px; border-bottom:var(--bd-div); cursor:pointer; text-align:left; width:100%; background:none; }
 .c-lrow:last-child { border-bottom:0; }
 .c-lrow:hover { background:var(--bg-2); }
-.c-lrow.sel { background:var(--accent-soft); box-shadow:inset 3px 0 0 var(--accent); }
+.c-lrow.sel { background:var(--accent-soft); }
 .c-brain-hint { display:flex; align-items:center; gap:7px; color:var(--muted-foreground); font-size:11.5px; margin-bottom:9px; }
 .c-brain-row .c-row-grip { opacity:0; }
 .c-brain-row:hover .c-row-grip, .c-brain-row:focus-within .c-row-grip, .c-brain-row:focus .c-row-grip, .c-row-grip:hover { opacity:.6; }
@@ -812,6 +837,16 @@ html.dark .grain {
 .c-pill.warn,.c-pill.pending { background:color-mix(in srgb, var(--pending) 9%, transparent); color:color-mix(in srgb, var(--pending) 76%, var(--ink)); }
 .c-pill.run  { background:color-mix(in srgb, var(--info) 8%, transparent); color:color-mix(in srgb, var(--info) 78%, var(--ink)); }
 .c-pill.idle { background:var(--bg-2); color:var(--muted-foreground); }
+
+/* #1211: Brain .bdrop — v4 dashed drop-zone (matches final.html .bdrop). */
+/* #1316: nowrap keeps the one-line "Drag files here, or + New folder" prompt
+   from breaking to 2-3 lines in a narrow column. */
+.bdrop { margin-top:12px; display:flex; flex-wrap:nowrap; align-items:center; justify-content:center; gap:8px; padding:18px; border:1.5px dashed var(--line); border-radius:12px; color:var(--muted-foreground); font-size:12.5px; white-space:nowrap; transition:background .12s,border-color .12s; }
+.bdrop.over { border-color:var(--accent); background:var(--sel); color:var(--accent); }
+.bdrop .bdlink { color:var(--accent); font-weight:500; background:none; border:0; cursor:pointer; padding:0; }
+/* #1316: populated brain — slim right-aligned create action, no permanent box
+   (the whole container is the drop target with an on-drag overlay). */
+.bdrop-slim { display:flex; justify-content:flex-end; margin:0 0 12px; }
 
 /* grid cards (SPEC §2b — calm: avatar+name, desc, one status line) */
 .c-grid { display:grid; grid-template-columns:repeat(auto-fill,minmax(212px,1fr)); gap:14px; }
@@ -857,7 +892,12 @@ html.dark .grain {
 .c-split.lc .c-listcol { flex:0 0 46px; min-width:46px; }
 .c-split.lc .c-listcol > .lcin, .c-split.lc .c-listcol > .c-splitbar { display:none; }
 .c-sliver { display:none; }
-.c-split.lc .c-listcol .c-sliver { display:flex; flex-direction:column; align-items:center; gap:8px; padding-top:14px; color:var(--muted-foreground); }
+/* Collapsed-list rail. The expand chevron (») sits in a 56px band so it shares
+   the SAME vertical baseline as the detail header's collapse chevron («) and the
+   expanded-list splitbar chevron — all three centered in the 56px header band
+   (run-output feedback #6). */
+.c-split.lc .c-listcol .c-sliver { display:flex; flex-direction:column; align-items:center; color:var(--muted-foreground); }
+.c-split.lc .c-listcol .c-sliver > button:first-child { height:56px; display:flex; align-items:center; justify-content:center; }
 .c-split .c-listcol .lcin { flex:1; overflow:auto; padding:14px 16px; }
 .c-splitbar { display:none; }
 .c-split .c-splitbar { display:flex; align-items:center; min-height:56px; padding:8px 14px; border-bottom:var(--bd-div); flex:0 0 auto; }
@@ -867,7 +907,9 @@ html.dark .grain {
 .c-split .c-listcol .c-lhead { display:none; }
 .c-split .c-listcol .c-lrow { grid-template-columns:1fr !important; min-height:58px; padding:13px 14px; }
 .c-split .c-listcol .c-lrow .c-cell, .c-split .c-listcol .c-lrow .c-pill, .c-split .c-listcol .c-lrow .c-menu { display:none; }
-.c-split .c-listcol .c-lrow.sel { background:var(--bg-2); box-shadow:none; }
+/* #1317: unified selected state — same accent-soft tint as the resting list so the
+   active row reads consistently whether the list is compact or full. No left bar (#1267). */
+.c-split .c-listcol .c-lrow.sel { background:var(--accent-soft); }
 .c-split .c-listcol .c-daygrp .dh { display:none; }
 
 /* detail header + tabs (SPEC §3)
@@ -886,14 +928,44 @@ html.dark .grain {
 .c-dh-sub .c-dh-desc { min-width:0; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
 .c-dh-act { display:flex; gap:7px; align-items:center; flex:0 0 auto; min-width:0; }
 .c-vpill { display:inline-flex; align-items:center; gap:5px; border:var(--bd-pill); border-radius:var(--radius-pill); font-size:10.5px; padding:2px 8px; color:var(--muted-foreground); background:var(--bg-2); white-space:nowrap; flex:0 0 auto; }
-.c-dtabs { display:flex; gap:2px; padding:7px 16px; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
+.c-dtabs { display:flex; gap:2px; padding:4px 16px; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; -webkit-overflow-scrolling:touch; }
 .c-dtabs::-webkit-scrollbar { height:0; display:none; }
 .c-source-file-tabs { min-width:0; max-width:100%; flex:1 1 auto; flex-wrap:nowrap; }
-.c-dtab { display:inline-flex; align-items:center; gap:7px; padding:6px 11px; border-radius:9px; color:var(--muted-foreground); font-size:13px; white-space:nowrap; }
+/* Tab cell: round only the TOP corners so the active underline reads as a
+   STRAIGHT, square-ended rule (round-09 Federico: underline must be straight,
+   not swirled/boxed; accent is links-only). */
+.c-dtab { display:inline-flex; align-items:center; gap:7px; padding:5px 11px 6px; border-radius:9px 9px 0 0; color:var(--muted-foreground); font-size:13px; white-space:nowrap; position:relative; }
 .c-dtab:hover { background:var(--bg-2); }
-.c-dtab.on { background:var(--bg-2); color:var(--ink); font-weight:500; }
+/* round-09: active tab = STRAIGHT 2px INK underline (square ends, no box, no
+   accent). A sharp ::after rule the full width of the cell keeps the ends
+   square regardless of the cell's top-corner radius. */
+.c-dtab.on { color:var(--ink); font-weight:500; }
+.c-dtab.on::after { content:""; position:absolute; left:0; right:0; bottom:0; height:2px; background:var(--ink); border-radius:0; }
 .c-dtab .cb { background:var(--bg-3); color:var(--ink-soft); font-size:10.5px; border-radius:var(--radius-pill); padding:0 6px; }
+
+/* Operations SECOND-ROW tabs: same straight-ink pattern, smaller + quieter,
+   sits directly under the primary row. No sidebar (round-09 worker-detail-v2). */
+.c-dtabs2 { display:flex; gap:2px; padding:6px 16px 0; border-bottom:var(--bd-div); overflow-x:auto; overflow-y:hidden; flex:0 0 auto; scrollbar-width:none; }
+.c-dtabs2::-webkit-scrollbar { height:0; display:none; }
+.c-dtab2 { display:inline-flex; align-items:center; gap:6px; padding:4px 10px 6px; border-radius:8px 8px 0 0; color:var(--muted-foreground); font-size:12px; white-space:nowrap; position:relative; }
+.c-dtab2:hover { background:var(--bg-2); }
+.c-dtab2.on { color:var(--ink); font-weight:500; }
+.c-dtab2.on::after { content:""; position:absolute; left:0; right:0; bottom:0; height:2px; background:var(--ink); border-radius:0; }
+.c-dtab2 .cb { background:var(--bg-3); color:var(--ink-soft); font-size:10px; border-radius:var(--radius-pill); padding:0 5px; }
+/* R9 FIX 2: pull the Operations second-row tabs flush under the primary tab row.
+   Breaks out of .c-dbody padding (18px 20px) so .c-dtabs2 sits directly beneath
+   .c-dtabs with no gap or framing text between the two rows. */
+.c-ops-row-flush { margin:-18px -20px 0; flex:0 0 auto; }
+/* Operations framing: "Visual editor of worker.yml" + a "View as YAML" link.
+   R9: lives in the panel BODY below both tab rows, not between them. */
+.c-ops-frame { display:flex; align-items:center; gap:8px; padding:14px 0 4px; font-size:11px; letter-spacing:.04em; text-transform:uppercase; color:var(--muted-foreground); }
 .c-dbody { flex:1; min-width:0; overflow:auto; padding:18px 20px; }
+/* R9 FIX 1: "Advanced ▾" group on the primary tab row — right-aligned, quiet,
+   findable. Not accent (accent is links-only); reads as a secondary tab group. */
+.c-dtabs-trailing { margin-left:auto; display:flex; align-items:center; padding-left:8px; }
+.c-dtab-adv { color:var(--muted-foreground); font-size:13px; padding:5px 9px 6px; border-radius:8px; white-space:nowrap; }
+.c-dtab-adv:hover { background:var(--bg-2); color:var(--ink); }
+.c-dtab-adv[data-state="open"] { background:var(--bg-2); color:var(--ink); }
 
 /* states (SPEC §7) */
 .c-statebox { flex:1; display:flex; flex-direction:column; align-items:center; justify-content:center; gap:10px; text-align:center; color:var(--muted-foreground); padding:50px; }
@@ -926,4 +998,67 @@ html.dark .grain {
   white-space: pre !important;
   word-break: normal !important;
   overflow-wrap: normal !important;
+}
+
+/* ---------------------------------------------------------------------------
+   APPROVAL DETAIL / REVIEW (round-09 r9, approved share-approval design).
+   input-left / proposed-output-right + a multi-item dotted pager. Extends the
+   real stylesheet; reuses --ink/--muted/--accent/--bd-div tokens, no bespoke
+   per-page CSS, accent on links only, no borders (hairline dividers only),
+   no amber as a second accent (the awaiting pill uses the muted --pending dot).
+   --------------------------------------------------------------------------- */
+
+/* Pager bar: "Approval N of M" + dotted indicator + prev/next. */
+.c-appr-pager { display:flex; align-items:center; justify-content:space-between; gap:12px; padding:0 0 14px; font-size:12.5px; color:var(--muted-foreground); }
+.c-appr-pager .where { display:inline-flex; align-items:center; gap:6px; min-width:0; }
+.c-appr-pager .where b { color:var(--ink-soft); font-weight:600; }
+.c-appr-pager .where .of { color:var(--muted-foreground); }
+.c-appr-pager .right { display:flex; align-items:center; gap:12px; flex:0 0 auto; }
+.c-appr-dots { display:flex; align-items:center; gap:5px; }
+.c-appr-dots i { width:6px; height:6px; border-radius:var(--radius-pill); background:var(--bg-3); display:inline-block; }
+.c-appr-dots i.on { background:var(--ink); }
+.c-appr-nav { display:flex; align-items:center; gap:4px; }
+.c-appr-pgbtn { display:inline-flex; align-items:center; justify-content:center; width:26px; height:26px; border-radius:var(--radius-button); color:var(--ink-soft); }
+.c-appr-pgbtn:hover:not(:disabled) { background:var(--bg-2); }
+.c-appr-pgbtn:disabled { opacity:.35; }
+
+/* Hero block: eyebrow + awaiting pill + confident title + meta line. */
+.c-appr-hero { padding:0 0 16px; }
+.c-appr-eyebrow { font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted-foreground); }
+.c-appr-wait { display:inline-flex; align-items:center; gap:6px; font-size:11.5px; color:var(--muted-foreground); }
+.c-appr-wait .dot { width:6px; height:6px; border-radius:var(--radius-pill); background:var(--pending); display:inline-block; }
+.c-appr-title { font-size:24px; line-height:1.18; font-weight:600; color:var(--ink); margin:8px 0 0; letter-spacing:-.01em; }
+.c-appr-meta { font-size:13px; color:var(--muted-foreground); line-height:1.55; margin:11px 0 0; }
+.c-appr-meta b { color:var(--ink-soft); font-weight:600; }
+
+/* Two-column grid: input LEFT, proposed output RIGHT, hairline divider between. */
+.c-appr-grid { display:grid; grid-template-columns:minmax(0,1fr) minmax(0,1fr); gap:0; }
+.c-appr-grid .col-left { padding-right:28px; }
+.c-appr-grid .col-right { padding-left:28px; border-left:var(--bd-div); }
+.c-appr-sech { font-size:11px; letter-spacing:.05em; text-transform:uppercase; color:var(--muted-foreground); margin:0 0 11px; }
+
+/* LEFT: comment box, attach affordance, who/why k/v, decide buttons. */
+.c-appr-comment { width:100%; min-height:84px; resize:vertical; border-radius:var(--radius-button); background:var(--bg-2); padding:11px 13px; font-size:13.5px; color:var(--ink); line-height:1.5; }
+.c-appr-comment::placeholder { color:var(--ink-faint); }
+.c-appr-attach { display:inline-flex; align-items:center; gap:7px; margin-top:11px; font-size:12.5px; color:var(--ink-soft); }
+.c-appr-attach:hover { color:var(--ink); }
+.c-appr-kv { display:grid; grid-template-columns:96px 1fr; gap:8px 14px; margin:16px 0 0; font-size:12.5px; }
+.c-appr-kv dt { color:var(--muted-foreground); }
+.c-appr-kv dd { color:var(--ink-soft); margin:0; min-width:0; overflow-wrap:anywhere; }
+.c-appr-kv dd a { color:var(--accent); }
+.c-appr-decide { display:flex; gap:9px; margin-top:20px; }
+
+/* RIGHT: the proposed output rendered AS ITSELF (email To/Subject/body), no box. */
+.c-appr-proposed { font-size:13.5px; color:var(--ink-soft); line-height:1.6; }
+.c-appr-proposed .addr { margin:0 0 14px; padding:0 0 12px; border-bottom:var(--bd-div); color:var(--ink-soft); }
+.c-appr-proposed .addr b { display:inline-block; min-width:62px; color:var(--muted-foreground); font-weight:500; }
+.c-appr-proposed .body p { margin:0 0 11px; }
+.c-appr-proposed .body p:last-child { margin-bottom:0; }
+
+.c-appr-foot { font-size:11.5px; color:var(--muted-foreground); margin:22px 0 0; padding:16px 0 0; border-top:var(--bd-div); }
+
+@media (max-width:760px) {
+  .c-appr-grid { grid-template-columns:1fr; }
+  .c-appr-grid .col-left { padding-right:0; padding-bottom:22px; margin-bottom:22px; border-bottom:var(--bd-div); }
+  .c-appr-grid .col-right { padding-left:0; border-left:0; }
 }

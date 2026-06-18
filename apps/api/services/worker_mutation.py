@@ -130,6 +130,34 @@ def _set_db_manifest_archived(
     repos.workers.update(user_id=user_id, worker_id=worker_id, manifest_json=manifest)
 
 
+def _set_db_manifest_stage(
+    worker_id: str,
+    *,
+    stage: str,
+    user_id: str,
+    repos: Repositories,
+) -> None:
+    """Mirror a worker's maturity ``stage`` ("draft"|"live") into its DB manifest.
+
+    Same rationale as ``_set_db_manifest_archived``: the API resolves ``stage``
+    from the DB manifest (``repos.workers.get`` → ``manifest_json``), not from
+    worker.yml on disk. The stage endpoint writes worker.yml for restart
+    durability, so the DB copy must be updated in lockstep or the detail
+    response, the card badge, and the list filter all read stale state.
+
+    No-op (non-fatal) for filesystem-only workers without a DB row.
+    """
+    try:
+        db_worker = repos.workers.get(user_id=user_id, worker_id=worker_id)
+    except sqlite3.OperationalError:
+        db_worker = None
+    if db_worker is None:
+        return
+    manifest = dict(db_worker.get("manifest") or {})
+    manifest["stage"] = stage
+    repos.workers.update(user_id=user_id, worker_id=worker_id, manifest_json=manifest)
+
+
 def _patch_worker_yml_field(worker_id: str, field: str, value: Any) -> None:
     """Write a single field into worker.yml on disk without disturbing other fields."""
     from worker_registry import WORKERS_DIR

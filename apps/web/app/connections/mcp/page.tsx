@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { useRouter } from "next/navigation";
 import {
   AlertCircle,
   Check,
@@ -511,7 +512,7 @@ export default function McpConnectionsPage() {
           type="button"
           onClick={() => setInstallOpen((v) => !v)}
           aria-expanded={installOpen}
-          className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left transition-colors hover:bg-[var(--active-nav-bg)]"
+          className="flex w-full items-center gap-3 rounded-xl px-4 py-3.5 text-left transition-colors hover:bg-[var(--bg-2)]"
         >
           <div className="flex size-8 shrink-0 items-center justify-center rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)]">
             <Terminal className="size-4 text-muted-foreground" />
@@ -632,7 +633,7 @@ export default function McpConnectionsPage() {
                 </Label>
                 <span
                   className={`inline-flex items-center gap-1 text-xs ${
-                    serverJsonValidation.error ? "text-destructive" : "text-emerald-600 dark:text-emerald-400"
+                    serverJsonValidation.error ? "text-destructive" : "text-[var(--positive)]"
                   }`}
                 >
                   {serverJsonValidation.error ? (
@@ -996,6 +997,7 @@ function McpRow({
   onTest: () => void;
   onToggle?: () => void;
 }) {
+  const router = useRouter();
   const [copied, setCopied] = useState(false);
 
   function copyUrl() {
@@ -1020,7 +1022,7 @@ function McpRow({
         tabIndex={onToggle ? 0 : undefined}
         onClick={onToggle}
         onKeyDown={onToggle ? (e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onToggle(); } } : undefined}
-        className={`group grid grid-cols-[32px_1fr_auto] items-center gap-3 px-3 py-2.5 md:grid-cols-[32px_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] md:gap-4 ${onToggle ? "cursor-pointer select-none hover:bg-[var(--active-nav-bg)]" : "hover:bg-[var(--active-nav-bg)]"} transition-colors`}
+        className={`group grid grid-cols-[32px_1fr_auto] items-center gap-3 px-3 py-2.5 md:grid-cols-[32px_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] md:gap-4 ${onToggle ? "cursor-pointer select-none hover:bg-[var(--bg-2)]" : "hover:bg-[var(--bg-2)]"} transition-colors`}
       >
         {/* Icon */}
         <div className="flex size-7 shrink-0 items-center justify-center rounded-lg [border:var(--bd-card)] bg-[var(--bg-app)]">
@@ -1127,7 +1129,7 @@ function McpRow({
               variant="outline"
               size="sm"
               className="h-7 px-3 text-xs"
-              onClick={() => { window.location.href = `/connections/mcp/${conn.id}`; }}
+              onClick={() => { router.push(`/connections/mcp/${conn.id}`); }}
             >
               <ExternalLink className="size-3" />
               Open

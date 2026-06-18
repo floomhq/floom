@@ -6,6 +6,10 @@
  * "used by workers" side. Adapted for the engine: no framer-motion (not
  * available), uses real ContextSummary data, shows real file-type chips.
  * (#1094)
+ *
+ * border-ok-file: diagram/visual component — inline border styles are
+ * intentional structural lines in the SVG-like node graph, not UI surface
+ * borders. Tracked as #1337 remaining work to convert to token system.
  */
 
 import {
@@ -185,15 +189,14 @@ export function BrainVisual({ folders }: BrainVisualProps) {
               className="flex items-center gap-1.5 text-[14px] font-semibold"
               style={{ color: "var(--foreground)" }}
             >
-              <Brain className="h-4 w-4" strokeWidth={2} style={{ color: "var(--accent)" }} />
+              <Brain className="h-4 w-4" strokeWidth={2} style={{ color: "var(--ink-soft)" }} />
               Company Brain
             </div>
             <span
-              className="inline-flex items-center gap-1 rounded-full px-2 py-0.5 text-[11px] font-medium"
+              className="inline-flex items-center gap-1 rounded-[var(--radius-squircle)] px-2 py-0.5 text-[11px] font-medium"
               style={{
-                background: "color-mix(in srgb, #22c55e 12%, transparent)",
-                color: "#16a34a",
-                border: "1px solid color-mix(in srgb, #22c55e 25%, transparent)",
+                background: "color-mix(in srgb, var(--positive) 12%, transparent)",
+                color: "var(--positive)",
               }}
             >
               Live
@@ -212,7 +215,7 @@ export function BrainVisual({ folders }: BrainVisualProps) {
                 <Check
                   className="h-3.5 w-3.5 shrink-0"
                   strokeWidth={2.5}
-                  style={{ color: "var(--accent)" }}
+                  style={{ color: "var(--ink-soft)" }}
                 />
                 <span style={{ color: "var(--foreground)" }}>{k}</span>
               </li>

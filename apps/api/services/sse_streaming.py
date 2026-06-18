@@ -277,3 +277,39 @@ def _log_replay_parts(repos: "Repositories", user_id: str, run_id: str) -> List[
         part["message"] = _redact_public_log_message(part["message"])
         parts.append(part)
     return parts
+
+
+def _log_replay_events(repos: "Repositories", user_id: str, run_id: str) -> List[Dict[str, Any]]:
+    """Build enriched log events from persisted log rows for the logs/stream endpoint.
+
+    Unlike _log_replay_parts (which builds AI-SDK part dicts for /stream replay),
+    this builds JSON event dicts for the /logs/stream endpoint. trace_id is
+    preserved so the frontend can group log lines by step/trace. level, message,
+    and timestamp are all included for informative display.
+    """
+    events: List[Dict[str, Any]] = []
+    try:
+        rows = repos.runs.list_logs(user_id=user_id, run_id=run_id)
+    except Exception:
+        logger.exception("Failed to load logs for logs/stream replay (run %s)", run_id)
+        return events
+    _raw: List[Dict[str, Any]] = []
+    for r in rows:
+        row = row_to_dict(r)
+        _raw.append(
+            {
+                "type": "log",
+                "level": row.get("level") or "info",
+                "message": row.get("message") or "",
+                "timestamp": row.get("timestamp"),
+                "trace_id": row.get("trace_id"),
+            }
+        )
+    for event in _collapse_stderr_code_echo_rows(_raw):
+        event["message"] = _redact_public_log_message(event["message"])
+        # Remove None trace_id to keep payloads compact; keep it when present
+        # so the frontend can group log lines by step.
+        if event.get("trace_id") is None:
+            event.pop("trace_id", None)
+        events.append(event)
+    return events

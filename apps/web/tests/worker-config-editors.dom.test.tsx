@@ -1,5 +1,5 @@
 import { describe, it, expect, vi } from "vitest";
-import { render, screen, fireEvent } from "@testing-library/react";
+import { render, screen } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { WorkerBrainEditor } from "@/components/worker/WorkerBrainEditor";
 import { WorkerToolsEditor } from "@/components/worker/WorkerToolsEditor";
@@ -85,33 +85,50 @@ describe("WorkerBrainEditor", () => {
 });
 
 describe("WorkerToolsEditor", () => {
+  // Round-09 B4: the editor now takes availableApps (combobox source) and
+  // toolsForApp (allowlist multiselect source). Add/allowlist/no-spurious-toast
+  // behavior is covered in worker-tools-editor-b4.dom.test.tsx; this block keeps
+  // the remove + manifest-invariant coverage on the new API.
   const conns: WorkerConnectionSpec[] = [{ composio: { app: "gmail", allowed_tools: ["SEND"] } }];
+  const availableApps = [
+    { slug: "github", name: "GitHub" },
+    { slug: "gmail", name: "Gmail" },
+  ];
+  const toolsForApp = (slug: string) => (slug === "gmail" ? ["SEND", "READ", "DRAFT"] : []);
 
-  it("adds a tool, removes one, and edits the allowlist", async () => {
+  it("removes a connection (emitting next connections)", async () => {
     const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<WorkerToolsEditor connections={conns} editable onChange={onChange} />);
-
-    await user.type(screen.getByLabelText("Add tool"), "github");
-    await user.click(screen.getByRole("button", { name: /Add tool/ }));
-    expect(onChange).toHaveBeenLastCalledWith([...conns, "github"]);
-
-    // allowlist edit → blur emits setComposioAllowlist
-    const allow = screen.getByLabelText("gmail allowed tools");
-    fireEvent.change(allow, { target: { value: "SEND, READ" } });
-    fireEvent.blur(allow);
-    expect(onChange).toHaveBeenLastCalledWith([{ composio: { app: "gmail", allowed_tools: ["SEND", "READ"] } }]);
-
+    render(
+      <WorkerToolsEditor
+        connections={conns}
+        editable
+        onChange={onChange}
+        availableApps={availableApps}
+        toolsForApp={toolsForApp}
+      />,
+    );
     await user.click(screen.getByRole("button", { name: "Remove gmail" }));
     expect(onChange).toHaveBeenLastCalledWith([]);
   });
 
-  it("clearing the allowlist drops the key (full access, never [])", () => {
+  it("clearing the whole allowlist drops the key (full access, never [])", async () => {
+    const user = userEvent.setup();
     const onChange = vi.fn();
-    render(<WorkerToolsEditor connections={conns} editable onChange={onChange} />);
-    const allow = screen.getByLabelText("gmail allowed tools");
-    fireEvent.change(allow, { target: { value: "" } });
-    fireEvent.blur(allow);
+    render(
+      <WorkerToolsEditor
+        connections={conns}
+        editable
+        onChange={onChange}
+        availableApps={availableApps}
+        toolsForApp={toolsForApp}
+      />,
+    );
+    await user.click(screen.getByRole("button", { name: /restrict gmail tools/i }));
+    // Deselect the only allowed tool (SEND), then commit -> empty set drops the
+    // allowed_tools key entirely (full access), never an empty [].
+    await user.click(screen.getByRole("option", { name: /SEND/ }));
+    await user.click(screen.getByRole("button", { name: /^Done$/ }));
     expect(onChange).toHaveBeenLastCalledWith([{ composio: { app: "gmail" } }]);
   });
 });

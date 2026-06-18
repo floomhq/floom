@@ -22,8 +22,8 @@ import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams, useSearchParams } from "next/navigation";
 import { toast } from "sonner";
+import { Layers } from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { WorkerAvatar } from "@/components/WorkerAvatar";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { WorkerInputForm, requiredRunInputErrors } from "@/components/run-page/WorkerInputForm";
 import { RunPanel } from "@/components/run-page/RunPanel";
@@ -66,11 +66,9 @@ function WorkerIdentityPanel({ worker }: { worker: WorkerDetail }) {
     <div className="space-y-3">
       {/* Avatar + name */}
       <div className="flex items-center gap-3">
-        <WorkerAvatar
-          name={worker.name}
-          size="size-10"
-          className="rounded-[var(--radius-squircle)]"
-        />
+        <span className="c-logo shrink-0">
+          <Layers className="size-4 text-[var(--ink-soft)]" />
+        </span>
         <div className="min-w-0">
           <p className="font-semibold text-[var(--ink)] truncate">{worker.name}</p>
           {worker.config.trigger?.type && (
@@ -272,13 +270,13 @@ export default function RunWorkerPage() {
       <div className="flex flex-col md:flex-row min-h-0 flex-1">
         {/* LEFT PANE */}
         <aside
-          className="shrink-0 border-b border-[var(--border-soft)] md:border-b-0 md:border-r md:overflow-y-auto"
+          className="shrink-0 bg-[var(--bg-card)] md:overflow-y-auto"
           style={{ width: "100%", maxWidth: 420 }}
         >
           <div className="p-5 space-y-6">
-            <WorkerIdentityPanel worker={worker} />
-
-            <div className="h-px bg-[var(--border-soft)]" />
+            <div className="[border-bottom:var(--bd-div)] pb-6">
+              <WorkerIdentityPanel worker={worker} />
+            </div>
 
             {/* Input form */}
             <WorkerInputForm
@@ -326,11 +324,11 @@ function RunPageShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 1080 }}>
       <div
-        className="rounded-[var(--radius-card)] border border-[var(--border-soft)] bg-[var(--bg-app)] shadow-[var(--shadow-pop)] overflow-hidden flex flex-col"
+        className="rounded-[var(--radius-card)] bg-[var(--bg-app)] shadow-[var(--shadow-pop)] overflow-hidden flex flex-col"
         style={{ minHeight: 560 }}
       >
         {/* Nav */}
-        <div className="flex items-center justify-between border-b border-[var(--border-soft)] bg-[var(--bg-card)] px-5 py-3 shrink-0">
+        <div className="flex items-center justify-between bg-[var(--bg-card)] px-5 py-3 shrink-0">
           <FloomMark />
         </div>
         {children}

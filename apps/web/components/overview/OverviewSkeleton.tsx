@@ -9,7 +9,7 @@ export function OverviewSkeleton() {
       </section>
       <div className="grid grid-cols-1 gap-4 md:grid-cols-2 xl:grid-cols-4">
         {Array.from({ length: 4 }).map((_, i) => (
-          <div key={i} className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] shadow-[var(--shadow-card)] p-6">
+          <div key={i} className="rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-6">
             <Skeleton className="h-9 w-20 rounded-lg" />
             <Skeleton className="h-4 w-28 mt-2" />
             <Skeleton className="h-3 w-24 mt-2" />

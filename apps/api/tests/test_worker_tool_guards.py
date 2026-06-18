@@ -391,9 +391,14 @@ def test_non_member_cannot_run_workspace_worker_not_in_list(env, monkeypatch):
     assert "not found" in run_result["error"].lower()
 
 
-def test_stock_worker_always_listed_and_runnable_for_member(env, monkeypatch):
-    """Stock/public workers must appear in any user's list and be runnable,
-    even when the DB row has a different owner and no workspace membership."""
+def test_stock_worker_not_owned_excluded_from_list_but_runnable(env, monkeypatch):
+    """Round-09 #1 (split-brain): a stock/public worker the caller does NOT own
+    is NOT in Emily's user-facing list — the owner-scoped dashboard worker grid
+    never shows it, so Emily must not either (the old 'always listed' contract is
+    exactly what made Emily report 9 workers while the grid showed 1). It stays
+    RUNNABLE by id via _worker_can_view (the stock bypass is a run/view gate, not
+    a listing signal). A stock worker the caller OWNS is still listed (see
+    test_emily_worker_split_brain_round09)."""
     from main import PUBLIC_STOCK_WORKER_IDS
     if not PUBLIC_STOCK_WORKER_IDS:
         return  # nothing to test if list is empty
@@ -401,24 +406,32 @@ def test_stock_worker_always_listed_and_runnable_for_member(env, monkeypatch):
     db = env["db"]
     cs = env["chat_service"]
 
-    # Seed the first public stock worker in the DB with a different owner and
-    # a workspace the calling user is NOT a member of.
+    # Seed the first public stock worker in the DB with a DIFFERENT owner and a
+    # workspace the calling user is NOT a member of — i.e. a cross-tenant seed
+    # the owner-scoped grid never surfaces.
     stock_id = next(iter(sorted(PUBLIC_STOCK_WORKER_IDS)))
     _create_worker_direct(db, stock_id, owner_id="alice",
                           workspace_id="ws-stock", visibility="workspace")
-    # emily-test is NOT a member of ws-stock.
+    # emily-test is NOT a member of ws-stock and does not own the worker.
 
     listed = cs._tool_workers_list_all({}, user_id="emily-test")
     listed_ids = {w["id"] for w in listed["workers"]}
-    assert stock_id in listed_ids, (
-        f"Stock worker {stock_id} must always appear in any user's list"
+    assert stock_id not in listed_ids, (
+        f"Stock worker {stock_id} the caller does not own must be EXCLUDED from "
+        "the user-facing list so Emily matches the owner-scoped grid (#1)"
     )
+    # It is footnoted, not silently dropped.
+    assert listed.get("hidden_system_count", 0) >= 1
 
-    # Also verify _worker_can_view returns True for it.
+    # include_system opts the hidden stock set back in.
+    listed_all = cs._tool_workers_list_all({"include_system": True}, user_id="emily-test")
+    assert stock_id in {w["id"] for w in listed_all["workers"]}
+
+    # Runnability is unchanged: _worker_can_view still returns True for it.
     from db import get_db as _get_db
     with _get_db() as conn:
         assert cs._worker_can_view(conn, stock_id, "emily-test") is True, (
-            f"Stock worker {stock_id} must always be viewable/runnable"
+            f"Stock worker {stock_id} must always be viewable/runnable by id"
         )
 
 

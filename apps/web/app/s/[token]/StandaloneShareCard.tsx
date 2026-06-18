@@ -111,7 +111,7 @@ export function StandaloneShareCard({
 
   // Breadcrumb segments for the current location.
   const crumbs: { label: string; onClick?: () => void }[] = [
-    { label: "Brain" },
+    { label: "Library" },
     {
       label: share.title,
       onClick: openFilePath || folderPrefix ? () => { setFolderPrefix(""); setOpenFilePath(null); } : undefined,

@@ -254,6 +254,82 @@ def assert_safe_outbound_mcp_url(url: str) -> str:
     return assert_safe_outbound_url(url, label="MCP server URL")
 
 
+def pin_safe_outbound_url(url: str, *, label: str = "URL") -> tuple[str, str]:
+    """Validate a user-supplied outbound URL for SSRF safety AND pin the target IP.
+
+    Defends against DNS-rebinding TOCTOU: ``assert_safe_outbound_url`` validates
+    the current DNS resolution, but between that check and the actual HTTP dial the
+    DNS could flip from a public IP to a private one.  This function resolves the
+    hostname once, validates every resolved IP, then rewrites the URL to address
+    the first safe IPv4 IP directly (or the first IPv6 if only AAAA records
+    exist).  The caller should:
+
+      1. Use the returned ``pinned_url`` for the actual HTTP request.
+      2. Add ``Host: <original-host>`` to the request headers so TLS SNI and
+         vhost routing work correctly.
+
+    Returns ``(original_url_stripped, pinned_url)`` where ``pinned_url`` has
+    the hostname replaced with the pinned IP literal.  If the host is already
+    an IP literal (no DNS lookup needed), both values are identical (no rebind
+    risk). If WORKEROS_ALLOW_PRIVATE_MCP_URLS=1, returns the original URL for
+    both values (self-hoster opt-out of SSRF protection).
+
+    Raises UnsafeOutboundUrlError on any policy violation (same as
+    assert_safe_outbound_url).
+    """
+    stripped = assert_safe_outbound_url(url, label=label)
+
+    if _allow_private_mcp_urls():
+        return stripped, stripped
+
+    parts = urlsplit(stripped)
+    host = parts.hostname or ""
+
+    # If already an IP literal there is no DNS to rebind; return as-is.
+    try:
+        ipaddress.ip_address(host)
+        return stripped, stripped
+    except ValueError:
+        pass
+
+    # Resolve again (same timeout as assert_safe_outbound_url).  We know this
+    # succeeds (assert_safe_outbound_url already validated it), but a fresh
+    # lookup gives us the current mapping to pin.
+    try:
+        resolved = _resolve_host_ips(host)
+    except (socket.gaierror, socket.timeout, OSError) as exc:
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: host could not be resolved at dial time ({host})"
+        ) from exc
+
+    # Prefer IPv4 for broader httpx compat; fall back to IPv6.
+    safe_ip: ipaddress._BaseAddress | None = None
+    for ip in resolved:
+        if _ip_is_disallowed(ip):
+            raise UnsafeOutboundUrlError(
+                f"{label} is not allowed: DNS rebind detected — host resolved to "
+                f"internal/loopback/link-local address at dial time"
+            )
+        if safe_ip is None or (isinstance(ip, ipaddress.IPv4Address) and isinstance(safe_ip, ipaddress.IPv6Address)):
+            safe_ip = ip
+
+    if safe_ip is None:
+        raise UnsafeOutboundUrlError(
+            f"{label} is not allowed: no safe IP resolved for {host}"
+        )
+
+    # Reconstruct the URL with the IP literal, preserving port, path, and query.
+    ip_str = str(safe_ip)
+    # IPv6 literals need square brackets in URLs.
+    netloc_ip = f"[{ip_str}]" if ":" in ip_str else ip_str
+    if parts.port:
+        netloc_ip = f"{netloc_ip}:{parts.port}"
+    from urllib.parse import urlunsplit as _urlunsplit
+    pinned = _urlunsplit((parts.scheme, netloc_ip, parts.path, parts.query, parts.fragment))
+    return stripped, pinned
+    return stripped, pinned
+
+
 def pinned_safe_outbound_httpx_target(
     url: str,
     *,
@@ -340,6 +416,7 @@ def pinned_safe_outbound_httpx_target(
     if port is not None:
         host_header = f"{host_header}:{port}"
     extensions = {"sni_hostname": host} if scheme == "https" else {}
+    return pinned_url, {"Host": host_header}, extensions
     return pinned_url, {"Host": host_header}, extensions
 
 
@@ -467,6 +544,9 @@ class WorkerTrigger(BaseModel):
     @field_validator("timezone")
     @classmethod
     def validate_timezone(cls, value: Optional[str]) -> Optional[str]:
+        # #1296 + main DRY: reject invalid IANA timezone names at parse time.
+        # _validate_timezone_name (canonical, also used elsewhere in this module)
+        # is functionally equivalent to the base inline cron_utils check.
         return _validate_timezone_name(value)
 
 
@@ -1437,6 +1517,7 @@ class WorkerContractTrigger(BaseModel):
     @field_validator("timezone")
     @classmethod
     def validate_timezone(cls, value: Optional[str]) -> Optional[str]:
+        # #1296 + main DRY: canonical _validate_timezone_name (see above).
         return _validate_timezone_name(value)
 
     @model_validator(mode="after")
@@ -1460,6 +1541,13 @@ class WorkerContract(BaseModel):
     system_worker: Optional[bool] = None
     archived: bool = False
     archive_reason: Optional[str] = None
+    # Stage: a worker maturity LABEL, orthogonal to archived/enabled/visibility.
+    # "draft" — work-in-progress (default for newly created workers)
+    # "live"  — promoted, trusted-to-run-in-production
+    # Pure label: never gates execution, scheduling, or access. Lets the operator
+    # separate WIP workers from the ones they rely on (mess-control). Stored in
+    # worker.yml so it travels with the bundle and is version-controlled.
+    stage: Optional[str] = None
     # Visibility: controls who can see and run this worker.
     # "private"   — owner only (default)
     # "workspace" — all workspace members
@@ -1953,6 +2041,12 @@ class WorkerUpdateRequest(BaseModel):
     name: Optional[str] = None
     description: Optional[str] = None
 
+    # RECONCILIATION: main's runtime test (test_cron_timezone_validation) requires
+    # WorkerUpdateRequest(cron_timezone="bad") to raise a ValidationError, so the
+    # model-level validator is kept. base's api test (test_security_quickwins_1293_1296)
+    # requires PATCH /workers/{id} with a bad timezone to return HTTP 400 (not 422).
+    # Both are satisfied: the validator raises here, and the app-level
+    # RequestValidationError handler maps "invalid timezone" errors to 400.
     @field_validator("cron_timezone")
     @classmethod
     def validate_cron_timezone(cls, value: Optional[str]) -> Optional[str]:
@@ -2153,6 +2247,9 @@ class WorkerSummary(BaseModel):
     system: Optional[bool] = None
     archived: bool = False
     archive_reason: Optional[str] = None
+    # Maturity label: "draft" (WIP) | "live" (promoted). Pure label, never gates
+    # execution. Defaults None on the model; the serializer resolves draft/live.
+    stage: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     folder: Optional[str] = None
     status: WorkerStatus
@@ -2204,6 +2301,9 @@ class WorkerDetail(BaseModel):
     # operator click into a dead-end 409. Defaults true (a normal active worker).
     enabled: bool = True
     archive_reason: Optional[str] = None
+    # Maturity label: "draft" (WIP) | "live" (promoted). Pure label, never gates
+    # execution. The serializer resolves draft/live from the manifest.
+    stage: Optional[str] = None
     tags: List[str] = Field(default_factory=list)
     folder: Optional[str] = None
     status: WorkerStatus
@@ -2246,6 +2346,11 @@ class WorkerDetail(BaseModel):
     visibility: str = "private"
     starred: bool = False  # #782: per-user favorite flag
     permissions: AssetPermissions = Field(default_factory=AssetPermissions)
+    # Round-09 gap #1: the saved per-worker default inputs (recipe column
+    # `input_values_json`). Scheduled/automated runs merge these over schema
+    # defaults (scheduler._effective_scheduled_inputs). Surfaced so the
+    # Operations > Inputs panel can LOAD what is saved instead of writing blind.
+    input_values: Dict[str, Any] = Field(default_factory=dict)
 
 
 class PublicWorkerInput(BaseModel):

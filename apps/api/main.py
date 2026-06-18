@@ -1258,11 +1258,36 @@ _WORKER_FILES_PATH_RE = re.compile(r"^/workers/[^/]+/files$")
 _WORKER_SOURCE_PATH_RE = re.compile(r"^/workers/[^/]+$")
 
 
+def _normalized_request_path(request: Request) -> str:
+    """Return the route-local path, stripping any ASGI mount prefix.
+
+    B10: the cloud wrapper mounts this engine sub-app under ``/api``
+    (``parent.mount("/api", engine.app)``). When mounted, Starlette keeps the
+    full prefixed path in ``scope["path"]`` (and ``request.url.path``) while
+    recording the mount prefix in ``scope["root_path"]``. The body-size /
+    upload exemptions below match route-local paths (``/contexts/...``,
+    ``/workers/from-bundle``, ...), so without stripping the prefix every
+    contexts/approvals upload in the cloud fell through to the 256 KB JSON
+    default and 1 MB images 413'd.
+
+    Stripping ``root_path`` (the canonical ASGI mount mechanism) is
+    mount-prefix-agnostic — it works for any mount point and accumulates across
+    nested mounts — and is a no-op when not mounted, so the un-prefixed path is
+    unchanged. The boundary check (exact match or ``prefix + "/"``) prevents
+    over-stripping a sibling segment such as ``/apiary``.
+    """
+    path = request.scope.get("path") or request.url.path or "/"
+    root_path = (request.scope.get("root_path") or "").rstrip("/")
+    if root_path and (path == root_path or path.startswith(root_path + "/")):
+        return path[len(root_path):] or "/"
+    return path
+
+
 def _body_limit_for_request(request: Request) -> Optional[int]:
     method = request.method.upper()
     if method not in {"POST", "PUT", "PATCH"}:
         return None
-    path = request.url.path
+    path = _normalized_request_path(request)
     if path == "/workers/from-bundle":
         return FROM_BUNDLE_BODY_LIMIT_BYTES
     if path == "/workspace/import":
@@ -1304,7 +1329,7 @@ def _body_limit_for_request(request: Request) -> Optional[int]:
 
 
 def _is_context_upload_request(request: Request) -> bool:
-    path = request.url.path
+    path = _normalized_request_path(request)
     return (
         request.method.upper() == "POST"
         and path.startswith("/contexts/")
@@ -1460,7 +1485,9 @@ def _rate_caller_keys(request: Request, path: str) -> List[str]:
 @app.middleware("http")
 async def rate_limit_middleware(request: Request, call_next):
     """Apply per-IP and per-secret limits. Exempt webhooks and health checks."""
-    path = request.url.path
+    # B10: strip any ASGI mount prefix (cloud mounts this app at /api) so the
+    # exemption + per-path limit matching is mount-agnostic.
+    path = _normalized_request_path(request)
     if path.startswith("/webhooks/") or path in {"/healthz", "/health"}:
         return await call_next(request)
     if not os.environ.get("FLOOM_SECRET") and os.environ.get("WORKEROS_RATE_LIMIT_DEV") != "1":
@@ -1516,7 +1543,13 @@ async def auth_middleware(request: Request, call_next):
     if request.method == "OPTIONS":
         return await call_next(request)
 
-    path = request.url.path
+    # B10: the cloud wrapper mounts this engine sub-app under ``/api``. The
+    # run-token proxy matchers (_RE_RUN_LLM_PROXY, _RE_RUN_COMPOSIO_PROXY, ...)
+    # and the run_id extraction below all match route-local paths
+    # (``/runs/{id}/llm``), so a sandbox using WORKEROS_API_URL=.../api would
+    # otherwise present ``/api/runs/{id}/llm`` and be rejected before reaching
+    # the managed proxy. Normalize the mount prefix away (no-op when unmounted).
+    path = _normalized_request_path(request)
     authorization_header = request.headers.get("authorization", "")
     bearer_token_header = ""
     if authorization_header.startswith("Bearer "):
@@ -1610,7 +1643,18 @@ async def auth_middleware(request: Request, call_next):
             or path.startswith("/approvals/public/")
             or path.startswith("/workers/public/")
             or path.startswith("/runs/public/")  # #765: token-gated read-only run view
-            or _RE_RUN_STREAM.match(path)  # #1338: endpoint enforces auth OR worker share token
+            # #1338 #1329: public SSE stream for share-link viewers. The route
+            # handler (stream_run_parts) validates the token (RUN-share OR
+            # WORKER-share entity_type) and enforces ownership, so the middleware
+            # only needs to let the request reach it. _RE_RUN_STREAM (main) is the
+            # canonical path matcher; the token=fls_ guard (base) is kept as a
+            # belt-and-suspenders narrowing for the share-link query form.
+            or _RE_RUN_STREAM.match(path)
+            or (
+                path.endswith("/stream")
+                and path.startswith("/runs/")
+                and "token=fls_" in str(request.url.query)
+            )
             or path.startswith("/workers/short-links/")
             or path.startswith("/s/")
             or path.startswith("/c/")
@@ -1801,11 +1845,26 @@ async def value_error_handler(_request, exc: ValueError):
 
 @app.exception_handler(RequestValidationError)
 async def request_validation_error_handler(_request, exc: RequestValidationError):
+    # RECONCILIATION: main's WorkerUpdateRequest.cron_timezone model validator
+    # raises a ValidationError ("invalid timezone: ...") which FastAPI surfaces
+    # here. base's contract (test_security_quickwins_1293_1296) is that a bad
+    # cron timezone on PATCH /workers/{id} returns HTTP 400, not the generic 422.
+    # Map that single, specific class of error to 400 while leaving every other
+    # request-validation failure at 422.
+    raw_errors = exc.errors()
+    if any("invalid timezone" in str(e.get("msg", "")).lower() for e in raw_errors):
+        return JSONResponse(
+            status_code=400,
+            content={
+                "detail": "Invalid cron timezone. Use an IANA timezone name such "
+                "as 'UTC' or 'Europe/Berlin'.",
+            },
+        )
     return JSONResponse(
         status_code=422,
         content={
             "detail": "validation failed",
-            "errors": _redacted_validation_errors(exc.errors(), expose_locations=False),
+            "errors": _redacted_validation_errors(raw_errors, expose_locations=False),
         },
     )
 
@@ -2542,6 +2601,18 @@ def update_worker(
         from cron_utils import is_valid_cron_expr
         if not is_valid_cron_expr(new_cron_expr):
             raise HTTPException(status_code=400, detail=f"Invalid cron expression: {new_cron_expr!r}")
+
+    # #1296: validate cron_timezone at create/update time so a bad value
+    # gets a clean 400 instead of silently falling back to UTC at run time.
+    if payload.cron_timezone is not None:
+        from cron_utils import is_valid_timezone
+        if not is_valid_timezone(payload.cron_timezone):
+            raise HTTPException(
+                status_code=400,
+                detail=f"Invalid cron timezone: {payload.cron_timezone!r}. "
+                       "Use an IANA timezone name such as 'UTC', 'Europe/Berlin', "
+                       "or 'America/New_York'.",
+            )
 
     updates: Dict[str, Any] = {}
 
@@ -5754,6 +5825,32 @@ def _mcp_arg(arguments: Dict[str, Any], name: str) -> str:
     return value
 
 
+def _mcp_arg_str(arguments: Dict[str, Any], name: str) -> str:
+    """Like _mcp_arg but preserves falsy non-None values (0, False, "").
+
+    #1294: ``_mcp_arg`` uses ``arguments.get(name) or ""`` which silently
+    coerces falsy values (integer 0, boolean False, or an empty string) to
+    the empty string — the required-check then fires and the tool returns
+    "required" even though the caller provided a valid value.  For the
+    secrets.set ``value`` argument the key insight is:
+      - None / missing           → required error (caller omitted it)
+      - ""  (empty string)       → still invalid (blank secret is meaningless)
+      - "0", "false", 0, False   → valid; must be stringified and passed through
+
+    This function converts the raw value to str BEFORE checking emptiness, so
+    ``0`` becomes ``"0"`` (non-empty) and is accepted, while None and missing
+    both produce the required error.
+    """
+    sentinel = object()
+    raw = arguments.get(name, sentinel)
+    if raw is sentinel or raw is None:
+        raise ValueError(f"Tool argument '{name}' is required")
+    converted = str(raw)
+    if not converted:
+        raise ValueError(f"Tool argument '{name}' is required")
+    return converted
+
+
 def _internal_asgi_request() -> Request:
     """Minimal in-process Request for direct calls into route fns that require a
     ``request`` positional. host=asgi makes the worker-write workspace check
@@ -5898,12 +5995,15 @@ def _mcp_call_secrets_list(auth: AuthContext, repos: Repositories) -> Dict[str, 
 
 
 def _mcp_call_secrets_set(arguments: Dict[str, Any], auth: AuthContext, repos: Repositories) -> Dict[str, Any]:
+    # #1294: use _mcp_arg_str for `value` so falsy-but-valid values (0, False,
+    # "0") are not silently coerced to empty and rejected as "required".
     key = _mcp_arg(arguments, "key").upper()
-    value = arguments.get("value")
-    if not isinstance(value, str):
-        raise ValueError("Tool argument 'value' must be a string")
+    # Union (round-09 #1294 base + main hardening): _mcp_arg_str preserves
+    # falsy non-None values (0/False/"") so they aren't silently coerced and
+    # rejected as "required"; main's try/except wraps pydantic ValidationError
+    # as a clean ValueError for the MCP tool boundary.
     try:
-        payload = SecretUpsertRequest(value=value)
+        payload = SecretUpsertRequest(value=_mcp_arg_str(arguments, "value"))
     except ValidationError as exc:
         raise ValueError(str(exc)) from exc
     data = upsert_secret(key, payload, auth=auth, repos=repos)
@@ -7256,6 +7356,19 @@ async def mcp_http_endpoint(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> JSONResponse:
+    """MCP JSON-RPC 2.0 endpoint for /mcp-tools/serve.
+
+    RECONCILIATION (round-09 base ←→ main): main hardened the shared
+    ``_mcp_handle_request`` dispatcher to be JSON-RPC-2.0 spec-correct —
+    a non-object body, an invalid batch item, and an oversized batch all
+    return a Response *object* carrying error -32600 at HTTP 200 (transport
+    success, RPC-level error), and the batch cap is enforced ("Batch too
+    large"). Base's earlier #1295 handler instead returned HTTP 400 for a
+    non-dict body. We delegate to the dispatcher (main's spec-correct path),
+    which also covers base's batch / single-request guarantees. Parse errors
+    keep their HTTP 400 (the body is not JSON at all, so there is no envelope
+    to return).
+    """
     try:
         body = await request.json()
     except Exception:

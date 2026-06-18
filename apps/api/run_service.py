@@ -825,6 +825,40 @@ from services.run_pause_policy import (  # noqa: E402,F401
     _alert_consecutive_failure_threshold,
     _maybe_pause_worker_after_consecutive_failures,
 )
+def _resolved_worker_timeout_seconds(config: Optional["WorkerConfig"]) -> int:
+    """Resolve the effective run timeout for a worker dispatch.
+
+    Policy (#1127/#1314):
+    - Default: ``config.runtime.limits.timeout_seconds`` (per-worker, default 300 s).
+    - Workspace ``default_timeout_seconds`` overrides the per-worker value when
+      set, enabling opt-in runs up to MAX_RUN_TIMEOUT_SECONDS (3600 s = 1 hour).
+    - Absolute ceiling: MAX_RUN_TIMEOUT_SECONDS (never exceeds 3600 s).
+
+    Examples:
+      worker limits=300, ws unset   → 300   (existing behaviour unchanged)
+      worker limits=300, ws=3600    → 3600  (workspace opt-in to 1 h)
+    """
+    from runtime_limits import MAX_RUN_TIMEOUT_SECONDS
+
+    if config and config.runtime and config.runtime.limits:
+        per_worker = config.runtime.limits.timeout_seconds
+    else:
+        per_worker = DEFAULT_TIMEOUT_SECONDS
+
+    raw = (_workspace_setting("default_timeout_seconds") or "").strip()
+    ws_timeout: Optional[int] = None
+    if raw:
+        try:
+            n = int(float(raw))
+            if n > 0:
+                ws_timeout = n
+        except (ValueError, TypeError):
+            pass
+
+    effective = ws_timeout if ws_timeout is not None else per_worker
+    return min(effective, MAX_RUN_TIMEOUT_SECONDS)
+
+
 def active_run_count() -> int:
     with _active_runs_lock:
         return len(_active_runs)
@@ -1533,6 +1567,87 @@ def re_enqueue_queued_runs_on_startup(
     return count
 
 
+# Reserved engine-controlled approval-phase keys. These are ALWAYS set by the
+# engine for an approvals.required worker and must never be trusted from inputs.
+_APPROVAL_DECISION_KEY = "decision"
+_APPROVAL_PHASE_KEY = "_workeros_approval_phase"
+_APPROVAL_OUTPUT_KEY = "approved_output"
+# How far we walk the retry_of_run_id chain when resolving the approval root.
+# A bounded walk prevents a malformed/cyclic chain from looping forever.
+_APPROVAL_RETRY_CHAIN_MAX = 20
+
+
+def _is_engine_approved_execution_run(run_id: str, repos: Repositories) -> bool:
+    """#418: authoritative test for "this run is the post-approval EXECUTE phase".
+
+    A run is an approved-execution run iff an APPROVED approval row records it
+    (or the root of its retry chain) as the ``follow_up_run_id``. Only
+    ``approve_run`` ever writes ``follow_up_run_id``, so this signal cannot be
+    spoofed by a caller-supplied ``decision`` input or ``trigger_source`` — both
+    of which ARE caller-controllable on the public run-create endpoint.
+
+    Walks the ``retry_of_run_id`` chain (bounded) so a retry descended from an
+    approved follow-up run is still recognised as the execute phase; a retry of
+    a PROPOSE-phase run is not.
+    """
+    seen: set[str] = set()
+    current = run_id
+    for _ in range(_APPROVAL_RETRY_CHAIN_MAX):
+        if not current or current in seen:
+            break
+        seen.add(current)
+        try:
+            approval = repos.approvals.get_by_follow_up_run_id(follow_up_run_id=current)
+        except Exception:
+            logger.exception("approval follow-up lookup failed for run %s", current)
+            approval = None
+        if approval and approval.get("status") == "approved":
+            return True
+        run_row = repos.runs.get_any(run_id=current)
+        parent = (run_row or {}).get("retry_of_run_id")
+        if not parent:
+            break
+        current = str(parent)
+    return False
+
+
+def _apply_approval_phase_inputs(
+    effective_inputs: Dict[str, Any],
+    run_id: str,
+    config: Optional[WorkerConfig],
+    repos: Repositories,
+) -> Dict[str, Any]:
+    """#418: for an ``approvals.required`` worker, stamp the run's approval phase
+    onto the inputs the worker sees — authoritatively, BEFORE execution.
+
+    - PROPOSE phase (every run that is NOT an engine-approved execution run):
+      force ``decision = "proposed"`` and strip any caller-supplied
+      ``approved_output`` so a worker cannot be tricked into acting. This is what
+      makes the two-phase contract a HARD engine guarantee instead of relying on
+      the absence of a key.
+    - EXECUTE phase (the engine-spawned follow-up run for an approved decision):
+      force ``decision = "approved"``. ``approved_output`` was already merged in
+      by ``approve_run``.
+
+    Non-approval workers are returned unchanged (no injection).
+    """
+    needs_approval = bool(
+        config and getattr(config, "approvals", None) and config.approvals.required
+    )
+    if not needs_approval:
+        return effective_inputs
+
+    out = dict(effective_inputs)
+    if _is_engine_approved_execution_run(run_id, repos):
+        out[_APPROVAL_DECISION_KEY] = "approved"
+        out[_APPROVAL_PHASE_KEY] = "execute"
+    else:
+        out[_APPROVAL_DECISION_KEY] = "proposed"
+        out[_APPROVAL_PHASE_KEY] = "propose"
+        out.pop(_APPROVAL_OUTPUT_KEY, None)
+    return out
+
+
 def execute_run(
     run_id: str,
     worker_id: str,
@@ -1549,6 +1664,12 @@ def execute_run(
     effective_inputs = _apply_config_input_defaults(
         config,
         _merge_instance_inputs(instance, inputs),
+    )
+    # #418: stamp the authoritative approval phase onto the inputs BEFORE the
+    # worker runs, so an approvals.required worker can never fire a side effect
+    # in the propose phase (and a caller cannot spoof approval via inputs).
+    effective_inputs = _apply_approval_phase_inputs(
+        effective_inputs, run_id, config, repos_obj
     )
     run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos_obj)
 
@@ -1652,11 +1773,9 @@ def execute_run(
         if config and config.runtime:
             runner = config.runtime.runner or "e2b"
         mode = config.runtime.mode if config and config.runtime else "pure-script"
-        timeout_seconds = (
-            config.runtime.limits.timeout_seconds
-            if config and config.runtime and config.runtime.limits
-            else 300
-        )
+        # #1127/#1314: resolve effective timeout — workspace default_timeout_seconds
+        # can raise the ceiling up to MAX_RUN_TIMEOUT_SECONDS (3600 s = 1 hour).
+        timeout_seconds = _resolved_worker_timeout_seconds(config)
         log_fn(f"Executing worker (mode={mode}, runner={runner})", level="debug")
         driver = get_sandbox_driver(runner, config=config)
         with use_context_scope(context_scope_for_user(owner_id)):
@@ -1727,7 +1846,15 @@ def execute_run(
         worker_needs_approval = bool(
             config and getattr(config, "approvals", None) and config.approvals.required
         )
-        approval_follow_up = (current_run or {}).get("trigger_source") == "approval"
+        # #418: an EXECUTE-phase run (the engine-spawned post-approval follow-up,
+        # or a retry of it) must NEVER re-gate — it is the authorised execution.
+        # Resolve this authoritatively from the approvals table (follow_up_run_id),
+        # NOT the caller-controllable trigger_source, which could be spoofed to
+        # suppress the gate on a fresh run.
+        approval_follow_up = (
+            worker_needs_approval
+            and _is_engine_approved_execution_run(run_id, repos_obj)
+        )
         _non_approval_terminal = {"error", "failed", "cancelled", "timeout", "rejected"}
         if (
             worker_needs_approval
@@ -1803,11 +1930,22 @@ def execute_run(
         # approvals row.  Do NOT mark COMPLETED — execution halts here.
         decision_required = result.decision_required
         worker_needs_approval = bool(config and getattr(config, "approvals", None) and config.approvals.required)
-        if decision_required and worker_needs_approval and result.status not in _non_approval_terminal:
+        # #418: never re-gate the execute-phase run. If a (misbehaving) worker
+        # emits decision_required again AFTER approval, ignore it — re-gating
+        # would spawn a second approval + follow-up and fire the side effect
+        # twice. The execute run is already authorised; let it complete once.
+        if decision_required and worker_needs_approval and not approval_follow_up and result.status not in _non_approval_terminal:
             approval_id = f"apr_{uuid.uuid4().hex[:12]}"
             label = decision_required.get("label") or (config.approvals.label if config and config.approvals else "Approve action")
             preview = decision_required.get("preview") or ""
-            decision_input_json = json.dumps(effective_inputs)
+            # #418: persist the ORIGINAL inputs (without the engine-injected
+            # propose-phase markers) so approve_run rebuilds clean execute-phase
+            # inputs; the execute run re-derives its phase authoritatively.
+            _original_inputs = {
+                k: v for k, v in effective_inputs.items()
+                if k not in (_APPROVAL_DECISION_KEY, _APPROVAL_PHASE_KEY)
+            }
+            decision_input_json = json.dumps(_original_inputs)
             now_ts = _now_iso()
             # #798: pending approvals auto-expire after APPROVAL_TTL_HOURS (24h
             # default) so a run never sits pending forever. #792: a worker may

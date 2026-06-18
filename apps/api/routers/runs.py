@@ -37,7 +37,7 @@ from fastapi.responses import FileResponse, PlainTextResponse, StreamingResponse
 from pydantic import BaseModel, Field
 
 import auth
-from auth import AuthContext, get_auth_context
+from auth import AuthContext, get_auth_context, get_optional_auth_context
 from core import hot_cache
 from core.utils import _parse_iso8601, row_to_dict
 from db import DB_PATH, Repositories, get_repos
@@ -84,6 +84,7 @@ from services.sse_streaming import (
     _TERMINAL_STATUSES,
     _finish_part_from_run_row,
     _format_run_part_sse,
+    _log_replay_events,
     _log_replay_parts,
     _parse_last_event_id,
     _run_part_cleanup,
@@ -935,17 +936,50 @@ async def stream_run_parts(
     run_id: str,
     request: Request,
     token: Optional[str] = Query(None, min_length=10),
+    auth: Optional[AuthContext] = Depends(get_optional_auth_context),
     repos: Repositories = Depends(get_repos),
 ):
-    """Server-Sent Events stream of AI SDK parts for a single run."""
-    if token:
-        row, stream_user_id = _get_run_for_worker_share_stream(run_id, token, repos)
-    else:
-        auth = await get_auth_context(request)
-        row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
-        if not row:
-            raise HTTPException(status_code=404, detail="Run not found")
+    """Server-Sent Events stream of AI SDK parts for a single run.
+
+    Authentication (#1338 #1329):
+    - Operator (authed): normal ``auth`` dependency, no ``token`` param.
+    - RUN share-link viewer (#1329): ``?token=`` resolves to a standalone share
+      row whose ``entity_type=='run'`` and ``entity_id==run_id``. Streams under
+      the owner's identity via the fixed ``__public_share__`` SSE bucket.
+    - WORKER share-link viewer (#1338): ``?token=`` resolves to a standalone
+      share row whose ``entity_type=='worker'``; ``_get_run_for_worker_share_stream``
+      validates the run belongs to that worker+owner.
+
+    RECONCILIATION FLAG (round-09 base + main): base and main each shipped a
+    DIFFERENT ``?token=`` contract under #1338. This union supports BOTH token
+    entity types so neither feature is lost. Human review required to confirm
+    the union is the intended public contract (vs. one canonical token type).
+    """
+    if token is not None:
+        # Try RUN share token first (base / #1329), then WORKER share token
+        # (main / #1338). Both validate ownership; both stream under owner id.
+        share_row = _load_standalone_share_row(token)
+        if (
+            share_row
+            and str(share_row.get("entity_type")) == "run"
+            and str(share_row.get("entity_id")) == run_id
+        ):
+            effective_user_id = str(share_row.get("owner_id") or "")
+            run_row = _get_run_by_explicit_id(run_id, user_id=effective_user_id, repos=repos)
+            if not run_row:
+                raise HTTPException(status_code=404, detail="Run not found")
+        else:
+            run_row, effective_user_id = _get_run_for_worker_share_stream(run_id, token, repos)
+        stream_user_id = "__public_share__"
+    elif auth is not None:
+        # Normal authenticated path.
+        effective_user_id = auth.user_id
         stream_user_id = auth.user_id
+        run_row = _get_run_by_explicit_id(run_id, user_id=effective_user_id, repos=repos)
+        if not run_row:
+            raise HTTPException(status_code=404, detail="Run not found")
+    else:
+        raise HTTPException(status_code=401, detail="Unauthorized")
 
     last_seen = _parse_last_event_id(request.headers.get("last-event-id"))
 
@@ -957,14 +991,14 @@ async def stream_run_parts(
         try:
             snapshot = _run_part_snapshot(run_id)
             if snapshot is None:
-                final_part = _finish_part_from_run_row(row)
+                final_part = _finish_part_from_run_row(run_row)
                 if final_part is not None:
                     # #188: the in-memory part buffer is gone (terminal run past its
                     # TTL, or a fresh server process). Replay persisted log rows so
                     # the client reconstructs the transcript instead of receiving a
                     # bare finish event.
                     event_id = 0
-                    for log_part in _log_replay_parts(repos, stream_user_id, run_id):
+                    for log_part in _log_replay_parts(repos, effective_user_id, run_id):
                         if event_id > last_seen:
                             yield _format_run_part_sse(event_id, log_part)
                         event_id += 1
@@ -1202,3 +1236,104 @@ def get_run_logs(
         }
         for row in collapsed
     ]
+
+
+@runs_router.get("/runs/{run_id}/logs/stream")
+async def stream_run_logs(
+    run_id: str,
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+):
+    """Server-Sent Events stream of log/trace lines for a single run.
+
+    Emits one ``data: <json>\\n\\n`` line per log event. Each event carries:
+      - ``type``: always ``"log"``
+      - ``level``: ``"info"`` | ``"warning"`` | ``"error"`` | ``"debug"``
+      - ``message``: redacted operator-safe log text
+      - ``timestamp``: ISO-8601 UTC string
+      - ``trace_id``: optional step/trace identifier (omitted when absent)
+
+    On connect, all existing log rows for the run are replayed immediately so
+    the client receives the full history without a separate REST call. New log
+    lines are then pushed in real-time as the run produces them.
+
+    When the run reaches a terminal state the stream emits a final
+    ``{"type": "done", "status": "<completed|failed>"}`` event and closes.
+
+    The stream uses the same per-user concurrent-stream cap as /runs/{id}/events
+    and /runs/{id}/stream. Returns 404 for unknown runs, 429 when the cap is
+    exceeded.
+    """
+    run_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
+    if not run_row:
+        raise HTTPException(status_code=404, detail="Run not found")
+
+    initial_status = run_row["status"]
+    already_terminal = initial_status in _TERMINAL_STATUSES
+
+    # Per-user concurrent-stream cap (same guard as /events and /stream).
+    stream_slot = _sse_stream_acquire(auth.user_id)
+
+    async def event_generator():
+        try:
+            # Always replay persisted log rows first so the client gets the
+            # full history on connect without a separate GET /runs/{id}/logs call.
+            for event in _log_replay_events(repos, auth.user_id, run_id):
+                yield f"data: {json.dumps(event)}\n\n"
+
+            # If the run is already terminal, emit a done event and close.
+            if already_terminal:
+                done_row = _get_run_by_explicit_id(run_id, user_id=auth.user_id, repos=repos)
+                done_status = (done_row or {}).get("status", initial_status)
+                yield f"data: {json.dumps({'type': 'done', 'status': done_status})}\n\n"
+                return
+
+            # Subscribe to live SSE events for this run.
+            q: asyncio.Queue = asyncio.Queue(maxsize=512)
+            loop = asyncio.get_running_loop()
+            with _sse_lock:
+                _sse_queues.setdefault(run_id, []).append((q, loop))
+
+            try:
+                while True:
+                    if await request.is_disconnected():
+                        break
+
+                    try:
+                        event = await asyncio.wait_for(q.get(), timeout=5.0)
+                    except asyncio.TimeoutError:
+                        yield ": keepalive\n\n"
+                        continue
+
+                    evt_type = event.get("type")
+
+                    if evt_type == "log":
+                        # Forward log events with trace_id when present.
+                        log_event: Dict[str, Any] = {
+                            "type": "log",
+                            "level": event.get("level") or "info",
+                            "message": event.get("message") or "",
+                            "timestamp": event.get("timestamp"),
+                        }
+                        if event.get("trace_id"):
+                            log_event["trace_id"] = event["trace_id"]
+                        yield f"data: {json.dumps(log_event)}\n\n"
+
+                    evt_status = event.get("status", "")
+                    if evt_type == "close" or evt_status in _TERMINAL_STATUSES:
+                        yield f"data: {json.dumps({'type': 'done', 'status': evt_status or 'unknown'})}\n\n"
+                        break
+            finally:
+                _sse_cleanup(run_id, q)
+        finally:
+            _sse_stream_release(stream_slot)
+
+    return StreamingResponse(
+        event_generator(),
+        media_type="text/event-stream",
+        headers={
+            "Cache-Control": "no-cache",
+            "X-Accel-Buffering": "no",
+        },
+    )
