@@ -4112,6 +4112,45 @@ class SqliteWorkspaceMemberRepository:
                 "WHERE workspace_id = ? AND user_id = ?",
                 (now, workspace_id, new_owner_id),
             )
+            worker_ids = [
+                str(row["id"])
+                for row in conn.execute(
+                    "SELECT id FROM workers WHERE workspace_id = ? AND owner_id = ?",
+                    (workspace_id, actor_id),
+                ).fetchall()
+            ]
+            if worker_ids:
+                placeholders = ", ".join("?" for _ in worker_ids)
+                try:
+                    conn.execute(
+                        f"UPDATE runs SET user_id = ? WHERE user_id = ? AND worker_id IN ({placeholders})",
+                        (new_owner_id, actor_id, *worker_ids),
+                    )
+                except sqlite3.OperationalError as exc:
+                    if "no such column: user_id" not in str(exc).lower():
+                        raise
+                conn.execute(
+                    f"UPDATE runs SET actor_user_id = ? WHERE actor_user_id = ? AND worker_id IN ({placeholders})",
+                    (new_owner_id, actor_id, *worker_ids),
+                )
+            conn.execute(
+                "UPDATE workers SET owner_id = ? WHERE workspace_id = ? AND owner_id = ?",
+                (new_owner_id, workspace_id, actor_id),
+            )
+            conn.execute(
+                "UPDATE brain_packs SET owner_id = ? WHERE workspace_id = ? AND owner_id = ?",
+                (new_owner_id, workspace_id, actor_id),
+            )
+            conn.execute(
+                "UPDATE asset_grants SET owner_id = ? WHERE owner_id = ? "
+                "AND asset_id IN (SELECT id FROM workers WHERE workspace_id = ? UNION SELECT id FROM brain_packs WHERE workspace_id = ?)",
+                (new_owner_id, actor_id, workspace_id, workspace_id),
+            )
+            conn.execute(
+                "UPDATE worker_short_links SET owner_id = ? WHERE owner_id = ? "
+                "AND worker_id IN (SELECT id FROM workers WHERE workspace_id = ?)",
+                (new_owner_id, actor_id, workspace_id),
+            )
         member = self.get(workspace_id=workspace_id, user_id=new_owner_id)
         if member is None:
             raise RuntimeError("failed to transfer ownership")
@@ -4476,6 +4515,29 @@ class SqliteUserRepository:
 
     def delete(self, *, user_id: str) -> bool:
         with get_db() as conn:
+            resource_checks = (
+                ("workers", "owner_id"),
+                ("runs", "actor_user_id"),
+                ("runs", "user_id"),
+                ("secrets", "user_id"),
+                ("composio_connections", "user_id"),
+                ("brain_packs", "owner_id"),
+                ("asset_versions", "user_id"),
+                ("mcp_tools", "user_id"),
+                ("asset_grants", "owner_id"),
+            )
+            for table, column in resource_checks:
+                try:
+                    row = conn.execute(
+                        f"SELECT 1 FROM {table} WHERE {column} = ? LIMIT 1",
+                        (user_id,),
+                    ).fetchone()
+                except sqlite3.OperationalError:
+                    continue
+                if row is not None:
+                    raise ValueError(
+                        f"cannot delete user {user_id!r}; {table}.{column} resources still exist"
+                    )
             cursor = conn.execute("DELETE FROM users WHERE id = ?", (user_id,))
         return cursor.rowcount > 0
 

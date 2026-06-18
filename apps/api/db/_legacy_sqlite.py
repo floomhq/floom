@@ -94,7 +94,8 @@ def _get_cached_db_connection(db_path: str, busy_timeout_ms: int) -> sqlite3.Con
     return conn
 
 
-def _execute_sql_script(conn: sqlite3.Connection, script: str) -> None:
+def _iter_sql_statements(script: str) -> list[str]:
+    statements: list[str] = []
     statement: list[str] = []
     in_single_quote = False
     in_double_quote = False
@@ -168,7 +169,7 @@ def _execute_sql_script(conn: sqlite3.Connection, script: str) -> None:
             statement.append(ch)
             sql = "".join(statement).strip()
             if sql:
-                conn.execute(sql)
+                statements.append(sql)
             statement = []
             i += 1
             continue
@@ -178,7 +179,23 @@ def _execute_sql_script(conn: sqlite3.Connection, script: str) -> None:
 
     trailing = "".join(statement).strip()
     if trailing:
-        conn.execute(trailing)
+        statements.append(trailing)
+    return statements
+
+
+def _execute_sql_script(conn: sqlite3.Connection, script: str) -> None:
+    for sql in _iter_sql_statements(script):
+        conn.execute(sql)
+
+
+def _execute_sql_script_skip_duplicate_columns(conn: sqlite3.Connection, script: str) -> None:
+    for sql in _iter_sql_statements(script):
+        try:
+            conn.execute(sql)
+        except sqlite3.OperationalError as exc:
+            if "duplicate column name" not in str(exc).lower():
+                raise
+            logger.info("Skipping already-applied column statement: %s", exc)
 
 
 def sqlite_runtime_settings() -> dict[str, Any]:
@@ -2127,6 +2144,7 @@ def get_current_version(conn: sqlite3.Connection) -> int:
 def apply_migrations():
     with get_db() as conn:
         current = get_current_version(conn)
+    duplicate_column_tolerant = {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50, 65, 71, 82}
     for i, migration in enumerate(MIGRATIONS, start=1):
         if i > current:
             with get_db() as conn:
@@ -2136,13 +2154,14 @@ def apply_migrations():
                     else:
                         migration(conn)
                 except sqlite3.OperationalError as exc:
-                    if i not in {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50, 65, 71, 82} or "duplicate column name" not in str(exc):
+                    if i not in duplicate_column_tolerant or "duplicate column name" not in str(exc).lower() or not isinstance(migration, str):
                         raise
                     logger.info(
-                        "Skipping already-applied column migration %s: %s",
+                        "Retrying additive column migration %s statement-by-statement after duplicate: %s",
                         i,
                         exc,
                     )
+                    _execute_sql_script_skip_duplicate_columns(conn, migration)
                 conn.execute(
                     "INSERT INTO schema_version (version, applied_at) VALUES (?, ?)",
                     (i, now_iso())

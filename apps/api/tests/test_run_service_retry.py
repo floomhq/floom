@@ -68,3 +68,60 @@ def test_non_retryable_failure_without_policy_does_not_schedule(monkeypatch):
 
     assert did_schedule is False
     assert scheduled == []
+
+
+def test_schedule_retry_is_idempotent_for_same_original_attempt(monkeypatch):
+    created: list[str] = []
+    started: list[str] = []
+
+    class Runs:
+        def create(self, *, run_id: str, **_kwargs):
+            created.append(run_id)
+
+    class Repos:
+        runs = Runs()
+
+    class ImmediateThread:
+        def __init__(self, *, target, **_kwargs):
+            self._target = target
+
+        def start(self):
+            self._target()
+
+    monkeypatch.setattr(run_service.threading, "Thread", ImmediateThread)
+    monkeypatch.setattr(run_service.time, "sleep", lambda _seconds: None)
+    monkeypatch.setattr(run_service, "start_run", lambda run_id, *_args, **_kwargs: started.append(run_id))
+
+    # Hold the key as if another scheduler thread already claimed it.
+    retry_key = ("run-original", 1, "retry")
+    with run_service._scheduled_retry_lock:
+        run_service._scheduled_retry_keys.add(retry_key)
+    try:
+        run_service._schedule_retry(
+            original_run_id="run-original",
+            worker_id="worker-a",
+            inputs={},
+            attempt=1,
+            delay_seconds=0,
+            user_id="user-a",
+            repos=Repos(),
+        )
+    finally:
+        with run_service._scheduled_retry_lock:
+            run_service._scheduled_retry_keys.discard(retry_key)
+
+    assert created == []
+    assert started == []
+
+    run_service._schedule_retry(
+        original_run_id="run-original",
+        worker_id="worker-a",
+        inputs={},
+        attempt=1,
+        delay_seconds=0,
+        user_id="user-a",
+        repos=Repos(),
+    )
+
+    assert len(created) == 1
+    assert started == created

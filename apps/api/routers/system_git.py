@@ -237,7 +237,7 @@ def link_git_repo(
         auth.user_id,
         repo_full_name=full_name,
         repo_url=repo_url,
-        remote_url=remote_url,
+        remote_url=repo_url,
         last_pushed_at=pushed_at,
     )
 
