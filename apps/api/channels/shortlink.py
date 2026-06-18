@@ -3,8 +3,7 @@
 GET /c/{token}
   - Looks up the token across slack_sender_bindings and whatsapp_sender_bindings
     (pending + unexpired rows only).
-  - Returns a 302 to the appropriate /settings?slack_claim=… or
-    ?whatsapp_claim=… URL on the frontend.
+  - Returns a 302 to the generic /settings?claim_token=… URL on the frontend.
   - Returns 404 if the token matches no pending/unexpired binding.
 
 This keeps all claim-handling logic in the existing /slack/bindings/claim and
@@ -73,7 +72,7 @@ def claim_shortlink_redirect(token: str):
                     expires = now_dt  # treat malformed expiry as expired
 
                 if expires >= now_dt:
-                    url = f"{frontend}/settings?whatsapp_claim={urllib.parse.quote(token)}"
+                    url = f"{frontend}/settings?claim_token={urllib.parse.quote(token)}"
                     return RedirectResponse(url=url, status_code=302)
 
             # Slack bindings
@@ -96,7 +95,7 @@ def claim_shortlink_redirect(token: str):
                     expires = now_dt
 
                 if expires >= now_dt:
-                    url = f"{frontend}/settings?slack_claim={urllib.parse.quote(token)}"
+                    url = f"{frontend}/settings?claim_token={urllib.parse.quote(token)}"
                     return RedirectResponse(url=url, status_code=302)
 
     except Exception:

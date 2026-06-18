@@ -85,6 +85,19 @@ def test_slack_events_rejects_invalid_signature(monkeypatch, tmp_path):
     assert response.json()["detail"] == "Invalid Slack signature"
 
 
+def test_slack_signature_tolerance_zero_still_rejects_replay(monkeypatch, tmp_path):
+    monkeypatch.setenv("SLACK_SIGNATURE_TOLERANCE_SECONDS", "0")
+    main = _load_api(monkeypatch, tmp_path)
+    body = json.dumps({"type": "url_verification", "challenge": "challenge-token"}).encode("utf-8")
+    headers = _slack_headers(body, ts=int(time.time()) - 120)
+
+    with TestClient(main.app) as client:
+        response = client.post("/slack/events", data=body, headers=headers)
+
+    assert response.status_code == 401
+    assert response.json()["detail"] == "Invalid Slack signature"
+
+
 def test_slack_commands_help_uses_signed_form_without_api_secret(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
 
