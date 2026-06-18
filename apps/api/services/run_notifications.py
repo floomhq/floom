@@ -306,6 +306,12 @@ def _send_email_notification(
         return
 
     from_addr = os.environ.get("NOTIFY_FROM_EMAIL", "notifications@example.com").strip()
+    # The user-facing brand is "Floom". Force the From display name to "Floom"
+    # regardless of how NOTIFY_FROM_EMAIL is configured (it must never read
+    # "Workeros" to recipients). Preserve the address, override the name.
+    _email_only = from_addr.split("<")[-1].strip(" <>") if "<" in from_addr else from_addr
+    if _email_only:
+        from_addr = f"Floom <{_email_only}>"
     status_label = "failed" if status == "failed" else "completed"
     subject = (subject_template or "Worker {worker_name} {status}").format(
         worker_name=worker_name, status=status_label, run_id=run_id

@@ -5,7 +5,8 @@
 // Emily create flow) and example worker cards.
 import { useRouter } from "next/navigation";
 import { useState, useRef } from "react";
-import { ArrowRight } from "lucide-react";
+import { ArrowRight, Plug } from "lucide-react";
+import Link from "next/link";
 import { PromptChips } from "@/components/PromptChips";
 
 // Example worker cards — mirrors the CREATE_EXAMPLES in EmilyChat.tsx.
@@ -146,6 +147,25 @@ export function ActivationPanel({ onFocusEmily }: { onFocusEmily?: () => void })
         </div>
       </div>
 
+      {/* Connect your apps nudge */}
+      <div className="w-full max-w-2xl">
+        <Link
+          href="/connections"
+          className="flex items-center gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] px-4 py-3 transition-colors hover:bg-[var(--active-nav-bg)]"
+        >
+          <span className="inline-flex shrink-0 items-center justify-center size-8 rounded-[var(--radius-squircle)] bg-[var(--accent-soft)] text-[var(--accent)]">
+            <Plug className="size-4" />
+          </span>
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-medium text-[var(--text-primary)]">Connect your apps</p>
+            <p className="text-xs text-[var(--text-muted)]">
+              Link Gmail, Slack, HubSpot, and more so workers can act on your behalf.
+            </p>
+          </div>
+          <ArrowRight className="size-4 shrink-0 text-[var(--text-muted)]" />
+        </Link>
+      </div>
+
       {/* Emily shortcut */}
       {onFocusEmily && (
         <p className="text-sm text-[var(--text-muted)]">
@@ -157,7 +177,7 @@ export function ActivationPanel({ onFocusEmily }: { onFocusEmily?: () => void })
           >
             ask Emily
           </button>{" "}
-          {" "}and describe what you want. She will build it for you.
+          and describe what you want. She will build it for you.
         </p>
       )}
     </div>

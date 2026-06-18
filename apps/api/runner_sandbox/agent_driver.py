@@ -78,6 +78,32 @@ def _ws_default_int(key: str) -> "Optional[int]":
         return None
 
 
+def _resolve_timeout_seconds(requested: int, limits: "Any") -> int:
+    """Resolve the effective run timeout for an agent-mode worker.
+
+    Policy (#1127/#1314):
+    - Start from ``limits.timeout_seconds`` (per-worker ceiling, default 300 s).
+    - If the workspace has set ``default_timeout_seconds``, use THAT value as
+      the timeout (it may be higher than the per-worker default, enabling up to
+      1-hour runs without touching individual manifests).
+    - Never exceed MAX_RUN_TIMEOUT_SECONDS (3600 s).
+
+    Examples:
+      worker limits=300, ws unset   → 300   (existing workers unchanged)
+      worker limits=300, ws=3600    → 3600  (workspace opt-in to 1 h)
+      worker limits=600, ws=300     → 300   (workspace is tighter → still wins)
+    """
+    from runtime_limits import MAX_RUN_TIMEOUT_SECONDS
+
+    per_worker = limits.timeout_seconds if limits else requested
+    _ws_timeout = _ws_default_int("default_timeout_seconds")
+    if _ws_timeout:
+        effective = _ws_timeout
+    else:
+        effective = per_worker
+    return min(effective, MAX_RUN_TIMEOUT_SECONDS)
+
+
 def _agent_effective_max_tokens(model: str, requested: int) -> Optional[int]:
     """Return provider-safe max_tokens for the Agents SDK.
 
@@ -265,12 +291,12 @@ class AgentDriver(SandboxDriver):
             return WorkerResult(status="error", error="Worker config not found", error_code="invalid_worker")
 
         limits = config.runtime.limits
-        timeout_seconds = min(timeout_seconds, limits.timeout_seconds)
-        # #797: workspace default_timeout_seconds is a ceiling — the tightest of
-        # the requested, per-worker, and workspace timeouts wins.
-        _ws_timeout = _ws_default_int("default_timeout_seconds")
-        if _ws_timeout:
-            timeout_seconds = min(timeout_seconds, _ws_timeout)
+        # #1127/#1314: resolve the effective timeout.
+        # Workspace default_timeout_seconds is an OPT-IN ceiling (up to 3600 s).
+        # When the workspace sets a value > per-worker limits, the larger value
+        # wins (allows 1-hour runs without touching individual worker manifests).
+        # The absolute ceiling is MAX_RUN_TIMEOUT_SECONDS (3600).
+        timeout_seconds = _resolve_timeout_seconds(limits.timeout_seconds, limits)
         try:
             return await asyncio.wait_for(
                 self._run_agent_inner(

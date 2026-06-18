@@ -98,7 +98,7 @@ export function WorkerInputForm({
           className={`space-y-1.5 ${isLongInput(inp) ? "sm:col-span-2" : ""}`}
         >
           <Label className="text-sm">
-            {inp.label}
+            {inp.label || humanizeOptionLabel(inp.name)}
             {inp.required && (
               <span className="text-red-500 ml-0.5">*</span>
             )}
@@ -112,7 +112,7 @@ export function WorkerInputForm({
               placeholder={inp.placeholder}
               value={(values[inp.name] as string) || ""}
               onChange={(e) => onInputChange(inp.name, e.target.value)}
-              className="min-h-[100px] border-border"
+              className="min-h-[100px] border-0 bg-[var(--bg-2)]"
               aria-invalid={Boolean(validationErrors[inp.name])}
             />
           ) : inp.type === "select" ? (
@@ -125,7 +125,7 @@ export function WorkerInputForm({
               onValueChange={(val) => onInputChange(inp.name, val)}
             >
               <SelectTrigger
-                className="border-border w-full"
+                className="border-0 bg-[var(--bg-2)] w-full"
                 aria-invalid={Boolean(validationErrors[inp.name])}
               >
                 <SelectValue
@@ -152,7 +152,7 @@ export function WorkerInputForm({
                 onChange={(e) =>
                   onInputChange(inp.name, e.target.checked)
                 }
-                className="w-4 h-4 rounded border-border accent-black cursor-pointer"
+                className="w-4 h-4 rounded border-0 bg-[var(--bg-2)] accent-black cursor-pointer"
                 aria-invalid={Boolean(validationErrors[inp.name])}
               />
               <label
@@ -185,7 +185,7 @@ export function WorkerInputForm({
               placeholder={inp.placeholder}
               value={(values[inp.name] as string) || ""}
               onChange={(e) => onInputChange(inp.name, e.target.value)}
-              className="border-border"
+              className="border-0 bg-[var(--bg-2)]"
               aria-invalid={Boolean(validationErrors[inp.name])}
             />
           )}

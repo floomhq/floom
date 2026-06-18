@@ -135,7 +135,15 @@ export function RunDetailSplitPane({
             </Button>
           </Link>
           {run.can_replay !== false && (
-            <Button variant="outline" size="sm" onClick={onReplay}>
+            /* #1274: confirm before replaying to prevent accidental duplicate runs. */
+            <Button
+              variant="outline"
+              size="sm"
+              onClick={() => {
+                if (!window.confirm("Re-run this worker with the same inputs?")) return;
+                onReplay?.();
+              }}
+            >
               <RotateCcw className="size-3.5 mr-1.5" />
               Re-run
             </Button>
@@ -303,7 +311,7 @@ function TimelineRow({ item }: { item: TimelineItem }) {
     <div className="relative flex gap-2 pb-3 pl-1">
       <div className="flex flex-col items-center">
         <RunStatusGlyph status={item.status} className="size-4" />
-        <div className="mt-1 h-full w-px bg-border" />
+        <div className="mt-1 h-full w-px bg-[var(--line)]" />
       </div>
       <div className="min-w-0 flex-1 rounded-[var(--radius-button)] px-2 py-1 hover:bg-muted">
         <div className="flex items-center justify-between gap-2">
@@ -314,6 +322,19 @@ function TimelineRow({ item }: { item: TimelineItem }) {
       </div>
     </div>
   );
+}
+
+// R9: the in-app run detail (the /runs Collection split-pane) reuses this
+// exact ai-elements (Tool / Task / StackTrace) step+tool-call renderer instead
+// of hand-rolling its own steps table. RunDetailSplitPane stays the single
+// source of truth for transcript rendering. `RunTranscript` is the thin export
+// wrapper that lets the Collection Logs tab render the same thing.
+export function RunTranscript({ run }: { run: RunDetail }) {
+  return <TranscriptView run={run} parts={partsFromRun(run)} />;
+}
+
+export function RunToolCalls({ run }: { run: RunDetail }) {
+  return <ToolCallsView calls={run.tool_calls ?? []} />;
 }
 
 function TranscriptView({ run, parts }: { run: RunDetail; parts: RunPart[] }) {
@@ -826,7 +847,7 @@ function ApprovalView({ approval }: { approval: ApprovalEntry | null }) {
   }
   const statusColor =
     approval.status === "approved"
-      ? "text-emerald-600"
+      ? "text-[var(--positive)]"
       : approval.status === "rejected"
       ? "text-destructive"
       : "text-[var(--ink-soft)]";

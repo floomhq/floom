@@ -72,6 +72,10 @@ const PUBLIC_PROXY_PREFIXES = [
 function isPublicPage(pathname: string): boolean {
   if (pathname === "/login") return true;
   if (PUBLIC_PAGE_EXACT.includes(pathname)) return true;
+  // Dev/QA preview harness (e.g. /preview/share) — public ONLY when explicitly
+  // enabled via PREVIEW_HARNESS=1. Never reachable in production (the flag is
+  // unset there), so this is not an auth bypass for the real app surface.
+  if (process.env.PREVIEW_HARNESS === "1" && pathname.startsWith("/preview")) return true;
   return PUBLIC_PAGE_PREFIXES.some(
     (prefix) => pathname === prefix || pathname.startsWith(prefix),
   );

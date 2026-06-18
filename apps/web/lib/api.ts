@@ -265,12 +265,49 @@ export const api = {
       });
       return worker;
     },
+    setStage: async (id: string, stage: import("./types").WorkerStage) => {
+      const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}/stage`, {
+        method: "PUT",
+        body: JSON.stringify({ stage }),
+      });
+      return worker;
+    },
+    // Round-09 gap #1: persist the per-worker default inputs (the recipe column
+    // `input_values_json`) via PATCH. This is what scheduled/automated runs merge
+    // over the schema defaults (scheduler._effective_scheduled_inputs). Without
+    // this, a scheduled worker with a required input has no saved value to fire with.
+    updateInputValues: async (id: string, input_values: Record<string, unknown>) => {
+      const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}`, {
+        method: "PATCH",
+        body: JSON.stringify({ input_values }),
+      });
+      return worker;
+    },
+    // Round-09 gap #6 / #788: pause/resume hit the real lifecycle endpoints that
+    // set enabled and re-enqueue the schedule, not a raw worker.yml `enabled:` PUT.
+    pause: async (id: string) => {
+      const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}/pause`, {
+        method: "POST",
+      });
+      return worker;
+    },
+    resume: async (id: string) => {
+      const worker = await fetchJson<import("./types").WorkerDetail>(`/workers/${id}/resume`, {
+        method: "POST",
+      });
+      return worker;
+    },
     shareLink: async (id: string) => {
       const link = await fetchJson<import("./types").StandaloneShareLink>(`/workers/${encodeURIComponent(id)}/share-link`, {
         method: "POST",
       });
       return link;
     },
+    // #766: revoke (disable) a worker's public share link. POSTing again rotates a fresh one.
+    revokeShareLink: (id: string) =>
+      fetchJson<{ revoked: boolean }>(`/workers/${encodeURIComponent(id)}/share-link`, {
+        method: "DELETE",
+      }),
     importFromShare: (token: string) =>
       fetchJson<{ worker_id: string; url: string }>("/workers/import-from-share", {
         method: "POST",
@@ -398,6 +435,16 @@ export const api = {
       return run;
     },
     logs: (id: string) => fetchJson<import("./types").LogEntry[]>(`/runs/${id}/logs`),
+    // #765: mint a read-only public share link for a run (owner only). Create-or-rotate.
+    shareLink: (id: string) =>
+      fetchJson<import("./types").StandaloneShareLink>(`/runs/${encodeURIComponent(id)}/share-link`, {
+        method: "POST",
+      }),
+    // #765/#766: revoke a run's public share link.
+    revokeShareLink: (id: string) =>
+      fetchJson<{ revoked: boolean }>(`/runs/${encodeURIComponent(id)}/share-link`, {
+        method: "DELETE",
+      }),
     cancel: (id: string) =>
       fetchJson<import("./types").ActionResponse>(`/runs/${id}/cancel`, {
         method: "POST",
@@ -631,6 +678,12 @@ export const api = {
       );
       return link;
     },
+    // #766: revoke a brain pack's public share link.
+    revokePackLink: (name: string) =>
+      fetchJson<{ revoked: boolean }>(
+        `/contexts/${encodeURIComponent(name)}/share-link`,
+        { method: "DELETE" }
+      ),
     delete: (name: string, force = false) =>
       fetchJson<{ status: string; referenced_by: string[] }>(
         `/contexts/${encodeURIComponent(name)}${force ? "?force=true" : ""}`,
@@ -655,6 +708,12 @@ export const api = {
       );
       return link;
     },
+    // #766: kill a single file's public /s/<token> link (same pair as the pack).
+    revokeFileLink: (name: string, path: string) =>
+      fetchJson<{ revoked: boolean }>(
+        `/contexts/${encodeURIComponent(name)}/files/${path.split("/").map(encodeURIComponent).join("/")}/share-link`,
+        { method: "DELETE" }
+      ),
     // #777: inspect a brain .db file — tables list, or a table's rows.
     sqlite: (name: string, path: string, table?: string) => {
       const qs = table ? `?table=${encodeURIComponent(table)}` : "";
@@ -872,6 +931,22 @@ export const api = {
     peek: (id: string) =>
       fetchJson<{ emails: Array<{ subject: string; from_name: string; from_email: string; date: string }> }>(
         `/connections/${encodeURIComponent(id)}/peek`,
+        { cache: "no-store" }
+      ),
+    // #789: live tool list advertised by an MCP connection's server (dials the
+    // server; distinct from the configured mcp_allowed_tools allowlist). 503 when
+    // the server is unreachable — callers degrade to the configured allowlist.
+    tools: (id: string) =>
+      fetchJson<{ tools: string[] }>(
+        `/connections/${encodeURIComponent(id)}/tools`,
+        { cache: "no-store" }
+      ),
+    // C-B9: curated read-only tool presets for the Tools-tab allowlist editor.
+    // With `app`, returns the single preset (`tools: null` when none exists);
+    // without it, every preset keyed by canonical app slug.
+    toolPresets: (app?: string) =>
+      fetchJson<{ app?: string; tools?: string[] | null; presets?: Record<string, string[]> }>(
+        `/connections/tool-presets${app ? `?app=${encodeURIComponent(app)}` : ""}`,
         { cache: "no-store" }
       ),
   },

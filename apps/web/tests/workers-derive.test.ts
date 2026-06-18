@@ -3,6 +3,7 @@ import {
   isSystemWorker,
   workerStatusPill,
   workerStatusKey,
+  workerStageKey,
   isRecent,
   workerSmartTags,
   contentTagOptions,
@@ -46,6 +47,20 @@ describe("workerStatusKey", () => {
     expect(workerStatusKey(w({ status: "error" }))).toBe("failing");
     expect(workerStatusKey(w({ status: "missing_secret" }))).toBe("needs-attention");
     expect(workerStatusKey(w({ status: "ready" }))).toBe("healthy");
+  });
+});
+
+describe("workerStageKey", () => {
+  it("honors an explicit stage", () => {
+    expect(workerStageKey(w({ stage: "draft" }))).toBe("draft");
+    expect(workerStageKey(w({ stage: "live" }))).toBe("live");
+  });
+  it("defaults stock/example/system workers to live", () => {
+    expect(workerStageKey(w({ is_example: true }))).toBe("live");
+    expect(workerStageKey(w({ system: true }))).toBe("live");
+  });
+  it("defaults a plain new worker to draft", () => {
+    expect(workerStageKey(w({}))).toBe("draft");
   });
 });
 

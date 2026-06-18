@@ -558,6 +558,7 @@ def _worker_record_from_row(row: sqlite3.Row) -> dict[str, Any]:
         "is_example": manifest_dict.get("is_example"),
         "archived": bool(manifest_dict.get("archived", False)),
         "archive_reason": manifest_dict.get("archive_reason"),
+        "stage": manifest_dict.get("stage"),
         "tags": manifest_dict.get("tags") or [],
         "folder": manifest_dict.get("folder"),
         "status": "healthy",
@@ -742,7 +743,7 @@ class SqliteWorkerRepository:
             "SELECT w.id, w.name, w.trigger_type, w.enabled, w.owner_id, sv.manifest_json "
             "FROM workers w "
             "LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id "
-        )
+        )  # w.owner_id is returned to the caller (round-09 #1 split-brain fix)
         with get_db() as conn:
             try:
                 role_row = conn.execute(
@@ -820,6 +821,12 @@ class SqliteWorkerRepository:
                 "name": r["name"],
                 "trigger_type": r["trigger_type"],
                 "enabled": bool(r["enabled"]),
+                # owner_id lets the caller distinguish a stock/example worker the
+                # operator genuinely OWNS (OSS seed-all → shown) from a seeded
+                # stock worker surfaced only by the stock-id / public-visibility
+                # padding that the owner-scoped grid never shows (cloud → hidden).
+                # Without it Emily's list diverged from the grid (round-09 #1).
+                "owner_id": r["owner_id"],
                 "manifest_json": r["manifest_json"],
             }
             for r in rows
@@ -3382,6 +3389,17 @@ class SqliteApprovalRepository:
             row = conn.execute(
                 "SELECT * FROM approvals WHERE run_id = ? ORDER BY created_at DESC LIMIT 1",
                 (run_id,),
+            ).fetchone()
+        return _row_dict(row) if row else None
+
+    def get_by_follow_up_run_id(self, *, follow_up_run_id: str) -> dict[str, Any] | None:
+        # #418: authoritative EXECUTE-phase signal. Only approve_run sets
+        # follow_up_run_id, so a matching approved row proves the engine
+        # authorised this run's side effect.
+        with get_db() as conn:
+            row = conn.execute(
+                "SELECT * FROM approvals WHERE follow_up_run_id = ? ORDER BY created_at DESC LIMIT 1",
+                (follow_up_run_id,),
             ).fetchone()
         return _row_dict(row) if row else None
 

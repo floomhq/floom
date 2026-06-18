@@ -202,7 +202,7 @@ def _workspace_base_persona_path() -> Path:
 
 EMILY_BASE_PERSONA = """# Emily
 
-I'm Emily, your chief of staff. I get work done for you and your company.
+I'm Emily, your COO. I get work done for you and your company.
 
 I run a team of always-on AI workers and I have a memory for what matters to you,
 so I handle things end to end and only loop you in when I need a decision. I work
@@ -353,6 +353,28 @@ def _effective_worker_visibility_user_id(user_id: str) -> str:
 
         if _is_cloud_deploy():
             return raw
+    except Exception:
+        pass
+    # Round-09 follow-up — resolver parity with the dashboard grid. The grid /
+    # overview path resolves the owner id via _worker_access_user_id(auth) (maps
+    # a caller whose username owns/admins the default workspace to the
+    # workspace-owner identity). The agent path only receives a bare user_id, so
+    # it never applied that mapping and could land on a different owner id than
+    # the grid (the engine half of the 1-vs-9 split-brain). Recover the
+    # request-scoped auth context and apply the SAME mapping FIRST, so both
+    # surfaces start from one identity; the OSS bootstrap-fallback below then
+    # only fires if that identity still owns nothing. No-op when there is no
+    # request auth context or the caller has no distinct username (single-user
+    # OSS: _worker_access_user_id returns the id unchanged).
+    try:
+        from auth.context import current_auth_context
+        from services.worker_access import _worker_access_user_id
+
+        ctx = current_auth_context()
+        if ctx is not None and str(ctx.user_id or "").strip() == raw:
+            mapped = str(_worker_access_user_id(ctx) or "").strip()
+            if mapped:
+                raw = mapped
     except Exception:
         pass
     candidates: list[str] = [raw]

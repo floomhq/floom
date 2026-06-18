@@ -13,6 +13,7 @@ export type TagFamilyKey =
   | "status" // derived item state, per collection
   | "trigger" // Runs only: Scheduled · Manual · Webhook (its own family)
   | "type" // Connections only: Connection · MCP · Secret
+  | "stage" // Workers only: Draft · Live (maturity label, mess-control)
   | "visibility" // Private · Shared (SPEC §12)
   | "content"; // shared user-label vocabulary
 
@@ -22,6 +23,7 @@ export const TAG_FAMILY_ORDER: TagFamilyKey[] = [
   "status",
   "trigger",
   "type",
+  "stage",
   "visibility",
   "content",
 ];
@@ -151,7 +153,17 @@ export interface CollectionConfig<T> {
   row: (item: T) => ListRowSpec;
   card?: (item: T) => CardSpec;
 
-  detail: (item: T) => { header: DetailHeader; tabs: DetailTab[] };
+  detail: (item: T) => {
+    header: DetailHeader;
+    tabs: DetailTab[];
+    /**
+     * Optional node rendered INSIDE the primary tab row, after the tabs and
+     * right-aligned (e.g. an "Advanced ▾" group that exposes secondary tabs).
+     * Most collections omit it; the worker detail uses it so the advanced tab
+     * group is visibly on the tab row, not buried in the header overflow.
+     */
+    tabsTrailing?: ReactNode;
+  };
 
   states?: CollectionStates;
 
@@ -166,8 +178,10 @@ export interface CollectionConfig<T> {
   };
   /** Extra control-bar actions (e.g. Runs "Export CSV"), left of +Add. */
   toolbarActions?: ReactNode;
-  /** Optional banner above the list (e.g. member-visibility note). */
-  banner?: ReactNode;
+  /** Optional banner above the list (e.g. member-visibility note). When a
+   *  function, CollectionView passes an `openAdd` callback that opens the +Add
+   *  panel — used by Brain's unified drop-zone banner ("+ New folder"). */
+  banner?: ReactNode | ((openAdd: () => void) => ReactNode);
   /** Optional footer rendered below the list body (e.g. "Load more" button — B37). */
   footer?: ReactNode;
 }

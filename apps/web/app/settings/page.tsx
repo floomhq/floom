@@ -49,6 +49,12 @@ import { ClaimSuccessOverlay, type ClaimChannel } from "@/components/channels/Cl
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
 import { EmilyAvatar } from "@/components/emily/EmilyAvatar";
+import {
+  useAssistantName,
+  setCachedAssistantName,
+  ASSISTANT_NAME_KEY,
+  DEFAULT_ASSISTANT_NAME,
+} from "@/lib/workspace/assistant-name";
 import { modelLabel } from "@/lib/model-labels";
 import { cn } from "@/lib/utils";
 import {
@@ -331,7 +337,8 @@ export function WorkspaceTokensPanel() {
           {tokens.length > 0 ? (
             <div className="space-y-1">
               {tokens.map((t) => (
-                <div key={t.id} className="flex items-center gap-3 rounded-[var(--radius-card)] [border:var(--bd-card)] px-3 py-2 text-sm">
+                <div key={t.id} className="flex items-center gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2 text-sm">
+
                   <div className="flex-1 min-w-0">
                     <span className="font-medium">{t.name}</span>
                     <span className="ml-2 text-xs text-muted-foreground">
@@ -1139,7 +1146,7 @@ function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser |
       <section className="space-y-3">
         <h2 className="text-sm font-medium text-muted-foreground">Profile</h2>
         <div className="flex items-center gap-4">
-          <div className="size-14 shrink-0 rounded-full bg-muted text-foreground grid place-items-center text-lg font-medium">
+          <div className="size-14 shrink-0 rounded-[var(--radius-card)] bg-muted text-foreground grid place-items-center text-lg font-medium">
             {initials}
           </div>
           <div className="min-w-0">
@@ -1285,6 +1292,16 @@ export function BehaviourSettings({ canEdit = true }: { canEdit?: boolean }) {
   return <BehaviourSettingsInner canEdit={canEdit} />;
 }
 
+// Round-09 trust fix (silent no-op #2): the failure-email toggle is useless
+// without a recipient. Mirror the backend's `failure_email_to` validator
+// (routers/workspace.py: comma-separated emails) so the operator can't enable
+// the toggle and silently email nobody.
+const _FAILURE_EMAIL_RE = /^[^@\s,]+@[^@\s,]+\.[^@\s,]+$/;
+function failureRecipientsValid(raw: string): boolean {
+  const parts = raw.split(",").map((p) => p.trim()).filter(Boolean);
+  return parts.length > 0 && parts.every((p) => _FAILURE_EMAIL_RE.test(p));
+}
+
 function BehaviourSettingsInner({ canEdit }: { canEdit: boolean }) {
   const [values, setValues] = useState<Record<string, string> | null>(null);
 
@@ -1297,6 +1314,13 @@ function BehaviourSettingsInner({ canEdit }: { canEdit: boolean }) {
 
   const toggle = (key: string, next: boolean) => {
     if (!canEdit) return;
+    // The failure-email toggle is a no-op unless a recipient is configured.
+    // Block turning it ON with an empty/invalid recipient so the operator never
+    // believes failures are emailed when they are not.
+    if (key === "failure_email_enabled" && next && !failureRecipientsValid(values?.failure_email_to ?? "")) {
+      toast.error("Add a failure-email recipient before enabling failure emails.");
+      return;
+    }
     setValues((prev) => ({ ...(prev ?? {}), [key]: next ? "true" : "false" }));
     api.workspace.setSetting(key, next ? "true" : "false").catch((err) => {
       toast.error((err as Error).message || "Could not save setting");
@@ -1308,18 +1332,53 @@ function BehaviourSettingsInner({ canEdit }: { canEdit: boolean }) {
     });
   };
 
+  const saveRecipient = (raw: string) => {
+    if (!canEdit) return;
+    const v = raw.trim();
+    if (v === (values?.failure_email_to ?? "")) return;
+    if (v && !failureRecipientsValid(v)) {
+      toast.error("Enter a valid email (comma-separated for multiple).");
+      return;
+    }
+    setValues((prev) => ({ ...(prev ?? {}), failure_email_to: v }));
+    api.workspace.setSetting("failure_email_to", v).catch((err) => {
+      toast.error((err as Error).message || "Could not save recipient");
+      api.workspace.getSettings().then(setValues).catch(() => {});
+    });
+  };
+
   if (values === null) return <Skeleton className="h-24 w-full" />;
   return (
     <div className="space-y-4">
       {BEHAVIOUR_TOGGLES.map((t) => (
-        <ToggleRow
-          key={t.key}
-          title={t.title}
-          description={t.description}
-          disabled={!canEdit}
-          checked={values[t.key] === "true"}
-          onCheckedChange={(v) => toggle(t.key, v)}
-        />
+        <div key={t.key} className="space-y-3">
+          <ToggleRow
+            title={t.title}
+            description={t.description}
+            disabled={!canEdit}
+            checked={values[t.key] === "true"}
+            onCheckedChange={(v) => toggle(t.key, v)}
+          />
+          {t.key === "failure_email_enabled" && (
+            <div className="space-y-1.5 pl-1">
+              <Label htmlFor="failure-email-to" className="text-sm">
+                Send failure emails to
+              </Label>
+              <Input
+                id="failure-email-to"
+                type="text"
+                defaultValue={values.failure_email_to ?? ""}
+                placeholder="ops@acme.com, oncall@acme.com"
+                className="max-w-xs"
+                disabled={!canEdit}
+                onBlur={(e) => saveRecipient(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Required to enable failure emails. Comma-separate multiple recipients.
+              </p>
+            </div>
+          )}
+        </div>
       ))}
     </div>
   );
@@ -1338,7 +1397,13 @@ const MODEL_DEFAULT_FIELDS: {
 }[] = [
   { key: "default_model", label: "Default model", placeholder: "e.g. claude-opus-4-8", type: "text", hint: "Used by new workers that don't pin a model." },
   { key: "max_output_tokens", label: "Max output tokens", placeholder: "e.g. 4096", type: "number", hint: "Per-run output ceiling." },
-  { key: "spend_cap_usd", label: "Monthly spend cap (USD)", placeholder: "e.g. 100", type: "number", hint: "Soft cap for run costs this month." },
+  // Round-09 trust fix B1: MUST be "monthly_spend_cap_usd" — run_cost.py reads
+  // exactly this key and the workspace-settings allow-list only accepts it. The
+  // UI previously wrote "spend_cap_usd" (not in the allow-list → 422 on save),
+  // so the operator's cap was a silent no-op and nothing was ever enforced.
+  { key: "monthly_spend_cap_usd", label: "Monthly spend cap (USD)", placeholder: "e.g. 100", type: "number", hint: "Soft cap for run costs this month." },
+  // #1444: per-workspace worker-to-worker fan-out cap (backend allow-list key
+  // "worker_call_fanout_limit", validated 1..MAX_WORKER_CALLS_PER_RUN).
   { key: "worker_call_fanout_limit", label: "Worker-call fan-out limit", placeholder: "e.g. 50 (max 50)", type: "number", hint: "Max child runs one run can spawn via worker-to-worker calls. Capped at 50." },
 ];
 
@@ -1558,6 +1623,65 @@ function SettingsHistoryMenu({
   );
 }
 
+// Round-09 (Federico 2026-06-17): the assistant name is a workspace setting.
+// Renaming here writes the `assistant_name` KV and propagates to every visible
+// surface (chat header, channels copy, approvals copy) via useAssistantName().
+function AssistantNameSection({ canEdit }: { canEdit: boolean }) {
+  const current = useAssistantName();
+  const [value, setValue] = useState(current);
+  const [original, setOriginal] = useState(current);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setValue(current);
+    setOriginal(current);
+  }, [current]);
+
+  const dirty = value.trim() !== original && value.trim().length > 0;
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    const next = value.trim();
+    if (!canEdit || !next || saving) return;
+    setSaving(true);
+    try {
+      await api.workspace.setSetting(ASSISTANT_NAME_KEY, next);
+      setCachedAssistantName(next);
+      setOriginal(next);
+      toast.success(`Assistant renamed to "${next}"`);
+    } catch (err) {
+      toast.error((err as Error).message || "Could not rename the assistant");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <div>
+        <h3 className="text-sm font-medium">Name</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          What your assistant is called across the app, channels, and approvals.
+        </p>
+      </div>
+      <form onSubmit={(e) => void save(e)} className="flex gap-2">
+        <Input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={DEFAULT_ASSISTANT_NAME}
+          maxLength={32}
+          disabled={!canEdit}
+          className="max-w-xs"
+          aria-label="Assistant name"
+        />
+        <Button type="submit" size="sm" disabled={!canEdit || !dirty || saving}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </form>
+    </section>
+  );
+}
+
 function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: boolean }) {
   const [agent, setAgent] = useState<WorkspaceAgentInfo | null>(null);
   const [base, setBase] = useState("");
@@ -1575,6 +1699,7 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
   const [error, setError] = useState<string | null>(null);
   const [versionsKey, setVersionsKey] = useState(0);
   const [baseVersionsKey, setBaseVersionsKey] = useState(0);
+  const assistantName = useAssistantName();
 
   const canEdit = canManageWorkspace && agent?.permissions?.can_edit !== false;
   const dirty = instructions !== originalInstructions;
@@ -1674,8 +1799,8 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
       <div className="flex flex-wrap items-center gap-3">
         <EmilyAvatar size="md" />
         <div className="min-w-0">
-          <h2 className="text-sm font-medium">Emily</h2>
-          <p className="text-xs text-muted-foreground">Persona, workspace notes, and compiled prompt.</p>
+          <h2 className="text-sm font-medium">{assistantName}</h2>
+          <p className="text-xs text-muted-foreground">Name, persona, workspace notes, and compiled prompt.</p>
         </div>
         {agent?.model ? <Badge variant="outline" className="text-xs">{modelLabel(agent.model)}</Badge> : null}
         {agent ? (
@@ -1683,8 +1808,8 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
             <AssetVisibilityControl
               visibility={agent.visibility}
               canShare={canEdit && (agent.permissions?.can_share ?? true)}
-              noun="Emily"
-              titleLabel="Emily visibility"
+              noun={assistantName}
+              titleLabel={`${assistantName} visibility`}
               onApply={async (next) => {
                 const updated = await api.system.setAssistantVisibility(next);
                 setAgent(updated);
@@ -1694,6 +1819,8 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
           </span>
         ) : null}
       </div>
+
+      <AssistantNameSection canEdit={canEdit} />
 
       <Tabs defaultValue="base">
         <TabsList>
@@ -1707,10 +1834,10 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-medium">Emily persona</h3>
+                    <h3 className="text-sm font-medium">{assistantName} persona</h3>
                     <Badge variant="outline" className="text-xs">{baseIsCustom ? "Custom" : "Built-in default"}</Badge>
                   </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Emily&apos;s core identity and style.</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{assistantName}&apos;s core identity and style.</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <SettingsHistoryMenu

@@ -10,6 +10,7 @@ import { Sidebar } from "@/components/layout/sidebar";
 import { DeepLinkRouter } from "@/components/layout/DeepLinkRouter";
 import { EmilyDock, EmilyMobileSheet } from "@/components/emily/EmilyChat";
 import { AlertsBell } from "@/components/overview/AlertsBell";
+import { BootSplash } from "@/components/layout/BootSplash";
 
 // Render exactly one Emily surface so only one chat instance mounts: the
 // desktop dock (≥768px) or the mobile bottom-sheet (<768px). Defaults to
@@ -30,7 +31,7 @@ function useIsDesktop(): boolean {
 // sidebar / command palette. /w and /s are standalone public share pages.
 // /login is the access gate -- it must render without sidebar chrome (and is
 // the one page reachable while logged out, see middleware.ts).
-const standalonePrefixes = ["/approvals/review", "/w", "/s", "/login", "/run"];
+const standalonePrefixes = ["/approvals/review", "/w", "/s", "/login", "/run", "/preview"];
 
 // The full-page /chat route renders its own Emily header; no dock needed there.
 // /workers/new is the hero hire flow — it needs full-width, no dock cramping it.
@@ -40,7 +41,7 @@ const noDockPrefixes = ["/chat", "/workers/new"];
 // must reach the bottom of the viewport). They render inside the standard
 // sidebar shell but WITHOUT the max-w-7xl/padding content wrapper so the
 // Collection's flex-column can fill the available height correctly. (#1101)
-const fullBleedCollectionPaths = ["/brain", "/workers", "/runs", "/connections", "/approvals"];
+const fullBleedCollectionPaths = ["/library", "/brain", "/workers", "/runs", "/connections", "/approvals"];
 
 export type AppShellProps = {
   children: React.ReactNode;
@@ -81,6 +82,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
   if (standalone) {
     return (
       <>
+        <BootSplash />
         <IconSprite />
         <Ambient />
         <main className="relative z-10 min-h-screen w-full">{children}</main>
@@ -93,6 +95,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
     // Full-page chat: sidebar + full-bleed main (no content padding, no dock)
     return (
       <>
+        <BootSplash />
         <IconSprite />
         <Ambient />
         <DeepLinkRouter />
@@ -109,6 +112,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
 
   return (
     <>
+      <BootSplash />
       <IconSprite />
       <Ambient />
       <DeepLinkRouter />

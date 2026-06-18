@@ -140,8 +140,10 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
 
   const header = config.hideTitle ? null : (
     <div style={{ padding: `22px ${PAGE_X}px 0` }}>
-      <div style={{ display: "flex", alignItems: "center", gap: 18 }}>
-        <div>
+      {/* #1266: min-w-0 + overflow:hidden keeps the row from spilling on narrow
+          viewports. c-counts is horizontally scrollable at ≤389px. */}
+      <div style={{ display: "flex", alignItems: "center", gap: 18, minWidth: 0, overflow: "hidden" }}>
+        <div style={{ minWidth: 0, flexShrink: 1 }}>
           <div style={{ fontSize: 23, fontWeight: 600, letterSpacing: "-0.02em" }}>
             {config.title}
           </div>
@@ -150,7 +152,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           )}
         </div>
         {config.counts && config.counts.length > 0 && (
-          <div className="c-counts" style={{ marginLeft: "auto" }}>
+          <div className="c-counts" style={{ marginLeft: "auto", flexShrink: 0 }}>
             {config.counts.map((c, i) => (
               <span className="ct" key={i}>
                 <b>{c.value}</b> {c.label}
@@ -215,6 +217,20 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
       <Plus size={14} /> {config.add.label}
     </button>
   );
+
+  // Opens the +Add panel (or runs onSelect) — shared by the toolbar add button
+  // and a function-form banner (e.g. Brain's "+ New folder" drop-zone link).
+  const openAdd = () => {
+    if (config.add?.panel) {
+      patch({ sel: null, tab: null });
+      setListCollapsed(false);
+      setCreating(true);
+    } else {
+      config.add?.onSelect?.();
+    }
+  };
+  const resolvedBanner =
+    typeof config.banner === "function" ? config.banner(openAdd) : config.banner;
 
   // ---- pagination (resting list only, not compact split-left) ----
   const totalPages = Math.ceil(filtered.length / LIST_PAGE_SIZE);
@@ -386,7 +402,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           )}
           <div className="c-body" style={{ marginTop: 14 }}>
             <div className="c-listcol" ref={bodyRef} style={{ padding: `0 ${PAGE_X}px 26px` }}>
-              {config.banner}
+              {resolvedBanner}
               {listOrGrid(false)}
               {config.footer}
             </div>
@@ -409,7 +425,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
             </div>
             <div className="c-splitbar">{searchBox(true)}</div>
             <div className="lcin">
-              {config.banner}
+              {resolvedBanner}
               {listOrGrid(true)}
             </div>
           </div>
@@ -435,6 +451,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
                 <DetailPane
                   header={detail.header}
                   tabs={detail.tabs}
+                  tabsTrailing={detail.tabsTrailing}
                   activeTab={activeTabKey}
                   onTab={(key) => patch({ tab: key })}
                   onClose={close}

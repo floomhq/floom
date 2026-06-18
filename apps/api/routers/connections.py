@@ -33,6 +33,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from auth import AuthContext, get_auth_context
+from core import hot_cache
 from core.utils import _parse_iso8601, row_to_dict
 from db import Repositories, get_repos, get_repositories, now_iso
 from models import (
@@ -51,6 +52,11 @@ from services.worker_access import _list_visible_workers, _worker_connection_slu
 logger = logging.getLogger("floom.api")
 
 connections_router = APIRouter()
+
+
+def _invalidate_connections_cache(user_id: str) -> None:
+    """Drop the connections list hot-cache entry for this user after a mutation."""
+    hot_cache.delete(("connections", user_id))
 
 def _connection_row_for_user(
     connection_id: str,
@@ -702,22 +708,49 @@ def list_connection_tool_presets(
 
 def _connections_last_used(user_id: str, repos: Repositories) -> Dict[str, tuple[str, str]]:
     """#802: map connection slug -> (last_used_at, worker_name) from the most
-    recent run of any worker declaring that connection. One pass over visible
-    workers; O(workers) recent-run lookups."""
+    recent run of any worker declaring that connection.
+
+    Uses a single batch SQL query (MAX created_at GROUP BY worker_id) instead of
+    one list_for_worker call per worker (#1278 perf fix). Falls back to empty on
+    any error so the connections list still renders.
+    """
     last_used: Dict[str, tuple[str, str]] = {}
     try:
-        for w in _list_visible_workers(user_id=user_id, repos=repos, use_cache=True):
+        workers = _list_visible_workers(user_id=user_id, repos=repos, use_cache=True)
+        # Collect (worker_id -> (slugs, name)) for workers that declare connections.
+        worker_slugs: Dict[str, tuple[list[str], str]] = {}
+        for w in workers:
             slugs = [s.lower() for s in _worker_connection_slugs(w)]
-            if not slugs:
+            if slugs:
+                worker_slugs[w["id"]] = (slugs, str(w.get("name") or w["id"]))
+        if not worker_slugs:
+            return {}
+        # Batch-fetch the most recent run timestamp per worker in one SQL call.
+        worker_ids = list(worker_slugs.keys())
+        from db import get_db
+        placeholders = ",".join("?" for _ in worker_ids)
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT r.worker_id, MAX(r.created_at) AS last_run_at
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE w.owner_id = ?
+                  AND r.worker_id IN ({placeholders})
+                GROUP BY r.worker_id
+                """,
+                [user_id, *worker_ids],
+            ).fetchall()
+        for row in rows:
+            wid = row[0] if isinstance(row, (list, tuple)) else row.get("worker_id")
+            ts = row[1] if isinstance(row, (list, tuple)) else row.get("last_run_at")
+            if not wid or not ts:
                 continue
-            recent = repos.runs.list_for_worker(user_id=user_id, worker_id=w["id"], limit=1, offset=0)
-            if not recent:
+            ts = str(ts)
+            entry = worker_slugs.get(str(wid))
+            if not entry:
                 continue
-            run = recent[0]
-            ts = str(run.get("created_at") or "")
-            if not ts:
-                continue
-            wname = str(w.get("name") or w["id"])
+            slugs, wname = entry
             for slug in slugs:
                 prev = last_used.get(slug)
                 if prev is None or ts > prev[0]:
@@ -732,6 +765,11 @@ def list_connections(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[ConnectionItem]:
+    cache_key = ("connections", auth.user_id)
+    cached = hot_cache.get(cache_key)
+    if cached is not None:
+        return cached
+
     rows = repos.connections.list(user_id=auth.user_id)
     if not rows:
         return []
@@ -770,6 +808,7 @@ def list_connections(
         ):
             continue
         result.append(_public_connection_item(d))
+    hot_cache.set(cache_key, result)
     return result
 
 
@@ -864,6 +903,7 @@ def initiate_connection(
         updated_at=now,
     )
 
+    _invalidate_connections_cache(auth.user_id)
     return ConnectionInitResponse(
         id=conn_id,
         app_name=app_name,
@@ -915,6 +955,7 @@ def create_mcp_connection(
     )
     item = row_to_dict(row)
     item["scopes"] = _parse_scopes_json(item.pop("scopes_json", None))
+    _invalidate_connections_cache(auth.user_id)
     return _public_connection_item(item)
 
 
@@ -1020,6 +1061,10 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
             now=now,
         )
 
+    # Invalidate the connections list cache for the owner so the next list
+    # request reflects the updated OAuth status.
+    if existing:
+        hot_cache.delete(("connections", existing["user_id"]))
     redirect_qs = "connected=1"
     if landing_app:
         redirect_qs += f"&app={urllib.parse.quote(landing_app)}"
@@ -1175,7 +1220,7 @@ def delete_connection(
             logger.warning("Could not revoke Composio connection %s: %s", composio_conn_id, exc)
 
     repos.connections.delete(user_id=user_id, composio_id=connection_id)
-
+    _invalidate_connections_cache(user_id)
     return {"status": "deleted"}
 
 

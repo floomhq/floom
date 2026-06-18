@@ -102,6 +102,24 @@ def _stub_side_effect(monkeypatch, _pin_db_to_this_module):
             _n["i"] += 1
             rid = f"run_followup_{_n['i']}"
             spawned.append(rid)
+        # #418: the approve handler now flips the follow-up run to QUEUED after
+        # attaching its approval linkage (closing the dispatch race). Insert a
+        # real row so that flip succeeds, mirroring production create_run. We
+        # still count spawns via `spawned` — the gate behaviour under test is
+        # unchanged.
+        try:
+            repos = main.get_repositories()
+            repos.runs.create(
+                user_id=_OWNER,
+                run_id=rid,
+                worker_id=worker_id,
+                status=kwargs.get("status") or main.RunStatus.RUNNING.value,
+                trigger_source=kwargs.get("trigger_source") or "approval",
+                runner="e2b",
+                input_json=inputs,
+            )
+        except Exception:
+            pass
         return rid
 
     def _fake_start_run(*args, **kwargs):

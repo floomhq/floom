@@ -156,7 +156,7 @@ export function WorkerBrainEditor({
           );
         })}
         {contexts.length === 0 && (
-          <div style={{ color: "var(--muted-foreground)", padding: 14 }}>No brain folders attached.</div>
+          <div style={{ color: "var(--muted-foreground)", padding: 14 }}>No library folders attached.</div>
         )}
       </div>
 
