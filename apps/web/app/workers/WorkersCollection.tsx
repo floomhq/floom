@@ -142,12 +142,16 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: Work
       return;
     }
     let alive = true;
+    // settled = true once the load resolves or fails, so the safety timeout
+    // below does not overwrite a successfully-loaded detail (stale-closure fix).
+    let settled = false;
     // Retry once before surfacing an error — a transiently slow backend should
     // not strand the detail tabs on "Could not load" (#1279 + round-03 source-load).
     const load = (attempt: number) => {
       api.workers
         .get(id)
         .then((d) => {
+          settled = true;
           detailCache.set(id, d);
           if (alive) setDetail(d);
         })
@@ -155,6 +159,7 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: Work
           if (!alive) return;
           if (attempt < 1) setTimeout(() => load(attempt + 1), 1500);
           else {
+            settled = true;
             // #1446: per-worker detail; log only (no toast per expanded worker).
             logError("Could not load worker details.", err);
             setDetail(null); // null = failed to load → tabs show error, not a spinner
@@ -163,9 +168,10 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: Work
     };
     load(0);
     // Safety timeout: if the API proxy hangs entirely, surface an error after 25 s
-    // (long enough to cover the retry above).
+    // (long enough to cover the retry above). Guard with `settled` so a
+    // successfully-loaded detail is never overwritten by this stale callback.
     const timeout = setTimeout(() => {
-      if (alive && detail === undefined) setDetail(null);
+      if (alive && !settled) setDetail(null);
     }, 25_000);
     return () => {
       alive = false;
