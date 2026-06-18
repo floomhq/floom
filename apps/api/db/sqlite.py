@@ -2835,6 +2835,94 @@ class SqliteRunRepository:
                     )
         return failed
 
+    def fail_stale_running_without_sandbox_logs(
+        self,
+        *,
+        cutoff_iso: str,
+        exclude_run_ids: Iterable[str] = (),
+        error: str,
+        error_code: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fail running rows that were claimed but never reached sandbox startup logs."""
+        completed_at = now_iso()
+        excluded = [str(run_id) for run_id in exclude_run_ids if str(run_id)]
+        exclude_clause = ""
+        params: list[Any] = [cutoff_iso]
+        if excluded:
+            placeholders = ",".join("?" for _ in excluded)
+            exclude_clause = f"AND r.id NOT IN ({placeholders})"
+            params.extend(excluded)
+
+        with get_db() as conn:
+            rows = conn.execute(
+                f"""
+                SELECT r.id, r.started_at, r.created_at, w.owner_id AS user_id
+                FROM runs r
+                JOIN workers w ON w.id = r.worker_id
+                WHERE r.status = 'running'
+                  AND COALESCE(r.started_at, r.created_at) < ?
+                  {exclude_clause}
+                  AND NOT EXISTS (
+                      SELECT 1
+                      FROM logs l
+                      WHERE l.run_id = r.id
+                        AND (
+                            l.message LIKE '[e2b] Preparing sandbox%'
+                            OR l.message LIKE '[e2b] Spawning sandbox%'
+                            OR l.message LIKE '[e2b] Sandbox ready%'
+                            OR l.message LIKE '[e2b] Running worker%'
+                        )
+                  )
+                ORDER BY COALESCE(r.started_at, r.created_at) ASC
+                """,
+                tuple(params),
+            ).fetchall()
+            failed: list[dict[str, Any]] = []
+            for row in rows:
+                normalized_error, normalized_error_code = _normalize_failed_error_fields(
+                    run_id=row["id"],
+                    error=error,
+                    error_code=error_code,
+                )
+                started_at = row["started_at"] or row["created_at"]
+                duration_ms = None
+                if started_at:
+                    try:
+                        import datetime as _dt
+
+                        started = _dt.datetime.fromisoformat(started_at)
+                        completed = _dt.datetime.fromisoformat(completed_at)
+                        duration_ms = int((completed - started).total_seconds() * 1000)
+                    except Exception:
+                        duration_ms = None
+                cursor = conn.execute(
+                    """
+                    UPDATE runs
+                    SET status = ?, error = ?, error_code = ?, completed_at = ?, duration_ms = ?
+                    WHERE id = ? AND status = 'running'
+                    """,
+                    (
+                        RunStatus.FAILED.value,
+                        normalized_error,
+                        normalized_error_code,
+                        completed_at,
+                        duration_ms,
+                        row["id"],
+                    ),
+                )
+                if cursor.rowcount:
+                    failed.append(
+                        {
+                            "id": row["id"],
+                            "run_id": row["id"],
+                            "user_id": row["user_id"],
+                            "started_at": row["started_at"],
+                            "created_at": row["created_at"],
+                            "completed_at": completed_at,
+                        }
+                    )
+        return failed
+
     def fail_all_pending_approval(
         self,
         *,
