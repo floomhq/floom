@@ -467,6 +467,14 @@ class ApprovalRepository(Protocol):
         """
         ...
 
+    def expire_if_stale(self, *, approval_id: str, now_iso_str: str) -> bool:
+        """#798 LAZY: atomically flip one pending approval past its expires_at
+        to 'expired' and move its run off pending_approval. Returns True iff
+        this call performed the flip (idempotent + race-safe via a guarded
+        UPDATE). Mirrors the hourly sweep's per-row logic.
+        """
+        ...
+
     def list_pending(self, *, owner_id: str, limit: int = 100) -> list[RowDict]: ...
 
     def count_pending(self, *, owner_id: str) -> int: ...
