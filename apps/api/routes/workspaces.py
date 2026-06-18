@@ -13,6 +13,9 @@ v1 is intentionally minimal: no invites, no roles, no rename, no delete.
 from __future__ import annotations
 
 import io
+import copy
+import threading
+import time
 from datetime import datetime, timedelta, timezone
 from urllib.parse import urlparse
 
@@ -37,6 +40,9 @@ router = APIRouter(prefix="/workspaces", tags=["workspaces"])
 
 # 30 days, matching the brief.
 _COOKIE_MAX_AGE_SECONDS = 30 * 24 * 3600
+_WORKSPACE_LIST_CACHE_TTL_SECONDS = 15.0
+_workspace_list_cache_lock = threading.Lock()
+_workspace_list_cache: dict[str, tuple[float, list["WorkspaceOut"]]] = {}
 
 
 class CreateWorkspaceRequest(BaseModel):
@@ -163,6 +169,42 @@ def _to_out(row: dict, role: str = "admin") -> WorkspaceOut:
     )
 
 
+def _workspace_cache_get(user_id: str) -> list[WorkspaceOut] | None:
+    now = time.monotonic()
+    with _workspace_list_cache_lock:
+        item = _workspace_list_cache.get(user_id)
+        if item is None:
+            return None
+        expires_at, value = item
+        if expires_at <= now:
+            _workspace_list_cache.pop(user_id, None)
+            return None
+        return copy.deepcopy(value)
+
+
+def _workspace_cache_set(user_id: str, value: list[WorkspaceOut]) -> None:
+    now = time.monotonic()
+    with _workspace_list_cache_lock:
+        if len(_workspace_list_cache) >= 256:
+            for key, (expires_at, _) in list(_workspace_list_cache.items()):
+                if expires_at <= now:
+                    _workspace_list_cache.pop(key, None)
+            if len(_workspace_list_cache) >= 256:
+                _workspace_list_cache.pop(next(iter(_workspace_list_cache)))
+        _workspace_list_cache[user_id] = (
+            now + _WORKSPACE_LIST_CACHE_TTL_SECONDS,
+            copy.deepcopy(value),
+        )
+
+
+def _workspace_cache_clear(user_id: str | None = None) -> None:
+    with _workspace_list_cache_lock:
+        if user_id:
+            _workspace_list_cache.pop(user_id, None)
+        else:
+            _workspace_list_cache.clear()
+
+
 def _share_url(token: str) -> str:
     settings = get_cloud_settings()
     return f"{settings.frontend_url.rstrip('/')}/workspace/share/{token}"
@@ -208,32 +250,35 @@ async def list_workspaces(
     request: Request,
     auth: AuthContext = Depends(get_auth_context),
 ) -> WorkspaceListResponse:
-    owned = workspace_repo.list_for_owner(owner_user_id=auth.user_id)
-    member_rows = workspace_repo.list_member_workspaces(user_id=auth.user_id)
+    all_workspaces = _workspace_cache_get(auth.user_id)
+    if all_workspaces is None:
+        owned = workspace_repo.list_for_owner(owner_user_id=auth.user_id)
+        member_rows = workspace_repo.list_member_workspaces(user_id=auth.user_id)
 
-    if not owned and not member_rows:
-        # Lazy-bootstrap a default workspace for brand-new users.
-        owned = [
-            workspace_repo.resolve_active_workspace(
-                user_id=auth.user_id,
-                email=auth.email,
-                requested_id=None,
-            )
-        ]
+        if not owned and not member_rows:
+            # Lazy-bootstrap a default workspace for brand-new users.
+            owned = [
+                workspace_repo.resolve_active_workspace(
+                    user_id=auth.user_id,
+                    email=auth.email,
+                    requested_id=None,
+                )
+            ]
 
-    # Build combined list: owned workspaces (role='admin') first, then member
-    # workspaces (role from workspace_members) in joined-at order.
-    all_workspaces: list[WorkspaceOut] = []
-    seen_ids: set[str] = set()
-    for row in owned:
-        ws_id = str(row["id"])
-        seen_ids.add(ws_id)
-        all_workspaces.append(_to_out(row, role="admin"))
-    for row in member_rows:
-        ws_id = str(row["id"])
-        if ws_id not in seen_ids:  # guard against owner also appearing as member
+        # Build combined list: owned workspaces (role='admin') first, then member
+        # workspaces (role from workspace_members) in joined-at order.
+        all_workspaces = []
+        seen_ids: set[str] = set()
+        for row in owned:
+            ws_id = str(row["id"])
             seen_ids.add(ws_id)
-            all_workspaces.append(_to_out(row, role=str(row.get("role") or "member")))
+            all_workspaces.append(_to_out(row, role="admin"))
+        for row in member_rows:
+            ws_id = str(row["id"])
+            if ws_id not in seen_ids:  # guard against owner also appearing as member
+                seen_ids.add(ws_id)
+                all_workspaces.append(_to_out(row, role=str(row.get("role") or "member")))
+        _workspace_cache_set(auth.user_id, all_workspaces)
 
     token_workspace_id = get_active_workspace_id() if auth.auth_method == "pat" else None
     if token_workspace_id:
@@ -274,6 +319,7 @@ async def create_workspace(
     auth: AuthContext = Depends(get_auth_context),
 ) -> WorkspaceOut:
     created = workspace_repo.create(owner_user_id=auth.user_id, name=payload.name)
+    _workspace_cache_clear(auth.user_id)
     return _to_out(created)
 
 
@@ -309,6 +355,7 @@ async def update_workspace(
     if workspace is None or str(workspace["owner_user_id"]) != auth.user_id:
         raise HTTPException(status_code=404, detail="workspace not found")
     updated = workspace_repo.rename(workspace_id=workspace_id, name=payload.name.strip())
+    _workspace_cache_clear(auth.user_id)
     return _to_out(updated)
 
 
@@ -358,6 +405,8 @@ async def transfer_workspace(
         )
     except PermissionError as exc:
         raise HTTPException(status_code=404, detail="workspace not found") from exc
+    _workspace_cache_clear(auth.user_id)
+    _workspace_cache_clear(recipient_user_id)
 
     return WorkspaceTransferResponse(
         workspace=_to_out(result["workspace"]),
