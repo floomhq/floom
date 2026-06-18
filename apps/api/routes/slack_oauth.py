@@ -76,20 +76,24 @@ def _append_success_params(return_to: str, *, team_id: str, claim: str) -> str:
 
 
 @router.get("/slack/install/start")
-async def slack_install_start(request: Request) -> RedirectResponse:
+async def slack_install_start(
+    request: Request,
+    auth: AuthContext = Depends(get_auth_context),
+) -> RedirectResponse:
     if not slack_db.install_enabled():
         raise HTTPException(status_code=503, detail="Slack installs are disabled")
     client_ip = _client_ip(request)
     slack_db.enforce_global_rate_limit()
     slack_db.enforce_ip_rate_limit(ip=client_ip, limit=5 if client_ip is None else 20)
     state, _expires_at = engine_main._issue_slack_oauth_state(
-        user_id="",
+        user_id=auth.user_id,
         return_to="/slack/installed",
     )
     install_url = engine_main._slack_install_url(state=state)
     slack_db.audit(
         action="install_start",
         ip=client_ip or "unknown",
+        actor_user_id=auth.user_id,
         user_agent=request.headers.get("user-agent"),
         metadata={"redirect_host": urllib.parse.urlparse(install_url).netloc},
     )

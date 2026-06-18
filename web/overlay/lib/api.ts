@@ -4,6 +4,7 @@
 // NEXT_PUBLIC_API_PROXY_BASE="/app/api/proxy". Keeping this an env seam lets the
 // Cloud wrapper consume this file unmodified (no fork).
 import { capturePostHogEvent } from "@/lib/posthog";
+import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 const WEB_BASE_PATH = (process.env.NEXT_PUBLIC_BASE_PATH || "").replace(/\/$/, "");
@@ -20,18 +21,18 @@ function activeWorkspaceCookieAttrs(): string {
 }
 
 export function getActiveWorkspaceId(): string | null {
-  if (typeof window === "undefined" || !window.localStorage) return null;
-  const value = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+  if (typeof window === "undefined") return null;
+  const value = safeStorageGet("local", ACTIVE_WORKSPACE_STORAGE_KEY);
   return value || "local-default";
 }
 
 export function setActiveWorkspaceId(workspaceId: string | null) {
-  if (typeof window === "undefined" || !window.localStorage) return;
+  if (typeof window === "undefined") return;
   if (!workspaceId) {
-    window.localStorage.removeItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+    safeStorageRemove("local", ACTIVE_WORKSPACE_STORAGE_KEY);
     window.document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=; ${activeWorkspaceCookieAttrs()}; Max-Age=0`;
   } else {
-    window.localStorage.setItem(ACTIVE_WORKSPACE_STORAGE_KEY, workspaceId);
+    safeStorageSet("local", ACTIVE_WORKSPACE_STORAGE_KEY, workspaceId);
     window.document.cookie = `${ACTIVE_WORKSPACE_COOKIE_KEY}=${encodeURIComponent(workspaceId)}; ${activeWorkspaceCookieAttrs()}; Max-Age=31536000`;
   }
 }

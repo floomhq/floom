@@ -96,6 +96,7 @@ function allowedHosts(req: NextRequest): Set<string> {
     if (h) hosts.add(h.split(",")[0].trim().toLowerCase());
   };
   add(req.nextUrl.host);
+  add(req.headers.get("x-forwarded-host"));
   for (const entry of (process.env.CSRF_TRUSTED_ORIGINS || "").split(",")) {
     const v = entry.trim();
     if (!v) continue;

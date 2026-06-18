@@ -264,6 +264,44 @@ def test_transfer_workspace_requires_exact_confirmation(monkeypatch):
     assert exc_info.value.detail["required"] == "TRANSFER Team Alpha"
 
 
+def test_transfer_workspace_requires_active_member_recipient(monkeypatch):
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "get",
+        lambda workspace_id: {
+            "id": workspace_id,
+            "name": "Team",
+            "owner_user_id": "owner-1",
+            "created_at": "2026-01-01",
+        },
+    )
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "resolve_transfer_recipient",
+        lambda **_kwargs: {"id": "owner-2", "email": "new@example.com"},
+    )
+    monkeypatch.setattr(
+        workspace_routes.workspace_repo,
+        "get_member_role",
+        lambda *, workspace_id, user_id: None,
+    )
+
+    with pytest.raises(HTTPException) as exc_info:
+        asyncio.run(
+            workspace_routes.transfer_workspace(
+                "ws_a",
+                workspace_routes.TransferWorkspaceRequest(
+                    recipient_email="new@example.com",
+                    confirmation="TRANSFER Team",
+                ),
+                AuthContext(user_id="owner-1", email="owner@example.com", scopes=()),
+            )
+        )
+
+    assert exc_info.value.status_code == 400
+    assert exc_info.value.detail == "recipient must be an active workspace member"
+
+
 def test_transfer_workspace_flips_owner_access_and_reports_revoked_pats(monkeypatch):
     state = {
         "workspace": {
@@ -306,7 +344,7 @@ def test_transfer_workspace_flips_owner_access_and_reports_revoked_pats(monkeypa
     monkeypatch.setattr(
         workspace_routes.workspace_repo,
         "get_member_role",
-        lambda *, workspace_id, user_id: None,
+        lambda *, workspace_id, user_id: "admin" if user_id == "owner-2" else None,
     )
 
     result = asyncio.run(
@@ -582,6 +620,18 @@ class _FakeSupabaseClient:
                     "created_at": "2026-01-01",
                 }
             ],
+            "workspace_members": [
+                {"workspace_id": "ws_a", "user_id": "owner-2", "role": "admin", "status": "active"},
+                {"workspace_id": "ws_other", "user_id": "owner-2", "role": "admin", "status": "active"},
+            ],
+            "asset_versions": [
+                {"id": "av_1", "workspace_id": "ws_a", "user_id": "owner-1"},
+                {"id": "av_other", "workspace_id": "ws_other", "user_id": "owner-1"},
+            ],
+            "mcp_tools": [
+                {"id": "mcp_1", "workspace_id": "ws_a", "user_id": "owner-1"},
+                {"id": "mcp_other", "workspace_id": "ws_other", "user_id": "owner-1"},
+            ],
             "api_tokens": [
                 {"id": "tok_1", "workspace_id": "ws_a"},
                 {"id": "tok_2", "workspace_id": "ws_a"},
@@ -627,6 +677,23 @@ class _FakeTransferRpc:
             if row["workspace_id"] == workspace_id and row["revoked_at"] is None:
                 row["revoked_at"] = "2026-01-01T00:00:00+00:00"
                 revoked_share_links += 1
+        for row in self.client.rows["workspace_members"]:
+            if row["workspace_id"] == workspace_id and row["user_id"] == current_owner:
+                row["role"] = "admin"
+                row["status"] = "active"
+            if row["workspace_id"] == workspace_id and row["user_id"] == new_owner:
+                row["status"] = "removed"
+        if not any(
+            row["workspace_id"] == workspace_id and row["user_id"] == current_owner
+            for row in self.client.rows["workspace_members"]
+        ):
+            self.client.rows["workspace_members"].append(
+                {"workspace_id": workspace_id, "user_id": current_owner, "role": "admin", "status": "active"}
+            )
+        for table_name in ("asset_versions", "mcp_tools"):
+            for row in self.client.rows[table_name]:
+                if row["workspace_id"] == workspace_id and row["user_id"] == current_owner:
+                    row["user_id"] = new_owner
         workspace["owner_user_id"] = new_owner
         event = {
             "id": self.params["p_event_id"],
@@ -672,6 +739,18 @@ def test_transfer_ownership_revokes_workspace_pats_and_records_audit(monkeypatch
     assert [row["id"] for row in fake_client.rows["api_tokens"]] == ["tok_other"]
     assert fake_client.rows["workspace_share_links"][0]["revoked_at"] is not None
     assert fake_client.rows["workspace_share_links"][1]["revoked_at"] is None
+    assert {
+        (row["workspace_id"], row["user_id"], row["role"], row["status"])
+        for row in fake_client.rows["workspace_members"]
+        if row["workspace_id"] == "ws_a"
+    } == {
+        ("ws_a", "owner-1", "admin", "active"),
+        ("ws_a", "owner-2", "admin", "removed"),
+    }
+    assert fake_client.rows["asset_versions"][0]["user_id"] == "owner-2"
+    assert fake_client.rows["asset_versions"][1]["user_id"] == "owner-1"
+    assert fake_client.rows["mcp_tools"][0]["user_id"] == "owner-2"
+    assert fake_client.rows["mcp_tools"][1]["user_id"] == "owner-1"
     assert fake_client.rows["workspace_transfer_events"][0]["previous_owner_user_id"] == "owner-1"
     assert fake_client.rows["workspace_transfer_events"][0]["new_owner_user_id"] == "owner-2"
     assert fake_client.rows["workspace_transfer_events"][0]["retained_authority"] == [

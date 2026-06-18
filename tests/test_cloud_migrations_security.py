@@ -69,3 +69,16 @@ def test_vault_secret_delete_triggers_cover_workspace_cascades():
     assert "before delete on public.slack_installations" in text
     assert "old.bot_token_encrypted" in text
     assert "public.workeros_vault_delete_secret(old.bot_token_encrypted)" in text
+
+
+def test_workspace_transfer_consistency_migration_reassigns_late_tables():
+    text = _migration("0045_workspace_transfer_consistency.sql")
+    assert "recipient must be an active workspace member" in text
+    assert "update public.workspace_members" in text
+    assert "set role = 'admin'" in text
+    assert "and user_id = p_current_owner" in text
+    assert "and user_id = p_new_owner" in text
+    assert "status = 'removed'" in text
+    assert "update public.asset_versions" in text
+    assert "set user_id = p_new_owner" in text
+    assert "update public.mcp_tools" in text

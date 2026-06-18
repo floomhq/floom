@@ -422,6 +422,8 @@ function SettingsContent() {
   const [waClaimBanner, setWaClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
   const [claimedSlackToken, setClaimedSlackToken] = useState<string | null>(null);
   const [slackClaimBanner, setSlackClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
+  const [pendingClaim, setPendingClaim] = useState<{ channel: ClaimChannel; token: string } | null>(null);
+  const [claimingChannel, setClaimingChannel] = useState<ClaimChannel | null>(null);
   // the operator 2026-06-11: a successful claim shows a full-screen confirmation,
   // not just an inline banner. Channel-aware copy; null = no overlay.
   const [claimSuccess, setClaimSuccess] = useState<ClaimChannel | null>(null);
@@ -466,61 +468,71 @@ function SettingsContent() {
     const token = (searchParams.get("whatsapp_claim") || "").trim();
     if (!token || token === claimedWhatsAppToken) return;
     setClaimedWhatsAppToken(token);
-    void (async () => {
-      try {
-        await api.whatsapp.claim(token);
-        setClaimSuccess("whatsapp");
-      } catch (e: unknown) {
-        const raw = e instanceof Error ? e.message : "";
-        const friendly =
-          raw === "WhatsApp claim not found"
-            ? "This link was not found or the number is already linked."
-            : raw === "WhatsApp claim expired"
-              ? "This link has expired. Text the Floom number again to get a new one."
-              : raw || "Failed to link WhatsApp.";
-        toast.error(friendly);
-        setWaClaimBanner({ ok: false, message: friendly });
-      } finally {
-        const params = new URLSearchParams(searchParams.toString());
-        params.delete("whatsapp_claim");
-        const qs = params.size ? `?${params.toString()}` : "";
-        const hash = typeof window !== "undefined" ? window.location.hash : "";
-        const path = typeof window !== "undefined" ? window.location.pathname : "/settings";
-        window.history.replaceState(null, "", `${path}${qs}${hash}`);
-        setSearch(window.location.search);
-      }
-    })();
+    setCollectionState((prev) => ({ ...prev, sel: "channels", tab: null }));
+    setPendingClaim({ channel: "whatsapp", token });
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("whatsapp_claim");
+    const qs = params.size ? `?${params.toString()}` : "";
+    const hash = typeof window !== "undefined" ? window.location.hash : "";
+    const path = typeof window !== "undefined" ? window.location.pathname : "/settings";
+    window.history.replaceState(null, "", `${path}${qs}${hash}`);
+    setSearch(window.location.search);
   }, [claimedWhatsAppToken, searchParams]);
 
   useEffect(() => {
     const token = (searchParams.get("slack_claim") || "").trim();
     if (!token || token === claimedSlackToken) return;
     setClaimedSlackToken(token);
-    void (async () => {
-      try {
-        await api.slack.claim(token);
+    setCollectionState((prev) => ({ ...prev, sel: "channels", tab: null }));
+    setPendingClaim({ channel: "slack", token });
+    const params = new URLSearchParams(searchParams.toString());
+    params.delete("slack_claim");
+    const qs = params.size ? `?${params.toString()}` : "";
+    const hash = typeof window !== "undefined" ? window.location.hash : "";
+    const path = typeof window !== "undefined" ? window.location.pathname : "/settings";
+    window.history.replaceState(null, "", `${path}${qs}${hash}`);
+    setSearch(window.location.search);
+  }, [claimedSlackToken, searchParams]);
+
+  async function confirmPendingClaim() {
+    if (!pendingClaim || claimingChannel) return;
+    setClaimingChannel(pendingClaim.channel);
+    try {
+      if (pendingClaim.channel === "whatsapp") {
+        await api.whatsapp.claim(pendingClaim.token);
+        setClaimSuccess("whatsapp");
+        setWaClaimBanner(null);
+      } else {
+        await api.slack.claim(pendingClaim.token);
         setClaimSuccess("slack");
-      } catch (e: unknown) {
-        const raw = e instanceof Error ? e.message : "";
-        const friendly =
-          raw === "Slack claim not found"
+        setSlackClaimBanner(null);
+      }
+      setPendingClaim(null);
+    } catch (e: unknown) {
+      const raw = e instanceof Error ? e.message : "";
+      const friendly =
+        pendingClaim.channel === "whatsapp"
+          ? raw === "WhatsApp claim not found"
+            ? "This link was not found or the number is already linked."
+            : raw === "WhatsApp claim expired"
+              ? "This link has expired. Text the Floom number again to get a new one."
+              : raw || "Failed to link WhatsApp."
+          : raw === "Slack claim not found"
             ? "This link was not found or the identity is already linked."
             : raw === "Slack claim expired"
               ? "This link has expired. Send Emily a DM in Slack to get a new one."
               : raw || "Failed to link Slack identity.";
-        toast.error(friendly);
+      toast.error(friendly);
+      if (pendingClaim.channel === "whatsapp") {
+        setWaClaimBanner({ ok: false, message: friendly });
+      } else {
         setSlackClaimBanner({ ok: false, message: friendly });
-      } finally {
-        const params = new URLSearchParams(searchParams.toString());
-        params.delete("slack_claim");
-        const qs = params.size ? `?${params.toString()}` : "";
-        const hash = typeof window !== "undefined" ? window.location.hash : "";
-        const path = typeof window !== "undefined" ? window.location.pathname : "/settings";
-        window.history.replaceState(null, "", `${path}${qs}${hash}`);
-        setSearch(window.location.search);
       }
-    })();
-  }, [claimedSlackToken, searchParams]);
+      setPendingClaim(null);
+    } finally {
+      setClaimingChannel(null);
+    }
+  }
 
   // #552: consume ?from_install=<channel> placed by the login page after an
   // install-param sign-in, route to the relevant tab, show a banner.
@@ -735,6 +747,43 @@ function SettingsContent() {
             window.location.href = "/";
           }}
         />
+      )}
+
+      {pendingClaim && (
+        <Alert>
+          <ShieldAlert className="size-4" />
+          <AlertTitle>
+            Confirm {pendingClaim.channel === "whatsapp" ? "WhatsApp number" : "Slack identity"} link
+          </AlertTitle>
+          <AlertDescription>
+            <div className="space-y-3">
+              <p>
+                This claim link will connect the {pendingClaim.channel === "whatsapp" ? "WhatsApp number" : "Slack identity"} behind it to your signed-in account. Continue only if you requested this link.
+              </p>
+              <div className="flex flex-wrap gap-2">
+                <Button
+                  type="button"
+                  size="sm"
+                  onClick={() => void confirmPendingClaim()}
+                  disabled={claimingChannel !== null}
+                >
+                  {claimingChannel === pendingClaim.channel
+                    ? "Linking..."
+                    : `Link ${pendingClaim.channel === "whatsapp" ? "WhatsApp" : "Slack"}`}
+                </Button>
+                <Button
+                  type="button"
+                  variant="ghost"
+                  size="sm"
+                  onClick={() => setPendingClaim(null)}
+                  disabled={claimingChannel !== null}
+                >
+                  Cancel
+                </Button>
+              </div>
+            </div>
+          </AlertDescription>
+        </Alert>
       )}
 
       {waClaimBanner && (

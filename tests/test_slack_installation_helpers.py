@@ -1,10 +1,13 @@
 from __future__ import annotations
 
+import asyncio
 from types import SimpleNamespace
 
 import pytest
+from starlette.requests import Request
 
 from apps.api.db import slack_installations as slack_db
+from auth import AuthContext
 
 
 class _UpdateTable:
@@ -139,8 +142,6 @@ def test_verify_claim_code_rejects_different_slack_identity():
 
 
 def test_slack_install_ip_uses_cloudflare_header_not_x_forwarded_for():
-    from starlette.requests import Request
-
     from apps.api.routes import slack_oauth
 
     request = Request(
@@ -168,6 +169,51 @@ def test_slack_install_ip_uses_cloudflare_header_not_x_forwarded_for():
         }
     )
     assert slack_oauth._client_ip(missing_cf) is None
+
+
+def test_slack_install_start_binds_state_to_authenticated_user(monkeypatch):
+    from apps.api.routes import slack_oauth
+
+    state_calls: list[dict] = []
+    audit_calls: list[dict] = []
+    monkeypatch.setattr(slack_db, "install_enabled", lambda: True)
+    monkeypatch.setattr(slack_db, "enforce_global_rate_limit", lambda: None)
+    monkeypatch.setattr(slack_db, "enforce_ip_rate_limit", lambda **_kwargs: None)
+    monkeypatch.setattr(slack_db, "audit", lambda **kwargs: audit_calls.append(kwargs))
+    monkeypatch.setattr(
+        slack_oauth.engine_main,
+        "_issue_slack_oauth_state",
+        lambda **kwargs: state_calls.append(kwargs) or ("state-123", "2999-01-01T00:00:00Z"),
+    )
+    monkeypatch.setattr(
+        slack_oauth.engine_main,
+        "_slack_install_url",
+        lambda *, state: f"https://slack.example/install?state={state}",
+    )
+    request = Request(
+        {
+            "type": "http",
+            "method": "GET",
+            "path": "/slack/install/start",
+            "headers": [
+                (b"cf-connecting-ip", b"203.0.113.10"),
+                (b"user-agent", b"pytest"),
+            ],
+            "client": ("10.0.0.1", 12345),
+        }
+    )
+
+    response = asyncio.run(
+        slack_oauth.slack_install_start(
+            request,
+            AuthContext(user_id="user-1", email="u@example.com", scopes=()),
+        )
+    )
+
+    assert response.status_code == 302
+    assert response.headers["location"] == "https://slack.example/install?state=state-123"
+    assert state_calls == [{"user_id": "user-1", "return_to": "/slack/installed"}]
+    assert audit_calls[0]["actor_user_id"] == "user-1"
 
 
 def test_slack_return_to_is_limited_to_install_destinations():

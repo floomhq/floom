@@ -1,6 +1,9 @@
 "use client";
 
 import { useEffect } from "react";
+import { reportError } from "@/lib/notify";
+import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
+import { trackTelemetry } from "@/lib/telemetry";
 
 // Root error boundary. Catches any unhandled error in the app shell.
 //
@@ -32,12 +35,20 @@ export default function GlobalError({
   reset: () => void;
 }) {
   useEffect(() => {
-    if (!isChunkLoadError(error)) return;
+    if (!isChunkLoadError(error)) {
+      reportError("Unhandled app error.", error);
+      trackTelemetry("web.unhandled_error", {
+        name: error.name,
+        message: error.message,
+        digest: error.digest,
+      });
+      return;
+    }
 
     // Avoid infinite reload loops: only attempt once per session.
-    const attempted = sessionStorage.getItem(RELOAD_ATTEMPTED_KEY);
+    const attempted = safeStorageGet("session", RELOAD_ATTEMPTED_KEY);
     if (!attempted) {
-      sessionStorage.setItem(RELOAD_ATTEMPTED_KEY, "1");
+      safeStorageSet("session", RELOAD_ATTEMPTED_KEY, "1");
       window.location.reload();
     }
   }, [error]);
@@ -51,7 +62,7 @@ export default function GlobalError({
         <button
           type="button"
           onClick={() => {
-            sessionStorage.removeItem(RELOAD_ATTEMPTED_KEY);
+            safeStorageRemove("session", RELOAD_ATTEMPTED_KEY);
             reset();
           }}
           className="inline-flex h-8 items-center rounded-md [border:var(--bd-card)] bg-card px-4 text-sm font-medium hover:bg-muted transition-colors"

@@ -1,5 +1,7 @@
 "use client";
 
+import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
+
 const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
 const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
 const SESSION_STORAGE_KEY = "workeros.telemetrySessionId";
@@ -23,17 +25,15 @@ function randomId(): string {
 }
 
 export function telemetrySessionId(): string {
-  if (typeof window === "undefined") return "server";
-  const existing = window.sessionStorage.getItem(SESSION_STORAGE_KEY);
+  const existing = safeStorageGet("session", SESSION_STORAGE_KEY);
   if (existing) return existing;
   const created = randomId();
-  window.sessionStorage.setItem(SESSION_STORAGE_KEY, created);
+  safeStorageSet("session", SESSION_STORAGE_KEY, created);
   return created;
 }
 
 function activeWorkspaceId(): string | null {
-  if (typeof window === "undefined") return null;
-  const value = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
+  const value = safeStorageGet("local", ACTIVE_WORKSPACE_STORAGE_KEY);
   return value && value !== "local-default" ? value : null;
 }
 

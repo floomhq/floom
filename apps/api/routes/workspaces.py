@@ -395,6 +395,12 @@ async def transfer_workspace(
     recipient_user_id = str(recipient["id"])
     if recipient_user_id == auth.user_id:
         raise HTTPException(status_code=400, detail="recipient already owns workspace")
+    recipient_role = workspace_repo.get_member_role(
+        workspace_id=workspace_id,
+        user_id=recipient_user_id,
+    )
+    if recipient_role is None:
+        raise HTTPException(status_code=400, detail="recipient must be an active workspace member")
 
     try:
         result = workspace_repo.transfer_ownership(
