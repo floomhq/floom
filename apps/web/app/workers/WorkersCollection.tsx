@@ -26,6 +26,7 @@ import {
   type SetupSubtab,
 } from "@/lib/workers/tabs";
 import { formatDuration } from "@/lib/runs/format";
+import { formatAbsolute } from "@/lib/formatters";
 import { runtimeSummary } from "@/lib/runtime-labels";
 import {
   Dialog,
@@ -863,6 +864,16 @@ function currentTriggerRows(d: WorkerDetail): TriggerRow[] {
   return specs.map((s) => makeTriggerRow(s));
 }
 
+// Read-only scheduler status (next run / last fired) for scheduled/cron workers.
+// Both come straight off the persisted workers row (scheduler bookkeeping). Empty
+// for manual / never-fired workers, so nothing renders there.
+function scheduleStatusRows(d: WorkerDetail): Array<[string, React.ReactNode]> {
+  const rows: Array<[string, React.ReactNode]> = [];
+  if (d.next_run_at) rows.push(["Next run", formatAbsolute(d.next_run_at)]);
+  if (d.last_fired_at) rows.push(["Last fired", formatAbsolute(d.last_fired_at)]);
+  return rows;
+}
+
 // W-02: Triggers are EDITABLE — read the current trigger(s) from worker.yml and
 // let the owner change the schedule / webhook / app-event / manual via the same
 // TriggersEditor used in the create flow. Persists through the worker.yml PUT
@@ -899,11 +910,14 @@ function TriggersTab({ w }: { w: WorkerSummary }) {
             ...(d.webhook_url
               ? [["Webhook", <span key="webhook" className="font-mono text-xs">{d.webhook_url}</span>] as [string, React.ReactNode]]
               : []),
+            ...scheduleStatusRows(d),
           ]}
         />
       </div>
     );
   }
+
+  const statusRows = scheduleStatusRows(d);
 
   const save = async () => {
     if (saving || !dirty) return;
@@ -922,15 +936,18 @@ function TriggersTab({ w }: { w: WorkerSummary }) {
   };
 
   return (
-    <TriggersEditor
-      rows={rows}
-      onChange={setRows}
-      webhookUrl={d.webhook_url}
-      dirty={dirty}
-      saving={saving}
-      onSave={() => void save()}
-      onDiscard={() => setRows(currentTriggerRows(d))}
-    />
+    <div className="flex flex-col gap-4">
+      {statusRows.length > 0 && <ConfigInfoGrid rows={statusRows} />}
+      <TriggersEditor
+        rows={rows}
+        onChange={setRows}
+        webhookUrl={d.webhook_url}
+        dirty={dirty}
+        saving={saving}
+        onSave={() => void save()}
+        onDiscard={() => setRows(currentTriggerRows(d))}
+      />
+    </div>
   );
 }
 
