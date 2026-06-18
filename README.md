@@ -101,6 +101,19 @@ Warm pooling reuses successful read-only local-context sandboxes for the same
 worker/template/context shape. Workers with writeable memory/context mounts or
 git-backed contexts intentionally stay on the cold path.
 
+Workers that need more sandbox memory declare `resources.memory_mb` in
+`worker.yml`. E2B memory is template-backed, so Cloud must provide matching
+template ids for the sizes it supports:
+
+```bash
+WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_2048=tpl-python-2gb
+WORKEROS_E2B_NODE_TEMPLATE_MEMORY_2048=tpl-node-2gb
+```
+
+Requests are capped by `WORKEROS_MAX_WORKER_MEMORY_MB` in the engine, defaulting
+to 8192 MB. If a worker requests a size without a matching template env var, the
+engine logs a warning and uses the normal runtime template.
+
 ## Tenancy model
 
 - Single Supabase project shared across all users
