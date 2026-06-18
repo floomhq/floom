@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryProvider } from "@/components/providers/QueryProvider";
 
 // Render the REAL page components (not the generic engine) with mocked data, to
 // prove they mount + render rows without client-side crashes. This is the layer
@@ -118,13 +119,13 @@ beforeEach(() => {
 describe("page components render with data (no client crash)", () => {
   it("WorkersCollection renders the worker", async () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
-    render(<WorkersCollection initialWorkers={[worker as never]} />);
+    render(<QueryProvider><WorkersCollection initialWorkers={[worker as never]} /></QueryProvider>);
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
   });
 
   it("WorkersCollection Config renders friendly runtime and model labels", async () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
-    render(<WorkersCollection initialWorkers={[worker as never]} />);
+    render(<QueryProvider><WorkersCollection initialWorkers={[worker as never]} /></QueryProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /Weekly Update/i }));
     // R9: advanced tabs are reached via the "Advanced ▾" group on the tab row.
     fireEvent.click(await screen.findByRole("button", { name: /Advanced tabs/i }));
@@ -141,7 +142,7 @@ describe("page components render with data (no client crash)", () => {
 
   it("RunsCollection renders the run + Export action", async () => {
     const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
-    render(<RunsCollection initialRuns={[run as never]} />);
+    render(<QueryProvider><RunsCollection initialRuns={[run as never]} /></QueryProvider>);
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /export/i })).toBeInTheDocument();
     expect(screen.queryByText("Export CSV")).not.toBeInTheDocument();
@@ -149,7 +150,7 @@ describe("page components render with data (no client crash)", () => {
 
   it("RunsCollection renders runs returned by the client API when server data is empty", async () => {
     const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
-    render(<RunsCollection initialRuns={[]} />);
+    render(<QueryProvider><RunsCollection initialRuns={[]} /></QueryProvider>);
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
     expect(screen.queryByText("No runs yet")).not.toBeInTheDocument();
   });
@@ -198,14 +199,14 @@ describe("page components render with data (no client crash)", () => {
 
     vi.mocked(api.workers.list).mockReturnValueOnce(new Promise(() => {}) as never);
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
-    const workers = render(<WorkersCollection initialWorkers={[]} />);
+    const workers = render(<QueryProvider><WorkersCollection initialWorkers={[]} /></QueryProvider>);
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("No workers yet")).not.toBeInTheDocument();
     workers.unmount();
 
     vi.mocked(api.runs.list).mockReturnValueOnce(new Promise(() => {}) as never);
     const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
-    const runs = render(<RunsCollection initialRuns={[]} />);
+    const runs = render(<QueryProvider><RunsCollection initialRuns={[]} /></QueryProvider>);
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("No run history yet")).not.toBeInTheDocument();
     runs.unmount();
