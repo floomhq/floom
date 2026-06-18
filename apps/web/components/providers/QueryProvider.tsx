@@ -10,6 +10,7 @@ import {
   PERSIST_MAX_AGE,
   PERSISTABLE_KEY_PREFIXES,
 } from "@/lib/query/persist";
+import { getSafeStorage } from "@/lib/safe-storage";
 
 // Stale-while-revalidate config (the industry-standard cache-first pattern):
 //   - staleTime 30s   → cached data is treated as fresh; navigating back to a
@@ -42,9 +43,10 @@ function makeClient() {
 // and the provider is already "use client"). On the server we pass no persister
 // and PersistQueryClientProvider behaves like a plain QueryClientProvider.
 function makePersister() {
-  if (typeof window === "undefined") return undefined;
+  const storage = getSafeStorage("local");
+  if (!storage) return undefined;
   return createSyncStoragePersister({
-    storage: window.localStorage,
+    storage,
     key: PERSIST_STORAGE_KEY,
   });
 }
