@@ -116,6 +116,19 @@ def _repo() -> SupabaseRunRepository:
                         "error_code": "boom",
                     },
                     {
+                        "id": "run_w1_failed_older",
+                        "user_id": "user_1",
+                        "workspace_id": "ws_1",
+                        "worker_id": "w1",
+                        "status": "failed",
+                        "trigger_source": "schedule",
+                        "created_at": "2026-06-13T20:00:00+00:00",
+                        "started_at": "2026-06-13T20:00:00+00:00",
+                        "completed_at": "2026-06-13T20:02:00+00:00",
+                        "duration_ms": 120000,
+                        "error_code": "older_boom",
+                    },
+                    {
                         "id": "run_w3_running_today",
                         "user_id": "user_1",
                         "workspace_id": "ws_1",
@@ -221,6 +234,7 @@ def test_supabase_overview_queries_match_engine_shapes_and_workspace_scope(monke
             user_id="user_1",
             worker_ids=["w1", "w2"],
             since="2026-06-01T00:00:00+00:00",
+            per_worker_limit=1,
         )
         sparkline = repo.overview_sparkline_buckets(
             user_id="user_1",
@@ -245,9 +259,9 @@ def test_supabase_overview_queries_match_engine_shapes_and_workspace_scope(monke
     assert failures[0]["failure_count"] == 1
     assert {row["id"] for row in terminal} == {
         "run_w1_done_today",
-        "run_w1_failed_24h",
         "run_w2_done_previous",
     }
+    assert "run_w1_failed_24h" not in {row["id"] for row in terminal}
     assert {(row["bucket"], row["status"], row["total"]) for row in sparkline} == {
         (8, "queued", 1),
         (9, "completed", 1),

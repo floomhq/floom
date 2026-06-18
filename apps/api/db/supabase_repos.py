@@ -2107,10 +2107,12 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         user_id: str,
         worker_ids: list[str],
         since: str,
+        per_worker_limit: int = 10,
     ) -> list[RowDict]:
         if not worker_ids:
             return []
-        return self._overview_run_rows(
+        per_worker_limit = max(1, min(int(per_worker_limit or 10), 100))
+        rows = self._overview_run_rows(
             user_id=user_id,
             columns="id,worker_id,status,trigger_source,created_at,started_at,completed_at,duration_ms,error,error_code",
             worker_ids=worker_ids,
@@ -2118,6 +2120,17 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
             since=since,
             order_created_desc=True,
         )
+        counts: dict[str, int] = defaultdict(int)
+        selected: list[dict[str, Any]] = []
+        for row in rows:
+            worker_id = str(row.get("worker_id") or "")
+            if not worker_id:
+                continue
+            if counts[worker_id] >= per_worker_limit:
+                continue
+            counts[worker_id] += 1
+            selected.append(row)
+        return selected
 
     def _resolve_trigger_member_emails(self, user_ids: list[str]) -> dict[str, str]:
         """Batch-look up emails for trigger_member_id values. Never raises."""
