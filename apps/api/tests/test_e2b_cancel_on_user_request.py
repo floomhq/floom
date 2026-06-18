@@ -15,6 +15,7 @@ if str(API_DIR) not in sys.path:
 def _load_app(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("FLOOM_SECRET", "test-secret")
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(tmp_path / "workers"))
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))

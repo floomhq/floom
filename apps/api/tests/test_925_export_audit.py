@@ -55,6 +55,7 @@ def client(monkeypatch, tmp_path):
     (d / "run.py").write_text("print('x')\n", encoding="utf-8")
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("FLOOM_SECRET", SECRET)
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))

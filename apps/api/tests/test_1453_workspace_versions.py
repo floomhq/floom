@@ -43,6 +43,7 @@ def _install_app(monkeypatch, tmp_path: Path, *, workers_dir: Path, workspace_di
         monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(workspace_dir))
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("FLOOM_SECRET", "dev")
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
