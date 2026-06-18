@@ -37,6 +37,10 @@ function isPublicPath(pathname: string): boolean {
   const path = stripAppBase(pathname);
   if (path === "/favicon.ico") return true;
   if (path === "/login") return true;
+  // #1447: pre-session onboarding + magic-link consumption pages. (The proxy
+  // hop these use is already public above via the /api/proxy/ rule.)
+  if (path === "/start" || path.startsWith("/start/")) return true;
+  if (path.startsWith("/auth/magic/")) return true;
   if (path.startsWith("/invite/")) return true;
   if (path === "/connections/callback") return true;
   if (path === "/privacy" || path === "/terms") return true;
@@ -117,6 +121,28 @@ function isCsrfSafe(req: NextRequest): boolean {
   return originHost ? allowed.has(originHost) : false;
 }
 
+// Round-09 P0 #5 — App Router RSC/Flight prefetch + Next data requests must NOT
+// receive a 307 HTML login redirect on failed auth. The client router expects an
+// RSC (text/x-component) payload; a 307->/login HTML response is treated as a
+// failed prefetch, throws React #418 (hydration mismatch), and HANGS soft <Link>
+// navigation (only hard reloads render). Detect these by BOTH the semantic `rsc`
+// header AND the `_rsc` cache-busting query param (Next can strip internal Flight
+// headers/query from the NextRequest before user middleware sees them, so use
+// both), plus router-prefetch/state-tree headers and Pages data
+// (`x-nextjs-data` / `/_next/data/`). Verdict + verification: Codex vs
+// next@16.2.6 source (`RSC_HEADER='rsc'`, Flight MPA-fallback logic).
+function isRscOrDataRequest(req: NextRequest): boolean {
+  const path = stripAppBase(req.nextUrl.pathname);
+  return (
+    req.headers.get("rsc") === "1" ||
+    req.headers.has("next-router-prefetch") ||
+    req.headers.has("next-router-state-tree") ||
+    req.nextUrl.searchParams.has("_rsc") ||
+    req.headers.has("x-nextjs-data") ||
+    path.startsWith("/_next/data/")
+  );
+}
+
 export async function middleware(req: NextRequest): Promise<NextResponse> {
   const nonce = btoa(crypto.randomUUID());
   const csp = buildCsp(nonce);
@@ -154,6 +180,17 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
   const session = req.cookies.get(SESSION_COOKIE);
   const verified = await verifySession(session?.value);
   if (!verified) {
+    // Round-09 #5: never send a 307 HTML login redirect for an RSC/Flight or
+    // Next data fetch — return a bodiless 401 (no-store) so the App Router
+    // falls back to a hard MPA navigation instead of hanging the soft nav. The
+    // page render + /api/proxy backend still enforce auth, so no protected RSC
+    // payload leaks (a forged/missing cookie can never produce backend data).
+    if (isRscOrDataRequest(req)) {
+      const response = new NextResponse(null, { status: 401 });
+      response.headers.set("Content-Security-Policy", csp);
+      response.headers.set("Cache-Control", "private, no-store, max-age=0");
+      return response;
+    }
     const path = stripAppBase(req.nextUrl.pathname);
     const loginUrl = req.nextUrl.clone();
     loginUrl.pathname = "/login";

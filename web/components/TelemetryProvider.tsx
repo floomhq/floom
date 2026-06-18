@@ -52,7 +52,9 @@ export function TelemetryProvider() {
       .then((user) => {
         if (active) identifyPostHogUser(user);
       })
-      .catch(() => {});
+      // #1446: telemetry identify is background; log (no toast) so a failed
+      // /me does not silently drop user attribution without a trace.
+      .catch((err) => console.error("Telemetry identify failed", err));
     return () => {
       active = false;
     };

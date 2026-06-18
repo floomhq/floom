@@ -40,11 +40,24 @@ type WorkspaceState = {
   activeId: string;
 };
 
-function shortInitial(name: string): string {
-  const display = resolveWorkspaceName(name);
-  const trimmed = display.trim();
-  if (!trimmed) return "?";
-  return trimmed.slice(0, 2).toUpperCase();
+/** DiceBear `shapes` avatar — deterministically seeded by workspace name/id.
+ *  Geometric, non-cartoonish, fits a serious B2B product.
+ *  Container uses var(--radius-button) (squircle), NOT a circle. */
+function WorkspaceAvatar({ name, size }: { name: string; size: number }) {
+  const seed = encodeURIComponent(resolveWorkspaceName(name) || name || "workspace");
+  const src = `https://api.dicebear.com/9.x/shapes/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf&backgroundType=gradientLinear&radius=0`;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
+      aria-hidden="true"
+      width={size}
+      height={size}
+      className="shrink-0 rounded-[var(--radius-button)] object-cover"
+      style={{ width: size, height: size }}
+    />
+  );
 }
 
 export function WorkspaceSwitcher() {
@@ -248,24 +261,25 @@ export function WorkspaceSwitcher() {
   return (
     <div className="w-full">
       <DropdownMenu>
-        {/* V4 SPEC §2: workspace identity — mark + name + chevron-on-hover */}
+        {/* V4 SPEC §2: workspace identity — mark + name + chevron-on-hover.
+            #1264: explicit asChild=false + onPointerDown stop so the trigger only
+            fires on the workspace name row itself, not on adjacent sidebar elements. */}
         <DropdownMenuTrigger
           className={cn(
-            "group flex h-10 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2.5 text-sm font-semibold text-ink transition-colors duration-150",
+            "group flex h-9 w-full items-center gap-2 rounded-[var(--radius-button)] bg-transparent px-2 text-sm font-semibold text-ink transition-colors duration-150",
             "hover:bg-[var(--active-nav-bg)] focus-visible:outline-none"
           )}
           aria-label="Switch workspace"
+          onPointerDown={(e) => e.stopPropagation()}
         >
-          {/* Workspace mark: company logo if available, else colored initial */}
-          <div className="size-6 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_22%,transparent)] text-[var(--accent)] grid place-items-center text-[10px] font-semibold uppercase tracking-wide">
-            {shortInitial(active.name)}
-          </div>
+          {/* Workspace mark: DiceBear shapes avatar, seeded by workspace name */}
+          <WorkspaceAvatar name={active.name} size={24} />
           <span className="flex-1 truncate text-left">{resolveWorkspaceName(active.name)}</span>
           <ChevronsUpDown className="size-4 opacity-0 group-hover:opacity-60 transition-opacity duration-100" />
         </DropdownMenuTrigger>
         {/* V9 (the operator 2026-06-02): "this can also be cleaner." The popover is
-            split into two clear sections — the workspace LIST (active row
-            carries the checkmark) and the ACTIONS group below a divider — with
+            split into two clear sections: the workspace LIST (active row
+            carries the checkmark) and the ACTIONS group below a divider, with
             consistent spacing. The active workspace name is shown only here in
             the list (the trigger above is the closed-state control), so there's
             no redundant repetition inside the menu. */}
@@ -289,9 +303,7 @@ export function WorkspaceSwitcher() {
                   className="flex items-center gap-2 focus:bg-[var(--active-nav-bg)] focus:text-ink"
                   disabled={isLoading}
                 >
-                  <div className="size-5 shrink-0 rounded-md bg-[color-mix(in_srgb,var(--accent)_18%,transparent)] text-[var(--accent)] grid place-items-center text-[9px] font-semibold uppercase">
-                    {shortInitial(w.name)}
-                  </div>
+                  <WorkspaceAvatar name={w.name} size={20} />
                   <span className="flex-1 truncate">{resolveWorkspaceName(w.name)}</span>
                   {isActive ? <Check className="size-4 opacity-80" /> : null}
                 </DropdownMenuItem>

@@ -69,13 +69,15 @@ describe("formatVersionRows", () => {
 });
 
 describe("WORKER_DETAIL_TABS (§4 contract)", () => {
-  it("is exactly the v4 five, in order", () => {
+  it("is the round-09 set: primary Overview/Runs/Setup then advanced Source/Versions/Brain/Tools, in order", () => {
     expect([...WORKER_DETAIL_TABS]).toEqual([
       "Overview",
-      "History",
+      "Runs",
+      "Setup",
       "Source",
       "Versions",
-      "Config",
+      "Brain",
+      "Tools",
     ]);
   });
 });

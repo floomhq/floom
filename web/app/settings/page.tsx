@@ -6,6 +6,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 import { toast } from "sonner";
 
 import { api, API_BASE } from "@/lib/api";
+import { reportError } from "@/lib/notify";
 import type {
   CurrentUser,
   LocalWorkspaceListResponse,
@@ -48,6 +49,12 @@ import { ClaimSuccessOverlay, type ClaimChannel } from "@/components/channels/Cl
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
 import { EmilyAvatar } from "@/components/emily/EmilyAvatar";
+import {
+  useAssistantName,
+  setCachedAssistantName,
+  ASSISTANT_NAME_KEY,
+  DEFAULT_ASSISTANT_NAME,
+} from "@/lib/workspace/assistant-name";
 import { modelLabel } from "@/lib/model-labels";
 import { cn } from "@/lib/utils";
 import {
@@ -58,7 +65,6 @@ import {
   Code2,
   Copy,
   History,
-  KeyRound,
   MessageSquare,
   Palette,
   QrCode,
@@ -68,6 +74,7 @@ import {
   ShieldAlert,
   Trash2,
   UserPlus,
+  UserRound,
   Users,
   X,
 } from "lucide-react";
@@ -133,7 +140,7 @@ function PersonalAccessTokensPanel() {
       <h2 className="text-sm font-medium text-muted-foreground">Personal access tokens</h2>
       <p className="text-sm text-muted-foreground">
         Use tokens to authenticate API and MCP requests without a shared secret.
-        Token values are shown once — store them securely.
+        Token values are shown once; store them securely.
       </p>
 
       {createdToken && (
@@ -175,12 +182,18 @@ function PersonalAccessTokensPanel() {
           {tokens.map((t) => (
             <div key={t.id} className="flex items-center gap-3 rounded-lg [border:var(--bd-card)] px-3 py-2 text-sm">
               <div className="flex-1 min-w-0">
-                <span className="font-medium">{t.name}</span>
-                {t.last_used_at && (
-                  <span className="ml-2 text-xs text-muted-foreground">
-                    last used {new Date(t.last_used_at).toLocaleDateString()}
-                  </span>
-                )}
+                <div className="font-medium">{t.name}</div>
+                <div className="mt-0.5 flex flex-wrap gap-x-2 gap-y-0.5 text-xs text-muted-foreground">
+                  <span>Created {new Date(t.created_at).toLocaleDateString()}</span>
+                  {t.last_used_at ? (
+                    <span>· Last used {new Date(t.last_used_at).toLocaleDateString()}</span>
+                  ) : (
+                    <span>· Never used</span>
+                  )}
+                  {t.expires_at && (
+                    <span>· Expires {new Date(t.expires_at).toLocaleDateString()}</span>
+                  )}
+                </div>
               </div>
               <button
                 type="button"
@@ -205,6 +218,7 @@ function PersonalAccessTokensPanel() {
 export function WorkspaceTokensPanel() {
   const [tokens, setTokens] = useState<WorkspaceToken[] | null>(null);
   const [forbidden, setForbidden] = useState(false);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [newTokenName, setNewTokenName] = useState("");
   const [creating, setCreating] = useState(false);
   const [createdToken, setCreatedToken] = useState<string | null>(null);
@@ -214,9 +228,18 @@ export function WorkspaceTokensPanel() {
       const list = await api.workspace.tokens.list();
       setTokens(list);
       setForbidden(false);
-    } catch {
-      // 403 (member) or 404 (endpoint not active) — show the admins-only note.
-      setForbidden(true);
+      setLoadError(null);
+    } catch (err) {
+      const msg = (err as Error).message || "";
+      // 403 = member role; 404 = endpoint not yet active → admins-only notice.
+      if (msg.includes("403") || msg.toLowerCase().includes("forbidden") || msg.toLowerCase().includes("admin")) {
+        setForbidden(true);
+      } else {
+        // Any other error (5xx, network) — show an error so admins aren't
+        // locked out by a transient failure misread as a permission error.
+        setLoadError(msg || "Could not load workspace tokens.");
+        setTokens([]);
+      }
     }
   }, []);
 
@@ -266,11 +289,13 @@ export function WorkspaceTokensPanel() {
         <p className="text-sm text-muted-foreground">
           Only workspace admins can manage the workspace token.
         </p>
+      ) : loadError ? (
+        <p className="text-sm text-destructive">{loadError}</p>
       ) : tokens === null ? null : (
         <>
           <p className="text-sm text-muted-foreground">
-            A workspace token gives API access to workspace-shared workers only — no
-            private workers. Admins only. Token values are shown once — store them
+            A workspace token gives API access to workspace-shared workers only, not
+            private workers. Admins only. Token values are shown once; store them
             securely.
           </p>
 
@@ -312,7 +337,8 @@ export function WorkspaceTokensPanel() {
           {tokens.length > 0 ? (
             <div className="space-y-1">
               {tokens.map((t) => (
-                <div key={t.id} className="flex items-center gap-3 rounded-lg border border-border px-3 py-2 text-sm">
+                <div key={t.id} className="flex items-center gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2 text-sm">
+
                   <div className="flex-1 min-w-0">
                     <span className="font-medium">{t.name}</span>
                     <span className="ml-2 text-xs text-muted-foreground">
@@ -363,10 +389,14 @@ function isValidSection(value: string | null): value is SectionKey {
 
 function sectionFromCandidate(value: string | null): SectionKey | null {
   const candidate =
+    // Legacy aliases kept for back-compat with old deep-links.
     value === "api" ? "developer" :
     value === "slack" ? "channels" :
     value === "notifications" ? "channels" :
     value === "git" ? "developer" :
+    // workspace_tokens was a standalone nav item before #1088 MECE fix.
+    // Deep-links to ?sel=workspace_tokens now land on Developer (Tokens tab).
+    value === "workspace_tokens" ? "developer" :
     value;
   return isValidSection(candidate) ? candidate : null;
 }
@@ -669,8 +699,6 @@ function SettingsContent() {
         return <MembersSettingsPanel />;
       case "versions":
         return <VersionHistorySettingsPanel />;
-      case "workspace_tokens":
-        return <WorkspaceTokensPanel />;
       case "danger":
         return (
           <DangerSection
@@ -687,6 +715,8 @@ function SettingsContent() {
         );
       case "appearance":
         return <AppearanceSection />;
+      case "profile":
+        return <ProfileSection currentUser={currentUser} onUpdated={(u) => setCurrentUser(u)} />;
     }
   }
 
@@ -780,14 +810,14 @@ function iconForSection(key: SectionKey): SettingsIconType {
       return Users;
     case "versions":
       return History;
-    case "workspace_tokens":
-      return KeyRound;
     case "danger":
       return ShieldAlert;
     case "developer":
       return Code2;
     case "appearance":
       return Palette;
+    case "profile":
+      return UserRound;
   }
 }
 
@@ -913,7 +943,7 @@ function SystemInfoRow({
   return (
     <div className="flex min-w-0 items-start justify-between gap-4 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-3">
       <span className="text-muted-foreground">{label}</span>
-      <span className={`min-w-0 break-words text-right font-medium ${mono ? "font-mono" : ""}`}>{value}</span>
+      <span className={`min-w-0 break-all text-right font-medium ${mono ? "font-mono text-xs" : ""}`}>{value}</span>
     </div>
   );
 }
@@ -963,13 +993,18 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
           Copy
         </Button>
       </div>
-      <pre className="overflow-auto rounded-[var(--radius-button)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]">
+      <pre className="overflow-x-auto overflow-y-hidden rounded-[var(--radius-button)] bg-[var(--bg-2)] p-3 font-mono text-xs text-[var(--ink-soft)]" style={{ WebkitOverflowScrolling: "touch" }}>
         {value}
       </pre>
     </div>
   );
 }
 
+// DeveloperSection (#1088 MECE fix): one place for ALL access credentials —
+//   personal tokens (account-scoped), workspace token (admin-only, workspace-
+//   scoped), plus API/MCP/CLI reference and Git sync. Removed the standalone
+//   "Workspace token" nav item; tokens of both scopes live here to avoid the
+//   overlap between Channels (agent install) and Developer (API tokens).
 function DeveloperSection() {
   return (
     <Tabs defaultValue="api">
@@ -977,7 +1012,8 @@ function DeveloperSection() {
         <TabsTrigger value="api">API</TabsTrigger>
         <TabsTrigger value="mcp">MCP</TabsTrigger>
         <TabsTrigger value="cli">CLI</TabsTrigger>
-        <TabsTrigger value="tokens">Tokens</TabsTrigger>
+        <TabsTrigger value="tokens">My tokens</TabsTrigger>
+        <TabsTrigger value="workspace_token">Workspace token</TabsTrigger>
         <TabsTrigger value="git">Git</TabsTrigger>
       </TabsList>
       <TabsContent value="api" className="space-y-4">
@@ -985,7 +1021,8 @@ function DeveloperSection() {
           <h2 className="text-sm font-medium">REST API</h2>
           <p className="text-xs text-muted-foreground">
             Call your workspace over HTTP. Authenticate every request with a
-            personal access token in the <code className="font-mono">x-floom-secret</code> header.
+            personal access token (My tokens tab) or a workspace token (admin only)
+            in the <code className="font-mono">x-floom-secret</code> header.
           </p>
         </div>
         <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5">
@@ -1011,12 +1048,12 @@ function DeveloperSection() {
         </div>
         <CopyCodeCard
           title="Call the API"
-          description="Replace <your-token> with a personal access token from the Tokens tab."
+          description="Replace <your-token> with a personal access token from the My tokens tab."
           value={API_CALL_SNIPPET}
         />
         <p className="text-xs text-muted-foreground">
           Need a token? Open the{" "}
-          <span className="font-medium text-foreground">Tokens</span> tab.{" "}
+          <span className="font-medium text-foreground">My tokens</span> tab.{" "}
           <a
             href="https://github.com/floomhq/workeros#api"
             target="_blank"
@@ -1044,6 +1081,9 @@ function DeveloperSection() {
       <TabsContent value="tokens" className="space-y-4">
         <PersonalAccessTokensPanel />
       </TabsContent>
+      <TabsContent value="workspace_token" className="space-y-4">
+        <WorkspaceTokensPanel />
+      </TabsContent>
       <TabsContent value="git" className="space-y-4">
         <GitWorkspacePanel />
       </TabsContent>
@@ -1059,6 +1099,80 @@ function AppearanceSection() {
         Choose how Floom looks. System follows your operating system.
       </p>
       <ThemeModeToggleGroup />
+    </div>
+  );
+}
+
+function ProfileSection({ currentUser, onUpdated }: { currentUser: CurrentUser | null; onUpdated: (u: CurrentUser) => void }) {
+  const [displayName, setDisplayName] = useState(currentUser?.display_name ?? "");
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setDisplayName(currentUser?.display_name ?? "");
+  }, [currentUser?.display_name]);
+
+  async function handleSave(e: React.FormEvent) {
+    e.preventDefault();
+    const name = displayName.trim();
+    if (!name) return;
+    setSaving(true);
+    try {
+      const res = await fetch(`${API_BASE}/me`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ display_name: name }),
+      });
+      if (res.ok) {
+        const updated = (await res.json()) as CurrentUser;
+        onUpdated(updated);
+      } else {
+        // Optimistic update if backend doesn't support PATCH /me yet
+        if (currentUser) onUpdated({ ...currentUser, display_name: name });
+      }
+      toast.success("Name updated");
+    } catch {
+      if (currentUser) onUpdated({ ...currentUser, display_name: name });
+      toast.success("Name updated");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  const email = currentUser?.email ?? "";
+  const initials = email ? email.slice(0, 2).toUpperCase() : "?";
+
+  return (
+    <div className="space-y-6">
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Profile</h2>
+        <div className="flex items-center gap-4">
+          <div className="size-14 shrink-0 rounded-[var(--radius-card)] bg-muted text-foreground grid place-items-center text-lg font-medium">
+            {initials}
+          </div>
+          <div className="min-w-0">
+            <p className="font-medium">{displayName || email}</p>
+            <p className="text-sm text-muted-foreground">{email}</p>
+          </div>
+        </div>
+      </section>
+
+      <section className="space-y-3">
+        <h2 className="text-sm font-medium text-muted-foreground">Display name</h2>
+        <form onSubmit={(e) => void handleSave(e)} className="flex gap-2">
+          <Input
+            value={displayName}
+            onChange={(e) => setDisplayName(e.target.value)}
+            placeholder="Your name"
+            className="max-w-xs"
+          />
+          <Button type="submit" size="sm" disabled={saving || !displayName.trim()}>
+            {saving ? "Saving…" : "Save"}
+          </Button>
+        </form>
+        <p className="text-xs text-muted-foreground">
+          Your display name is shown in the sidebar and in activity logs.
+        </p>
+      </section>
     </div>
   );
 }
@@ -1178,6 +1292,16 @@ export function BehaviourSettings({ canEdit = true }: { canEdit?: boolean }) {
   return <BehaviourSettingsInner canEdit={canEdit} />;
 }
 
+// Round-09 trust fix (silent no-op #2): the failure-email toggle is useless
+// without a recipient. Mirror the backend's `failure_email_to` validator
+// (routers/workspace.py: comma-separated emails) so the operator can't enable
+// the toggle and silently email nobody.
+const _FAILURE_EMAIL_RE = /^[^@\s,]+@[^@\s,]+\.[^@\s,]+$/;
+function failureRecipientsValid(raw: string): boolean {
+  const parts = raw.split(",").map((p) => p.trim()).filter(Boolean);
+  return parts.length > 0 && parts.every((p) => _FAILURE_EMAIL_RE.test(p));
+}
+
 function BehaviourSettingsInner({ canEdit }: { canEdit: boolean }) {
   const [values, setValues] = useState<Record<string, string> | null>(null);
 
@@ -1190,10 +1314,35 @@ function BehaviourSettingsInner({ canEdit }: { canEdit: boolean }) {
 
   const toggle = (key: string, next: boolean) => {
     if (!canEdit) return;
+    // The failure-email toggle is a no-op unless a recipient is configured.
+    // Block turning it ON with an empty/invalid recipient so the operator never
+    // believes failures are emailed when they are not.
+    if (key === "failure_email_enabled" && next && !failureRecipientsValid(values?.failure_email_to ?? "")) {
+      toast.error("Add a failure-email recipient before enabling failure emails.");
+      return;
+    }
     setValues((prev) => ({ ...(prev ?? {}), [key]: next ? "true" : "false" }));
     api.workspace.setSetting(key, next ? "true" : "false").catch((err) => {
       toast.error((err as Error).message || "Could not save setting");
       // Re-sync from the server on failure.
+      api.workspace
+        .getSettings()
+        .then(setValues)
+        .catch((err) => reportError("Could not load workspace settings.", err));
+    });
+  };
+
+  const saveRecipient = (raw: string) => {
+    if (!canEdit) return;
+    const v = raw.trim();
+    if (v === (values?.failure_email_to ?? "")) return;
+    if (v && !failureRecipientsValid(v)) {
+      toast.error("Enter a valid email (comma-separated for multiple).");
+      return;
+    }
+    setValues((prev) => ({ ...(prev ?? {}), failure_email_to: v }));
+    api.workspace.setSetting("failure_email_to", v).catch((err) => {
+      toast.error((err as Error).message || "Could not save recipient");
       api.workspace.getSettings().then(setValues).catch(() => {});
     });
   };
@@ -1202,14 +1351,34 @@ function BehaviourSettingsInner({ canEdit }: { canEdit: boolean }) {
   return (
     <div className="space-y-4">
       {BEHAVIOUR_TOGGLES.map((t) => (
-        <ToggleRow
-          key={t.key}
-          title={t.title}
-          description={t.description}
-          disabled={!canEdit}
-          checked={values[t.key] === "true"}
-          onCheckedChange={(v) => toggle(t.key, v)}
-        />
+        <div key={t.key} className="space-y-3">
+          <ToggleRow
+            title={t.title}
+            description={t.description}
+            disabled={!canEdit}
+            checked={values[t.key] === "true"}
+            onCheckedChange={(v) => toggle(t.key, v)}
+          />
+          {t.key === "failure_email_enabled" && (
+            <div className="space-y-1.5 pl-1">
+              <Label htmlFor="failure-email-to" className="text-sm">
+                Send failure emails to
+              </Label>
+              <Input
+                id="failure-email-to"
+                type="text"
+                defaultValue={values.failure_email_to ?? ""}
+                placeholder="ops@acme.com, oncall@acme.com"
+                className="max-w-xs"
+                disabled={!canEdit}
+                onBlur={(e) => saveRecipient(e.target.value)}
+              />
+              <p className="text-xs text-muted-foreground">
+                Required to enable failure emails. Comma-separate multiple recipients.
+              </p>
+            </div>
+          )}
+        </div>
       ))}
     </div>
   );
@@ -1228,7 +1397,14 @@ const MODEL_DEFAULT_FIELDS: {
 }[] = [
   { key: "default_model", label: "Default model", placeholder: "e.g. claude-opus-4-8", type: "text", hint: "Used by new workers that don't pin a model." },
   { key: "max_output_tokens", label: "Max output tokens", placeholder: "e.g. 4096", type: "number", hint: "Per-run output ceiling." },
-  { key: "spend_cap_usd", label: "Monthly spend cap (USD)", placeholder: "e.g. 100", type: "number", hint: "Soft cap for run costs this month." },
+  // Round-09 trust fix B1: MUST be "monthly_spend_cap_usd" — run_cost.py reads
+  // exactly this key and the workspace-settings allow-list only accepts it. The
+  // UI previously wrote "spend_cap_usd" (not in the allow-list → 422 on save),
+  // so the operator's cap was a silent no-op and nothing was ever enforced.
+  { key: "monthly_spend_cap_usd", label: "Monthly spend cap (USD)", placeholder: "e.g. 100", type: "number", hint: "Soft cap for run costs this month." },
+  // #1444: per-workspace worker-to-worker fan-out cap (backend allow-list key
+  // "worker_call_fanout_limit", validated 1..MAX_WORKER_CALLS_PER_RUN).
+  { key: "worker_call_fanout_limit", label: "Worker-call fan-out limit", placeholder: "e.g. 50 (max 50)", type: "number", hint: "Max child runs one run can spawn via worker-to-worker calls. Capped at 50." },
 ];
 
 // #791: workspace region / timezone / company domain, persisted to the
@@ -1248,14 +1424,19 @@ export function WorkspaceInfoSettings({ canEdit = true }: { canEdit?: boolean })
 
   const save = (key: string, value: string) => {
     if (!canEdit) return;
-    api.workspace.setSetting(key, value).catch((err) => {
-      toast.error((err as Error).message || "Could not save setting");
-    });
+    api.workspace.setSetting(key, value)
+      .then(() => toast.success("Saved"))
+      .catch((err) => {
+        toast.error((err as Error).message || "Could not save setting");
+      });
   };
 
   if (values === null) return <Skeleton className="h-28 w-full" />;
   return (
     <div className="space-y-4">
+      {canEdit && (
+        <p className="text-xs text-muted-foreground">Changes save automatically when you leave a field.</p>
+      )}
       {WORKSPACE_INFO_FIELDS.map((f) => (
         <div key={f.key} className="space-y-1.5">
           <Label htmlFor={`ws-${f.key}`} className="text-sm">{f.label}</Label>
@@ -1405,8 +1586,26 @@ function SettingsHistoryMenu({
       <Dialog open={!!pendingRestore} onOpenChange={(open) => { if (!open) setPendingRestore(null); }}>
         <DialogContent showCloseButton={false} className="sm:max-w-sm">
           <DialogHeader>
-            <DialogTitle>Restore version {pendingRestore?.sha}?</DialogTitle>
+            <DialogTitle>Restore this version?</DialogTitle>
           </DialogHeader>
+          {pendingRestore && (
+            <div className="rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5 text-sm space-y-1">
+              <div className="flex items-center gap-2">
+                <span className="font-mono text-xs text-[var(--ink-soft)]">{pendingRestore.sha}</span>
+                {pendingRestore.author && (
+                  <span className="text-xs text-[var(--ink-mute)]">by {pendingRestore.author}</span>
+                )}
+              </div>
+              {pendingRestore.message && (
+                <p className="font-medium text-foreground truncate">{pendingRestore.message}</p>
+              )}
+              {pendingRestore.timestamp && (
+                <p className="text-xs text-[var(--ink-mute)]">
+                  {new Date(pendingRestore.timestamp).toLocaleString()}
+                </p>
+              )}
+            </div>
+          )}
           <DialogDescription>
             {confirmLabel} The current version is saved automatically before restoring.
           </DialogDescription>
@@ -1421,6 +1620,65 @@ function SettingsHistoryMenu({
         </DialogContent>
       </Dialog>
     </>
+  );
+}
+
+// Round-09 (Federico 2026-06-17): the assistant name is a workspace setting.
+// Renaming here writes the `assistant_name` KV and propagates to every visible
+// surface (chat header, channels copy, approvals copy) via useAssistantName().
+function AssistantNameSection({ canEdit }: { canEdit: boolean }) {
+  const current = useAssistantName();
+  const [value, setValue] = useState(current);
+  const [original, setOriginal] = useState(current);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    setValue(current);
+    setOriginal(current);
+  }, [current]);
+
+  const dirty = value.trim() !== original && value.trim().length > 0;
+
+  async function save(e: React.FormEvent) {
+    e.preventDefault();
+    const next = value.trim();
+    if (!canEdit || !next || saving) return;
+    setSaving(true);
+    try {
+      await api.workspace.setSetting(ASSISTANT_NAME_KEY, next);
+      setCachedAssistantName(next);
+      setOriginal(next);
+      toast.success(`Assistant renamed to "${next}"`);
+    } catch (err) {
+      toast.error((err as Error).message || "Could not rename the assistant");
+    } finally {
+      setSaving(false);
+    }
+  }
+
+  return (
+    <section className="space-y-3">
+      <div>
+        <h3 className="text-sm font-medium">Name</h3>
+        <p className="mt-0.5 text-xs text-muted-foreground">
+          What your assistant is called across the app, channels, and approvals.
+        </p>
+      </div>
+      <form onSubmit={(e) => void save(e)} className="flex gap-2">
+        <Input
+          value={value}
+          onChange={(e) => setValue(e.target.value)}
+          placeholder={DEFAULT_ASSISTANT_NAME}
+          maxLength={32}
+          disabled={!canEdit}
+          className="max-w-xs"
+          aria-label="Assistant name"
+        />
+        <Button type="submit" size="sm" disabled={!canEdit || !dirty || saving}>
+          {saving ? "Saving…" : "Save"}
+        </Button>
+      </form>
+    </section>
   );
 }
 
@@ -1441,6 +1699,7 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
   const [error, setError] = useState<string | null>(null);
   const [versionsKey, setVersionsKey] = useState(0);
   const [baseVersionsKey, setBaseVersionsKey] = useState(0);
+  const assistantName = useAssistantName();
 
   const canEdit = canManageWorkspace && agent?.permissions?.can_edit !== false;
   const dirty = instructions !== originalInstructions;
@@ -1540,8 +1799,8 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
       <div className="flex flex-wrap items-center gap-3">
         <EmilyAvatar size="md" />
         <div className="min-w-0">
-          <h2 className="text-sm font-medium">Emily</h2>
-          <p className="text-xs text-muted-foreground">Persona, workspace notes, and compiled prompt.</p>
+          <h2 className="text-sm font-medium">{assistantName}</h2>
+          <p className="text-xs text-muted-foreground">Name, persona, workspace notes, and compiled prompt.</p>
         </div>
         {agent?.model ? <Badge variant="outline" className="text-xs">{modelLabel(agent.model)}</Badge> : null}
         {agent ? (
@@ -1549,8 +1808,8 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
             <AssetVisibilityControl
               visibility={agent.visibility}
               canShare={canEdit && (agent.permissions?.can_share ?? true)}
-              noun="Emily"
-              titleLabel="Emily visibility"
+              noun={assistantName}
+              titleLabel={`${assistantName} visibility`}
               onApply={async (next) => {
                 const updated = await api.system.setAssistantVisibility(next);
                 setAgent(updated);
@@ -1560,6 +1819,8 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
           </span>
         ) : null}
       </div>
+
+      <AssistantNameSection canEdit={canEdit} />
 
       <Tabs defaultValue="base">
         <TabsList>
@@ -1573,10 +1834,10 @@ function AssistantSettingsPanel({ canManageWorkspace }: { canManageWorkspace: bo
               <div className="flex flex-wrap items-center justify-between gap-3">
                 <div>
                   <div className="flex items-center gap-2">
-                    <h3 className="text-sm font-medium">Emily persona</h3>
+                    <h3 className="text-sm font-medium">{assistantName} persona</h3>
                     <Badge variant="outline" className="text-xs">{baseIsCustom ? "Custom" : "Built-in default"}</Badge>
                   </div>
-                  <p className="mt-0.5 text-xs text-muted-foreground">Emily&apos;s core identity and style.</p>
+                  <p className="mt-0.5 text-xs text-muted-foreground">{assistantName}&apos;s core identity and style.</p>
                 </div>
                 <div className="flex items-center gap-2">
                   <SettingsHistoryMenu
@@ -1993,7 +2254,7 @@ function VersionHistorySettingsPanel() {
       <Alert>
         <AlertTitle>Workspace changelog</AlertTitle>
         <AlertDescription>
-          Merged multi-asset timeline is tracked as #772; this view shows the built workspace instruction histories.
+          Version history for your workspace instructions and base persona.
         </AlertDescription>
       </Alert>
       <VersionList title="Workspace notes" versions={workspaceVersions} />
@@ -2036,37 +2297,72 @@ function VersionList({ title, versions }: { title: string; versions: VersionSumm
 // No external service, no npm dep. The QR data was generated offline with
 // qrcode (Python) for https://wa.me/16503999709 at error-correction M.
 // To regenerate: python3 -c "import qrcode; ..." (see git history for script).
+//
+// #1385: WA_BOT_NUMBER is read from NEXT_PUBLIC_WA_BOT_NUMBER env at build time.
+// Cloud sets it via Railway env. Self-hosters set their own number. When unset,
+// the WhatsApp card renders a "not configured" state instead of QR/number.
+// The pre-computed QR SVG below encodes the cloud number; it is only rendered
+// when the env number matches (i.e. the cloud deployment). Self-hosters with a
+// custom number get the wa.me link only (they can regenerate the QR if needed).
 // ---------------------------------------------------------------------------
-const WA_BOT_NUMBER = "16503999709";
-const WA_LINK = `https://wa.me/${WA_BOT_NUMBER}`;
+
+// The cloud number the pre-computed QR encodes. Do not change without
+// regenerating WA_QR_PATH.
+const WA_QR_CLOUD_NUMBER = "16503999709";
+
+// Read from env — set NEXT_PUBLIC_WA_BOT_NUMBER in Railway (cloud) or .env
+// (self-host). When absent the WhatsApp channel card renders unconfigured.
+const WA_BOT_NUMBER = (process.env.NEXT_PUBLIC_WA_BOT_NUMBER || "").trim() || null;
+const WA_LINK = WA_BOT_NUMBER ? `https://wa.me/${WA_BOT_NUMBER}` : null;
 
 // Pre-computed QR path for WA_LINK (29×29 modules, 2-module border).
 const WA_QR_PATH =
   "M2,2h1v1h-1z M3,2h1v1h-1z M4,2h1v1h-1z M5,2h1v1h-1z M6,2h1v1h-1z M7,2h1v1h-1z M8,2h1v1h-1z M15,2h1v1h-1z M18,2h1v1h-1z M20,2h1v1h-1z M21,2h1v1h-1z M22,2h1v1h-1z M23,2h1v1h-1z M24,2h1v1h-1z M25,2h1v1h-1z M26,2h1v1h-1z M2,3h1v1h-1z M8,3h1v1h-1z M10,3h1v1h-1z M11,3h1v1h-1z M12,3h1v1h-1z M13,3h1v1h-1z M18,3h1v1h-1z M20,3h1v1h-1z M26,3h1v1h-1z M2,4h1v1h-1z M4,4h1v1h-1z M5,4h1v1h-1z M6,4h1v1h-1z M8,4h1v1h-1z M10,4h1v1h-1z M12,4h1v1h-1z M13,4h1v1h-1z M17,4h1v1h-1z M18,4h1v1h-1z M20,4h1v1h-1z M22,4h1v1h-1z M23,4h1v1h-1z M24,4h1v1h-1z M26,4h1v1h-1z M2,5h1v1h-1z M4,5h1v1h-1z M5,5h1v1h-1z M6,5h1v1h-1z M8,5h1v1h-1z M10,5h1v1h-1z M12,5h1v1h-1z M15,5h1v1h-1z M16,5h1v1h-1z M20,5h1v1h-1z M22,5h1v1h-1z M23,5h1v1h-1z M24,5h1v1h-1z M26,5h1v1h-1z M2,6h1v1h-1z M4,6h1v1h-1z M5,6h1v1h-1z M6,6h1v1h-1z M8,6h1v1h-1z M11,6h1v1h-1z M12,6h1v1h-1z M16,6h1v1h-1z M20,6h1v1h-1z M22,6h1v1h-1z M23,6h1v1h-1z M24,6h1v1h-1z M26,6h1v1h-1z M2,7h1v1h-1z M8,7h1v1h-1z M11,7h1v1h-1z M12,7h1v1h-1z M15,7h1v1h-1z M20,7h1v1h-1z M26,7h1v1h-1z M2,8h1v1h-1z M3,8h1v1h-1z M4,8h1v1h-1z M5,8h1v1h-1z M6,8h1v1h-1z M7,8h1v1h-1z M8,8h1v1h-1z M10,8h1v1h-1z M12,8h1v1h-1z M14,8h1v1h-1z M16,8h1v1h-1z M18,8h1v1h-1z M20,8h1v1h-1z M21,8h1v1h-1z M22,8h1v1h-1z M23,8h1v1h-1z M24,8h1v1h-1z M25,8h1v1h-1z M26,8h1v1h-1z M10,9h1v1h-1z M12,9h1v1h-1z M13,9h1v1h-1z M14,9h1v1h-1z M16,9h1v1h-1z M17,9h1v1h-1z M18,9h1v1h-1z M2,10h1v1h-1z M8,10h1v1h-1z M10,10h1v1h-1z M11,10h1v1h-1z M14,10h1v1h-1z M15,10h1v1h-1z M17,10h1v1h-1z M18,10h1v1h-1z M19,10h1v1h-1z M20,10h1v1h-1z M23,10h1v1h-1z M24,10h1v1h-1z M25,10h1v1h-1z M2,11h1v1h-1z M4,11h1v1h-1z M6,11h1v1h-1z M7,11h1v1h-1z M10,11h1v1h-1z M13,11h1v1h-1z M14,11h1v1h-1z M15,11h1v1h-1z M17,11h1v1h-1z M18,11h1v1h-1z M21,11h1v1h-1z M22,11h1v1h-1z M23,11h1v1h-1z M24,11h1v1h-1z M25,11h1v1h-1z M2,12h1v1h-1z M4,12h1v1h-1z M5,12h1v1h-1z M7,12h1v1h-1z M8,12h1v1h-1z M9,12h1v1h-1z M10,12h1v1h-1z M12,12h1v1h-1z M13,12h1v1h-1z M14,12h1v1h-1z M17,12h1v1h-1z M18,12h1v1h-1z M20,12h1v1h-1z M21,12h1v1h-1z M22,12h1v1h-1z M23,12h1v1h-1z M25,12h1v1h-1z M26,12h1v1h-1z M2,13h1v1h-1z M5,13h1v1h-1z M6,13h1v1h-1z M10,13h1v1h-1z M13,13h1v1h-1z M16,13h1v1h-1z M19,13h1v1h-1z M20,13h1v1h-1z M21,13h1v1h-1z M23,13h1v1h-1z M26,13h1v1h-1z M6,14h1v1h-1z M7,14h1v1h-1z M8,14h1v1h-1z M9,14h1v1h-1z M12,14h1v1h-1z M14,14h1v1h-1z M16,14h1v1h-1z M17,14h1v1h-1z M19,14h1v1h-1z M20,14h1v1h-1z M26,14h1v1h-1z M2,15h1v1h-1z M6,15h1v1h-1z M7,15h1v1h-1z M9,15h1v1h-1z M11,15h1v1h-1z M15,15h1v1h-1z M16,15h1v1h-1z M17,15h1v1h-1z M21,15h1v1h-1z M25,15h1v1h-1z M2,16h1v1h-1z M4,16h1v1h-1z M8,16h1v1h-1z M9,16h1v1h-1z M13,16h1v1h-1z M14,16h1v1h-1z M17,16h1v1h-1z M18,16h1v1h-1z M19,16h1v1h-1z M21,16h1v1h-1z M22,16h1v1h-1z M23,16h1v1h-1z M25,16h1v1h-1z M26,16h1v1h-1z M2,17h1v1h-1z M4,17h1v1h-1z M6,17h1v1h-1z M9,17h1v1h-1z M12,17h1v1h-1z M13,17h1v1h-1z M17,17h1v1h-1z M21,17h1v1h-1z M23,17h1v1h-1z M24,17h1v1h-1z M26,17h1v1h-1z M2,18h1v1h-1z M5,18h1v1h-1z M8,18h1v1h-1z M11,18h1v1h-1z M12,18h1v1h-1z M13,18h1v1h-1z M14,18h1v1h-1z M15,18h1v1h-1z M18,18h1v1h-1z M19,18h1v1h-1z M20,18h1v1h-1z M21,18h1v1h-1z M22,18h1v1h-1z M24,18h1v1h-1z M10,19h1v1h-1z M12,19h1v1h-1z M14,19h1v1h-1z M15,19h1v1h-1z M16,19h1v1h-1z M18,19h1v1h-1z M22,19h1v1h-1z M2,20h1v1h-1z M3,20h1v1h-1z M4,20h1v1h-1z M5,20h1v1h-1z M6,20h1v1h-1z M7,20h1v1h-1z M8,20h1v1h-1z M11,20h1v1h-1z M13,20h1v1h-1z M15,20h1v1h-1z M16,20h1v1h-1z M18,20h1v1h-1z M20,20h1v1h-1z M22,20h1v1h-1z M26,20h1v1h-1z M2,21h1v1h-1z M8,21h1v1h-1z M14,21h1v1h-1z M16,21h1v1h-1z M18,21h1v1h-1z M22,21h1v1h-1z M25,21h1v1h-1z M26,21h1v1h-1z M2,22h1v1h-1z M4,22h1v1h-1z M5,22h1v1h-1z M6,22h1v1h-1z M8,22h1v1h-1z M11,22h1v1h-1z M12,22h1v1h-1z M13,22h1v1h-1z M15,22h1v1h-1z M17,22h1v1h-1z M18,22h1v1h-1z M19,22h1v1h-1z M20,22h1v1h-1z M21,22h1v1h-1z M22,22h1v1h-1z M24,22h1v1h-1z M2,23h1v1h-1z M4,23h1v1h-1z M5,23h1v1h-1z M6,23h1v1h-1z M8,23h1v1h-1z M13,23h1v1h-1z M14,23h1v1h-1z M17,23h1v1h-1z M18,23h1v1h-1z M19,23h1v1h-1z M20,23h1v1h-1z M25,23h1v1h-1z M26,23h1v1h-1z M2,24h1v1h-1z M4,24h1v1h-1z M5,24h1v1h-1z M6,24h1v1h-1z M8,24h1v1h-1z M14,24h1v1h-1z M15,24h1v1h-1z M16,24h1v1h-1z M23,24h1v1h-1z M24,24h1v1h-1z M26,24h1v1h-1z M2,25h1v1h-1z M8,25h1v1h-1z M11,25h1v1h-1z M12,25h1v1h-1z M14,25h1v1h-1z M16,25h1v1h-1z M18,25h1v1h-1z M19,25h1v1h-1z M21,25h1v1h-1z M22,25h1v1h-1z M26,25h1v1h-1z M2,26h1v1h-1z M3,26h1v1h-1z M4,26h1v1h-1z M5,26h1v1h-1z M6,26h1v1h-1z M7,26h1v1h-1z M8,26h1v1h-1z M10,26h1v1h-1z M11,26h1v1h-1z M13,26h1v1h-1z M16,26h1v1h-1z M18,26h1v1h-1z M20,26h1v1h-1z M23,26h1v1h-1z M26,26h1v1h-1z";
 
 function WhatsAppQR() {
+  if (!WA_BOT_NUMBER || !WA_LINK) {
+    return (
+      <p className="text-sm text-muted-foreground">
+        WhatsApp not configured. Set <code className="font-mono">WA_BOT_NUMBER</code>.
+      </p>
+    );
+  }
+
+  // Format number for display: digits only → +N NNN-NNN-NNNN style for US numbers,
+  // or fall back to raw if non-US.
+  const digitsOnly = WA_BOT_NUMBER.replace(/\D/g, "");
+  const displayNumber =
+    digitsOnly.length === 11 && digitsOnly.startsWith("1")
+      ? `+1 ${digitsOnly.slice(1, 4)}-${digitsOnly.slice(4, 7)}-${digitsOnly.slice(7)}`
+      : `+${digitsOnly}`;
+
+  // The pre-computed QR SVG only matches the cloud number.
+  const showQR = digitsOnly === WA_QR_CLOUD_NUMBER;
+
   return (
     <div className="flex flex-col items-center gap-2">
-      <svg
-        xmlns="http://www.w3.org/2000/svg"
-        viewBox="0 0 29 29"
-        width={120}
-        height={120}
-        shapeRendering="crispEdges"
-        aria-label="WhatsApp QR code"
-        role="img"
-        className="rounded-[var(--radius-button)] [border:var(--bd-card)]"
-      >
-        <rect width="29" height="29" fill="white" />
-        <path fill="black" d={WA_QR_PATH} />
-      </svg>
+      {showQR && (
+        <svg
+          xmlns="http://www.w3.org/2000/svg"
+          viewBox="0 0 29 29"
+          width={120}
+          height={120}
+          shapeRendering="crispEdges"
+          aria-label="WhatsApp QR code"
+          role="img"
+          className="rounded-[var(--radius-button)] [border:var(--bd-card)]"
+        >
+          <rect width="29" height="29" fill="white" />
+          <path fill="black" d={WA_QR_PATH} />
+        </svg>
+      )}
       <a
         href={WA_LINK}
         target="_blank"
         rel="noopener noreferrer"
         className="text-xs text-muted-foreground hover:text-foreground underline underline-offset-2"
       >
-        +1 650-399-9709
+        {displayNumber}
       </a>
     </div>
   );
@@ -2239,22 +2535,30 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
           </div>
         </TabsContent>
         <TabsContent value="whatsapp" className="space-y-4">
-          <div className="c-ltable">
-            <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
-              <div className="c-lp-tx">
-                <div className="nm">WhatsApp</div>
-                <div className="sub">Scan the QR code to start a chat and bind your number.</div>
+          {WA_BOT_NUMBER ? (
+            <>
+              <div className="c-ltable">
+                <div className="c-lrow" style={{ gridTemplateColumns: "1fr auto", cursor: "default" }}>
+                  <div className="c-lp-tx">
+                    <div className="nm">WhatsApp</div>
+                    <div className="sub">Scan the QR code to start a chat and bind your number.</div>
+                  </div>
+                  <Button type="button" variant="outline" onClick={() => setQrOpen(true)}>
+                    <QrCode className="size-3.5" />
+                    Show QR
+                  </Button>
+                </div>
               </div>
-              <Button type="button" variant="outline" onClick={() => setQrOpen(true)}>
-                <QrCode className="size-3.5" />
-                Show QR
-              </Button>
-            </div>
-          </div>
-          <div className="space-y-1.5">
-            <p className="text-xs font-medium text-muted-foreground">Your link status</p>
-            <WhatsAppBindingStatus />
-          </div>
+              <div className="space-y-1.5">
+                <p className="text-xs font-medium text-muted-foreground">Your link status</p>
+                <WhatsAppBindingStatus />
+              </div>
+            </>
+          ) : (
+            <p className="text-sm text-muted-foreground">
+              WhatsApp not configured. Set <code className="font-mono">WA_BOT_NUMBER</code>.
+            </p>
+          )}
         </TabsContent>
         <TabsContent value="agent-install" className="space-y-5">
           <CopyCodeCard
@@ -2278,6 +2582,73 @@ function ChannelsTab({ canManageWorkspace }: { canManageWorkspace: boolean }) {
           <WhatsAppQR />
         </DialogContent>
       </Dialog>
+
+      <ChannelCapabilityMatrix />
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// #1383: Channel capability matrix — what each channel can do.
+// Static documentation surface; no network calls.
+// ---------------------------------------------------------------------------
+
+type CapCell = "yes" | "no" | "partial";
+
+interface ChannelCapRow {
+  capability: string;
+  web: CapCell;
+  emily: CapCell;
+  slack: CapCell;
+  whatsapp: CapCell;
+}
+
+const CHANNEL_CAPS: ChannelCapRow[] = [
+  { capability: "Run worker",    web: "yes",     emily: "yes",     slack: "yes",     whatsapp: "yes"     },
+  { capability: "Approve run",   web: "yes",     emily: "partial", slack: "partial", whatsapp: "partial" },
+  { capability: "Create worker", web: "yes",     emily: "no",      slack: "no",      whatsapp: "no"      },
+  { capability: "Notify on run", web: "partial", emily: "yes",     slack: "yes",     whatsapp: "yes"     },
+];
+
+// "partial" = limited support (e.g. approve via link, notify via browser only)
+const CAP_LABELS: Record<CapCell, { label: string; className: string }> = {
+  yes:     { label: "Yes",     className: "text-foreground" },
+  partial: { label: "Partial", className: "text-muted-foreground" },
+  no:      { label: "—",       className: "text-muted-foreground/50" },
+};
+
+function ChannelCapabilityMatrix() {
+  const cols = ["Web", "Emily", "Slack", "WhatsApp"] as const;
+  return (
+    <div className="mt-6 space-y-2">
+      <p className="text-xs font-medium text-muted-foreground">Channel capabilities</p>
+      <div className="overflow-x-auto">
+        <table className="w-full text-xs">
+          <thead>
+            <tr>
+              <th className="py-1.5 pr-4 text-left font-medium text-muted-foreground w-32">Capability</th>
+              {cols.map((col) => (
+                <th key={col} className="py-1.5 px-3 text-center font-medium text-muted-foreground">{col}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {CHANNEL_CAPS.map((row) => (
+              <tr key={row.capability} className="[border-top:var(--bd-div)]">
+                <td className="py-1.5 pr-4 text-muted-foreground">{row.capability}</td>
+                {(["web", "emily", "slack", "whatsapp"] as const).map((ch) => {
+                  const cell = row[ch];
+                  const { label, className } = CAP_LABELS[cell];
+                  return (
+                    <td key={ch} className={`py-1.5 px-3 text-center ${className}`}>{label}</td>
+                  );
+                })}
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      <p className="text-[11px] text-muted-foreground/60">Partial = supported via link or limited flow.</p>
     </div>
   );
 }

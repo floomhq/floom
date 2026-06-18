@@ -126,11 +126,16 @@ describe("page components render with data (no client crash)", () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
     render(<WorkersCollection initialWorkers={[worker as never]} />);
     fireEvent.click(await screen.findByRole("button", { name: /Weekly Update/i }));
+    // R9: advanced tabs are reached via the "Advanced ▾" group on the tab row.
+    fireEvent.click(await screen.findByRole("button", { name: /Advanced tabs/i }));
+    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Config" }));
     fireEvent.click(await screen.findByRole("tab", { name: "Config" }));
-    expect(await screen.findByRole("tab", { name: "Tools" })).toBeInTheDocument();
-    fireEvent.click(screen.getByRole("tab", { name: "Triggers" }));
-    expect(await screen.findByText("E2B sandbox · Agent skill")).toBeInTheDocument();
-    expect(screen.getByText("Claude Sonnet 4.6")).toBeInTheDocument();
+    expect(await screen.findByText("Tools")).toBeInTheDocument();
+    expect(screen.getByText("Brain")).toBeInTheDocument();
+    expect(screen.getAllByText("Triggers").length).toBeGreaterThan(0);
+    expect(await screen.findByText(/E2B sandbox/)).toBeInTheDocument();
+    expect(screen.getByText(/Agent skill/)).toBeInTheDocument();
+    expect(screen.getByText(/Claude Sonnet 4\.6/)).toBeInTheDocument();
     expect(screen.queryByText("bedrock/us.anthropic.claude-sonnet-4-6")).not.toBeInTheDocument();
   });
 
@@ -165,7 +170,9 @@ describe("page components render with data (no client crash)", () => {
   it("BrainCollection renders the folder", async () => {
     const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
     render(<BrainCollection initialFolders={[folder as never]} />);
-    expect(await screen.findByText("Company facts")).toBeInTheDocument();
+    expect(await screen.findByRole("button", { name: /Company facts 3 files/i })).toBeInTheDocument();
+    expect(screen.getAllByText("Company facts")).toHaveLength(2);
+    expect(screen.getByText("Contexts")).toBeInTheDocument();
   });
 
   it("ApprovalsCollection fetches + renders the approval", async () => {

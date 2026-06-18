@@ -19,17 +19,17 @@ function src(rel: string) { return readFileSync(resolve(ROOT, rel), "utf8"); }
 function api(rel: string) { return readFileSync(resolve(API_ROOT, rel), "utf8"); }
 
 // ---------------------------------------------------------------------------
-// #562 — Worker detail: missing connections link directly to connect flow
+// #562 — Connections rows link directly to connect flow
 // ---------------------------------------------------------------------------
 
 function test562MissingConnectionsDirectLink(): void {
   const s = src("app/connections/ConnectionsCollection.tsx");
   assert(
     s.includes("/connections/connect/") && s.includes("return_to"),
-    "Missing connections callout must link directly to /connections/connect/{slug} with return_to",
+    "Connection setup action must link directly to /connections/connect/{slug} with return_to",
   );
   assert(
-    s.includes("encodeURIComponent(slug)") || s.includes("encodeURIComponent(slugs[0])"),
+    s.includes("encodeURIComponent(i.connection.app_name)"),
     "Connect link slugs must be URI-encoded",
   );
 }
@@ -205,7 +205,7 @@ function test538MagicLinkMiddlewareExempt(): void {
 // ---------------------------------------------------------------------------
 
 const tests: [string, () => void][] = [
-  ["#562 missing connections banner links directly to connect flow with return_to", test562MissingConnectionsDirectLink],
+  ["#562 connection setup action links directly to connect flow with return_to", test562MissingConnectionsDirectLink],
   ["#562 missing secrets banner includes return_to on secrets links", test562MissingSecretsDirectLink],
   ["#562 top-level Add secret link updated to /connections/secrets with return_to", test562TopLevelSecretLinkUpdated],
   ["#538 _issue_magic_link and _validate_magic_link helpers defined", test538MagicLinkIssuer],

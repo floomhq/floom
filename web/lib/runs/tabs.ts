@@ -1,4 +1,4 @@
-// Run detail tab set, locked to APP-UI-V4-SPEC §4: Output · Trace · Inputs · Raw.
-// (Was Output/Steps/Tools/Cost.) Constant + test guard the contract.
-export const RUN_DETAIL_TABS = ["Output", "Trace", "Inputs", "Raw"] as const;
+// Run detail tab set: Output · Logs · Inputs. The "Raw" view is a Preview/Raw
+// toggle on the Output result (and on each file), not a separate tab.
+export const RUN_DETAIL_TABS = ["Output", "Logs", "Inputs"] as const;
 export type RunDetailTab = (typeof RUN_DETAIL_TABS)[number];

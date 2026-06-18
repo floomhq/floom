@@ -54,6 +54,11 @@ describe("Cloud overlay parity", () => {
     expect(webMeHelper).toBe(overlayMeHelper);
     expect(webMe).toBe(overlayMe);
     expect(webMeHelper).toContain("display_name");
-    expect(webMeHelper).toContain("engine-shaped user");
+    // #1306: the Cloud /me helper attaches the OAuth profile photo as a
+    // Cloud-only seam (`picture` from Google `picture` / GitHub `avatar_url`),
+    // which the CloudAccountFooter renders (squared, no border) with an
+    // initials fallback. The engine CurrentUser still has no avatar field.
+    expect(webMeHelper).toContain("picture");
+    expect(webMeHelper).toContain("avatar_url");
   });
 });

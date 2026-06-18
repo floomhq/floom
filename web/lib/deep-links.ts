@@ -9,7 +9,8 @@
 const HASH_TO_ROUTE: Record<string, string> = {
   overview: "/overview",
   workers: "/workers",
-  brain: "/brain",
+  brain: "/library",
+  library: "/library",
   runs: "/runs",
   approvals: "/approvals",
   connections: "/connections",

@@ -111,7 +111,7 @@ export function StandaloneShareCard({
 
   // Breadcrumb segments for the current location.
   const crumbs: { label: string; onClick?: () => void }[] = [
-    { label: "Brain" },
+    { label: "Library" },
     {
       label: share.title,
       onClick: openFilePath || folderPrefix ? () => { setFolderPrefix(""); setOpenFilePath(null); } : undefined,
@@ -262,7 +262,7 @@ function PackView({
 
         <div className="px-5 py-4">
           <p className="mb-2 text-[11px] font-medium uppercase tracking-wide text-[var(--ink-soft)]">
-            {atRoot ? "Files" : `${folderPrefix.replace(/\/$/, "")} — ${fileCount} file${fileCount === 1 ? "" : "s"}`}
+            {atRoot ? "Files" : `${folderPrefix.replace(/\/$/, "")} (${fileCount} file${fileCount === 1 ? "" : "s"})`}
           </p>
           <div className="flex flex-col gap-1">
             {nodes.length === 0 && <p className="text-sm text-[var(--ink-soft)]">This folder is empty.</p>}
@@ -367,7 +367,7 @@ function FileView({
         {file.is_binary && type === "file" ? (
           <div className="flex flex-col items-center justify-center gap-2 py-10 text-center">
             <BrandLogo icon={file.display_type || "file"} className="size-8 text-[var(--ink-faint)]" />
-            <p className="text-sm text-[var(--ink-soft)]">Binary file — download to view.</p>
+            <p className="text-sm text-[var(--ink-soft)]">Binary file; download to view.</p>
           </div>
         ) : content ? (
           <GenericOutput type={type} value={content} />

@@ -3,14 +3,14 @@
 import { Suspense, useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
-import { CheckCircle, ChevronLeft, ChevronRight, Download, FileText, Film, ImageIcon, RotateCcw, Table, XCircle } from "lucide-react";
+import { CheckCircle, ChevronLeft, Download, FileText, Film, ImageIcon, RotateCcw, Table } from "lucide-react";
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { notifyApprovalsChanged } from "@/lib/useApprovalsSync";
 import { FloomMark } from "@/components/share/ShareCardShell";
-import { GenericOutput } from "@/components/generic-output";
-import { ApprovalActionItems, approvalActionLine } from "@/components/share/ApprovalActionItems";
+import { approvalActionLine } from "@/components/share/ApprovalActionItems";
+import { ApprovalReviewBody } from "@/components/share/ApprovalReviewBody";
 import type { ApprovalRow, Artifact } from "@/lib/types";
 import { AnnotationsViewer } from "./annotations";
 
@@ -33,23 +33,6 @@ function parseDecisionInput(raw?: string | null): Record<string, unknown> {
   } catch {
     return {};
   }
-}
-
-// Infer a GenericOutput type from the proposed-output preview string.
-function inferPreviewType(preview: string): string {
-  const t = preview.trim();
-  if ((t.startsWith("{") && t.endsWith("}")) || (t.startsWith("[") && t.endsWith("]"))) return "json";
-  if (/^#{1,3}\s|\n[-*]\s|\|.+\|/.test(t)) return "markdown";
-  return "text";
-}
-
-function formatRelative(iso: string): string {
-  const minutes = Math.max(0, Math.floor((Date.now() - new Date(iso).getTime()) / 60000));
-  if (minutes < 1) return "just now";
-  if (minutes < 60) return `${minutes}m ago`;
-  const hours = Math.floor(minutes / 60);
-  if (hours < 24) return `${hours}h ago`;
-  return `${Math.floor(hours / 24)}d ago`;
 }
 
 function formatBytes(bytes?: number): string | null {
@@ -542,7 +525,7 @@ function PdfArtifactPreview({ href, file }: { href: string; file: PreviewFile })
         {loading && <LoadingPreview />}
         <canvas
           ref={canvasRef}
-          className={`mx-auto max-w-full rounded-[var(--radius-button)] bg-white shadow-[var(--shadow-card)] ${loading ? "invisible" : ""}`}
+          className={`mx-auto max-w-full rounded-[var(--radius-button)] bg-white shadow-[var(--shadow-pop)] ${loading ? "invisible" : ""}`}
         />
       </div>
     </div>
@@ -703,7 +686,6 @@ function ReviewContent() {
   const [chatComment, setChatComment] = useState("");
   const [chatFiles, setChatFiles] = useState<{ url: string; name: string }[]>([]);
   const [uploading, setUploading] = useState(false);
-  const [dragOver, setDragOver] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
 
@@ -782,15 +764,6 @@ function ReviewContent() {
     [approval, isSignedLink, token]
   );
 
-  const handleDrop = useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      setDragOver(false);
-      Array.from(e.dataTransfer.files).forEach((file) => void uploadFile(file));
-    },
-    [uploadFile]
-  );
-
   const removeCurrent = useCallback(() => {
     setRows((current) => {
       const next = current.filter((row) => row.id !== approval?.id);
@@ -817,7 +790,7 @@ function ReviewContent() {
         await api.approvals.approveAction(approval.id, annotationsPayload);
       } else if (isAgentTool) {
         await api.approvals.approveAgentTool(approval.id);
-        toast.success("Approved — run will resume");
+        toast.success("Approved: run will resume");
       } else {
         await api.runs.approve(approval.run_id, undefined, annotationsPayload);
         toast.success("Approved");
@@ -858,10 +831,18 @@ function ReviewContent() {
   }, [annotationsPayload, chatComment, approval, isDestructiveDelete, isAgentTool, isSignedLink, load, removeCurrent, token]);
 
   return (
-    <div className="flex min-h-screen flex-col items-center justify-center bg-[var(--bg)] px-4 py-6">
-      {/* Internal owner: back-link + queue counter above the card */}
-      {!isSignedLink && (
-        <div className="mb-2 flex w-full max-w-[560px] items-center justify-between">
+    <div className="flex min-h-screen flex-col bg-[var(--bg)]">
+      {/* Topbar: brand + who-asked + shared-link marker (consistent header) */}
+      <div className="flex items-center justify-between [border-bottom:var(--bd-div)] px-6 py-3.5">
+        <div className="flex items-center gap-2.5">
+          <FloomMark size={18} />
+          <span className="text-sm font-medium text-[var(--ink)]">Approval request</span>
+        </div>
+        {isSignedLink ? (
+          <span className="rounded-[var(--radius-pill)] bg-[var(--bg-2)] px-2.5 py-0.5 text-xs text-[var(--ink-soft)]">
+            Shared link
+          </span>
+        ) : (
           <Link
             href="/approvals"
             className="inline-flex items-center gap-1 text-xs text-[var(--ink-soft)] hover:text-[var(--ink)]"
@@ -869,216 +850,118 @@ function ReviewContent() {
             <ChevronLeft className="h-3.5 w-3.5" />
             All approvals
           </Link>
-          {rows.length > 1 && (
-            <div className="flex items-center gap-2 text-xs text-[var(--ink-soft)]">
-              <button
-                type="button"
-                onClick={() => setIndex((i) => Math.max(0, i - 1))}
-                disabled={index === 0 || !!busy}
-                aria-label="Previous approval"
-                className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] disabled:opacity-40 hover:bg-[var(--bg-2)]"
-              >
-                <ChevronLeft className="h-3.5 w-3.5" />
-              </button>
-              <span>{index + 1} of {rows.length}</span>
-              <button
-                type="button"
-                onClick={() => setIndex((i) => Math.min(rows.length - 1, i + 1))}
-                disabled={index >= rows.length - 1 || !!busy}
-                aria-label="Next approval"
-                className="inline-flex h-6 w-6 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] disabled:opacity-40 hover:bg-[var(--bg-2)]"
-              >
-                <ChevronRight className="h-3.5 w-3.5" />
-              </button>
-            </div>
-          )}
-        </div>
-      )}
+        )}
+      </div>
 
-      {/* Wave 3: ONE fixed-height 480px card */}
-      <div
-        className="flex w-full max-w-[560px] flex-col rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--paper)] shadow-[var(--shadow-card)]"
-        style={{ height: "480px" }}
-      >
-        {/* Card header: brand + "Approval request" + shared-link marker */}
-        <div className="flex shrink-0 items-center justify-between [border-bottom:var(--bd-div)] px-5 py-3.5">
-          <div className="flex items-center gap-2.5">
-            <FloomMark size={18} />
-            <span className="text-sm font-medium text-[var(--ink)]">Approval request</span>
+      <div className="flex-1 px-6 py-8">
+        {loading ? (
+          <div className="mx-auto max-w-[820px] space-y-3">
+            <div className="h-5 w-1/2 animate-pulse rounded bg-[var(--bg-2)]" />
+            <div className="h-24 animate-pulse rounded bg-[var(--bg-2)]" />
           </div>
-          {isSignedLink && (
-            <span className="rounded-[var(--radius-pill)] bg-[var(--bg-2)] px-2 py-0.5 text-xs text-[var(--ink-soft)]">
-              Shared link
-            </span>
-          )}
-        </div>
-
-        {/* Scrollable content area */}
-        <div className="min-h-0 flex-1 space-y-4 overflow-y-auto px-5 py-4">
-          {loading ? (
-            <div className="space-y-3">
-              <div className="h-5 w-3/4 animate-pulse rounded bg-[var(--bg-2)]" />
-              <div className="h-20 animate-pulse rounded bg-[var(--bg-2)]" />
-            </div>
-          ) : loadError ? (
-            <div className="flex h-full flex-col justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] bg-red-50/80 px-4 py-4 text-sm text-red-700 dark:bg-red-950/30 dark:text-red-300">
-              <div className="font-medium">Could not load approvals.</div>
-              <div className="mt-1">{loadError}</div>
-              <button
-                type="button"
-                onClick={() => void load()}
-                className="mt-3 inline-flex h-8 w-fit items-center rounded-[var(--radius-button)] [border:var(--bd-btn)] px-3 text-xs font-medium hover:bg-red-100 dark:hover:bg-red-900/40"
-              >
-                Retry
-              </button>
-            </div>
-          ) : !approval ? (
-            <div className="flex h-full flex-col items-center justify-center py-8 text-center">
-              <CheckCircle className="h-8 w-8 text-[var(--ink-faint)]" />
-              <p className="mt-3 text-sm font-medium text-[var(--ink)]">No pending approvals</p>
-              <p className="mt-1 text-xs text-[var(--ink-soft)]">
-                Everything currently waiting for a decision has been handled.
-              </p>
-            </div>
-          ) : (
-            <>
-              {/* Plain-language action line */}
-              <div className="rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[color-mix(in_srgb,var(--pending)_8%,var(--bg-2))] px-4 py-3">
-                <p className="text-[14px] font-semibold leading-snug text-[var(--ink)]">
-                  {approvalActionLine(approval.label, decisionInput)}
-                </p>
-                <p className="mt-0.5 text-xs text-[var(--ink-soft)]">
-                  {formatRelative(approval.created_at)}
-                  {isDestructiveDelete && (
-                    <span className="ml-2 font-medium text-red-600 dark:text-red-400">Delete request</span>
-                  )}
-                </p>
-              </div>
-
-              {/* Action items */}
-              {!isDestructiveDelete && <ApprovalActionItems decisionInput={decisionInput} />}
-
-              {/* Proposed output via GenericOutput */}
-              {approval.preview && (
-                <div className="max-h-[120px] overflow-y-auto rounded-[var(--radius-button)] [border:var(--bd-card)] bg-[var(--bg-2)] p-4">
-                  <GenericOutput type={inferPreviewType(approval.preview)} value={approval.preview} />
-                </div>
-              )}
-
-              {/* File preview */}
-              {previewFile && (
+        ) : loadError ? (
+          <div className="mx-auto max-w-[560px] rounded-[var(--radius-button)] bg-[var(--bg-2)] px-4 py-4 text-sm text-[var(--ink)]">
+            <div className="font-medium">Could not load approvals.</div>
+            <div className="mt-1 text-[var(--ink-soft)]">{loadError}</div>
+            <button
+              type="button"
+              onClick={() => void load()}
+              className="c-vpill mt-3 inline-flex w-fit items-center px-3 py-1.5 text-xs font-medium"
+            >
+              Retry
+            </button>
+          </div>
+        ) : !approval ? (
+          <div className="flex flex-col items-center justify-center py-20 text-center">
+            <CheckCircle className="h-8 w-8 text-[var(--ink-faint)]" />
+            <p className="mt-3 text-sm font-medium text-[var(--ink)]">No pending approvals</p>
+            <p className="mt-1 text-xs text-[var(--ink-soft)]">
+              Everything currently waiting for a decision has been handled.
+            </p>
+          </div>
+        ) : (
+          <ApprovalReviewBody
+            approval={approval}
+            actionLine={approvalActionLine(approval.label, decisionInput)}
+            index={index}
+            total={rows.length}
+            onPrev={() => setIndex((i) => Math.max(0, i - 1))}
+            onNext={() => setIndex((i) => Math.min(rows.length - 1, i + 1))}
+            comment={chatComment}
+            onComment={setChatComment}
+            approveKeepsComment={!isAgentTool}
+            busy={!!busy}
+            onApprove={approve}
+            onReject={reject}
+            onAttach={() => fileInputRef.current?.click()}
+            footnote={
+              isSignedLink
+                ? "Shared via Floom. Your decision is recorded against this request only."
+                : "Same view in-app and via a shared link. Your decision is recorded against this request."
+            }
+            proposedOverride={
+              previewFile ? (
                 <ApprovalFilePreview
                   file={previewFile}
                   approval={approval}
                   isSignedLink={isSignedLink}
                   token={token}
                 />
-              )}
-
-              {/* Read-only persisted annotations from prior reviewers */}
-              {approval.annotations &&
-                (approval.annotations.text?.length > 0 || approval.annotations.images?.length > 0) && (
-                  <AnnotationsViewer
-                    annotations={approval.annotations}
-                    resolveImageUrl={resolveUploadUrl}
-                  />
+              ) : isDestructiveDelete ? (
+                <div className="text-sm text-[var(--warning)]">
+                  This request will permanently delete the listed records. Review carefully before approving.
+                </div>
+              ) : undefined
+            }
+            leftExtra={
+              <>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="image/*"
+                  className="hidden"
+                  onChange={(e) => {
+                    const file = e.target.files?.[0];
+                    if (file) void uploadFile(file);
+                    e.target.value = "";
+                  }}
+                />
+                {chatFiles.length > 0 && (
+                  <div className="mt-3 flex flex-wrap gap-1.5">
+                    {chatFiles.map((f, i) => (
+                      <span
+                        key={i}
+                        className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] bg-[var(--bg-2)] px-2 py-0.5 text-xs text-[var(--ink-soft)]"
+                      >
+                        <ImageIcon className="h-3 w-3" />
+                        {f.name}
+                        <button
+                          type="button"
+                          onClick={() => setChatFiles((prev) => prev.filter((_, j) => j !== i))}
+                          className="ml-0.5 leading-none hover:text-[var(--ink)]"
+                          aria-label={`Remove ${f.name}`}
+                        >
+                          ×
+                        </button>
+                      </span>
+                    ))}
+                  </div>
                 )}
-            </>
-          )}
-        </div>
-
-        {/* Pinned footer: chatbox feedback row + Reject / Approve */}
-        <div className="shrink-0 [border-top:var(--bd-div)]">
-          {/* Chatbox — resizable, auto-grows, drag-and-drop for images and files */}
-          <div
-            className={`mx-3 mt-3 flex items-start gap-2 rounded-[var(--radius-button)] [border:var(--bd-input)] px-3 py-2 transition-colors ${
-              dragOver
-                ? "bg-[color-mix(in_srgb,var(--primary)_6%,var(--bg-2))]"
-                : "bg-[var(--bg-2)]"
-            }`}
-            onDragOver={(e) => { e.preventDefault(); setDragOver(true); }}
-            onDragLeave={() => setDragOver(false)}
-            onDrop={handleDrop}
-          >
-            <textarea
-              value={chatComment}
-              onChange={(e) => {
-                setChatComment(e.target.value);
-                e.target.style.height = "auto";
-                e.target.style.height = `${e.target.scrollHeight}px`;
-              }}
-              placeholder="Add a comment or drop an image…"
-              rows={1}
-              className="flex-1 resize-none bg-transparent text-sm text-[var(--ink)] placeholder:text-[var(--ink-faint)] focus:outline-none"
-              style={{ minHeight: "28px", maxHeight: "96px", overflowY: "auto" }}
-            />
-            <button
-              type="button"
-              onClick={() => fileInputRef.current?.click()}
-              disabled={uploading || !approval}
-              aria-label="Attach image or file"
-              className="mt-0.5 shrink-0 text-[var(--ink-soft)] hover:text-[var(--ink)] disabled:opacity-40"
-            >
-              <ImageIcon className="h-4 w-4" />
-            </button>
-            <input
-              ref={fileInputRef}
-              type="file"
-              accept="image/*"
-              className="hidden"
-              onChange={(e) => {
-                const file = e.target.files?.[0];
-                if (file) void uploadFile(file);
-                e.target.value = "";
-              }}
-            />
-          </div>
-
-          {/* Attached file chips */}
-          {chatFiles.length > 0 && (
-            <div className="flex flex-wrap gap-1.5 px-3 pt-1.5">
-              {chatFiles.map((f, i) => (
-                <span
-                  key={i}
-                  className="inline-flex items-center gap-1 rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--bg-2)] px-2 py-0.5 text-xs text-[var(--ink-soft)]"
-                >
-                  <ImageIcon className="h-3 w-3" />
-                  {f.name}
-                  <button
-                    type="button"
-                    onClick={() => setChatFiles((prev) => prev.filter((_, j) => j !== i))}
-                    className="ml-0.5 leading-none hover:text-[var(--ink)]"
-                    aria-label={`Remove ${f.name}`}
-                  >
-                    ×
-                  </button>
-                </span>
-              ))}
-            </div>
-          )}
-
-          {/* Reject / Approve */}
-          <div className="flex items-center gap-2 px-3 py-3">
-            <button
-              type="button"
-              onClick={approve}
-              disabled={!!busy || !approval}
-              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-sm font-medium text-[var(--primary-text)] shadow-[var(--shadow-btn)] disabled:opacity-40"
-            >
-              <CheckCircle className="h-4 w-4" />
-              {busy === "approve" ? "Approving…" : "Approve"}
-            </button>
-            <button
-              type="button"
-              onClick={reject}
-              disabled={!!busy || !approval}
-              className="inline-flex h-9 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-4 text-sm font-medium text-destructive disabled:opacity-40"
-            >
-              <XCircle className="h-4 w-4" />
-              {busy === "reject" ? "Rejecting…" : "Reject"}
-            </button>
-          </div>
-        </div>
+                {uploading && <p className="mt-2 text-xs text-[var(--ink-soft)]">Uploading…</p>}
+                {approval.annotations &&
+                  ((approval.annotations.text?.length ?? 0) > 0 ||
+                    (approval.annotations.images?.length ?? 0) > 0) && (
+                    <div className="mt-4">
+                      <AnnotationsViewer
+                        annotations={approval.annotations}
+                        resolveImageUrl={resolveUploadUrl}
+                      />
+                    </div>
+                  )}
+              </>
+            }
+          />
+        )}
       </div>
     </div>
   );

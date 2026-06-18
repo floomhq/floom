@@ -17,8 +17,10 @@ import {
   FileText,
   Film,
   Folder,
+  History,
   Image as ImageIcon,
   Link as LinkIcon,
+  Link2Off,
   Lock,
   Plus,
   RotateCcw,
@@ -27,15 +29,23 @@ import {
   ShieldAlert,
   Table,
   Trash2,
+  UploadCloud,
   X,
 } from "lucide-react";
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { reportError } from "@/lib/notify";
 import type { ContextDetail, ContextFileItem, ContextSummary, SecretWarning, VersionSummary } from "@/lib/types";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl, AssetVisibilityIndicator } from "@/components/AssetVisibilityControl";
-import { Button } from "@/components/ui/button";
+import { Button, buttonVariants } from "@/components/ui/button";
+import {
+  DropdownMenu,
+  DropdownMenuContent,
+  DropdownMenuTrigger,
+} from "@/components/ui/dropdown-menu";
+import { cn } from "@/lib/utils";
 import {
   Dialog,
   DialogContent,
@@ -777,7 +787,7 @@ function ContextsPage() {
       {/* Page header */}
       <div className="flex items-start justify-between gap-4 shrink-0">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Brain</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Library</h1>
           <p className="text-sm text-muted-foreground mt-0.5">
             Reusable folders of files your workers can read before they act.
           </p>
@@ -910,32 +920,11 @@ function ContextsPage() {
 
         {/* ---- Pack detail / miller folder columns ------------------------ */}
         {!selectedName ? (
-          <section
-            {...dropHandlers}
-            className={`relative flex-1 overflow-hidden flex items-center justify-center p-8 transition-colors duration-300 ${
-              dragActive ? "bg-muted/30" : ""
-            }`}
-          >
-            <div className="max-w-md text-center space-y-4">
-              <div className="space-y-1.5">
-                <h2 className="text-base font-semibold">Give your workers knowledge</h2>
-                <p className="text-sm text-muted-foreground">
-                  A folder is a small set of files your workers read before they act:
-                  company facts, your ICP, product details, and brand voice. Attach a folder to a
-                  worker and it uses those files on every run.
-                </p>
-              </div>
-              <Button onClick={() => setShowNewContext(true)}>
-                <Plus className="size-4" />
-                New folder
-              </Button>
-            </div>
-            {dragActive && (
-              <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
-                Drop files to create a folder
-              </div>
-            )}
-          </section>
+          <ContextEmptyState
+            dragActive={dragActive}
+            onNewFolder={() => setShowNewContext(true)}
+            dropHandlers={dropHandlers}
+          />
         ) : !detail ? (
           <section className="flex-1 overflow-hidden flex items-center justify-center">
             <Skeleton className="h-10 w-48 rounded-[var(--radius-button)]" />
@@ -957,6 +946,11 @@ function ContextsPage() {
             onAddFile={() => fileInputRef.current?.click()}
             onCreateFile={createTextFile}
             onVisibilityChange={(updated) => setDetail(updated)}
+            onRolledBack={() => {
+              void api.contexts.get(selectedName).then(setDetail).catch(() => {});
+              void loadContexts(selectedName);
+              setSelectedFile(null);
+            }}
             dropHandlers={dropHandlers}
           />
         ) : (
@@ -990,9 +984,9 @@ function ContextsPage() {
 
             <section
               {...dropHandlers}
-              className={`relative flex-1 overflow-hidden flex flex-col min-w-0 transition-colors duration-300 ${
-                dragActive && !readOnly ? "bg-muted/30" : ""
-              } ${mobilePane === "file" ? "flex" : "hidden lg:flex"}`}
+              className={`relative flex-1 overflow-hidden flex flex-col min-w-0 ${
+                mobilePane === "file" ? "flex" : "hidden lg:flex"
+              }`}
             >
               {secretWarnings.length > 0 && (
                 <SecretWarningBanner
@@ -1020,14 +1014,17 @@ function ContextsPage() {
                 onRestored={(restoredContent) => {
                   setFileText(restoredContent);
                   setVersionsKey((k) => k + 1);
-                  void api.contexts.get(selectedName).then(setDetail).catch(() => {});
+                  void api.contexts
+                    .get(selectedName)
+                    .then(setDetail)
+                    .catch((err) => reportError("Could not reload this folder.", err));
                   void loadContexts(selectedName);
                 }}
               />
               {dragActive && !readOnly && (
-                <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
-                  Drop files to add them{folderPath.length ? ` to ${folderPath.join("/")}` : ""}
-                </div>
+                <DropZoneOverlay
+                  label={`Drop files to add them${folderPath.length ? ` to ${folderPath.join("/")}` : ""}`}
+                />
               )}
             </section>
           </>
@@ -1272,10 +1269,93 @@ function PackRow({
 }
 
 // ===========================================================================
+// Drop affordance (B11 + B6). ONE clearly-bounded dashed rounded box — never a
+// whole-pane grey wash. Reused by every drop target so the affordance is
+// globally consistent.
+//   - DropZoneOverlay: the on-drag overlay floated inside an existing pane
+//     (PackDetailPane / file viewer). Bounded box, not a pane-wide tint.
+//   - ContextEmptyState: the empty Library pane. The dashed box is PERSISTENT
+//     (the missing drop affordance, B6) and goes to its active state on drag.
+// ===========================================================================
+
+const DROPZONE_BASE =
+  "flex items-center justify-center gap-2 rounded-[var(--radius-card)] " +
+  "border-2 border-dashed text-sm font-medium transition-colors";
+
+/** On-drag bounded dashed box floated over an existing pane. */
+function DropZoneOverlay({ label }: { label: string }) {
+  return (
+    <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center">
+      <div
+        data-dropzone="true"
+        className={`${DROPZONE_BASE} h-full w-full border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_8%,var(--bg-card))] text-[var(--accent)] backdrop-blur-[1px]`}
+      >
+        <UploadCloud className="size-4" />
+        {label}
+      </div>
+    </div>
+  );
+}
+
+/** Empty Library pane: a persistent dashed drop-zone box (B6) that highlights
+ *  on drag (B11). No whole-pane grey wash. */
+export function ContextEmptyState({
+  dragActive,
+  onNewFolder,
+  dropHandlers,
+}: {
+  dragActive: boolean;
+  onNewFolder: () => void;
+  dropHandlers: Partial<{
+    onDragEnter: React.DragEventHandler<HTMLElement>;
+    onDragOver: React.DragEventHandler<HTMLElement>;
+    onDragLeave: React.DragEventHandler<HTMLElement>;
+    onDrop: React.DragEventHandler<HTMLElement>;
+  }>;
+}) {
+  return (
+    <section
+      {...dropHandlers}
+      className="relative flex-1 overflow-hidden flex items-center justify-center p-8"
+    >
+      <div className="w-full max-w-md text-center space-y-4">
+        <div className="space-y-1.5">
+          <h2 className="text-base font-semibold">Give your workers knowledge</h2>
+          <p className="text-sm text-muted-foreground">
+            A folder is a small set of files your workers read before they act:
+            company facts, your ICP, product details, and brand voice. Attach a folder to a
+            worker and it uses those files on every run.
+          </p>
+        </div>
+        {/* Persistent dashed drop-zone box: drag-drop and "New folder" wired
+            together in one affordance (B6 / L4 / L7). */}
+        <div
+          data-dropzone="true"
+          className={`${DROPZONE_BASE} flex-col px-6 py-8 ${
+            dragActive
+              ? "border-[var(--accent)] bg-[color-mix(in_srgb,var(--accent)_8%,var(--bg-card))] text-[var(--accent)]"
+              : "border-[var(--line)] text-muted-foreground"
+          }`}
+        >
+          <UploadCloud className={`size-5 ${dragActive ? "" : "opacity-70"}`} />
+          <span>
+            {dragActive ? "Drop files to create a folder" : "Drag files here to create a folder"}
+          </span>
+          <Button variant="outline" size="sm" onClick={onNewFolder} className="mt-1">
+            <Plus className="size-4" />
+            New folder
+          </Button>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+// ===========================================================================
 // Pack detail pane (default 2-pane mode): metadata header + miller columns.
 // ===========================================================================
 
-function PackDetailPane({
+export function PackDetailPane({
   detail,
   folderColumns,
   folderPath,
@@ -1289,6 +1369,7 @@ function PackDetailPane({
   onAddFile,
   onCreateFile,
   onVisibilityChange,
+  onRolledBack,
   dropHandlers,
 }: {
   detail: ContextDetail;
@@ -1304,6 +1385,7 @@ function PackDetailPane({
   onAddFile: () => void;
   onCreateFile: () => void;
   onVisibilityChange: (updated: ContextDetail) => void;
+  onRolledBack: () => void;
   dropHandlers: Partial<{
     onDragEnter: React.DragEventHandler<HTMLElement>;
     onDragOver: React.DragEventHandler<HTMLElement>;
@@ -1311,26 +1393,14 @@ function PackDetailPane({
     onDrop: React.DragEventHandler<HTMLElement>;
   }>;
 }) {
-  const [packLinkCopied, setPackLinkCopied] = useState(false);
-
-  async function copyPackLink() {
-    try {
-      const link = await api.contexts.sharePackLink(detail.name);
-      await navigator.clipboard.writeText(link.url);
-      setPackLinkCopied(true);
-      toast.success("Share link copied");
-      setTimeout(() => setPackLinkCopied(false), 1500);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to create share link");
-    }
-  }
+  const sensitive = detail.sensitive ?? true;
 
   return (
     <section
       {...dropHandlers}
-      className={`relative flex-1 overflow-hidden flex-col min-w-0 transition-colors ${
-        dragActive && !readOnly ? "bg-muted/30" : ""
-      } ${mobileVisible ? "flex" : "hidden lg:flex"}`}
+      className={`relative flex-1 overflow-hidden flex-col min-w-0 ${
+        mobileVisible ? "flex" : "hidden lg:flex"
+      }`}
     >
       {/* Pack header / metadata (used-by chips live here) */}
       <div className="min-h-[82px] shrink-0 [border-bottom:var(--bd-div)] px-5 py-4">
@@ -1355,20 +1425,30 @@ function PackDetailPane({
               </span>
             )}
           </h2>
-          <div className="flex items-center gap-2 shrink-0">
+          <div className="flex items-center gap-1.5 shrink-0">
+            {/* Folder history + rollback. Per-file history lives on the open file
+                (FilePane); this is the WHOLE-FOLDER history, placed next to it so
+                the two read as a pair. Disabled (with the reason inline) while
+                Sensitive — Sensitive folders have no git history. */}
+            <FolderHistoryMenu
+              packName={detail.name}
+              sensitive={sensitive}
+              readOnly={readOnly}
+              onRolledBack={onRolledBack}
+            />
             {/* Sensitive toggle: when on, this pack is never committed to git
                 or pushed to GitHub — stored only in encrypted Supabase Storage. */}
             {!readOnly && (
               <button
                 type="button"
-                title={(detail.sensitive ?? true) ? "Sensitive — not tracked by git. Click to enable git tracking." : "Git-tracked. Click to make sensitive (exclude from git)."}
+                title={sensitive ? "Sensitive: not tracked by git. Click to enable git tracking + folder history." : "Git-tracked. Click to make sensitive (exclude from git)."}
                 onClick={async () => {
-                  const next = !(detail.sensitive ?? true);
+                  const next = !sensitive;
                   await api.contexts.setSensitive(detail.name, next);
                   onVisibilityChange({ ...detail, sensitive: next });
                 }}
                 className={`p-1 rounded-[var(--radius-button)] transition-colors shrink-0 ${
-                  (detail.sensitive ?? true)
+                  sensitive
                     ? "text-[var(--negative)] bg-[color-mix(in_srgb,var(--negative)_10%,transparent)] hover:bg-[color-mix(in_srgb,var(--negative)_14%,transparent)]"
                     : "text-muted-foreground hover:bg-muted"
                 }`}
@@ -1391,16 +1471,28 @@ function PackDetailPane({
                 }}
               />
             )}
-            <button
-              type="button"
-              onClick={copyPackLink}
-              className="p-1 rounded-[var(--radius-button)] hover:bg-muted text-muted-foreground transition-colors shrink-0"
-              title="Share this folder"
-            >
-              {packLinkCopied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5" />}
-            </button>
+            {/* Public share-link control with Copy AND Revoke (#766). Hidden for
+                read-only system packs (not shareable). */}
+            {!readOnly && (
+              <ShareControl
+                noun="folder"
+                onShare={async () => (await api.contexts.sharePackLink(detail.name)).url}
+                onRevoke={async () => (await api.contexts.revokePackLink(detail.name)).revoked}
+              />
+            )}
           </div>
         </div>
+        {/* Sensitive consequence note: make the Sensitive -> no folder history
+            dependency explicit instead of leaving the rollback control dead. */}
+        {!readOnly && sensitive && (
+          <p className="mt-2 flex items-start gap-1.5 text-xs text-muted-foreground">
+            <ShieldAlert className="mt-0.5 size-3 shrink-0 text-[var(--negative)]" />
+            <span>
+              Sensitive: encrypted in storage, never committed to git or pushed to GitHub.
+              Turn it off to enable version history and rollback for the whole folder.
+            </span>
+          </p>
+        )}
         {readOnly && (
           <p className="mt-2 text-xs text-muted-foreground">
             This is a Floom engine folder. It shapes how workers are generated and is read-only.
@@ -1503,13 +1595,13 @@ function PackDetailPane({
         </div>
       )}
 
-      {/* Full-pane drop overlay (covers the whole detail pane, including the
-          miller columns) so a drop anywhere over a writable pack uploads.
-          pointer-events-none lets the underlying drag events keep firing. */}
+      {/* Drop affordance: ONE bounded dashed box (covers the pane, drop lands
+          anywhere over a writable pack). pointer-events-none lets the
+          underlying drag events keep firing. No whole-pane grey wash (B11). */}
       {dragActive && !readOnly && (
-        <div className="pointer-events-none absolute inset-3 z-10 flex items-center justify-center rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)]/80 text-sm font-medium text-[var(--ink)] backdrop-blur-[1px]">
-          Drop files to add them{folderPath.length ? ` to ${folderPath.join("/")}` : ""}
-        </div>
+        <DropZoneOverlay
+          label={`Drop files to add them${folderPath.length ? ` to ${folderPath.join("/")}` : ""}`}
+        />
       )}
     </section>
   );
@@ -1726,21 +1818,8 @@ function FilePane({
   onBackMobile: () => void;
   onRestored: (restoredContent: string) => void;
 }) {
-  const [fileLinkCopied, setFileLinkCopied] = useState(false);
   if (!file) return null;
-
-  async function copyFileLink() {
-    if (!file) return;
-    try {
-      const link = await api.contexts.shareFileLink(packName, file.path);
-      await navigator.clipboard.writeText(link.url);
-      setFileLinkCopied(true);
-      toast.success("Share link copied");
-      setTimeout(() => setFileLinkCopied(false), 1500);
-    } catch (error) {
-      toast.error(error instanceof Error ? error.message : "Failed to create share link");
-    }
-  }
+  const filePath = file.path;
 
   const canEdit = isKnownTextFile(file) && !readOnly;
   const displayType = fileDisplayType(file);
@@ -1803,14 +1882,13 @@ function FilePane({
               onRestored={onRestored}
             />
           )}
-          <button
-            type="button"
-            onClick={copyFileLink}
-            className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
-            title="Share this file"
-          >
-            {fileLinkCopied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5" />}
-          </button>
+          {/* Public share-link control with Copy AND Revoke (#766) — the same
+              control as the folder, scoped to this one file. */}
+          <ShareControl
+            noun="file"
+            onShare={async () => (await api.contexts.shareFileLink(packName, filePath)).url}
+            onRevoke={async () => (await api.contexts.revokeFileLink(packName, filePath)).revoked}
+          />
           <a
             href={fileUrl}
             className="inline-flex h-7 w-7 items-center justify-center rounded-[var(--radius-button)] [border:var(--bd-card)] text-muted-foreground hover:bg-muted hover:text-foreground transition-colors"
@@ -2320,7 +2398,7 @@ function PreviewUnavailable({
 }) {
   return (
     <div className="flex h-full min-h-[260px] items-center justify-center p-6">
-      <div className="max-w-lg rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-5 text-sm shadow-sm">
+      <div className="max-w-lg rounded-[var(--radius-card)] [border:var(--bd-card)] bg-[var(--bg-card)] p-5 text-sm">
         <p className="font-medium text-foreground">{title}</p>
         <p className="mt-2 leading-6 text-muted-foreground">{detail}</p>
         <div className="mt-4 flex flex-wrap items-center gap-2">
@@ -2338,6 +2416,245 @@ function PreviewUnavailable({
         </div>
       </div>
     </div>
+  );
+}
+
+// ===========================================================================
+// Public share-link control (#766). The bare "copy link" icon used to mint a
+// permanent /s/<token> link with no way to kill it — a privacy hole on
+// Sensitive packs. This control mints (Copy) AND revokes from one menu, on the
+// same kit as the Versions / Visibility affordances.
+//
+// Honest backend truth: only SHA-256(token) is stored, so the raw URL cannot be
+// re-displayed after minting — re-sharing ROTATES the link. So the control shows
+// the URL only in the session it was minted (copy it now), and Revoke kills it
+// instantly. Used for both packs and files (parameterized by `noun` + callbacks).
+// ===========================================================================
+
+export function ShareControl({
+  noun,
+  onShare,
+  onRevoke,
+}: {
+  noun: "folder" | "file";
+  onShare: () => Promise<string>; // returns the minted URL
+  onRevoke: () => Promise<boolean>; // returns whether a link was killed
+}) {
+  const [url, setUrl] = useState<string | null>(null);
+  const [busy, setBusy] = useState<"share" | "revoke" | null>(null);
+  const [copied, setCopied] = useState(false);
+
+  async function mint() {
+    setBusy("share");
+    try {
+      const next = await onShare();
+      setUrl(next);
+      await navigator.clipboard.writeText(next).catch(() => {});
+      setCopied(true);
+      setTimeout(() => setCopied(false), 1500);
+      toast.success("Share link created and copied");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to create share link");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  async function copy() {
+    if (!url) return;
+    await navigator.clipboard.writeText(url).catch(() => {});
+    setCopied(true);
+    setTimeout(() => setCopied(false), 1500);
+  }
+
+  async function revoke() {
+    setBusy("revoke");
+    try {
+      const killed = await onRevoke();
+      setUrl(null);
+      toast.success(killed ? "Share link revoked" : "No active share link to revoke");
+    } catch (error) {
+      toast.error(error instanceof Error ? error.message : "Failed to revoke share link");
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <DropdownMenu>
+      <DropdownMenuTrigger
+        className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-7 w-7 p-0")}
+        title={`Share this ${noun}`}
+      >
+        {copied ? <Check className="size-3.5 text-[var(--success)]" /> : <LinkIcon className="size-3.5" />}
+      </DropdownMenuTrigger>
+      <DropdownMenuContent align="end" sideOffset={6} className="w-80 p-1">
+        {/* Custom interactive body (Create/Copy/Revoke buttons), not menu items,
+            so this uses plain styled markup rather than the menu-item primitives
+            (DropdownMenuLabel needs a Group parent in the base-ui kit). */}
+        <p className="px-2 pt-1.5 pb-1 text-[10px] font-medium uppercase tracking-wider text-muted-foreground">
+          Public share link
+        </p>
+        <div className="mx-1 my-1 [border-bottom:var(--bd-div)]" />
+        <div className="px-2 pb-1.5 pt-0.5 space-y-2">
+          <p className="text-xs leading-5 text-muted-foreground">
+            Anyone with the link can view and download this {noun}, no account needed.
+            Revoke kills the link instantly.
+          </p>
+          {url ? (
+            <div className="space-y-1.5">
+              <p className="truncate rounded-[var(--radius-button)] bg-[var(--bg-app)] px-2 py-1.5 font-mono text-[11px] text-foreground" title={url}>
+                {url.replace(/^https?:\/\//, "")}
+              </p>
+              <p className="text-[11px] leading-4 text-muted-foreground">
+                Copy it now. The link can&apos;t be shown again; re-sharing rotates it to a new URL.
+              </p>
+            </div>
+          ) : null}
+          <div className="flex items-center gap-2">
+            {url ? (
+              <Button size="sm" variant="outline" className="h-7 flex-1 gap-1.5 text-xs" onClick={copy}>
+                {copied ? <Check className="size-3.5 text-[var(--success)]" /> : <Copy className="size-3.5" />}
+                {copied ? "Copied" : "Copy link"}
+              </Button>
+            ) : (
+              <Button size="sm" className="h-7 flex-1 gap-1.5 text-xs" disabled={busy === "share"} onClick={() => void mint()}>
+                <LinkIcon className="size-3.5" />
+                {busy === "share" ? "Creating…" : "Create link"}
+              </Button>
+            )}
+            <button
+              type="button"
+              disabled={busy === "revoke"}
+              onClick={() => void revoke()}
+              className="inline-flex h-7 items-center gap-1.5 rounded-[var(--radius-button)] px-2.5 text-xs font-medium text-[var(--negative)] transition-colors hover:bg-[color-mix(in_srgb,var(--negative)_12%,transparent)] disabled:opacity-50"
+              title={`Revoke this ${noun}'s share link`}
+            >
+              <Link2Off className="size-3.5" />
+              {busy === "revoke" ? "Revoking…" : "Revoke"}
+            </button>
+          </div>
+        </div>
+      </DropdownMenuContent>
+    </DropdownMenu>
+  );
+}
+
+// ===========================================================================
+// Folder (pack) version history + rollback. Per-file history already exists on
+// the FilePane; this surfaces the orphaned WHOLE-FOLDER history/rollback
+// (client methods shipped, zero call sites). Reuses the same VersionHistoryMenu
+// primitive as per-file history so the two read as a pair (Federico flag: file
+// history NEXT TO folder history). Disabled while Sensitive (no git history).
+// ===========================================================================
+
+function FolderHistoryMenu({
+  packName,
+  sensitive,
+  readOnly,
+  onRolledBack,
+}: {
+  packName: string;
+  sensitive: boolean;
+  readOnly: boolean;
+  onRolledBack: () => void;
+}) {
+  const [versions, setVersions] = useState<VersionSummary[]>([]);
+  const [loading, setLoading] = useState(false);
+  const [loadedOnce, setLoadedOnce] = useState(false);
+  const [rollingBack, setRollingBack] = useState<string | null>(null);
+  const [pending, setPending] = useState<VersionSummary | null>(null);
+
+  const canRollback = !sensitive && !readOnly;
+
+  const loadVersions = useCallback(async () => {
+    setLoading(true);
+    try {
+      setVersions(await api.contexts.listVersions(packName));
+    } catch {
+      setVersions([]);
+    } finally {
+      setLoading(false);
+      setLoadedOnce(true);
+    }
+  }, [packName]);
+
+  useEffect(() => {
+    setLoadedOnce(false);
+    setVersions([]);
+  }, [packName]);
+
+  async function confirmRollback() {
+    if (!pending) return;
+    const v = pending;
+    setPending(null);
+    setRollingBack(v.id);
+    try {
+      await api.contexts.rollback(packName, v.sha);
+      toast.success(`Rolled the folder back to commit ${v.sha}`);
+      onRolledBack();
+      await loadVersions();
+    } catch (err: unknown) {
+      toast.error(err instanceof Error ? err.message : "Rollback failed");
+    } finally {
+      setRollingBack(null);
+    }
+  }
+
+  // Sensitive folders have no git history, so the menu is disabled with the
+  // honest reason inline rather than a mysteriously-dead control.
+  if (sensitive) {
+    return (
+      <DropdownMenu>
+        <DropdownMenuTrigger
+          className={cn(buttonVariants({ variant: "ghost", size: "sm" }), "h-7 gap-1 text-xs")}
+          title="Folder history is unavailable while this folder is Sensitive"
+        >
+          <History className="size-3.5" />
+          Folder history
+        </DropdownMenuTrigger>
+        <DropdownMenuContent align="end" sideOffset={6} className="w-80 p-2">
+          <p className="text-xs leading-5 text-muted-foreground">
+            Folder history and rollback need git history. This folder is{" "}
+            <span className="font-medium text-foreground">Sensitive</span>, so it is never
+            committed to git. Turn off Sensitive to enable whole-folder history and rollback.
+          </p>
+        </DropdownMenuContent>
+      </DropdownMenu>
+    );
+  }
+
+  return (
+    <>
+      <VersionHistoryMenu
+        versions={versions}
+        loading={loading && !loadedOnce}
+        canRestore={canRollback}
+        restoringId={rollingBack}
+        buttonClassName="h-7 text-xs"
+        label="Folder history"
+        onOpen={() => {
+          if (!loadedOnce) void loadVersions();
+        }}
+        onRestore={(v) => setPending(v)}
+      />
+      <Dialog open={!!pending} onOpenChange={(open) => { if (!open) setPending(null); }}>
+        <DialogContent showCloseButton={false} className="sm:max-w-sm">
+          <DialogHeader>
+            <DialogTitle>Roll the whole folder back?</DialogTitle>
+          </DialogHeader>
+          <DialogDescription>
+            Restores every file in <code className="font-mono text-xs">{packName}</code> to commit{" "}
+            <code className="font-mono text-xs">{pending?.sha}</code>. A new commit is created
+            automatically so this is itself reversible.
+          </DialogDescription>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setPending(null)}>Cancel</Button>
+            <Button onClick={() => void confirmRollback()}>Roll back folder</Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+    </>
   );
 }
 
@@ -2404,7 +2721,7 @@ function FileHistoryMenu({
     try {
       const result = await api.contexts.restoreFileVersion(packName, filePath, v.sha);
       if (result.deleted) {
-        toast.error("This commit recorded the file as deleted — it has been removed.");
+        toast.error("This commit recorded the file as deleted; it has been removed.");
       } else {
         try {
           const text = await api.contexts.readTextFile(packName, filePath);

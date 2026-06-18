@@ -155,3 +155,81 @@ describe("#935 middleware integration", () => {
     );
   });
 });
+
+// Round-09 P0 #5 — RSC/Flight prefetch must NOT receive a 307 HTML login
+// redirect on failed auth. The App Router client expects an RSC (text/x-component)
+// payload; a 307→/login HTML body is treated as a failed prefetch (404-equiv),
+// throws React #418, and hangs soft <Link> navigation. Per Codex (verified vs
+// next@16.2.6): return a bodiless 401 (no-store) for RSC/data requests so the
+// client falls back to a hard MPA navigation; keep the 307 only for real
+// document navigations. Page render + /api/proxy backend still enforce auth,
+// so no protected RSC payload leaks.
+describe("Round-09 #5 — RSC/Flight requests are not redirected to /login", () => {
+  const rscVariants: Array<{ name: string; url: string; headers: Record<string, string> }> = [
+    {
+      name: "?_rsc= query param (cache-busting marker)",
+      url: "https://workeros.floom.dev/app/workers?_rsc=abc123",
+      headers: {},
+    },
+    {
+      name: "RSC: 1 request header (Flight marker)",
+      url: "https://workeros.floom.dev/app/runs",
+      headers: { rsc: "1" },
+    },
+    {
+      name: "Next-Router-Prefetch header (link prefetch)",
+      url: "https://workeros.floom.dev/app/connections",
+      headers: { "next-router-prefetch": "1" },
+    },
+    {
+      name: "Next-Router-State-Tree header (soft nav)",
+      url: "https://workeros.floom.dev/app/approvals",
+      headers: { "next-router-state-tree": "%5B%22%22%5D" },
+    },
+  ];
+
+  it("returns 401 (NOT a 307 /login redirect) for an anonymous RSC/data request", async () => {
+    const { middleware } = await import("@/middleware");
+    for (const variant of rscVariants) {
+      const res = await middleware(new NextRequest(variant.url, { headers: variant.headers }));
+      expect(res.status, `RSC variant: ${variant.name}`).toBe(401);
+      // Must NOT be the HTML login redirect that breaks the Flight fetch.
+      expect(res.headers.get("location"), `RSC variant: ${variant.name}`).toBeNull();
+      // Auth-failed responses are never shared-cacheable.
+      expect(res.headers.get("cache-control")).toBe("private, no-store, max-age=0");
+    }
+  });
+
+  it("returns 401 for an RSC request carrying a FORGED (unverifiable) cookie", async () => {
+    const { middleware } = await import("@/middleware");
+    const forgedCookie = cookieFor("a.b.c"); // structurally fine, unverifiable
+    const res = await middleware(
+      new NextRequest("https://workeros.floom.dev/app/workers?_rsc=xyz", {
+        headers: { cookie: `workeros_cloud_session=${forgedCookie}`, rsc: "1" },
+      }),
+    );
+    expect(res.status).toBe(401);
+    expect(res.headers.get("location")).toBeNull();
+  });
+
+  it("still 307-redirects a real document navigation (no RSC markers) to /login", async () => {
+    const { middleware } = await import("@/middleware");
+    const res = await middleware(
+      new NextRequest("https://workeros.floom.dev/app/workers", { headers: {} }),
+    );
+    expect(res.status).toBe(307);
+    expect(res.headers.get("location")).toContain("/login");
+  });
+
+  it("lets a VALID-session RSC request through (x-middleware-next), not a 401", async () => {
+    const { middleware } = await import("@/middleware");
+    const validCookie = cookieFor(await signToken());
+    const res = await middleware(
+      new NextRequest("https://workeros.floom.dev/app/workers?_rsc=ok", {
+        headers: { cookie: `workeros_cloud_session=${validCookie}`, rsc: "1" },
+      }),
+    );
+    expect(res.headers.get("x-middleware-next")).toBe("1");
+    expect(res.status).not.toBe(401);
+  });
+});

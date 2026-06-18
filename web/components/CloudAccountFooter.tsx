@@ -21,7 +21,7 @@ const ACTIVE_WORKSPACE_STORAGE_KEY = "workeros.activeWorkspaceId";
 
 function activeWorkspaceHeaders(headers?: HeadersInit): Headers {
   const next = new Headers(headers);
-  if (typeof window === "undefined") return next;
+  if (typeof window === "undefined" || !window.localStorage) return next;
   const workspaceId = window.localStorage.getItem(ACTIVE_WORKSPACE_STORAGE_KEY);
   if (workspaceId && workspaceId !== "local-default") {
     next.set("x-workeros-workspace", workspaceId);
@@ -44,6 +44,11 @@ function profileInitials(value: string) {
   );
 }
 
+// #1306: Google/GitHub login attaches a profile photo via the Cloud /me seam
+// (see overlay/app/lib/me.ts). The engine CurrentUser type has no avatar field,
+// so widen it locally here.
+type CloudUser = CurrentUser & { picture?: string | null };
+
 export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } = {}) {
   const pathname = usePathname();
   const settingsActive = pathname === "/settings" || pathname.startsWith("/settings/");
@@ -52,7 +57,9 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
     pathname.startsWith("/login/") ||
     pathname === "/app/login" ||
     pathname.startsWith("/app/login/");
-  const [user, setUser] = useState<CurrentUser | null>(null);
+  const [user, setUser] = useState<CloudUser | null>(null);
+  // #1306: when the photo URL 404s/expires, fall back to initials.
+  const [avatarFailed, setAvatarFailed] = useState(false);
 
   useEffect(() => {
     if (isLoginPath) return;
@@ -61,18 +68,24 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
       .then((response) => response.json())
       .then((data) => {
         if (!cancelled && data?.user?.email) {
-          const currentUser = data.user as CurrentUser;
+          const currentUser = data.user as CloudUser;
           setUser(currentUser);
+          setAvatarFailed(false);
           identifyPostHogUser(currentUser);
           fetch("/app/api/proxy/auth/tokens/bootstrap", {
             method: "POST",
             headers: activeWorkspaceHeaders(),
-          }).catch(() => {});
+            // #1446: do not swallow silently; a failed token bootstrap leaves
+            // the session unable to reach the API. Log for ops.
+          }).catch((err) => console.error("Token bootstrap failed", err));
         } else if (!cancelled) {
           window.location.replace("/app/login?next=/app");
         }
       })
-      .catch(() => {
+      .catch((err) => {
+        // #1446: log the load failure before redirecting to login so ops can
+        // tell a real /me outage apart from an expected logged-out state.
+        console.error("Could not load current user", err);
         if (!cancelled) window.location.replace("/app/login?next=/app");
       });
     return () => {
@@ -88,7 +101,12 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
     : user?.email
       ? "Signed in"
       : "Floom";
-  const initial = profileInitials(primary);
+  // #1306 / G5: show the real Google/GitHub photo when present; fall back to a
+  // flat squircle with a single initial — NO DiceBear, NO gradient, NO circle.
+  // Design-system: squircle (radius-button), flat bg-[var(--bg-2)] ink-soft
+  // initial, no border, no network fetch on fallback.
+  const avatarUrl = user?.picture && !avatarFailed ? user.picture : null;
+  const avatarInitial = (primary || "U").trim()[0]?.toUpperCase() ?? "U";
 
   async function logout() {
     try {
@@ -114,9 +132,24 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
           )}
           aria-label="Profile menu"
         >
-          <div className="grid size-7 shrink-0 place-items-center rounded-full border border-[var(--border-soft)] bg-muted text-[11px] font-medium text-foreground">
-            {initial}
-          </div>
+          {/* #1306 / G5: real photo for OAuth logins; flat squircle initial
+              otherwise. No DiceBear, no gradient, no circle — DS rule. */}
+          {avatarUrl ? (
+            <img
+              src={avatarUrl}
+              alt="Profile avatar"
+              referrerPolicy="no-referrer"
+              onError={() => setAvatarFailed(true)}
+              className="size-7 shrink-0 rounded-[var(--radius-button)] object-cover"
+            />
+          ) : (
+            <span
+              aria-hidden="true"
+              className="size-7 shrink-0 inline-flex items-center justify-center rounded-[var(--radius-button)] bg-[var(--bg-2)] text-[var(--ink-soft)] font-medium select-none text-[13px]"
+            >
+              {avatarInitial}
+            </span>
+          )}
           <div className="min-w-0 leading-tight text-left">
             <p className="truncate text-xs font-medium text-foreground">{primary}</p>
             <p className="truncate text-[10px] text-muted-foreground">{secondary}</p>

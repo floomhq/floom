@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { OAUTH_LOGIN_URL, OAUTH_LOGIN_URL_GITHUB } from "@/lib/api";
 import { LoginEmailPanel } from "@/components/LoginEmailPanel";
-import { V3Shell } from "@/app/v3/V3Shell";
+import { Hl, V3Shell } from "@/app/v3/V3Shell";
 
 export const metadata = {
   title: "Sign in · Floom Workers",
@@ -10,16 +10,15 @@ export const metadata = {
 // Illustrative activity data shown pre-auth to demonstrate worker runs.
 // No real user data — purely a proof-of-concept showcase.
 const ACTIVITY_ROWS: {
-  initials: string;
   name: string;
   result: string;
   status: "done" | "running";
   time: string;
 }[] = [
-  { initials: "LR", name: "Lead research", result: "14 qualified leads", status: "done", time: "4m ago" },
-  { initials: "PF", name: "Post-call follow-up", result: "Sent to 3 contacts", status: "done", time: "11m ago" },
-  { initials: "PR", name: "Pipeline report", result: "Gathering data", status: "running", time: "now" },
-  { initials: "GD", name: "GitHub Digest", result: "14 PRs summarized", status: "done", time: "22m ago" },
+  { name: "Lead research", result: "14 qualified leads", status: "done", time: "4m ago" },
+  { name: "Post-call follow-up", result: "Sent to 3 contacts", status: "done", time: "11m ago" },
+  { name: "Pipeline report", result: "Gathering data", status: "running", time: "now" },
+  { name: "GitHub Digest", result: "14 PRs summarized", status: "done", time: "22m ago" },
 ];
 
 export default async function LoginPage({
@@ -47,24 +46,13 @@ export default async function LoginPage({
             className="text-[40px] font-semibold leading-[1.04] tracking-[-0.034em]"
             style={{ color: "var(--text-primary)" }}
           >
-            Workers that{" "}
-            <span
-              style={{
-                color: "#3e6fe0",
-                background: "#eef3fe",
-                borderRadius: 4,
-                padding: "0 4px",
-              }}
-            >
-              actually run
-            </span>
-            .
+            <Hl>Hire</Hl> AI workers.
           </h1>
           <p
             className="mt-4 max-w-[380px] text-[14px] leading-relaxed"
             style={{ color: "var(--text-muted)" }}
           >
-            Review drafts, connect tools, and keep every worker run on the record.
+            Describe the job, review the draft, and keep every worker run on the record.
           </p>
 
           {/* Activity card — white, flat, no border/shadow per design spec */}
@@ -93,37 +81,26 @@ export default async function LoginPage({
             {/* Activity rows */}
             {ACTIVITY_ROWS.map((row, i) => (
               <div
-                key={row.initials}
-                className="flex items-center gap-3"
+                key={row.name}
+                className="flex min-h-[52px] items-center gap-3"
                 style={{
                   padding: 12,
                   borderTop: i > 0 ? "1px solid rgba(16,17,20,.055)" : undefined,
                 }}
               >
-                {/* Worker avatar squircle: 40px, radius 9, black bg, white initials */}
-                <span
-                  className="flex shrink-0 items-center justify-center text-[13px] font-semibold text-white"
-                  style={{
-                    width: 40,
-                    height: 40,
-                    borderRadius: 9,
-                    background: "#181818",
-                    letterSpacing: "0.01em",
-                  }}
-                >
-                  {row.initials}
-                </span>
+                {/* Real-app run-row icon: 20px accent-soft squircle, accent glyph (no monogram avatar) */}
+                <WorkerRowIcon />
 
-                {/* Name + result */}
+                {/* Name + result — matches dashboard run row (name + sub-line) */}
                 <div className="min-w-0 flex-1">
                   <div
-                    className="text-[15px] font-semibold"
+                    className="truncate text-sm font-medium"
                     style={{ color: "var(--text-primary)" }}
                   >
                     {row.name}
                   </div>
                   <div
-                    className="mt-0.5 text-[13px]"
+                    className="mt-0.5 text-xs"
                     style={{ color: "var(--text-muted)" }}
                   >
                     {row.result}
@@ -211,6 +188,29 @@ export default async function LoginPage({
         </section>
       </main>
     </V3Shell>
+  );
+}
+
+// Run-row icon: mirrors the dashboard WorkerRowIcon — 20px accent-soft squircle
+// with a small accent-colored glyph. No monogram avatar (real app has none).
+function WorkerRowIcon() {
+  return (
+    <span
+      className="inline-flex shrink-0 items-center justify-center"
+      style={{
+        width: 20,
+        height: 20,
+        borderRadius: "var(--radius-squircle)",
+        background: "var(--accent-soft)",
+        color: "var(--accent)",
+        border: "1px solid color-mix(in srgb, var(--accent) 22%, transparent)",
+      }}
+      aria-hidden="true"
+    >
+      <svg width="12" height="12" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2.2" strokeLinecap="round" strokeLinejoin="round">
+        <path d="M3 12h4l3 8 4-16 3 8h4" />
+      </svg>
+    </span>
   );
 }
 

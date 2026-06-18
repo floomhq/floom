@@ -18,7 +18,7 @@ const WS_KEY = "workeros.activeWorkspaceId";
 
 function wsHeaders(init?: HeadersInit): Headers {
   const h = new Headers(init);
-  if (typeof window !== "undefined") {
+  if (typeof window !== "undefined" && window.localStorage) {
     const id = window.localStorage.getItem(WS_KEY);
     if (id && id !== "local-default") h.set("x-workeros-workspace", id);
   }

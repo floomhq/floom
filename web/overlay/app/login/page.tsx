@@ -1,5 +1,6 @@
 import Link from "next/link";
 import { LoginEmailPanel } from "@/components/LoginEmailPanel";
+import { WorkerAvatar } from "@/components/WorkerAvatar";
 
 export const metadata = {
   title: "Sign in · Floom",
@@ -17,6 +18,21 @@ const INSTALL_ROUTES: Record<string, string> = {
   cli: "/app/install/cli",
 };
 
+// Illustrative activity data shown pre-auth to demonstrate worker runs.
+// No real user data, purely a proof-of-concept showcase that mirrors the
+// public /login marketing panel.
+const ACTIVITY_ROWS: {
+  name: string;
+  result: string;
+  status: "done" | "running";
+  time: string;
+}[] = [
+  { name: "Lead research", result: "14 qualified leads", status: "done", time: "4m ago" },
+  { name: "Post-call follow-up", result: "Sent to 3 contacts", status: "done", time: "11m ago" },
+  { name: "Pipeline report", result: "Gathering data", status: "running", time: "now" },
+  { name: "GitHub Digest", result: "14 PRs summarized", status: "done", time: "22m ago" },
+];
+
 export default async function LoginPage({
   searchParams,
 }: {
@@ -30,25 +46,148 @@ export default async function LoginPage({
   const signupHref = `/login?mode=signup&next=${encodeURIComponent(next)}${install ? `&install=${encodeURIComponent(install)}` : ""}`;
 
   return (
-    <main className="min-h-screen flex flex-col bg-[var(--bg)] text-[var(--ink)] font-sans antialiased">
+    <main
+      className="min-h-screen font-sans antialiased"
+      style={{ background: "var(--bg-app)", color: "var(--text-primary)" }}
+    >
+      {/* Keyframes for the Running pill dot pulse, scoped to login page */}
+      <style>{`
+        @keyframes login-pulse {
+          0%, 100% { opacity: 1; }
+          50% { opacity: 0.3; }
+        }
+      `}</style>
+
       <header className="px-6 py-5">
         <Link
           href="/"
-          className="inline-flex items-center gap-2 text-[15px] font-[660] tracking-[-0.025em] text-[var(--ink)] hover:opacity-80 transition-opacity"
+          className="inline-flex items-center gap-2 text-[15px] font-[660] tracking-[-0.025em] transition-opacity hover:opacity-80"
+          style={{ color: "var(--text-primary)" }}
         >
           <FloomMark />
           Floom{" "}
-          <span style={{ color: "var(--ink-mute)", fontWeight: 450, marginLeft: 2 }}>/ workeros</span>
+          <span style={{ color: "var(--text-muted)", fontWeight: 450, marginLeft: 2 }}>/ workeros</span>
         </Link>
       </header>
 
-      <section className="flex-1 grid place-items-center px-6 pb-24">
-        <div className="w-full max-w-[400px]">
-          <div className="rounded-[var(--radius-card)] border border-[var(--line)] bg-[var(--paper)] shadow-[var(--shadow-pop)] p-8">
-            <div className="text-center space-y-1.5 mb-7">
-              <h1 className="text-[22px] font-semibold tracking-tight leading-tight">Sign in to Floom</h1>
-              <p className="text-[13px] text-[var(--ink-soft)] leading-relaxed">
-                {install ? `Sign in to install ${install}` : "AI workers that actually run"}
+      <section className="mx-auto grid w-full max-w-[900px] items-center gap-12 px-6 pb-24 pt-6 md:grid-cols-[1fr_380px] md:pt-16">
+        {/* LEFT: L2 refined activity-proof panel. Built from the dashboard's
+            own primitives — WorkerAvatar (rounded-[--radius-button] bg-muted
+            squircle) + the .c-pill ok/run status pills + design tokens — so it
+            reads as a slice of the real product, not a login mockup. Flat by
+            token (--shadow-card: none); separation via bg-step + hairline. */}
+        <div className="hidden max-w-[460px] md:block">
+          <h1
+            className="text-[40px] font-semibold leading-[1.04] tracking-[-0.034em]"
+            style={{ color: "var(--text-primary)" }}
+          >
+            Workers that{" "}
+            <span style={{ color: "var(--accent)" }}>actually run</span>.
+          </h1>
+          <p
+            className="mt-4 max-w-[380px] text-[14px] leading-relaxed"
+            style={{ color: "var(--text-muted)" }}
+          >
+            {install
+              ? `Sign in to install ${install} and put it to work.`
+              : "A glimpse of a workspace today:"}
+          </p>
+
+          {/* Activity feed, flat: bg-step + hairline only, no drop-shadow. */}
+          <div
+            className="mt-7 overflow-hidden"
+            style={{
+              background: "var(--bg-card)",
+              borderRadius: "var(--radius-card)",
+              boxShadow: "var(--hairline)",
+            }}
+          >
+            {/* Feed header */}
+            <div
+              className="flex items-center justify-between"
+              style={{
+                padding: "13px 18px 12px",
+                borderBottom: "var(--bd-div)",
+              }}
+            >
+              <span
+                className="text-[11px] font-medium uppercase tracking-[0.06em]"
+                style={{ color: "var(--muted-foreground)" }}
+              >
+                Today
+              </span>
+              <CPill tone="ok" label="6 active" />
+            </div>
+
+            {/* Activity rows — same geometry as the dashboard's .c-lrow. */}
+            {ACTIVITY_ROWS.map((row, i) => (
+              <div
+                key={row.name}
+                className="flex items-center gap-3.5"
+                style={{
+                  minHeight: 64,
+                  padding: "0 18px",
+                  borderTop: i > 0 ? "var(--bd-div)" : undefined,
+                }}
+              >
+                <WorkerAvatar name={row.name} seed={row.name} size="size-10" />
+
+                {/* Name + outcome */}
+                <div className="min-w-0 flex-1 py-3">
+                  <div
+                    className="truncate text-[14.5px] font-semibold tracking-[-0.01em]"
+                    style={{ color: "var(--ink)" }}
+                  >
+                    {row.name}
+                  </div>
+                  <div
+                    className="mt-0.5 truncate text-[12.5px]"
+                    style={{ color: "var(--muted-foreground)" }}
+                  >
+                    {row.result}
+                  </div>
+                </div>
+
+                {/* Status pill + timestamp */}
+                <div className="flex shrink-0 flex-col items-end gap-1.5">
+                  <CPill tone={row.status === "done" ? "ok" : "run"} />
+                  <span
+                    className="text-[11px] tabular-nums"
+                    style={{ color: "var(--ink-faint)" }}
+                  >
+                    {row.time}
+                  </span>
+                </div>
+              </div>
+            ))}
+          </div>
+
+          {/* Stat footer */}
+          <div
+            className="mt-4 flex items-center gap-2 text-[13px]"
+            style={{ color: "var(--muted-foreground)" }}
+          >
+            142 runs today
+            <Dot />
+            0 need attention
+            <Dot />
+            avg 38s
+          </div>
+        </div>
+
+        {/* RIGHT: auth card. Dashboard auth wiring preserved verbatim. */}
+        <div className="w-full md:max-w-[380px] md:justify-self-end">
+          <div
+            className="rounded-[var(--radius-card)] p-8"
+            style={{
+              background: "var(--bg-card)",
+              boxShadow: "0 1px 2px rgba(16,17,20,.04), 0 16px 40px rgba(16,17,20,.07)",
+            }}
+          >
+            <div className="mb-7 space-y-1.5 text-center">
+              <h2 className="text-[22px] font-semibold leading-tight tracking-tight">Welcome back</h2>
+              <p className="text-[13px] leading-relaxed" style={{ color: "var(--ink-soft)" }}>
+                {install ? `Sign in to install ${install}` : "Magic link, password, or OAuth."}
               </p>
             </div>
 
@@ -64,29 +203,31 @@ export default async function LoginPage({
             </div>
 
             <div className="my-5 flex items-center gap-3">
-              <span className="h-px flex-1 bg-[var(--line)]" />
-              <span className="text-[11px] font-medium uppercase tracking-[0.08em] text-[var(--ink-mute)]">or</span>
-              <span className="h-px flex-1 bg-[var(--line)]" />
+              <span className="h-px flex-1" style={{ background: "var(--line)" }} />
+              <span className="text-[11px] font-medium uppercase tracking-[0.08em]" style={{ color: "var(--ink-mute)" }}>
+                or
+              </span>
+              <span className="h-px flex-1" style={{ background: "var(--line)" }} />
             </div>
 
             <LoginEmailPanel next={next} initialMode={initialMode} />
 
-            <p className="mt-6 text-[11.5px] leading-[1.6] text-[var(--ink-mute)] text-center">
+            <p className="mt-6 text-center text-[11.5px] leading-[1.6]" style={{ color: "var(--ink-mute)" }}>
               By signing in you agree to the{" "}
-              <Link href="/terms" className="underline underline-offset-2 hover:text-[var(--ink)] transition-colors">
+              <Link href="/terms" className="underline underline-offset-2 transition-colors hover:text-[var(--ink)]">
                 Terms
               </Link>{" "}
               and{" "}
-              <Link href="/privacy" className="underline underline-offset-2 hover:text-[var(--ink)] transition-colors">
+              <Link href="/privacy" className="underline underline-offset-2 transition-colors hover:text-[var(--ink)]">
                 Privacy Policy
               </Link>
               . We&apos;ll create your workspace automatically on first sign-in.
             </p>
           </div>
 
-          <p className="mt-5 text-center text-[12px] text-[var(--ink-mute)]">
+          <p className="mt-5 text-center text-[12px]" style={{ color: "var(--ink-mute)" }}>
             New here?{" "}
-            <Link href={signupHref} className="text-[var(--ink-soft)] hover:text-[var(--ink)] underline underline-offset-2 transition-colors">
+            <Link href={signupHref} className="underline underline-offset-2 transition-colors hover:text-[var(--ink)]" style={{ color: "var(--ink-soft)" }}>
               Create an account
             </Link>
           </p>
@@ -105,33 +246,59 @@ export default async function LoginPage({
           font-weight: 500;
           letter-spacing: -0.005em;
           text-decoration: none;
-          transition: transform 120ms cubic-bezier(0.2, 0.7, 0.2, 1), background 120ms, border-color 120ms;
+          transition: transform 120ms cubic-bezier(0.2, 0.7, 0.2, 1), background 120ms, opacity 120ms;
         }
         .auth-btn:active { transform: translateY(1px); }
         .auth-btn-primary {
           background: var(--solid);
           color: var(--solid-fg);
-          border: 1px solid var(--solid);
-          box-shadow: 0 1px 0 rgba(0,0,0,0.04), inset 0 1px 0 rgba(255,255,255,0.06);
         }
         .auth-btn-primary:hover { background: var(--solid-2); }
         .auth-btn-secondary {
-          background: var(--paper);
+          background: var(--bg-2);
           color: var(--ink);
-          border: 1px solid var(--line);
         }
         .auth-btn-secondary:hover {
-          border-color: rgba(20,20,20,0.18);
-          background: var(--paper-2);
+          background: var(--bg-3);
         }
       `}</style>
     </main>
   );
 }
 
+function Dot() {
+  return (
+    <span
+      style={{
+        width: 3,
+        height: 3,
+        borderRadius: "50%",
+        background: "var(--ink-faint)",
+        display: "inline-block",
+      }}
+    />
+  );
+}
+
+// Status pill: reuses the dashboard's own .c-pill primitive (globals.css)
+// with the real tones — ok = --success tint, run = --info tint — so it is the
+// exact pill the collection rows use, not a re-skin. The run dot pulses to
+// convey live state (the only login-scoped flourish).
+function CPill({ tone, label }: { tone: "ok" | "run"; label?: string }) {
+  return (
+    <span className={`c-pill ${tone}`} style={{ fontSize: 11, padding: "3px 9px" }}>
+      <span
+        className="dot"
+        style={tone === "run" ? { animation: "login-pulse 1.5s ease-in-out infinite" } : undefined}
+      />
+      {label ?? (tone === "ok" ? "Done" : "Running")}
+    </span>
+  );
+}
+
 // Same play-arrow mark + lockup the landing nav uses (.ln-mark / "Floom /
-// workeros"). /login only imports globals.css, not landing.css, so the mark
-// is inlined here from the same SVG path rather than reusing the class.
+// workeros"). /app/login only imports globals.css, not landing.css, so the
+// mark is inlined here from the same SVG path rather than reusing the class.
 function FloomMark({ size = 20 }: { size?: number }) {
   return (
     <svg
@@ -139,7 +306,7 @@ function FloomMark({ size = 20 }: { size?: number }) {
       height={size}
       viewBox="0 0 100 100"
       aria-hidden="true"
-      style={{ color: "var(--ink)" }}
+      style={{ color: "var(--text-primary)" }}
     >
       <path
         d="M32 26h20l22 22a3 3 0 0 1 0 4l-22 22H32a6 6 0 0 1-6-6V32a6 6 0 0 1 6-6z"

@@ -125,8 +125,7 @@ export function LoginEmailPanel({ next }: { next: string }) {
       <button
         type="submit"
         disabled={loading}
-        className="flex h-11 w-full items-center justify-center rounded-[12px] px-4 text-[14px] font-medium text-white transition hover:-translate-y-px disabled:cursor-not-allowed disabled:opacity-60"
-        style={{ background: "var(--v3-accent)" }}
+        className="flex h-11 w-full items-center justify-center rounded-[12px] bg-foreground px-4 text-[14px] font-medium text-background transition hover:opacity-85 disabled:cursor-not-allowed disabled:opacity-60"
       >
         {loading ? "Sending..." : mode === "magic" ? "Email me a magic link" : "Sign in with password"}
       </button>

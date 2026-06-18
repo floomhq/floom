@@ -2,6 +2,7 @@
 
 import { Check } from "lucide-react";
 import { Button } from "@/components/ui/button";
+import { useAssistantName } from "@/lib/workspace/assistant-name";
 
 export type ClaimChannel = "whatsapp" | "slack";
 
@@ -11,14 +12,16 @@ interface ClaimSuccessOverlayProps {
   onContinue: () => void;
 }
 
-const COPY: Record<ClaimChannel, { title: string; line: string }> = {
+// Channel copy references the assistant by name (workspace-renameable). title is
+// channel-fixed; the line is built from the resolved name at render time.
+const COPY: Record<ClaimChannel, { title: string; line: (name: string) => string }> = {
   whatsapp: {
     title: "You're connected",
-    line: "Emily will message you on WhatsApp. Tell her what you want handled.",
+    line: (name) => `${name} will message you on WhatsApp. Tell her what you want handled.`,
   },
   slack: {
     title: "You're connected",
-    line: "Emily is ready in Slack. DM her what you want handled.",
+    line: (name) => `${name} is ready in Slack. DM her what you want handled.`,
   },
 };
 
@@ -31,6 +34,7 @@ const COPY: Record<ClaimChannel, { title: string; line: string }> = {
  * gradients or colored-left-borders, no emoji-as-icon.
  */
 export function ClaimSuccessOverlay({ channel, onContinue }: ClaimSuccessOverlayProps) {
+  const assistantName = useAssistantName();
   const copy = COPY[channel];
   return (
     <div
@@ -52,7 +56,7 @@ export function ClaimSuccessOverlay({ channel, onContinue }: ClaimSuccessOverlay
         <h1 className="mt-6 text-2xl font-semibold tracking-tight text-foreground">
           {copy.title}
         </h1>
-        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{copy.line}</p>
+        <p className="mt-2 text-sm leading-relaxed text-muted-foreground">{copy.line(assistantName)}</p>
 
         <Button className="mt-8 w-full" onClick={onContinue} autoFocus>
           Go to dashboard

@@ -114,11 +114,12 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
               </div>
               <div className="mt-3 text-[16px] font-medium tracking-[-0.01em]">{d.exampleRun.email.subject}</div>
               <p className="mt-2 whitespace-pre-line text-[13.5px] leading-relaxed text-muted-foreground">{d.exampleRun.email.body}</p>
-              <div className="mt-5 flex items-center justify-between bg-secondary/60 px-4 py-3">
+              <p className="mt-2 whitespace-pre-line text-[13.5px] text-muted-foreground">{d.exampleRun.email.signoff}</p>
+              <div className="mt-5 flex items-center justify-between border-t border-border-soft pt-4">
                 <span className="text-[12px] text-muted-foreground">{d.exampleRun.approvalQuestion}</span>
                 <span className="flex gap-2">
                   <span className="rounded-[10px] px-3.5 py-1.5 text-[12.5px] font-medium text-white" style={{ background: "var(--v3-accent)" }}>Approve</span>
-                  <span className="rounded-[10px] bg-secondary px-3.5 py-1.5 text-[12.5px]">Edit</span>
+                  <span className="rounded-[10px] border border-border bg-card px-3.5 py-1.5 text-[12.5px]">Edit</span>
                 </span>
               </div>
             </div>
@@ -149,7 +150,7 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
                 whileInView={{ opacity: 1 }}
                 viewport={{ once: true }}
                 transition={{ delay: 0.1 + i * 0.07, duration: 0.35 }}
-                className="flex items-start gap-4 py-3 text-[13.5px]"
+                className="flex items-start gap-4 border-b border-border-soft py-3 text-[13.5px] last:border-0"
               >
                 <span className="w-[72px] shrink-0 pt-px text-[11px] font-medium uppercase tracking-[0.06em] text-muted-foreground">{k}</span>
                 <span className="flex-1 text-foreground/85">{v}</span>

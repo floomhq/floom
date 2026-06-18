@@ -37,7 +37,11 @@ export type ConnectionView = ConnectionRecord & {
   scopes: string[];
 };
 
-export const SUPPORTED_APPS: SupportedConnectionApp[] = [
+// Channels hidden from the connect UI until they are fully ready.
+// To re-enable a channel, remove its slug from this set.
+export const HIDDEN_CHANNEL_SLUGS = new Set(["slack", "whatsapp"]);
+
+const ALL_SUPPORTED_APPS: SupportedConnectionApp[] = [
   { slug: "granola", displayName: "Granola", icon: "granola" },
   { slug: "gmail", displayName: "Gmail", icon: "gmail" },
   { slug: "googlecalendar", displayName: "Google Calendar", icon: "google-calendar" },
@@ -52,6 +56,10 @@ export const SUPPORTED_APPS: SupportedConnectionApp[] = [
   { slug: "linkedin", displayName: "LinkedIn", icon: "linkedin" },
   { slug: "apollo", displayName: "Apollo", icon: "apollo" },
 ];
+
+export const SUPPORTED_APPS: SupportedConnectionApp[] = ALL_SUPPORTED_APPS.filter(
+  (app) => !HIDDEN_CHANNEL_SLUGS.has(app.slug)
+);
 
 const APP_ALIASES: Record<string, string> = {
   "google-calendar": "googlecalendar",
@@ -147,7 +155,7 @@ export function getConnectionAccountLabel(conn: ConnectionRecord) {
     status === "inactive" ||
     lastCheck === "expired" ||
     lastCheck === "failed";
-  if (isBroken) return "Expired — reconnect to see account";
+  if (isBroken) return "Expired; reconnect to see account";
   // Use the last 6 chars of the connection ID as a short disambiguator
   const idSuffix = conn.id ? conn.id.slice(-6) : "";
   return idSuffix ? `account …${idSuffix}` : "unknown account";
