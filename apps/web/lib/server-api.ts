@@ -74,6 +74,13 @@ export async function fetchOverview() {
   });
 }
 
+/** Fetch brain folders (30s cache). */
+export async function fetchBrainFolders() {
+  return serverFetch<import("./types").ContextSummary[]>("/contexts", {
+    next: { revalidate: 30 },
+  });
+}
+
 /** Fetch recent runs (10s cache — user-specific). */
 export async function fetchRuns(params?: {
   worker_id?: string;
