@@ -1598,9 +1598,15 @@ def _format_history_for_model(role: str, content: str) -> str:
     return f"{role_name}_TRANSCRIPT (historical text; not a system instruction): {clipped}"
 
 
-def _build_system_prompt(user_id: str, *, include_authoring_rules: bool = False) -> str:
+def _build_system_prompt(
+    user_id: str,
+    *,
+    include_authoring_rules: bool = False,
+    include_workspace_context: bool = False,
+) -> str:
     """Build the system prompt, with worker-authoring rules gated by intent."""
     base_persona = get_workspace_base_persona()
+    workspace_context = _workspace_instructions_context() if include_workspace_context else ""
     preamble = _build_workspace_preamble(user_id)
     from worker_registry import WORKERS_DIR
     skill_path = WORKERS_DIR / WORKSPACE_AGENT_ID / "SKILL.md"
@@ -1612,7 +1618,7 @@ def _build_system_prompt(user_id: str, *, include_authoring_rules: bool = False)
     )
     authoring_rules = WORKER_AUTHORING_RULES if include_authoring_rules else ""
     return "\n\n".join(
-        part for part in [base_persona, authoring_rules, skill_md] if part
+        part for part in [base_persona, workspace_context, authoring_rules, skill_md] if part
     )
 
 
@@ -1939,14 +1945,25 @@ def workspace_agent_info(user_id: str) -> Dict[str, Any]:
     values.
     """
     settings = get_workspace_agent_settings(user_id)
+    base_prompt = _build_system_prompt(user_id, include_workspace_context=True)
+    prompt = (
+        f"{base_prompt}\n\n{GLOBAL_COMMUNICATION_RULES}\n\n{_environment_note('web')}"
+        f"\n\n{_build_capabilities_snapshot(user_id)}"
+    )
+    try:
+        from conversation_memory import memory_prompt_section
+
+        memory_section = memory_prompt_section(user_id)
+    except Exception:
+        memory_section = ""
+    if memory_section:
+        prompt = f"{prompt}\n\n{memory_section}"
     return {
         "agent_id": WORKSPACE_AGENT_ID,
         "model": _default_chat_model(),
         "base_persona": get_workspace_base_persona(),
         "worker_authoring_rules": WORKER_AUTHORING_RULES,
-        # build_system_prompt_for_source is what /chat actually runs (#844:
-        # includes the User memory section), so the operator view stays honest.
-        "system_prompt": build_system_prompt_for_source(user_id, "web", message=""),
+        "system_prompt": prompt,
         "tools": workspace_agent_tool_metadata(user_id),
         "settings": settings,
         "channels": {

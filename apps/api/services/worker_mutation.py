@@ -24,8 +24,8 @@ from fastapi import HTTPException, Request
 from core.config import _is_cloud_deploy
 from services.worker_access import (
     _canonical_worker_id,
-    _get_visible_worker,
     _raise_if_protected_worker_mutation,
+    _worker_for_mutation,
 )
 from services.worker_serialize import _build_worker_detail
 
@@ -78,7 +78,7 @@ def _set_worker_enabled(
     _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    worker = _worker_for_mutation(worker_id, auth, repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     update_fields: Dict[str, Any] = {"enabled": enabled}
@@ -323,7 +323,7 @@ def _mutate_worker_contexts(
     _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    worker = _worker_for_mutation(worker_id, auth, repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
     manifest = dict(worker.get("manifest") or {})

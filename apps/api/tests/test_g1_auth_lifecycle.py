@@ -103,9 +103,21 @@ def test_header_scope_with_user_header_is_member(monkeypatch, tmp_path):
     assert body["is_admin"] is False
 
 
-def test_shared_secret_default_remains_admin(monkeypatch, tmp_path):
-    """Backwards compat: plain shared-secret installs keep admin."""
+def test_shared_secret_default_is_member(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path, secret=SECRET)
+    with _client(main) as client:
+        resp = client.get("/auth/me", headers={"x-floom-secret": SECRET})
+    assert resp.status_code == 200, resp.text
+    body = resp.json()
+    assert body["role"] == "member"
+    assert body["is_admin"] is False
+
+
+def test_shared_secret_role_admin_is_explicit_opt_in(monkeypatch, tmp_path):
+    main = _load_main(
+        monkeypatch, tmp_path, secret=SECRET,
+        extra_env={"WORKEROS_SHARED_SECRET_ROLE": "admin"},
+    )
     with _client(main) as client:
         resp = client.get("/auth/me", headers={"x-floom-secret": SECRET})
     assert resp.status_code == 200, resp.text

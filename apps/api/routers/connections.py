@@ -211,6 +211,18 @@ def _normalize_composio_connection_status(status: Optional[str]) -> str:
     return normalized
 
 
+def _callback_persisted_status(existing_status: str, remote_status: str) -> str:
+    """Return callback status using only persisted/remote state.
+
+    The browser-visible OAuth callback query string is not proof that Composio
+    activated the account. It can decide redirect UX, but it must not promote a
+    stored connection to active.
+    """
+    if remote_status and remote_status != "not_found":
+        return remote_status
+    return existing_status
+
+
 def _account_label_from_info(info: Dict[str, Any]) -> str:
     for key in ("email", "account_label", "handle", "username", "login"):
         value = info.get(key)
@@ -1033,16 +1045,7 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
         except Exception:
             remote_status = ""
 
-        callback_status = _normalize_composio_connection_status(status)
-        final_status = (
-            "active"
-            if callback_status == "active" and remote_status in ("", "initiated", "pending", "unknown", "not_found")
-            else remote_status
-            if remote_status and remote_status != "not_found"
-            else callback_status
-            if callback_status
-            else existing["status"]
-        )
+        final_status = _callback_persisted_status(str(existing.get("status") or ""), remote_status)
         now = now_iso()
         repos.connections.update(
             user_id=existing["user_id"],

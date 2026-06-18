@@ -4167,8 +4167,13 @@ class SqliteUserRepository:
     """Local user accounts — created via POST /auth/setup or POST /users (admin)."""
 
     def count(self) -> int:
-        with get_db() as conn:
-            row = conn.execute("SELECT COUNT(*) AS cnt FROM users").fetchone()
+        try:
+            with get_db() as conn:
+                row = conn.execute("SELECT COUNT(*) AS cnt FROM users").fetchone()
+        except sqlite3.OperationalError as exc:
+            if "no such table: users" in str(exc).lower():
+                return 0
+            raise
         return int(row["cnt"] or 0) if row else 0
 
     def create(
@@ -4192,6 +4197,31 @@ class SqliteUserRepository:
         result = self.get(user_id=user_id)
         if result is None:
             raise RuntimeError(f"failed to create user {user_id}")
+        return result
+
+    def create_first_admin(
+        self,
+        *,
+        user_id: str,
+        username: str,
+        display_name: str | None,
+        password_hash: str,
+    ) -> dict[str, Any] | None:
+        created_at = now_iso()
+        with get_db() as conn:
+            cursor = conn.execute(
+                """
+                INSERT INTO users (id, username, display_name, password_hash, role, disabled, created_at, updated_at)
+                SELECT ?, ?, ?, ?, 'admin', 0, ?, ?
+                WHERE NOT EXISTS (SELECT 1 FROM users)
+                """,
+                (user_id, username, display_name, password_hash, created_at, created_at),
+            )
+        if cursor.rowcount < 1:
+            return None
+        result = self.get(user_id=user_id)
+        if result is None:
+            raise RuntimeError(f"failed to create first admin {user_id}")
         return result
 
     def get(self, *, user_id: str) -> dict[str, Any] | None:

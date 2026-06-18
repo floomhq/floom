@@ -115,6 +115,19 @@ def test_594_correct_secret_returns_200_when_secret_configured(monkeypatch, tmp_
     )
     data = r.json()
     assert data.get("auth_method") == "secret"
+    assert data.get("role") == "member"
+
+
+def test_594_secret_admin_role_requires_explicit_opt_in(monkeypatch, tmp_path):
+    monkeypatch.setenv("FLOOM_SECRET", "correct-secret")
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
+    _isolated_empty_db(monkeypatch, tmp_path)
+    _clear_auth_cache()
+    client = _client()
+    r = client.get("/auth/me", headers={"x-floom-secret": "correct-secret"})
+    assert r.status_code == 200
+    data = r.json()
+    assert data.get("auth_method") == "secret"
     assert data.get("role") == "admin"
 
 

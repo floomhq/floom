@@ -40,7 +40,8 @@ class SharedSecretAuthProvider:
                 status_code=401,
                 detail="x-floom-user header required when user-header scope is enabled",
             )
-        # #933: allow demoting the shared secret from root-equivalent to member.
-        if (os.environ.get("WORKEROS_SHARED_SECRET_ROLE") or "").strip().lower() == "member":
+        # Shared-secret auth is member-scoped by default. Operators that need
+        # legacy root-equivalent behavior must opt in explicitly.
+        if (os.environ.get("WORKEROS_SHARED_SECRET_ROLE") or "").strip().lower() != "admin":
             return AuthContext(user_id=user_id, email=None, role="member")
         return AuthContext(user_id=user_id, email=None, scopes=("admin",))
