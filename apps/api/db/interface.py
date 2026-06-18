@@ -161,7 +161,13 @@ class WorkerRepository(Protocol):
         next_run_at: str | None,
     ) -> None: ...
 
-    def find_trigger_by_external_id(self, *, external_trigger_id: str) -> RowDict | None: ...
+    def find_trigger_by_external_id(
+        self,
+        *,
+        external_trigger_id: str,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> RowDict | None: ...
 
     def find_trigger_for_webhook(self, *, worker_id: str) -> RowDict | None: ...
 

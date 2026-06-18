@@ -8,6 +8,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { FloomMark } from "@/components/layout/sidebar";
+import { sanitizeRedirect } from "@/lib/redirects";
 
 type LoginMode = "loading" | "setup" | "username" | "secret";
 
@@ -74,7 +75,7 @@ function LoginContent() {
   };
   const rawNext = searchParams.get("next") ||
     (installChannel ? (INSTALL_ROUTES[installChannel] ?? "/overview") : "/overview");
-  const next = rawNext.startsWith("/") && !rawNext.startsWith("//") ? rawNext : "/overview";
+  const next = sanitizeRedirect(rawNext);
 
   const effectiveMode: LoginMode = forceSecret && (mode === "username" || mode === "setup") ? "secret" : mode;
 

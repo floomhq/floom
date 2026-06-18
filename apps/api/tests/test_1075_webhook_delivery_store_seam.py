@@ -57,16 +57,31 @@ def test_registered_store_is_used_and_dedupes(main_mod):
     ]
 
 
-def test_empty_delivery_id_short_circuits_without_touching_store(main_mod):
+def test_empty_delivery_id_still_claims_store(main_mod):
     store = _FakeStore()
     main_mod.set_webhook_delivery_store(store)
-    # No delivery id to dedupe on -> always claim, store never consulted.
     assert main_mod._claim_webhook_delivery("github", "") is True
-    assert store.calls == []
+    assert main_mod._claim_webhook_delivery("github", "") is False
+    assert store.calls == [
+        ("github", "missing-delivery-id"),
+        ("github", "missing-delivery-id"),
+    ]
+
+
+def test_missing_delivery_id_can_be_derived_from_body_hash(main_mod):
+    body = b'{"subject":"same"}'
+    first = main_mod._webhook_delivery_id_or_body_hash("", body)
+    second = main_mod._webhook_delivery_id_or_body_hash(None, body)
+    different = main_mod._webhook_delivery_id_or_body_hash("", b'{"subject":"different"}')
+
+    assert first == second
+    assert first.startswith("body-sha256:")
+    assert different != first
 
 
 def test_clearing_store_falls_back_to_sqlite_default(main_mod):
     main_mod.set_webhook_delivery_store(None)
+    main_mod.init_db()
     # SQLite default still dedupes: first claim wins, immediate redelivery loses.
     # Use a unique id so the assertion is independent of any receipt already in
     # the shared dev DB (the SQLite fallback persists rows; the FakeStore tests
