@@ -1402,10 +1402,20 @@ def _hash_tree(root: Path) -> str:
             continue
         digest.update(rel.as_posix().encode("utf-8"))
         if path.is_file():
-            stat = path.stat()
-            digest.update(str(stat.st_size).encode("ascii"))
-            digest.update(str(int(stat.st_mtime_ns)).encode("ascii"))
+            digest.update(path.read_bytes())
     return digest.hexdigest()
+
+
+def _effective_context_inputs(config: WorkerConfig | None, inputs: Dict[str, Any] | None) -> Dict[str, Any]:
+    effective = dict(inputs or {})
+    if not config:
+        return effective
+    for inp in getattr(config, "inputs", []) or []:
+        name = getattr(inp, "name", None)
+        default = getattr(inp, "default", None)
+        if name and default is not None and name not in effective:
+            effective[name] = default
+    return effective
 
 
 def _selected_contexts_for_inputs(
@@ -1415,14 +1425,29 @@ def _selected_contexts_for_inputs(
     if not config or not config.contexts:
         return [], None
     selected: list[dict[str, Any]] = []
+    effective_inputs = _effective_context_inputs(config, inputs)
     for raw_context in config.contexts:
         try:
             context = normalize_context_mount(raw_context)
-            if context_mount_matches_inputs(context, inputs):
+            if context_mount_matches_inputs(context, effective_inputs):
                 selected.append(context)
         except ValueError as exc:
             return [], f"Invalid context declaration: {exc}"
     return selected, None
+
+
+def _warm_pool_sensitive_run_material(
+    config: WorkerConfig | None,
+    inputs: Dict[str, Any] | None,
+    secrets: Dict[str, str] | None = None,
+) -> str | None:
+    if inputs:
+        return "run inputs"
+    if secrets:
+        return "secrets"
+    if config and getattr(config, "connections", None):
+        return "connections"
+    return None
 
 
 def _warm_pool_context_key_entries(
@@ -1454,8 +1479,11 @@ def _warm_pool_key(
     config: WorkerConfig | None,
     inputs: Dict[str, Any],
     sandbox_template: str | None,
+    secrets: Dict[str, str] | None = None,
 ) -> tuple[str | None, str | None]:
     if not _warm_pool_enabled():
+        return None, None
+    if _warm_pool_sensitive_run_material(config, inputs, secrets):
         return None, None
     selected_contexts, context_error = _selected_contexts_for_inputs(config, inputs)
     if context_error:
@@ -1486,7 +1514,8 @@ def _warm_pool_key(
 
 def _cleanup_run_state(sandbox: Any, workdir: str, *, log_fn: Callable[[str, str], None]) -> bool:
     result = sandbox.commands.run(
-        "rm -rf inputs outputs result.json .env.local secrets.json connections.json",
+        "find . -mindepth 1 -maxdepth 1 -not -name context -exec rm -rf -- {} + && "
+        "find /tmp -mindepth 1 -maxdepth 1 -exec rm -rf -- {} +",
         cwd=workdir,
         timeout=30,
         request_timeout=45,
@@ -1717,6 +1746,7 @@ class E2BSandboxDriver(SandboxDriver):
             worker_dir=worker_dir,
             config=config,
             inputs=inputs,
+            secrets=secrets,
             sandbox_template=sandbox_template,
         )
         if warm_key_error:
@@ -2017,6 +2047,12 @@ class E2BSandboxDriver(SandboxDriver):
                     _emit_command_output(exc_stderr, "warning", "[e2b] stderr: ", log_fn)
                 exc_exit_code = _exception_exit_code(exc)
                 if exc_exit_code is None:
+                    diagnostics = _sandbox_memory_diagnostics(sandbox, workdir)
+                    log_fn(
+                        "[e2b] Sandbox command transport failed before an exit code; "
+                        f"memory diagnostics: {diagnostics}",
+                        "warning",
+                    )
                     raise
                 if _looks_like_sandbox_oom(exc_exit_code, exc_stdout, exc_stderr):
                     diagnostics = _sandbox_memory_diagnostics(sandbox, workdir)
@@ -2193,6 +2229,7 @@ class E2BSandboxDriver(SandboxDriver):
         if not config or not config.contexts:
             return None
         inputs = inputs or {}
+        effective_inputs = _effective_context_inputs(config, inputs)
 
         contexts_root = f"{workdir}/context"
         made_context_root = False
@@ -2202,7 +2239,7 @@ class E2BSandboxDriver(SandboxDriver):
             for raw_context in config.contexts:
                 try:
                     context = normalize_context_mount(raw_context)
-                    should_mount = context_mount_matches_inputs(context, inputs)
+                    should_mount = context_mount_matches_inputs(context, effective_inputs)
                 except ValueError as exc:
                     return f"Invalid context declaration: {exc}"
 

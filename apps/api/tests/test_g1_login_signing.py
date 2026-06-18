@@ -140,13 +140,22 @@ def test_legacy_magic_link_without_nonce_is_rejected(monkeypatch, tmp_path):
     assert exc.value.status_code == 400
 
 
+def test_magic_link_validation_refused_without_configured_secret(monkeypatch, tmp_path):
+    main = _load_main(monkeypatch, tmp_path)
+    with pytest.raises(HTTPException) as exc:
+        main._validate_magic_link_full("bad.token")
+    assert exc.value.status_code == 503
+
+
 # ---------------------------------------------------------------------------
 # #930 — upload signing key fallback is not a public constant
 # ---------------------------------------------------------------------------
 
-def test_upload_signing_key_is_not_hardcoded_constant(monkeypatch, tmp_path):
+def test_upload_signing_key_requires_configured_secret(monkeypatch, tmp_path):
     main = _load_main(monkeypatch, tmp_path)
-    assert main._upload_signing_key() != b"local-dev-upload-url-signing"
+    with pytest.raises(HTTPException) as exc:
+        main._upload_signing_key()
+    assert exc.value.status_code == 503
 
 
 def test_token_forged_with_old_hardcoded_key_is_rejected(monkeypatch, tmp_path):
@@ -162,11 +171,13 @@ def test_token_forged_with_old_hardcoded_key_is_rejected(monkeypatch, tmp_path):
     ).hexdigest()
     with pytest.raises(HTTPException) as exc_info:
         main._verify_upload_download_token("f" * 64, f"{payload}.{forged_sig}")
-    assert exc_info.value.status_code == 404
+    assert exc_info.value.status_code == 503
 
 
 def test_upload_token_round_trip_still_works(monkeypatch, tmp_path):
-    main = _load_main(monkeypatch, tmp_path)
+    main = _load_main(
+        monkeypatch, tmp_path, env={"WORKEROS_UPLOAD_URL_SIGNING_SECRET": "g1-upload-key"}
+    )
     token = main._make_upload_download_token("a" * 64, "alice")
     assert main._verify_upload_download_token("a" * 64, token) == "alice"
 

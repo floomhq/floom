@@ -214,7 +214,7 @@ def link_git_repo(
 
     pat = cfg["github_pat"]
     full_name = payload.repo_full_name.strip()
-    remote_url = f"https://x-access-token:{pat}@github.com/{full_name}.git"
+    remote_url = f"https://github.com/{full_name}.git"
     repo_url = f"https://github.com/{full_name}"
 
     workspace = _git_workspace()
@@ -222,10 +222,10 @@ def link_git_repo(
         _git_ops.configure_remote(workspace, remote_url)
         # Pull if the remote has commits (e.g. auto-init), then push
         try:
-            _git_ops.pull(workspace)
+            _git_ops.pull_with_github_token(workspace, pat)
         except _git_ops.GitOpsError:
             pass  # Remote is empty — fine, we'll just push
-        _git_ops.push(workspace)
+        _git_ops.push_with_github_token(workspace, pat)
     except _git_ops.GitOpsError as exc:
         raise HTTPException(
             status_code=500,
@@ -237,7 +237,7 @@ def link_git_repo(
         auth.user_id,
         repo_full_name=full_name,
         repo_url=repo_url,
-        remote_url=remote_url,
+        remote_url=repo_url,
         last_pushed_at=pushed_at,
     )
 
@@ -265,10 +265,10 @@ def push_git_workspace(auth: AuthContext = Depends(get_auth_context)) -> _GitSta
 
     _require_admin(auth)
     cfg = _git_cfg_get(auth.user_id)
-    if not cfg or not cfg.get("repo_full_name"):
+    if not cfg or not cfg.get("repo_full_name") or not cfg.get("github_pat"):
         raise HTTPException(status_code=400, detail="No GitHub repo linked")
     try:
-        _git_ops.push(_git_workspace())
+        _git_ops.push_with_github_token(_git_workspace(), cfg["github_pat"])
     except _git_ops.GitOpsError as exc:
         raise HTTPException(
             status_code=500,
@@ -336,9 +336,9 @@ def import_git_workspace(
     tmp = Path(tempfile.mkdtemp(prefix="workeros-import-"))
     try:
         # Clone into temp directory
-        remote_url = f"https://x-access-token:{pat}@github.com/{repo_full_name}.git"
+        remote_url = f"https://github.com/{repo_full_name}.git"
         try:
-            _git_ops.clone_or_init(tmp, remote_url)
+            _git_ops.clone_or_init_with_github_token(tmp, remote_url, pat)
         except _git_ops.GitOpsError as exc:
             raise HTTPException(
                 status_code=500,

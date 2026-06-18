@@ -338,6 +338,7 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
           help={config.states?.empty?.help}
           icon={config.states?.empty?.icon}
           action={config.states?.empty?.action ?? addButton}
+          dropzone={config.states?.empty?.dropzone}
         />
       );
     }
@@ -379,6 +380,10 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
       onKeyDown={onKeyDown}
     >
       {header}
+
+      {!isOpen && !creating && config.headerSlot && (
+        <div style={{ padding: `10px ${PAGE_X}px 0` }}>{config.headerSlot}</div>
+      )}
 
       {!isOpen && !creating && (
         <>

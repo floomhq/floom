@@ -1000,7 +1000,8 @@ def test_shortlink_redirects_to_whatsapp_claim(monkeypatch, tmp_path):
     with TestClient(main.app, follow_redirects=False) as client:
         resp = client.get("/c/shorttest")
     assert resp.status_code == 302
-    assert "whatsapp_claim=shorttest" in resp.headers["location"]
+    assert "claim_token=shorttest" in resp.headers["location"]
+    assert "whatsapp_claim=" not in resp.headers["location"]
 
 
 def test_shortlink_redirects_to_slack_claim(monkeypatch, tmp_path):
@@ -1021,7 +1022,8 @@ def test_shortlink_redirects_to_slack_claim(monkeypatch, tmp_path):
     with TestClient(main.app, follow_redirects=False) as client:
         resp = client.get("/c/slackshort")
     assert resp.status_code == 302
-    assert "slack_claim=slackshort" in resp.headers["location"]
+    assert "claim_token=slackshort" in resp.headers["location"]
+    assert "slack_claim=" not in resp.headers["location"]
 
 
 def test_shortlink_returns_404_for_unknown_token(monkeypatch, tmp_path):

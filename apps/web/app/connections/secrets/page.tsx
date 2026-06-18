@@ -151,7 +151,7 @@ function SecretsContent() {
     return (
       <div className="space-y-6">
         <header>
-          <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Integrations</h1>
           <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
             Manage environment secrets for your workers. Values are write-only.
           </p>
@@ -171,11 +171,11 @@ function SecretsContent() {
   return (
     <div className="space-y-6">
       {/* Secrets lives under /connections/secrets (P2-9) and shares the
-          Connections tabs. Same H1 ("Connections") + subtitle pattern as
+          Connections tabs. Same H1 ("Integrations") + subtitle pattern as
           /connections and /connections/browse so the tabs feel like one page. */}
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
-          <h1 className="text-2xl font-semibold tracking-tight">Connections</h1>
+          <h1 className="text-2xl font-semibold tracking-tight">Integrations</h1>
           <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
             Manage environment secrets for your workers. Values are write-only.
           </p>

@@ -17,7 +17,7 @@ function jsonRequest(body: string, ip = "203.0.113.10"): Request {
 
 async function loadRoute() {
   const mod = await import("@/app/api/auth/login/route");
-  return mod.POST as (req: Request) => Promise<Response>;
+  return mod.POST as unknown as (req: Request) => Promise<Response>;
 }
 
 describe("/api/auth/login secret mode", () => {
