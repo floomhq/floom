@@ -112,6 +112,9 @@ export interface CollectionStates {
     help?: string;
     icon?: import("react").ComponentType<{ size?: number }>;
     action?: ReactNode;
+    /** Render the empty state as a bounded dashed drop-zone box (drop-led
+     *  surfaces such as the Library). */
+    dropzone?: boolean;
   };
   errorRetry?: () => void;
 }

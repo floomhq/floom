@@ -8,14 +8,18 @@ export function EmptyState({
   help,
   action,
   icon: Icon = Inbox,
+  dropzone = false,
 }: {
   title: string;
   help?: string;
   action?: ReactNode;
   icon?: ComponentType<{ size?: number }>;
+  /** When true the empty state is itself a bounded dashed drop-zone box (the
+   *  drop target affordance), used by drop-led surfaces like the Library. */
+  dropzone?: boolean;
 }) {
   return (
-    <div className="c-statebox" role="status">
+    <div className={dropzone ? "c-statebox c-dropbox" : "c-statebox"} role="status">
       <span className="g">
         <Icon size={24} />
       </span>
