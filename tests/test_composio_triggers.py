@@ -167,6 +167,78 @@ def test_composio_events_with_valid_hmac_creates_run(monkeypatch, tmp_path):
     assert json.loads(row["input_json"])["event"]["data"]["subject"] == "Hello"
 
 
+def test_composio_events_scopes_duplicate_trigger_id_by_connected_account(monkeypatch, tmp_path):
+    main, composio_client = _load_api(monkeypatch, tmp_path)
+    monkeypatch.setattr(composio_client, "enable_trigger", lambda *args, **kwargs: "ct_shared")
+    other_user = "other-user"
+    other_worker = "gmail-composio-other"
+
+    with TestClient(main.app) as client:
+        created = _create_worker(client)
+        assert created.status_code == 200, created.text
+        repos = main.get_repositories()
+        repos.workers.create(
+            user_id=other_user,
+            worker_id=other_worker,
+            name="other-gmail-composio",
+            manifest_json={
+                "schema_version": "0.3",
+                "id": other_worker,
+                "name": "other-gmail-composio",
+                "title": "Other Gmail Composio",
+                "description": "Run from a Composio Gmail event.",
+                "version": "0.1.0",
+                "entrypoint": "SKILL.md",
+                "exec": {"command": "python run.py", "runtime": "python311", "runner": "e2b"},
+                "inputs": [],
+                "outputs": [],
+                "secrets": [],
+                "trigger": {
+                    "type": "composio",
+                    "composio": {
+                        "event": "GMAIL_NEW_EMAIL",
+                        "connection_id": "conn_gmail_other_stub",
+                    },
+                },
+            },
+            composio_trigger_id="ct_shared",
+            composio_event="GMAIL_NEW_EMAIL",
+        )
+        repos.workers.reconcile_triggers(
+            worker_id=other_worker,
+            triggers=[{"type": "composio_event", "event": "GMAIL_NEW_EMAIL"}],
+            external_trigger_id="ct_shared",
+        )
+        repos.connections.upsert(
+            user_id=other_user,
+            id="conn-row-other",
+            app_name="gmail",
+            composio_connection_id="conn_gmail_other_stub",
+            status="active",
+        )
+        body = json.dumps({
+            "id": "msg_tenant_scoped",
+            "metadata": {
+                "trigger_id": "ct_shared",
+                "trigger_slug": "GMAIL_NEW_EMAIL",
+                "connected_account_id": "conn_gmail_other_stub",
+            },
+            "data": {"subject": "tenant-scoped"},
+        }).encode()
+        response = client.post(
+            "/composio-events",
+            content=body,
+            headers=_composio_webhook_headers(body),
+        )
+
+    assert response.status_code == 200, response.text
+    run_id = response.json()["run_id"]
+    with main.get_db() as conn:
+        row = conn.execute("SELECT worker_id, trigger_ref FROM runs WHERE id = ?", (run_id,)).fetchone()
+    assert row["worker_id"] == other_worker
+    assert row["trigger_ref"] == f"trg_{other_worker}_0"
+
+
 def test_composio_events_replay_same_delivery_is_ignored(monkeypatch, tmp_path):
     main, composio_client = _load_api(monkeypatch, tmp_path)
     monkeypatch.setattr(composio_client, "enable_trigger", lambda *args, **kwargs: "ct_gmail_123")

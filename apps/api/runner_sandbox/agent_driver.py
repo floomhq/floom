@@ -695,6 +695,7 @@ class AgentDriver(SandboxDriver):
         # Decoding is shared with chat_service.stream_chat (#605); this method
         # only formats the normalized item into transcript/run parts.
         from runner_sandbox.stream_adapter import decode_stream_event
+        from services.chat_tool_cards import build_args_preview
 
         item = decode_stream_event(event)
         if item is None:
@@ -717,28 +718,34 @@ class AgentDriver(SandboxDriver):
             return {"type": "reasoning", "text": item.text}, False
 
         if item.kind == "tool_call":
+            args_preview = build_args_preview(item.tool_name, item.args)
             return {
                 "type": "tool-call",
                 "toolName": item.tool_name,
-                "args": item.args,
+                "args": args_preview,
+                "args_preview": args_preview,
                 "callId": item.call_id,
                 **item.metadata,
             }, False
 
         if item.kind == "tool_output":
+            result_preview = build_args_preview("tool-result", item.output)
             return {
                 "type": "tool-result",
                 "callId": item.call_id,
-                "result": item.output,
+                "result": result_preview,
+                "result_preview": result_preview,
                 "isError": item.is_error,
                 **item.metadata,
             }, False
 
         if item.kind == "mcp_approval":
+            args_preview = build_args_preview(item.tool_name, item.args)
             return {
                 "type": "tool-call",
                 "toolName": item.tool_name,
-                "args": item.args,
+                "args": args_preview,
+                "args_preview": args_preview,
                 "callId": item.call_id,
                 "kind": "mcp-approval",
                 **item.metadata,

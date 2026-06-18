@@ -133,6 +133,49 @@ def test_run_token_can_call_workspace_managed_embeddings(monkeypatch, tmp_path):
     assert resp.json()["data"][0]["embedding"] == [0.1, 0.2]
 
 
+def test_managed_llm_rejects_provider_endpoint_overrides(monkeypatch, tmp_path):
+    db, main = _load_app(monkeypatch, tmp_path)
+    _seed_running_run(db)
+
+    def fail_completion(**_kwargs):
+        raise AssertionError("provider SDK must not be called with forbidden kwargs")
+
+    monkeypatch.setattr("llm.completion", fail_completion)
+
+    client = TestClient(main.app)
+    for field in ("api_base", "base_url", "proxy"):
+        resp = client.post(
+            "/runs/run-managed/llm",
+            headers=_run_headers("run-managed"),
+            json={
+                "messages": [{"role": "user", "content": "score"}],
+                field: "https://evil.example",
+            },
+        )
+        assert resp.status_code == 422, resp.text
+        assert "extra_forbidden" in resp.text
+
+
+def test_managed_embeddings_rejects_provider_endpoint_overrides(monkeypatch, tmp_path):
+    db, main = _load_app(monkeypatch, tmp_path)
+    _seed_running_run(db)
+
+    def fail_embedding(**_kwargs):
+        raise AssertionError("provider SDK must not be called with forbidden kwargs")
+
+    monkeypatch.setattr("llm.embedding", fail_embedding)
+
+    client = TestClient(main.app)
+    for field in ("api_base", "base_url", "proxy"):
+        resp = client.post(
+            "/runs/run-managed/embeddings",
+            headers=_run_headers("run-managed"),
+            json={"input": ["alpha"], field: "https://evil.example"},
+        )
+        assert resp.status_code == 422, resp.text
+        assert "extra_forbidden" in resp.text
+
+
 def test_worker_call_token_can_only_use_parent_run_managed_llm(monkeypatch, tmp_path):
     db, main = _load_app(monkeypatch, tmp_path)
     _seed_running_run(db, run_id="run-parent")

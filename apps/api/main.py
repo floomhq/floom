@@ -4280,7 +4280,7 @@ class _ComposioProxyRequest(BaseModel):
 
 
 class _ManagedLLMRequest(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     messages: List[Dict[str, Any]]
     model: Optional[str] = None
@@ -4294,7 +4294,7 @@ class _ManagedLLMBatchRequest(BaseModel):
 
 
 class _ManagedEmbeddingsRequest(BaseModel):
-    model_config = ConfigDict(extra="allow")
+    model_config = ConfigDict(extra="forbid")
 
     input: Union[str, List[str]]
     model: Optional[str] = None
@@ -4694,11 +4694,18 @@ def _sqlite_claim_webhook_delivery(source: str, delivery_id: str) -> bool:
 
 def _claim_webhook_delivery(source: str, delivery_id: str) -> bool:
     if not delivery_id:
-        return True
+        delivery_id = "missing-delivery-id"
     store = _webhook_delivery_store
     if store is not None:
         return store.claim(source, delivery_id)
     return _sqlite_claim_webhook_delivery(source, delivery_id)
+
+
+def _webhook_delivery_id_or_body_hash(delivery_id: str | None, body: bytes) -> str:
+    cleaned = str(delivery_id or "").strip()
+    if cleaned:
+        return cleaned
+    return "body-sha256:" + hashlib.sha256(body).hexdigest()
 
 
 def _candidate_composio_trigger_ids(payload: Any, request: Request) -> list[str]:
@@ -4733,7 +4740,44 @@ def _candidate_composio_trigger_ids(payload: Any, request: Request) -> list[str]
                     nested_keys.append("id")
                 for key in nested_keys:
                     candidates.append(nested.get(key))
-    return [str(c) for c in candidates if c]
+    return list(dict.fromkeys(str(c).strip() for c in candidates if str(c or "").strip()))
+
+
+def _candidate_composio_connection_ids(payload: Any) -> list[str]:
+    candidates: list[Any] = []
+    if isinstance(payload, dict):
+        for key in (
+            "connected_account_id",
+            "connectedAccountId",
+            "composio_connection_id",
+            "connection_id",
+        ):
+            candidates.append(payload.get(key))
+        for nested_key in ("data", "metadata", "trigger"):
+            nested = payload.get(nested_key)
+            if isinstance(nested, dict):
+                for key in (
+                    "connected_account_id",
+                    "connectedAccountId",
+                    "composio_connection_id",
+                    "connection_id",
+                ):
+                    candidates.append(nested.get(key))
+    return list(dict.fromkeys(str(c).strip() for c in candidates if str(c or "").strip()))
+
+
+def _composio_tenant_context(payload: Any, repos: Repositories) -> tuple[str | None, str | None]:
+    for connection_id in _candidate_composio_connection_ids(payload):
+        try:
+            row = repos.connections.get_by_composio_connection_id(
+                composio_connection_id=connection_id
+            )
+        except Exception:
+            row = None
+        if row:
+            user_id = str(row.get("user_id") or "").strip() or None
+            return user_id, derive_workspace_id(user_id) if user_id else None
+    return None, None
 
 
 def _event_name_from_payload(payload: Any) -> Optional[str]:
@@ -4751,23 +4795,49 @@ def _event_name_from_payload(payload: Any) -> Optional[str]:
     return None
 
 
-def _find_worker_for_composio_event(payload: Any, request: Request) -> Optional[str]:
+def _find_worker_for_composio_event(
+    payload: Any,
+    request: Request,
+    *,
+    tenant_user_id: str | None = None,
+    tenant_workspace_id: str | None = None,
+) -> Optional[str]:
     candidates = _candidate_composio_trigger_ids(payload, request)
     with get_db() as conn:
         for trigger_id in candidates:
-            row = conn.execute(
-                "SELECT id FROM workers WHERE composio_trigger_id = ? LIMIT 1",
-                (trigger_id,),
-            ).fetchone()
-            if row:
-                return row["id"]
+            where = ["composio_trigger_id = ?", "enabled = 1"]
+            params: list[Any] = [trigger_id]
+            if tenant_user_id:
+                where.append("owner_id = ?")
+                params.append(tenant_user_id)
+            if tenant_workspace_id:
+                where.append("COALESCE(workspace_id, 'local-default') = ?")
+                params.append(tenant_workspace_id)
+            rows = conn.execute(
+                f"SELECT id FROM workers WHERE {' AND '.join(where)} ORDER BY id LIMIT 2",
+                params,
+            ).fetchall()
+            if len(rows) == 1:
+                return rows[0]["id"]
         if candidates:
             return None
         event_name = _event_name_from_payload(payload)
         if event_name:
+            where = [
+                "composio_event = ?",
+                "composio_trigger_id IS NOT NULL",
+                "enabled = 1",
+            ]
+            params = [event_name]
+            if tenant_user_id:
+                where.append("owner_id = ?")
+                params.append(tenant_user_id)
+            if tenant_workspace_id:
+                where.append("COALESCE(workspace_id, 'local-default') = ?")
+                params.append(tenant_workspace_id)
             rows = conn.execute(
-                "SELECT id FROM workers WHERE composio_event = ? AND composio_trigger_id IS NOT NULL",
-                (event_name,),
+                f"SELECT id FROM workers WHERE {' AND '.join(where)} ORDER BY id LIMIT 2",
+                params,
             ).fetchall()
             if len(rows) == 1:
                 return rows[0]["id"]
@@ -4800,11 +4870,16 @@ async def composio_events(request: Request) -> ActionResponse:
     # so the run is tagged with WHICH trigger fired and dedupe is scoped to that
     # trigger. Fall back to the worker-scalar lookup for legacy DBs.
     repos = get_repositories()
+    tenant_user_id, tenant_workspace_id = _composio_tenant_context(payload, repos)
     trigger_ref: Optional[str] = None
     worker_id: Optional[str] = None
     for candidate in _candidate_composio_trigger_ids(payload, request):
         try:
-            row = repos.workers.find_trigger_by_external_id(external_trigger_id=candidate)
+            row = repos.workers.find_trigger_by_external_id(
+                external_trigger_id=candidate,
+                user_id=tenant_user_id,
+                workspace_id=tenant_workspace_id,
+            )
         except Exception:
             row = None
         if row:
@@ -4812,14 +4887,20 @@ async def composio_events(request: Request) -> ActionResponse:
             worker_id = row["worker_id"]
             break
     if not worker_id:
-        worker_id = _find_worker_for_composio_event(payload, request)
+        worker_id = _find_worker_for_composio_event(
+            payload,
+            request,
+            tenant_user_id=tenant_user_id,
+            tenant_workspace_id=tenant_workspace_id,
+        )
     if not worker_id:
         raise HTTPException(status_code=404, detail="No worker registered for Composio trigger")
 
-    delivery_id = (
+    delivery_id = _webhook_delivery_id_or_body_hash(
         request.headers.get("webhook-id")
         or (payload.get("id") if isinstance(payload, dict) else "")
-        or ""
+        or "",
+        body,
     )
     # Dedupe by (trigger, delivery_id): a redelivery of the same event to the
     # same trigger fires at most one run.
@@ -6542,15 +6623,16 @@ async def webhook_trigger(
         trigger_ref = None
 
     # Dedupe by (trigger, delivery_id): a redelivery carrying the same delivery
-    # id fires at most one run. Senders that don't supply a delivery id are not
-    # deduped (delivery_id == "" → always allowed).
-    delivery_id = (
+    # id fires at most one run. If the sender omits the id, derive one from the
+    # raw body so identical retries are still suppressed.
+    delivery_id = _webhook_delivery_id_or_body_hash(
         request.headers.get("webhook-id")
         or request.headers.get("X-Delivery-Id")
         or request.headers.get("X-GitHub-Delivery")
-        or ""
+        or "",
+        body,
     )
-    if delivery_id and not _claim_webhook_delivery(
+    if not _claim_webhook_delivery(
         f"webhook:{trigger_ref or worker_id}", str(delivery_id)
     ):
         return ActionResponse(status="duplicate_ignored")

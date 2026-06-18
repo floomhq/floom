@@ -190,6 +190,17 @@ class TestBackfill:
         t2 = ws.current_webhook_token(wid)
         assert t1 == t2, "backfill must not re-mint on every call"
 
+    def test_verify_missing_secret_is_read_only(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        import webhook_service as ws
+
+        wid = f"wk-{uuid.uuid4().hex[:8]}"
+        _insert_webhook_worker(main, wid, with_secret=False)
+
+        assert ws.get_webhook_secret_hash(wid) is None, "precondition: no secret yet"
+        assert ws.verify_webhook_token(wid, "bad-token") is False
+        assert ws.get_webhook_secret_hash(wid) is None, "verification must not backfill"
+
 
 class TestConstantTime:
     def test_verify_uses_compare_digest(self, monkeypatch):

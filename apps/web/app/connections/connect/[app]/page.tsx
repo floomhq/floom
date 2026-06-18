@@ -5,6 +5,7 @@ import { useParams, useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, CheckCircle2, Loader2 } from "lucide-react";
 import { api } from "@/lib/api";
+import { sanitizeRedirect } from "@/lib/redirects";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ProviderLogos } from "@/components/connections/ProviderLogos";
@@ -190,6 +191,5 @@ export default function ConnectAppPage() {
 }
 
 function normalizeReturnTo(value: string | null): string {
-  if (value && value.startsWith("/") && !value.startsWith("//")) return value;
-  return "/connections";
+  return sanitizeRedirect(value, "/connections");
 }
