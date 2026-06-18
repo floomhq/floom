@@ -62,6 +62,15 @@ jobs:
       - name: Install dependencies
         run: pip install -r requirements.txt pytest pytest-asyncio
 
+      - name: Collect tests
+        env:
+          WORKEROS_DEPLOY: local
+          WORKEROS_ROOT: ${{ github.workspace }}
+          FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          OPENAI_API_KEY: sk-test-${{ github.run_id }}
+          COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
+        run: pytest tests/ --collect-only -q -p no:warnings
+
       - name: Run tests
         env:
           WORKEROS_DEPLOY: local
@@ -95,6 +104,15 @@ jobs:
 
       - name: Install dependencies
         run: pip install -r apps/api/requirements.txt pytest pytest-asyncio
+
+      - name: Collect root runtime tests
+        env:
+          WORKEROS_DEPLOY: local
+          WORKEROS_ROOT: ${{ github.workspace }}
+          FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          OPENAI_API_KEY: sk-test-${{ github.run_id }}
+          COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
+        run: pytest tests/ --collect-only -q -p no:warnings
 
       - name: Run root runtime tests
         env:
@@ -132,6 +150,15 @@ jobs:
 
       - name: Install dependencies
         run: python -m pip install -r apps/api/requirements.txt pytest pytest-asyncio
+
+      - name: Collect root runtime tests
+        env:
+          WORKEROS_DEPLOY: local
+          WORKEROS_ROOT: ${{ github.workspace }}
+          FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
+          OPENAI_API_KEY: sk-test-${{ github.run_id }}
+          COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
+        run: python -m pytest tests/ --collect-only -q -p no:warnings
 
       - name: Run root runtime tests
         env:
