@@ -69,3 +69,29 @@ def test_git_workspace_plaintext_pat_rows_are_still_readable(monkeypatch, tmp_pa
         )
 
     assert git_service._git_cfg_get("alice")["github_pat"] == "ghp_legacy_plaintext"
+
+
+def test_github_token_auth_uses_askpass_not_tokenized_url(monkeypatch, tmp_path):
+    git_ops = importlib.import_module("git_ops")
+    calls: list[tuple[list[str], dict[str, str] | None]] = []
+
+    def fake_git(args, cwd, check=True, timeout=30, env=None):
+        calls.append((args, env))
+
+        class Result:
+            returncode = 0
+            stderr = ""
+            stdout = ""
+
+        return Result()
+
+    monkeypatch.setattr(git_ops, "_git", fake_git)
+
+    git_ops.configure_remote(tmp_path, "https://github.com/floomhq/workeros.git")
+    git_ops.push_with_github_token(tmp_path, "ghp_plaintext_secret")
+
+    flattened_args = " ".join(" ".join(args) for args, _env in calls)
+    assert "ghp_plaintext_secret" not in flattened_args
+    assert "x-access-token:ghp_plaintext_secret" not in flattened_args
+    assert calls[-1][0] == ["push", "-u", "origin", "HEAD"]
+    assert calls[-1][1]["WORKEROS_GIT_ASKPASS_PASSWORD"] == "ghp_plaintext_secret"

@@ -16,9 +16,6 @@ if str(API_DIR) not in sys.path:
 
 SECRET = "test-secret-workspace-github-export"
 OWNER = "export-owner"
-REMOTE_SCHEME = "https://"
-REMOTE_USER = "x-access" "-token"
-REMOTE_HOST = "@github.com"
 OWNER_SECRET_ENV_KEYS = (
     "__WORKEROS_SECRET___EXPORT_OWNER_GITHUB_TOKEN",
     "__WORKEROS_SECRET___EXPORT_OWNER_GH_TOKEN",
@@ -35,6 +32,7 @@ def app_env(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_SECRET", SECRET)
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
     monkeypatch.setenv("WORKEROS_USER_ID", OWNER)
     monkeypatch.setenv("WORKEROS_WORKSPACE_DIR", str(workspace))
     monkeypatch.delenv("WORKEROS_GIT_REMOTE", raising=False)
@@ -111,12 +109,12 @@ def _mock_git(monkeypatch):
     def configure_remote(workspace_dir, remote_url):
         calls.append(("remote", (workspace_dir, remote_url)))
 
-    def push(workspace_dir):
-        calls.append(("push", workspace_dir))
+    def push_with_github_token(workspace_dir, token):
+        calls.append(("push", (workspace_dir, token)))
 
     monkeypatch.setattr(git_ops, "commit_paths", commit_paths)
     monkeypatch.setattr(git_ops, "configure_remote", configure_remote)
-    monkeypatch.setattr(git_ops, "push", push)
+    monkeypatch.setattr(git_ops, "push_with_github_token", push_with_github_token)
     return calls
 
 
@@ -143,8 +141,8 @@ def test_export_with_present_repo_pushes(app_env, monkeypatch):
     assert gh_calls == [("validate", "pat-test")]
     assert [name for name, _ in git_calls] == ["commit", "remote", "push"]
     remote_url = git_calls[1][1][1]
-    expected_remote = f"{REMOTE_SCHEME}{REMOTE_USER}:pat-test{REMOTE_HOST}/octocat/existing-workspace.git"
-    assert remote_url == expected_remote
+    assert remote_url == "https://github.com/octocat/existing-workspace.git"
+    assert git_calls[2][1][1] == "pat-test"
     assert "pat-test" not in resp.text
 
 

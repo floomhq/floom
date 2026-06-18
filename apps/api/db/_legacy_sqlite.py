@@ -2126,6 +2126,12 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_approvals_owner_status_created
         ON approvals(owner_id, status, created_at);
     """,
+    # -- migration 86: schedule trigger distributed lease (#1474) ------------
+    """
+    ALTER TABLE worker_triggers ADD COLUMN locked_until TEXT;
+    CREATE INDEX IF NOT EXISTS idx_worker_triggers_schedule_due_lock
+        ON worker_triggers(type, enabled, next_run_at, locked_until);
+    """,
 ]
 
 
@@ -2144,7 +2150,7 @@ def get_current_version(conn: sqlite3.Connection) -> int:
 def apply_migrations():
     with get_db() as conn:
         current = get_current_version(conn)
-    duplicate_column_tolerant = {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50, 65, 71, 82}
+    duplicate_column_tolerant = {3, 4, 6, 8, 15, 18, 20, 22, 27, 28, 30, 31, 33, 41, 42, 48, 50, 65, 71, 82, 86}
     for i, migration in enumerate(MIGRATIONS, start=1):
         if i > current:
             with get_db() as conn:
