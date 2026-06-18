@@ -24,6 +24,54 @@ if sys.platform == "win32":
 
 from pathlib import Path as _Path
 
+# Materialize the Vertex WIF (Workload Identity Federation) credential file
+# BEFORE any engine module import that may initialise google-auth.
+#
+# Chat/codegen/suggest run through LiteLLM's `vertex_ai/` provider (see
+# WORKEROS_CHAT_MODEL=vertex_ai/...), which loads Application Default
+# Credentials from the path in GOOGLE_APPLICATION_CREDENTIALS. On Railway that
+# path is `ops/vertex/wif-config.json`, which is NOT committed to the repo or
+# baked into the image (it is environment config, not source). Without the
+# file, google-auth raises DefaultCredentialsError and chat fails with
+# "Chat failed upstream".
+#
+# The config is a KEYLESS `external_account` WIF descriptor: it federates the
+# container's AWS IAM identity (the same `claude-bedrock-bench` creds already
+# present for Bedrock, AWS account 005696749876) into a GCP service-account
+# token. It contains no private key, so carrying it as a base64 env var
+# (VERTEX_WIF_CONFIG_B64) is config, not a secret leak — but we keep it out of
+# git regardless and write it to disk on boot.
+#
+# Fails soft: if the env var is absent or GOOGLE_APPLICATION_CREDENTIALS is
+# unset/already present on disk, this is a no-op and the rest of the API
+# (healthz, approvals, runs, non-Vertex paths) still boots normally.
+def _materialize_vertex_wif_config() -> None:
+    import base64 as _base64
+
+    cred_path = (os.environ.get("GOOGLE_APPLICATION_CREDENTIALS") or "").strip()
+    b64 = (os.environ.get("VERTEX_WIF_CONFIG_B64") or "").strip()
+    if not cred_path or not b64:
+        return
+    target = _Path(cred_path)
+    if target.is_file() and target.stat().st_size > 0:
+        return
+    try:
+        raw = _base64.b64decode(b64)
+        target.parent.mkdir(parents=True, exist_ok=True)
+        target.write_bytes(raw)
+        try:
+            target.chmod(0o600)
+        except OSError:
+            pass
+    except Exception as exc:  # pragma: no cover - boot-time best effort
+        sys.stderr.write(
+            f"[wif] failed to materialize {cred_path} from "
+            f"VERTEX_WIF_CONFIG_B64: {type(exc).__name__}: {exc}\n"
+        )
+
+
+_materialize_vertex_wif_config()
+
 # Set FLOOM_WORKERS_DIR before ANY engine module imports.
 # run_service.py does `from worker_registry import WORKERS_DIR` at module level;
 # WORKERS_DIR is a module-level constant that is evaluated at import time from
