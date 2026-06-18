@@ -31,8 +31,8 @@ afterEach(() => {
 });
 
 describe("pinned-tabs tab sets", () => {
-  it("primary tabs are Overview, Runs and Operations (round-09)", () => {
-    expect([...BASE_DETAIL_TABS]).toEqual(["Overview", "Runs", "Operations"]);
+  it("primary tabs are Overview, Runs and Setup (round-09)", () => {
+    expect([...BASE_DETAIL_TABS]).toEqual(["Overview", "Runs", "Setup"]);
   });
 
   it("advanced (pinnable) tabs are Source, Versions, Brain, Tools in canonical order", () => {

@@ -21,8 +21,8 @@ import { formatVersionRows } from "@/lib/workers/versions";
 import {
   WORKER_DETAIL_TABS,
   type WorkerDetailTab,
-  OPERATIONS_SUBTABS,
-  type OperationsSubtab,
+  SETUP_SUBTABS,
+  type SetupSubtab,
 } from "@/lib/workers/tabs";
 import { formatDuration } from "@/lib/runs/format";
 import { runtimeSummary } from "@/lib/runtime-labels";
@@ -1270,22 +1270,22 @@ function OpsLimitsPanel({ w }: { w: WorkerSummary }) {
   );
 }
 
-// Operations: PRIMARY tab hosting the second-row sub-tabs. Reuses .c-dtabs2 /
+// Setup: PRIMARY tab hosting the second-row sub-tabs. Reuses .c-dtabs2 /
 // .c-dtab2 (the smaller straight-ink underline variant) — NO sidebar.
-function OperationsTab({ w }: { w: WorkerSummary }) {
+function SetupTab({ w }: { w: WorkerSummary }) {
   const router = useRouter();
-  const [sub, setSub] = useState<OperationsSubtab>("Inputs");
-  const counts = useOperationsSubCounts(w);
+  const [sub, setSub] = useState<SetupSubtab>("Inputs");
+  const counts = useSetupSubCounts(w);
   return (
     <div className="flex flex-col">
-      {/* R9 FIX 2: the Operations second-row tabs sit DIRECTLY under the primary
+      {/* R9 FIX 2: the Setup second-row tabs sit DIRECTLY under the primary
           tab row, with no framing text and no gap wedged between the two rows.
           The .c-ops-row-flush wrapper breaks out of the c-dbody padding so
           .c-dtabs2 lines up flush beneath .c-dtabs. The "visual editor of
           worker.yml" framing moved INTO the panel content (below both rows). */}
       <div className="c-ops-row-flush">
-        <div className="c-dtabs2" role="tablist" aria-label="Operations">
-          {OPERATIONS_SUBTABS.map((key) => (
+        <div className="c-dtabs2" role="tablist" aria-label="Setup">
+          {SETUP_SUBTABS.map((key) => (
             <button
               key={key}
               type="button"
@@ -1326,8 +1326,8 @@ function OperationsTab({ w }: { w: WorkerSummary }) {
   );
 }
 
-/** Small count badges for the Operations sub-tabs, derived from the manifest. */
-function useOperationsSubCounts(w: WorkerSummary): Partial<Record<OperationsSubtab, number>> {
+/** Small count badges for the Setup sub-tabs, derived from the manifest. */
+function useSetupSubCounts(w: WorkerSummary): Partial<Record<SetupSubtab, number>> {
   const [d] = useWorkerDetail(w.id);
   return useMemo(() => {
     const inputs = (d?.config?.inputs ?? w.inputs ?? []).length;
@@ -1349,7 +1349,7 @@ function useOperationsSubCounts(w: WorkerSummary): Partial<Record<OperationsSubt
 const WORKER_TAB_COMPONENT: Record<WorkerDetailTab, (props: { w: WorkerSummary }) => React.ReactNode> = {
   Overview: OverviewTab,
   Runs: RunsTab,
-  Operations: OperationsTab,
+  Setup: SetupTab,
   Source: SourceTab,
   Versions: VersionsTab,
   Brain: BrainTab,

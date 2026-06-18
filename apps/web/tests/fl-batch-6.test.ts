@@ -95,8 +95,8 @@ function test539SetupInDropdown(): void {
 
 function test539PrimaryTabsOnly4(): void {
   const s = src("lib/workers/tabs.ts");
-  // round-09: primary = Overview/Runs/Operations; advanced = Source/Versions/Brain/Tools.
-  assert(s.includes("Overview") && s.includes("Runs") && s.includes("Operations") && s.includes("Source") && s.includes("Versions"),
+  // round-09: primary = Overview/Runs/Setup; advanced = Source/Versions/Brain/Tools.
+  assert(s.includes("Overview") && s.includes("Runs") && s.includes("Setup") && s.includes("Source") && s.includes("Versions"),
     "Worker split-pane tabs must expose the round-09 detail tab set");
 }
 

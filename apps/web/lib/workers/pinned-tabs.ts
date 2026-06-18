@@ -17,9 +17,9 @@ import { WORKER_DETAIL_TABS, type WorkerDetailTab } from "@/lib/workers/tabs";
 const LS_KEY_PINNED_TABS = "floom.workerDetail.pinnedTabs";
 
 /** Always-visible PRIMARY tabs (never pinnable, never hidden). round-09:
- *  Overview · Runs · Operations. The advanced group (Source/Versions/Brain/
+ *  Overview · Runs · Setup. The advanced group (Source/Versions/Brain/
  *  Tools) is quiet/secondary and pinnable via the Customize control. */
-export const BASE_DETAIL_TABS = ["Overview", "Runs", "Operations"] as const;
+export const BASE_DETAIL_TABS = ["Overview", "Runs", "Setup"] as const;
 
 /** The advanced tabs that can be pinned, in canonical render order. */
 export const ADVANCED_DETAIL_TABS = WORKER_DETAIL_TABS.filter(

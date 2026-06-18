@@ -113,17 +113,17 @@ describe("R9 worker-detail FIX 1 — Advanced group is visible ON the tab row", 
   });
 });
 
-describe("R9 worker-detail FIX 2 — Operations tab rows stack tight", () => {
+describe("R9 worker-detail FIX 2 — Setup tab rows stack tight", () => {
   it("has no .c-ops-frame between the primary row and the .c-dtabs2 second row", async () => {
     await openDetail();
-    fireEvent.click(screen.getByRole("tab", { name: "Operations" }));
+    fireEvent.click(screen.getByRole("tab", { name: "Setup" }));
     const subRow = await waitFor(() => {
       const el = document.querySelector(".c-dtabs2");
       expect(el).toBeTruthy();
       return el!;
     });
     // The flush wrapper holds the second row and is the FIRST child of the
-    // Operations panel — nothing (no framing text, no gap div) precedes it.
+    // Setup panel — nothing (no framing text, no gap div) precedes it.
     const flush = document.querySelector(".c-ops-row-flush");
     expect(flush).toBeTruthy();
     expect(flush!.contains(subRow)).toBe(true);

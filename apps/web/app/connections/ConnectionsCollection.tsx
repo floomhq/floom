@@ -475,7 +475,7 @@ function OAuthToolsPanel({ connection }: { connection: ConnectionItem }) {
         Default tool scope for new workers. Each worker can narrow this further.
       </div>
       {scope === "Custom" ? (
-        <div style={pad}>Configure the exact tool list on each worker (Operations → Tools).</div>
+        <div style={pad}>Configure the exact tool list on each worker (Setup → Tools).</div>
       ) : (
         <ToolSection label="Granted scopes" items={shown} mono={false} />
       )}
