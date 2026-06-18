@@ -2184,7 +2184,7 @@ class E2BSandboxDriver(SandboxDriver):
         sandbox: Any,
         workdir: str,
         config: Optional[WorkerConfig],
-        inputs: Dict[str, Any],
+        inputs: Dict[str, Any] | None = None,
         made_dirs: set[str],
         log_fn: Callable[[str, str], None],
         user_id: str | None = None,
@@ -2198,10 +2198,11 @@ class E2BSandboxDriver(SandboxDriver):
 
         with use_context_scope(context_scope_for_user(user_id)):
             ensure_memory_context_pack(config=config, user_id=user_id, log_fn=log_fn)
+            effective_inputs = inputs or {}
             for raw_context in config.contexts:
                 try:
                     context = normalize_context_mount(raw_context)
-                    should_mount = context_mount_matches_inputs(context, inputs)
+                    should_mount = context_mount_matches_inputs(context, effective_inputs)
                 except ValueError as exc:
                     return f"Invalid context declaration: {exc}"
 
