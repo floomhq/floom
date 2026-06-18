@@ -21,6 +21,7 @@ class _AuthClient:
         self.signup_payloads: list[dict] = []
         self.otp_payloads: list[dict] = []
         self.verify_payloads: list[dict] = []
+        self.refresh_payloads: list[str] = []
         self.signup_response = signup_response
         self.user = user
 
@@ -47,6 +48,18 @@ class _AuthClient:
     def get_user(self, access_token: str):
         assert access_token == "access-token-123"
         return SimpleNamespace(user=self.user)
+
+    def refresh_session(self, refresh_token: str):
+        self.refresh_payloads.append(refresh_token)
+        user = self.user or SimpleNamespace(id="user-1", email="new@example.com")
+        session = SimpleNamespace(
+            access_token="rotated-access-token-123",
+            refresh_token="rotated-refresh-token-123",
+            expires_at=1_900_000_500,
+            expires_in=3600,
+            user=user,
+        )
+        return SimpleNamespace(user=user, session=session)
 
 
 class _Client:
@@ -256,6 +269,75 @@ def test_password_signup_with_session_sets_cookie(monkeypatch):
     assert response.status_code == 200
     assert response.json() == {"ok": True, "next": "/app"}
     assert "workeros_cloud_session=" in response.headers["set-cookie"]
+    cookie_value = response.headers["set-cookie"].split("workeros_cloud_session=", 1)[1].split(";", 1)[0]
+    assert cookie_value.startswith("v2.")
+    assert "access-token-123" not in cookie_value
+    assert "refresh-token-123" not in cookie_value
+    decoded = auth._decode_session_cookie(cookie_value)
+    assert decoded is not None
+    assert decoded["access_token"] == "access-token-123"
+    assert decoded["refresh_token"] == "refresh-token-123"
+
+
+def test_session_cookie_rejects_tampered_ciphertext(monkeypatch):
+    user = SimpleNamespace(id="user-1", email="new@example.com")
+    session = SimpleNamespace(
+        access_token="access-token-123",
+        refresh_token="refresh-token-123",
+        expires_at=1_900_000_000,
+        expires_in=3600,
+        user=user,
+    )
+    cookie = auth._encode_session_cookie(session)
+
+    assert auth._decode_session_cookie(cookie[:-1] + ("A" if cookie[-1] != "A" else "B")) is None
+
+
+def test_session_token_returns_access_token_from_encrypted_cookie(monkeypatch):
+    user = SimpleNamespace(id="user-1", email="new@example.com")
+    auth_client = _AuthClient(user=user)
+    client = _app(monkeypatch, auth_client)
+    session = SimpleNamespace(
+        access_token="access-token-123",
+        refresh_token="refresh-token-123",
+        expires_at=1_900_000_000,
+        expires_in=3600,
+        user=user,
+    )
+
+    response = client.get(
+        "/auth/session-token",
+        cookies={"workeros_cloud_session": auth._encode_session_cookie(session)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["access_token"] == "access-token-123"
+    assert auth_client.refresh_payloads == []
+
+
+def test_session_token_refreshes_near_expiry_cookie(monkeypatch):
+    user = SimpleNamespace(id="user-1", email="new@example.com")
+    auth_client = _AuthClient(user=user)
+    client = _app(monkeypatch, auth_client)
+    session = SimpleNamespace(
+        access_token="old-access-token-123",
+        refresh_token="refresh-token-123",
+        expires_at=1,
+        expires_in=3600,
+        user=user,
+    )
+
+    response = client.get(
+        "/auth/session-token",
+        cookies={"workeros_cloud_session": auth._encode_session_cookie(session)},
+    )
+
+    assert response.status_code == 200
+    assert response.json()["access_token"] == "rotated-access-token-123"
+    assert auth_client.refresh_payloads == ["refresh-token-123"]
+    cookie_value = response.headers["set-cookie"].split("workeros_cloud_session=", 1)[1].split(";", 1)[0]
+    assert cookie_value.startswith("v2.")
+    assert "rotated-refresh-token-123" not in cookie_value
 
 
 def test_fragment_session_verifies_token_and_sets_cookie(monkeypatch):

@@ -82,33 +82,27 @@ function parseSessionCookie(
  * Returns the new set-cookie header values so the proxy can forward them
  * to the browser, and the fresh access token for the proxied request.
  */
-async function refreshSessionCookie(
+async function backendSessionToken(
   req: NextRequest,
 ): Promise<{ accessToken: string; setCookieHeaders: string[] } | null> {
-  const refreshUrl = `${API_BASE}/auth/refresh`;
-  // Forward the current cookie so the backend can read the refresh_token.
+  const sessionUrl = `${API_BASE}/auth/session-token`;
   const cookieHeader = req.headers.get("cookie") ?? "";
   try {
-    const res = await fetch(refreshUrl, {
-      method: "POST",
+    const res = await fetch(sessionUrl, {
+      method: "GET",
       headers: { cookie: cookieHeader },
+      cache: "no-store",
     });
     if (!res.ok) return null;
-    // Extract the new access_token from the Set-Cookie the backend returned.
     const setCookieHeaders: string[] = [];
     const rawSetCookies = getSetCookies(res);
     for (const h of rawSetCookies) {
       if (h) setCookieHeaders.push(h);
     }
-    // Parse the updated session cookie to get the fresh access_token.
-    const setCookieForSession = rawSetCookies.find((h) =>
-      h.startsWith(`${SESSION_COOKIE}=`),
-    );
-    if (!setCookieForSession) return null;
-    const rawValue = setCookieForSession.split(";")[0].slice(SESSION_COOKIE.length + 1);
-    const parsed = parseSessionCookie(rawValue);
-    if (!parsed) return null;
-    return { accessToken: parsed.access_token, setCookieHeaders };
+    const payload = (await res.json()) as { access_token?: unknown };
+    const accessToken = typeof payload.access_token === "string" ? payload.access_token : "";
+    if (!accessToken) return null;
+    return { accessToken, setCookieHeaders };
   } catch {
     return null;
   }
@@ -129,6 +123,13 @@ async function getAccessToken(
   const raw = cookieStore.get(SESSION_COOKIE)?.value;
   if (!raw) return { token: null, refreshedCookies: [] };
 
+  const backendSession = await backendSessionToken(req);
+  if (backendSession) {
+    return { token: backendSession.accessToken, refreshedCookies: backendSession.setCookieHeaders };
+  }
+
+  // Rolling-deploy fallback for legacy base64 cookies. New encrypted cookies
+  // are intentionally opaque to the web tier and must be resolved by the API.
   const session = parseSessionCookie(raw);
   if (!session) return { token: null, refreshedCookies: [] };
 
@@ -138,10 +139,6 @@ async function getAccessToken(
     session.expires_at - nowSeconds <= REFRESH_GRACE_SECONDS;
 
   if (needsRefresh) {
-    const refreshed = await refreshSessionCookie(req);
-    if (refreshed) {
-      return { token: refreshed.accessToken, refreshedCookies: refreshed.setCookieHeaders };
-    }
     // Refresh failed (revoked token, network error, …).  If the existing
     // access token is still structurally present but expired, return null so
     // the proxy returns 401 and the UI routes the user to /login.

@@ -14,6 +14,7 @@ from typing import Any
 from urllib.parse import parse_qs, unquote_plus, urlencode, urlparse
 
 import httpx
+from cryptography.fernet import Fernet, InvalidToken
 from fastapi import APIRouter, Depends, HTTPException, Request
 from fastapi.responses import HTMLResponse, JSONResponse, RedirectResponse
 from pydantic import BaseModel, Field
@@ -60,6 +61,8 @@ _OAUTH_COOKIE_MAX_AGE = 600
 # the user's browser session — to expire every hour even though the refresh token
 # inside was valid for 30 days.
 _SESSION_COOKIE_MAX_AGE = 60 * 60 * 24 * 30  # 30 days
+_SESSION_COOKIE_VERSION = "v2."
+_SESSION_REFRESH_GRACE_SECONDS = 60
 _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]+$")
 _CLI_APPROVE_DENY_RATE_LIMIT = 5
 _CLI_APPROVE_DENY_RATE_WINDOW_SECONDS = 60.0
@@ -313,7 +316,45 @@ def _clear_cookie(response: JSONResponse | RedirectResponse, name: str) -> None:
         )
 
 
+def _session_cookie_key_material() -> str:
+    value = (
+        os.environ.get("WORKEROS_SESSION_COOKIE_SECRET")
+        or os.environ.get("WORKEROS_CLOUD_SECRETS_ENCRYPTION_KEY")
+        or os.environ.get("SUPABASE_SERVICE_ROLE_KEY")
+        or ""
+    ).strip()
+    if value:
+        return value
+    if os.environ.get("WORKEROS_DEPLOY") == "cloud":
+        raise RuntimeError(
+            "WORKEROS_SESSION_COOKIE_SECRET or SUPABASE_SERVICE_ROLE_KEY is required to mint cloud session cookies"
+        )
+    return "workeros-local-dev-session-cookie-secret"
+
+
+@lru_cache(maxsize=1)
+def _session_cookie_fernet() -> Fernet:
+    digest = hashlib.sha256(_session_cookie_key_material().encode("utf-8")).digest()
+    key = base64.urlsafe_b64encode(digest)
+    return Fernet(key)
+
+
+def _session_cookie_payload(session: Any) -> dict[str, Any]:
+    return {
+        "access_token": session.access_token,
+        "refresh_token": session.refresh_token,
+        "expires_at": session.expires_at,
+        "user_id": getattr(getattr(session, "user", None), "id", None),
+    }
+
+
 def _encode_session_cookie(session: Any) -> str:
+    payload = _session_cookie_payload(session)
+    plaintext = json.dumps(payload, separators=(",", ":")).encode("utf-8")
+    return _SESSION_COOKIE_VERSION + _session_cookie_fernet().encrypt(plaintext).decode("ascii")
+
+
+def _encode_legacy_session_cookie_for_tests(session: Any) -> str:
     payload = {
         "access_token": session.access_token,
         "refresh_token": session.refresh_token,
@@ -430,6 +471,18 @@ def _decode_session_cookie(raw_value: str | None) -> dict[str, Any] | None:
     raw_value = raw_value.strip()
     if len(raw_value) >= 2 and raw_value[0] == '"' and raw_value[-1] == '"':
         raw_value = raw_value[1:-1]
+    if raw_value.startswith(_SESSION_COOKIE_VERSION):
+        try:
+            decoded = _session_cookie_fernet().decrypt(
+                raw_value[len(_SESSION_COOKIE_VERSION) :].encode("ascii")
+            ).decode("utf-8")
+            data = json.loads(decoded)
+        except (InvalidToken, ValueError, TypeError, json.JSONDecodeError):
+            return None
+        return data if isinstance(data, dict) else None
+
+    # Rolling-deploy compatibility: accept pre-encryption base64 JSON cookies so
+    # already signed-in users are not forced out, but never mint this format.
     padded = raw_value + "=" * (-len(raw_value) % 4)
     try:
         decoded = base64.urlsafe_b64decode(padded.encode()).decode()
@@ -876,6 +929,56 @@ def refresh_session(request: Request):
     return response
 
 
+@router.get("/session-token")
+def session_token(request: Request):
+    """Return a short-lived Supabase access token from the encrypted session cookie.
+
+    This is for the Next.js server-side proxy. It lets the proxy stop decoding
+    the cookie payload itself; refresh tokens remain opaque outside the API.
+    """
+    session = _decode_session_cookie(request.cookies.get(_SESSION_COOKIE_NAME))
+    if not session:
+        raise HTTPException(status_code=401, detail="Not signed in")
+    access_token = str(session.get("access_token") or "").strip()
+    refresh_token = str(session.get("refresh_token") or "").strip()
+    if not access_token or not refresh_token:
+        raise HTTPException(status_code=401, detail="Session cookie missing tokens")
+
+    try:
+        expires_at = int(session.get("expires_at") or 0)
+    except (TypeError, ValueError):
+        expires_at = 0
+    now_ts = int(time.time())
+    if expires_at and expires_at - now_ts > _SESSION_REFRESH_GRACE_SECONDS:
+        return JSONResponse({"access_token": access_token, "expires_at": expires_at})
+
+    client = new_supabase_anon_client()
+    try:
+        auth_response = client.auth.refresh_session(refresh_token)
+    except Exception as exc:
+        logger.warning("auth/session-token refresh failed: %s", _gotrue_detail(exc))
+        raise HTTPException(status_code=401, detail="Session refresh failed") from exc
+
+    new_session = getattr(auth_response, "session", None)
+    user = getattr(auth_response, "user", None) or getattr(new_session, "user", None)
+    if new_session is None or user is None or not getattr(user, "id", None):
+        raise HTTPException(status_code=401, detail="Session refresh returned no session")
+
+    response = JSONResponse(
+        {
+            "access_token": str(getattr(new_session, "access_token", "") or ""),
+            "expires_at": getattr(new_session, "expires_at", None),
+        }
+    )
+    _set_cookie(
+        response,
+        _SESSION_COOKIE_NAME,
+        _encode_session_cookie(new_session),
+        max_age=_SESSION_COOKIE_MAX_AGE,
+    )
+    return response
+
+
 @router.get("/callback")
 def callback(
     request: Request,
@@ -1049,10 +1152,10 @@ def cli_bootstrap():
 def _session_user(request: Request) -> tuple[str, str]:
     """Return (verified_user_id, refresh_token) from the cloud session cookie.
 
-    SECURITY (F1/F2): the session cookie is an unsigned base64-JSON blob, so a
-    raw ``user_id`` field in it is attacker-controllable. This handler MUST NOT
-    trust that field. Instead it cryptographically verifies the cookie's
-    Supabase ``access_token`` against the project's JWKS (the same local
+    SECURITY (F1/F2/F4): current session cookies are encrypted server-side, but
+    rolling deploys may still present legacy base64 cookies. This handler MUST
+    NOT trust the raw ``user_id`` field. Instead it cryptographically verifies
+    the cookie's Supabase ``access_token`` against the project's JWKS (the same local
     verification path /api/* uses) and derives the user_id from the VERIFIED
     ``sub`` claim. A forged or tampered cookie fails verification → 401.
 
