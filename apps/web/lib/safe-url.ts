@@ -19,6 +19,11 @@ export function sanitizeHref(href: string | undefined): string | undefined {
   // ("java\nscript:" parses as javascript: in some engines).
   const cleaned = href.replace(/[\s\x00-\x1F\x7F]+/g, "");
   if (cleaned === "") return undefined;
+  // Protocol-relative URLs (`//host/path`) resolve to https: with the base
+  // below, but they are still external navigations. Reject them before URL
+  // parsing so markdown renderers never mistake them for single-slash internal
+  // app links.
+  if (cleaned.startsWith("//")) return undefined;
 
   let protocol: string;
   try {
