@@ -447,6 +447,10 @@ _DEFAULT_E2B_PYTHON_BAKED_PACKAGES = {
     "requests",
 }
 
+_DEFAULT_TEMPLATE_CPU_COUNT = 2
+_DEFAULT_PYTHON_TEMPLATE_MEMORY_MB = 2048
+_DEFAULT_NODE_TEMPLATE_MEMORY_MB = 2048
+
 
 def _python_baked_package_names() -> set[str]:
     configured = _split_env_values(os.environ.get("WORKEROS_E2B_PYTHON_BAKED_PACKAGES"))
@@ -501,18 +505,51 @@ def _worker_resources(config: WorkerConfig | None) -> tuple[int | None, int | No
     return memory_value, cpu_value
 
 
-def _resource_template_env_key(kind: str, memory_mb: int | None) -> str | None:
-    if not memory_mb:
-        return None
+def _resource_template_env_keys(kind: str, memory_mb: int | None, cpu_count: int | None) -> list[str]:
+    if not memory_mb and not cpu_count:
+        return []
     normalized_kind = "NODE" if kind == "node" else "PYTHON"
-    return f"WORKEROS_E2B_{normalized_kind}_TEMPLATE_MEMORY_{memory_mb}"
+    keys: list[str] = []
+    if memory_mb and cpu_count:
+        keys.append(f"WORKEROS_E2B_{normalized_kind}_TEMPLATE_MEMORY_{memory_mb}_CPU_{cpu_count}")
+        keys.append(f"WORKEROS_E2B_{normalized_kind}_TEMPLATE_CPU_{cpu_count}_MEMORY_{memory_mb}")
+    if memory_mb:
+        keys.append(f"WORKEROS_E2B_{normalized_kind}_TEMPLATE_MEMORY_{memory_mb}")
+    if cpu_count:
+        keys.append(f"WORKEROS_E2B_{normalized_kind}_TEMPLATE_CPU_{cpu_count}")
+    return keys
+
+
+def _default_template_resources(kind: str) -> tuple[int, int]:
+    memory_default = (
+        _DEFAULT_NODE_TEMPLATE_MEMORY_MB
+        if kind == "node"
+        else _DEFAULT_PYTHON_TEMPLATE_MEMORY_MB
+    )
+    kind_prefix = "WORKEROS_E2B_NODE" if kind == "node" else "WORKEROS_E2B_PYTHON"
+    try:
+        memory_mb = int(
+            os.environ.get(f"{kind_prefix}_TEMPLATE_MEMORY_MB")
+            or os.environ.get("WORKEROS_E2B_TEMPLATE_MEMORY_MB")
+            or str(memory_default)
+        )
+    except ValueError:
+        memory_mb = memory_default
+    try:
+        cpu_count = int(
+            os.environ.get(f"{kind_prefix}_TEMPLATE_CPU_COUNT")
+            or os.environ.get("WORKEROS_E2B_TEMPLATE_CPU_COUNT")
+            or str(_DEFAULT_TEMPLATE_CPU_COUNT)
+        )
+    except ValueError:
+        cpu_count = _DEFAULT_TEMPLATE_CPU_COUNT
+    return memory_mb, cpu_count
 
 
 def _e2b_template_for_config(config: WorkerConfig | None) -> str | None:
     kind = _runtime_kind(config)
-    memory_mb, _cpu_count = _worker_resources(config)
-    resource_env = _resource_template_env_key(kind, memory_mb)
-    if resource_env:
+    memory_mb, cpu_count = _worker_resources(config)
+    for resource_env in _resource_template_env_keys(kind, memory_mb, cpu_count):
         value = os.environ.get(resource_env)
         if value:
             return value.strip() or None
@@ -573,15 +610,32 @@ def _e2b_template_for_run(worker_dir: Path, config: WorkerConfig | None, *, log_
         return cached_template
 
     template = _e2b_template_for_config(config)
-    memory_mb, _cpu_count = _worker_resources(config)
-    resource_env = _resource_template_env_key(_runtime_kind(config), memory_mb)
-    if memory_mb and resource_env and not os.environ.get(resource_env):
+    kind = _runtime_kind(config)
+    memory_mb, cpu_count = _worker_resources(config)
+    resource_envs = _resource_template_env_keys(kind, memory_mb, cpu_count)
+    if resource_envs and not any(os.environ.get(key) for key in resource_envs):
         log_fn(
-            f"[e2b] Worker requests {memory_mb}MB memory, but {resource_env} is not configured; "
-            "using the default E2B template",
+            "[e2b] Worker requests sandbox resources "
+            f"memory={memory_mb or 'default'}MB cpu={cpu_count or 'default'}, but none of "
+            f"{', '.join(resource_envs)} is configured; using the default E2B template. "
+            "E2B fixes memory/cpu on the template, not Sandbox.create().",
             "warning",
         )
     return template
+
+
+def _sandbox_resource_log_line(config: WorkerConfig | None, sandbox_template: str | None) -> str:
+    kind = _runtime_kind(config)
+    requested_memory_mb, requested_cpu_count = _worker_resources(config)
+    default_memory_mb, default_cpu_count = _default_template_resources(kind)
+    memory_label = f"{requested_memory_mb}MB requested" if requested_memory_mb else f"{default_memory_mb}MB template default"
+    cpu_label = f"{requested_cpu_count} requested" if requested_cpu_count else f"{default_cpu_count} template default"
+    template_label = sandbox_template or "E2B SDK default template"
+    return (
+        "[e2b] Sandbox resources: "
+        f"memory={memory_label}, cpu={cpu_label}, template={template_label}. "
+        "Resource limits are template-fixed; Sandbox.create() has no memory/cpu arguments."
+    )
 
 
 def _configured_e2b_api_keys() -> list[str]:
@@ -1656,6 +1710,7 @@ class E2BSandboxDriver(SandboxDriver):
                 f"[e2b] Using configured {_runtime_kind(config)} template for sandbox startup",
                 "info",
             )
+        log_fn(_sandbox_resource_log_line(config, sandbox_template), "info")
         warm_key, warm_key_error = _warm_pool_key(
             worker_id=worker_id,
             user_id=user_id,
