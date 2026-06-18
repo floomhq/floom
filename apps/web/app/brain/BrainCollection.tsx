@@ -5,6 +5,7 @@ import Link from "next/link";
 import { toast } from "sonner";
 import { Folder, Lock, Upload, Users } from "lucide-react";
 import { api } from "@/lib/api";
+import { useContexts } from "@/lib/query/hooks";
 import { reportError } from "@/lib/notify";
 import { formatRelative } from "@/lib/formatters";
 import type { ContextSummary, ContextDetail } from "@/lib/types";
@@ -455,10 +456,12 @@ function EmptyStateActions({
 }
 
 export default function BrainCollection({ initialFolders }: { initialFolders: ContextSummary[] }) {
-  const [folders, setFolders] = useState<ContextSummary[]>(initialFolders);
+  const foldersQuery = useContexts(initialFolders.length > 0 ? initialFolders : undefined);
+  const folders = foldersQuery.data ?? initialFolders;
   // Show a loading skeleton until the first fetch completes so we never flash
   // "No folders yet" before the real data arrives (14a: empty-initial-state bug).
-  const [loading, setLoading] = useState(initialFolders.length === 0);
+  // Cached revisits bypass this because the query already has data.
+  const loading = foldersQuery.isLoading && !foldersQuery.data;
   // #1112: dropped files pending folder creation
   const [pendingDropFiles, setPendingDropFiles] = useState<File[] | null>(null);
   const [listDragOver, setListDragOver] = useState(false);
@@ -467,20 +470,13 @@ export default function BrainCollection({ initialFolders }: { initialFolders: Co
   // Browse-files trigger for the empty state (same flow as a drop).
   const browseInputRef = useRef<HTMLInputElement>(null);
 
-  const refresh = async (initial = false) => {
+  const refresh = async () => {
     try {
-      const data = await api.contexts.list();
-      setFolders(data);
+      await foldersQuery.refetch();
     } catch {
       // leave existing state intact on error
-    } finally {
-      if (initial) setLoading(false);
     }
   };
-
-  useEffect(() => {
-    void refresh(true);
-  }, []);
 
   const remove = async (c: ContextSummary) => {
     try {

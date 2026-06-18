@@ -35,6 +35,7 @@ import {
 import Papa from "papaparse";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useContexts } from "@/lib/query/hooks";
 import { reportError } from "@/lib/notify";
 import type { ContextDetail, ContextFileItem, ContextSummary, SecretWarning, VersionSummary } from "@/lib/types";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
@@ -368,10 +369,12 @@ function ContextsPage() {
   const fileInputRef = useRef<HTMLInputElement>(null);
 
   // ---- Core state ---------------------------------------------------------
-  const [contexts, setContexts] = useState<ContextSummary[]>([]);
+  const contextsQuery = useContexts();
+  const { data: contextsData, refetch: refetchContexts } = contextsQuery;
+  const contexts = contextsQuery.data ?? [];
   const [selectedName, setSelectedName] = useState<string>(() => searchParams.get("pack") ?? "");
   const [detail, setDetail] = useState<ContextDetail | null>(null);
-  const [loading, setLoading] = useState(true);
+  const loading = contextsQuery.isLoading && !contextsQuery.data;
 
   // folderPath: the miller-column drill path inside the selected pack.
   // [] = pack root; ["SOP"] = inside SOP; ["SOP","2026"] = nested.
@@ -475,8 +478,8 @@ function ContextsPage() {
 
   // ---- Data loading -------------------------------------------------------
   const loadContexts = useCallback(async (nextSelected?: string) => {
-    const items = await api.contexts.list();
-    setContexts(items);
+    const result = await refetchContexts();
+    const items = result.data ?? contextsData ?? [];
     setSelectedName((current) => {
       const firstOperator = items.find((c) => !c.system)?.name;
       const fallback = firstOperator || items[0]?.name || "";
@@ -488,36 +491,29 @@ function ContextsPage() {
       }
       return selected;
     });
-  }, []);
+  }, [contextsData, refetchContexts]);
 
   useEffect(() => {
-    let cancelled = false;
-    const isTransientFetchError = (error: unknown) =>
-      error instanceof TypeError ||
-      (error instanceof Error && /failed to fetch|load failed|network/i.test(error.message));
+    if (contextsQuery.isError && !contextsQuery.data) {
+      toast.error("Failed to load folders");
+    }
+  }, [contextsQuery.isError, contextsQuery.data]);
 
-    (async () => {
-      try {
-        await loadContexts();
-      } catch (error: unknown) {
-        if (isTransientFetchError(error)) {
-          try {
-            await new Promise((r) => setTimeout(r, 600));
-            if (cancelled) return;
-            await loadContexts();
-          } catch {
-            if (!cancelled) toast.error("Couldn't reach the server. Check your connection and retry.");
-          }
-        } else if (!cancelled) {
-          toast.error(error instanceof Error ? error.message : "Failed to load folders");
-        }
-      } finally {
-        if (!cancelled) setLoading(false);
+  useEffect(() => {
+    const items = contextsData;
+    if (!items) return;
+    setSelectedName((current) => {
+      const firstOperator = items.find((c) => !c.system)?.name;
+      const fallback = firstOperator || items[0]?.name || "";
+      const selected = current || fallback;
+      if (selected) {
+        api.contexts.get(selected).then(setDetail).catch(() => setDetail(null));
+      } else {
+        setDetail(null);
       }
-    })();
-
-    return () => { cancelled = true; };
-  }, [loadContexts]);
+      return selected;
+    });
+  }, [contextsData]);
 
   // ---- File text loading (keyed on stable primitives) ---------------------
   const fileObj = useMemo(
@@ -625,7 +621,6 @@ function ContextsPage() {
     try {
       await api.contexts.delete(context.name, true);
       const remaining = contexts.filter((item) => item.name !== context.name);
-      setContexts(remaining);
       setFolderPath([]);
       setSelectedFile(null);
       await loadContexts(remaining[0]?.name || "");
@@ -2851,4 +2846,3 @@ function columnIndexFromCellRef(ref: string): number {
   }
   return Math.max(index - 1, 0);
 }
-
