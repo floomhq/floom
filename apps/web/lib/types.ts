@@ -254,6 +254,7 @@ export interface RunDetail {
   approval_trail?: ApprovalEntry;
   can_replay?: boolean;
   total_tokens?: number;
+  total_cost_usd?: number;
   error?: string;
   started_at?: string;
   completed_at?: string;
@@ -373,6 +374,10 @@ export interface WorkerDetail {
   webhook_url?: string;
   files: WorkerFile[];
   triggers_spec: TriggerSpec[];
+  // Scheduler bookkeeping (workers row): next due time + last fired time for
+  // scheduled/cron workers. Null for manual / never-fired workers.
+  next_run_at?: string | null;
+  last_fired_at?: string | null;
   missing_secrets?: string[];      // #556: required secrets not yet configured
   missing_connections?: string[];  // #556: required connections not yet configured
   // Owner-only signed share link to the standalone public worker page

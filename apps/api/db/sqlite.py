@@ -2130,7 +2130,7 @@ class SqliteRunRepository:
                        r.status, r.trigger_source, r.runner, r.input_json, r.output_json,
                        r.error, r.error_code, r.started_at, r.completed_at, r.duration_ms, r.created_at,
                        r.cancel_requested, r.cancelled_at, r.bundle_snapshot_path,
-                       r.quality_warning, r.trigger_ref
+                       r.quality_warning, r.trigger_ref, r.total_cost_usd
                 FROM runs r
                 JOIN workers w ON w.id = r.worker_id
                 LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
