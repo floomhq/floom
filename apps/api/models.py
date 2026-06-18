@@ -1094,7 +1094,7 @@ class WorkerConfig(BaseModel):
     connections: List[WorkerConnectionSpec] = []  # Strings are deprecated legacy Composio app slugs.
     contexts: List[WorkerContextMountSpec] = []
     memory: WorkerMemoryConfig = Field(default_factory=WorkerMemoryConfig)
-    resources: WorkerResources = Field(default_factory=WorkerResources)
+    resources: Optional[WorkerResources] = None
     outputs: List[WorkerOutput] = []
     csv_required_columns: Optional[List[str]] = None  # Column names for the CSV mapper wizard
     approvals: WorkerApprovals = Field(default_factory=WorkerApprovals)
@@ -1811,7 +1811,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
             for context in (contract.contexts or contract.exec.contexts or [])
         ],
         memory=contract.memory,
-        resources=contract.resources,
+        resources=contract.exec.resources or contract.resources,
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
         approvals=contract.approvals,
