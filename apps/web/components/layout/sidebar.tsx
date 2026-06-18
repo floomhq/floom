@@ -12,6 +12,7 @@ import { useApprovalsCount } from "@/lib/useApprovalsSync";
 import { useQueryClient } from "@tanstack/react-query";
 import { prefetchRouteData, prefetchIdleRoutes } from "@/lib/query/prefetch";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
+import { WorkspaceMonogram } from "@/components/layout/WorkspaceMonogram";
 import { AlertsBell } from "@/components/overview/AlertsBell";
 import { api } from "@/lib/api";
 import type { CurrentUser } from "@/lib/types";
@@ -44,28 +45,6 @@ export function FloomMark({ size = 28 }: { size?: number }) {
         fill="var(--bg-app)"
       />
     </svg>
-  );
-}
-
-// #1305: the app is WHITE-LABELED — the workspace IS the brand. The top-left
-// mark must be the WORKSPACE logo/avatar, never the Floom play-triangle.
-// DiceBear `shapes` avatar deterministically seeded by workspace name —
-// geometric, non-cartoonish, fits a serious B2B product.
-// Container uses var(--radius-button) (squircle), NOT a circle.
-function WorkspaceDiceBearAvatar({ name, size }: { name: string; size: number }) {
-  const seed = encodeURIComponent(resolveWorkspaceName(name) || name || "workspace");
-  const src = `https://api.dicebear.com/9.x/shapes/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf&backgroundType=gradientLinear&radius=0`;
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt=""
-      aria-hidden="true"
-      width={size}
-      height={size}
-      className="shrink-0 rounded-[var(--radius-button)] object-cover"
-      style={{ width: size, height: size }}
-    />
   );
 }
 
@@ -139,14 +118,9 @@ export function WorkspaceMark({
       />
     );
   }
-  // DiceBear shapes avatar — consistent with WorkspaceSwitcher mark.
-  // NOT round, NOT the Floom play-triangle.
-  return (
-    <WorkspaceDiceBearAvatar
-      name={workspaceName}
-      size={size}
-    />
-  );
+  // G3/G4: no avatars/DiceBear. Flat squircle monogram seeded by workspace
+  // name — consistent with WorkspaceSwitcher mark and UserInitialsAvatar.
+  return <WorkspaceMonogram name={workspaceName} size={size} />;
 }
 
 /** Mobile top-bar workspace name (white-label — replaces the "Floom" wordmark). */
@@ -183,7 +157,7 @@ const nav: NavItem[] = [
   { href: "/library", label: "Library", icon: Library },
   { href: "/runs", label: "Runs", icon: Clock },
   { href: "/approvals", label: "Approvals", icon: CheckCircle, badge: true },
-  { href: "/connections", label: "Connections", icon: Plug },
+  { href: "/connections", label: "Integrations", icon: Plug },
 ];
 
 export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigate?: () => void }) {
