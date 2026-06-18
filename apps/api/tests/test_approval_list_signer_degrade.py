@@ -134,7 +134,7 @@ def test_get_approvals_route_returns_200_without_signer(monkeypatch):
     import main  # noqa: PLC0415
 
     class _ApprovalsRepo:
-        def list_pending(self, *, owner_id: str):
+        def list_pending(self, *, owner_id: str, limit: int = 100):
             return [dict(_APPROVAL, owner_id=owner_id)]
 
     class _ReposHttp:
