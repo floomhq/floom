@@ -345,3 +345,58 @@ def test_list_approvals_caps_and_batches_artifacts(monkeypatch):
     assert len(result) == 2
     assert result[0]["artifacts"][0]["id"] == "artifact-1"
     assert result[1]["artifacts"] == []
+
+
+def test_context_summary_uses_cached_metadata_without_tree_walk(monkeypatch, tmp_path):
+    import contexts
+    from services import context_access
+
+    root = tmp_path / "pack"
+    root.mkdir()
+    metadata = {
+        "pack": {
+            "owner_id": "user-a",
+            "writeable": True,
+            "sensitive": False,
+            "summary": {
+                "file_count": 123,
+                "total_size_bytes": 4567,
+                "updated_at": "2026-06-18T00:00:00+00:00",
+            },
+        }
+    }
+
+    def fail_tree_summary(_root):
+        raise AssertionError("context list path walked files despite cached summary")
+
+    monkeypatch.setattr(contexts, "context_dir", lambda _name: root)
+    monkeypatch.setattr(contexts, "context_tree_summary", fail_tree_summary)
+
+    summary = context_access._context_summary("pack", metadata)
+
+    assert summary.file_count == 123
+    assert summary.total_size_bytes == 4567
+    assert summary.updated_at == "2026-06-18T00:00:00+00:00"
+
+
+def test_context_write_refreshes_summary_metadata(monkeypatch, tmp_path):
+    import contexts
+    from services import context_access
+
+    monkeypatch.setattr(contexts, "CONTEXTS_DIR", tmp_path)
+    contexts.set_context_scope_resolver(None)
+    root = tmp_path / "pack"
+    root.mkdir(parents=True)
+    contexts.set_context_metadata("pack", owner_id="user-a")
+
+    item = context_access._write_context_file(
+        "pack",
+        "notes/a.txt",
+        b"hello",
+        user_id="user-a",
+    )
+    metadata = contexts.load_context_metadata()
+
+    assert item.path == "notes/a.txt"
+    assert metadata["pack"]["summary"]["file_count"] == 1
+    assert metadata["pack"]["summary"]["total_size_bytes"] == 5
