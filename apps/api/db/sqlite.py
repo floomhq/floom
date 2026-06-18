@@ -2596,6 +2596,58 @@ class SqliteRunRepository:
             ).fetchall()
         return [_row_dict(row) for row in rows]
 
+    def list_artifacts_for_runs(
+        self,
+        *,
+        user_id: str,
+        run_ids: list[str],
+        limit_per_run: int | None = _DEFAULT_RUN_ARTIFACT_LIMIT,
+    ) -> dict[str, list[dict[str, Any]]]:
+        unique_run_ids = list(dict.fromkeys(str(run_id) for run_id in run_ids if run_id))
+        if not unique_run_ids:
+            return {}
+        bounded_limit = _bounded_positive_int(
+            limit_per_run,
+            default=_DEFAULT_RUN_ARTIFACT_LIMIT,
+            maximum=_DEFAULT_RUN_ARTIFACT_LIMIT,
+        )
+        placeholders = ", ".join("?" for _ in unique_run_ids)
+        with get_db() as conn:
+            has_actor_user_id = self._has_actor_user_id_column(conn)
+            scope_sql = (
+                "(COALESCE(r.actor_user_id, w.owner_id) = ? OR w.owner_id = ?)"
+                if has_actor_user_id
+                else "w.owner_id = ?"
+            )
+            scope_params: tuple[Any, ...] = (user_id, user_id) if has_actor_user_id else (user_id,)
+            rows = conn.execute(
+                f"""
+                SELECT *
+                FROM (
+                    SELECT
+                        a.*,
+                        ROW_NUMBER() OVER (
+                            PARTITION BY a.run_id
+                            ORDER BY a.created_at, a.name
+                        ) AS artifact_rank
+                    FROM artifacts a
+                    JOIN runs r ON r.id = a.run_id
+                    JOIN workers w ON w.id = r.worker_id
+                    WHERE a.run_id IN ({placeholders})
+                      AND {scope_sql}
+                )
+                WHERE artifact_rank <= ?
+                ORDER BY run_id, created_at, name
+                """,
+                (*unique_run_ids, *scope_params, bounded_limit),
+            ).fetchall()
+        grouped: dict[str, list[dict[str, Any]]] = {run_id: [] for run_id in unique_run_ids}
+        for row in rows:
+            data = _row_dict(row)
+            data.pop("artifact_rank", None)
+            grouped.setdefault(str(data.get("run_id") or ""), []).append(data)
+        return grouped
+
     def clear_all(self, *, user_id: str) -> int:
         run_ids = [row["id"] for row in self.list_all_ids(user_id=user_id)]
         if not run_ids:
@@ -3489,7 +3541,8 @@ class SqliteApprovalRepository:
             ).fetchone()
         return _row_dict(row) if row else None
 
-    def list_pending(self, *, owner_id: str) -> list[dict[str, Any]]:
+    def list_pending(self, *, owner_id: str, limit: int = 100) -> list[dict[str, Any]]:
+        bounded_limit = _bounded_positive_int(limit, default=100, maximum=200)
         with get_db() as conn:
             rows = conn.execute(
                 """
@@ -3498,8 +3551,9 @@ class SqliteApprovalRepository:
                 LEFT JOIN workers w ON w.id = a.worker_id
                 WHERE a.owner_id = ? AND a.status = 'pending'
                 ORDER BY a.created_at ASC
+                LIMIT ?
                 """,
-                (owner_id,),
+                (owner_id, bounded_limit),
             ).fetchall()
         return [_row_dict(row) for row in rows]
 

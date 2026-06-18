@@ -270,3 +270,78 @@ def test_list_secrets_uses_listed_worker_configs_for_used_by(monkeypatch):
 
     assert by_name["API_KEY"].used_by == ["Worker A", "Worker B"]
     assert by_name["OTHER_KEY"].used_by == ["Worker A"]
+
+
+def test_list_approvals_caps_and_batches_artifacts(monkeypatch):
+    from routers import approvals
+
+    captured: dict[str, object] = {}
+
+    class ApprovalsRepo:
+        def list_pending(self, *, owner_id, limit):
+            captured["owner_id"] = owner_id
+            captured["limit"] = limit
+            return [
+                {
+                    "id": "approval-1",
+                    "owner_id": owner_id,
+                    "run_id": "run-1",
+                    "worker_id": "worker-a",
+                    "worker_name": "Worker A",
+                    "status": "pending",
+                    "label": "Review",
+                    "preview": "ok",
+                    "created_at": "2026-06-18T00:00:00+00:00",
+                    "decision_input_json": "{}",
+                    "annotations_json": None,
+                    "preview_payload_json": None,
+                },
+                {
+                    "id": "approval-2",
+                    "owner_id": owner_id,
+                    "run_id": "run-2",
+                    "worker_id": "worker-b",
+                    "worker_name": "Worker B",
+                    "status": "pending",
+                    "label": "Review",
+                    "preview": "ok",
+                    "created_at": "2026-06-18T00:01:00+00:00",
+                    "decision_input_json": "{}",
+                    "annotations_json": None,
+                    "preview_payload_json": None,
+                },
+            ]
+
+    class RunsRepo:
+        def list_artifacts_for_runs(self, *, user_id, run_ids, limit_per_run=1000):
+            captured["artifact_user_id"] = user_id
+            captured["artifact_run_ids"] = run_ids
+            return {
+                "run-1": [
+                    {
+                        "id": "artifact-1",
+                        "run_id": "run-1",
+                        "name": "out.txt",
+                        "type": "text/plain",
+                        "path": "run-1/out.txt",
+                        "size_bytes": 2,
+                        "created_at": "2026-06-18T00:02:00+00:00",
+                    }
+                ],
+                "run-2": [],
+            }
+
+        def list_artifacts(self, **_kwargs):
+            raise AssertionError("per-approval artifact query was used")
+
+    repos = SimpleNamespace(approvals=ApprovalsRepo(), runs=RunsRepo())
+    auth = SimpleNamespace(user_id="user-a")
+
+    result = approvals.list_approvals(limit=500, auth=auth, repos=repos)
+
+    assert captured["limit"] == 200
+    assert captured["artifact_user_id"] == "user-a"
+    assert captured["artifact_run_ids"] == ["run-1", "run-2"]
+    assert len(result) == 2
+    assert result[0]["artifacts"][0]["id"] == "artifact-1"
+    assert result[1]["artifacts"] == []
