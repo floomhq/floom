@@ -26,6 +26,7 @@ import {
   type SetupSubtab,
 } from "@/lib/workers/tabs";
 import { formatDuration } from "@/lib/runs/format";
+import { formatAbsolute } from "@/lib/formatters";
 import { runtimeSummary } from "@/lib/runtime-labels";
 import {
   Dialog,
@@ -142,12 +143,16 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: Work
       return;
     }
     let alive = true;
+    // settled = true once the load resolves or fails, so the safety timeout
+    // below does not overwrite a successfully-loaded detail (stale-closure fix).
+    let settled = false;
     // Retry once before surfacing an error — a transiently slow backend should
     // not strand the detail tabs on "Could not load" (#1279 + round-03 source-load).
     const load = (attempt: number) => {
       api.workers
         .get(id)
         .then((d) => {
+          settled = true;
           detailCache.set(id, d);
           if (alive) setDetail(d);
         })
@@ -155,6 +160,7 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: Work
           if (!alive) return;
           if (attempt < 1) setTimeout(() => load(attempt + 1), 1500);
           else {
+            settled = true;
             // #1446: per-worker detail; log only (no toast per expanded worker).
             logError("Could not load worker details.", err);
             setDetail(null); // null = failed to load → tabs show error, not a spinner
@@ -163,9 +169,10 @@ function useWorkerDetail(id: string): [WorkerDetail | undefined | null, (d: Work
     };
     load(0);
     // Safety timeout: if the API proxy hangs entirely, surface an error after 25 s
-    // (long enough to cover the retry above).
+    // (long enough to cover the retry above). Guard with `settled` so a
+    // successfully-loaded detail is never overwritten by this stale callback.
     const timeout = setTimeout(() => {
-      if (alive && detail === undefined) setDetail(null);
+      if (alive && !settled) setDetail(null);
     }, 25_000);
     return () => {
       alive = false;
@@ -857,6 +864,16 @@ function currentTriggerRows(d: WorkerDetail): TriggerRow[] {
   return specs.map((s) => makeTriggerRow(s));
 }
 
+// Read-only scheduler status (next run / last fired) for scheduled/cron workers.
+// Both come straight off the persisted workers row (scheduler bookkeeping). Empty
+// for manual / never-fired workers, so nothing renders there.
+function scheduleStatusRows(d: WorkerDetail): Array<[string, React.ReactNode]> {
+  const rows: Array<[string, React.ReactNode]> = [];
+  if (d.next_run_at) rows.push(["Next run", formatAbsolute(d.next_run_at)]);
+  if (d.last_fired_at) rows.push(["Last fired", formatAbsolute(d.last_fired_at)]);
+  return rows;
+}
+
 // W-02: Triggers are EDITABLE — read the current trigger(s) from worker.yml and
 // let the owner change the schedule / webhook / app-event / manual via the same
 // TriggersEditor used in the create flow. Persists through the worker.yml PUT
@@ -893,11 +910,14 @@ function TriggersTab({ w }: { w: WorkerSummary }) {
             ...(d.webhook_url
               ? [["Webhook", <span key="webhook" className="font-mono text-xs">{d.webhook_url}</span>] as [string, React.ReactNode]]
               : []),
+            ...scheduleStatusRows(d),
           ]}
         />
       </div>
     );
   }
+
+  const statusRows = scheduleStatusRows(d);
 
   const save = async () => {
     if (saving || !dirty) return;
@@ -916,15 +936,18 @@ function TriggersTab({ w }: { w: WorkerSummary }) {
   };
 
   return (
-    <TriggersEditor
-      rows={rows}
-      onChange={setRows}
-      webhookUrl={d.webhook_url}
-      dirty={dirty}
-      saving={saving}
-      onSave={() => void save()}
-      onDiscard={() => setRows(currentTriggerRows(d))}
-    />
+    <div className="flex flex-col gap-4">
+      {statusRows.length > 0 && <ConfigInfoGrid rows={statusRows} />}
+      <TriggersEditor
+        rows={rows}
+        onChange={setRows}
+        webhookUrl={d.webhook_url}
+        dirty={dirty}
+        saving={saving}
+        onSave={() => void save()}
+        onDiscard={() => setRows(currentTriggerRows(d))}
+      />
+    </div>
   );
 }
 

@@ -122,6 +122,12 @@ export function RunDetailSplitPane({
                 <span>{run.total_tokens.toLocaleString()} tokens</span>
               </>
             )}
+            {run.total_cost_usd != null && run.total_cost_usd > 0 && (
+              <>
+                <span className="text-muted-foreground/60">·</span>
+                <span>Cost: ${run.total_cost_usd.toFixed(2)}</span>
+              </>
+            )}
           </div>
         </div>
         <div className="flex flex-wrap items-center gap-2 shrink-0">

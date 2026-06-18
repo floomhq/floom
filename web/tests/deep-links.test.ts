@@ -5,7 +5,9 @@ describe("pageForHash", () => {
   it("maps each known page keyword to its route", () => {
     expect(pageForHash("#overview")).toBe("/overview");
     expect(pageForHash("#workers")).toBe("/workers");
-    expect(pageForHash("#brain")).toBe("/brain");
+    // R9: /brain renamed to /library; #brain and #library both map to /library
+    expect(pageForHash("#brain")).toBe("/library");
+    expect(pageForHash("#library")).toBe("/library");
     expect(pageForHash("#runs")).toBe("/runs");
     expect(pageForHash("#approvals")).toBe("/approvals");
     expect(pageForHash("#connections")).toBe("/connections");

@@ -42,7 +42,9 @@ describe("Emily ToolCardRenderer", () => {
     );
 
     expect(screen.getByText("Read brain pack")).toBeTruthy();
-    expect(screen.getByText("call_1")).toBeTruthy();
+    // R9: callId is no longer rendered as visible text in the Tool component
+    // (the design removed the mono callId label from the collapsed header).
+    expect(screen.queryByText("call_1")).toBeNull();
 
     await userEvent.click(screen.getByText("Read brain pack"));
 

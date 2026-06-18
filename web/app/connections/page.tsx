@@ -1,5 +1,7 @@
+import nextDynamic from "next/dynamic";
 import { fetchConnections } from "@/lib/server-api";
-import ConnectionsCollection from "./ConnectionsCollection";
+
+const ConnectionsCollection = nextDynamic(() => import("./ConnectionsCollection"));
 
 // #945: was `revalidate = N` (ISR) — an authenticated, per-user data fetch
 // must not be baked into a statically-cached shell shared across requests.

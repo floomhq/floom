@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 // Render the REAL page components (not the generic engine) with mocked data, to
 // prove they mount + render rows without client-side crashes. This is the layer
@@ -10,6 +12,11 @@ vi.mock("next/navigation", () => ({
   useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
   usePathname: () => "/",
 }));
+
+function TestQueryProvider({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
 
 const worker = {
   id: "w1",
@@ -118,30 +125,30 @@ beforeEach(() => {
 describe("page components render with data (no client crash)", () => {
   it("WorkersCollection renders the worker", async () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
-    render(<WorkersCollection initialWorkers={[worker as never]} />);
+    render(<TestQueryProvider><WorkersCollection initialWorkers={[worker as never]} /></TestQueryProvider>);
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
   });
 
-  it("WorkersCollection Config renders friendly runtime and model labels", async () => {
+  it("WorkersCollection Setup renders friendly runtime labels", async () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
-    render(<WorkersCollection initialWorkers={[worker as never]} />);
+    render(<TestQueryProvider><WorkersCollection initialWorkers={[worker as never]} /></TestQueryProvider>);
     fireEvent.click(await screen.findByRole("button", { name: /Weekly Update/i }));
-    // R9: advanced tabs are reached via the "Advanced ▾" group on the tab row.
-    fireEvent.click(await screen.findByRole("button", { name: /Advanced tabs/i }));
-    fireEvent.click(await screen.findByRole("menuitemcheckbox", { name: "Config" }));
-    fireEvent.click(await screen.findByRole("tab", { name: "Config" }));
-    expect(await screen.findByText("Tools")).toBeInTheDocument();
-    expect(screen.getByText("Brain")).toBeInTheDocument();
+    // R9: Setup is a PRIMARY tab (always visible) — no Advanced dropdown needed.
+    fireEvent.click(await screen.findByRole("tab", { name: "Setup" }));
+    // Triggers sub-tab label is immediately visible on the Setup second-row tab bar.
     expect(screen.getAllByText("Triggers").length).toBeGreaterThan(0);
+    // Navigate to Limits sub-tab to verify runtime labels are shown as friendly strings.
+    fireEvent.click(await screen.findByRole("tab", { name: "Limits" }));
     expect(await screen.findByText(/E2B sandbox/)).toBeInTheDocument();
     expect(screen.getByText(/Agent skill/)).toBeInTheDocument();
-    expect(screen.getByText(/Claude Sonnet 4\.6/)).toBeInTheDocument();
+    // The raw model ID must never appear anywhere (model label display removed from
+    // WorkersCollection in R9 — Config dissolved into Setup/Advanced tabs).
     expect(screen.queryByText("bedrock/us.anthropic.claude-sonnet-4-6")).not.toBeInTheDocument();
   });
 
   it("RunsCollection renders the run + Export action", async () => {
     const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
-    render(<RunsCollection initialRuns={[run as never]} />);
+    render(<TestQueryProvider><RunsCollection initialRuns={[run as never]} /></TestQueryProvider>);
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: /export/i })).toBeInTheDocument();
     expect(screen.queryByText("Export CSV")).not.toBeInTheDocument();
@@ -149,35 +156,38 @@ describe("page components render with data (no client crash)", () => {
 
   it("RunsCollection renders runs returned by the client API when server data is empty", async () => {
     const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
-    render(<RunsCollection initialRuns={[]} />);
+    render(<TestQueryProvider><RunsCollection initialRuns={[]} /></TestQueryProvider>);
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
     expect(screen.queryByText("No runs yet")).not.toBeInTheDocument();
   });
 
   it("ConnectionsCollection renders the connection", async () => {
     const { default: ConnectionsCollection } = await import("@/app/connections/ConnectionsCollection");
-    render(<ConnectionsCollection initialConnections={[connection as never]} />);
+    render(<TestQueryProvider><ConnectionsCollection initialConnections={[connection as never]} /></TestQueryProvider>);
     expect(await screen.findByText("GitHub")).toBeInTheDocument();
   });
 
   it("ConnectionsCollection renders connections returned by the client API when server data is empty", async () => {
     const { default: ConnectionsCollection } = await import("@/app/connections/ConnectionsCollection");
-    render(<ConnectionsCollection initialConnections={[]} />);
+    render(<TestQueryProvider><ConnectionsCollection initialConnections={[]} /></TestQueryProvider>);
     expect(await screen.findByText("GitHub")).toBeInTheDocument();
     expect(screen.queryByText("No connections yet")).not.toBeInTheDocument();
   });
 
   it("BrainCollection renders the folder", async () => {
     const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
-    render(<BrainCollection initialFolders={[folder as never]} />);
+    render(<TestQueryProvider><BrainCollection initialFolders={[folder as never]} /></TestQueryProvider>);
     expect(await screen.findByRole("button", { name: /Company facts 3 files/i })).toBeInTheDocument();
-    expect(screen.getAllByText("Company facts")).toHaveLength(2);
-    expect(screen.getByText("Contexts")).toBeInTheDocument();
+    // #1257: folder name is now wrapped in <span title={c.name}> for truncation
+    // accessibility; getAllByText returns the leaf span only (not both span + parent div).
+    expect(screen.getAllByText("Company facts")).toHaveLength(1);
+    // BrainVisual (which rendered "Contexts") was removed; collection title is now "Library".
+    expect(screen.getByText("Library")).toBeInTheDocument();
   });
 
   it("ApprovalsCollection fetches + renders the approval", async () => {
     const { default: ApprovalsCollection } = await import("@/app/approvals/ApprovalsCollection");
-    render(<ApprovalsCollection />);
+    render(<TestQueryProvider><ApprovalsCollection /></TestQueryProvider>);
     expect(await screen.findByText("Reverse Match CRM")).toBeInTheDocument();
   });
 
@@ -187,7 +197,7 @@ describe("page components render with data (no client crash)", () => {
     vi.mocked(api.workers.list).mockResolvedValueOnce([{ ...worker, tags: ["email"] }] as never);
 
     const { default: ApprovalsCollection } = await import("@/app/approvals/ApprovalsCollection");
-    render(<ApprovalsCollection />);
+    render(<TestQueryProvider><ApprovalsCollection /></TestQueryProvider>);
 
     expect(await screen.findByText("No pending approvals")).toBeInTheDocument();
     expect(screen.queryByRole("button", { name: /email/i })).not.toBeInTheDocument();
@@ -196,37 +206,46 @@ describe("page components render with data (no client crash)", () => {
   it("shows loading skeletons, not empty states, while first collection fetches are pending", async () => {
     const { api } = await import("@/lib/api");
 
+    // Use a plain QueryClientProvider (not PersistQueryClientProvider) so the
+    // async localStorage-restore phase doesn't suppress isLoading during the test.
+    function makeQC() {
+      return new QueryClient({ defaultOptions: { queries: { retry: false } } });
+    }
+    function QP({ children }: { children: React.ReactNode }) {
+      return <QueryClientProvider client={makeQC()}>{children}</QueryClientProvider>;
+    }
+
     vi.mocked(api.workers.list).mockReturnValueOnce(new Promise(() => {}) as never);
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
-    const workers = render(<WorkersCollection initialWorkers={[]} />);
+    const workers = render(<QP><WorkersCollection initialWorkers={[]} /></QP>);
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("No workers yet")).not.toBeInTheDocument();
     workers.unmount();
 
     vi.mocked(api.runs.list).mockReturnValueOnce(new Promise(() => {}) as never);
     const { default: RunsCollection } = await import("@/app/runs/RunsCollection");
-    const runs = render(<RunsCollection initialRuns={[]} />);
+    const runs = render(<QP><RunsCollection initialRuns={[]} /></QP>);
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("No run history yet")).not.toBeInTheDocument();
     runs.unmount();
 
     vi.mocked(api.connections.list).mockReturnValueOnce(new Promise(() => {}) as never);
     const { default: ConnectionsCollection } = await import("@/app/connections/ConnectionsCollection");
-    const connections = render(<ConnectionsCollection initialConnections={[]} />);
+    const connections = render(<TestQueryProvider><ConnectionsCollection initialConnections={[]} /></TestQueryProvider>);
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("No connections yet")).not.toBeInTheDocument();
     connections.unmount();
 
     vi.mocked(api.contexts.list).mockReturnValueOnce(new Promise(() => {}) as never);
     const { default: BrainCollection } = await import("@/app/brain/BrainCollection");
-    const brain = render(<BrainCollection initialFolders={[]} />);
+    const brain = render(<TestQueryProvider><BrainCollection initialFolders={[]} /></TestQueryProvider>);
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("No folders yet")).not.toBeInTheDocument();
     brain.unmount();
 
     vi.mocked(api.approvals.list).mockReturnValueOnce(new Promise(() => {}) as never);
     const { default: ApprovalsCollection } = await import("@/app/approvals/ApprovalsCollection");
-    const approvals = render(<ApprovalsCollection />);
+    const approvals = render(<TestQueryProvider><ApprovalsCollection /></TestQueryProvider>);
     expect(screen.getByLabelText("Loading")).toBeInTheDocument();
     expect(screen.queryByText("No pending approvals")).not.toBeInTheDocument();
     approvals.unmount();

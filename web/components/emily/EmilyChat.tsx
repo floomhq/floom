@@ -15,6 +15,7 @@ import {
 import { cn } from "@/lib/utils";
 import { useRouter } from "next/navigation";
 
+import { useEmilyFullscreen } from "./emily-fullscreen";
 import { EmilyAvatar } from "./EmilyAvatar";
 import { MarkdownText } from "./MarkdownText";
 import { PromptInput } from "./PromptInput";
@@ -802,13 +803,16 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
           onSuggest={(text) => { setInput(text); }}
           hidden={!hasMessages || isStreaming}
         />
+        {/* B15: keep the textarea editable while Emily streams — only the SEND
+            action is gated on isStreaming (sendDisabled), so the user can draft
+            their next message during a response. */}
         <PromptInput
           value={input}
           onChange={setInput}
           onSubmit={handleSubmit}
           onFilesChange={setAttachedFiles}
           attachedFiles={attachedFiles}
-          disabled={isStreaming}
+          sendDisabled={isStreaming}
           placeholder={createMode ? "Create me: a worker that…" : `Message ${assistantName}...`}
         />
         <p className="mt-1 text-center text-[10px] text-muted-foreground">
@@ -821,30 +825,38 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
 
 // ── Dock component (right-side persistent rail) ───────────────────────────────
 
-// Emily dock width progression (SPEC §12): collapsed ↔ rail ↔ wide ↔ full-screen
-// overlay, via the expand control + collapse button.
-type DockMode = "collapsed" | "rail" | "wide" | "full";
+// Emily dock width (SPEC §12): collapsed ↔ rail ↔ wide, an in-rail widen. TRUE
+// fullscreen (Emily fills the main content area, sidebar stays) is a separate
+// state owned by EmilyFullscreenContext (consumed by AppShell to hide the page
+// pane). The `full` overlay mode was removed — it covered the nav too, which is
+// not what Federico wanted.
+type DockMode = "collapsed" | "rail" | "wide";
 
-// Widths per APP-UI-V4-SPEC §2: rail 330px (collapse 46px), widen 560px, full.
+// Widths per APP-UI-V4-SPEC §2: rail 330px (collapse 46px), widen 560px.
 const DOCK_WIDTH: Record<DockMode, string> = {
   collapsed: "w-[46px]",
   rail: "w-full md:w-[330px]",
   wide: "w-full md:w-[560px] md:max-w-[52vw]",
-  full: "fixed inset-0 z-50 w-full", // full-screen overlay
 };
 
 export function EmilyDock({ className }: { className?: string }) {
   const assistantName = useAssistantName();
   const [mode, setMode] = useState<DockMode>("rail");
-  const open = mode !== "collapsed";
-  const isFull = mode === "full";
-  // Cycle the dock width: rail → wide → full → rail. The header control widens;
-  // a dedicated Close control (full mode only) restores the right-rail directly.
-  const cycleExpand = () =>
-    setMode((m) => (m === "rail" ? "wide" : m === "wide" ? "full" : "rail"));
-  // Round-09 (Federico 2026-06-17): in full-screen, exit must be one click back
-  // to the rail (not a 2-step cycle through "wide").
-  const exitFull = () => setMode("rail");
+  // True fullscreen lives in shared context (AppShell hides the page pane and
+  // this dock flex-grows to fill the main area — the left sidebar stays put).
+  const { fullscreen: isFull, setFullscreen } = useEmilyFullscreen();
+  const open = mode !== "collapsed" || isFull;
+  // Round-09 (Federico 2026-06-17): the PRIMARY expand control is TRUE
+  // fullscreen — one click in (Emily takes over the main area, nav stays), one
+  // click out (back to the right rail). No multi-step cycle through "wide".
+  const enterFull = () => {
+    setMode((m) => (m === "collapsed" ? "rail" : m));
+    setFullscreen(true);
+  };
+  const exitFull = () => setFullscreen(false);
+  const toggleFull = () => (isFull ? exitFull() : enterFull());
+  // Secondary in-rail widen (rail ↔ wide), only when NOT fullscreen.
+  const toggleWiden = () => setMode((m) => (m === "wide" ? "rail" : "wide"));
   // actionsRef lets the dock header drive new/export/recent without prop-drilling
   const coreActionsRef = useRef<ChatCoreActions | null>(null);
   // hasMessages as state so the Export menu item disables correctly (can't read ref in render)
@@ -884,12 +896,19 @@ export function EmilyDock({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex h-full flex-col bg-background shrink-0 overflow-hidden",
-        mode !== "full" && "[border-left:var(--bd-div)]",
-        DOCK_WIDTH[mode],
+        "flex h-full flex-col bg-background overflow-hidden [border-left:var(--bd-div)]",
+        // Fullscreen: flex-grow to fill the main area (page pane is hidden by
+        // AppShell), sidebar stays to the left. Otherwise: fixed-width rail.
+        isFull ? "flex-1 min-w-0" : cn("shrink-0", DOCK_WIDTH[mode]),
         className
       )}
-      aria-label={open ? `Emily dock (${mode})` : "Emily dock (collapsed)"}
+      aria-label={
+        isFull
+          ? "Emily dock (fullscreen)"
+          : open
+            ? `Emily dock (${mode})`
+            : "Emily dock (collapsed)"
+      }
     >
       {/* Collapsed strip — shown only when collapsed */}
       {!open && (
@@ -919,26 +938,41 @@ export function EmilyDock({ className }: { className?: string }) {
               aria-label="Online"
             />
           </div>
-          {/* Fullscreen / shrink toggle — the make-fullscreen control lives here
-              in the right sidebar (Federico 2026-06-17). Maximize widens toward
-              full; Minimize steps back. */}
+          {/* Secondary in-rail widen (rail ↔ wide) — only when NOT fullscreen.
+              Lets Federico nudge the rail wider without taking over the page. */}
+          {!isFull && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="hidden size-7 p-0 text-muted-foreground hover:bg-[var(--active-nav-bg)] hover:text-foreground md:inline-flex"
+              onClick={toggleWiden}
+              title={mode === "wide" ? `Narrow ${assistantName}` : `Widen ${assistantName}`}
+              aria-label={mode === "wide" ? `Narrow ${assistantName}` : `Widen ${assistantName}`}
+            >
+              {mode === "wide" ? <ChevronRight className="size-4" /> : <ChevronLeft className="size-4" />}
+            </Button>
+          )}
+          {/* PRIMARY make-fullscreen toggle — true one-click fullscreen: Emily
+              takes over the main content area, the left nav stays (Federico
+              2026-06-17). High-contrast so the affordance is clearly visible in
+              BOTH light and night mode (the muted icon was hard to see). */}
           <Button
             size="sm"
             variant="ghost"
-            className="size-7 p-0 text-muted-foreground hover:text-foreground"
-            onClick={cycleExpand}
-            title={isFull ? `Shrink ${assistantName}` : `Expand ${assistantName}`}
+            className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
+            onClick={toggleFull}
+            title={isFull ? `Exit full screen` : `Full screen ${assistantName}`}
             aria-label={isFull ? `Shrink ${assistantName}` : `Expand ${assistantName}`}
           >
-            {isFull ? <Minimize2 className="size-3.5" /> : <Maximize2 className="size-3.5" />}
+            {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
           </Button>
           {/* Full-screen CLOSE control (Federico 2026-06-17): only in full mode,
-              one click exits the overlay straight back to the right rail. */}
+              one click exits fullscreen straight back to the right rail. */}
           {isFull && (
             <Button
               size="sm"
               variant="ghost"
-              className="size-7 p-0 text-muted-foreground hover:text-foreground"
+              className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
               onClick={exitFull}
               title="Close full screen"
               aria-label="Close full screen"
