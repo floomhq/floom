@@ -404,11 +404,11 @@ def _context_summary(
     repos: Optional[Repositories] = None,
     user_id: Optional[str] = None,
 ) -> "ContextSummary":
-    from contexts import context_dir, context_owner_id, context_updated_at, iter_context_files
+    from contexts import context_dir, context_owner_id, context_tree_summary
     from models import AssetPermissions, ContextSummary
     root = context_dir(name)
-    files = list(iter_context_files(root))
-    total_size = sum(path.stat().st_size for path in files)
+    cached_summary = (metadata.get(name) or {}).get("summary")
+    summary = cached_summary if isinstance(cached_summary, dict) else context_tree_summary(root)
     is_system = _is_system_context_pack(name, metadata)
     description = _context_description(root)
     if description is None and is_system:
@@ -428,9 +428,9 @@ def _context_summary(
         )
     return ContextSummary(
         name=name,
-        file_count=len(files),
-        total_size_bytes=total_size,
-        updated_at=context_updated_at(root),
+        file_count=int(summary.get("file_count") or 0),
+        total_size_bytes=int(summary.get("total_size_bytes") or 0),
+        updated_at=summary.get("updated_at") or None,
         writeable=bool(metadata.get(name, {}).get("writeable", False)),
         sensitive=bool(metadata.get(name, {}).get("sensitive", True)),
         category=(metadata.get(name, {}).get("category") or None),  # #780
@@ -740,8 +740,9 @@ def _write_context_file(
     user_id: str,
     tags: List[str] | None = None,
     file_metadata: Dict[str, Any] | None = None,
+    refresh_summary: bool = True,
 ) -> ContextFileItem:
-    from contexts import context_dir, context_file_metadata, load_context_metadata, set_context_file_metadata, set_context_file_secret_flag, set_context_metadata
+    from contexts import context_dir, context_file_metadata, load_context_metadata, refresh_context_summary_metadata, set_context_file_metadata, set_context_file_secret_flag, set_context_metadata
     from models import ContextFileItem
 
     root = context_dir(name)
@@ -776,6 +777,8 @@ def _write_context_file(
     # Persist the warning flag so list/detail views badge the file even after
     # the write response is gone. (Cleared when a later write comes back clean.)
     set_context_file_secret_flag(name, file_path, bool(secret_warnings))
+    if refresh_summary:
+        refresh_context_summary_metadata(name)
     pack_meta = load_context_metadata().get(name) or pack_meta
     item = ContextFileItem(**context_file_metadata(root, destination, pack_metadata=pack_meta))
     item.secret_warnings = secret_warnings
