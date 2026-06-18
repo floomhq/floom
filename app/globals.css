@@ -294,11 +294,30 @@ html.dark {
     scrollbar-gutter: stable;
     background: var(--bg);
     overflow-x: hidden;
+    /* LND-8: rubber-band overscroll must reveal the landing's dark surface,
+       not the browser default white. Match the landing --bg-app per theme. */
+    overscroll-behavior-y: none;
+  }
+
+  /* LND-8: keep the html background in lock-step with the landing theme so the
+     overscroll band matches. The landing theme classes live on <html>
+     (floom-night / floom-day); system mode follows prefers-color-scheme. */
+  html.floom-night {
+    background: #191a1d;
+  }
+  html.floom-day {
+    background: #fbfbfc;
+  }
+  @media (prefers-color-scheme: dark) {
+    html:not(.floom-day) {
+      background: #191a1d;
+    }
   }
 
   body {
     @apply bg-transparent text-foreground antialiased;
     min-height: 100%;
+    overscroll-behavior-y: none;
     font-family: var(--font);
     font-feature-settings: var(--font-feat);
     font-size: 14px;
