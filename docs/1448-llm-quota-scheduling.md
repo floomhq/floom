@@ -56,28 +56,26 @@ runtime: { type: python, runner: e2b }
 - It bounds *concurrency*, not *request rate*. For pure RPM limits without a
   concurrency proxy, the gateway below is the real answer.
 
-## What is NOT implemented (option 2 - the managed LLM gateway)
+## What is implemented for option 2 - managed LLM gateway wiring
 
-A managed gateway is the complete fix and the bigger build. Design:
+The engine also ships the gateway wiring and reference LiteLLM deployment under
+`ops/llm-gateway/`:
 
-- A first-class proxy endpoint (engine or a sidecar) that speaks the
-  OpenAI/Vertex/Bedrock wire formats. Workers point litellm at it
-  (`OPENAI_BASE_URL` / provider base override injected into the sandbox env) and
-  send their normal calls.
-- The gateway holds a **shared token/RPM bucket per provider** (and per model),
-  so all runs draw from one budget instead of each hitting the raw endpoint.
-- **Shared backoff:** a 429 from the provider trips a short circuit-breaker that
-  every in-flight worker's calls respect, instead of each run retrying blindly.
-- **Multi-region round-robin / failover:** pool several regional endpoints
-  (e.g. Vertex regions) and spread load, failing a region out on sustained 429s.
-- **Per-workspace accounting:** attribute spend/usage to the calling workspace
-  (ties into monthly_spend_cap_usd) and enforce per-workspace budgets centrally.
+- E2B sandboxes receive `OPENAI_BASE_URL` and `OPENAI_API_KEY` pointing at the
+  gateway when `WORKEROS_LLM_GATEWAY_URL` is configured.
+- The gateway host is added to the sandbox egress allowlist.
+- `ops/llm-gateway/litellm_config.yaml` provides a Vertex/Gemini multi-region
+  pool, shared Redis-backed cooldown state, and fallback routing.
+- `ops/llm-gateway/README.md` documents the live verification path.
 
-This changes the worker LLM-call contract (route through the gateway) and needs
-provider credentials + live load to validate (untestable on the dev host), so it
-is intentionally deferred. The scheduling backpressure above removes the single
-largest reliability foot-gun in the meantime and is the issue's explicitly
-"cheap relative to its value" option.
+The remaining work for this option is deployment and live-load verification:
+run the LiteLLM proxy + Redis with real provider credentials, set
+`WORKEROS_LLM_GATEWAY_URL` / `WORKEROS_LLM_GATEWAY_KEY` on the API service, then
+repeat the original stacked-search test and confirm provider 429s drop.
+
+Per-workspace provider budgets and weighted LLM tokens are still future
+improvements. The current deployment-wide scheduler cap matches the current
+shared provider-quota problem and is the safe first control.
 
 Relates to #1438 (workers can't use a managed LLM), #1433 (warm pools), and
 #1442 (the observability gap that hid the 429-driven failures).
