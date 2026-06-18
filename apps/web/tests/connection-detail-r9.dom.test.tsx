@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 // R9: structural proof of the REAL connection detail (not a mockup). Mounts the
 // real ConnectionsCollection, opens the detail pane for an OAuth connection and
@@ -66,9 +68,18 @@ beforeEach(() => {
   listConnections.mockResolvedValue([gmail, linear]);
 });
 
+function TestQueryProvider({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
 async function openDetail(name: RegExp) {
   const { default: ConnectionsCollection } = await import("@/app/connections/ConnectionsCollection");
-  render(<ConnectionsCollection initialConnections={[gmail as never, linear as never]} />);
+  render(
+    <TestQueryProvider>
+      <ConnectionsCollection initialConnections={[gmail as never, linear as never]} />
+    </TestQueryProvider>,
+  );
   // Click the resting-list/grid row to open the 70% detail pane.
   const trigger = await screen.findByText(name);
   fireEvent.click(trigger);

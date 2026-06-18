@@ -194,7 +194,11 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
   // so the tab switch is instant. Link already prefetches the route's JS/RSC;
   // this adds the DATA. Cache-first + idempotent (see prefetch.ts).
   const queryClient = useQueryClient();
-  const warm = (href: string) => prefetchRouteData(queryClient, href);
+  const router = useRouter();
+  const warm = (href: string) => {
+    prefetchRouteData(queryClient, href);
+    router.prefetch(href);
+  };
 
   return (
     <nav className="flex-1 px-3 space-y-0.5">
@@ -332,7 +336,11 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
   // inside NavLinks). After first paint, warm the highest-value routes once on
   // idle so the first tab switch is already instant.
   const queryClient = useQueryClient();
-  const warm = (href: string) => prefetchRouteData(queryClient, href);
+  const router = useRouter();
+  const warm = (href: string) => {
+    prefetchRouteData(queryClient, href);
+    router.prefetch(href);
+  };
   useEffect(() => {
     prefetchIdleRoutes(queryClient, pathname);
     // Run once after mount; pathname/queryClient are stable enough for a

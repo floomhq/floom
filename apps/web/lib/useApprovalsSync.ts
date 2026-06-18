@@ -12,8 +12,8 @@
 //
 // Plain module-level pub/sub (no extra dependency) keeps it ChatGPT-simple.
 
-import { useCallback, useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { useCallback, useEffect } from "react";
+import { useApprovalsCountQuery } from "@/lib/query/hooks";
 
 const listeners = new Set<() => void>();
 
@@ -36,39 +36,32 @@ const POLL_MS = 30_000;
  * 30s poll, on window focus/visibility, and on notifyApprovalsChanged().
  */
 export function useApprovalsCount(): number {
-  const [count, setCount] = useState(0);
+  const { data, refetch } = useApprovalsCountQuery();
 
   useEffect(() => {
-    let cancelled = false;
-    const refetch = async () => {
-      try {
-        const res = await api.approvals.count();
-        if (!cancelled) setCount(res.pending);
-      } catch {
-        // silently ignore — badge just keeps its last known value
-      }
+    const refetchCount = () => {
+      void refetch();
     };
 
-    refetch();
-    const interval = setInterval(refetch, POLL_MS);
-    const onFocus = () => refetch();
+    refetchCount();
+    const interval = setInterval(refetchCount, POLL_MS);
+    const onFocus = () => refetchCount();
     const onVisible = () => {
-      if (document.visibilityState === "visible") refetch();
+      if (document.visibilityState === "visible") refetchCount();
     };
     window.addEventListener("focus", onFocus);
     document.addEventListener("visibilitychange", onVisible);
-    const unsubscribe = subscribe(refetch);
+    const unsubscribe = subscribe(refetchCount);
 
     return () => {
-      cancelled = true;
       clearInterval(interval);
       window.removeEventListener("focus", onFocus);
       document.removeEventListener("visibilitychange", onVisible);
       unsubscribe();
     };
-  }, []);
+  }, [refetch]);
 
-  return count;
+  return data?.pending ?? 0;
 }
 
 /**
