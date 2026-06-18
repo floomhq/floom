@@ -9,9 +9,7 @@ The platform-secret specs and env helpers live in ``services.secrets_env``, the
 GitHub-connected encrypted-vault sync in ``services.git_service``, and the
 worker listing in ``services.worker_access`` — all real module-level imports
 (never purged by fixtures; they resolve db/auth/worker_registry lazily
-themselves). ``run_service`` IS purged, so ``get_worker_config_for_run`` is
-imported lazily inside the handler. Secrets test fixtures purge ``routers.*``
-alongside ``main``.
+themselves). Secrets test fixtures purge ``routers.*`` alongside ``main``.
 """
 
 from __future__ import annotations
@@ -34,7 +32,7 @@ from services.secrets_env import (
     _available_secret_names_for_user,
     _secret_value_has_control_chars,
 )
-from services.worker_access import _list_visible_workers
+from services.worker_access import _list_visible_workers, _worker_required_secret_names
 
 logger = logging.getLogger("floom.api")
 
@@ -59,14 +57,6 @@ def _require_secret_mutation_allowed(auth: AuthContext, existing: Optional[Dict[
 
 
 secrets_router = APIRouter()
-
-
-def _safe_worker_config_for_secret_listing(get_worker_config_for_run, worker_id: str):
-    try:
-        return get_worker_config_for_run(worker_id)
-    except Exception:
-        logger.warning("secrets list: ignoring invalid config for worker %s", worker_id, exc_info=True)
-        return None
 
 
 class SecretUpsertRequest(BaseModel):
@@ -231,8 +221,6 @@ def list_secrets(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[SecretItem]:
-    from run_service import get_worker_config_for_run
-
     db_secrets = {
         row["name"]: row_to_dict(row)
         for row in repos.secrets.list(user_id=auth.user_id)
@@ -241,15 +229,14 @@ def list_secrets(
     workers = _list_visible_workers(user_id=auth.user_id, repos=repos, use_cache=True)
     platform_available = _available_secret_names_for_user(auth.user_id, repos) - set(db_secrets)
 
-    # Build worker configs once — avoids N×M get_worker_config_for_run() calls
-    # (one per worker per secret) that would otherwise hit the DB on every secret.
-    worker_configs: dict[str, Any] = {}
+    secret_to_workers: dict[str, list[str]] = {}
     worker_secret_names: set[str] = set()
     for w in workers:
-        config = _safe_worker_config_for_secret_listing(get_worker_config_for_run, w["id"])
-        worker_configs[w["id"]] = config
-        if config:
-            worker_secret_names.update(config.secrets)
+        worker_name = str(w.get("name") or w.get("id") or "")
+        for secret_name in _worker_required_secret_names(w):
+            worker_secret_names.add(secret_name)
+            if secret_name not in PLATFORM_SECRETS and worker_name:
+                secret_to_workers.setdefault(secret_name, []).append(worker_name)
 
     # Filter out platform-managed secrets — they appear in Settings, not here
     all_secret_names = (worker_secret_names | set(db_secrets)) - PLATFORM_SECRETS
@@ -265,11 +252,7 @@ def list_secrets(
             status = SecretStatus.SET
         else:
             status = SecretStatus.SET if value else SecretStatus.MISSING
-        used_by = [
-            w["name"]
-            for w in workers
-            if worker_configs.get(w["id"]) and name in worker_configs[w["id"]].secrets
-        ]
+        used_by = secret_to_workers.get(name, [])
         result.append(
             SecretItem(
                 name=name,

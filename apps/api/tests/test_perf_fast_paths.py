@@ -182,3 +182,37 @@ def test_list_connections_empty_rows_skips_last_used(monkeypatch):
     )
 
     assert connections.list_connections(auth=auth, repos=repos) == []
+
+
+def test_list_secrets_uses_listed_worker_configs_for_used_by(monkeypatch):
+    import sys
+    from routers import secrets
+
+    class SecretsRepo:
+        def list(self, *, user_id):
+            assert user_id == "user-a"
+            return [
+                {"name": "API_KEY", "status": "set", "value": "redacted"},
+                {"name": "OTHER_KEY", "status": "set", "value": "redacted"},
+            ]
+
+    repos = SimpleNamespace(secrets=SecretsRepo())
+    auth = SimpleNamespace(user_id="user-a", is_admin=True, role="admin")
+    workers = [
+        {"id": "worker-a", "name": "Worker A", "config": {"secrets": ["API_KEY", "OTHER_KEY"]}},
+        {"id": "worker-b", "name": "Worker B", "config": {"exec": {"secrets": ["API_KEY"]}}},
+    ]
+
+    class BombRunService:
+        def __getattr__(self, name):
+            raise AssertionError(f"run_service.{name} was accessed")
+
+    monkeypatch.setitem(sys.modules, "run_service", BombRunService())
+    monkeypatch.setattr(secrets, "_list_visible_workers", lambda **_kwargs: workers)
+    monkeypatch.setattr(secrets, "_available_secret_names_for_user", lambda *_args, **_kwargs: set())
+
+    result = secrets.list_secrets(auth=auth, repos=repos)
+    by_name = {item.name: item for item in result}
+
+    assert by_name["API_KEY"].used_by == ["Worker A", "Worker B"]
+    assert by_name["OTHER_KEY"].used_by == ["Worker A"]
