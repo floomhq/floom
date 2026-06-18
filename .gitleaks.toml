@@ -1,0 +1,36 @@
+# gitleaks config for the secret-scan gate (pre-push hook + CI).
+# Extends the default ruleset and allowlists known-benign findings in the tree
+# (vendored Python venv example data, dummy test fixtures, example constants,
+# and CI-only test keys) so the gate stays green while still catching any NEW
+# real secret. Mirrors the engine repo's .gitleaks.toml.
+
+[extend]
+useDefault = true
+
+[allowlist]
+description = "Benign vendored examples, test fixtures, example constants, and CI-only test keys."
+
+# - .ci-venv/ is a checked-in Python venv; boto3/botocore ship documentation
+#   example payloads (AKIAIOSFODNN7EXAMPLE, sample request tokens) that trip
+#   the default aws-access-token / generic-api-key rules. These are vendored
+#   library docs, never real credentials.
+# - test fixtures (incl. the engine submodule's apps/api/tests) legitimately
+#   contain fake/sample credentials.
+# - .next/ is a generated Next.js build artifact.
+paths = [
+  '''(^|/)\.ci-venv/''',
+  '''(^|/)\.next/''',
+  '''(^|/)tests?/''',
+  '''.*\.test\.[a-z]+$''',
+]
+
+# Specific non-test constants confirmed benign (see git history / code review):
+regexes = [
+  # boto3/botocore documentation example AWS access token.
+  '''AKIAIOSFODNN7EXAMPLE''',
+  # CLI device-code alphabet (cli_auth) — a charset, not a key.
+  '''ABCDEFGHJKLMNPQRSTUVWXYZ23456789''',
+  # CI-only Fernet test key (cloud-engine-autosync.yml) — base64 of
+  # "workeros-cloud-ci-test-key-32byt"; documented as CI-only, never a real secret.
+  '''d29ya2Vyb3MtY2xvdWQtY2ktdGVzdC1rZXktMzJieXQ=''',
+]

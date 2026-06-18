@@ -26,7 +26,7 @@ export async function POST(req: NextRequest) {
   // Clear the Next.js web session cookie
   res.cookies.set(SESSION_COOKIE, "", {
     httpOnly: true,
-    secure: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
     maxAge: 0,
@@ -34,7 +34,7 @@ export async function POST(req: NextRequest) {
   // Clear the backend session cookie (#927: Secure matches how it is set)
   res.cookies.set("wos_session", "", {
     httpOnly: true,
-    secure: true,
+    secure: process.env.NODE_ENV === "production",
     sameSite: "lax",
     path: "/",
     maxAge: 0,

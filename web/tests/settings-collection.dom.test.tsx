@@ -139,7 +139,7 @@ describe("Settings Collection (Phase 3)", () => {
     expect(screen.getByText("Configure Emily")).toBeInTheDocument();
     expect(screen.getByText("People & roles")).toBeInTheDocument();
     expect(screen.getByText("Git-tracked workspace changelog")).toBeInTheDocument();
-    expect(screen.getByText("Theme & accent")).toBeInTheDocument();
+    expect(screen.getByText("Theme (light, dark, system)")).toBeInTheDocument();
 
     await user.click(screen.getByText("Members"));
 

@@ -13,6 +13,7 @@ export type TagFamilyKey =
   | "status" // derived item state, per collection
   | "trigger" // Runs only: Scheduled · Manual · Webhook (its own family)
   | "type" // Connections only: Connection · MCP · Secret
+  | "stage" // Workers only: Draft · Live (maturity label, mess-control)
   | "visibility" // Private · Shared (SPEC §12)
   | "content"; // shared user-label vocabulary
 
@@ -22,6 +23,7 @@ export const TAG_FAMILY_ORDER: TagFamilyKey[] = [
   "status",
   "trigger",
   "type",
+  "stage",
   "visibility",
   "content",
 ];
@@ -105,7 +107,12 @@ export interface DetailHeader {
 }
 
 export interface CollectionStates {
-  empty?: { title: string; help?: string };
+  empty?: {
+    title: string;
+    help?: string;
+    icon?: import("react").ComponentType<{ size?: number }>;
+    action?: ReactNode;
+  };
   errorRetry?: () => void;
 }
 
@@ -116,6 +123,12 @@ export interface CollectionStates {
 export interface CollectionConfig<T> {
   title: string;
   subtitle?: string;
+  /**
+   * When true the Collection suppresses its own title/subtitle header row.
+   * Use this when the parent renders its own heading (e.g. the WorkersCollection
+   * tab switcher already labels the "Workers" tab — a second H1 is redundant).
+   */
+  hideTitle?: boolean;
   items: T[];
   loading?: boolean;
   error?: string | null;
@@ -140,7 +153,17 @@ export interface CollectionConfig<T> {
   row: (item: T) => ListRowSpec;
   card?: (item: T) => CardSpec;
 
-  detail: (item: T) => { header: DetailHeader; tabs: DetailTab[] };
+  detail: (item: T) => {
+    header: DetailHeader;
+    tabs: DetailTab[];
+    /**
+     * Optional node rendered INSIDE the primary tab row, after the tabs and
+     * right-aligned (e.g. an "Advanced ▾" group that exposes secondary tabs).
+     * Most collections omit it; the worker detail uses it so the advanced tab
+     * group is visibly on the tab row, not buried in the header overflow.
+     */
+    tabsTrailing?: ReactNode;
+  };
 
   states?: CollectionStates;
 
@@ -155,8 +178,12 @@ export interface CollectionConfig<T> {
   };
   /** Extra control-bar actions (e.g. Runs "Export CSV"), left of +Add. */
   toolbarActions?: ReactNode;
-  /** Optional banner above the list (e.g. member-visibility note). */
-  banner?: ReactNode;
+  /** Optional banner above the list (e.g. member-visibility note). When a
+   *  function, CollectionView passes an `openAdd` callback that opens the +Add
+   *  panel — used by Brain's unified drop-zone banner ("+ New folder"). */
+  banner?: ReactNode | ((openAdd: () => void) => ReactNode);
+  /** Optional footer rendered below the list body (e.g. "Load more" button — B37). */
+  footer?: ReactNode;
 }
 
 /** Grid card (SPEC §2b — name, 2-line desc, status pill + tool logos). */
@@ -170,4 +197,21 @@ export interface CardSpec {
   toolLogos?: ReactNode;
   /** Star toggle (hover only). Omit to hide. */
   star?: { on: boolean; onToggle: () => void };
+  /**
+   * Optional mini sparkline showing recent run history.
+   * Shown on hover in the card footer (#1117).
+   * Accepts TimeseriesDay[] (success/fail split) or number[] (totals only).
+   */
+  sparkline?: ReactNode;
+  /**
+   * Optional muted metadata line shown between description and footer.
+   * E.g. "2h ago · 12 runs · 91%". (#1175)
+   */
+  meta?: ReactNode;
+  /**
+   * Optional quick-action buttons shown on hover in the card footer (#1174).
+   * Each item has a label and an onClick. Rendered as small text buttons.
+   * Use e.stopPropagation() is handled by CollectionGrid.
+   */
+  quickActions?: Array<{ label: string; onClick: (e: React.MouseEvent) => void }>;
 }

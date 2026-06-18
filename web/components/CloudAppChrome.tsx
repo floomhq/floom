@@ -25,6 +25,28 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
     pathname === "/app/chat" ||
     pathname.startsWith("/app/chat/");
 
+  // #1218 / engine #1101: collection pages (Brain split-view, Workers, Runs,
+  // Connections, Approvals) own their internal flex-column layout and MUST fill
+  // the full viewport height so their split divider reaches the bottom. The
+  // engine AppShell renders these full-bleed (no max-w-7xl/padding wrapper) so
+  // the CollectionView's height:100% resolves against a definite-height flex
+  // column. The Cloud chrome previously wrapped EVERY page in the padded
+  // max-w-7xl container, which broke the height chain on cloud — so the brain
+  // divider stopped short of the viewport bottom. Mirror the engine here.
+  const isFullBleedCollectionPath = [
+    "/brain",
+    "/workers",
+    "/runs",
+    "/connections",
+    "/approvals",
+  ].some(
+    (base) =>
+      pathname === base ||
+      pathname.startsWith(`${base}/`) ||
+      pathname === `/app${base}` ||
+      pathname.startsWith(`/app${base}/`),
+  ) && !isApprovalReviewPath;
+
   if (isLoginPath || isJoinPath) {
     return (
       <>
@@ -72,9 +94,19 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
       <IconSprite />
       <Ambient />
       <Sidebar accountFooter={({ onNavigate }) => <CloudAccountFooter onNavigate={onNavigate} />} />
-      <main className="relative z-10 flex-1 min-w-0 h-full overflow-y-auto">
-        <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8">{children}</div>
-      </main>
+      {/* #1218: collection pages render full-bleed (no padded max-w-7xl wrapper)
+          so their flex-column fills the viewport height and the split divider
+          reaches the bottom — matching the engine AppShell (#1101). Standard
+          pages keep the centered, padded, scroll container. */}
+      {isFullBleedCollectionPath ? (
+        <main className="relative z-10 flex-1 min-w-0 h-full overflow-hidden flex flex-col">
+          {children}
+        </main>
+      ) : (
+        <main className="relative z-10 flex-1 min-w-0 h-full overflow-y-auto">
+          <div className="max-w-7xl mx-auto px-4 sm:px-6 py-6 sm:py-8 flex flex-col min-h-full">{children}</div>
+        </main>
+      )}
       <EmilyDock className="hidden md:flex" />
       <CommandPalette />
       <TelemetryProvider />

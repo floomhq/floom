@@ -32,6 +32,12 @@ describe("ModelDefaults (#797)", () => {
     const capInput = screen.getByLabelText("Monthly spend cap (USD)") as HTMLInputElement;
     fireEvent.change(capInput, { target: { value: "100" } });
     fireEvent.blur(capInput);
-    await waitFor(() => expect(setSetting).toHaveBeenCalledWith("spend_cap_usd", "100"));
+    // Round-09 trust fix B1: the spend cap MUST write the exact key the backend
+    // reads + enforces (`run_cost.py` reads `monthly_spend_cap_usd`; the
+    // workspace-settings allow-list only accepts `monthly_spend_cap_usd`). The
+    // UI previously wrote `spend_cap_usd`, which is NOT in the allow-list, so the
+    // save was rejected (422) and the cap was a silent no-op.
+    await waitFor(() => expect(setSetting).toHaveBeenCalledWith("monthly_spend_cap_usd", "100"));
+    expect(setSetting).not.toHaveBeenCalledWith("spend_cap_usd", "100");
   });
 });

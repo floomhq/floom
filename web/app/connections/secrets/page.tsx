@@ -1,6 +1,7 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
+import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -10,7 +11,7 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { KeyRound, TestTube2, Trash2, Plus, Check, X, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
-import type { SecretItem } from "@/lib/types";
+import type { SecretItem, WorkerSummary } from "@/lib/types";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { useIsAdmin } from "@/lib/use-is-admin";
@@ -31,6 +32,7 @@ function SecretsContent() {
   const searchParams = useSearchParams();
   const prefillName = searchParams.get("prefill") ?? "";
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
+  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [addingName, setAddingName] = useState(prefillName);
   const [addingValue, setAddingValue] = useState("");
@@ -48,11 +50,21 @@ function SecretsContent() {
   // workspace's vendors and operational gaps. Owner/admin only.
   const { isAdmin, pending: roleCheckPending } = useIsAdmin();
 
+  // #1226: name -> worker id for clickable used-by links
+  const workersByName = useMemo(
+    () => new Map(workers.map((w) => [w.name, w.id])),
+    [workers],
+  );
+
   const refresh = useCallback(async () => {
     if (!isAdmin) return;
     try {
-      const s = await api.secrets.list();
+      const [s, w] = await Promise.all([
+        api.secrets.list(),
+        api.workers.list().catch(() => [] as WorkerSummary[]),
+      ]);
       setSecrets(s);
+      setWorkers(w);
     } catch {
       toast.error("Failed to load secrets");
     } finally {
@@ -264,7 +276,7 @@ function SecretsContent() {
               return (
                 <div key={s.name} className="space-y-2">
                   {/* min-h-[44px] ensures the row itself is a comfortable touch target */}
-                  <div className="flex items-start justify-between gap-2 rounded-lg p-3 hover:bg-[var(--active-nav-bg)] transition-colors min-h-[44px]">
+                  <div className="flex items-start justify-between gap-2 rounded-lg p-3 hover:bg-[var(--bg-2)] transition-colors min-h-[44px]">
                     <div className="flex items-start gap-3 min-w-0">
                       <KeyRound className="mt-0.5 w-4 h-4 text-muted-foreground shrink-0" />
                       <div className="min-w-0">
@@ -272,7 +284,24 @@ function SecretsContent() {
                         {s.used_by.length > 0 && (
                           <p className="text-xs text-muted-foreground mt-0.5">
                             <span className="opacity-70">Used by: </span>
-                            {usedByVisible.join(", ")}
+                            {usedByVisible.map((workerName, idx) => {
+                              const workerId = workersByName.get(workerName);
+                              return (
+                                <span key={workerName}>
+                                  {idx > 0 && ", "}
+                                  {workerId ? (
+                                    <Link
+                                      href={`/workers/${encodeURIComponent(workerId)}`}
+                                      className="underline underline-offset-2 hover:text-foreground"
+                                    >
+                                      {workerName}
+                                    </Link>
+                                   ) : (
+                                     workerName
+                                   )}
+                                </span>
+                              );
+                            })}
                             {!usedByExpanded && usedByHidden > 0 ? (
                               <button
                                 type="button"
@@ -312,8 +341,8 @@ function SecretsContent() {
                               <span
                                 className={
                                   s.last_check_status === "valid"
-                                    ? " text-emerald-600 font-medium"
-                                    : " text-red-500 font-medium"
+                                    ? " text-[var(--positive)] font-medium"
+                                    : " text-[var(--negative)] font-medium"
                                 }
                               >
                                 {" "}&middot; {s.last_check_status}
@@ -365,7 +394,7 @@ function SecretsContent() {
                       <Button
                         variant="ghost"
                         size="sm"
-                        className="min-h-[44px] min-w-[44px] px-2 text-xs text-red-500 hover:text-red-700 sm:min-h-0 sm:min-w-0 sm:h-7"
+                        className="min-h-[44px] min-w-[44px] px-2 text-xs text-[var(--negative)] hover:text-[var(--negative)] sm:min-h-0 sm:min-w-0 sm:h-7"
                         onClick={() => handleDelete(s.name)}
                         disabled={deletingName === s.name}
                         title="Remove secret"

@@ -1,5 +1,8 @@
 export type WorkerStatus = "healthy" | "ready" | "needs_attention" | "missing_secret" | "error";
 
+/** Worker maturity stage — a label, not a gate. */
+export type WorkerStage = "draft" | "live";
+
 // ── Emily conversation persistence ─────────────────────────────────────────────
 // Shapes returned by GET /conversations and GET /conversations/{id}
 // (apps/api/main.py list_conversations + get_conversation_detail).
@@ -290,6 +293,12 @@ export interface WorkerSummary {
   system?: boolean;
   archived?: boolean;
   archive_reason?: string;
+  /** false when the worker is paused/disabled — UI disables/warns on the Run button (#788). */
+  enabled?: boolean;
+  /** Maturity LABEL: "draft" (work-in-progress) | "live" (promoted). Orthogonal
+   *  to archived/enabled/visibility — never gates execution. New workers default
+   *  to "draft"; stock/example/system default to "live". */
+  stage?: WorkerStage;
   tags: string[];
   folder?: string;
   status: WorkerStatus;
@@ -347,6 +356,8 @@ export interface WorkerDetail {
   /** P2: false when the worker is paused/disabled — UI disables the Run button. */
   enabled?: boolean;
   archive_reason?: string;
+  /** Maturity LABEL: "draft" | "live". Pure label, never gates execution. */
+  stage?: WorkerStage;
   tags: string[];
   folder?: string;
   status: WorkerStatus;
@@ -379,6 +390,11 @@ export interface WorkerDetail {
   // Text excerpt of the most recent successful run's result (≤500 chars).
   latest_output?: string | null;
   latest_output_run_id?: string | null;
+  // Round-09 gap #1: the saved per-worker default inputs (recipe column
+  // `input_values_json`). Scheduled/automated runs merge these over schema
+  // defaults. Surfaced so the Operations > Inputs panel can LOAD what is saved,
+  // not just write blind. Empty object when nothing is saved.
+  input_values?: Record<string, unknown>;
 }
 
 // A feedback comment left on a worker (SPEC §12). Anyone who can SEE the worker
@@ -431,7 +447,7 @@ export interface PublicWorker {
 export interface StandaloneShareLink {
   token: string;
   url: string;
-  entity_type: "worker" | "brain_file" | "brain_pack";
+  entity_type: "worker" | "brain_file" | "brain_pack" | "run";
 }
 
 export interface PublicShareFile {
@@ -604,6 +620,15 @@ export interface ApprovalRow {
   public_link?: string;
   /** X4: structured reviewer feedback attached with the decision (highlight+comment on text, screenshot pins). */
   annotations?: ApprovalAnnotations | null;
+  /** Cost snapshot at pause (#795): dollars + tokens consumed before the gate. */
+  cost_usd_so_far?: number | null;
+  tokens_so_far?: number | null;
+  /** Expiry (#798): ISO timestamp the pending approval lapses (APPROVAL_TTL_HOURS, default 24h). */
+  expires_at?: string | null;
+  /** Typed preview (#792): preview_type + parsed preview_payload (email / records / tasks). `type` mirrors preview_type. */
+  preview_type?: string | null;
+  type?: string | null;
+  preview_payload?: unknown;
 }
 
 /** X4: a comment attached to a highlighted span of a text/markdown artifact. */
@@ -774,6 +799,11 @@ export interface CurrentUser {
   role?: string;
   is_admin?: boolean;
   username?: string | null;
+  // #1306: profile photo from Google/GitHub OAuth. Populated by the Cloud
+  // wrapper's /me (the OSS engine /me has no OAuth picture). When present, the
+  // sidebar profile chip shows the real photo instead of initials.
+  picture?: string | null;
+  avatar_url?: string | null;
 }
 
 export interface WorkspaceShareLink {

@@ -26,6 +26,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { VersionHistoryMenu } from "@/components/VersionHistoryMenu";
 import { AssetVisibilityControl } from "@/components/AssetVisibilityControl";
 import { EmilyAvatar } from "@/components/emily/EmilyAvatar";
+import { useAssistantName } from "@/lib/workspace/assistant-name";
 import { modelLabel } from "@/lib/model-labels";
 
 type TabKey = "base" | "instructions" | "prompt";
@@ -137,6 +138,7 @@ export default function AssistantPage() {
       : "base";
   const [tab, setTab] = useState<TabKey>(initial);
   const [agent, setAgent] = useState<WorkspaceAgentInfo | null>(null);
+  const assistantName = useAssistantName();
 
   // Layer 1: base instructions (built-in Emily persona, applies to ALL conversations).
   const [base, setBase] = useState("");
@@ -282,12 +284,12 @@ export default function AssistantPage() {
             <EmilyAvatar size="md" />
             <div>
               <div className="flex items-center gap-1.5">
-                <h1 className="text-2xl font-semibold tracking-tight">Emily</h1>
+                <h1 className="text-2xl font-semibold tracking-tight">{assistantName}</h1>
                 {/* #541: same presence treatment as the chat surfaces — Emily
                     is a coworker who is around, not a config object. */}
                 <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
               </div>
-              <p className="text-xs text-muted-foreground">Chief of Staff</p>
+              <p className="text-xs text-muted-foreground">chief of staff</p>
             </div>
           </div>
           <Link
@@ -295,7 +297,7 @@ export default function AssistantPage() {
             className="inline-flex h-8 items-center gap-1.5 rounded-[var(--radius-button)] [border:var(--bd-card)] px-3 text-sm font-medium text-ink hover:bg-[var(--active-nav-bg)] transition-colors"
           >
             <MessageCircle className="w-3.5 h-3.5" />
-            Talk to Emily
+            Talk to {assistantName}
           </Link>
           {agent?.model ? (
             <Badge variant="outline" className="text-xs">
@@ -309,8 +311,8 @@ export default function AssistantPage() {
               <AssetVisibilityControl
                 visibility={agent.visibility}
                 canShare={agent.permissions?.can_share ?? true}
-                noun="Emily"
-                titleLabel="Emily visibility"
+                noun={assistantName}
+                titleLabel={`${assistantName} visibility`}
                 onApply={async (next) => {
                   const updated = await api.system.setAssistantVisibility(next);
                   setAgent(updated);
@@ -321,7 +323,7 @@ export default function AssistantPage() {
           ) : null}
         </div>
         <p className="mt-1 text-sm text-muted-foreground">
-          How Emily works for this workspace — her persona, what she knows
+          How Emily works for this workspace: her persona, what she knows
           about your company, and the prompt she runs on. To get work done,
           just talk to her.
         </p>

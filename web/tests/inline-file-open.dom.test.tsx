@@ -32,12 +32,42 @@ describe("InlineFileOpen", () => {
     expect(document.querySelector("img")).toBeNull(); // back to the list
   });
 
-  it("loads text content inline via loadText", async () => {
+  it("does not render API-provided unsafe file URLs", () => {
+    render(
+      <InlineFileOpen
+        files={[{ id: "evil.png", name: "evil.png", url: "javascript:alert(1)" }]}
+        rootLabel="Output"
+      />,
+    );
+
+    fireEvent.click(screen.getByText("evil.png"));
+    expect(screen.queryByRole("link", { name: /Download/i })).toBeNull();
+    expect(document.querySelector("img")).toBeNull();
+  });
+
+  it("loads text content inline via loadText (markdown rendered in Preview)", async () => {
     const loadText = vi.fn().mockResolvedValue("# hello brain");
     render(<InlineFileOpen files={files} rootLabel="company-facts" loadText={loadText} />);
     fireEvent.click(screen.getByText("notes.md"));
-    await waitFor(() => expect(screen.getByText("# hello brain")).toBeTruthy());
+    // #1289: Preview is the default — a .md file renders its heading, not the
+    // raw "# hello brain" source.
+    await waitFor(() => expect(screen.getByRole("heading", { name: "hello brain" })).toBeTruthy());
     expect(loadText).toHaveBeenCalledWith(expect.objectContaining({ id: "notes.md" }));
+  });
+
+  it("#1289: Preview/Raw toggle switches between rendered markdown and raw source", async () => {
+    const loadText = vi.fn().mockResolvedValue("# hello brain");
+    render(<InlineFileOpen files={files} rootLabel="company-facts" loadText={loadText} />);
+    fireEvent.click(screen.getByText("notes.md"));
+    // Preview (default): rendered heading, no literal "#".
+    await waitFor(() => expect(screen.getByRole("heading", { name: "hello brain" })).toBeTruthy());
+    expect(screen.queryByText("# hello brain")).toBeNull();
+    // Switch to Raw: the literal markdown source is shown.
+    fireEvent.click(screen.getByRole("button", { name: /^Raw$/i }));
+    await waitFor(() => expect(screen.getByText("# hello brain")).toBeTruthy());
+    // Back to Preview.
+    fireEvent.click(screen.getByRole("button", { name: /^Preview$/i }));
+    await waitFor(() => expect(screen.getByRole("heading", { name: "hello brain" })).toBeTruthy());
   });
 
   it("never text-loads binary files; .db gets the #777 fallback", () => {
@@ -50,16 +80,16 @@ describe("InlineFileOpen", () => {
 
   it("shows an upload affordance only when onUpload is provided", () => {
     const { unmount } = render(<InlineFileOpen files={files} rootLabel="Output" />);
-    expect(screen.queryByRole("button", { name: /Add files/i })).toBeNull();
+    expect(screen.queryByText(/Drag files here to upload/i)).toBeNull();
     unmount();
     render(<InlineFileOpen files={files} rootLabel="brain" onUpload={vi.fn()} />);
-    expect(screen.getByRole("button", { name: /Add files/i })).toBeTruthy();
-    expect(screen.getByText(/drag . drop/i)).toBeTruthy();
+    expect(screen.getByText(/Drag files here to upload/i)).toBeTruthy();
+    expect(screen.getByRole("button", { name: /browse/i })).toBeTruthy();
   });
 
   it("offers the dropzone even for an empty folder (so files can be added)", () => {
     render(<InlineFileOpen files={[]} rootLabel="brain" emptyLabel="This folder is empty." onUpload={vi.fn()} />);
-    expect(screen.getByRole("button", { name: /Add files/i })).toBeTruthy();
+    expect(screen.getByText(/Drag files here to upload/i)).toBeTruthy();
     expect(screen.getByText("This folder is empty.")).toBeTruthy();
   });
 
@@ -67,11 +97,9 @@ describe("InlineFileOpen", () => {
     const onUpload = vi.fn().mockResolvedValue(undefined);
     render(<InlineFileOpen files={files} rootLabel="brain" onUpload={onUpload} />);
     const dropped = new File(["hi"], "memo.txt", { type: "text/plain" });
-    // The dropzone is the outer list container; drop onto the file list row's parent.
-    const zone = screen.getByText("chart.png").closest("div[style]")?.parentElement?.parentElement;
-    const target = zone ?? screen.getByText("chart.png");
-    fireEvent.dragOver(target, { dataTransfer: { files: [dropped] } });
-    fireEvent.drop(target, { dataTransfer: { files: [dropped] } });
+    const target = screen.getByText(/Drag files here to upload/i).parentElement as HTMLElement;
+    fireEvent.dragOver(target, { dataTransfer: { files: [dropped], types: ["Files"] } });
+    fireEvent.drop(target, { dataTransfer: { files: [dropped], types: ["Files"] } });
     await waitFor(() => expect(onUpload).toHaveBeenCalledTimes(1));
     const [files0, dirPrefix] = onUpload.mock.calls[0];
     expect(files0[0].name).toBe("memo.txt");
@@ -86,5 +114,29 @@ describe("InlineFileOpen", () => {
     fireEvent.change(picker, { target: { files: [picked] } });
     await waitFor(() => expect(onUpload).toHaveBeenCalledTimes(1));
     expect(onUpload.mock.calls[0][0][0].name).toBe("pick.csv");
+  });
+
+  it("shows Edit between Back and Download and saves edited text", async () => {
+    const loadText = vi.fn().mockResolvedValue("# old");
+    const onSaveText = vi.fn().mockResolvedValue(undefined);
+    render(<InlineFileOpen files={files} rootLabel="company-facts" loadText={loadText} onSaveText={onSaveText} />);
+    fireEvent.click(screen.getByText("notes.md"));
+    // #1289: Preview renders the markdown heading by default.
+    await waitFor(() => expect(screen.getByRole("heading", { name: "old" })).toBeTruthy());
+
+    const back = screen.getByRole("button", { name: /Back/i });
+    const edit = screen.getByRole("button", { name: /Edit/i });
+    const download = screen.getByRole("link", { name: /Download/i });
+    expect(Boolean(back.compareDocumentPosition(edit) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+    expect(Boolean(edit.compareDocumentPosition(download) & Node.DOCUMENT_POSITION_FOLLOWING)).toBe(true);
+
+    fireEvent.click(edit);
+    const editor = screen.getByDisplayValue("# old");
+    fireEvent.change(editor, { target: { value: "# new" } });
+    fireEvent.click(screen.getByRole("button", { name: /Save/i }));
+
+    await waitFor(() => expect(onSaveText).toHaveBeenCalledWith(expect.objectContaining({ id: "notes.md" }), "# new"));
+    // After save, Preview re-renders the new markdown heading.
+    await waitFor(() => expect(screen.getByRole("heading", { name: "new" })).toBeTruthy());
   });
 });

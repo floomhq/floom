@@ -135,7 +135,7 @@ export default function ConnectAppPage() {
                       ))}
                     </ul>
                     <p className="mt-2 text-muted-foreground">
-                      Reconnecting refreshes access for the same account — it
+                      Reconnecting refreshes access for the same account; it
                       won&apos;t create a duplicate. Connect a different account
                       to add it alongside this one.
                     </p>

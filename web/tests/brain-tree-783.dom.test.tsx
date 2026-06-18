@@ -21,11 +21,11 @@ describe("InlineFileOpen nested tree (#783)", () => {
 
     // Root level: the top-level file + a "docs" folder (not the nested files).
     expect(screen.getByText("top.txt")).toBeInTheDocument();
-    expect(screen.getByText("docs")).toBeInTheDocument();
+    expect(screen.getByText("docs/")).toBeInTheDocument();
     expect(screen.queryByText("a.txt")).toBeNull();
 
     // Descend into docs → shows base names, breadcrumb back to root.
-    fireEvent.click(screen.getByText("docs"));
+    fireEvent.click(screen.getByText("docs/"));
     expect(screen.getByText("a.txt")).toBeInTheDocument();
     expect(screen.getByText("b.txt")).toBeInTheDocument();
     expect(screen.getByRole("button", { name: "alpha" })).toBeInTheDocument();

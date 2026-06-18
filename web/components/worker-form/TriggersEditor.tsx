@@ -165,20 +165,28 @@ function TriggerRowSummary({ row, onEdit, onRemove }: TriggerRowSummaryProps) {
   const summary = triggerSummaryLine(row);
 
   return (
-    <div className="flex items-center gap-3 py-2.5 px-3 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card hover:bg-muted/30 transition-colors group">
+    <div
+      role="button"
+      tabIndex={0}
+      onClick={onEdit}
+      onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") { e.preventDefault(); onEdit(); } }}
+      className="flex items-center gap-3 py-2.5 px-3 rounded-[var(--radius-button)] [border:var(--bd-card)] bg-card hover:bg-muted/30 transition-colors group cursor-pointer"
+      title="Click to edit trigger"
+    >
       <Icon className="w-3.5 h-3.5 text-muted-foreground shrink-0" />
       <div className="flex-1 min-w-0 flex items-center gap-2 overflow-hidden">
         <span className="text-xs font-medium text-foreground shrink-0">{meta.label}</span>
         <span className="text-muted-foreground text-xs select-none">·</span>
         <span className="text-xs text-muted-foreground truncate" title={summary.title}>{summary.text}</span>
       </div>
-      <div className="flex items-center gap-0.5 shrink-0 opacity-0 group-hover:opacity-100 transition-opacity">
+      {/* Edit/remove buttons: dim at rest (opacity-40), full on hover — always discoverable */}
+      <div className="flex items-center gap-0.5 shrink-0 opacity-40 group-hover:opacity-100 transition-opacity">
         <Button
           type="button"
           variant="ghost"
           size="sm"
           className="h-6 w-6 p-0 text-muted-foreground hover:text-foreground"
-          onClick={onEdit}
+          onClick={(e) => { e.stopPropagation(); onEdit(); }}
           title="Edit trigger"
         >
           <Pencil className="w-3 h-3" />
@@ -188,7 +196,7 @@ function TriggerRowSummary({ row, onEdit, onRemove }: TriggerRowSummaryProps) {
           variant="ghost"
           size="sm"
           className="h-6 w-6 p-0 text-muted-foreground hover:text-destructive"
-          onClick={onRemove}
+          onClick={(e) => { e.stopPropagation(); onRemove(); }}
           title="Remove trigger"
         >
           <X className="w-3 h-3" />
@@ -236,8 +244,9 @@ function TriggerRowEditor({
             size="sm"
             className="h-6 px-2 text-xs text-muted-foreground hover:text-foreground"
             onClick={onCollapse}
+            title="Collapse (changes apply when you click Save triggers below)"
           >
-            Done
+            Collapse
           </Button>
           <Button
             type="button"
@@ -419,7 +428,7 @@ export function TriggersEditor({
       <div>
         <h2 className="text-sm font-medium text-foreground">Triggers</h2>
         <p className="text-xs text-muted-foreground mt-0.5">
-          Decide when this worker runs. Use one trigger or chain several.
+          Decide when this worker runs. Click a trigger to edit it, then save.
         </p>
       </div>
 
