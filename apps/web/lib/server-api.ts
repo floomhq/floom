@@ -80,12 +80,16 @@ export async function fetchRuns(params?: {
   status?: string;
   limit?: number;
   offset?: number;
+  before_created_at?: string;
+  before_id?: string;
 }) {
   const qs = new URLSearchParams();
   if (params?.worker_id) qs.append("worker_id", params.worker_id);
   if (params?.status) qs.append("status", params.status);
   if (params?.limit) qs.append("limit", String(params.limit));
   if (params?.offset) qs.append("offset", String(params.offset));
+  if (params?.before_created_at) qs.append("before_created_at", params.before_created_at);
+  if (params?.before_id) qs.append("before_id", params.before_id);
   const query = qs.toString() ? `?${qs.toString()}` : "";
   return serverFetch<import("./types").RunSummary[]>(`/runs${query}`, {
     next: { revalidate: 10 },

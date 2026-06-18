@@ -183,6 +183,21 @@ class RunRepository(Protocol):
         include_total: bool = True,
     ) -> tuple[list[RowDict], int]: ...
 
+    def list_operator_visible(
+        self,
+        *,
+        user_id: str,
+        worker_id: str | None = None,
+        statuses: list[str] | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 50,
+        before_created_at: str | None = None,
+        before_id: str | None = None,
+        offset: int = 0,
+        include_system: bool = False,
+    ) -> tuple[list[RowDict], int]: ...
+
     def overview_status_rollup(
         self,
         *,

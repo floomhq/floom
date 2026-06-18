@@ -2090,6 +2090,15 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_runs_actor_created
         ON runs(actor_user_id, created_at DESC);
     """,
+    # -- migration 83: operator runs list pagination indexes (#1470) ----------
+    """
+    CREATE INDEX IF NOT EXISTS idx_runs_actor_source_created_id
+        ON runs(actor_user_id, trigger_source, created_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_runs_worker_source_created_id
+        ON runs(worker_id, trigger_source, created_at DESC, id DESC);
+    CREATE INDEX IF NOT EXISTS idx_workers_owner_id_id
+        ON workers(owner_id, id);
+    """,
 ]
 
 
