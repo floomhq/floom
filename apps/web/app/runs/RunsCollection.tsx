@@ -393,7 +393,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
   const [workers, setWorkers] = useState<WorkerSummary[]>([]);
   const [loadingMore, setLoadingMore] = useState(false);
   const [hasMore, setHasMore] = useState(initialRuns.length === 0); // unknown until first fetch
-  const [offset, setOffset] = useState(0);
   const [now] = useState(() => Date.now());
 
   // Sync the cached first page into local state (which loadMore appends to).
@@ -401,7 +400,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     if (runsQuery.data) {
       const sorted = [...runsQuery.data].sort((a, b) => runSortTime(b) - runSortTime(a));
       setRuns(sorted);
-      setOffset(PAGE_SIZE);
       setHasMore(runsQuery.data.length === PAGE_SIZE);
     }
   }, [runsQuery.data]);
@@ -414,7 +412,14 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     if (loadingMore) return;
     setLoadingMore(true);
     try {
-      const rows = await api.runs.list({ limit: PAGE_SIZE, offset });
+      const current = [...runs].sort((a, b) => runSortTime(b) - runSortTime(a));
+      const cursor = current[current.length - 1];
+      const cursorCreatedAt = cursor?.created_at ?? cursor?.started_at ?? undefined;
+      const rows = await api.runs.list(
+        cursor && cursorCreatedAt
+          ? { limit: PAGE_SIZE, before_created_at: cursorCreatedAt, before_id: cursor.id }
+          : { limit: PAGE_SIZE },
+      );
       const sorted = [...rows].sort((a, b) => runSortTime(b) - runSortTime(a));
       setRuns((prev) => {
         // Deduplicate by id in case a new run appeared between pages.
@@ -422,7 +427,6 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
         const novel = sorted.filter((r) => !seen.has(r.id));
         return [...prev, ...novel].sort((a, b) => runSortTime(b) - runSortTime(a));
       });
-      setOffset((o) => o + PAGE_SIZE);
       setHasMore(rows.length === PAGE_SIZE);
     } catch {
       // leave existing rows intact
@@ -435,9 +439,9 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     if (initial) {
       await runsQuery.refetch();
     } else {
-      // Non-initial refresh re-fetches the current window size (keeps existing offset).
+      // Non-initial refresh re-fetches the current window size.
       try {
-        const rows = await api.runs.list({ limit: Math.max(offset, PAGE_SIZE) });
+        const rows = await api.runs.list({ limit: Math.max(runs.length, PAGE_SIZE) });
         setRuns([...rows].sort((a, b) => runSortTime(b) - runSortTime(a)));
       } catch {
         // leave existing state intact on refresh errors
@@ -471,11 +475,17 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
   const exportCSV = async () => {
     const PAGE = 500;
     let all: RunSummary[] = [];
+    let before_created_at: string | undefined;
+    let before_id: string | undefined;
     try {
-      for (let offset = 0; ; offset += PAGE) {
-        const page = await api.runs.list({ limit: PAGE, offset });
+      for (;;) {
+        const page = await api.runs.list({ limit: PAGE, before_created_at, before_id });
         all = [...all, ...page];
         if (page.length < PAGE) break;
+        const last = page[page.length - 1];
+        before_created_at = last.created_at ?? last.started_at ?? undefined;
+        before_id = last.id;
+        if (!before_created_at || !before_id) break;
       }
     } catch {
       all = runs;

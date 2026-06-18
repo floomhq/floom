@@ -64,6 +64,77 @@ def test_cloud_runs_explicit_limit_is_respected(monkeypatch):
     assert captured["limit"] == 50
 
 
+def test_runs_list_uses_sql_visibility_keyset_and_cheap_has_more(monkeypatch):
+    from starlette.responses import Response
+    from routers import runs
+
+    captured: dict[str, object] = {}
+
+    class Request:
+        headers = {}
+        query_params = {"limit": "2", "before_created_at": "2026-06-18T00:00:00+00:00", "before_id": "run-3"}
+
+    class RunsRepo:
+        def list_operator_visible(self, **kwargs):
+            captured.update(kwargs)
+            return [
+                {
+                    "id": "run-2",
+                    "worker_id": "worker-a",
+                    "worker_name": "Worker A",
+                    "status": "completed",
+                    "trigger_source": "manual",
+                    "input_json": "{}",
+                    "created_at": "2026-06-17T00:00:00+00:00",
+                    "started_at": None,
+                    "completed_at": None,
+                    "duration_ms": None,
+                    "error": None,
+                    "error_code": None,
+                },
+                {
+                    "id": "run-1",
+                    "worker_id": "worker-a",
+                    "worker_name": "Worker A",
+                    "status": "completed",
+                    "trigger_source": "manual",
+                    "input_json": "{}",
+                    "created_at": "2026-06-16T00:00:00+00:00",
+                    "started_at": None,
+                    "completed_at": None,
+                    "duration_ms": None,
+                    "error": None,
+                    "error_code": None,
+                },
+            ], 3
+
+        def list(self, **_kwargs):
+            raise AssertionError("legacy list path was used")
+
+    response = Response()
+    monkeypatch.delenv("WORKEROS_DEPLOY", raising=False)
+    monkeypatch.setattr(runs.hot_cache, "get", lambda _key: None)
+    monkeypatch.setattr(runs.hot_cache, "set", lambda _key, _value: None)
+
+    result = runs.list_runs(
+        request=Request(),
+        response=response,
+        limit=2,
+        before_created_at="2026-06-18T00:00:00+00:00",
+        before_id="run-3",
+        auth=SimpleNamespace(user_id="user-a", role="admin"),
+        repos=SimpleNamespace(runs=RunsRepo()),
+    )
+
+    assert [row.id for row in result] == ["run-2", "run-1"]
+    assert captured["before_created_at"] == "2026-06-18T00:00:00+00:00"
+    assert captured["before_id"] == "run-3"
+    assert response.headers["X-Total-Count"] == "3"
+    assert response.headers["X-Has-More"] == "true"
+    assert response.headers["X-Next-Before-Created-At"] == "2026-06-16T00:00:00+00:00"
+    assert response.headers["X-Next-Before-Id"] == "run-1"
+
+
 def test_list_visible_runs_fast_mode_stops_after_page(monkeypatch):
     from services import run_access
 

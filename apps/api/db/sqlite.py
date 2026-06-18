@@ -1809,6 +1809,92 @@ class SqliteRunRepository:
                 total = offset + len(rows) + (1 if len(rows) >= limit else 0)
         return [_row_dict(row) for row in rows], int(total or 0)
 
+    def list_operator_visible(
+        self,
+        *,
+        user_id: str,
+        worker_id: str | None = None,
+        statuses: list[str] | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 50,
+        before_created_at: str | None = None,
+        before_id: str | None = None,
+        offset: int = 0,
+        include_system: bool = False,
+    ) -> tuple[list[dict[str, Any]], int]:
+        from core.config import _INTERNAL_WORKER_ID_PREFIXES, _SYSTEM_WORKER_IDS
+        from services.run_access import _OPERATOR_TRIGGER_SOURCES
+
+        with get_db() as conn:
+            has_actor_user_id = self._has_actor_user_id_column(conn)
+        if has_actor_user_id:
+            where = ["(COALESCE(r.actor_user_id, w.owner_id) = ? OR w.owner_id = ?)"]
+            params: list[Any] = [user_id, user_id]
+            actor_select = "r.actor_user_id,"
+        else:
+            where = ["w.owner_id = ?"]
+            params = [user_id]
+            actor_select = "NULL AS actor_user_id,"
+        if worker_id:
+            where.append("r.worker_id = ?")
+            params.append(worker_id)
+        if statuses:
+            where.append(f"r.status IN ({', '.join('?' for _ in statuses)})")
+            params.extend(statuses)
+        if since:
+            where.append("r.created_at >= ?")
+            params.append(since)
+        if until:
+            where.append("r.created_at <= ?")
+            params.append(until)
+        if before_created_at and before_id:
+            where.append("(r.created_at < ? OR (r.created_at = ? AND r.id < ?))")
+            params.extend([before_created_at, before_created_at, before_id])
+
+        if _SYSTEM_WORKER_IDS:
+            where.append(f"r.worker_id NOT IN ({', '.join('?' for _ in _SYSTEM_WORKER_IDS)})")
+            params.extend(sorted(_SYSTEM_WORKER_IDS))
+        where.append("r.worker_id NOT LIKE '.%'")
+        for prefix in sorted(_INTERNAL_WORKER_ID_PREFIXES):
+            where.append("r.worker_id NOT LIKE ?")
+            params.append(f"{prefix}%")
+        if not include_system:
+            allowed_sources = sorted(_OPERATOR_TRIGGER_SOURCES)
+            where.append(
+                "(TRIM(COALESCE(r.trigger_source, '')) = '' "
+                f"OR LOWER(TRIM(r.trigger_source)) IN ({', '.join('?' for _ in allowed_sources)}))"
+            )
+            params.extend(allowed_sources)
+
+        where_sql = " AND ".join(where)
+        select_sql = f"""
+            SELECT r.id, r.worker_id,
+                   COALESCE(JSON_EXTRACT(sv.manifest_json, '$.title'), w.name) AS worker_name,
+                   {actor_select}
+                   r.status, r.trigger_source, r.input_json, r.created_at, r.started_at,
+                   r.completed_at, r.duration_ms, r.error, r.error_code,
+                   r.quality_warning
+            FROM runs r
+            JOIN workers w ON w.id = r.worker_id
+            LEFT JOIN skill_versions sv ON sv.id = w.skill_version_id
+            WHERE {where_sql}
+            ORDER BY r.created_at DESC, r.id DESC
+            LIMIT ?
+        """
+        query_params: tuple[Any, ...]
+        if offset > 0 and not (before_created_at and before_id):
+            select_sql += " OFFSET ?"
+            query_params = (*params, limit + 1, offset)
+        else:
+            query_params = (*params, limit + 1)
+        with get_db() as conn:
+            rows = conn.execute(select_sql, query_params).fetchall()
+        has_more = len(rows) > limit
+        page_rows = rows[:limit]
+        cheap_total = offset + len(page_rows) + (1 if has_more else 0)
+        return [_row_dict(row) for row in page_rows], int(cheap_total)
+
     @staticmethod
     def _in_clause(values: list[str] | tuple[str, ...]) -> str:
         return ", ".join("?" for _ in values)
