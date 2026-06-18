@@ -136,6 +136,19 @@ def test_floom_secret_auth(monkeypatch, tmp_path):
         resp = c.get("/auth/me", headers={"x-floom-secret": "mysecret"})
         assert resp.status_code == 200
         assert resp.json()["auth_method"] == "secret"
+        assert resp.json()["role"] == "member"
+
+
+def test_floom_secret_admin_role_is_explicit_opt_in(monkeypatch, tmp_path):
+    from fastapi.testclient import TestClient
+    monkeypatch.setenv("FLOOM_SECRET", "mysecret")
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
+    main = load_main(monkeypatch, tmp_path)
+    monkeypatch.setenv("FLOOM_SECRET", "mysecret")
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
+    with TestClient(main.app, base_url="https://testserver") as c:
+        resp = c.get("/auth/me", headers={"x-floom-secret": "mysecret"})
+        assert resp.status_code == 200
         assert resp.json()["role"] == "admin"
 
 

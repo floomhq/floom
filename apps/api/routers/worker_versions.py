@@ -19,7 +19,12 @@ from auth import AuthContext, get_auth_context
 from db import Repositories, get_repos
 from models import VersionSummary, WorkerDetail
 from services.git_service import _git_author, _git_workspace, _require_sha_in_asset_history, _workers_git_prefix
-from services.worker_access import _get_visible_worker, _raise_if_protected_worker_mutation
+from services.worker_access import (
+    _canonical_worker_id,
+    _get_visible_worker,
+    _raise_if_protected_worker_mutation,
+    _worker_for_mutation,
+)
 from services.worker_mutation import _require_worker_write_workspace_context
 from services.worker_registry_ops import (
     _embed_files_in_skill_version,
@@ -102,8 +107,9 @@ def rollback_worker(
     # #1455(b): rollback rewrites the worker bundle, so it is a worker write and
     # takes the same workspace-context guard as create/update/delete.
     _require_worker_write_workspace_context(request)
+    worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    worker = _worker_for_mutation(worker_id, auth, repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 

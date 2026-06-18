@@ -35,15 +35,22 @@ def _load_main(monkeypatch, tmp_path, *, env: dict | None = None):
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("WORKEROS_INSECURE_COOKIES", "1")
     for name in ("FLOOM_SECRET", "WORKEROS_MAGIC_LINK_SECRET", "WORKEROS_UPLOAD_URL_SIGNING_SECRET"):
-        monkeypatch.delenv(name, raising=False)
+        monkeypatch.setenv(name, "")
     for key, value in (env or {}).items():
         monkeypatch.setenv(key, value)
     for name in list(sys.modules):
-        if name == "main" or name == "db" or name.startswith("db.") or name == "auth" or name.startswith("auth."):
+        if (
+            name in ("main", "db", "auth", "routers", "services")
+            or name.startswith(("db.", "auth.", "routers.", "services."))
+        ):
             sys.modules.pop(name, None)
     db = importlib.import_module("db")
     db.init_db()
     db.get_repositories.cache_clear()
+    for name in ("FLOOM_SECRET", "WORKEROS_MAGIC_LINK_SECRET", "WORKEROS_UPLOAD_URL_SIGNING_SECRET"):
+        monkeypatch.setenv(name, "")
+    for key, value in (env or {}).items():
+        monkeypatch.setenv(key, value)
     return importlib.import_module("main")
 
 

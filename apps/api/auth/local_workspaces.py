@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import os
 import re
+import sqlite3
 import uuid
 from typing import Any
 
@@ -57,24 +58,36 @@ def _default_name(base_user_id: str) -> str:
 
 def ensure_default_workspace(owner_user_id: str) -> dict[str, Any]:
     created_at = now_iso()
-    with get_db() as conn:
-        conn.execute(
-            """
-            INSERT OR IGNORE INTO local_workspaces
-                (id, owner_user_id, name, created_at)
-            VALUES (?, ?, ?, ?)
-            """,
-            (DEFAULT_WORKSPACE_ID, owner_user_id, _default_name(owner_user_id), created_at),
-        )
-        row = conn.execute(
-            """
-            SELECT id, owner_user_id, name, created_at, region, timezone
-            FROM local_workspaces
-            WHERE owner_user_id = ? AND id = ?
-            LIMIT 1
-            """,
-            (owner_user_id, DEFAULT_WORKSPACE_ID),
-        ).fetchone()
+    try:
+        with get_db() as conn:
+            conn.execute(
+                """
+                INSERT OR IGNORE INTO local_workspaces
+                    (id, owner_user_id, name, created_at)
+                VALUES (?, ?, ?, ?)
+                """,
+                (DEFAULT_WORKSPACE_ID, owner_user_id, _default_name(owner_user_id), created_at),
+            )
+            row = conn.execute(
+                """
+                SELECT id, owner_user_id, name, created_at, region, timezone
+                FROM local_workspaces
+                WHERE owner_user_id = ? AND id = ?
+                LIMIT 1
+                """,
+                (owner_user_id, DEFAULT_WORKSPACE_ID),
+            ).fetchone()
+    except sqlite3.OperationalError as exc:
+        if "no such table: local_workspaces" not in str(exc).lower():
+            raise
+        return {
+            "id": DEFAULT_WORKSPACE_ID,
+            "owner_user_id": owner_user_id,
+            "name": _default_name(owner_user_id),
+            "created_at": created_at,
+            "region": None,
+            "timezone": None,
+        }
     if row is None:
         raise RuntimeError("failed to create default local workspace")
     return dict(row)
