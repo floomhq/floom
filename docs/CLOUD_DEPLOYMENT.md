@@ -28,7 +28,13 @@ engine fix is required in production.
 3. Run the relevant tests for the change. For engine bumps, include the engine
    tests that cover the changed path before bumping the submodule.
 
-4. Confirm required Railway env vars are set on `workeros-cloud-api`.
+4. Apply any new Supabase migrations in `supabase/migrations/` before or during
+   the API deploy. For the current security hardening batch, confirm
+   `0044_git_workspace_config_admin_select.sql` has been applied; otherwise
+   active workspace members can still read raw Git config rows through
+   PostgREST even though the application code is fixed.
+
+5. Confirm required Railway env vars are set on `workeros-cloud-api`.
 
 ## Required Runtime Env
 
@@ -39,10 +45,26 @@ WORKEROS_DEPLOY=cloud
 SUPABASE_URL=...
 SUPABASE_SERVICE_ROLE_KEY=...
 SUPABASE_JWT_SECRET=...
+WORKEROS_CLOUD_SECRETS_ENCRYPTION_KEY=...
 E2B_API_KEY=...
 OPENAI_API_KEY=...
 COMPOSIO_API_KEY=...
 ```
+
+The scheduler is part of the API process and must hold a Postgres advisory lock
+in Cloud. The API now fails startup if the lock DB env is missing:
+
+```bash
+WORKEROS_CLOUD_DB_HOST=...
+WORKEROS_CLOUD_DB_PORT=5432
+WORKEROS_CLOUD_DB_NAME=...
+WORKEROS_CLOUD_DB_USER=...
+WORKEROS_CLOUD_DB_PASS=...
+```
+
+`railway.toml` also pins `numReplicas = 1`. Do not increase API replicas until
+scheduled-run dispatch is split into a dedicated single-replica worker service
+or the scheduler lock/readiness flow is reviewed for the new topology.
 
 Slack, signing, upload, approval, and webhook secrets must also be set when
 those surfaces are enabled:
@@ -117,6 +139,9 @@ railway up --service workeros-cloud-api
 Use the Railway project/environment that owns `workeros-api.floom.dev`. This
 command uploads the current checkout, including the `engine/` submodule content.
 
+After deployment, verify the deployment details show `numReplicas = 1` from
+`railway.toml` and that `/healthz` is served by the new deployment.
+
 ## Post-Deploy Smoke
 
 Run the read-only route smoke gate:
@@ -163,4 +188,10 @@ WORKEROS_LLM_GATEWAY_KEY=
 - Deploying LLM scheduling code without `WORKEROS_MAX_CONCURRENT_LLM_RUNS`.
 - Forgetting `llm_intensive: true` on the worker manifest.
 - Assuming the LiteLLM gateway is active when `WORKEROS_LLM_GATEWAY_URL` is unset.
+- Forgetting to apply Supabase migrations before deploying code that depends on
+  new RLS or schema behavior.
+- Missing `WORKEROS_CLOUD_DB_*` lock envs; Cloud API startup now fails closed
+  rather than running an unlocked scheduler.
+- Rotating or omitting `WORKEROS_CLOUD_SECRETS_ENCRYPTION_KEY`; GitHub PATs and
+  legacy encrypted secrets use this key.
 - Treating old systemd/autodeploy incident notes as current Cloud deployment docs.
