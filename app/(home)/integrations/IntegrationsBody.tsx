@@ -55,7 +55,6 @@ const FEATURED: Record<string, { category: string; detail: string }> = {
   gmail: { category: "Google Workspace", detail: "Read, draft, and send email" },
   googlecalendar: { category: "Google Workspace", detail: "Meetings, schedules, and prep" },
   googledrive: { category: "Google Workspace", detail: "Docs, files, and shared context" },
-  slack: { category: "Communication", detail: "Ask, approve, and receive finished work" },
   notion: { category: "Knowledge", detail: "Pages, playbooks, and internal docs" },
   linear: { category: "Product", detail: "Issues, projects, and status updates" },
   github: { category: "Product", detail: "Repos, PRs, issues, and engineering reports" },
@@ -258,8 +257,8 @@ export function IntegrationsBody() {
           transition={{ duration: 0.5, delay: 0.08, ease: EASE }}
           className="mx-auto mt-4 max-w-[460px] text-[15.5px] text-muted-foreground"
         >
-          Floom connects to {CATALOG.length.toLocaleString()}+ tools so a worker can read the
-          right context, produce the output, and ask for approval where your team already works.
+          Connects to {CATALOG.length.toLocaleString()}+ tools — reads context, produces
+          output, asks for approval where your team works.
         </motion.p>
       </div>
 
