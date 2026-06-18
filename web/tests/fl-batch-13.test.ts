@@ -169,12 +169,12 @@ function test538StreamChatAcceptsSystemSuffix(): void {
 function test538MagicLinkPage(): void {
   const s = src("app/auth/magic/[token]/page.tsx");
   assert(
-    s.includes("consumeMagicLink") || s.includes("/auth/magic/"),
-    "Magic link page must call the consume endpoint",
+    s.includes("window.location.assign") && s.includes("/api/proxy/auth/magic/"),
+    "Magic link page must navigate to the consume endpoint through the same-origin proxy",
   );
   assert(
-    s.includes("router.replace") || s.includes("router.push"),
-    "Magic link page must redirect after consuming the token",
+    !s.includes("consumeMagicLink") && !s.includes("fetchJson"),
+    "Magic link page must not fetch the redirect endpoint as JSON",
   );
 }
 

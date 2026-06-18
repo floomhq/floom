@@ -50,6 +50,13 @@ _ACTIVE_OUTREACH_STATUSES = {"queued", "queued_dryrun", "sent"}
 _LINKEDIN_MARKER = "linkedin.com/in/"
 
 
+def _first_write_row(resp: Any, *, operation: str) -> dict[str, Any]:
+    rows = getattr(resp, "data", None) or []
+    if not rows:
+        raise HTTPException(status_code=400, detail=f"NovaSearch {operation} failed or row is not accessible")
+    return dict(rows[0])
+
+
 def _load_matcher() -> dict[str, Any]:
     global _MATCH_MODULES
     if _MATCH_MODULES is not None:
@@ -544,7 +551,10 @@ def _update_candidate(workspace_id: str, arguments: dict[str, Any]) -> dict[str,
     if note is not None and str(note).strip():
         stamped = f"[{payload['last_updated']}] {str(note).strip()}"
         payload["notes"] = f"{row.get('notes')}\n{stamped}" if row.get("notes") else stamped
-    updated = client.table("novasearch_tracked_candidates").update(payload).eq("id", row["id"]).execute().data[0]
+    updated = _first_write_row(
+        client.table("novasearch_tracked_candidates").update(payload).eq("id", row["id"]).execute(),
+        operation="candidate update",
+    )
     updated["updated"] = True
     updated["message"] = f"Kandidat '{updated.get('name') or key}' aktualisiert: Status '{updated['status']}'."
     return updated
@@ -558,12 +568,12 @@ def _remember(workspace_id: str, user_id: str, arguments: dict[str, Any]) -> dic
     if kind not in _VALID_KINDS:
         kind = "fact"
     scope = str(arguments.get("scope") or "global").strip() or "global"
-    row = (
+    row = _first_write_row(
         new_supabase_service_client()
         .table("novasearch_memory")
         .insert({"workspace_id": workspace_id, "user_id": user_id, "scope": scope, "kind": kind, "text": text, "created_at": _now_iso()})
-        .execute()
-        .data[0]
+        .execute(),
+        operation="memory insert",
     )
     return {"stored": True, "id": row["id"], "scope": scope, "kind": kind, "text": text, "message": f"Gemerkt ({kind}, Bereich '{scope}'): {text}"}
 
@@ -629,7 +639,7 @@ def _report_issue(workspace_id: str, user_id: str, arguments: dict[str, Any]) ->
     severity = str(arguments.get("severity") or "medium").strip().lower()
     if severity not in _VALID_SEVERITIES:
         severity = "medium"
-    row = (
+    row = _first_write_row(
         new_supabase_service_client()
         .table("novasearch_issue_reports")
         .insert({
@@ -647,8 +657,8 @@ def _report_issue(workspace_id: str, user_id: str, arguments: dict[str, Any]) ->
             "status": "local_only",
             "metadata_json": arguments.get("metadata") if isinstance(arguments.get("metadata"), dict) else {},
         })
-        .execute()
-        .data[0]
+        .execute(),
+        operation="issue report insert",
     )
     row["reported"] = True
     row["message"] = f"Issue gespeichert: {title}. GitHub nicht konfiguriert oder nicht erreichbar; lokal gespeichert."
@@ -896,7 +906,14 @@ async def match_candidates_start(
     _evict_old_jobs()
     job_id = uuid.uuid4().hex
     with _MATCH_JOBS_LOCK:
-        _MATCH_JOBS[job_id] = {"status": "running", "created_at": time.time(), "result": None, "error": None}
+        _MATCH_JOBS[job_id] = {
+            "status": "running",
+            "created_at": time.time(),
+            "workspace_id": workspace_id,
+            "user_id": auth.user_id,
+            "result": None,
+            "error": None,
+        }
     thread = threading.Thread(
         target=_run_background_match_job,
         kwargs={
@@ -917,12 +934,15 @@ async def match_candidates_start(
 @router.get("/match/result/{job_id}")
 async def match_candidates_result(
     job_id: str,
-    _auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = Depends(get_auth_context),
 ) -> dict[str, Any]:
     _evict_old_jobs()
+    workspace_id = _require_workspace_id()
     with _MATCH_JOBS_LOCK:
         entry = _MATCH_JOBS.get(job_id)
         if entry is None:
+            raise HTTPException(status_code=404, detail="Job not found or expired")
+        if entry.get("workspace_id") != workspace_id or entry.get("user_id") != auth.user_id:
             raise HTTPException(status_code=404, detail="Job not found or expired")
         snapshot = {"status": entry["status"], "result": entry.get("result"), "error": entry.get("error")}
     if snapshot["status"] == "running":

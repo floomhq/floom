@@ -591,7 +591,7 @@ def _cloud_body_limit_for_request(request: Request) -> int | None:
         return None
     path = request.url.path.rstrip("/") or "/"
     # Webhook bodies use the same 1 MB Slack limit (re-used for general webhooks).
-    if _re.match(r"^/api/webhooks/[^/]+$", path):
+    if _re.match(r"^/(?:api/)?webhooks/[^/]+$", path):
         from apps.api._engine import import_engine_module as _ie
         try:
             return _ie("channels.common")._MAX_WEBHOOK_BODY_BYTES
@@ -1536,6 +1536,17 @@ async def cloud_webhook_trigger(
         except Exception:
             inputs = {"raw": body.decode("utf-8", errors="replace")}
 
+    delivery_id = (
+        request.headers.get("webhook-id")
+        or request.headers.get("X-Delivery-Id")
+        or request.headers.get("X-GitHub-Delivery")
+    )
+    if delivery_id and not engine_main._claim_webhook_delivery(
+        f"webhook:{worker_id}",
+        str(delivery_id),
+    ):
+        return engine_main.ActionResponse(status="duplicate_ignored")
+
     run_id = engine_main.create_run(
         worker_id,
         inputs,
@@ -1551,6 +1562,15 @@ async def cloud_webhook_trigger(
         repos=repos,
     )
     return engine_main.ActionResponse(status="queued", run_id=run_id)
+
+
+@app.post("/webhooks/{worker_id}", response_model=engine_main.ActionResponse)
+async def cloud_root_webhook_trigger(
+    worker_id: str,
+    request: Request,
+    token: str | None = Query(None),
+) -> Any:
+    return await cloud_webhook_trigger(worker_id=worker_id, request=request, token=token)
 
 
 # The engine creates its OWN FastAPI app with docs enabled (Floom API). Mounted

@@ -437,13 +437,16 @@ class SupabaseAuthProvider:
             # AuthContext directly, NOT the active_member_role contextvar. The
             # engine AuthContext.role DEFAULTS to "admin", so omitting role here
             # silently grants every cloud member admin. Thread the resolved role
-            # in, failing closed to "member" when role can't be proven.
+            # in, and reject workspace-bound PATs when active membership can no
+            # longer be proven.
+            if role is None:
+                raise HTTPException(status_code=403, detail="token is not valid for this workspace")
             obs.set_context(user_id=user_id)
             return AuthContext(
                 user_id=user_id,
                 email=None,
                 scopes=("api",),
-                role=role or "member",
+                role=role,
                 auth_method="pat",
             )
 

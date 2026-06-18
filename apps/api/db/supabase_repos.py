@@ -613,6 +613,34 @@ class _BaseSupabaseRepository:
 
 
 class SupabaseWorkerRepository(_BaseSupabaseRepository):
+    def _scope_skill_versions(self, builder: Any) -> Any:
+        workspace_id = get_active_workspace_id()
+        if workspace_id:
+            return builder.eq("workspace_id", workspace_id)
+        return builder
+
+    def _assert_skill_version_write_allowed(
+        self,
+        *,
+        skill_version_id: str,
+        workspace_id: str | None,
+        user_id: str,
+    ) -> None:
+        existing = _first_row(
+            self._client.table("skill_versions")
+            .select("id,user_id,workspace_id")
+            .eq("id", skill_version_id)
+            .limit(1)
+            .execute()
+        )
+        if existing is None:
+            return
+        existing_workspace_id = existing.get("workspace_id")
+        if existing_workspace_id and workspace_id and existing_workspace_id != workspace_id:
+            raise RuntimeError("skill version belongs to a different workspace")
+        if str(existing.get("user_id") or "") != user_id and not existing_workspace_id:
+            raise RuntimeError("skill version belongs to a different user")
+
     def _skill_versions_by_id(
         self, skill_version_ids: Iterable[str]
     ) -> dict[str, dict[str, Any]]:
@@ -622,12 +650,8 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         last_error: Exception | None = None
         for attempt in range(2):
             try:
-                response = (
-                    self._client.table("skill_versions")
-                    .select("*")
-                    .in_("id", ids)
-                    .execute()
-                )
+                builder = self._client.table("skill_versions").select("*").in_("id", ids)
+                response = self._scope_skill_versions(builder).execute()
                 break
             except Exception as exc:
                 last_error = exc
@@ -882,13 +906,12 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             disk_files = _read_worker_files_from_disk(worker_id)
             if not disk_files:
                 return
-            resp = (
+            builder = (
                 self._client.table("skill_versions")
                 .select("manifest_json")
                 .eq("id", skill_version_id)
-                .limit(1)
-                .execute()
             )
+            resp = self._scope_skill_versions(builder).limit(1).execute()
             rows = resp.data or []
             if not rows:
                 return
@@ -898,9 +921,10 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             if manifest.get("_files") == disk_files:
                 return
             manifest["_files"] = disk_files
-            self._client.table("skill_versions").update(
+            update_builder = self._client.table("skill_versions").update(
                 {"manifest_json": manifest}
-            ).eq("id", skill_version_id).execute()
+            ).eq("id", skill_version_id)
+            self._scope_skill_versions(update_builder).execute()
             _repo_logger.info(
                 "#269 captured %d on-disk file(s) into _files for worker %s",
                 len(disk_files),
@@ -921,9 +945,15 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             user_id=user_id,
             explicit_workspace_id=fields.get("workspace_id"),
         )
+        self._assert_skill_version_write_allowed(
+            skill_version_id=skill_version_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
         self._client.table("skill_versions").upsert(
             {
                 "id": skill_version_id,
+                "workspace_id": workspace_id,
                 "user_id": user_id,
                 "name": manifest_json.get("name") or name,
                 "version": str(manifest_json.get("version") or "0.1.0"),
@@ -1016,9 +1046,21 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
                 f"worker {worker_id!r} already exists for a different user"
             )
 
+        workspace_id = _resolve_workspace_id_for_write(
+            user_id=user_id,
+            explicit_workspace_id=fields.get("workspace_id"),
+            worker_id=worker_id,
+        )
+        self._assert_skill_version_write_allowed(
+            skill_version_id=skill_version_id,
+            workspace_id=workspace_id,
+            user_id=user_id,
+        )
+
         self._client.table("skill_versions").upsert(
             {
                 "id": skill_version_id,
+                "workspace_id": workspace_id,
                 "user_id": user_id,
                 "name": manifest_json.get("name") or name,
                 "version": str(manifest_json.get("version") or "0.1.0"),
@@ -1053,11 +1095,7 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
             # (a worker's workspace doesn't change after creation; the
             # engine's _persist_discovered_workers re-runs upsert on
             # every discovery pass).
-            worker_payload["workspace_id"] = _resolve_workspace_id_for_write(
-                user_id=user_id,
-                explicit_workspace_id=fields.get("workspace_id"),
-                worker_id=worker_id,
-            )
+            worker_payload["workspace_id"] = workspace_id
             worker_payload.update(
                 {
                     "next_run_at": fields.get("next_run_at"),
@@ -1104,10 +1142,11 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
                 payload["manifest_json"] = _json_storage_value(manifest_json, {})
             if bundle_path is not None:
                 payload["bundle_path"] = bundle_path
-            self._client.table("skill_versions").update(payload).eq(
+            builder = self._client.table("skill_versions").update(payload).eq(
                 "id",
                 worker["skill_version_id"],
-            ).execute()
+            )
+            self._scope_skill_versions(builder).execute()
         payload: dict[str, Any] = {}
         for key in (
             "name",
@@ -1388,7 +1427,8 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
         return int(getattr(response, "count", 0) or 0)
 
     def delete_skill_version(self, *, skill_version_id: str) -> None:
-        self._client.table("skill_versions").delete().eq("id", skill_version_id).execute()
+        builder = self._client.table("skill_versions").delete().eq("id", skill_version_id)
+        self._scope_skill_versions(builder).execute()
 
     def get_recipe(
         self,
@@ -4229,6 +4269,12 @@ class SupabaseVersionRepository:
     def _client(self) -> Client:
         return get_supabase_service_client()
 
+    def _scope(self, builder: Any) -> Any:
+        workspace_id = get_active_workspace_id()
+        if workspace_id:
+            return builder.eq("workspace_id", workspace_id)
+        return builder
+
     def create(
         self,
         *,
@@ -4240,20 +4286,20 @@ class SupabaseVersionRepository:
     ) -> dict[str, Any]:
         import uuid as _uuid
         version_id = f"ver_{_uuid.uuid4().hex[:12]}"
+        workspace_id = get_active_workspace_id()
         # Next version number
-        response = (
+        version_query = (
             self._client.table("asset_versions")
             .select("version_number")
             .eq("asset_type", asset_type)
             .eq("asset_id", asset_id)
-            .order("version_number", desc=True)
-            .limit(1)
-            .execute()
         )
+        response = self._scope(version_query).order("version_number", desc=True).limit(1).execute()
         rows = _response_rows(response)
         next_version = (rows[0]["version_number"] + 1) if rows else 1
-        self._client.table("asset_versions").insert({
+        payload = {
             "id": version_id,
+            "workspace_id": workspace_id,
             "asset_type": asset_type,
             "asset_id": asset_id,
             "user_id": user_id,
@@ -4261,7 +4307,8 @@ class SupabaseVersionRepository:
             "snapshot_json": snapshot_json,
             "change_source": change_source,
             "created_at": datetime.now(timezone.utc).isoformat(),
-        }).execute()
+        }
+        self._client.table("asset_versions").insert(payload).execute()
         return self.get(version_id=version_id) or {}
 
     def list(
@@ -4271,48 +4318,42 @@ class SupabaseVersionRepository:
         asset_id: str,
         limit: int = 50,
     ) -> list[dict[str, Any]]:
-        response = (
+        builder = (
             self._client.table("asset_versions")
             .select("id, asset_type, asset_id, user_id, version_number, change_source, created_at")
             .eq("asset_type", asset_type)
             .eq("asset_id", asset_id)
-            .order("version_number", desc=True)
-            .limit(limit)
-            .execute()
         )
+        response = self._scope(builder).order("version_number", desc=True).limit(limit).execute()
         return _response_rows(response)
 
     def get(self, *, version_id: str) -> dict[str, Any] | None:
-        response = (
+        builder = (
             self._client.table("asset_versions")
             .select("*")
             .eq("id", version_id)
-            .limit(1)
-            .execute()
         )
+        response = self._scope(builder).limit(1).execute()
         return _first_row(response)
 
     def prune(self, *, asset_type: str, asset_id: str, keep: int = 50) -> int:
-        response = (
+        builder = (
             self._client.table("asset_versions")
             .select("id")
             .eq("asset_type", asset_type)
             .eq("asset_id", asset_id)
-            .order("version_number", desc=True)
-            .limit(keep)
-            .execute()
         )
+        response = self._scope(builder).order("version_number", desc=True).limit(keep).execute()
         keep_ids = [r["id"] for r in _response_rows(response)]
         if not keep_ids:
             return 0
-        delete_resp = (
+        delete_builder = (
             self._client.table("asset_versions")
             .delete()
             .eq("asset_type", asset_type)
             .eq("asset_id", asset_id)
-            .not_.in_("id", keep_ids)
-            .execute()
         )
+        delete_resp = self._scope(delete_builder).not_.in_("id", keep_ids).execute()
         return len(_response_rows(delete_resp))
 
     def delete_for_asset(self, *, asset_type: str, asset_id: str) -> int:
@@ -4322,13 +4363,13 @@ class SupabaseVersionRepository:
         deleted, so its snapshot history does not linger as an orphan.
         Mirrors SqliteVersionRepository.delete_for_asset.
         """
-        response = (
+        builder = (
             self._client.table("asset_versions")
             .delete()
             .eq("asset_type", asset_type)
             .eq("asset_id", asset_id)
-            .execute()
         )
+        response = self._scope(builder).execute()
         return len(_response_rows(response))
 
     def delete_for_context(self, *, name: str) -> int:
@@ -4345,12 +4386,12 @@ class SupabaseVersionRepository:
         prefix = f"{name}:"
         deleted = 0
         for asset_type in ("brain_pack", "brain_file"):
-            rows = _response_rows(
+            select_builder = (
                 self._client.table("asset_versions")
                 .select("id, asset_id")
                 .eq("asset_type", asset_type)
-                .execute()
             )
+            rows = _response_rows(self._scope(select_builder).execute())
             target_ids = [
                 str(r["id"])
                 for r in rows
@@ -4359,12 +4400,12 @@ class SupabaseVersionRepository:
             ]
             if not target_ids:
                 continue
-            resp = (
+            delete_builder = (
                 self._client.table("asset_versions")
                 .delete()
                 .in_("id", target_ids)
-                .execute()
             )
+            resp = self._scope(delete_builder).execute()
             deleted += len(_response_rows(resp))
         return deleted
 

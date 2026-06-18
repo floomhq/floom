@@ -304,6 +304,85 @@ def test_cloud_webhook_missing_token_fails_before_config_load(monkeypatch, tmp_p
     assert called == {"config": False, "create_run": False}
 
 
+def test_cloud_webhook_deduplicates_delivery_id(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    created: list[str] = []
+    claimed: set[tuple[str, str]] = set()
+
+    class _Workers:
+        def get_any(self, *, worker_id):
+            return {"id": worker_id, "owner_id": "owner-1"}
+
+    class _Repos:
+        workers = _Workers()
+
+    def _claim(source: str, delivery_id: str) -> bool:
+        key = (source, delivery_id)
+        if key in claimed:
+            return False
+        claimed.add(key)
+        return True
+
+    monkeypatch.setattr(main.engine_main, "get_repositories", lambda: _Repos())
+    monkeypatch.setattr(main, "verify_webhook_token", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(main.engine_main, "_worker_has_webhook_trigger", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(main.engine_main, "get_worker_config_for_run", lambda _worker_id: {})
+    monkeypatch.setattr(main.engine_main, "_claim_webhook_delivery", _claim)
+    monkeypatch.setattr(main.engine_main, "_check_webhook_rate_limit", lambda _key: True)
+    monkeypatch.setattr(main.engine_main, "create_run", lambda *_args, **_kwargs: created.append("run") or "run-1")
+    monkeypatch.setattr(main.engine_main, "start_run", lambda *_args, **_kwargs: None)
+
+    first = client.post(
+        "/api/webhooks/worker-1?token=good",
+        headers={"X-Delivery-Id": "delivery-1"},
+        json={"ok": True},
+    )
+    second = client.post(
+        "/api/webhooks/worker-1?token=good",
+        headers={"X-Delivery-Id": "delivery-1"},
+        json={"ok": True},
+    )
+
+    assert first.status_code == 200
+    assert first.json()["status"] == "queued"
+    assert second.status_code == 200
+    assert second.json()["status"] == "duplicate_ignored"
+    assert created == ["run"]
+
+
+def test_root_webhook_path_uses_cloud_wrapper(monkeypatch, tmp_path):
+    main = _load_cloud_app(monkeypatch, tmp_path)
+    client = TestClient(main.app)
+    called = {"verify": False}
+
+    class _Workers:
+        def get_any(self, *, worker_id):
+            return {"id": worker_id, "owner_id": "owner-1"}
+
+    class _Repos:
+        workers = _Workers()
+
+    def _verify(*_args, **_kwargs):
+        called["verify"] = True
+        return True
+
+    monkeypatch.setattr(main.engine_main, "get_repositories", lambda: _Repos())
+    monkeypatch.setattr(main, "verify_webhook_token", _verify)
+    monkeypatch.setattr(main.engine_main, "_worker_has_webhook_trigger", lambda *_args, **_kwargs: True)
+    monkeypatch.setattr(main.engine_main, "get_worker_config_for_run", lambda _worker_id: {})
+    monkeypatch.setattr(main.engine_main, "_claim_webhook_delivery", lambda *_args: True)
+    monkeypatch.setattr(main.engine_main, "_check_webhook_rate_limit", lambda _key: True)
+    monkeypatch.setattr(main.engine_main, "create_run", lambda *_args, **_kwargs: "run-1")
+    monkeypatch.setattr(main.engine_main, "start_run", lambda *_args, **_kwargs: None)
+
+    response = client.post("/webhooks/worker-1?token=good", json={"ok": True})
+
+    assert response.status_code == 200
+    assert response.json()["status"] == "queued"
+    assert called["verify"] is True
+
+
 # ---------------------------------------------------------------------------
 # P2-A / P2-B: /metrics and /system/info must be admin-only
 # ---------------------------------------------------------------------------

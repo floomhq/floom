@@ -40,7 +40,11 @@ function isPublicPath(pathname: string): boolean {
   // #1447: pre-session onboarding + magic-link consumption pages. (The proxy
   // hop these use is already public above via the /api/proxy/ rule.)
   if (path === "/start" || path.startsWith("/start/")) return true;
+  if (path === "/join") return true;
+  if (path === "/cli-auth") return true;
+  if (path.startsWith("/install/")) return true;
   if (path.startsWith("/auth/magic/")) return true;
+  if (path.startsWith("/workspace/share/")) return true;
   if (path.startsWith("/invite/")) return true;
   if (path === "/connections/callback") return true;
   if (path === "/privacy" || path === "/terms") return true;
@@ -91,8 +95,6 @@ function allowedHosts(req: NextRequest): Set<string> {
     if (h) hosts.add(h.split(",")[0].trim().toLowerCase());
   };
   add(req.nextUrl.host);
-  add(req.headers.get("host"));
-  add(req.headers.get("x-forwarded-host"));
   for (const entry of (process.env.CSRF_TRUSTED_ORIGINS || "").split(",")) {
     const v = entry.trim();
     if (!v) continue;

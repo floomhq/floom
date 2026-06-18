@@ -1,44 +1,19 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { useParams, useRouter } from "next/navigation";
-import { api } from "@/lib/api";
-
-/**
- * Validate that a redirect target is a safe same-origin relative path.
- *
- * Accepted: paths starting with a single "/" that are NOT protocol-relative
- * ("//evil.com") and NOT backslash-escaped ("/\evil.com"), preventing open
- * redirect attacks regardless of what the backend returns.
- *
- * Returns the sanitized path, or "/overview" if the input is invalid.
- */
-function sanitizeRedirect(raw: string | null | undefined): string {
-  const FALLBACK = "/overview";
-  if (!raw || typeof raw !== "string") return FALLBACK;
-  // Must start with exactly one "/" and NOT be "//" or "/\" (protocol-relative / backslash escape)
-  if (!raw.startsWith("/")) return FALLBACK;
-  if (raw.startsWith("//") || raw.startsWith("/\\")) return FALLBACK;
-  // Must not contain a scheme (e.g. "javascript:" injected mid-path or after redirect)
-  if (/[a-zA-Z][a-zA-Z0-9+\-.]*:/.test(raw)) return FALLBACK;
-  return raw;
-}
+import { useParams } from "next/navigation";
 
 export default function MagicLinkPage() {
   const params = useParams<{ token: string }>();
-  const router = useRouter();
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
-    void (async () => {
-      try {
-        const result = await api.auth.consumeMagicLink(params.token);
-        router.replace(sanitizeRedirect(result.redirect_to));
-      } catch (err: unknown) {
-        setError(err instanceof Error ? err.message : "Invalid or expired sign-in link.");
-      }
-    })();
-  }, [params.token, router]);
+    if (!params.token) {
+      setError("Invalid or expired sign-in link.");
+      return;
+    }
+    window.location.assign(`/api/proxy/auth/magic/${encodeURIComponent(params.token)}`);
+  }, [params.token]);
 
   if (error) {
     return (
