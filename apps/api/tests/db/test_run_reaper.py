@@ -166,6 +166,65 @@ def test_recover_requeues_abandoned_run_within_budget(repo_bundle, monkeypatch):
     assert scheduled[0]["inputs"] == {"q": "hello"}
 
 
+def test_recover_requeues_claimed_run_that_never_reached_sandbox(repo_bundle, monkeypatch):
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    _create_worker(repos, manifest)
+    now = dt.datetime.now(dt.timezone.utc)
+    stale = (now - dt.timedelta(seconds=180)).isoformat()
+    _make_stale_running(repos, manifest, "run-claimed-orphan", started=stale)
+    repos.runs.add_log(
+        user_id="user-a",
+        run_id="run-claimed-orphan",
+        level="info",
+        message="Queue drain claimed run; dispatching executor thread.",
+        timestamp=stale,
+    )
+
+    scheduled: list[dict] = []
+    monkeypatch.setattr(run_service, "_schedule_retry", lambda **kw: scheduled.append(kw))
+    monkeypatch.setenv("WORKEROS_AUTO_REQUEUE_ABANDONED_RUNS", "1")
+    monkeypatch.setenv("WORKEROS_DISPATCH_ORPHAN_TIMEOUT_SECONDS", "120")
+
+    result = run_service.recover_abandoned_runs(
+        repos=repos, now=now, timeout_seconds=300, grace_seconds=60
+    )
+
+    assert result == {"failed": 1, "requeued": 1}
+    row = repos.runs.get(user_id="user-a", run_id="run-claimed-orphan")
+    assert row["status"] == RunStatus.FAILED.value
+    assert row["error_code"] == run_service.DISPATCH_ORPHAN_ERROR_CODE
+    logs = repos.runs.list_logs(user_id="user-a", run_id="run-claimed-orphan")
+    assert any(log["message"] == run_service.DISPATCH_ORPHAN_ERROR for log in logs)
+    assert scheduled[0]["original_run_id"] == "run-claimed-orphan"
+
+
+def test_recover_does_not_reap_running_run_after_sandbox_start_log(repo_bundle, monkeypatch):
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    _create_worker(repos, manifest)
+    now = dt.datetime.now(dt.timezone.utc)
+    stale = (now - dt.timedelta(seconds=180)).isoformat()
+    _make_stale_running(repos, manifest, "run-started", started=stale)
+    repos.runs.add_log(
+        user_id="user-a",
+        run_id="run-started",
+        level="info",
+        message="[e2b] Spawning sandbox",
+        timestamp=stale,
+    )
+
+    monkeypatch.setenv("WORKEROS_DISPATCH_ORPHAN_TIMEOUT_SECONDS", "120")
+    result = run_service.recover_abandoned_runs(
+        repos=repos, now=now, timeout_seconds=300, grace_seconds=60
+    )
+
+    assert result == {"failed": 0, "requeued": 0}
+    assert repos.runs.get(user_id="user-a", run_id="run-started")["status"] == RunStatus.RUNNING.value
+
+
 def test_recover_does_not_requeue_a_restart_retry(repo_bundle, monkeypatch):
     """A run that is ITSELF a restart-recovery retry must not be recovered again,
     so a worker that crashes the executor on every boot cannot loop forever. The

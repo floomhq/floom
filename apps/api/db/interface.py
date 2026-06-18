@@ -394,6 +394,15 @@ class RunRepository(Protocol):
         error_code: str | None = None,
     ) -> list[RowDict]: ...
 
+    def fail_stale_running_without_sandbox_logs(
+        self,
+        *,
+        cutoff_iso: str,
+        exclude_run_ids: Iterable[str] = (),
+        error: str,
+        error_code: str | None = None,
+    ) -> list[RowDict]: ...
+
     def fail_all_pending_approval(
         self,
         *,

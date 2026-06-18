@@ -2047,6 +2047,12 @@ class E2BSandboxDriver(SandboxDriver):
                     _emit_command_output(exc_stderr, "warning", "[e2b] stderr: ", log_fn)
                 exc_exit_code = _exception_exit_code(exc)
                 if exc_exit_code is None:
+                    diagnostics = _sandbox_memory_diagnostics(sandbox, workdir)
+                    log_fn(
+                        "[e2b] Sandbox command transport failed before an exit code; "
+                        f"memory diagnostics: {diagnostics}",
+                        "warning",
+                    )
                     raise
                 if _looks_like_sandbox_oom(exc_exit_code, exc_stdout, exc_stderr):
                     diagnostics = _sandbox_memory_diagnostics(sandbox, workdir)
