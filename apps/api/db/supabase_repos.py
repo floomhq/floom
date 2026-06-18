@@ -1424,6 +1424,17 @@ class SupabaseWorkerRepository(_BaseSupabaseRepository):
 
 
 class SupabaseRunRepository(_BaseSupabaseRepository):
+    _LIST_COLUMNS = (
+        "id,worker_id,status,trigger_source,input_json,error,error_code,"
+        "started_at,completed_at,duration_ms,created_at,quality_warning,"
+        "trigger_member_id"
+    )
+    _DETAIL_COLUMNS = (
+        "id,worker_id,status,trigger_source,runner,input_json,output_json,error,"
+        "error_code,started_at,completed_at,duration_ms,created_at,"
+        "cancel_requested,cancelled_at,bundle_snapshot_path,trigger_member_id"
+    )
+
     def _resolve_trigger_member_emails(self, user_ids: list[str]) -> dict[str, str]:
         """Batch-look up emails for trigger_member_id values. Never raises."""
         if not user_ids:
@@ -1499,11 +1510,12 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
         until: str | None = None,
         limit: int = 50,
         offset: int = 0,
+        include_total: bool = True,
     ) -> tuple[list[dict[str, Any]], int]:
-        builder = self._client.table("runs").select(
-            "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path,trigger_member_id",
-            count="exact",
-        )
+        if include_total:
+            builder = self._client.table("runs").select(self._LIST_COLUMNS, count="exact")
+        else:
+            builder = self._client.table("runs").select(self._LIST_COLUMNS)
         builder = _scope_by_workspace(builder, user_id=user_id)
         if worker_id:
             builder = builder.eq("worker_id", worker_id)
@@ -1542,13 +1554,112 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
                 pass
 
         rows = self._decorate_run_rows(raw_rows)
-        total = int(getattr(response, "count", 0) or 0)
+        if include_total:
+            total = int(getattr(response, "count", 0) or 0)
+        else:
+            total = offset + len(rows) + (1 if len(rows) >= limit else 0)
         return rows, total
 
+    @staticmethod
+    def _operator_run_visible(row: dict[str, Any], *, include_system: bool) -> bool:
+        try:
+            ensure_engine_api_path()
+            from core.config import _INTERNAL_WORKER_ID_PREFIXES, _SYSTEM_WORKER_IDS  # noqa: PLC0415
+            from services.run_access import _OPERATOR_TRIGGER_SOURCES  # noqa: PLC0415
+        except Exception:
+            _SYSTEM_WORKER_IDS = frozenset({
+                "workspace-agent",
+                "worker-author",
+                "slack-listener",
+                "whatsapp-listener",
+            })
+            _INTERNAL_WORKER_ID_PREFIXES = ("_mcp_", "audit-local-", "smoke-")
+            _OPERATOR_TRIGGER_SOURCES = frozenset({
+                "manual",
+                "schedule",
+                "approval",
+                "composio",
+                "webhook",
+                "workspace-agent",
+            })
+
+        worker_id = str(row.get("worker_id") or "")
+        if not worker_id:
+            return False
+        if worker_id in _SYSTEM_WORKER_IDS:
+            return False
+        if worker_id.startswith("."):
+            return False
+        if any(worker_id.startswith(prefix) for prefix in _INTERNAL_WORKER_ID_PREFIXES):
+            return False
+        if include_system:
+            return True
+        source = str(row.get("trigger_source") or "").strip().lower()
+        return not source or source in _OPERATOR_TRIGGER_SOURCES
+
+    def list_operator_visible(
+        self,
+        *,
+        user_id: str,
+        worker_id: str | None = None,
+        statuses: list[str] | None = None,
+        since: str | None = None,
+        until: str | None = None,
+        limit: int = 50,
+        before_created_at: str | None = None,
+        before_id: str | None = None,
+        offset: int = 0,
+        include_system: bool = False,
+    ) -> tuple[list[dict[str, Any]], int]:
+        page_limit = max(1, min(int(limit or 50), 200))
+        fetch_limit = min(max(page_limit * 2 + 1, 25), 200)
+        visible_rows: list[dict[str, Any]] = []
+        raw_offset = max(0, int(offset or 0))
+
+        for _batch in range(3):
+            builder = self._client.table("runs").select(self._LIST_COLUMNS)
+            builder = _scope_by_workspace(builder, user_id=user_id)
+            if worker_id:
+                builder = builder.eq("worker_id", worker_id)
+            if statuses:
+                builder = builder.in_("status", statuses)
+            if since:
+                builder = builder.gte("created_at", since)
+            if until:
+                builder = builder.lte("created_at", until)
+            if before_created_at and before_id:
+                builder = builder.or_(
+                    f"created_at.lt.{before_created_at},"
+                    f"and(created_at.eq.{before_created_at},id.lt.{before_id})"
+                )
+            response = (
+                builder
+                .order("created_at", desc=True)
+                .order("id", desc=True)
+                .range(raw_offset, raw_offset + fetch_limit - 1)
+                .execute()
+            )
+            raw_rows = _response_rows(response)
+            if not raw_rows:
+                break
+            for row in raw_rows:
+                if self._operator_run_visible(row, include_system=include_system):
+                    visible_rows.append(row)
+                    if len(visible_rows) > page_limit:
+                        break
+            if len(visible_rows) > page_limit or len(raw_rows) < fetch_limit:
+                break
+            if before_created_at and before_id:
+                break
+            raw_offset += len(raw_rows)
+
+        page_rows = visible_rows[:page_limit]
+        rows = self._decorate_run_rows(page_rows)
+        cheap_total = offset + len(rows) + (1 if len(visible_rows) > page_limit else 0)
+        return rows, cheap_total
+
     def get(self, *, user_id: str, run_id: str) -> dict[str, Any] | None:
-        builder = self._client.table("runs").select(
-            "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path,trigger_member_id"
-        )
+        builder = self._client.table("runs").select(self._DETAIL_COLUMNS)
         builder = _scope_by_workspace(builder, user_id=user_id)
         response = builder.eq("id", run_id).limit(1).execute()
         row = _first_row(response)
@@ -1557,9 +1668,7 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
                 return None
             fallback = (
                 self._client.table("runs")
-                .select(
-                    "id,worker_id,status,trigger_source,runner,input_json,output_json,error,started_at,completed_at,duration_ms,created_at,cancel_requested,cancelled_at,bundle_snapshot_path,trigger_member_id"
-                )
+                .select(self._DETAIL_COLUMNS)
                 .eq("id", run_id)
                 .eq("user_id", user_id)
                 .limit(1)

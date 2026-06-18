@@ -32,10 +32,13 @@ class _FakeTable:
         self.filters: list[tuple[str, str]] = []
         self.in_filters: list[tuple[str, set[str]]] = []
         self.limit_value = None
+        self.range_value = None
         self.selected = None
+        self.select_kwargs = {}
 
-    def select(self, value, **_kwargs):
+    def select(self, value, **kwargs):
         self.selected = value
+        self.select_kwargs = kwargs
         return self
 
     def eq(self, key, value):
@@ -50,7 +53,14 @@ class _FakeTable:
         self.limit_value = value
         return self
 
+    def range(self, start, end):
+        self.range_value = (start, end)
+        return self
+
     def order(self, *_args, **_kwargs):
+        return self
+
+    def or_(self, *_args, **_kwargs):
         return self
 
     def execute(self):
@@ -59,6 +69,9 @@ class _FakeTable:
             rows = [row for row in rows if row.get(key) == value]
         for key, values in self.in_filters:
             rows = [row for row in rows if row.get(key) in values]
+        if self.range_value is not None:
+            start, end = self.range_value
+            rows = rows[start : end + 1]
         if self.limit_value is not None:
             rows = rows[: self.limit_value]
         return _FakeResponse(rows)
@@ -69,11 +82,13 @@ class _FakeClient:
         self.rows_by_table = rows if isinstance(rows, dict) else None
         self.rows = rows
         self.table_ref = _FakeTable([])
+        self.table_refs: list[_FakeTable] = []
 
     def table(self, name):
         rows = self.rows_by_table.get(name, []) if self.rows_by_table is not None else self.rows
         self.table_ref = _FakeTable(rows)
         self.table_ref.table_name = name
+        self.table_refs.append(self.table_ref)
         return self.table_ref
 
 
@@ -234,6 +249,61 @@ def test_run_get_falls_back_to_owned_exact_id_when_workspace_cookie_is_stale():
     assert result is not None
     assert result["id"] == run_id
     assert result["worker_id"] == worker_id
+
+
+def test_run_list_operator_visible_uses_lightweight_select_and_cheap_total():
+    now_iso = _now_iso()
+    client = _FakeClient(
+        {
+            "runs": [
+                {
+                    "id": "run-visible",
+                    "user_id": "user_fede",
+                    "worker_id": "worker-visible",
+                    "status": "completed",
+                    "trigger_source": "manual",
+                    "input_json": {},
+                    "output_json": {"large": "payload"},
+                    "error": None,
+                    "created_at": now_iso,
+                },
+                {
+                    "id": "run-audit",
+                    "user_id": "user_fede",
+                    "worker_id": "worker-visible",
+                    "status": "completed",
+                    "trigger_source": "audit",
+                    "input_json": {},
+                    "output_json": {"large": "payload"},
+                    "error": None,
+                    "created_at": now_iso,
+                },
+                {
+                    "id": "run-hidden",
+                    "user_id": "user_fede",
+                    "worker_id": ".system-worker",
+                    "status": "completed",
+                    "trigger_source": "manual",
+                    "input_json": {},
+                    "output_json": {"large": "payload"},
+                    "error": None,
+                    "created_at": now_iso,
+                },
+            ],
+            "workers": [],
+        }
+    )
+
+    rows, total = SupabaseRunRepository(client=client).list_operator_visible(
+        user_id="user_fede",
+        limit=10,
+    )
+
+    runs_table = next(table for table in client.table_refs if table.table_name == "runs")
+    assert runs_table.select_kwargs.get("count") is None
+    assert "output_json" not in runs_table.selected
+    assert [row["id"] for row in rows] == ["run-visible"]
+    assert total == 1
 
 
 def _now_iso() -> str:

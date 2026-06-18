@@ -6,6 +6,7 @@ import time
 from dataclasses import dataclass
 from functools import lru_cache
 
+import httpx
 from supabase import Client, create_client
 from supabase.lib.client_options import SyncClientOptions
 
@@ -20,6 +21,14 @@ def _env(*names: str, default: str | None = None) -> str | None:
         if value:
             return value
     return default
+
+
+def _env_int(name: str, default: int, *, minimum: int, maximum: int) -> int:
+    try:
+        value = int((os.environ.get(name) or "").strip() or default)
+    except ValueError:
+        value = default
+    return max(minimum, min(value, maximum))
 
 
 @dataclass(frozen=True)
@@ -105,11 +114,77 @@ def get_cloud_settings() -> CloudSettings:
     )
 
 
+class _RetryingHTTPTransport(httpx.HTTPTransport):
+    _IDEMPOTENT_METHODS = frozenset({"GET", "HEAD", "OPTIONS"})
+    _RETRYABLE = (
+        httpx.RemoteProtocolError,
+        httpx.ReadError,
+        httpx.ConnectError,
+        httpx.ConnectTimeout,
+    )
+
+    def __init__(self, *, retries: int, backoff_seconds: float, **kwargs: object) -> None:
+        super().__init__(**kwargs)
+        self._retries = max(0, retries)
+        self._backoff_seconds = max(0.0, backoff_seconds)
+
+    def handle_request(self, request: httpx.Request) -> httpx.Response:
+        attempts = self._retries + 1 if request.method in self._IDEMPOTENT_METHODS else 1
+        for attempt in range(attempts):
+            try:
+                return super().handle_request(request)
+            except self._RETRYABLE:
+                if attempt >= attempts - 1:
+                    raise
+                time.sleep(self._backoff_seconds * (attempt + 1))
+        raise RuntimeError("unreachable Supabase retry state")
+
+
+def _supabase_http_client() -> httpx.Client:
+    max_connections = _env_int(
+        "WORKEROS_SUPABASE_MAX_CONNECTIONS",
+        100,
+        minimum=10,
+        maximum=500,
+    )
+    max_keepalive = _env_int(
+        "WORKEROS_SUPABASE_MAX_KEEPALIVE_CONNECTIONS",
+        40,
+        minimum=5,
+        maximum=max_connections,
+    )
+    keepalive_expiry = _env_int(
+        "WORKEROS_SUPABASE_KEEPALIVE_EXPIRY_SECONDS",
+        120,
+        minimum=10,
+        maximum=240,
+    )
+    retries = _env_int("WORKEROS_SUPABASE_GET_RETRIES", 3, minimum=0, maximum=3)
+    limits = httpx.Limits(
+        max_connections=max_connections,
+        max_keepalive_connections=max_keepalive,
+        keepalive_expiry=float(keepalive_expiry),
+    )
+    transport = _RetryingHTTPTransport(
+        retries=retries,
+        backoff_seconds=0.1,
+        http2=True,
+        limits=limits,
+        trust_env=False,
+    )
+    return httpx.Client(
+        timeout=httpx.Timeout(120.0),
+        transport=transport,
+        trust_env=False,
+    )
+
+
 def _client_options() -> SyncClientOptions:
     return SyncClientOptions(
         auto_refresh_token=False,
         persist_session=False,
         headers={"X-Client-Info": "workeros-cloud-api"},
+        httpx_client=_supabase_http_client(),
     )
 
 
