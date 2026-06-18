@@ -28,6 +28,7 @@ export function PromptInput({
   attachedFiles,
   placeholder,
   disabled,
+  sendDisabled,
 }: {
   value: string;
   onChange: (v: string) => void;
@@ -35,7 +36,14 @@ export function PromptInput({
   onFilesChange: (files: AttachedFile[]) => void;
   attachedFiles: AttachedFile[];
   placeholder?: string;
+  /** Hard-disable the whole composer (textarea + attach + send). */
   disabled?: boolean;
+  /**
+   * B15 (Federico 2026-06-17): decouple typing from sending. When Emily is
+   * streaming a reply we keep the textarea EDITABLE so the user can draft their
+   * next message, and disable ONLY the send action until the stream completes.
+   */
+  sendDisabled?: boolean;
 }) {
   const textareaRef = useRef<HTMLTextAreaElement>(null);
   const fileInputRef = useRef<HTMLInputElement>(null);
@@ -43,6 +51,9 @@ export function PromptInput({
   const handleKey = (e: React.KeyboardEvent) => {
     if (e.key === "Enter" && !e.shiftKey) {
       e.preventDefault();
+      // B15: Enter never sends while a reply is streaming — but the keystrokes
+      // before Enter still land in the textarea (it stays editable).
+      if (disabled || sendDisabled) return;
       onSubmit();
     }
   };
@@ -59,7 +70,7 @@ export function PromptInput({
   useEffect(() => {
     if (textareaRef.current) {
       textareaRef.current.style.height = "auto";
-      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 140)}px`;
+      textareaRef.current.style.height = `${Math.min(textareaRef.current.scrollHeight, 120)}px`;
     }
   }, [value]);
 
@@ -88,7 +99,8 @@ export function PromptInput({
     onFilesChange(attachedFiles.filter((f) => f.id !== id));
   };
 
-  const canSend = (value.trim().length > 0 || attachedFiles.length > 0) && !disabled;
+  const canSend =
+    (value.trim().length > 0 || attachedFiles.length > 0) && !disabled && !sendDisabled;
 
   return (
     <div className="space-y-2">
@@ -105,7 +117,11 @@ export function PromptInput({
           /workers/new (lib/prompt-detect). */}
       <PromptChips prompt={value} className="px-1" />
 
-      <div className="flex items-center gap-2 rounded-xl [border:var(--bd-card)] bg-[var(--bg-2)] px-3 py-2.5 focus-within:[border:var(--bd-card)]">
+      {/* E10 (Federico 2026-06-17): flat #FBFBFC composer (bg-app), NOT the grey
+          --bg-2 panel that read as an unwanted "white box" appearing on type/focus.
+          A single subtle divider outline keeps it discoverable; more compact
+          padding (py-2) makes the box shorter. */}
+      <div className="flex items-center gap-2 rounded-xl [border:var(--bd-div)] bg-[var(--bg-app)] px-3 py-2 focus-within:[border:var(--bd-div)]">
         {/* Attach button */}
         <button
           type="button"
@@ -131,7 +147,7 @@ export function PromptInput({
 
         <textarea
           ref={textareaRef}
-          className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground min-h-[20px] max-h-[140px] overflow-auto"
+          className="flex-1 resize-none bg-transparent text-sm outline-none placeholder:text-muted-foreground min-h-[20px] max-h-[120px] overflow-auto"
           placeholder={placeholder ?? "Message Emily..."}
           value={value}
           onChange={(e) => onChange(e.target.value)}
