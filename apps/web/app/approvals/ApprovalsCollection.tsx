@@ -1,11 +1,9 @@
 "use client";
 
-import { useCallback, useEffect, useMemo, useState } from "react";
+import { useCallback, useMemo, useState } from "react";
 import Link from "next/link";
 import { toast } from "sonner";
 import { CheckSquare2 } from "lucide-react";
-import { api } from "@/lib/api";
-import { reportError } from "@/lib/notify";
 import type { ApprovalRow, WorkerSummary } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey, TagOption } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
@@ -18,6 +16,7 @@ import {
   approveCommentSupported,
 } from "@/lib/approvals/decision";
 import { notifyApprovalsChanged, useApprovalsListSync } from "@/lib/useApprovalsSync";
+import { useApprovals, useWorkers } from "@/lib/query/hooks";
 
 function itemCount(a: ApprovalRow): number {
   const di = parseDecisionInput(a.decision_input_json);
@@ -53,10 +52,17 @@ function approvalContentTagOptions(
 }
 
 export default function ApprovalsCollection() {
-  const [items, setItems] = useState<ApprovalRow[]>([]);
-  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  const approvalsQuery = useApprovals("pending");
+  const workersQuery = useWorkers();
+  const { refetch: refetchApprovals } = approvalsQuery;
+  const { refetch: refetchWorkers } = workersQuery;
+  const items = approvalsQuery.data ?? [];
+  const workers = workersQuery.data ?? [];
+  const loading = approvalsQuery.isLoading && !approvalsQuery.data;
   const [error, setError] = useState<string | null>(null);
+  const listError =
+    error ??
+    (approvalsQuery.isError && !approvalsQuery.data ? "Could not load approvals." : null);
   // Per-approval reviewer comment (keyed by approval id), and the in-flight
   // decision so the buttons can disable + show progress.
   const [comments, setComments] = useState<Record<string, string>>({});
@@ -69,36 +75,14 @@ export default function ApprovalsCollection() {
   }, [workers]);
 
   const refresh = useCallback(async () => {
-    try {
-      const rows = await api.approvals.list("pending");
-      setItems(rows);
-      setError(null);
-    } catch {
+    const result = await refetchApprovals();
+    void refetchWorkers();
+    if (result.error) {
       setError("Could not load approvals.");
-    } finally {
-      setLoading(false);
+    } else {
+      setError(null);
     }
-  }, []);
-
-  useEffect(() => {
-    void refresh();
-    // Content tags are inherited from the parent worker (SPEC §11).
-    api.workers
-      .list()
-      .then(setWorkers)
-      .catch((err) => reportError("Could not load workers for approval filters.", err));
-    // Safety timeout: if the API proxy is unreachable and the request hangs,
-    // stop showing the skeleton after 10 s so users see an error + retry.
-    const timeout = setTimeout(() => {
-      setLoading((prev) => {
-        if (prev) {
-          setError("Could not load approvals. Check your connection and try again.");
-        }
-        return false;
-      });
-    }, 10_000);
-    return () => clearTimeout(timeout);
-  }, [refresh]);
+  }, [refetchApprovals, refetchWorkers]);
 
   // Keep the sidebar badge + other tabs in sync (preserves legacy behavior).
   useApprovalsListSync(refresh);
@@ -133,7 +117,7 @@ export default function ApprovalsCollection() {
     subtitle: "Workers waiting for your decision before executing.",
     items,
     loading,
-    error,
+    error: listError,
     idOf: (a) => a.id,
     searchOf: (a) => `${a.worker_name ?? ""} ${a.label ?? ""}`,
     tagsOf: (a) => {
@@ -241,7 +225,6 @@ export default function ApprovalsCollection() {
     states: {
       empty: { title: "No pending approvals", help: "Workers will appear here when they need a decision.", icon: CheckSquare2 },
       errorRetry: () => {
-        setLoading(true);
         void refresh();
       },
     },

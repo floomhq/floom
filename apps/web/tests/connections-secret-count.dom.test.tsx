@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 // Round-09 #6 — render the REAL ConnectionsCollection with the live bug data
 // (0 connections + 43 secrets) and prove the headline count tiles never read as
@@ -28,12 +30,17 @@ vi.mock("@/lib/api", () => ({
 
 beforeEach(() => vi.clearAllMocks());
 
+function TestQueryProvider({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
 describe("ConnectionsCollection count tiles (round-09 #6)", () => {
   it("does not count 43 secrets as active connections", async () => {
     const { default: ConnectionsCollection } = await import(
       "@/app/connections/ConnectionsCollection"
     );
-    render(<ConnectionsCollection initialConnections={[]} />);
+    render(<TestQueryProvider><ConnectionsCollection initialConnections={[]} /></TestQueryProvider>);
 
     // First secret renders → the unified list mounted.
     expect(await screen.findByText("SECRET_0")).toBeInTheDocument();

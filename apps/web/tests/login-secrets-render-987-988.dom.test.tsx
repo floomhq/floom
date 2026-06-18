@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 // #987: /login must render the sign-in form (not the not-found shell / blank).
 // #988: /connections/secrets must leave the "Loading secrets..." Suspense
@@ -25,6 +27,7 @@ vi.mock("@/lib/api", () => ({
   api: {
     auth: { setupRequired: authSetupRequired, status: authStatus },
     secrets: { list: secretsList },
+    workers: { list: vi.fn().mockResolvedValue([]) },
   },
 }));
 
@@ -36,6 +39,11 @@ beforeEach(() => {
   authStatus.mockResolvedValue({ mode: "username" });
   secretsList.mockResolvedValue([]);
 });
+
+function TestQueryProvider({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
 
 describe("#987 login page renders the sign-in form", () => {
   it("shows sign-in controls, not a blank/not-found shell", async () => {
@@ -53,7 +61,7 @@ describe("#987 login page renders the sign-in form", () => {
 describe("#988 secrets page leaves the Suspense fallback and fetches", () => {
   it("calls api.secrets.list() for an admin and leaves 'Loading secrets...'", async () => {
     const mod = await import("@/app/connections/secrets/page");
-    render(<mod.default />);
+    render(<TestQueryProvider><mod.default /></TestQueryProvider>);
     await waitFor(() => expect(secretsList).toHaveBeenCalled());
     await waitFor(() => {
       expect(document.body.textContent || "").not.toMatch(/Loading secrets\.\.\./);

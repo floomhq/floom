@@ -1,5 +1,7 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
+import type { ReactNode } from "react";
 
 // #1006: WorkersCollection accepts host-injected top-level views so
 // workeros-cloud can compose the engine component (its cross-tenant
@@ -40,10 +42,15 @@ beforeEach(() => {
   vi.clearAllMocks();
 });
 
+function TestQueryProvider({ children }: { children: ReactNode }) {
+  const client = new QueryClient({ defaultOptions: { queries: { retry: false } } });
+  return <QueryClientProvider client={client}>{children}</QueryClientProvider>;
+}
+
 describe("WorkersCollection extra views (#1006)", () => {
   it("renders no view switcher when no extra views are supplied (OSS)", async () => {
     const { default: WorkersCollection } = await import("@/app/workers/WorkersCollection");
-    render(<WorkersCollection initialWorkers={[worker as never]} />);
+    render(<TestQueryProvider><WorkersCollection initialWorkers={[worker as never]} /></TestQueryProvider>);
     expect(await screen.findByText("Weekly Update")).toBeInTheDocument();
     // No top-level tablist in OSS mode.
     expect(screen.queryByRole("tablist", { name: "Workers views" })).toBeNull();
@@ -58,7 +65,11 @@ describe("WorkersCollection extra views (#1006)", () => {
         render: () => <div>WORKSPACE ADMIN PANEL</div>,
       },
     ];
-    render(<WorkersCollection initialWorkers={[worker as never]} extraViews={extraViews} />);
+    render(
+      <TestQueryProvider>
+        <WorkersCollection initialWorkers={[worker as never]} extraViews={extraViews} />
+      </TestQueryProvider>,
+    );
 
     // Switcher is present with both tabs.
     expect(await screen.findByRole("tab", { name: "Workers" })).toBeInTheDocument();

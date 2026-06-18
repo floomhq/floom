@@ -22,8 +22,8 @@ describe("Sign-in split page (§5a2 / #822)", () => {
     const { default: LoginPage } = await import("@/app/login/page");
     render(<LoginPage />);
 
-    expect(await screen.findByText("Hire AI workers.")).toBeInTheDocument();
-    expect(screen.getByText("Your first sign-in creates your workspace.")).toBeInTheDocument();
+    expect(await screen.findByText("Hire AI workers for your company.")).toBeInTheDocument();
+    expect(screen.getByText(/Jobs that run themselves/)).toBeInTheDocument();
     expect(screen.queryByText("This week")).not.toBeInTheDocument();
     expect(screen.queryByText("142")).not.toBeInTheDocument();
     expect(screen.queryByText("Weekly sales summary")).not.toBeInTheDocument();
