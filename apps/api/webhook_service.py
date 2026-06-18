@@ -133,6 +133,15 @@ def get_or_create_token_key(worker_id: str, *, repos: Repositories | None = None
     return backfilled
 
 
+def get_existing_token_key(worker_id: str, *, repos: Repositories | None = None) -> str | None:
+    """Return the worker's current webhook token key without backfilling.
+
+    Verification must be read-only: unauthenticated probes should not create or
+    rotate webhook material for legacy workers that do not yet have a secret.
+    """
+    return _repos(repos).workers.get_webhook_secret_hash(worker_id=worker_id)
+
+
 def current_webhook_token(worker_id: str, *, repos: Repositories | None = None) -> str:
     """Return the worker's current webhook URL token (backfilling key if needed)."""
     token_key = get_or_create_token_key(worker_id, repos=repos)
@@ -174,10 +183,11 @@ def verify_webhook_token(
     """
     if not token:
         return False
-    token_key = get_or_create_token_key(worker_id, repos=repos)
-    expected = derive_webhook_token(worker_id, token_key)
-    if hmac.compare_digest(token, expected):
-        return True
+    token_key = get_existing_token_key(worker_id, repos=repos)
+    if token_key:
+        expected = derive_webhook_token(worker_id, token_key)
+        if hmac.compare_digest(token, expected):
+            return True
     if _legacy_grace_enabled():
         # #998: with no real FLOOM_SECRET the legacy token cannot be valid —
         # fail closed (reject) instead of comparing against a public constant.

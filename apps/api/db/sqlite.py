@@ -1701,17 +1701,36 @@ class SqliteWorkerRepository:
                 (last_fired_at, next_run_at, now_iso(), trigger_id),
             )
 
-    def find_trigger_by_external_id(self, *, external_trigger_id: str) -> dict[str, Any] | None:
+    def find_trigger_by_external_id(
+        self,
+        *,
+        external_trigger_id: str,
+        user_id: str | None = None,
+        workspace_id: str | None = None,
+    ) -> dict[str, Any] | None:
+        where = ["t.external_trigger_id = ?", "t.enabled = 1", "w.enabled = 1"]
+        params: list[Any] = [external_trigger_id]
+        if user_id:
+            where.append("w.owner_id = ?")
+            params.append(user_id)
+        if workspace_id:
+            where.append("COALESCE(w.workspace_id, 'local-default') = ?")
+            params.append(workspace_id)
         with get_db() as conn:
-            row = conn.execute(
-                """
-                SELECT * FROM worker_triggers
-                WHERE external_trigger_id = ? AND enabled = 1
-                LIMIT 1
+            rows = conn.execute(
+                f"""
+                SELECT t.*, w.owner_id AS worker_owner_id, w.workspace_id AS worker_workspace_id
+                FROM worker_triggers t
+                JOIN workers w ON w.id = t.worker_id
+                WHERE {' AND '.join(where)}
+                ORDER BY t.worker_id, t.position, t.id
+                LIMIT 2
                 """,
-                (external_trigger_id,),
-            ).fetchone()
-        return _row_dict(row) if row else None
+                params,
+            ).fetchall()
+        if len(rows) != 1:
+            return None
+        return _row_dict(rows[0])
 
     def find_trigger_for_webhook(self, *, worker_id: str) -> dict[str, Any] | None:
         with get_db() as conn:

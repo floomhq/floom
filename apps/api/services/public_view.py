@@ -627,7 +627,19 @@ def _public_sse_event(event: Dict[str, Any]) -> Dict[str, Any]:
 
 
 def _public_run_part(part: Dict[str, Any]) -> Dict[str, Any]:
+    from services.chat_tool_cards import build_args_preview
+
     public_part = dict(part)
+    part_type = public_part.get("type")
+    if part_type == "tool-call" and "args" in public_part:
+        tool_name = str(public_part.get("toolName") or "tool")
+        args_preview = build_args_preview(tool_name, public_part.get("args"))
+        public_part["args"] = args_preview
+        public_part["args_preview"] = args_preview
+    if part_type == "tool-result" and "result" in public_part:
+        result_preview = build_args_preview("tool-result", public_part.get("result"))
+        public_part["result"] = result_preview
+        public_part["result_preview"] = result_preview
     if "message" in public_part:
         public_part["message"] = _redact_public_log_message(str(public_part.get("message") or ""))
     if public_part.get("error") is not None:

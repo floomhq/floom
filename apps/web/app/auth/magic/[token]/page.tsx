@@ -3,26 +3,7 @@
 import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import { api } from "@/lib/api";
-
-/**
- * Validate that a redirect target is a safe same-origin relative path.
- *
- * Accepted: paths starting with a single "/" that are NOT protocol-relative
- * ("//evil.com") and NOT backslash-escaped ("/\evil.com"), preventing open
- * redirect attacks regardless of what the backend returns.
- *
- * Returns the sanitized path, or "/overview" if the input is invalid.
- */
-function sanitizeRedirect(raw: string | null | undefined): string {
-  const FALLBACK = "/overview";
-  if (!raw || typeof raw !== "string") return FALLBACK;
-  // Must start with exactly one "/" and NOT be "//" or "/\" (protocol-relative / backslash escape)
-  if (!raw.startsWith("/")) return FALLBACK;
-  if (raw.startsWith("//") || raw.startsWith("/\\")) return FALLBACK;
-  // Must not contain a scheme (e.g. "javascript:" injected mid-path or after redirect)
-  if (/[a-zA-Z][a-zA-Z0-9+\-.]*:/.test(raw)) return FALLBACK;
-  return raw;
-}
+import { sanitizeRedirect } from "@/lib/redirects";
 
 export default function MagicLinkPage() {
   const params = useParams<{ token: string }>();
