@@ -129,7 +129,9 @@ It defaults to DuckDuckGo; set `SERPER_API_KEY` for Google-quality results.
 
 ### Optional configuration
 
-- `FLOOM_SECRET`: operator secret for API requests. Leave unset for local dev.
+- `FLOOM_SECRET`: operator secret for API requests. Leave unset for local dev;
+  set `WORKEROS_SHARED_SECRET_ROLE=admin` only when legacy admin-equivalent
+  shared-secret access is required.
 - `COMPOSIO_API_KEY` and `COMPOSIO_WEBHOOK_SIGNING_KEY`: OAuth apps and triggers.
 - `SLACK_CLIENT_ID` and `SLACK_CLIENT_SECRET`: Slack integration.
 - `WORKEROS_MAGIC_LINK_SECRET`: HMAC key for magic sign-in links.
@@ -258,7 +260,9 @@ Browse [`workers/`](../workers/) for the full set. A few useful examples:
 
 For a self-hosted deployment:
 
-1. Set `FLOOM_SECRET` so API requests require the `x-floom-secret` header.
+1. Set `FLOOM_SECRET` so API requests require the `x-floom-secret` header. It is
+   member-scoped by default; add `WORKEROS_SHARED_SECRET_ROLE=admin` only if this
+   deployment intentionally uses the shared secret for admin operations.
 2. Run the API without reload:
 
    ```bash

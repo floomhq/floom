@@ -68,11 +68,10 @@ def _local_shared_secret_context(request: Request) -> AuthContext:
             status_code=401,
             detail="x-floom-user header required when user-header scope is enabled",
         )
-    # #933: FLOOM_SECRET is a root-equivalent credential by default (backwards
-    # compat for single-user installs). Deployments can demote it with
-    # WORKEROS_SHARED_SECRET_ROLE=member so secret leakage no longer equals
-    # full admin compromise.
-    if (os.environ.get("WORKEROS_SHARED_SECRET_ROLE") or "").strip().lower() == "member":
+    # FLOOM_SECRET authenticates the caller, but it should not grant root by
+    # default. Operators that intentionally need legacy root-equivalent shared
+    # secret behavior must opt in explicitly.
+    if (os.environ.get("WORKEROS_SHARED_SECRET_ROLE") or "").strip().lower() != "admin":
         return AuthContext(user_id=user_id, role="member", auth_method="secret")
     return AuthContext(
         user_id=user_id,

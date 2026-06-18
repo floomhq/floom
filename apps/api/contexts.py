@@ -313,14 +313,31 @@ def validate_context_name(name: str) -> str:
     return stripped
 
 
+def _containment_key(path: Path) -> str:
+    text = os.path.normcase(os.path.normpath(str(path)))
+    if text.startswith("\\\\?\\"):
+        text = text[4:]
+    return text.rstrip("\\/")
+
+
+def _is_relative_to_path(path: Path, root: Path) -> bool:
+    path_key = _containment_key(path)
+    root_key = _containment_key(root)
+    return path_key == root_key or path_key.startswith(root_key + os.sep)
+
+
+def _relative_posix_path(path: Path, root: Path) -> str:
+    if not _is_relative_to_path(path, root):
+        raise ValueError(f"Path traversal attempt: {path}")
+    return PurePosixPath(os.path.relpath(str(path), str(root))).as_posix()
+
+
 def context_dir(name: str) -> Path:
     safe_name = validate_context_name(name)
     root = current_contexts_root()
     target = (root / safe_name).resolve()
-    try:
-        target.relative_to(root)
-    except ValueError as exc:
-        raise ValueError(f"Path traversal attempt: {target}") from exc
+    if not _is_relative_to_path(target, root):
+        raise ValueError(f"Path traversal attempt: {target}")
     # Cloud lazy-hydration: if the directory is absent or empty and a hydration
     # hook is registered (cloud startup sets one), fetch the context pack from
     # Supabase Storage before returning the path.  This is a no-op in OSS /
@@ -337,11 +354,10 @@ def context_dir(name: str) -> Path:
 
 def safe_context_file_path(name: str, raw_path: str) -> Path:
     rel = normalize_context_file_path(raw_path)
-    target = (context_dir(name) / rel).resolve()
-    try:
-        target.relative_to(context_dir(name))
-    except ValueError as exc:
-        raise ValueError(f"Path traversal attempt: {target}") from exc
+    root = context_dir(name)
+    target = (root / rel).resolve()
+    if not _is_relative_to_path(target, root):
+        raise ValueError(f"Path traversal attempt: {target}")
     return target
 
 
@@ -672,7 +688,7 @@ def context_file_display_type(path_str: str, mime_type: str) -> str:
 
 
 def context_file_metadata(root: Path, path: Path, pack_metadata: dict[str, Any] | None = None) -> dict[str, Any]:
-    rel = path.relative_to(root).as_posix()
+    rel = _relative_posix_path(path, root)
     stat = path.stat()
     mime_type = guess_mime_type(rel)
     result = {

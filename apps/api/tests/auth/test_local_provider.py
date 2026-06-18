@@ -27,6 +27,18 @@ def test_valid_secret_returns_auth_context(monkeypatch):
 
     assert ctx.user_id == "federico"
     assert ctx.email is None
+    assert ctx.role == "member"
+    assert ctx.scopes == ()
+
+
+def test_secret_admin_role_requires_explicit_opt_in(monkeypatch):
+    monkeypatch.setenv("FLOOM_SECRET", "test-secret")
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
+
+    provider = SharedSecretAuthProvider()
+
+    ctx = asyncio.run(provider.verify(_request({"x-floom-secret": "test-secret"})))
+
     assert ctx.scopes == ("admin",)
 
 
