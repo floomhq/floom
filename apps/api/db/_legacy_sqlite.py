@@ -2099,6 +2099,11 @@ MIGRATIONS: list[Migration] = [
     CREATE INDEX IF NOT EXISTS idx_workers_owner_id_id
         ON workers(owner_id, id);
     """,
+    # -- migration 84: connection list filter/sort index (#1470) ------------
+    """
+    CREATE INDEX IF NOT EXISTS idx_composio_connections_user_kind_app
+        ON composio_connections(user_id, kind, app_name);
+    """,
 ]
 
 
