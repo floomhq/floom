@@ -49,3 +49,13 @@ def test_git_workspace_config_rls_filters_active_members_only():
     assert "drop policy if exists \"workspace admins can manage git config\"" in text
     assert "status = 'active'" in text
     assert "role = 'admin'" in text
+
+
+def test_vault_secret_delete_triggers_cover_workspace_cascades():
+    text = _migration("0043_vault_secret_delete_triggers.sql")
+    assert "before delete on public.secrets" in text
+    assert "old.vault_secret_id" in text
+    assert "public.workeros_vault_delete_secret(old.vault_secret_id)" in text
+    assert "before delete on public.slack_installations" in text
+    assert "old.bot_token_encrypted" in text
+    assert "public.workeros_vault_delete_secret(old.bot_token_encrypted)" in text
