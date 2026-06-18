@@ -1,5 +1,7 @@
 "use client";
 
+import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
+
 /**
  * Emily chat — persistent conversation id.
  *
@@ -12,29 +14,14 @@
 export const CONVERSATION_STORAGE_KEY = "workeros.emily.conversationId";
 
 export function readStoredConversationId(): string | null {
-  if (typeof window === "undefined") return null;
-  try {
-    const value = window.localStorage.getItem(CONVERSATION_STORAGE_KEY);
-    return value && value.trim() ? value : null;
-  } catch {
-    return null;
-  }
+  const value = safeStorageGet("local", CONVERSATION_STORAGE_KEY);
+  return value && value.trim() ? value : null;
 }
 
 export function writeStoredConversationId(id: string): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.setItem(CONVERSATION_STORAGE_KEY, id);
-  } catch {
-    /* storage unavailable (private mode / quota) — non-fatal */
-  }
+  safeStorageSet("local", CONVERSATION_STORAGE_KEY, id);
 }
 
 export function clearStoredConversationId(): void {
-  if (typeof window === "undefined") return;
-  try {
-    window.localStorage.removeItem(CONVERSATION_STORAGE_KEY);
-  } catch {
-    /* non-fatal */
-  }
+  safeStorageRemove("local", CONVERSATION_STORAGE_KEY);
 }

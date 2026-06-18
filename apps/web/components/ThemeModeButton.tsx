@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
+import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
 
 type ThemeMode = "system" | "day" | "night";
 
@@ -14,8 +15,7 @@ const LABELS: Record<ThemeMode, string> = {
 };
 
 function readMode(): ThemeMode {
-  if (typeof window === "undefined") return "day";
-  const stored = window.localStorage.getItem(STORAGE_KEY);
+  const stored = safeStorageGet("local", STORAGE_KEY);
   return stored === "day" || stored === "night" || stored === "system" ? stored : "day";
 }
 
@@ -25,7 +25,7 @@ function applyMode(mode: ThemeMode) {
   const isDark = mode === "night" || (mode === "system" && prefersDark);
   document.documentElement.classList.toggle("dark", isDark);
   document.documentElement.dataset.theme = mode;
-  window.localStorage.setItem(STORAGE_KEY, mode);
+  safeStorageSet("local", STORAGE_KEY, mode);
   // PR S19 (I-43): broadcast so every mounted ThemeModeButton (e.g. the
   // sidebar one AND the one inside Settings → Appearance) re-syncs.
   window.dispatchEvent(new CustomEvent(SYNC_EVENT, { detail: { mode } }));

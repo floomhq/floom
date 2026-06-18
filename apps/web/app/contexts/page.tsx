@@ -60,6 +60,7 @@ import { Skeleton } from "@/components/ui/skeleton";
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs";
 import { Textarea } from "@/components/ui/textarea";
 import { CodeBlock } from "@/components/file-viewer/code-block";
+import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
 
 const TEXT_PREVIEW_LIMIT = 512 * 1024;
 const TABLE_PREVIEW_ROWS = 100;
@@ -267,9 +268,8 @@ function clamp(value: number, min: number, max: number): number {
 }
 
 function loadPaneWidths(): PaneWidths {
-  if (typeof window === "undefined") return { packs: PACKS_DEFAULT, mid: MID_DEFAULT };
   try {
-    const raw = window.localStorage.getItem(PANE_WIDTHS_KEY);
+    const raw = safeStorageGet("local", PANE_WIDTHS_KEY);
     if (raw) {
       const parsed = JSON.parse(raw) as Partial<PaneWidths>;
       return {
@@ -409,12 +409,7 @@ function ContextsPage() {
   const resizeBase = useRef<PaneWidths>(paneWidths);
 
   useEffect(() => {
-    if (typeof window === "undefined") return;
-    try {
-      window.localStorage.setItem(PANE_WIDTHS_KEY, JSON.stringify(paneWidths));
-    } catch {
-      /* storage unavailable / quota */
-    }
+    safeStorageSet("local", PANE_WIDTHS_KEY, JSON.stringify(paneWidths));
   }, [paneWidths]);
 
   const beginResize = useCallback(() => {

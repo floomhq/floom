@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { Monitor, Sun, Moon } from "lucide-react";
 import { cn } from "@/lib/utils";
+import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
 
 // S29z: explicit three-button toggle group for /settings#appearance.
 // The cycling ThemeModeButton stays in the sidebar (compact). Here we
@@ -19,8 +20,7 @@ const OPTIONS: { value: ThemeMode; label: string; icon: typeof Monitor }[] = [
 ];
 
 function readMode(): ThemeMode {
-  if (typeof window === "undefined") return "day";
-  const stored = window.localStorage.getItem(STORAGE_KEY);
+  const stored = safeStorageGet("local", STORAGE_KEY);
   return stored === "day" || stored === "night" || stored === "system" ? stored : "day";
 }
 
@@ -30,7 +30,7 @@ function applyMode(mode: ThemeMode) {
   const isDark = mode === "night" || (mode === "system" && prefersDark);
   document.documentElement.classList.toggle("dark", isDark);
   document.documentElement.dataset.theme = mode;
-  window.localStorage.setItem(STORAGE_KEY, mode);
+  safeStorageSet("local", STORAGE_KEY, mode);
   window.dispatchEvent(new CustomEvent(SYNC_EVENT, { detail: { mode } }));
 }
 

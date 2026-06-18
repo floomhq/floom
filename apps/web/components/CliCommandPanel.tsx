@@ -9,6 +9,7 @@ import { McpToolCatalog } from "@/components/McpToolCatalog";
 import { getPublicApiBase, getPublicApiHost } from "@/lib/api-base";
 import { getActiveWorkspaceId } from "@/lib/api";
 import { buildMcpJson } from "@/lib/mcp-config";
+import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
 
 // #1185: use sessionStorage (cleared when the tab closes) instead of
 // localStorage so the OSS API secret is not persisted across sessions where it
@@ -31,17 +32,16 @@ const MCP_TARGETS: { value: McpTarget; label: string; hint: string }[] = [
 ];
 
 function readStoredSecret(): string {
-  if (typeof window === "undefined") return "";
   // Migrate: purge any legacy localStorage values and re-store in sessionStorage.
   for (const key of SECRET_LEGACY_LS_KEYS) {
-    const ls = window.localStorage.getItem(key);
+    const ls = safeStorageGet("local", key);
     if (ls && ls.trim()) {
-      window.sessionStorage.setItem(SECRET_SESSION_KEY, ls.trim());
-      window.localStorage.removeItem(key);
+      safeStorageSet("session", SECRET_SESSION_KEY, ls.trim());
+      safeStorageRemove("local", key);
       return ls.trim();
     }
   }
-  return window.sessionStorage.getItem(SECRET_SESSION_KEY)?.trim() ?? "";
+  return safeStorageGet("session", SECRET_SESSION_KEY)?.trim() ?? "";
 }
 
 function maskSecret(secret: string): string {
@@ -186,7 +186,7 @@ export function CliCommandPanel() {
   function storeSecret(value: string) {
     try {
       // #1185: sessionStorage only — secret is not persisted across sessions.
-      window.sessionStorage.setItem(SECRET_SESSION_KEY, value);
+      safeStorageSet("session", SECRET_SESSION_KEY, value);
     } catch {}
     setStoredSecret(value);
   }
@@ -241,9 +241,9 @@ export function CliCommandPanel() {
 
   function clearSecret() {
     try {
-      window.sessionStorage.removeItem(SECRET_SESSION_KEY);
+      safeStorageRemove("session", SECRET_SESSION_KEY);
       // Also clear any remaining legacy localStorage keys.
-      for (const key of SECRET_LEGACY_LS_KEYS) window.localStorage.removeItem(key);
+      for (const key of SECRET_LEGACY_LS_KEYS) safeStorageRemove("local", key);
     } catch {}
     setStoredSecret("");
     setRevealed(false);
