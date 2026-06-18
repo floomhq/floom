@@ -550,16 +550,18 @@ def system_overview(
     # deleted worker's failures are not actionable "attention" — query only runs
     # whose worker is API-visible so the cluster + its link cannot 404.
     visible_worker_ids = sorted(_visible_worker_ids)
+    consecutive_failure_threshold = _overview_consecutive_failure_threshold()
     visible_terminal_runs = repos.runs.overview_terminal_runs(
         user_id=auth.user_id,
         worker_ids=visible_worker_ids,
         since=window_14d.isoformat(),
+        per_worker_limit=max(10, consecutive_failure_threshold),
     )
     attention_items.extend(
         _overview_consecutive_failure_items(
             runs=visible_terminal_runs,
             worker_names=worker_names,
-            threshold=_overview_consecutive_failure_threshold(),
+            threshold=consecutive_failure_threshold,
         )
     )
     _consecutive_failure_worker_ids = {
