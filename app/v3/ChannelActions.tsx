@@ -101,7 +101,7 @@ export function McpHeaderButton() {
         onClick={() => setOpen(true)}
         aria-label="MCP config"
         title="MCP config"
-        className="ml-1 inline-flex h-8 items-center gap-1.5 rounded-[10px] px-2.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
+        className="inline-flex h-8 items-center gap-1.5 rounded-[10px] px-2.5 text-[12.5px] font-medium text-muted-foreground transition-colors hover:bg-secondary hover:text-foreground"
       >
         <Terminal className="h-3.5 w-3.5" />
         MCP

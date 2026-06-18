@@ -19,13 +19,9 @@ import {
   HubSpotLogo,
   NotionLogo,
   SheetsLogo,
-  SlackLogo,
-  WhatsAppLogo,
 } from "@/components/landing-icons";
 
 const KNOWN_TOOLS: Array<{ keys: string[] }> = [
-  { keys: ["slack"] },
-  { keys: ["whatsapp"] },
   { keys: ["gmail"] },
   { keys: ["google calendar", "gcal"] },
   { keys: ["hubspot crm", "hubspot"] },
@@ -40,8 +36,6 @@ type Match = { start: number; end: number };
 
 /* map from lowercase key → logo component */
 const TOOL_LOGOS: Record<string, React.ReactNode> = {
-  slack: <SlackLogo />,
-  whatsapp: <WhatsAppLogo />,
   gmail: <GmailLogo />,
   "google calendar": <GCalLogo />,
   gcal: <GCalLogo />,

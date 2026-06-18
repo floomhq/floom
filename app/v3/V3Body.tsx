@@ -27,7 +27,6 @@ import {
   NotionLogo,
   OutlookLogo,
   SheetsLogo,
-  SlackLogo,
 } from "@/components/landing-icons";
 import { V3Composer } from "./V3Composer";
 import { V3TemplateCard } from "./V3TemplateCard";
@@ -66,7 +65,7 @@ const BEATS: { key: string; t: React.ReactNode; p: string }[] = [
   {
     key: "approve",
     t: <>Approve the <Hl>draft</Hl></>,
-    p: "The finished work comes to you first. Nothing ships without your yes, in Slack, WhatsApp, or here.",
+    p: "The finished work comes to you first. Nothing ships without your yes, right here.",
   },
   {
     key: "record",
@@ -387,7 +386,7 @@ export function V3Body() {
         >
           <Link href="/integrations" className="text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground/80 transition-colors hover:text-foreground">Connects to your tools</Link>
           <Link href="/integrations" aria-label="Browse Floom integrations" className="flex items-center justify-center gap-5 opacity-80 transition-opacity hover:opacity-100">
-          {[<GmailLogo key="g" />, <SlackLogo key="s" />, <HubSpotLogo key="h" />, <NotionLogo key="n" />, <GCalLogo key="c" />, <SheetsLogo key="sh" />].map((logo, i) => (
+          {[<GmailLogo key="g" />, <HubSpotLogo key="h" />, <NotionLogo key="n" />, <GCalLogo key="c" />, <SheetsLogo key="sh" />].map((logo, i) => (
             <span key={i} className="flex h-5 w-5 items-center justify-center grayscale-[0.2] [&_svg]:h-5 [&_svg]:w-5">{logo}</span>
           ))}
           </Link>

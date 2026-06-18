@@ -2,8 +2,8 @@
 
 /**
  * /v3/product — the depth page, rebuilt in the v3 artifact voice.
- * AppFrame up top, then three full beats (Approvals with the Slack moment,
- * the run record, the company brain), a quiet connections line, one button.
+ * AppFrame up top, then three full beats (Approvals, the run record, the
+ * company brain), a quiet connections line, one button.
  * Alternating sides, one idea per screen, soft panels like the landing story.
  */
 
@@ -17,7 +17,6 @@ import {
   HubSpotLogo,
   NotionLogo,
   SheetsLogo,
-  SlackLogo,
 } from "@/components/landing-icons";
 import { Hl, V3Shell } from "../V3Shell";
 import "../theme.css";
@@ -37,8 +36,8 @@ const NAV_ITEMS = [
 const APP_WORKERS = [
   { av: "WU", nm: "Weekly Update", d: "Turns raw notes into a polished weekly company update.", st: "active" as const, meta: "5d ago", tools: [<NotionLogo key="n" />, <GmailLogo key="g" />] },
   { av: "CF", nm: "Client Follow-up", d: "Drafts follow-up emails after calls, adds CRM notes.", st: "review" as const, meta: "needs you", tools: [<GmailLogo key="g" />, <HubSpotLogo key="h" />] },
-  { av: "GD", nm: "GitHub Digest", d: "Every morning at 9am, a digest of unread PRs and issues.", st: "active" as const, meta: "running", tools: [<SlackLogo key="s" />] },
-  { av: "PB", nm: "Pipeline Brief", d: "Weekly pipeline summary posted in #sales.", st: "active" as const, meta: "3d ago", tools: [<SheetsLogo key="sh" />, <SlackLogo key="s" />] },
+  { av: "GD", nm: "GitHub Digest", d: "Every morning at 9am, a digest of unread PRs and issues.", st: "active" as const, meta: "running", tools: [<NotionLogo key="n" />] },
+  { av: "PB", nm: "Pipeline Brief", d: "Weekly pipeline summary, emailed to the team.", st: "active" as const, meta: "3d ago", tools: [<SheetsLogo key="sh" />, <GmailLogo key="g" />] },
 ];
 
 function Reveal({ children, delay = 0, className }: { children: React.ReactNode; delay?: number; className?: string }) {
@@ -61,8 +60,8 @@ function ApprovalArtifact() {
   return (
     <div className="w-full max-w-[440px] rounded-[18px] bg-card p-6">
       <div className="flex items-center gap-2 text-[11.5px] text-muted-foreground">
-        <span className="[&_svg]:h-3.5 [&_svg]:w-3.5"><SlackLogo /></span>
-        <span className="font-medium text-foreground"># sales</span>
+        <CheckCircle2 className="h-3.5 w-3.5" style={{ color: "var(--v3-accent)" }} />
+        <span className="font-medium text-foreground">Approval</span>
         <span className="ml-auto font-mono text-[10px]">2:14 PM</span>
       </div>
       <div className="mt-4">
@@ -293,7 +292,7 @@ export function V3ProductBody() {
             transition={{ duration: 0.5, delay: 0.08, ease: EASE }}
             className="mx-auto mt-4 max-w-[460px] text-[15.5px] text-muted-foreground"
           >
-            Most days the worker reports in Slack and you never open this. When you do, everything is on the record.
+            Most days the worker reports in and you never open this. When you do, everything is on the record.
           </motion.p>
         </div>
 
@@ -326,7 +325,7 @@ export function V3ProductBody() {
         {/* connections, one quiet line */}
         <Reveal className="flex flex-col items-center gap-4 pb-20 text-center">
           <Link href="/integrations" className="flex items-center justify-center gap-5 opacity-80 transition-opacity hover:opacity-100" aria-label="Browse Floom integrations">
-            {[<GmailLogo key="g" />, <SlackLogo key="s" />, <HubSpotLogo key="h" />, <NotionLogo key="n" />, <GCalLogo key="c" />, <SheetsLogo key="sh" />].map((logo, i) => (
+            {[<GmailLogo key="g" />, <HubSpotLogo key="h" />, <NotionLogo key="n" />, <GCalLogo key="c" />, <SheetsLogo key="sh" />].map((logo, i) => (
               <span key={i} className="flex h-5 w-5 items-center justify-center [&_svg]:h-5 [&_svg]:w-5">{logo}</span>
             ))}
           </Link>

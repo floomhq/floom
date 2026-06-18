@@ -16,14 +16,12 @@ import {
   HubSpotLogo,
   NotionLogo,
   SheetsLogo,
-  SlackLogo,
 } from "@/components/landing-icons";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 const MARKS: Record<string, React.ReactNode> = {
   gmail: <GmailLogo />,
-  slack: <SlackLogo />,
   hubspot: <HubSpotLogo />,
   notion: <NotionLogo />,
   calendar: <GCalLogo />,

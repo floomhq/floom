@@ -17,8 +17,8 @@ import {
   GmailLogo,
   HubSpotLogo,
   NotionLogo,
+  OutlookLogo,
   SheetsLogo,
-  SlackLogo,
 } from "@/components/landing-icons";
 import { V3Shell } from "../../V3Shell";
 import { V3TemplateCard } from "../../V3TemplateCard";
@@ -28,7 +28,6 @@ const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
 
 const MARKS: Record<string, React.ReactNode> = {
   gmail: <GmailLogo />,
-  slack: <SlackLogo />,
   hubspot: <HubSpotLogo />,
   notion: <NotionLogo />,
   calendar: <GCalLogo />,
@@ -75,20 +74,22 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
           >
             {d.summary}
           </motion.p>
+          {/* LND-1: button + tool logos + trigger text on one clean row.
+              Compact nowrap button, inline logos, inline trigger. */}
           <motion.div
             initial={{ opacity: 0, y: 10 }}
             animate={{ opacity: 1, y: 0 }}
             transition={{ duration: 0.45, delay: 0.16, ease: EASE }}
-            className="mt-6 flex items-center gap-4"
+            className="mt-6 flex flex-nowrap items-center gap-3"
           >
             <Link
               href="/login"
-              className="inline-flex items-center rounded-[12px] px-5 py-2.5 text-[14px] font-medium text-white"
+              className="inline-flex h-9 shrink-0 items-center whitespace-nowrap rounded-[10px] px-4 text-[13.5px] font-medium text-white"
               style={{ background: "var(--v3-accent)" }}
             >
               Hire this worker
             </Link>
-            <span className="flex items-center gap-2">
+            <span className="flex shrink-0 items-center gap-2">
               {t.tools.slice(0, 4).map((tool) => {
                 const mark = MARKS[tool.toLowerCase()];
                 return mark ? (
@@ -96,7 +97,7 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
                 ) : null;
               })}
             </span>
-            <span className="font-mono text-[11px] text-muted-foreground">{t.runs}</span>
+            <span className="truncate font-mono text-[11px] text-muted-foreground">{t.runs}</span>
           </motion.div>
         </div>
 
@@ -108,9 +109,16 @@ export function V3TemplateDetailBody({ t, d }: { t: Template; d: TemplateDetail 
         >
           <div className="rounded-[22px] bg-secondary/70 p-5 sm:p-7">
             <div className="rounded-[18px] bg-card p-6">
-              <div className="flex items-center justify-between text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
-                <span>Email draft · to {d.exampleRun.email.to}</span>
-                <span className="font-mono normal-case tracking-normal">{d.exampleRun.id}</span>
+              {/* LND-2: provider logos at the top of the email-draft card. */}
+              <div className="flex items-center justify-between">
+                <span className="flex items-center gap-1.5 [&_svg]:h-[15px] [&_svg]:w-[15px]" aria-label="Gmail or Outlook">
+                  <GmailLogo />
+                  <OutlookLogo />
+                </span>
+                <span className="font-mono text-[11px] text-muted-foreground">{d.exampleRun.id}</span>
+              </div>
+              <div className="mt-3 text-[11px] font-medium uppercase tracking-[0.08em] text-muted-foreground">
+                Email draft · to {d.exampleRun.email.to}
               </div>
               <div className="mt-3 text-[16px] font-medium tracking-[-0.01em]">{d.exampleRun.email.subject}</div>
               <p className="mt-2 whitespace-pre-line text-[13.5px] leading-relaxed text-muted-foreground">{d.exampleRun.email.body}</p>

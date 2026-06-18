@@ -8,17 +8,14 @@
 import Link from "next/link";
 import { useState } from "react";
 import { motion } from "motion/react";
-import { SlackLogo, WhatsAppLogo } from "@/components/landing-icons";
 import { Hl, V3Shell } from "../V3Shell";
 import "../theme.css";
 
 const EASE: [number, number, number, number] = [0.22, 1, 0.36, 1];
-const WORKEROS_API_BASE = (process.env.NEXT_PUBLIC_WORKEROS_API_BASE ?? "https://workeros-api.floom.dev").replace(/\/$/, "");
-const SLACK_INSTALL_URL = `${WORKEROS_API_BASE}/slack/install/start`;
 
 const TOC = [
   ["quickstart", "Quickstart"],
-  ["channels", "Install in your channel"],
+  ["channels", "Install from your terminal"],
   ["mcp", "Use from any agent (MCP)"],
   ["brain", "Company brain"],
   ["approvals", "Approvals"],
@@ -154,27 +151,11 @@ export function V3DocsBody() {
             </div>
             </DocsSection>
 
-            <DocsSection id="channels" title="Install in your channel">
+            <DocsSection id="channels" title="Install from your terminal">
             <p className="text-[13.5px] leading-relaxed text-muted-foreground">
-              You never have to open the dashboard. Install Floom where your team already talks and hire, approve, and redirect from there.
+              You never have to open the dashboard. Pair Floom from your terminal and hire, approve, and redirect from there.
             </p>
             <div className="mt-4 flex flex-col">
-              <div className="flex items-center gap-3 py-3.5">
-                <span className="[&_svg]:h-4 [&_svg]:w-4"><SlackLogo /></span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-medium">Slack</div>
-                  <div className="text-[12px] text-muted-foreground">Workspace install. Workers post drafts and approval buttons in your channels.</div>
-                </div>
-                <Link href={SLACK_INSTALL_URL} className="rounded-[8px] bg-secondary px-2.5 py-1 text-[12px] font-medium hover:bg-[var(--bg-3)]">Install</Link>
-              </div>
-              <div className="flex items-center gap-3 py-3.5">
-                <span className="[&_svg]:h-4 [&_svg]:w-4"><WhatsAppLogo /></span>
-                <div className="min-w-0 flex-1">
-                  <div className="text-[13px] font-medium">WhatsApp</div>
-                  <div className="text-[12px] text-muted-foreground">Personal or shared number. Summaries and approvals as messages.</div>
-                </div>
-                <Link href="/login?install=whatsapp" className="rounded-[8px] bg-secondary px-2.5 py-1 text-[12px] font-medium hover:bg-[var(--bg-3)]">Install</Link>
-              </div>
               <div className="flex items-center gap-3 py-3.5">
                 <span className="flex h-4 w-4 items-center justify-center rounded-[4px] bg-primary font-mono text-[7.5px] font-bold text-primary-foreground">&gt;_</span>
                 <div className="min-w-0 flex-1">
@@ -205,7 +186,7 @@ export function V3DocsBody() {
 
             <DocsSection id="approvals" title="Approvals">
             <p className="text-[13.5px] leading-relaxed text-muted-foreground">
-              Anything that leaves the building (emails, CRM writes, posts) is held for your yes by default. Approve in Slack, WhatsApp, or the app. You can relax the gate per worker once you trust it.
+              Anything that leaves the building (emails, CRM writes, posts) is held for your yes by default. Approve in the app or from your terminal. You can relax the gate per worker once you trust it.
             </p>
             </DocsSection>
 
