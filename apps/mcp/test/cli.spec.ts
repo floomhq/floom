@@ -1,11 +1,12 @@
 import assert from "node:assert/strict";
-import { mkdtemp, writeFile } from "node:fs/promises";
+import { mkdir, mkdtemp, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import test from "node:test";
 import { buildCliProgram, getPackageVersion } from "../src/cli.js";
 import { runWhoamiCommand } from "../src/commands/whoami.js";
 import { parseInputAssignments } from "../src/commands/run.js";
+import { loadWorkerSource } from "../src/commands/workers.js";
 
 test("floom --version prints package version", async () => {
   const program = buildCliProgram();
@@ -51,4 +52,35 @@ test("floom run parses --input key=value and --input file=@path", async () => {
   ]);
   assert.equal(parsed.values.name, "Alice");
   assert.deepEqual(parsed.fileUploads, [{ key: "cv", path: tempFile }]);
+});
+
+test("workers push source includes full UTF-8 bundle tree", async () => {
+  const dir = await mkdtemp(join(tmpdir(), "workeros-worker-bundle-"));
+  await mkdir(join(dir, "data"), { recursive: true });
+  await mkdir(join(dir, "lib"), { recursive: true });
+  await mkdir(join(dir, "__pycache__"), { recursive: true });
+  await writeFile(join(dir, "worker.yml"), [
+    "id: full-bundle",
+    "name: full-bundle",
+    "runtime: python",
+    "exec:",
+    "  runtime: python",
+    "  entry: run.py",
+    "",
+  ].join("\n"));
+  await writeFile(join(dir, "run.py"), "from lib.helper import main\nmain()\n");
+  await writeFile(join(dir, "SKILL.md"), "# Full bundle\n");
+  await writeFile(join(dir, "data", "cities.json"), "{\"cities\":[]}\n");
+  await writeFile(join(dir, "lib", "helper.py"), "def main(): pass\n");
+  await writeFile(join(dir, "__pycache__", "ignored.pyc"), "ignored");
+
+  const result = await loadWorkerSource(dir);
+
+  assert.deepEqual(result.errors, []);
+  assert.ok(result.source);
+  const files = new Map(result.source.files.map((file) => [file.path, file.content]));
+  assert.equal(files.get("data/cities.json"), "{\"cities\":[]}\n");
+  assert.equal(files.get("lib/helper.py"), "def main(): pass\n");
+  assert.equal(files.get("worker.yml")?.includes("full-bundle"), true);
+  assert.equal(files.has("__pycache__/ignored.pyc"), false);
 });

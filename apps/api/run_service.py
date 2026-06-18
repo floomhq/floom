@@ -258,6 +258,7 @@ def _schedule_retry_for_failed_run(
     owner_id: str | None,
     config: Any,
     result_retryable: bool,
+    result_error_code: str | None,
     repos: "Repositories",
     log_fn,
 ) -> bool:
@@ -271,7 +272,7 @@ def _schedule_retry_for_failed_run(
 
     current_run_row = repos.runs.get_any(run_id=run_id)
     current_attempt = int((current_run_row or {}).get("retry_attempt") or 0)
-    max_attempts = retry_cfg.max_attempts if retry_cfg else 2
+    max_attempts = retry_cfg.max_attempts if retry_cfg else _retryable_driver_max_attempts(result_error_code)
     if current_attempt >= max_attempts - 1:
         return False
 
@@ -788,6 +789,8 @@ INTERRUPTED_RUN_ERROR = "Run was interrupted by an API restart before completion
 INTERRUPTED_RUN_ERROR_CODE = "interrupted_by_restart"
 ABANDONED_RUN_ERROR = "run abandoned (server restarted): no active executor after timeout window"
 ABANDONED_RUN_ERROR_CODE = "run_abandoned_server_restart"
+DISPATCH_ORPHAN_ERROR = "run abandoned before sandbox dispatch: claimed by queue drain but no executor reached sandbox startup"
+DISPATCH_ORPHAN_ERROR_CODE = "run_claimed_without_dispatch"
 WORKER_DELETED_RUN_ERROR = "Worker deleted before run completed."
 _SCHEDULE_MISSING_SECRET_PAUSE_AFTER = 3
 _RUN_REAPER_DEFAULT_GRACE_SECONDS = 60
@@ -928,6 +931,35 @@ def _max_restart_retries() -> int:
         return 1
 
 
+def _dispatch_orphan_timeout_seconds() -> int:
+    raw = os.environ.get("WORKEROS_DISPATCH_ORPHAN_TIMEOUT_SECONDS", "")
+    if not raw:
+        return 120
+    try:
+        return max(30, int(raw))
+    except ValueError:
+        return 120
+
+
+def _is_infra_retry_error_code(error_code: str | None) -> bool:
+    return (error_code or "").strip().lower() in {
+        "e2b_sandbox_error",
+        "e2b_quota_exhausted",
+        "run_claimed_without_dispatch",
+    }
+
+
+def _retryable_driver_max_attempts(error_code: str | None) -> int:
+    raw = os.environ.get("WORKEROS_INFRA_RETRY_MAX_ATTEMPTS", "")
+    default = 3 if _is_infra_retry_error_code(error_code) else 2
+    if not raw:
+        return default
+    try:
+        return max(1, int(raw))
+    except ValueError:
+        return default
+
+
 def _fail_stale_running_rows(
     repos_obj: Repositories,
     *,
@@ -967,6 +999,48 @@ def _fail_stale_running_rows(
             len(failed),
             timeout,
             grace,
+        )
+    return failed
+
+
+def _fail_dispatch_orphan_rows(
+    repos_obj: Repositories,
+    *,
+    now_dt: datetime,
+) -> list[dict[str, Any]]:
+    timeout = _dispatch_orphan_timeout_seconds()
+    cutoff_iso = (now_dt - timedelta(seconds=timeout)).isoformat()
+    active_ids = _active_run_ids()
+    fail_method = getattr(repos_obj.runs, "fail_stale_running_without_sandbox_logs", None)
+    if not callable(fail_method):
+        return []
+    failed = fail_method(
+        cutoff_iso=cutoff_iso,
+        exclude_run_ids=active_ids,
+        error=DISPATCH_ORPHAN_ERROR,
+        error_code=DISPATCH_ORPHAN_ERROR_CODE,
+    )
+    for row in failed:
+        run_id = str(row.get("run_id") or row.get("id") or "")
+        user_id = row.get("user_id")
+        if not run_id or not user_id:
+            continue
+        try:
+            repos_obj.runs.add_log(
+                user_id=str(user_id),
+                run_id=run_id,
+                level="error",
+                message=DISPATCH_ORPHAN_ERROR,
+                timestamp=datetime.now(timezone.utc).isoformat(),
+                trace_id=None,
+            )
+        except Exception as exc:
+            logger.warning("Failed to add dispatch-orphan log for %s: %s", run_id, exc)
+    if failed:
+        logger.warning(
+            "Reaped %d claimed-without-dispatch run(s) older than %ss",
+            len(failed),
+            timeout,
         )
     return failed
 
@@ -1087,7 +1161,8 @@ def recover_abandoned_runs(
     """
     repos_obj = _repos(repos)
     timeout, grace, now_dt = _resolve_reaper_window(timeout_seconds, grace_seconds, now)
-    failed = _fail_stale_running_rows(repos_obj, timeout=timeout, grace=grace, now_dt=now_dt)
+    failed = _fail_dispatch_orphan_rows(repos_obj, now_dt=now_dt)
+    failed.extend(_fail_stale_running_rows(repos_obj, timeout=timeout, grace=grace, now_dt=now_dt))
     requeued = 0
     if failed and _auto_requeue_abandoned_enabled():
         for row in failed:
@@ -1203,6 +1278,18 @@ def _drain_one_batch() -> None:
                 continue
 
             # Slot acquired — dispatch the run in a thread.
+            try:
+                repos_obj.runs.add_log(
+                    user_id=user_id,
+                    run_id=run_id,
+                    level="info",
+                    message="Queue drain claimed run; dispatching executor thread.",
+                    timestamp=_now_iso(),
+                    trace_id=None,
+                )
+            except Exception as log_exc:
+                logger.warning("Queue drain: failed to log claim for run %s: %s", run_id, log_exc)
+
             # The semaphore is released inside _run_thread_entry_with_semaphore.
             thread = threading.Thread(
                 target=_run_thread_entry_with_semaphore,
@@ -1936,6 +2023,7 @@ def execute_run(
                 owner_id=owner_id,
                 config=config,
                 result_retryable=bool(getattr(result, "retryable", False)),
+                result_error_code=result_error_code,
                 repos=repos_obj,
                 log_fn=log_fn,
             )

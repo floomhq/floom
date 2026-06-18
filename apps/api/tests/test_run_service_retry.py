@@ -11,12 +11,16 @@ import run_service
 
 
 class _Runs:
+    def __init__(self, retry_attempt: int = 0):
+        self.retry_attempt = retry_attempt
+
     def get_any(self, *, run_id: str):
-        return {"id": run_id, "retry_attempt": 0}
+        return {"id": run_id, "retry_attempt": self.retry_attempt}
 
 
 class _Repos:
-    runs = _Runs()
+    def __init__(self, retry_attempt: int = 0):
+        self.runs = _Runs(retry_attempt=retry_attempt)
 
 
 def test_retryable_driver_failure_schedules_one_retry(monkeypatch):
@@ -35,6 +39,7 @@ def test_retryable_driver_failure_schedules_one_retry(monkeypatch):
         owner_id="user-a",
         config=None,
         result_retryable=True,
+        result_error_code="worker_runtime_error",
         repos=_Repos(),
         log_fn=lambda msg, level="info": logs.append((msg, level)),
     )
@@ -62,12 +67,35 @@ def test_non_retryable_failure_without_policy_does_not_schedule(monkeypatch):
         owner_id="user-a",
         config=None,
         result_retryable=False,
+        result_error_code="worker_reported_error",
         repos=_Repos(),
         log_fn=lambda *_args, **_kwargs: None,
     )
 
     assert did_schedule is False
     assert scheduled == []
+
+
+def test_infra_retryable_failure_allows_second_retry_by_default(monkeypatch):
+    scheduled: list[dict] = []
+    logs: list[tuple[str, str]] = []
+    monkeypatch.setattr(run_service, "_schedule_retry", lambda **kwargs: scheduled.append(kwargs))
+
+    did_schedule = run_service._schedule_retry_for_failed_run(
+        run_id="run-original",
+        worker_id="worker-a",
+        inputs={},
+        owner_id="user-a",
+        config=None,
+        result_retryable=True,
+        result_error_code="e2b_sandbox_error",
+        repos=_Repos(retry_attempt=1),
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+    )
+
+    assert did_schedule is True
+    assert scheduled[0]["attempt"] == 2
+    assert any("Scheduling retryable failure 2/2 in 120s" in msg for msg, _level in logs)
 
 
 def test_schedule_retry_is_idempotent_for_same_original_attempt(monkeypatch):
