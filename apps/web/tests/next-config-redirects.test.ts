@@ -20,10 +20,22 @@ describe("next.config redirects", () => {
   it("keeps the OSS build free of Cloud apex redirects", async () => {
     const redirects = await loadRedirects();
 
+    // R9: /brain renamed to /library — two permanent redirects added to OSS
+    // so bookmarks and old deep-links still resolve.
     expect(redirects).toEqual([
       {
         source: "/workers/:id/edit",
         destination: "/workers?sel=:id&tab=Config",
+        permanent: true,
+      },
+      {
+        source: "/brain",
+        destination: "/library",
+        permanent: true,
+      },
+      {
+        source: "/brain/:path*",
+        destination: "/library/:path*",
         permanent: true,
       },
     ]);
