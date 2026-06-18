@@ -17,7 +17,7 @@
 // Data layer (useOverview cache-first hook) is owned by a parallel lane, not
 // touched here. Only the presentational layout changed. The empty-workspace
 // ActivationPanel path is preserved.
-import { type ReactNode, useEffect, useMemo, useState } from "react";
+import { type ReactNode, useEffect, useState } from "react";
 import Link from "next/link";
 
 import { useOverview as useOverviewQuery } from "@/lib/query/hooks";
@@ -59,6 +59,7 @@ import { api } from "@/lib/api";
 import { Skeleton } from "@/components/ui/skeleton";
 import { formatRelative } from "@/lib/formatters";
 import { ActivationPanel } from "@/components/overview/ActivationPanel";
+import { Sparkline } from "@/components/Sparkline";
 
 export type { SystemOverviewAttentionItem };
 
@@ -403,24 +404,11 @@ export function OverviewDashboard({
   const estHoursSaved =
     completedThisWeek > 0 ? Math.max(1, Math.round((completedThisWeek * 15) / 60)) : 0;
 
-  // 7d run-series for the inline hero sparkline. Plot the per-bucket totals as a
-  // thin stroke-only accent polyline (spec: "thin stroke-only SVG polyline").
-  const sparkPoints = useMemo(() => {
-    const buckets = data?.stats.runs_7d_sparkline ?? [];
-    if (buckets.length < 2) return null;
-    const counts = buckets.map((b) => b.total);
-    const max = Math.max(...counts, 1);
-    const w = 150;
-    const h = 44;
-    const stepX = w / (counts.length - 1);
-    return counts
-      .map((v, i) => {
-        const x = i * stepX;
-        const y = h - 4 - (v / max) * (h - 8);
-        return `${x.toFixed(0)},${y.toFixed(0)}`;
-      })
-      .join(" ");
-  }, [data?.stats.runs_7d_sparkline]);
+  // 7d run-series for the inline hero sparkline. The shared <Sparkline> (area
+  // variant) computes its own geometry from these per-bucket {label,total}
+  // buckets and adds hover tooltip + active-point dot. We only pass the raw
+  // buckets through.
+  const sparkBuckets = data?.stats.runs_7d_sparkline ?? [];
 
   // Empty-workspace path preserved: no active workers AND no work this week.
   const isEmptyWorkspace =
@@ -466,7 +454,13 @@ export function OverviewDashboard({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 pb-6 pt-1">
-      <div className="w-full max-w-[640px]">
+      {/* Content column fills the available pane width up to a sensible cap so it
+          no longer leaves a dead gap before the Emily panel (Federico
+          2026-06-17: "the overview is not properly filling the container"). The
+          640px cap stopped well short of the pane; raised so it fills on typical
+          widths while staying readable on very wide screens. The summary
+          paragraph keeps its own tighter max-w so prose lines stay legible. */}
+      <div className="w-full max-w-[920px]">
         {/* 1. Greeting + date line. */}
         <div className="text-[26px] font-semibold leading-tight tracking-[-0.01em] text-[var(--text-primary)]">
           {greeting}
@@ -475,7 +469,7 @@ export function OverviewDashboard({
         <div className="mt-1 text-[13px] text-[var(--text-muted)]">{todayLabel}</div>
 
         {/* 2. Label + the big near-black number (heavier/larger than the
-            greeting — reclaims visual primacy) + inline sparkline.
+            greeting, reclaims visual primacy) + inline sparkline.
             O2/OV-ASCII: wrapped in the same framed-card treatment as the
             WorkerAsciiDiagram (bg-[var(--bg-2)], radius-card, px-5 py-4)
             so the overview hero has the same surface vocabulary as the
@@ -493,23 +487,19 @@ export function OverviewDashboard({
                 {completedThisWeek}
               </div>
             )}
-            {sparkPoints && (
-              <svg
-                width="150"
-                height="44"
-                viewBox="0 0 150 44"
-                className="mb-2 block"
-                aria-hidden="true"
-              >
-                <polyline
-                  fill="none"
-                  stroke="var(--accent)"
-                  strokeWidth="2.5"
-                  strokeLinecap="round"
-                  strokeLinejoin="round"
-                  points={sparkPoints}
+            {!loading && sparkBuckets.length >= 2 && (
+              // Reuse the shared Sparkline (area variant): hover surfaces a
+              // tooltip with the bucket value + weekday label and drops an
+              // active-point dot on the hovered point. Theme-aware + flat,
+              // matching the rest of the DS. Replaces the old static polyline.
+              <div className="mb-2 w-[150px]">
+                <Sparkline
+                  data={sparkBuckets}
+                  width={150}
+                  height={44}
+                  variant="area"
                 />
-              </svg>
+              </div>
             )}
           </div>
         </div>
