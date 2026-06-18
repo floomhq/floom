@@ -594,7 +594,7 @@ export default function McpConnectionsPage() {
               onClick={() => setMode("json")}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 mode === "json"
-                  ? "bg-[var(--bg-card)] text-foreground shadow-sm"
+                  ? "bg-[var(--bg-card)] text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -605,7 +605,7 @@ export default function McpConnectionsPage() {
               onClick={() => setMode("form")}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 mode === "form"
-                  ? "bg-[var(--bg-card)] text-foreground shadow-sm"
+                  ? "bg-[var(--bg-card)] text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -616,7 +616,7 @@ export default function McpConnectionsPage() {
               onClick={() => setMode("import")}
               className={`rounded-md px-3 py-1.5 text-xs font-medium transition-colors ${
                 mode === "import"
-                  ? "bg-[var(--bg-card)] text-foreground shadow-sm"
+                  ? "bg-[var(--bg-card)] text-foreground"
                   : "text-muted-foreground hover:text-foreground"
               }`}
             >
@@ -1058,7 +1058,7 @@ function McpRow({
             className="rounded p-0.5 opacity-0 transition-opacity hover:bg-muted group-hover:opacity-100"
             title="Copy URL"
           >
-            {copied ? <Check className="size-3.5 text-green-600" /> : <Copy className="size-3.5 text-muted-foreground" />}
+            {copied ? <Check className="size-3.5 text-[var(--positive)]" /> : <Copy className="size-3.5 text-muted-foreground" />}
           </button>
         </div>
 
