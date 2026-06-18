@@ -38,6 +38,16 @@ describe("next.config redirects", () => {
         destination: "/library/:path*",
         permanent: true,
       },
+      {
+        source: "/integrations",
+        destination: "/connections",
+        permanent: false,
+      },
+      {
+        source: "/integrations/:path*",
+        destination: "/connections/:path*",
+        permanent: false,
+      },
     ]);
   });
 
@@ -53,6 +63,15 @@ describe("next.config redirects", () => {
     expect(redirects).toContainEqual({
       source: "/connections/:path*",
       destination: "/app/connections/:path*",
+      permanent: false,
+      basePath: false,
+    });
+    // /integrations is the user-facing rename of /connections; the bare apex
+    // path must map into the Cloud /app basePath too, then /app/integrations
+    // redirects to /app/connections (the canonical route stays /connections).
+    expect(redirects).toContainEqual({
+      source: "/integrations",
+      destination: "/app/integrations",
       permanent: false,
       basePath: false,
     });
