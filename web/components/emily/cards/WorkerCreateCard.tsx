@@ -3,6 +3,7 @@
 import { CheckCircle2, Circle, Loader2, XCircle, Play, ExternalLink } from "lucide-react";
 import { StatusPill } from "@/components/collection/StatusPill";
 import { cn } from "@/lib/utils";
+import { sanitizeHref } from "@/lib/safe-url";
 import type { WorkerCreateCard as WorkerCreateCardType } from "@/lib/emily-chat-types";
 
 type StepStatus = "pending" | "running" | "completed" | "failed";
@@ -81,7 +82,7 @@ export function WorkerCreateCard({ card }: { card: WorkerCreateCardType }) {
           {card.actions.map((action) => (
             <a
               key={action.id}
-              href={action.href}
+              href={sanitizeHref(action.href)}
               className="inline-flex h-7 items-center gap-1.5 rounded-md [border:var(--bd-card)] bg-background px-2.5 text-xs font-normal text-foreground hover:bg-accent transition-colors"
             >
               {action.id === "run_worker" && <Play className="size-3" />}

@@ -123,17 +123,11 @@ async def lifespan(_app: FastAPI):
     if (os.environ.get("WORKEROS_DEPLOY") or "").strip().lower() == "cloud":
         db_host = (os.environ.get("WORKEROS_CLOUD_DB_HOST") or "").strip()
         if not db_host:
-            # No DB configured — start scheduler without advisory lock.
-            # Safe for single-instance deployments; set WORKEROS_CLOUD_DB_*
-            # if running multiple instances to prevent duplicate cron runs.
-            import logging as _logging
-            _logging.getLogger("workeros.cloud").warning(
-                "WORKEROS_CLOUD_DB_HOST not set — starting scheduler without "
-                "advisory lock. Safe for single-instance deployments only."
+            raise RuntimeError(
+                "WORKEROS_CLOUD_DB_HOST is required in cloud mode so the "
+                "scheduler can acquire its distributed advisory lock."
             )
-            from apps.api._engine import import_engine_module as _ie
-            _ie("scheduler").start_scheduler()
-        elif not start_cloud_scheduler():
+        if not start_cloud_scheduler():
             raise RuntimeError("Cloud scheduler advisory lock is already held.")
         # Start the run drain loop — picks up queued runs and dispatches them
         # to E2B. The engine only starts this in local mode; cloud must do it

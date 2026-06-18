@@ -97,4 +97,21 @@ describe("Emily ToolCardRenderer", () => {
     expect(screen.getByText("Reject")).toBeTruthy();
     expect(screen.queryByText("Args")).toBeNull();
   });
+
+  it("#466 strips dangerous hrefs from Emily tool-card actions", () => {
+    render(
+      <ToolCardRenderer
+        card={card({
+          kind: "generic",
+          title: "Unsafe action",
+          toolName: "demo.tool",
+          actions: [
+            { id: "open", label: "Open", href: "javascript:alert(1)", method: "GET" },
+          ],
+        } as Partial<ToolCard> & { kind: ToolCard["kind"] })}
+      />
+    );
+
+    expect(screen.getByText("Open").closest("a")).not.toHaveAttribute("href");
+  });
 });

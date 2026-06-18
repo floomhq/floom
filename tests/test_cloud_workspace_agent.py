@@ -6,6 +6,7 @@ from unittest.mock import Mock
 import pytest
 
 import apps.api.cloud_workspace_agent as cloud_agent
+from apps.api.routes import workspace_agent as workspace_agent_routes
 from apps.api.auth.workspace_context import active_workspace
 
 
@@ -210,6 +211,33 @@ def test_resolve_slack_event_binding_accepts_matching_team_channel_row(monkeypat
 def test_workspace_agent_requires_active_workspace_for_save():
     with pytest.raises(RuntimeError, match="active workspace"):
         cloud_agent.set_workspace_md("# Workspace\n\nSaved")
+
+
+@pytest.mark.asyncio
+async def test_slack_binding_route_denies_workspace_member(monkeypatch):
+    upsert = Mock()
+    monkeypatch.setattr(workspace_agent_routes, "upsert_slack_binding", upsert)
+
+    payload = workspace_agent_routes.SlackBindingPayload(external_channel_id="C1")
+    with active_workspace("ws_test", "member"):
+        with pytest.raises(Exception) as exc:
+            await workspace_agent_routes.save_slack_binding(payload)
+
+    assert getattr(exc.value, "status_code", None) == 403
+    upsert.assert_not_called()
+
+
+@pytest.mark.asyncio
+async def test_slack_binding_route_allows_workspace_admin(monkeypatch):
+    upsert = Mock(return_value={"workspace_id": "ws_test", "external_channel_id": "C1"})
+    monkeypatch.setattr(workspace_agent_routes, "upsert_slack_binding", upsert)
+
+    payload = workspace_agent_routes.SlackBindingPayload(external_channel_id="C1")
+    with active_workspace("ws_test", "admin"):
+        result = await workspace_agent_routes.save_slack_binding(payload)
+
+    assert result["binding"]["external_channel_id"] == "C1"
+    upsert.assert_called_once()
 
 
 def test_apply_overrides_replaces_engine_functions(monkeypatch):

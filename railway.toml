@@ -2,6 +2,7 @@
 dockerfile = "Dockerfile"
 
 [deploy]
+numReplicas = 1
 startCommand = "sh -c 'exec uvicorn apps.api.main:app --host 0.0.0.0 --port ${PORT:-8000} --workers 1'"
 healthcheckPath = "/healthz"
 healthcheckTimeout = 300

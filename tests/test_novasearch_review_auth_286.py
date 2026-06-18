@@ -58,6 +58,7 @@ def _client(
     *,
     auth_user_id: str | None,
     active_workspace_id: str | None = WORKSPACE_ID,
+    active_member_role: str | None = "member",
     query_row: dict[str, Any] | None = QUERY_ROW,
     supabase: _FakeSupabaseClient | None = None,
 ) -> TestClient:
@@ -65,6 +66,7 @@ def _client(
 
     monkeypatch.setattr(nova, "_query_row_by_id", lambda _query_id: query_row)
     monkeypatch.setattr(nova, "get_active_workspace_id", lambda: active_workspace_id)
+    monkeypatch.setattr(nova, "get_active_member_role", lambda: active_member_role)
     monkeypatch.setattr(nova, "new_supabase_service_client", lambda: supabase or _FakeSupabaseClient())
 
     app = FastAPI()
@@ -105,8 +107,26 @@ def test_review_page_requires_active_workspace_match(monkeypatch):
     assert response.status_code == 404
 
 
-def test_review_page_renders_for_authenticated_workspace_member(monkeypatch):
-    client = _client(monkeypatch, auth_user_id=REVIEWER_ID)
+def test_review_page_rejects_non_owner_member(monkeypatch):
+    client = _client(monkeypatch, auth_user_id=REVIEWER_ID, active_member_role="member")
+
+    response = client.get(f"/api/novasearch/review/{VALID_ID}")
+
+    assert response.status_code == 403
+
+
+def test_review_page_renders_for_query_owner(monkeypatch):
+    client = _client(monkeypatch, auth_user_id=QUERY_OWNER_ID, active_member_role="member")
+
+    response = client.get(f"/api/novasearch/review/{VALID_ID}")
+
+    assert response.status_code == 200
+    assert "Backend Engineer" in response.text
+    assert "Alice" in response.text
+
+
+def test_review_page_renders_for_workspace_admin(monkeypatch):
+    client = _client(monkeypatch, auth_user_id=REVIEWER_ID, active_member_role="admin")
 
     response = client.get(f"/api/novasearch/review/{VALID_ID}")
 
@@ -158,9 +178,20 @@ def test_review_label_requires_active_workspace_match(monkeypatch):
     assert response.status_code == 404
 
 
-def test_review_label_records_authenticated_reviewer(monkeypatch):
+def test_review_label_rejects_non_owner_member(monkeypatch):
+    client = _client(monkeypatch, auth_user_id=REVIEWER_ID, active_member_role="member")
+
+    response = client.post(
+        f"/api/novasearch/review/{VALID_ID}/label",
+        json={"candidate_key": "candidate-1", "worth_contact": True},
+    )
+
+    assert response.status_code == 403
+
+
+def test_review_label_records_authenticated_query_owner(monkeypatch):
     supabase = _FakeSupabaseClient()
-    client = _client(monkeypatch, auth_user_id=REVIEWER_ID, supabase=supabase)
+    client = _client(monkeypatch, auth_user_id=QUERY_OWNER_ID, active_member_role="member", supabase=supabase)
 
     response = client.post(
         f"/api/novasearch/review/{VALID_ID}/label",
@@ -178,13 +209,26 @@ def test_review_label_records_authenticated_reviewer(monkeypatch):
     assert supabase.table_name == "novasearch_match_labels"
     assert supabase.last_payload is not None
     assert supabase.last_payload["workspace_id"] == WORKSPACE_ID
-    assert supabase.last_payload["user_id"] == REVIEWER_ID
-    assert supabase.last_payload["user_id"] != QUERY_OWNER_ID
+    assert supabase.last_payload["user_id"] == QUERY_OWNER_ID
     assert supabase.last_payload["candidate_key"] == "candidate-1"
 
 
+def test_review_label_allows_workspace_admin(monkeypatch):
+    supabase = _FakeSupabaseClient()
+    client = _client(monkeypatch, auth_user_id=REVIEWER_ID, active_member_role="admin", supabase=supabase)
+
+    response = client.post(
+        f"/api/novasearch/review/{VALID_ID}/label",
+        json={"candidate_key": "candidate-1", "worth_contact": True},
+    )
+
+    assert response.status_code == 200
+    assert supabase.last_payload is not None
+    assert supabase.last_payload["user_id"] == REVIEWER_ID
+
+
 def test_review_label_requires_candidate_key(monkeypatch):
-    client = _client(monkeypatch, auth_user_id=REVIEWER_ID)
+    client = _client(monkeypatch, auth_user_id=QUERY_OWNER_ID)
 
     response = client.post(
         f"/api/novasearch/review/{VALID_ID}/label",

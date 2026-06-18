@@ -132,3 +132,23 @@ def test_cloud_lifespan_runs_startup_recovery(monkeypatch):
         "stop_drain",
         "stop_scheduler",
     ]
+
+
+def test_cloud_lifespan_requires_scheduler_lock_db(monkeypatch):
+    monkeypatch.setenv("WORKEROS_DEPLOY", "cloud")
+    monkeypatch.delenv("WORKEROS_CLOUD_DB_HOST", raising=False)
+
+    import apps.api.main as main
+
+    async def _run():
+        from fastapi import FastAPI
+
+        async with main.lifespan(FastAPI()):
+            pass
+
+    try:
+        asyncio.run(_run())
+    except RuntimeError as exc:
+        assert "WORKEROS_CLOUD_DB_HOST is required" in str(exc)
+    else:
+        raise AssertionError("cloud lifespan must fail closed without scheduler DB lock env")

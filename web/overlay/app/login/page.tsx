@@ -1,6 +1,7 @@
 import Link from "next/link";
 import { LoginEmailPanel } from "@/components/LoginEmailPanel";
 import { WorkerAvatar } from "@/components/WorkerAvatar";
+import { safeAppNext } from "@/lib/safe-next";
 
 export const metadata = {
   title: "Sign in · Floom",
@@ -9,7 +10,7 @@ export const metadata = {
 const API_BASE = process.env.NEXT_PUBLIC_WORKEROS_API_BASE ?? "https://workeros-api.floom.dev";
 
 const oauthLoginUrl = (provider: "google" | "github", next = "/app") =>
-  `${API_BASE}/auth/login?provider=${provider}&next=${encodeURIComponent(next)}`;
+  `${API_BASE}/auth/login?provider=${provider}&next=${encodeURIComponent(safeAppNext(next))}`;
 
 const INSTALL_ROUTES: Record<string, string> = {
   slack: "/app/install/slack",
@@ -41,7 +42,7 @@ export default async function LoginPage({
   // Next 16: searchParams is always a Promise in server components.
   const sp = (await searchParams) ?? {};
   const install = typeof sp.install === "string" ? sp.install.toLowerCase() : "";
-  const next = install && INSTALL_ROUTES[install] ? INSTALL_ROUTES[install] : sp.next ?? "/app";
+  const next = install && INSTALL_ROUTES[install] ? INSTALL_ROUTES[install] : safeAppNext(sp.next);
   const initialMode = sp.mode === "signup" || sp.mode === "signin" ? sp.mode : "magic";
   const signupHref = `/login?mode=signup&next=${encodeURIComponent(next)}${install ? `&install=${encodeURIComponent(install)}` : ""}`;
 

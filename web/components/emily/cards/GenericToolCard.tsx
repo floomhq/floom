@@ -1,5 +1,6 @@
 import { ExternalLink } from "lucide-react";
 import type { GenericToolCard as GenericToolCardType } from "@/lib/emily-chat-types";
+import { sanitizeHref } from "@/lib/safe-url";
 import { Tool } from "@/components/ai-elements/tool";
 
 // #825: tool calls render with the EXISTING collapsible ai-elements/tool.tsx
@@ -30,7 +31,7 @@ export function GenericToolCard({ card }: { card: GenericToolCardType }) {
             action.method === "GET" ? (
               <a
                 key={action.id}
-                href={action.href}
+                href={sanitizeHref(action.href)}
                 className="inline-flex items-center gap-1 rounded-md [border:var(--bd-card)] bg-background px-2 py-1 text-[11px] font-medium text-foreground hover:bg-accent transition-colors"
               >
                 {action.label ?? action.id}

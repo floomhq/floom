@@ -4,7 +4,7 @@ from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field, field_validator
 
 from apps.api._engine import ensure_engine_api_path
-from apps.api.auth.workspace_context import get_active_workspace_id
+from apps.api.auth.workspace_context import get_active_member_role, get_active_workspace_id
 from apps.api.cloud_workspace_agent import (
     delete_slack_binding,
     get_slack_binding,
@@ -41,6 +41,11 @@ def _workspace_id_or_500() -> str:
     return workspace_id
 
 
+def _require_workspace_admin() -> None:
+    if get_active_member_role() != "admin":
+        raise HTTPException(status_code=403, detail="workspace admin required")
+
+
 @router.get("/channels/slack")
 async def read_slack_binding(
     _auth: AuthContext = Depends(get_auth_context),
@@ -54,6 +59,7 @@ async def save_slack_binding(
     payload: SlackBindingPayload,
     _auth: AuthContext = Depends(get_auth_context),
 ) -> dict:
+    _require_workspace_admin()
     workspace_id = _workspace_id_or_500()
     row = upsert_slack_binding(
         workspace_id=workspace_id,
@@ -69,5 +75,6 @@ async def save_slack_binding(
 async def remove_slack_binding(
     _auth: AuthContext = Depends(get_auth_context),
 ) -> dict:
+    _require_workspace_admin()
     workspace_id = _workspace_id_or_500()
     return {"deleted": delete_slack_binding(workspace_id=workspace_id)}

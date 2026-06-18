@@ -51,6 +51,16 @@ def test_git_workspace_config_rls_filters_active_members_only():
     assert "role = 'admin'" in text
 
 
+def test_git_workspace_config_select_is_admin_only():
+    text = _migration("0044_git_workspace_config_admin_select.sql")
+    assert "drop policy if exists \"workspace members can read git config\"" in text
+    assert "create policy \"workspace admins can read git config\"" in text
+    select_policy = text.split("create policy \"workspace admins can read git config\"", 1)[1]
+    assert "for select" in select_policy
+    assert "role = 'admin'" in select_policy
+    assert "status = 'active'" in select_policy
+
+
 def test_vault_secret_delete_triggers_cover_workspace_cascades():
     text = _migration("0043_vault_secret_delete_triggers.sql")
     assert "before delete on public.secrets" in text

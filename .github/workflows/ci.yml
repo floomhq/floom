@@ -63,3 +63,18 @@ jobs:
           # ENGINE_SUBMODULE_TOKEN); it surfaced once the suite actually runs.
           WORKEROS_CLOUD_SECRETS_ENCRYPTION_KEY: d29ya2Vyb3MtY2xvdWQtY2ktdGVzdC1rZXktMzJieXQ=
         run: pytest tests/ -v --tb=short
+
+      - name: Install engine dependencies
+        run: pip install -r engine/apps/api/requirements.txt
+
+      - name: Run engine tests
+        working-directory: engine
+        env:
+          WORKEROS_DB: ${{ runner.temp }}/workeros-engine-ci.db
+          FLOOM_DB: ${{ runner.temp }}/workeros-engine-ci.db
+          FLOOM_WORKERS_DIR: ${{ runner.temp }}/workeros-engine-workers
+          FLOOM_CONTEXTS_DIR: ${{ runner.temp }}/workeros-engine-contexts
+          FLOOM_ARTIFACTS_DIR: ${{ runner.temp }}/workeros-engine-artifacts
+          WORKEROS_GITHUB_PAT_ENCRYPTION_SECRET: ci-github-pat-secret
+          WORKEROS_CLOUD_SECRETS_ENCRYPTION_KEY: d29ya2Vyb3MtY2xvdWQtY2ktdGVzdC1rZXktMzJieXQ=
+        run: python -m pytest -q

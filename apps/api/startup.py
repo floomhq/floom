@@ -541,6 +541,12 @@ def _override_git_cfg_for_cloud() -> None:
     """
     from apps.api._engine import import_engine_module
     from apps.api.auth.workspace_context import get_active_workspace_id
+    from apps.api.cloud_git import (
+        authenticated_github_remote_url,
+        plaintext_cfg,
+        storage_fields,
+        strip_remote_credentials,
+    )
     from apps.api.config import get_supabase_service_client
     from datetime import datetime, timezone
 
@@ -557,7 +563,16 @@ def _override_git_cfg_for_cloud() -> None:
                 .limit(1)
                 .execute()
             )
-            return dict(rows.data[0]) if rows.data else None
+            if not rows.data:
+                return None
+            raw = dict(rows.data[0])
+            cfg = plaintext_cfg(raw)
+            pat = raw.get("github_pat")
+            if pat and not str(pat).startswith("fernet:") and cfg:
+                svc.table("git_workspace_config").update(
+                    {"github_pat": storage_fields({"github_pat": cfg["github_pat"]})["github_pat"]}
+                ).eq("workspace_id", workspace_id).execute()
+            return cfg
         except Exception:
             return None
 
@@ -565,6 +580,7 @@ def _override_git_cfg_for_cloud() -> None:
         workspace_id = get_active_workspace_id() or user_id
         try:
             svc = get_supabase_service_client()
+            fields = storage_fields(fields)
             # Use UPDATE if row exists, INSERT if not — never replace existing
             # fields (e.g. github_pat must survive a link-only upsert).
             existing = (
@@ -589,13 +605,18 @@ def _override_git_cfg_for_cloud() -> None:
                 .execute()
             )
             if row.data:
-                r = row.data[0]
+                r = plaintext_cfg(row.data[0]) or {}
                 remote_url = r.get("remote_url") or ""
                 if not remote_url and r.get("github_pat") and r.get("repo_full_name"):
-                    remote_url = f"https://{r['github_pat']}@github.com/{r['repo_full_name']}.git"
+                    remote_url = f"https://github.com/{r['repo_full_name']}.git"
                     svc.table("git_workspace_config").update({"remote_url": remote_url}).eq(
                         "workspace_id", workspace_id
                     ).execute()
+                remote_url = strip_remote_credentials(remote_url)
+                if r.get("github_pat") and r.get("repo_full_name"):
+                    remote_url = authenticated_github_remote_url(
+                        r["github_pat"], r["repo_full_name"]
+                    )
                 if remote_url:
                     from apps.api.cloud_git_local import configure_remote
                     configure_remote(workspace_id, remote_url)

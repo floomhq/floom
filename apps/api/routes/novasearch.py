@@ -17,7 +17,7 @@ from typing import Any
 from fastapi import APIRouter, Depends, File, HTTPException, Request, UploadFile
 from fastapi.responses import HTMLResponse
 
-from apps.api.auth.workspace_context import get_active_workspace_id
+from apps.api.auth.workspace_context import get_active_member_role, get_active_workspace_id
 from apps.api._engine import ensure_engine_api_path
 from apps.api.config import new_supabase_service_client
 from apps.api.obs import get_logger, log_failure
@@ -48,6 +48,10 @@ _VALID_KINDS = ("rule", "fact", "feedback", "preference")
 _VALID_SEVERITIES = ("low", "medium", "high", "critical")
 _ACTIVE_OUTREACH_STATUSES = {"queued", "queued_dryrun", "sent"}
 _LINKEDIN_MARKER = "linkedin.com/in/"
+
+
+def _can_access_review_query(query: dict[str, Any], auth: AuthContext) -> bool:
+    return get_active_member_role() == "admin" or str(query.get("user_id") or "") == str(auth.user_id)
 
 
 def _first_write_row(resp: Any, *, operation: str) -> dict[str, Any]:
@@ -1055,7 +1059,7 @@ async def novasearch_loxo_health(
 @router.get("/review/{query_id}", response_class=HTMLResponse)
 async def novasearch_review(
     query_id: str,
-    _auth: AuthContext = Depends(get_auth_context),
+    auth: AuthContext = Depends(get_auth_context),
 ) -> HTMLResponse:
     if not _REVIEW_ID_RE.fullmatch(query_id or ""):
         return HTMLResponse("<!doctype html><title>Not found</title><h1>Review link not found</h1>", status_code=404)
@@ -1065,6 +1069,8 @@ async def novasearch_review(
     workspace_id = get_active_workspace_id()
     if not workspace_id or workspace_id != query.get("workspace_id"):
         return HTMLResponse("<!doctype html><title>Not found</title><h1>Review link not found</h1>", status_code=404)
+    if not _can_access_review_query(query, auth):
+        return HTMLResponse("<!doctype html><title>Forbidden</title><h1>Forbidden</h1>", status_code=403)
     labels = (
         new_supabase_service_client()
         .table("novasearch_match_labels")
@@ -1115,6 +1121,8 @@ async def novasearch_review_label(
     workspace_id = get_active_workspace_id()
     if not workspace_id or workspace_id != query.get("workspace_id"):
         raise HTTPException(status_code=404, detail="Review link not found")
+    if not _can_access_review_query(query, auth):
+        raise HTTPException(status_code=403, detail="Review query access denied")
     body = await _read_json_body(request)
     candidate_key = str(body.get("candidate_key") or "").strip()
     if not candidate_key:
