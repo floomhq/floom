@@ -17,6 +17,7 @@ the connection test fixtures, so the bindings refresh per reload.
 from __future__ import annotations
 
 import asyncio
+import copy
 import json
 import logging
 import os
@@ -51,6 +52,45 @@ from services.worker_access import _list_visible_workers, _worker_connection_slu
 logger = logging.getLogger("floom.api")
 
 connections_router = APIRouter()
+_CONNECTION_LIST_CACHE_TTL_SECONDS = 10.0
+_connection_list_cache_lock = threading.Lock()
+_connection_list_cache: Dict[str, tuple[float, List["ConnectionItem"]]] = {}
+
+
+def _connection_list_cache_get(user_id: str) -> List["ConnectionItem"] | None:
+    now = time.monotonic()
+    with _connection_list_cache_lock:
+        item = _connection_list_cache.get(user_id)
+        if item is None:
+            return None
+        expires_at, value = item
+        if expires_at <= now:
+            _connection_list_cache.pop(user_id, None)
+            return None
+        return copy.deepcopy(value)
+
+
+def _connection_list_cache_set(user_id: str, value: List["ConnectionItem"]) -> None:
+    now = time.monotonic()
+    with _connection_list_cache_lock:
+        if len(_connection_list_cache) >= 256:
+            for key, (expires_at, _) in list(_connection_list_cache.items()):
+                if expires_at <= now:
+                    _connection_list_cache.pop(key, None)
+            if len(_connection_list_cache) >= 256:
+                _connection_list_cache.pop(next(iter(_connection_list_cache)))
+        _connection_list_cache[user_id] = (
+            now + _CONNECTION_LIST_CACHE_TTL_SECONDS,
+            copy.deepcopy(value),
+        )
+
+
+def _connection_list_cache_clear(user_id: str | None = None) -> None:
+    with _connection_list_cache_lock:
+        if user_id:
+            _connection_list_cache.pop(user_id, None)
+        else:
+            _connection_list_cache.clear()
 
 def _connection_row_for_user(
     connection_id: str,
@@ -732,8 +772,12 @@ def list_connections(
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
 ) -> List[ConnectionItem]:
+    cached = _connection_list_cache_get(auth.user_id)
+    if cached is not None:
+        return cached
     rows = repos.connections.list(user_id=auth.user_id)
     if not rows:
+        _connection_list_cache_set(auth.user_id, [])
         return []
     now = datetime.now(timezone.utc)
     last_used = _connections_last_used(auth.user_id, repos)  # #802
@@ -770,6 +814,7 @@ def list_connections(
         ):
             continue
         result.append(_public_connection_item(d))
+    _connection_list_cache_set(auth.user_id, result)
     return result
 
 
@@ -863,6 +908,7 @@ def initiate_connection(
         created_at=now,
         updated_at=now,
     )
+    _connection_list_cache_clear(auth.user_id)
 
     return ConnectionInitResponse(
         id=conn_id,
@@ -915,6 +961,7 @@ def create_mcp_connection(
     )
     item = row_to_dict(row)
     item["scopes"] = _parse_scopes_json(item.pop("scopes_json", None))
+    _connection_list_cache_clear(auth.user_id)
     return _public_connection_item(item)
 
 
@@ -1004,6 +1051,7 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
             composio_connection_id=callback_connection_id,
             updated_at=now,
         )
+        _connection_list_cache_clear(str(existing["user_id"]))
 
         # N5-1 dedupe: now that the OAuth round-trip is complete we can learn the
         # real account identity (e.g. the Gmail address) from Composio. If the
@@ -1083,6 +1131,7 @@ def _dedupe_connection_account(
             updated_at=now,
         )
         repos.connections.delete(user_id=user_id, composio_id=new_id)
+        _connection_list_cache_clear(str(user_id))
         landing_id = canonical["id"]
     except Exception as exc:  # pragma: no cover - defensive
         logger.warning("Connection dedupe failed for %s: %s", connection_id, exc)
@@ -1175,6 +1224,7 @@ def delete_connection(
             logger.warning("Could not revoke Composio connection %s: %s", composio_conn_id, exc)
 
     repos.connections.delete(user_id=user_id, composio_id=connection_id)
+    _connection_list_cache_clear(user_id)
 
     return {"status": "deleted"}
 

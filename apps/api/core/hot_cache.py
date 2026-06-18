@@ -9,7 +9,7 @@ from collections.abc import Hashable
 from typing import Any
 
 
-_CACHE_TTL_SECONDS = 2.0
+_CACHE_TTL_SECONDS = 10.0
 _MAX_ENTRIES = 256
 _lock = threading.Lock()
 _items: dict[Hashable, tuple[float, Any]] = {}
