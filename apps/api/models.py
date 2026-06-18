@@ -1321,6 +1321,7 @@ class WorkerContractExec(BaseModel):
     inputs: List[WorkerContractField] = Field(default_factory=list)
     secrets: List[str] = Field(default_factory=list)
     contexts: List[WorkerContextMountSpec] = Field(default_factory=list)
+    resources: Optional[WorkerResources] = None
     outputs: List[WorkerContractField] = Field(default_factory=list)
 
     @field_validator("mode", mode="before")
@@ -1806,7 +1807,7 @@ def worker_contract_to_worker_config(contract: WorkerContract, worker_id: str) -
             for context in (contract.contexts or contract.exec.contexts or [])
         ],
         memory=contract.memory,
-        resources=contract.resources,
+        resources=contract.exec.resources or contract.resources,
         outputs=outputs,
         csv_required_columns=contract.csv_required_columns,
         approvals=contract.approvals,
@@ -1912,6 +1913,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
             entry=config.runtime.entrypoint or "run.py",
             inputs=[_legacy_input_to_contract_field(field) for field in config.inputs],
             secrets=list(config.secrets),
+            resources=config.resources,
             outputs=[_legacy_output_to_contract_field(field) for field in config.outputs],
         ),
         system_prompt=config.runtime.system_prompt,
@@ -1931,6 +1933,7 @@ def worker_config_to_worker_contract(config: WorkerConfig, version: str = "0.1.0
         connections=[_model_data(connection) for connection in config.connections],
         contexts=[_model_data(context) for context in config.contexts],
         memory=config.memory,
+        resources=config.resources,
         csv_required_columns=config.csv_required_columns,
     )
 

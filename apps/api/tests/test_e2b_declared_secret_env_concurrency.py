@@ -15,7 +15,7 @@ API_DIR = Path(__file__).resolve().parents[1]
 if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
-from models import WorkerConfig, WorkerRuntime, WorkerTrigger
+from models import WorkerConfig, WorkerResources, WorkerRuntime, WorkerTrigger
 from runner_sandbox import e2b_driver
 from runner_sandbox.e2b_driver import E2BSandboxDriver
 
@@ -556,6 +556,109 @@ def test_e2b_worker_command_exception_surfaces_stderr_traceback(tmp_path, monkey
     assert "RuntimeError: nova exploded" in result.error
     assert any("[e2b] stderr: Traceback" in msg for msg, _level in logs)
     assert any("RuntimeError: nova exploded" in msg for msg, _level in logs)
+
+    if _Sandbox.host_root:
+        shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
+
+
+def test_e2b_resource_request_selects_matching_template_and_logs_fixed_limit(tmp_path, monkeypatch):
+    _install_fake_e2b(monkeypatch, tmp_path)
+    monkeypatch.setenv("WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_4096_CPU_4", "tpl-python-4gb-4cpu")
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text(
+        """
+import json
+from pathlib import Path
+Path("result.json").write_text(json.dumps({"status": "success", "outputs": {"ok": True}, "artifacts": []}))
+""".lstrip(),
+        encoding="utf-8",
+    )
+
+    config = WorkerConfig(
+        id="resource-worker",
+        name="Resource Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python3 run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        resources=WorkerResources(memory_mb=4096, cpu_count=4),
+        secrets=[],
+        memory=False,
+        outputs=[],
+    )
+    logs: list[tuple[str, str]] = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="resource-worker",
+        run_id="run-resource-worker",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+        trace_id="trace-resource-worker",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    assert result.status == "success"
+    assert _Sandbox.last_create_kwargs["template"] == "tpl-python-4gb-4cpu"
+    assert "memory_mb" not in _Sandbox.last_create_kwargs
+    assert "cpu_count" not in _Sandbox.last_create_kwargs
+    assert any(
+        "memory=4096MB requested, cpu=4 requested" in msg
+        and "Resource limits are template-fixed" in msg
+        for msg, _level in logs
+    )
+
+    if _Sandbox.host_root:
+        shutil.rmtree(_Sandbox.host_root, ignore_errors=True)
+
+
+def test_e2b_missing_result_with_cgroup_oom_reports_sandbox_oom(tmp_path, monkeypatch):
+    _install_fake_e2b(monkeypatch, tmp_path)
+    monkeypatch.setattr(e2b_driver, "_sandbox_memory_diagnostics", lambda _sandbox, _workdir: "/sys/fs/cgroup/memory.events: oom_kill 1")
+
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('booted then killed')\n", encoding="utf-8")
+
+    config = WorkerConfig(
+        id="oom-worker",
+        name="OOM Worker",
+        trigger=WorkerTrigger(type="manual"),
+        runtime=WorkerRuntime(
+            type="python311",
+            command="python3 run.py",
+            mode="pure-script",
+            bundle_path=str(worker_dir),
+        ),
+        secrets=[],
+        memory=False,
+        outputs=[],
+    )
+    logs: list[tuple[str, str]] = []
+
+    result = E2BSandboxDriver().run(
+        worker_id="oom-worker",
+        run_id="run-oom-worker",
+        inputs={},
+        secrets={},
+        log_fn=lambda msg, level="info": logs.append((msg, level)),
+        trace_id="trace-oom-worker",
+        timeout_seconds=30,
+        config=config,
+    )
+
+    assert result.status == "error"
+    assert result.error_code == "sandbox_oom"
+    assert result.retryable is False
+    assert "Sandbox ran out of memory before writing result.json" in result.error
+    assert "oom_kill 1" in result.error
+    assert any("Sandbox ran out of memory before writing result.json" in msg for msg, _level in logs)
 
     if _Sandbox.host_root:
         shutil.rmtree(_Sandbox.host_root, ignore_errors=True)

@@ -458,7 +458,7 @@ sandbox; patch to relative paths first.
 
 **Gotchas:**
 - Claude-Code-only tools (Read/Edit/Bash on host filesystem) are not available in the sandbox runtime. Audit the skill's tool calls before porting.
-- Heavy Python deps (torch, transformers, playwright) won't fit in the E2B template. Trim dependencies or split the worker into smaller sandboxed steps.
+- Heavy Python deps or large context packs may need a larger E2B template. Declare `resources.memory_mb` or `exec.resources.memory_mb` in `worker.yml`; the operator must configure the matching `WORKEROS_E2B_*_TEMPLATE_MEMORY_<MB>` template env var.
 - Skills that use Claude's `web_search` work; the runner exposes equivalent search.
 
 ---

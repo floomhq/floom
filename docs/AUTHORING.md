@@ -180,6 +180,10 @@ exec:
   runtime: python311         # python311 | node20
   runner: e2b                # e2b (default) | local (zero cold-start, trusted only)
   entry: run.py              # legacy field; should match `entrypoint`
+  # resources can also live here for schema_version 0.3 bundles.
+  # If both are present, exec.resources wins.
+  resources:
+    memory_mb: 2048
 
   inputs:
     - name: topic            # field name (passed to run())
@@ -410,14 +414,15 @@ WORKEROS_E2B_WARM_POOL_MAX_AGE_SECONDS=900
 
 Warm pooling reuses only read-only local context mounts. Workers with writeable or git-backed contexts keep the cold path so writeback and clone semantics stay unchanged. Per-run files (`inputs/`, `outputs/`, `result.json`, `.env.local`, `secrets.json`, `connections.json`) are removed before reuse, and the pool key changes when the worker bundle or local context pack changes.
 
-For larger workers, declare `resources.memory_mb` and point that size at an E2B template built with matching memory:
+For larger workers, declare `resources.memory_mb` or `exec.resources.memory_mb` and point that size at an E2B template built with matching memory:
 
 ```bash
 WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_2048=tpl-python-2gb
 WORKEROS_E2B_NODE_TEMPLATE_MEMORY_2048=tpl-node-2gb
+WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_2048_CPU_4=tpl-python-2gb-4cpu
 ```
 
-E2B memory/CPU is a template-build property, so an unconfigured resource request logs a warning and falls back to the normal runtime template. Operators can also register content-addressed worker templates with:
+E2B SDK 2.28.0 does not expose memory or CPU on `Sandbox.create()`. Memory/CPU is a template-build property, so an unconfigured resource request logs a warning and falls back to the normal runtime template. Operators can also register content-addressed worker templates with:
 
 ```bash
 WORKEROS_E2B_TEMPLATE_CACHE_JSON='{"<bundle-cache-key>":"tpl-worker-specific"}'
