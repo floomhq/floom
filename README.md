@@ -88,6 +88,8 @@ API process logs the conflict and exits instead of double-firing scheduled runs.
 
 ## Cloud Runtime Env
 
+Canonical deployment checklist: [docs/CLOUD_DEPLOYMENT.md](docs/CLOUD_DEPLOYMENT.md).
+
 Set these on the Railway `workeros-cloud-api` service for performant E2B repeat
 runs:
 
