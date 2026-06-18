@@ -12,9 +12,8 @@ import { qk } from "@/lib/query/hooks";
 // entry is already cached and fresh, it is a no-op (no duplicate network call).
 // We pass a small extra staleTime so back-to-back hovers never restart a fetch.
 //
-// Only the four routes backed by a `qk` hook are warmed (Overview, Workers,
-// Runs, Connections). Library and Approvals have no shared query key, so they
-// get Next.js route (JS/RSC) prefetch from the Link only, no data prefetch.
+// Only routes backed by `qk` hooks are warmed. Each route may warm supporting
+// lists too when that is what the destination needs for first paint.
 type PrefetchFn = (qc: QueryClient) => Promise<unknown>;
 
 const PREFETCH_STALE = 30_000;
@@ -39,9 +38,53 @@ const ROUTE_PREFETCH: Record<string, PrefetchFn> = {
       staleTime: PREFETCH_STALE,
     }),
   "/connections": (qc) =>
+    Promise.all([
+      qc.prefetchQuery({
+        queryKey: qk.connections,
+        queryFn: () => api.connections.list(),
+        staleTime: PREFETCH_STALE,
+      }),
+      qc.prefetchQuery({
+        queryKey: qk.secrets,
+        queryFn: () => api.secrets.list(),
+        staleTime: PREFETCH_STALE,
+      }),
+      qc.prefetchQuery({
+        queryKey: qk.workers(),
+        queryFn: () => api.workers.list(),
+        staleTime: PREFETCH_STALE,
+      }),
+      qc.prefetchQuery({
+        queryKey: qk.members,
+        queryFn: () =>
+          (api.members?.list?.() ?? Promise.resolve({ members: [] }))
+            .then((r) => r.members)
+            .catch(() => []),
+        staleTime: PREFETCH_STALE,
+      }),
+    ]),
+  "/approvals": (qc) =>
+    Promise.all([
+      qc.prefetchQuery({
+        queryKey: qk.approvals("pending"),
+        queryFn: () => api.approvals.list("pending"),
+        staleTime: PREFETCH_STALE,
+      }),
+      qc.prefetchQuery({
+        queryKey: qk.workers(),
+        queryFn: () => api.workers.list(),
+        staleTime: PREFETCH_STALE,
+      }),
+      qc.prefetchQuery({
+        queryKey: qk.approvalsCount,
+        queryFn: () => api.approvals.count(),
+        staleTime: PREFETCH_STALE,
+      }),
+    ]),
+  "/library": (qc) =>
     qc.prefetchQuery({
-      queryKey: qk.connections,
-      queryFn: () => api.connections.list(),
+      queryKey: qk.contexts,
+      queryFn: () => api.contexts.list(),
       staleTime: PREFETCH_STALE,
     }),
 };
@@ -60,9 +103,7 @@ export function prefetchRouteData(qc: QueryClient, href: string): void {
  * persisted cache already restored a fresh entry), no polling, no refetch loop.
  */
 export function prefetchIdleRoutes(qc: QueryClient, current: string): void {
-  // Workers and Runs are the most-visited destinations after Overview; warm
-  // them (skipping whichever route the operator is already on).
-  const targets = ["/overview", "/workers", "/runs"].filter((href) => href !== current);
+  const targets = ["/workers", "/connections", "/approvals", "/library"].filter((href) => href !== current);
   const run = () => targets.forEach((href) => prefetchRouteData(qc, href));
   if (typeof window === "undefined") return;
   const ric = (window as Window & { requestIdleCallback?: (cb: () => void) => void }).requestIdleCallback;

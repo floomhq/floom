@@ -4,6 +4,7 @@ import { Suspense, useCallback, useEffect, useMemo, useState } from "react";
 import Link from "next/link";
 import { useSearchParams } from "next/navigation";
 import { api } from "@/lib/api";
+import { useSecrets, useWorkers } from "@/lib/query/hooks";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { StatusPill } from "@/components/collection/StatusPill";
 import { Button } from "@/components/ui/button";
@@ -11,7 +12,6 @@ import { Input } from "@/components/ui/input";
 import { Skeleton } from "@/components/ui/skeleton";
 import { KeyRound, TestTube2, Trash2, Plus, Check, X, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
-import type { SecretItem, WorkerSummary } from "@/lib/types";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { useIsAdmin } from "@/lib/use-is-admin";
@@ -31,9 +31,18 @@ function SecretsContent() {
   // S24: ?prefill=NAME from /connections/browse -> opens add form pre-filled.
   const searchParams = useSearchParams();
   const prefillName = searchParams.get("prefill") ?? "";
-  const [secrets, setSecrets] = useState<SecretItem[]>([]);
-  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
-  const [loading, setLoading] = useState(true);
+  // #943 — the secret inventory (names + which workers use them) maps the
+  // workspace's vendors and operational gaps. Owner/admin only.
+  const { isAdmin, pending: roleCheckPending } = useIsAdmin();
+  const secretsQuery = useSecrets(undefined, isAdmin && !roleCheckPending);
+  const workersQuery = useWorkers(undefined, undefined, isAdmin && !roleCheckPending);
+  const { refetch: refetchSecrets } = secretsQuery;
+  const { refetch: refetchWorkers } = workersQuery;
+  const secrets = isAdmin ? (secretsQuery.data ?? []) : [];
+  const workers = workersQuery.data ?? [];
+  const loading =
+    isAdmin &&
+    ((secretsQuery.isLoading && !secretsQuery.data) || (workersQuery.isLoading && !workersQuery.data));
   const [addingName, setAddingName] = useState(prefillName);
   const [addingValue, setAddingValue] = useState("");
   const [addingOpen, setAddingOpen] = useState(Boolean(prefillName));
@@ -46,10 +55,6 @@ function SecretsContent() {
   // Track which secrets have their "used by" list expanded on mobile
   const [expandedUsedBy, setExpandedUsedBy] = useState<Set<string>>(new Set());
 
-  // #943 — the secret inventory (names + which workers use them) maps the
-  // workspace's vendors and operational gaps. Owner/admin only.
-  const { isAdmin, pending: roleCheckPending } = useIsAdmin();
-
   // #1226: name -> worker id for clickable used-by links
   const workersByName = useMemo(
     () => new Map(workers.map((w) => [w.name, w.id])),
@@ -59,27 +64,17 @@ function SecretsContent() {
   const refresh = useCallback(async () => {
     if (!isAdmin) return;
     try {
-      const [s, w] = await Promise.all([
-        api.secrets.list(),
-        api.workers.list().catch(() => [] as WorkerSummary[]),
-      ]);
-      setSecrets(s);
-      setWorkers(w);
+      await Promise.allSettled([refetchSecrets(), refetchWorkers()]);
     } catch {
       toast.error("Failed to load secrets");
-    } finally {
-      setLoading(false);
     }
-  }, [isAdmin]);
+  }, [isAdmin, refetchSecrets, refetchWorkers]);
 
   useEffect(() => {
-    if (roleCheckPending) return;
-    if (!isAdmin) {
-      setLoading(false);
-      return;
+    if (!roleCheckPending && isAdmin && secretsQuery.isError && !secretsQuery.data) {
+      toast.error("Failed to load secrets");
     }
-    void refresh();
-  }, [refresh, roleCheckPending, isAdmin]);
+  }, [roleCheckPending, isAdmin, secretsQuery.isError, secretsQuery.data]);
 
   async function handleAdd() {
     if (!addingName.trim() || !addingValue.trim()) {

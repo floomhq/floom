@@ -42,7 +42,7 @@ describe("Emily ToolCardRenderer", () => {
     );
 
     expect(screen.getByText("Read brain pack")).toBeTruthy();
-    expect(screen.getByText("call_1")).toBeTruthy();
+    expect(screen.queryByText("call_1")).toBeNull();
 
     await userEvent.click(screen.getByText("Read brain pack"));
 
