@@ -42,7 +42,7 @@ def toggle_worker_star(
     """#782: toggle the caller's star/favorite for a worker. Per-user; returns
     the new state. 404 if the worker is not visible to the caller."""
     worker_id = _canonical_worker_id(worker_id)
-    if _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos) is None:
+    if _worker_for_mutation(worker_id, auth, repos) is None:
         raise HTTPException(status_code=404, detail="Worker not found")
     return {"starred": _toggle_worker_star(auth.user_id, worker_id)}
 
