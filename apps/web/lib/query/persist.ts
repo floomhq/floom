@@ -25,6 +25,7 @@ export const PERSISTABLE_KEY_PREFIXES = [
   "workers",
   "connections",
   "secrets", // metadata only (names/status), never secret values
+  "contexts", // folder metadata only; file bodies/details stay out of persistence
   "runs",
 ] as const;
 

@@ -5,6 +5,7 @@ import Link from "next/link";
 import { AlertTriangle, Check, ChevronDown, Copy, Eye, EyeOff, Mail, Server, KeyRound } from "lucide-react";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
+import { useConnections, useMembers, useSecrets, useWorkers } from "@/lib/query/hooks";
 import type { ConnectionItem, RunSummary, SecretItem, WorkerSummary, WorkspaceMember } from "@/lib/types";
 import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
@@ -713,16 +714,30 @@ export default function ConnectionsCollection({
 }: {
   initialConnections: ConnectionItem[];
 }) {
-  const [connections, setConnections] = useState<ConnectionItem[]>(initialConnections);
-  const [secrets, setSecrets] = useState<SecretItem[]>([]);
-  const [workers, setWorkers] = useState<WorkerSummary[]>([]);
-  const [members, setMembers] = useState<WorkspaceMember[]>([]);
-  // #1234: always start loading so secrets render on first paint (not after SSR
-  // connections cause loading=false while secrets are still in-flight).
-  // #1269/#1279: the 10s safety timeout in the effect below guarantees loading
-  // resolves, so this never becomes an infinite skeleton on a hung API.
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
+  const connectionsQuery = useConnections(initialConnections);
+  const secretsQuery = useSecrets();
+  const workersQuery = useWorkers();
+  const membersQuery = useMembers();
+  const connections = connectionsQuery.data ?? initialConnections;
+  const secrets = secretsQuery.data ?? [];
+  const workers = workersQuery.data ?? [];
+  const members = membersQuery.data ?? [];
+  const hasCachedData = connections.length > 0 || secrets.length > 0 || workers.length > 0 || members.length > 0;
+  const firstLoadPending =
+    (connectionsQuery.isLoading && !connectionsQuery.data) ||
+    (secretsQuery.isLoading && !secretsQuery.data) ||
+    (workersQuery.isLoading && !workersQuery.data) ||
+    (membersQuery.isLoading && !membersQuery.data);
+  // #1269/#1279: keep the hung-API safety timeout, now applied to the query
+  // first-load state. Cached revisits bypass it and render immediately.
+  const [timedOut, setTimedOut] = useState(false);
+  const loading = firstLoadPending && !timedOut;
+  const error =
+    timedOut && !hasCachedData
+      ? "Could not load connections. Check your connection and try again."
+      : connectionsQuery.isError && !connectionsQuery.data
+        ? "Could not load connections. Check your connection and try again."
+        : null;
   // Pinned advanced connection tabs (per-session): the "Advanced ▾" group on the
   // tab row pins/opens secondary tabs (Recent emails, Config). Mirrors the
   // worker-detail Advanced group but session-scoped (no cross-worker preference
@@ -736,38 +751,22 @@ export default function ConnectionsCollection({
       return next;
     });
 
-  const refresh = async (initial = false) => {
-    const [c, s, w, m] = await Promise.allSettled([
-      api.connections.list(),
-      api.secrets.list(),
-      api.workers.list(),
-      (api.members?.list?.() ?? Promise.resolve({ members: [] as WorkspaceMember[] }))
-        .then((r) => r.members)
-        .catch(() => [] as WorkspaceMember[]),
+  const refresh = async () => {
+    await Promise.allSettled([
+      connectionsQuery.refetch(),
+      secretsQuery.refetch(),
+      workersQuery.refetch(),
+      membersQuery.refetch(),
     ]);
-    if (c.status === "fulfilled") setConnections(c.value);
-    if (s.status === "fulfilled") setSecrets(s.value);
-    if (w.status === "fulfilled") setWorkers(w.value);
-    if (m.status === "fulfilled") setMembers(m.value);
-    if (initial) setLoading(false);
   };
 
   useEffect(() => {
-    void refresh(true);
-    // Safety timeout: if the API proxy hangs, stop the skeleton after 25 s. But
-    // only surface an error when we have NOTHING to show — with SSR/cached data
-    // we keep showing it instead of flashing "Something went wrong" on a slow
-    // backend (consistent with the workers/runs cache-first behavior).
+    if (!firstLoadPending) return;
     const timeout = setTimeout(() => {
-      setLoading((prev) => {
-        if (prev && initialConnections.length === 0) {
-          setError("Could not load connections. Check your connection and try again.");
-        }
-        return false;
-      });
+      setTimedOut(true);
     }, 25_000);
     return () => clearTimeout(timeout);
-  }, []);
+  }, [firstLoadPending]);
 
   const items = useMemo(() => toUnified(connections, secrets), [connections, secrets]);
 
@@ -1190,9 +1189,8 @@ export default function ConnectionsCollection({
         help: "Connect an app, add an MCP server, or store a secret your workers can use.",
       },
       errorRetry: () => {
-        setError(null);
-        setLoading(true);
-        void refresh(true);
+        setTimedOut(false);
+        void refresh();
       },
     },
   };
