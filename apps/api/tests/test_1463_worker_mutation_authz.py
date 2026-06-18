@@ -82,3 +82,38 @@ def test_webhook_secret_rotation_denies_workspace_member_without_owner_or_admin(
         main.rotate_webhook_secret("shared-worker", auth=_member_auth(), repos=_repos())
 
     assert exc.value.status_code == 404
+
+
+def test_patch_worker_denies_workspace_member_before_webhook_secret_rotate(monkeypatch):
+    import main
+    from models import WorkerUpdateRequest
+
+    monkeypatch.setattr(main, "_worker_for_mutation", lambda *_args, **_kwargs: None)
+    endpoint = next(
+        route.endpoint
+        for route in main.app.routes
+        if getattr(route, "path", "") == "/workers/{worker_id}"
+        and "PATCH" in getattr(route, "methods", set())
+    )
+
+    with pytest.raises(HTTPException) as exc:
+        endpoint(
+            "shared-worker",
+            WorkerUpdateRequest(webhook_secret_rotate=True),
+            _request(),
+            auth=_member_auth(),
+            repos=_repos(),
+        )
+
+    assert exc.value.status_code == 404
+
+
+def test_star_denies_workspace_member_without_owner_or_admin(monkeypatch):
+    import routers.worker_lifecycle as lifecycle
+
+    monkeypatch.setattr(lifecycle, "_worker_for_mutation", lambda *_args, **_kwargs: None)
+
+    with pytest.raises(HTTPException) as exc:
+        lifecycle.toggle_worker_star("shared-worker", auth=_member_auth(), repos=_repos())
+
+    assert exc.value.status_code == 404
