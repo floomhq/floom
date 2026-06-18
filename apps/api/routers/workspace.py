@@ -87,9 +87,6 @@ from services.workspace_ops import (
 _WORKSPACE_INSTRUCTIONS_ASSET_TYPE = "workspace_instructions"
 _WORKSPACE_BASE_PERSONA_ASSET_TYPE = "workspace_base_persona"
 _GITHUB_PAT_SECRET_NAMES = ("GITHUB_TOKEN", "GH_TOKEN", "GITHUB_PAT")
-_GITHUB_REMOTE_SCHEME = "https://"
-_GITHUB_REMOTE_USERNAME = "x-access" "-token"
-_GITHUB_REMOTE_HOST = "@github.com"
 _REPO_FULL_NAME_RE = re.compile(r"^[A-Za-z0-9_.-]+/[A-Za-z0-9_.-]+$")
 
 logger = logging.getLogger("floom.api")
@@ -482,10 +479,7 @@ def export_workspace_to_github(
     if not repo_url:
         repo_url = _repo_html_url(repo_full_name)
 
-    remote_url = (
-        f"{_GITHUB_REMOTE_SCHEME}{_GITHUB_REMOTE_USERNAME}:"
-        f"{pat}{_GITHUB_REMOTE_HOST}/{repo_full_name}.git"
-    )
+    remote_url = f"https://github.com/{repo_full_name}.git"
     author_name, author_email = _git_author(auth)
     try:
         pushed_ref = _git_ops.commit_paths(
@@ -496,7 +490,7 @@ def export_workspace_to_github(
             author_email=author_email,
         )
         _git_ops.configure_remote(workspace, remote_url)
-        _git_ops.push(workspace)
+        _git_ops.push_with_github_token(workspace, pat)
     except _git_ops.GitOpsError as exc:
         raise HTTPException(
             status_code=500,

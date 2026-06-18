@@ -17,7 +17,10 @@ from __future__ import annotations
 import logging
 import os
 import re
+import sys
+import tempfile
 import subprocess
+from contextlib import contextmanager
 from pathlib import Path
 from typing import Callable, Optional
 
@@ -116,6 +119,7 @@ def _git(
     cwd: Path,
     check: bool = True,
     timeout: int = 30,
+    env: dict[str, str] | None = None,
 ) -> subprocess.CompletedProcess:
     result = subprocess.run(
         ["git"] + args,
@@ -123,11 +127,45 @@ def _git(
         capture_output=True,
         text=True,
         timeout=timeout,
-        env={**os.environ},
+        env={**os.environ, **(env or {})},
     )
     if check and result.returncode != 0:
         raise GitOpsError(f"git {args[0]} failed: {result.stderr.strip()}")
     return result
+
+
+@contextmanager
+def _github_token_env(token: str, username: str = "x-access-token"):
+    """Yield git env that answers HTTPS auth prompts without tokenized URLs."""
+    with tempfile.TemporaryDirectory(prefix="workeros-git-askpass-") as tmp:
+        helper_py = Path(tmp) / "askpass.py"
+        helper_py.write_text(
+            "import os, sys\n"
+            "prompt = ' '.join(sys.argv[1:]).lower()\n"
+            "key = 'WORKEROS_GIT_ASKPASS_USERNAME' if 'username' in prompt else 'WORKEROS_GIT_ASKPASS_PASSWORD'\n"
+            "print(os.environ.get(key, ''))\n",
+            encoding="utf-8",
+        )
+        if os.name == "nt":
+            askpass = Path(tmp) / "askpass.cmd"
+            askpass.write_text(
+                f'@echo off\r\n"{sys.executable}" "{helper_py}" %*\r\n',
+                encoding="utf-8",
+            )
+        else:
+            askpass = Path(tmp) / "askpass.sh"
+            askpass.write_text(
+                f"#!{sys.executable}\n"
+                + helper_py.read_text(encoding="utf-8"),
+                encoding="utf-8",
+            )
+            askpass.chmod(0o700)
+        yield {
+            "GIT_ASKPASS": str(askpass),
+            "GIT_TERMINAL_PROMPT": "0",
+            "WORKEROS_GIT_ASKPASS_USERNAME": username,
+            "WORKEROS_GIT_ASKPASS_PASSWORD": token,
+        }
 
 
 def clone_or_init(workspace_dir: Path, remote_url: str) -> bool:
@@ -385,6 +423,12 @@ def push(workspace_dir: Path) -> None:
     _git(["push", "-u", "origin", "HEAD"], workspace_dir, timeout=60)
 
 
+def push_with_github_token(workspace_dir: Path, token: str) -> None:
+    """Push HEAD to origin using a transient GitHub token, never a token URL."""
+    with _github_token_env(token) as env:
+        _git(["push", "-u", "origin", "HEAD"], workspace_dir, timeout=60, env=env)
+
+
 def push_background(workspace_dir: Path) -> None:
     """Push to origin in a daemon thread — fires after every commit, never blocks.
 
@@ -410,3 +454,28 @@ def push_background(workspace_dir: Path) -> None:
 def pull(workspace_dir: Path) -> None:
     """Pull from origin (fast-forward only)."""
     _git(["pull", "--ff-only"], workspace_dir, timeout=60)
+
+
+def pull_with_github_token(workspace_dir: Path, token: str) -> None:
+    """Pull from origin using a transient GitHub token, never a token URL."""
+    with _github_token_env(token) as env:
+        _git(["pull", "--ff-only"], workspace_dir, timeout=60, env=env)
+
+
+def clone_or_init_with_github_token(workspace_dir: Path, remote_url: str, token: str) -> bool:
+    """Clone a private GitHub repo with askpass auth and a public remote URL."""
+    git_dir = workspace_dir / ".git"
+    if git_dir.exists():
+        return False
+
+    workspace_dir.mkdir(parents=True, exist_ok=True)
+    with _github_token_env(token) as env:
+        result = _git(["clone", remote_url, "."], workspace_dir, check=False, timeout=120, env=env)
+    if result.returncode != 0:
+        raise GitOpsError(
+            f"git clone failed: {result.stderr.strip()}\n"
+            "Check the GitHub token has read access."
+        )
+    _git(["config", "user.email", "workeros@local"], workspace_dir)
+    _git(["config", "user.name", "WorkerOS"], workspace_dir)
+    return True
