@@ -138,6 +138,28 @@ def test_slack_commands_help_uses_signed_form_without_api_secret(monkeypatch, tm
     assert "/floom approvals" in response.json()["text"]
 
 
+def test_slack_commands_deduplicates_retry_by_trigger_id(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    body = _form_body(
+        {
+            "team_id": "T123",
+            "channel_id": "C123",
+            "user_id": "U123",
+            "trigger_id": "trigger-123",
+            "text": "help",
+            "response_url": "https://hooks.slack.test/response",
+        }
+    )
+
+    with TestClient(main.app) as client:
+        first = client.post("/slack/commands", data=body, headers=_slack_form_headers(body))
+        second = client.post("/slack/commands", data=body, headers=_slack_form_headers(body))
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == {"ok": True, "duplicate": True}
+
+
 def test_slack_commands_unbound_sender_does_not_run_as_owner(monkeypatch, tmp_path):
     """Codex finding #1: a slash command from an unbound (or other) Slack user
     must NOT execute as the bootstrap owner. It must (a) never list the owner's
@@ -255,6 +277,31 @@ def test_slack_interactivity_dismisses_signed_approval_action(monkeypatch, tmp_p
         "replace_original": True,
         "text": "Dismissed approval `run_123`.",
     }
+
+
+def test_slack_interactivity_deduplicates_retry(monkeypatch, tmp_path):
+    main = _load_api(monkeypatch, tmp_path)
+    payload = {
+        "team": {"id": "T123"},
+        "user": {"id": "U123"},
+        "container": {"message_ts": "1710000000.000100"},
+        "actions": [
+            {
+                "action_id": "workeros_approval_dismiss",
+                "block_id": "approval-actions",
+                "value": json.dumps({"run_id": "run_123"}),
+            }
+        ],
+    }
+    body = _form_body({"payload": json.dumps(payload)})
+
+    with TestClient(main.app) as client:
+        first = client.post("/slack/interactivity", data=body, headers=_slack_form_headers(body))
+        second = client.post("/slack/interactivity", data=body, headers=_slack_form_headers(body))
+
+    assert first.status_code == 200
+    assert second.status_code == 200
+    assert second.json() == {"ok": True, "duplicate": True}
 
 
 def test_slack_app_mention_returns_pointer_reply_not_agent(monkeypatch, tmp_path):

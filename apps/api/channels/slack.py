@@ -146,6 +146,38 @@ def _slack_interactivity_url() -> str:
     return f"{_public_api_base_url()}/slack/interactivity"
 
 
+def _slack_command_delivery_id(form: Dict[str, Any], body: bytes) -> str:
+    trigger_id = str(form.get("trigger_id") or "").strip()
+    if trigger_id:
+        return f"trigger:{trigger_id}"
+    digest = hashlib.sha256(body).hexdigest()
+    return f"body:{digest}"
+
+
+def _slack_interactivity_delivery_id(form: Dict[str, Any], body: bytes) -> str:
+    raw_payload = str(form.get("payload") or "")
+    try:
+        payload = json.loads(raw_payload) if raw_payload else {}
+    except Exception:
+        payload = {}
+    if isinstance(payload, dict):
+        action = (payload.get("actions") or [{}])[0]
+        if not isinstance(action, dict):
+            action = {}
+        user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+        container = payload.get("container") if isinstance(payload.get("container"), dict) else {}
+        stable_parts = [
+            str(user.get("id") or ""),
+            str(container.get("message_ts") or container.get("view_id") or ""),
+            str(action.get("action_id") or ""),
+            str(action.get("block_id") or ""),
+            str(action.get("value") or ""),
+        ]
+        if any(stable_parts):
+            return "action:" + hashlib.sha256("\x1f".join(stable_parts).encode("utf-8")).hexdigest()
+    return "body:" + hashlib.sha256(body).hexdigest()
+
+
 # ---------------------------------------------------------------------------
 # Scope helpers
 # ---------------------------------------------------------------------------
@@ -2040,6 +2072,10 @@ async def slack_commands(request: Request, background_tasks: BackgroundTasks) ->
     form = _parse_slack_form_body(body)
     # Single source of truth: actor resolution + ephemeral claim handling lives
     # in _slack_command_response_from_form (Codex finding #1).
+    from main import _claim_webhook_delivery
+    delivery_id = _slack_command_delivery_id(form, body)
+    if not _claim_webhook_delivery("slack:commands", delivery_id):
+        return JSONResponse({"ok": True, "duplicate": True})
     return await _slack_command_response_from_form(form, background_tasks)
 
 
@@ -2065,4 +2101,8 @@ async def slack_interactivity(request: Request) -> Response:
         raise HTTPException(status_code=401, detail="Invalid Slack signature")
 
     form = _parse_slack_form_body(body)
+    from main import _claim_webhook_delivery
+    delivery_id = _slack_interactivity_delivery_id(form, body)
+    if not _claim_webhook_delivery("slack:interactivity", delivery_id):
+        return JSONResponse({"ok": True, "duplicate": True})
     return _slack_interactivity_response_from_form(form)
