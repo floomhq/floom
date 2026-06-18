@@ -69,6 +69,7 @@ export default async function RootLayout({
         */}
         <script
           nonce={nonce}
+          suppressHydrationWarning
           dangerouslySetInnerHTML={{
             __html: `(function(){try{var m=localStorage.getItem('floom-theme');var d=window.matchMedia&&window.matchMedia('(prefers-color-scheme:dark)').matches;var isDark=m==='night'||(m!=='day'&&m==='system'&&d)||(!m&&false);document.documentElement.classList.toggle('dark',isDark);document.documentElement.setAttribute('data-theme',m||'day');}catch(e){}})();`,
           }}
