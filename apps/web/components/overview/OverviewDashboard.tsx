@@ -279,15 +279,15 @@ function attentionAction(item: SystemOverviewAttentionItem): {
     );
     return {
       title: `${provider} needs reconnect`,
-      detail: item.message || "Connection expired",
+      detail: item.message || "Integration expired",
       actionLabel: "Reconnect",
       href: "/connections",
     };
   }
   if (kind === "missing_connection") {
     return {
-      title: `${workerLabel} needs a connection`,
-      detail: item.message || "Add a connection to run",
+      title: `${workerLabel} needs an integration`,
+      detail: item.message || "Add an integration to run",
       actionLabel: "Add",
       href: `/connections?worker=${encodeURIComponent(item.worker_id ?? "")}`,
     };
