@@ -381,6 +381,10 @@ export function CollectionView<T>({ config, state, onChange, onInvalidSel }: Col
     >
       {header}
 
+      {!isOpen && !creating && config.headerSlot && (
+        <div style={{ padding: `10px ${PAGE_X}px 0` }}>{config.headerSlot}</div>
+      )}
+
       {!isOpen && !creating && (
         <>
           <div className="c-toolbar" style={{ padding: `14px ${PAGE_X}px 0` }}>

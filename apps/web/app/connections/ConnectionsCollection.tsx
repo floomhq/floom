@@ -11,6 +11,7 @@ import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { BrandLogo } from "@/components/connections/BrandLogo";
+import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { RunStatusBadge } from "@/components/RunStatus";
 import { StatusPill } from "@/components/collection/StatusPill";
 import {
@@ -812,6 +813,7 @@ export default function ConnectionsCollection({
   const config: CollectionConfig<UnifiedConn> = {
     title: "Integrations",
     subtitle: "Apps, MCP servers and secrets your workers can use.",
+    headerSlot: <ConnectionsTabs />,
     items,
     loading,
     error,
