@@ -477,7 +477,7 @@ export function RequirementsEditor({
         )}
         {skipped && (
           <p className="mt-0.5 text-xs text-[var(--warning)]">
-            Skipped. You can configure these later in Settings / Connections.
+            Skipped. You can configure these later in Settings / Integrations.
           </p>
         )}
       </CardHeader>

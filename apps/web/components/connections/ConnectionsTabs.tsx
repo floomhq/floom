@@ -19,7 +19,7 @@ export function ConnectionsTabs() {
   ];
 
   return (
-    <nav className="-mx-4 flex items-center overflow-x-auto [border-bottom:var(--bd-div)] px-4 sm:mx-0 sm:gap-1 sm:px-0" aria-label="Connections sections">
+    <nav className="-mx-4 flex items-center overflow-x-auto [border-bottom:var(--bd-div)] px-4 sm:mx-0 sm:gap-1 sm:px-0" aria-label="Integrations sections">
       {tabs.map((tab) => {
         const active = tab.match(pathname);
         return (
