@@ -66,6 +66,37 @@ def test_apply_migrations_rolls_back_partial_sql_script(monkeypatch, tmp_path):
     db._close_cached_db_connection()
 
 
+def test_duplicate_column_migration_executes_remaining_statements_before_stamping(monkeypatch, tmp_path):
+    db = _load_legacy_sqlite(monkeypatch, tmp_path / "duplicate-column.db")
+    db._close_cached_db_connection()
+    migrations = [
+        """
+        CREATE TABLE schema_version (
+            version INTEGER PRIMARY KEY,
+            applied_at TEXT NOT NULL
+        );
+        CREATE TABLE demo_table (id INTEGER PRIMARY KEY, existing TEXT);
+        """,
+        "CREATE TABLE filler_2 (id INTEGER);",
+        """
+        ALTER TABLE demo_table ADD COLUMN existing TEXT;
+        ALTER TABLE demo_table ADD COLUMN missing TEXT;
+        """,
+    ]
+    monkeypatch.setattr(db, "MIGRATIONS", migrations)
+
+    db.apply_migrations()
+
+    with db.get_db() as conn:
+        columns = {row["name"] for row in conn.execute("PRAGMA table_info(demo_table)")}
+        version = conn.execute("SELECT MAX(version) FROM schema_version").fetchone()[0]
+
+    assert "existing" in columns
+    assert "missing" in columns
+    assert version == 3
+    db._close_cached_db_connection()
+
+
 def test_get_db_reuses_connection_until_db_path_changes(monkeypatch, tmp_path):
     first_path = tmp_path / "pool.db"
     second_path = tmp_path / "pool-two.db"

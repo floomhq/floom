@@ -15,7 +15,7 @@ Concurrency rule: skip if a previous run for this worker is still running.
 import json
 import logging
 import threading
-from datetime import datetime, timezone
+from datetime import datetime, timedelta, timezone
 from typing import Any, Optional
 from zoneinfo import ZoneInfo
 
@@ -281,6 +281,24 @@ def _tick_trigger_rows(repos, now: datetime, now_iso_str: str) -> int:
             continue  # not due yet
 
         new_next = compute_next_run_at(cron_expr, now, cron_timezone)
+        lease_until = (now + timedelta(seconds=max(POLL_INTERVAL_SECONDS * 3, 180))).isoformat()
+        claim_schedule_trigger = getattr(repos.workers, "claim_schedule_trigger", None)
+        if callable(claim_schedule_trigger):
+            try:
+                if not claim_schedule_trigger(
+                    trigger_id=trigger_id,
+                    now_iso=now_iso_str,
+                    locked_until=lease_until,
+                ):
+                    logger.info(
+                        "Skipping schedule trigger %s for worker %s: already claimed",
+                        trigger_id,
+                        worker_id,
+                    )
+                    continue
+            except Exception:
+                logger.exception("Failed to claim schedule trigger %s", trigger_id)
+                continue
         # Concurrency guard is per-WORKER (one bundle, one running run at a time).
         running_count = (
             repos.runs.count_running_for_worker(user_id=user_id, worker_id=worker_id)

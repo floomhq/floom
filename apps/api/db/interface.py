@@ -143,6 +143,14 @@ class WorkerRepository(Protocol):
 
     def list_due_schedule_triggers(self, *, now_iso: str) -> list[RowDict]: ...
 
+    def claim_schedule_trigger(
+        self,
+        *,
+        trigger_id: str,
+        now_iso: str,
+        locked_until: str,
+    ) -> bool: ...
+
     def set_trigger_next_run_at(self, *, trigger_id: str, next_run_at: str | None) -> None: ...
 
     def mark_trigger_fired(
@@ -379,6 +387,15 @@ class RunRepository(Protocol):
     def fail_running(self, *, user_id: str, error: str, error_code: str | None = None) -> list[str]: ...
 
     def fail_stale_running(
+        self,
+        *,
+        cutoff_iso: str,
+        exclude_run_ids: Iterable[str] = (),
+        error: str,
+        error_code: str | None = None,
+    ) -> list[RowDict]: ...
+
+    def fail_stale_running_without_sandbox_logs(
         self,
         *,
         cutoff_iso: str,

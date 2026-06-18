@@ -394,3 +394,112 @@ def test_sqlite_run_repo_implements_fail_all_pending_approval():
     from db.sqlite import SqliteRunRepository
     assert hasattr(SqliteRunRepository, "fail_all_pending_approval")
     assert callable(SqliteRunRepository.fail_all_pending_approval)
+
+
+# ---------------------------------------------------------------------------
+# #1481/#1482 - approval decisions must honor atomic claim result
+# ---------------------------------------------------------------------------
+
+def _auth(user_id: str = "user1"):
+    from auth.context import AuthContext
+
+    return AuthContext(user_id=user_id, role="admin", auth_method="test")
+
+
+def test_destructive_action_claims_before_delete_and_409s_on_lost_claim(monkeypatch):
+    from fastapi import HTTPException
+    import main
+
+    repos = MagicMock()
+    repos.approvals.get.return_value = {
+        "id": "apr_1",
+        "status": "pending",
+        "run_id": "run_1",
+        "decision_input_json": json.dumps({"kind": "destructive_delete", "path": "/workers/w1"}),
+    }
+    repos.approvals.approve.return_value = None
+    deleted: list[str] = []
+    monkeypatch.setattr(main, "_execute_destructive_delete", lambda path, *_args: deleted.append(path) or "deleted")
+
+    with pytest.raises(HTTPException) as exc:
+        main.approve_destructive_action(
+            "apr_1",
+            body=main.ApproveActionRequest(),
+            auth=_auth(),
+            repos=repos,
+        )
+
+    assert exc.value.status_code == 409
+    assert deleted == []
+
+
+def test_reject_destructive_action_409s_on_lost_claim():
+    from fastapi import HTTPException
+    import main
+
+    repos = MagicMock()
+    repos.approvals.get.return_value = {
+        "id": "apr_1",
+        "status": "pending",
+        "run_id": "run_1",
+        "decision_input_json": json.dumps({"kind": "destructive_delete", "path": "/workers/w1"}),
+    }
+    repos.approvals.reject.return_value = None
+
+    with pytest.raises(HTTPException) as exc:
+        main.reject_destructive_action(
+            "apr_1",
+            body=main.RejectRequest(),
+            auth=_auth(),
+            repos=repos,
+        )
+
+    assert exc.value.status_code == 409
+
+
+def test_agent_tool_approve_409s_on_lost_claim():
+    from fastapi import HTTPException
+    import main
+
+    repos = MagicMock()
+    repos.approvals.get.return_value = {
+        "id": "apr_1",
+        "status": "pending",
+        "run_id": "run_1",
+        "decision_input_json": json.dumps({"kind": "agent_tool"}),
+    }
+    repos.approvals.approve.return_value = None
+
+    with pytest.raises(HTTPException) as exc:
+        main.approve_agent_tool_approval(
+            "apr_1",
+            body=main.ApproveRequest(),
+            auth=_auth(),
+            repos=repos,
+        )
+
+    assert exc.value.status_code == 409
+
+
+def test_agent_tool_reject_409s_on_lost_claim():
+    from fastapi import HTTPException
+    import main
+
+    repos = MagicMock()
+    repos.approvals.get.return_value = {
+        "id": "apr_1",
+        "status": "pending",
+        "run_id": "run_1",
+        "decision_input_json": json.dumps({"kind": "agent_tool"}),
+    }
+    repos.approvals.reject.return_value = None
+
+    with pytest.raises(HTTPException) as exc:
+        main.reject_agent_tool_approval(
+            "apr_1",
+            body=main.RejectRequest(),
+            auth=_auth(),
+            repos=repos,
+        )
+
+    assert exc.value.status_code == 409

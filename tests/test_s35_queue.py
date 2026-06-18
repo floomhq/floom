@@ -572,6 +572,8 @@ class TestDrainLoopDbMethods:
         assert row is not None
         assert row["status"] == "running"
         assert dispatched == [run_id]
+        logs = repos.runs.list_logs(user_id="federico", run_id=run_id)
+        assert any("Queue drain claimed run" in log["message"] for log in logs)
 
         with run_service._active_runs_lock:
             run_service._active_runs.clear()
@@ -623,6 +625,7 @@ class TestDrainLoopDbMethods:
             owner_id="federico",
             config=None,
             result_retryable=True,
+            result_error_code="worker_runtime_error",
             repos=repos,
             log_fn=lambda message, level="info": log_messages.append((level, message)),
         )
@@ -650,6 +653,7 @@ class TestDrainLoopDbMethods:
             owner_id="federico",
             config=None,
             result_retryable=False,
+            result_error_code="worker_reported_error",
             repos=repos,
             log_fn=lambda *_args, **_kwargs: None,
         )
@@ -738,6 +742,7 @@ class TestStartupReEnqueue:
         repos.runs.create(user_id="local", run_id="rrun", worker_id="fail-wkr", status="running", started_at=stale, trigger_source="t", runner="e2b", input_json={})
         repos.runs.create(user_id="local", run_id="rqueue", worker_id="fail-wkr", status="queued", trigger_source="t", runner="e2b", input_json={})
 
+        monkeypatch.setenv("WORKEROS_AUTO_REQUEUE_ABANDONED_RUNS", "0")
         for name in list(sys.modules):
             if name == "run_service":
                 sys.modules.pop(name, None)
@@ -747,7 +752,7 @@ class TestStartupReEnqueue:
         # Running → failed; queued → still queued
         rrun = repos.runs.get(user_id="local", run_id="rrun")
         assert rrun["status"] == "failed"
-        assert rrun["error_code"] == "run_abandoned_server_restart"
+        assert rrun["error_code"] == "run_claimed_without_dispatch"
 
         rqueue = repos.runs.get(user_id="local", run_id="rqueue")
         assert rqueue["status"] == "queued"

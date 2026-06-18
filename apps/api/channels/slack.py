@@ -117,6 +117,23 @@ def _slack_oauth_callback_url() -> str:
     return f"{_public_api_base_url()}/slack/oauth/callback"
 
 
+def _append_slack_oauth_success_params(return_to: str, *, team_id: str) -> str:
+    safe_return_to = return_to if return_to.startswith("/") and not return_to.startswith("//") else "/assistant"
+    parsed = urllib.parse.urlsplit(safe_return_to)
+    query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    query.extend([
+        ("slack_connected", "1"),
+        ("team_id", team_id),
+    ])
+    return urllib.parse.urlunsplit((
+        "",
+        "",
+        parsed.path or "/assistant",
+        urllib.parse.urlencode(query),
+        parsed.fragment,
+    ))
+
+
 def _slack_events_url() -> str:
     return f"{_public_api_base_url()}/slack/events"
 
@@ -127,6 +144,38 @@ def _slack_commands_url() -> str:
 
 def _slack_interactivity_url() -> str:
     return f"{_public_api_base_url()}/slack/interactivity"
+
+
+def _slack_command_delivery_id(form: Dict[str, Any], body: bytes) -> str:
+    trigger_id = str(form.get("trigger_id") or "").strip()
+    if trigger_id:
+        return f"trigger:{trigger_id}"
+    digest = hashlib.sha256(body).hexdigest()
+    return f"body:{digest}"
+
+
+def _slack_interactivity_delivery_id(form: Dict[str, Any], body: bytes) -> str:
+    raw_payload = str(form.get("payload") or "")
+    try:
+        payload = json.loads(raw_payload) if raw_payload else {}
+    except Exception:
+        payload = {}
+    if isinstance(payload, dict):
+        action = (payload.get("actions") or [{}])[0]
+        if not isinstance(action, dict):
+            action = {}
+        user = payload.get("user") if isinstance(payload.get("user"), dict) else {}
+        container = payload.get("container") if isinstance(payload.get("container"), dict) else {}
+        stable_parts = [
+            str(user.get("id") or ""),
+            str(container.get("message_ts") or container.get("view_id") or ""),
+            str(action.get("action_id") or ""),
+            str(action.get("block_id") or ""),
+            str(action.get("value") or ""),
+        ]
+        if any(stable_parts):
+            return "action:" + hashlib.sha256("\x1f".join(stable_parts).encode("utf-8")).hexdigest()
+    return "body:" + hashlib.sha256(body).hexdigest()
 
 
 # ---------------------------------------------------------------------------
@@ -523,8 +572,8 @@ def slack_oauth_callback(code: str = "", state: str = "", error: str = ""):
     )
 
     return_to_val = str(state_payload.get("return_to") or "/assistant")
-    safe_return_to = return_to_val if return_to_val.startswith("/") and not return_to_val.startswith("//") else "/assistant"
-    return RedirectResponse(url=f"{frontend_url}{safe_return_to}?slack_connected=1&team_id={urllib.parse.quote(team_id)}")
+    return_to = _append_slack_oauth_success_params(return_to_val, team_id=team_id)
+    return RedirectResponse(url=f"{frontend_url}{return_to}")
 
 
 # ---------------------------------------------------------------------------
@@ -538,7 +587,7 @@ def _slack_events_enabled() -> bool:
 
 def _slack_signature_tolerance_seconds() -> int:
     try:
-        return max(0, int(os.environ.get("SLACK_SIGNATURE_TOLERANCE_SECONDS", "300")))
+        return max(30, int(os.environ.get("SLACK_SIGNATURE_TOLERANCE_SECONDS", "300")))
     except ValueError:
         return 300
 
@@ -553,7 +602,7 @@ def _verify_slack_signature(body: bytes, request: Request, signing_secret: str) 
     except ValueError:
         return False
     tolerance = _slack_signature_tolerance_seconds()
-    if tolerance > 0 and abs(time.time() - ts) > tolerance:
+    if abs(time.time() - ts) > tolerance:
         return False
     base = b"v0:" + timestamp.encode("utf-8") + b":" + body
     expected = "v0=" + hmac.new(signing_secret.encode("utf-8"), base, hashlib.sha256).hexdigest()
@@ -2023,6 +2072,10 @@ async def slack_commands(request: Request, background_tasks: BackgroundTasks) ->
     form = _parse_slack_form_body(body)
     # Single source of truth: actor resolution + ephemeral claim handling lives
     # in _slack_command_response_from_form (Codex finding #1).
+    from main import _claim_webhook_delivery
+    delivery_id = _slack_command_delivery_id(form, body)
+    if not _claim_webhook_delivery("slack:commands", delivery_id):
+        return JSONResponse({"ok": True, "duplicate": True})
     return await _slack_command_response_from_form(form, background_tasks)
 
 
@@ -2048,4 +2101,8 @@ async def slack_interactivity(request: Request) -> Response:
         raise HTTPException(status_code=401, detail="Invalid Slack signature")
 
     form = _parse_slack_form_body(body)
+    from main import _claim_webhook_delivery
+    delivery_id = _slack_interactivity_delivery_id(form, body)
+    if not _claim_webhook_delivery("slack:interactivity", delivery_id):
+        return JSONResponse({"ok": True, "duplicate": True})
     return _slack_interactivity_response_from_form(form)

@@ -169,6 +169,25 @@ def test_queued_run_cancel_does_not_call_e2b_sandbox(monkeypatch, tmp_path):
     db.get_repositories.cache_clear()
 
 
+def test_terminal_run_cancel_is_idempotent_success(monkeypatch, tmp_path):
+    db, main = _load_app(monkeypatch, tmp_path)
+    repos = db.get_repositories()
+    _create_worker_and_run(repos, status="completed")
+
+    client = TestClient(main.app, raise_server_exceptions=False)
+    resp = client.post(
+        "/runs/run-cancel/cancel",
+        headers={"x-floom-secret": "test-secret"},
+    )
+
+    assert resp.status_code == 200, resp.text
+    assert resp.json() == {"status": "completed", "run_id": "run-cancel"}
+    row = repos.runs.get(user_id="federico", run_id="run-cancel")
+    assert row["status"] == "completed"
+    assert row["cancel_requested"] == 0
+    db.get_repositories.cache_clear()
+
+
 def test_cancel_flag_db_read_failure_fails_closed_and_is_metrified(monkeypatch, tmp_path, caplog):
     db, main = _load_app(monkeypatch, tmp_path)
     import db as db_module

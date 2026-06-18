@@ -34,6 +34,23 @@ def test_derived_workspace_id_from_scoped_owner(repo_bundle):
     assert worker["workspace_id"] == "ws_0123456789abcd"
 
 
+def test_user_delete_refuses_to_orphan_owned_resources(repo_bundle):
+    repos, _db, manifest = repo_bundle
+    repos.users.create(
+        user_id="owner-delete",
+        username="owner-delete",
+        display_name=None,
+        password_hash="hash",
+        role="member",
+    )
+    _create_worker(repos, manifest, user_id="owner-delete", worker_id="w-owned-delete")
+
+    with pytest.raises(ValueError, match="resources still exist"):
+        repos.users.delete(user_id="owner-delete")
+
+    assert repos.users.get(user_id="owner-delete") is not None
+
+
 # ---------------------------------------------------------------------------
 # WorkspaceMemberRepository (single-owner degenerate)
 # ---------------------------------------------------------------------------
@@ -80,8 +97,23 @@ def test_one_active_owner_index_blocks_second_owner(repo_bundle):
 
 
 def test_invite_then_set_role_then_transfer(repo_bundle):
-    repos, db, _manifest = repo_bundle
+    repos, db, manifest = repo_bundle
     _seed_owner(db, "ws_aaaaaaaaaaaaaa", "owner-1")
+    _create_worker(
+        repos,
+        manifest,
+        user_id="owner-1",
+        worker_id="w-transfer",
+        workspace_id="ws_aaaaaaaaaaaaaa",
+    )
+    repos.runs.create(
+        user_id="owner-1",
+        run_id="run-transfer",
+        worker_id="w-transfer",
+        status="completed",
+        trigger_source="manual",
+        runner="e2b",
+    )
 
     invited = repos.members.invite(
         workspace_id="ws_aaaaaaaaaaaaaa",
@@ -124,6 +156,11 @@ def test_invite_then_set_role_then_transfer(repo_bundle):
     assert transferred["role"] == "owner"
     old = repos.members.get(workspace_id="ws_aaaaaaaaaaaaaa", user_id="owner-1")
     assert old["role"] == "admin"
+    worker = repos.workers.get(user_id=member_uid, worker_id="w-transfer")
+    assert worker is not None
+    assert worker["owner_id"] == member_uid
+    run = repos.runs.get(user_id=member_uid, run_id="run-transfer")
+    assert run is not None
 
 
 def test_admin_cannot_remove_other_admin(repo_bundle):

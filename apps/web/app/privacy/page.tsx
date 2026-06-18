@@ -34,7 +34,7 @@ export default function PrivacyPage() {
             through the API: values are never returned to the browser.
           </li>
           <li>
-            <strong>Connections</strong>: OAuth connections (via Composio) and
+            <strong>Integrations</strong>: OAuth connections (via Composio) and
             MCP endpoints you authorize, referenced by internal identifiers.
             OAuth access tokens are held by the connection provider, not in this
             database.
