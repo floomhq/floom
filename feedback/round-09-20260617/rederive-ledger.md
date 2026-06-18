@@ -67,4 +67,33 @@ Per `codex-rederive-verdict.md`. Worktrees only, no deploy.
   - The 6 failures are ALL in `tests/test_615_brain_git_clone_paths.py` and are **PRE-EXISTING on clean `origin/main`**, NOT caused by this merge.
   - Root cause: `_upload_contexts_to_sandbox()` requires a keyword-only `inputs` arg (a main-side change) but `test_615` calls it without `inputs=`. The signature in the merged file is byte-identical to `origin/main`; my merge did not touch `e2b_driver.py` or `test_615`. Confirmed `origin/main`'s own copy of the test omits `inputs=` at lines 73/99.
   - NOT fixed here — it is a stale main test, orthogonal to the R9 re-derive. Flagged for a separate fix.
-- `apps/web` build: see report (Turbopack worktree caveat noted there).
+- `apps/web` next build: **exit 0, "Compiled successfully"** (ran `npm ci` + `npx next build` in the isolated worktree; all routes compiled). The earlier tsc errors were 100% symlink artifacts (a main-`node_modules` symlink lacking R9's `@tanstack/react-query` deps) and vanished after a clean `npm ci`. Standalone `tsc --noEmit` still flags test-only files (`tests/*.dom.test.tsx` missing `@testing-library/jest-dom`/`user-event` type wiring), which are not in the build graph.
+
+---
+
+## CLOUD — re-derive (release/round-09-20260618)
+
+- Cloud base main: `03c6799e2fbe3fa5831d57eed9ff735787853d4b`
+- Cloud R9 tip merged: `fa898b930821319e56acd9dd4b9547d734b19420` (`origin/fix/overlay-r9-cloud`)
+- Engine submodule pointed at the ENGINE release SHA: `985047e8dd9978fb1317a66b642fe9361c8cc2b3`
+
+### Conflicts & resolutions
+- **`engine` submodule (only conflict).** main pointer = `a71880a9` (engine main); R9-cloud pointer = `093b6af9` (R9 engine tip). git refused the submodule auto-merge ("commits don't follow merge-base").
+  - **Resolution: checked the engine submodule out to the re-derived ENGINE release SHA `985047e8` and `git add engine`.** That release IS the merge of main+R9 engine, so it is the correct, non-divergent pointer for the cloud release.
+- **Overlay forks auto-merged cleanly (no text conflict markers):** `web/overlay/lib/api.ts`, `web/overlay/middleware.ts`, `web/overlay/components/CloudAccountFooter.tsx`. Verified the merge result vs `origin/main`:
+  - `api.ts` diff vs main = **purely additive** R9 endpoints (worker setStage/pause/resume/updateInputValues/revokeShareLink, run shareLink/revoke, brain pack/file revoke, connection tools/presets). **NO removal** of main's `063e5118` localStorage guards.
+  - `middleware.ts` diff vs main = **purely additive** R9 `isRscOrDataRequest()` + RSC-401 handling. Main's `063e5118` `/start` + `/auth/magic` public routes untouched.
+
+### CLOUD — KEEP rules (verified in the GENERATED post-`npm run sync` tree)
+- **main's `063e5118` localStorage guards kept:** generated `web/lib/api.ts` has 2 `typeof window === "undefined" || !window.localStorage` guards; `CloudAccountFooter.tsx` guarded. VERIFIED (R9's removal NOT taken).
+- **main's `063e5118` public `/start` + `/auth/magic` routes kept:** generated `web/middleware.ts:42-43`. VERIFIED.
+- **R9's RSC-401 handling kept:** generated `web/middleware.ts` `isRscOrDataRequest()` + bodiless `status: 401` (lines 134/189); generated `web/lib/api.ts:120` `if (status === 401) redirectToLoginOnce(path)`. VERIFIED.
+- **G5 CloudAccountFooter squircle fix kept:** `web/overlay/components/CloudAccountFooter.tsx` flat squircle (radius-button), real photo for OAuth, flat-squircle initial (`#1306 / G5`, lines ~105-148). VERIFIED.
+
+### CLOUD — gate results
+- `npm run sync`: **exit 0** — 377 engine files copied, 42 overlay files layered, 0 stale skipped. Overlay diff does NOT drop the `063e5118` guards/routes (verified in generated output above).
+- `npm run check-drift`: **PASS** (exit 0) — "synced tree matches engine/apps/web (overlay excluded). Zero drift."
+- `npm run build`: **exit 0**, "Compiled successfully" — all routes built (incl. `/start`, `/auth/magic/[token]`, `/invite/[token]`, `/workers/[id]/share`, `/workspace/share/[token]`).
+
+### Intentional drops (cloud): NONE.
+No R9 cloud fix and no main fix was dropped. The submodule conflict was resolved by pointing at the unified engine release; both overlay merges were additive.
