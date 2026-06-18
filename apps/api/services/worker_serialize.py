@@ -705,6 +705,12 @@ def _build_worker_detail(
         files=worker_files,
         webhook_url=webhook_url,
         triggers_spec=triggers_spec,
+        # Scheduler bookkeeping (workers row), surfaced read-only for the detail
+        # pane's next-run / last-fired display on scheduled/cron workers. Both are
+        # None for manual/never-fired workers. last_fired_at maps to the worker's
+        # last_scheduled_run_at (the scheduler's last-started timestamp).
+        next_run_at=worker.get("next_run_at"),
+        last_fired_at=worker.get("last_scheduled_run_at"),
         missing_secrets=_det_missing_secrets,
         missing_connections=_det_missing_connections,
         public_link=_worker_public_link(worker) if str(worker.get("visibility") or "private") == "public" else None,
