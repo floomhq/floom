@@ -1,6 +1,6 @@
 "use client";
 
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
 import type { TimeseriesDay } from "@/lib/types";
 import type { OverviewSparklineBucket } from "@/lib/types";
@@ -42,6 +42,11 @@ export function Sparkline({
   // Hovered bucket index for the area-variant tooltip (-1 = none). Declared
   // before the early return so hook order stays stable across variants.
   const [hovered, setHovered] = useState(-1);
+  const [mounted, setMounted] = useState(false);
+
+  useEffect(() => {
+    setMounted(true);
+  }, []);
 
   if (!data || data.length === 0) return null;
 
@@ -140,7 +145,7 @@ export function Sparkline({
                 onMouseEnter={() => setHovered(i)}
                 onMouseLeave={() => setHovered((h) => (h === i ? -1 : h))}
               >
-                <title>{title}</title>
+                {mounted ? <title>{title}</title> : null}
               </rect>
             );
           })}
@@ -206,7 +211,7 @@ export function Sparkline({
               opacity={failed > 0 ? 1 : totalH === 0 ? 0.16 : 0.3}
               rx={1}
             >
-              <title>{title}</title>
+              {mounted ? <title>{title}</title> : null}
             </rect>
           );
         }
@@ -246,7 +251,7 @@ export function Sparkline({
 
         return (
           <g key={day.date ?? i}>
-            <title>{title}</title>
+            {mounted ? <title>{title}</title> : null}
             {completedH > 0 && (
               <rect
                 x={x}
