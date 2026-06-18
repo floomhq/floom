@@ -892,7 +892,7 @@ function FilesEditorEdit({
                 <button
                   type="button"
                   onClick={(e) => { e.stopPropagation(); deleteFile(f.path); }}
-                  className="-my-1.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-muted-foreground opacity-100 transition-all hover:text-red-500 sm:-my-1 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100"
+                  className="-my-1.5 inline-flex h-9 w-9 shrink-0 items-center justify-center rounded-[var(--radius-button)] text-muted-foreground opacity-100 transition-all hover:text-[var(--negative)] sm:-my-1 sm:h-7 sm:w-7 sm:opacity-0 sm:group-hover:opacity-100"
                   title={`Delete ${f.path}`}
                   aria-label={`Delete ${f.path}`}
                 >
