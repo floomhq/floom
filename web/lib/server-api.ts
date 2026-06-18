@@ -1,6 +1,7 @@
 import { cookies } from "next/headers";
 import type {
   ConnectionItem,
+  ContextSummary,
   PublicWorker,
   RunSummary,
   StandaloneShare,
@@ -87,6 +88,15 @@ export async function fetchWorkerList() {
 export async function fetchOverview() {
   return serverFetch<SystemOverview>("/system/overview", {
     next: { revalidate: 10 },
+  });
+}
+
+// perf-F2 mirror: the engine /library page now server-fetches brain folders.
+// The cloud serverFetch prepends /api → /api/contexts, with the cloud session
+// Bearer + workspace header. BrainCollection falls back to a client query on [].
+export async function fetchBrainFolders() {
+  return serverFetch<ContextSummary[]>("/contexts", {
+    next: { revalidate: 30 },
   });
 }
 

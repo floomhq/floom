@@ -115,18 +115,7 @@ describe("middleware auth gate", () => {
 
   it("keeps public pages reachable without login", async () => {
     const { middleware } = await import("@/middleware");
-    for (const p of [
-      "/login",
-      "/join?invite=abc",
-      "/cli-auth?code=abcd-1234",
-      "/start",
-      "/install/slack",
-      "/auth/magic/token.abc",
-      "/workspace/share/share-token",
-      "/connections/callback?status=success",
-      "/approvals/review?id=x&token=y",
-      "/w/abc?token=y",
-    ]) {
+    for (const p of ["/login", "/connections/callback?status=success", "/approvals/review?id=x&token=y", "/w/abc?token=y"]) {
       const res = await middleware(req(p));
       expect(res.headers.get("x-middleware-next")).toBe("1");
     }

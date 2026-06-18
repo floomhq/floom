@@ -7,16 +7,14 @@
 // → /login (FL4). This helper lets those server components detect the session
 // the same way middleware.ts does, so the share-card CTAs can branch on it.
 //
-// Mirrors middleware.ts: a valid cloud Supabase session cookie counts as
-// authenticated. This file is cloud-owned; OSS HMAC cookies are intentionally
-// not accepted here.
+// Mirrors middleware.ts: a valid HMAC `workeros_session` cookie OR a backend
+// multi-member `wos_session` cookie counts as authenticated.
 import { cookies } from "next/headers";
-import { verifySession } from "@/lib/verify-session";
-
-const SESSION_COOKIE = "workeros_cloud_session";
+import { SESSION_COOKIE, verifySessionToken } from "@/lib/web-session";
 
 export async function isAuthenticated(): Promise<boolean> {
   const store = await cookies();
   const token = store.get(SESSION_COOKIE)?.value;
-  return Boolean(await verifySession(token));
+  if (await verifySessionToken(token)) return true;
+  return Boolean(store.get("wos_session")?.value);
 }

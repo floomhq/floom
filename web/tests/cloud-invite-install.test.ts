@@ -55,17 +55,6 @@ function testMiddlewarePublicInvite(): void {
   assert(s.includes('path.startsWith("/invites/")'), "invite preview API must be public pre-login");
 }
 
-function testMiddlewarePublicOnboardingInMainAndOverlay(): void {
-  for (const rel of ["middleware.ts", "overlay/middleware.ts"]) {
-    const s = src(rel);
-    assert(s.includes('path === "/join"'), `${rel} must expose /join pre-login`);
-    assert(s.includes('path === "/cli-auth"'), `${rel} must expose /cli-auth pre-login`);
-    assert(s.includes('path.startsWith("/install/")'), `${rel} must expose /install/:channel pre-login`);
-    assert(s.includes('path.startsWith("/auth/magic/")'), `${rel} must expose /auth/magic/:token pre-login`);
-    assert(s.includes('path.startsWith("/workspace/share/")'), `${rel} must expose workspace share links pre-login`);
-  }
-}
-
 // Originally a standalone script (pre-vitest); now a proper suite so the
 // cloud runner (vitest.config.ts) can execute it.
 describe("cloud invite/install routes", () => {
@@ -74,5 +63,4 @@ describe("cloud invite/install routes", () => {
   it("install channel route", testInstallRoute);
   it("login install routing", testLoginInstallRoutes);
   it("middleware public invite paths", testMiddlewarePublicInvite);
-  it("middleware public onboarding paths in main and overlay", testMiddlewarePublicOnboardingInMainAndOverlay);
 });

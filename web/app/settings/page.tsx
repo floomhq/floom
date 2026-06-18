@@ -422,7 +422,6 @@ function SettingsContent() {
   const [waClaimBanner, setWaClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
   const [claimedSlackToken, setClaimedSlackToken] = useState<string | null>(null);
   const [slackClaimBanner, setSlackClaimBanner] = useState<{ ok: boolean; message: string } | null>(null);
-  const [claimedGenericToken, setClaimedGenericToken] = useState<string | null>(null);
   // the operator 2026-06-11: a successful claim shows a full-screen confirmation,
   // not just an inline banner. Channel-aware copy; null = no overlay.
   const [claimSuccess, setClaimSuccess] = useState<ClaimChannel | null>(null);
@@ -522,58 +521,6 @@ function SettingsContent() {
       }
     })();
   }, [claimedSlackToken, searchParams]);
-
-  useEffect(() => {
-    const token = (searchParams.get("claim_token") || "").trim();
-    if (!token || token === claimedGenericToken) return;
-    setClaimedGenericToken(token);
-    void (async () => {
-      const clearClaimToken = () => {
-        const params = new URLSearchParams(searchParams.toString());
-        params.delete("claim_token");
-        const qs = params.size ? `?${params.toString()}` : "";
-        const hash = typeof window !== "undefined" ? window.location.hash : "";
-        const path = typeof window !== "undefined" ? window.location.pathname : "/settings";
-        window.history.replaceState(null, "", `${path}${qs}${hash}`);
-        setSearch(window.location.search);
-      };
-      try {
-        try {
-          await api.whatsapp.claim(token);
-          setClaimSuccess("whatsapp");
-          return;
-        } catch (e: unknown) {
-          const raw = e instanceof Error ? e.message : "";
-          if (raw && raw !== "WhatsApp claim not found") {
-            const friendly =
-              raw === "WhatsApp claim expired"
-                ? "This link has expired. Text the Floom number again to get a new one."
-                : raw || "Failed to link WhatsApp.";
-            toast.error(friendly);
-            setWaClaimBanner({ ok: false, message: friendly });
-            return;
-          }
-        }
-
-        try {
-          await api.slack.claim(token);
-          setClaimSuccess("slack");
-        } catch (e: unknown) {
-          const raw = e instanceof Error ? e.message : "";
-          const friendly =
-            raw === "Slack claim expired"
-              ? "This link has expired. Send Emily a DM in Slack to get a new one."
-              : raw === "Slack claim not found"
-                ? "This link was not found or is already linked."
-                : raw || "Failed to link channel identity.";
-          toast.error(friendly);
-          setSlackClaimBanner({ ok: false, message: friendly });
-        }
-      } finally {
-        clearClaimToken();
-      }
-    })();
-  }, [claimedGenericToken, searchParams]);
 
   // #552: consume ?from_install=<channel> placed by the login page after an
   // install-param sign-in, route to the relevant tab, show a banner.

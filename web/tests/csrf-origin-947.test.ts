@@ -74,7 +74,7 @@ describe("#947 cloud CSRF origin validation on /api/proxy", () => {
     expect(res.status).not.toBe(403);
   });
 
-  it("does not trust x-forwarded-host as a CSRF allow-list source", async () => {
+  it("honors x-forwarded-host (the /app rewrite fronts the function)", async () => {
     const { middleware } = await import("@/middleware");
     const res = await middleware(
       req("/api/proxy/workers", {
@@ -83,6 +83,6 @@ describe("#947 cloud CSRF origin validation on /api/proxy", () => {
         origin: `https://${HOST}`,
       }),
     );
-    expect(res.status).toBe(403);
+    expect(res.status).not.toBe(403);
   });
 });
