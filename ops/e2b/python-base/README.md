@@ -10,11 +10,21 @@ pip install e2b
 E2B_API_KEY=e2b_... python ops/e2b/python-base/template.py
 ```
 
+Default resources are `2` CPU and `2048` MB memory. Override them when building
+a larger template:
+
+```bash
+WORKEROS_E2B_PYTHON_TEMPLATE_ALIAS=workeros-python-4gb \
+WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_MB=4096 \
+E2B_API_KEY=e2b_... python ops/e2b/python-base/template.py
+```
+
 Configure the API after the build returns your account-scoped template id or
 alias:
 
 ```bash
 WORKEROS_E2B_PYTHON_TEMPLATE_ID=workeros-python-base
+WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_4096=workeros-python-4gb
 WORKEROS_E2B_PYTHON_DEPS_BAKED=1
 ```
 

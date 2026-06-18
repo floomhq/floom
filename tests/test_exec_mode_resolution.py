@@ -105,6 +105,24 @@ def test_pure_script_without_command_defaults_command_engine_211():
     assert contract.exec.command == "python run.py"
 
 
+def test_exec_resources_override_top_level_resources():
+    contract = parse_worker_manifest(
+        manifest(
+            {
+                "runtime": "python311",
+                "entry": "run.py",
+                "resources": {"memory_mb": 4096, "cpu_count": 4},
+            },
+            resources={"memory_mb": 2048, "cpu_count": 2},
+        )
+    )
+
+    config = worker_contract_to_worker_config(contract, "resource-worker")
+
+    assert config.resources.memory_mb == 4096
+    assert config.resources.cpu_count == 4
+
+
 def test_stock_worker_migration_dispatch_matrix():
     rows = {}
     result = subprocess.run(
