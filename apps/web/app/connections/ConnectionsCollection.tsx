@@ -734,9 +734,9 @@ export default function ConnectionsCollection({
   const loading = firstLoadPending && !timedOut;
   const error =
     timedOut && !hasCachedData
-      ? "Could not load connections. Check your connection and try again."
+      ? "Could not load integrations. Check your connection and try again."
       : connectionsQuery.isError && !connectionsQuery.data
-        ? "Could not load connections. Check your connection and try again."
+        ? "Could not load integrations. Check your connection and try again."
         : null;
   // Pinned advanced connection tabs (per-session): the "Advanced ▾" group on the
   // tab row pins/opens secondary tabs (Recent emails, Config). Mirrors the
@@ -810,7 +810,7 @@ export default function ConnectionsCollection({
   };
 
   const config: CollectionConfig<UnifiedConn> = {
-    title: "Connections",
+    title: "Integrations",
     subtitle: "Apps, MCP servers and secrets your workers can use.",
     items,
     loading,
@@ -1156,7 +1156,7 @@ export default function ConnectionsCollection({
     add: {
       label: "Add",
       panel: {
-        title: "Add a connection",
+        title: "Add an integration",
         render: () => (
           <div style={{ display: "flex", flexDirection: "column", gap: 10, maxWidth: 460 }}>
             <p style={pad}>Connect an app, register an MCP server, or store a secret.</p>
@@ -1185,7 +1185,7 @@ export default function ConnectionsCollection({
     },
     states: {
       empty: {
-        title: "No connections yet",
+        title: "No integrations yet",
         help: "Connect an app, add an MCP server, or store a secret your workers can use.",
       },
       errorRetry: () => {

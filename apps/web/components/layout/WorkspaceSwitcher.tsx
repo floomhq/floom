@@ -9,6 +9,7 @@ import { api, getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
 import { cn } from "@/lib/utils";
 import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-logo";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
+import { WorkspaceMonogram } from "@/components/layout/WorkspaceMonogram";
 import { getWorkspaceActionCopy, isCloudMode } from "@/lib/workspace/action-copy";
 import type { LocalWorkspace } from "@/lib/types";
 import { Button } from "@/components/ui/button";
@@ -40,24 +41,10 @@ type WorkspaceState = {
   activeId: string;
 };
 
-/** DiceBear `shapes` avatar — deterministically seeded by workspace name/id.
- *  Geometric, non-cartoonish, fits a serious B2B product.
- *  Container uses var(--radius-button) (squircle), NOT a circle. */
+/** G3/G4: no avatars/DiceBear. Workspace mark is a flat squircle monogram
+ *  (shared with the collapsed/mobile sidebar mark via WorkspaceMonogram). */
 function WorkspaceAvatar({ name, size }: { name: string; size: number }) {
-  const seed = encodeURIComponent(resolveWorkspaceName(name) || name || "workspace");
-  const src = `https://api.dicebear.com/9.x/shapes/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf&backgroundType=gradientLinear&radius=0`;
-  return (
-    // eslint-disable-next-line @next/next/no-img-element
-    <img
-      src={src}
-      alt=""
-      aria-hidden="true"
-      width={size}
-      height={size}
-      className="shrink-0 rounded-[var(--radius-button)] object-cover"
-      style={{ width: size, height: size }}
-    />
-  );
+  return <WorkspaceMonogram name={name} size={size} />;
 }
 
 export function WorkspaceSwitcher() {

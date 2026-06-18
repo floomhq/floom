@@ -51,6 +51,7 @@ function cloudApexRedirects(): RedirectRule[] {
     "contexts",
     "approvals",
     "connections",
+    "integrations",
     "secrets",
     "settings",
     "members",
@@ -104,6 +105,18 @@ const nextConfig: NextConfig = {
         source: "/brain/:path*",
         destination: "/library/:path*",
         permanent: true,
+      },
+      // /integrations is the new user-facing name for /connections; redirect
+      // inbound links and bookmarks to the canonical route (2026-06-17).
+      {
+        source: "/integrations",
+        destination: "/connections",
+        permanent: false,
+      },
+      {
+        source: "/integrations/:path*",
+        destination: "/connections/:path*",
+        permanent: false,
       },
     ];
   },
