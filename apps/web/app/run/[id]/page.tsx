@@ -270,7 +270,7 @@ export default function RunWorkerPage() {
       <div className="flex flex-col md:flex-row min-h-0 flex-1">
         {/* LEFT PANE */}
         <aside
-          className="shrink-0 bg-[var(--bg-card)] md:overflow-y-auto"
+          className="shrink-0 bg-[var(--bg-card)] md:overflow-y-auto md:[border-right:var(--bd-div)]"
           style={{ width: "100%", maxWidth: 420 }}
         >
           <div className="p-5 space-y-6">
@@ -324,11 +324,11 @@ function RunPageShell({ children }: { children: React.ReactNode }) {
   return (
     <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 1080 }}>
       <div
-        className="rounded-[var(--radius-card)] bg-[var(--bg-app)] shadow-[var(--shadow-pop)] overflow-hidden flex flex-col"
+        className="rounded-[var(--radius-card)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)] overflow-hidden flex flex-col"
         style={{ minHeight: 560 }}
       >
         {/* Nav */}
-        <div className="flex items-center justify-between bg-[var(--bg-card)] px-5 py-3 shrink-0">
+        <div className="flex items-center justify-between [border-bottom:var(--bd-div)] px-5 py-3 shrink-0">
           <FloomMark />
         </div>
         {children}
