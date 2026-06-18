@@ -230,9 +230,26 @@ def _list_visible_runs(
     until: str | None = None,
     limit: int = 50,
     offset: int = 0,
+    before_created_at: str | None = None,
+    before_id: str | None = None,
     include_system: bool = False,
     exact_total: bool = True,
 ) -> tuple[list[Any], int]:
+    list_operator_visible = getattr(repos.runs, "list_operator_visible", None)
+    if list_operator_visible is not None and not exact_total:
+        return list_operator_visible(
+            user_id=user_id,
+            worker_id=worker_id,
+            statuses=statuses,
+            since=since,
+            until=until,
+            limit=limit,
+            before_created_at=before_created_at,
+            before_id=before_id,
+            offset=offset,
+            include_system=include_system,
+        )
+
     batch_size = max(limit, 100)
     raw_offset = 0
     raw_total_count: int | None = None
