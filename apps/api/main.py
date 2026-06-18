@@ -2530,7 +2530,7 @@ def update_worker(
     _require_worker_write_workspace_context(request)
     worker_id = _canonical_worker_id(worker_id)
     _raise_if_protected_worker_mutation(worker_id)
-    worker = _get_visible_worker(worker_id, user_id=auth.user_id, repos=repos)
+    worker = _worker_for_mutation(worker_id, auth, repos)
     if not worker:
         raise HTTPException(status_code=404, detail="Worker not found")
 
