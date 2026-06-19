@@ -35,6 +35,9 @@ const PUBLIC_PAGE_PREFIXES = [
   "/login",
   "/connections/callback", // OAuth provider return path; finishes via tokenless callback id
   "/approvals/review", // external signed-link approval review
+  "/review/", // NovaSearch Review Pack: public client review flow (token in URL,
+  //       pack-password gated in-page). Trailing slash so it never matches an
+  //       auth-gated route that merely starts with "/review" (OW-02 footgun).
   "/w/", // public worker share (token-gated, server-rendered)
   "/s/", // public standalone share (token-gated, server-rendered)
   "/c/", // branded claim short-link; rewritten to the API /c/{token} route,
@@ -62,6 +65,10 @@ const PUBLIC_PAGE_EXACT = [
 const PUBLIC_PROXY_PATHS = ["/api/proxy/connections/callback"];
 const PUBLIC_PROXY_PREFIXES = [
   "/api/proxy/approvals/public/",
+  // NovaSearch Review Pack: the public token-gated read/vote endpoints the
+  // /review/[token] page calls from the browser (no Floom session). The path
+  // token + pack password are the secret; CSRF still applies to the POST.
+  "/api/proxy/review/public/",
   // #1447: magic-link CONSUMPTION (GET /auth/magic/{token}) is hit by a
   // logged-out recipient to establish a session, so the proxy hop must be
   // public. The token in the path is the secret. Issuance (POST
@@ -198,7 +205,9 @@ export async function middleware(req: NextRequest) {
       pathname === "/s" ||
       pathname.startsWith("/s/") ||
       pathname === "/approvals/review" ||
-      pathname.startsWith("/approvals/review");
+      pathname.startsWith("/approvals/review") ||
+      pathname === "/review" ||
+      pathname.startsWith("/review/");
     if (isNoindexPath) {
       response.headers.set("X-Robots-Tag", "noindex, nofollow");
       response.headers.set("Cache-Control", "no-store");
