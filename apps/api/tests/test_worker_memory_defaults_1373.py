@@ -36,6 +36,20 @@ def test_worker_memory_defaults_to_enabled_and_mounts_writeable_context():
     } in contexts
 
 
+def test_worker_memory_can_declare_when_it_is_writeable():
+    config = _base_worker_config(
+        memory={"writeable_when": {"input": "operation", "equals": "record_candidate_feedback"}}
+    )
+
+    contexts = [c.model_dump() if hasattr(c, "model_dump") else c for c in config.contexts]
+    assert {
+        "name": "memory-memory-default-worker",
+        "writeable": True,
+        "source": "local",
+        "writeable_when": {"input": "operation", "equals": "record_candidate_feedback"},
+    } in contexts
+
+
 def test_worker_memory_can_still_be_explicitly_disabled():
     config = _base_worker_config(memory=False)
 

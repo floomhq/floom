@@ -985,6 +985,11 @@ class WorkerContextMount(BaseModel):
     #     when: {input: operation, not_in: [profile]}
     # Existing mounts omit this and are always staged.
     when: Optional[Dict[str, Any]] = None
+    # Optional per-run writeability predicate. The pack still mounts when
+    # `when` matches, but is treated as read-only unless this condition matches.
+    # Useful for memory packs that are read on most operations and written only
+    # by an explicit feedback/update operation.
+    writeable_when: Optional[Dict[str, Any]] = None
 
     def model_dump(self, *args: Any, **kwargs: Any) -> Dict[str, Any]:
         kwargs.setdefault("exclude_none", True)
@@ -1015,6 +1020,7 @@ WorkerContextMountSpec = Union[str, WorkerContextMount]
 class WorkerMemoryConfig(BaseModel):
     enabled: bool = True
     context: Optional[str] = None
+    writeable_when: Optional[Dict[str, Any]] = None
 
     @model_validator(mode="before")
     @classmethod
@@ -1066,6 +1072,7 @@ def memory_context_mount_for_worker(worker_id: str, memory: WorkerMemoryConfig) 
         "name": memory.context or default_worker_memory_context_name(worker_id),
         "writeable": True,
         "source": "local",
+        **({"writeable_when": dict(memory.writeable_when)} if memory.writeable_when else {}),
     }
 
 
@@ -1089,11 +1096,15 @@ def _normalize_memory_contexts(
         if normalized.name != memory_name:
             continue
         if normalized.source == "local":
-            normalized_contexts[idx] = WorkerContextMount(
-                name=memory_name,
-                writeable=True,
-                source="local",
-            )
+            mount = {
+                "name": memory_name,
+                "writeable": True,
+                "source": "local",
+            }
+            writeable_when = memory_mount.get("writeable_when") or normalized.writeable_when
+            if writeable_when:
+                mount["writeable_when"] = dict(writeable_when)
+            normalized_contexts[idx] = WorkerContextMount(**mount)
         return normalized_contexts
 
     normalized_contexts.append(WorkerContextMount(**memory_mount))

@@ -778,6 +778,11 @@ def normalize_context_mount(raw: Any) -> dict[str, Any]:
             if not isinstance(when, Mapping):
                 raise ValueError("context when must be an object")
             normalized["when"] = dict(when)
+        raw_writeable_when = raw.get("writeable_when", raw.get("writable_when"))
+        if raw_writeable_when is not None:
+            if not isinstance(raw_writeable_when, Mapping):
+                raise ValueError("context writeable_when must be an object")
+            normalized["writeable_when"] = dict(raw_writeable_when)
         return normalized
     if hasattr(raw, "model_dump"):
         return normalize_context_mount(raw.model_dump())
