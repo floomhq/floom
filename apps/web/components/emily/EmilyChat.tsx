@@ -525,11 +525,18 @@ interface EmilyChatCoreProps {
   onConversationIdChange?: (id: string | null) => void;
   /** #1363 — when true, show a proactive first-run opener instead of the generic empty state. */
   isNewWorkspace?: boolean;
+  /** When set with createMode, the primed prompt is auto-submitted once on
+   *  mount — used by the Emily HOME drafting state so the home "becomes the
+   *  conversation" without the user re-pressing send. */
+  autoSubmitPrime?: boolean;
 }
 
 const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
 
-function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpenRunDetails, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange, isNewWorkspace = false }: EmilyChatCoreProps) {
+// Exported so the Emily HOME (components/home/EmilyHome) can render the SAME
+// real chat core inline for its drafting state — reusing the live conversation
+// rendering + worker-drafting tool cards instead of rebuilding Emily.
+export function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpenRunDetails, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange, isNewWorkspace = false, autoSubmitPrime = false }: EmilyChatCoreProps) {
   const assistantName = useAssistantName();
   const {
     messages,
@@ -671,6 +678,20 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
     setInput("");
     setAttachedFiles([]);
   }, [input, attachedFiles, sendMessage, createMode, messages.length]);
+
+  // HOME drafting: auto-submit the primed create prompt exactly once on mount so
+  // the home seamlessly "becomes the conversation". Guarded by a ref so it never
+  // re-fires (e.g. on re-render) and only when there are no messages yet.
+  const autoSubmittedRef = useRef(false);
+  useEffect(() => {
+    if (!autoSubmitPrime || !createMode) return;
+    if (autoSubmittedRef.current) return;
+    const text = (primeInput ?? "").trim();
+    if (!text || messages.length > 0 || isHydrating) return;
+    autoSubmittedRef.current = true;
+    sendMessage(buildCreateWorkerMessage(text));
+    setInput("");
+  }, [autoSubmitPrime, createMode, primeInput, messages.length, isHydrating, sendMessage]);
 
   // Create-mode source pill → append a natural "use my <source>" hint to the
   // composer so the assistant knows which context to wire into the new worker.

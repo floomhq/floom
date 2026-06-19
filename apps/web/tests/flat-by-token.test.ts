@@ -2,8 +2,10 @@ import { describe, it, expect } from "vitest";
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
+// Emily-home redesign (2026-06-19): the old OverviewDashboard was replaced by
+// the Emily-fullscreen HOME. The flat-by-token guard now covers EmilyHome.
 const overviewSrc = readFileSync(
-  resolve(__dirname, "../components/overview/OverviewDashboard.tsx"),
+  resolve(__dirname, "../components/home/EmilyHome.tsx"),
   "utf8"
 );
 
@@ -231,13 +233,11 @@ describe("Phase 2 — Textarea primitive (v4 flat, APP-UI-V4-SPEC §1)", () => {
   });
 });
 
-// P5: OverviewDashboard must be flat by token (spec rule #2). The V4 "Brief /
-// digest" layout dropped the old metric-tile grid entirely in favour of a single
-// editorial column with hairline dividers only, so the assertions now guard the
-// flat language itself (no hardcoded borders) rather than the removed tiles.
-describe("P5 — OverviewDashboard is flat by token (spec rule #2)", () => {
+// P5: the Emily-fullscreen HOME must be flat by token (spec rule #2). The
+// composer-anchored home is borderless — surfaces are bg tokens + the accent
+// focus ring, never hardcoded border colors.
+describe("P5 — EmilyHome is flat by token (spec rule #2)", () => {
   it("uses no hardcoded border-default / border-strong utilities", () => {
-    // Separation is hairline (--bd-div) only; no hardcoded border colors.
     expect(overviewSrc).not.toContain("border-[var(--border-default)]");
     expect(overviewSrc).not.toContain("border border-[var(--border-default)]");
   });
@@ -246,8 +246,8 @@ describe("P5 — OverviewDashboard is flat by token (spec rule #2)", () => {
     expect(overviewSrc).not.toContain("hover:border-[var(--border-strong)]");
   });
 
-  it("hairline dividers use the --bd-div token, not a raw border utility", () => {
-    // The Recent-work / Needs-you strips separate rows with the divider token.
-    expect(overviewSrc).toContain("[border-top:var(--bd-div)]");
+  it("surfaces are bg tokens, not raw border utilities", () => {
+    // The composer + pills sit on --bg-2 / --bg-3, no `border:` chrome.
+    expect(overviewSrc).toContain("bg-[var(--bg-2)]");
   });
 });

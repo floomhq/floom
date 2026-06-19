@@ -4,10 +4,11 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Activity, Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound } from "lucide-react";
+import { Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound, Grid2x2 } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
+import { useMcpModal } from "@/components/mcp/mcp-modal-context";
 import { useApprovalsCount } from "@/lib/useApprovalsSync";
 import { useQueryClient } from "@tanstack/react-query";
 import { prefetchRouteData, prefetchIdleRoutes } from "@/lib/query/prefetch";
@@ -150,10 +151,11 @@ type NavItem = {
   badge?: boolean;
 };
 
-// V4 SPEC §2: nav order per wireframe — no Assistant item (config lives in
-// Settings per v4). Overview · Workers · Library · Runs · Approvals · Connections.
+// Emily-home redesign (Federico 2026-06-19): the "Overview" nav item is GONE —
+// the home ("/") is now the Emily-fullscreen home, reached via the workspace
+// logo/switcher, not a nav row. Nav: Workers · Library · Runs · Approvals ·
+// Integrations. (MCP is a pinned item above the profile footer — see below.)
 const nav: NavItem[] = [
-  { href: "/overview", label: "Overview", icon: Activity },
   { href: "/workers", label: "Workers", icon: Box, hint: "Your AI workers" },
   { href: "/library", label: "Library", icon: Library },
   { href: "/runs", label: "Runs", icon: Clock },
@@ -178,10 +180,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
   return (
     <nav className="flex-1 px-3 space-y-0.5">
       {nav.map((item) => {
-        const active =
-          item.href === "/overview"
-            ? pathname === "/" || pathname === "/overview"
-            : pathname === item.href || pathname.startsWith(item.href + "/");
+        const active = pathname === item.href || pathname.startsWith(item.href + "/");
         const showBadge = item.badge && pendingCount > 0;
         return (
           <Link
@@ -210,6 +209,30 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
         );
       })}
     </nav>
+  );
+}
+
+// MCP item — pinned LOW, just above the profile footer (Emily-home redesign).
+// Opens the MCP-install POPUP modal (not a page). The badge mirrors the v6
+// "12" affordance but is informational chrome only; the count is omitted here
+// since the OSS engine has no live "installed clients" count to show honestly.
+function SidebarMcpItem({ onNavigate }: { onNavigate?: () => void }) {
+  const mcpModal = useMcpModal();
+  return (
+    <div className="px-3 pb-2">
+      <button
+        type="button"
+        onClick={() => {
+          onNavigate?.();
+          mcpModal.open();
+        }}
+        title="Add Floom to your AI client"
+        className="flex h-9 w-full items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium text-[var(--ink-soft)] transition-[background,color] duration-150 ease-[var(--ease)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
+      >
+        <Grid2x2 className="w-4 h-4" />
+        MCP
+      </button>
+    </div>
   );
 }
 
@@ -300,6 +323,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
   }, [pathname]);
 
   const pendingCount = useApprovalsCount();
+  const mcpModal = useMcpModal();
   // Data prefetch (collapsed icon rail uses this `warm`; the expanded nav warms
   // inside NavLinks). After first paint, warm the highest-value routes once on
   // idle so the first tab switch is already instant.
@@ -404,6 +428,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
           <>
             <SidebarPrimaryActions />
             <NavLinks pathname={pathname} />
+            <SidebarMcpItem />
             {renderAccountFooter(accountFooter)}
           </>
         )}
@@ -412,10 +437,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
         {collapsed && (
           <nav className="flex flex-1 flex-col items-center gap-0.5 pt-3 pb-3 overflow-y-auto" aria-label="Icon navigation">
             {nav.map((item) => {
-              const active =
-                item.href === "/overview"
-                  ? pathname === "/" || pathname === "/overview"
-                  : pathname === item.href || pathname.startsWith(item.href + "/");
+              const active = pathname === item.href || pathname.startsWith(item.href + "/");
               const showBadge = item.badge && pendingCount > 0;
               return (
                 <Link
@@ -443,6 +465,16 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
             })}
             {/* Settings icon at bottom */}
             <div className="flex-1" />
+            {/* MCP — opens the install popup modal (above Settings). */}
+            <button
+              type="button"
+              onClick={() => mcpModal.open()}
+              title="MCP — add Floom to your AI client"
+              aria-label="MCP — add Floom to your AI client"
+              className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] transition-[background,color] duration-150 hover:bg-[var(--active-nav-bg)] hover:text-ink"
+            >
+              <Grid2x2 className="w-4 h-4" />
+            </button>
             <Link
               href="/settings"
               title="Settings"
@@ -498,6 +530,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
               <SidebarPrimaryActions onNavigate={() => setOpen(false)} />
               <NavLinks pathname={pathname} onNavigate={() => setOpen(false)} />
             </div>
+            <SidebarMcpItem onNavigate={() => setOpen(false)} />
             {renderAccountFooter(accountFooter, { onNavigate: () => setOpen(false) })}
           </aside>
         </div>
