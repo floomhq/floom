@@ -11,7 +11,7 @@ import time
 import queue
 import sqlite3
 from html import escape
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from pathlib import Path
 from typing import Dict, Any, Callable, Optional
 from datetime import datetime, timedelta, timezone
@@ -803,6 +803,8 @@ class _ActiveRun:
     worker_id: str
     user_id: str | None
     thread: threading.Thread
+    started_monotonic: float = field(default_factory=time.monotonic)
+    stage: str = "claimed"
 
 
 _active_runs: dict[str, _ActiveRun] = {}
@@ -819,6 +821,32 @@ def _unregister_active_run(run_id: str) -> None:
     with _active_runs_lock:
         _active_runs.pop(run_id, None)
         _shutdown_cancelled_runs.discard(run_id)
+
+
+def _mark_active_run_stage(run_id: str, stage: str) -> None:
+    with _active_runs_lock:
+        active = _active_runs.get(run_id)
+        if active is not None:
+            active.stage = stage
+
+
+def _active_run_ids_excluding_stale_pre_sandbox(timeout_seconds: int) -> set[str]:
+    """Active ids that should still protect rows from dispatch-orphan reaping.
+
+    A live thread before sandbox startup can be the bug: it may be blocked in
+    run-context setup, DB recipe/secret loading, or another pre-driver step. Do
+    not let that active handle hide the row forever once it has exceeded the
+    dispatch-orphan timeout. Runs that reached sandbox startup are already
+    protected by the repository's sandbox-log predicate.
+    """
+    cutoff = time.monotonic() - max(0, int(timeout_seconds))
+    pre_sandbox = {"claimed", "thread_entry", "context_entered", "execute_start", "pre_sandbox"}
+    with _active_runs_lock:
+        return {
+            run_id
+            for run_id, active in _active_runs.items()
+            if active.stage not in pre_sandbox or active.started_monotonic >= cutoff
+        }
 
 
 def _schedule_missing_secret_pause_threshold() -> int:
@@ -1010,7 +1038,7 @@ def _fail_dispatch_orphan_rows(
 ) -> list[dict[str, Any]]:
     timeout = _dispatch_orphan_timeout_seconds()
     cutoff_iso = (now_dt - timedelta(seconds=timeout)).isoformat()
-    active_ids = _active_run_ids()
+    active_ids = _active_run_ids_excluding_stale_pre_sandbox(timeout)
     fail_method = getattr(repos_obj.runs, "fail_stale_running_without_sandbox_logs", None)
     if not callable(fail_method):
         return []
@@ -1758,6 +1786,7 @@ def execute_run(
     user_id: str | None = None,
     repos: Repositories | None = None,
 ) -> None:
+    _mark_active_run_stage(run_id, "execute_start")
     repos_obj = _repos(repos)
     owner_id = user_id or _worker_owner_id(worker_id, repos_obj)
     trace_id = f"trace_{uuid.uuid4().hex[:16]}"
@@ -1789,7 +1818,20 @@ def execute_run(
 
     try:
         current_run = repos_obj.runs.get_any(run_id=run_id)
-        if (current_run or {}).get("status") != RunStatus.RUNNING.value:
+        current_status = (current_run or {}).get("status")
+        if current_status in {
+            RunStatus.COMPLETED.value,
+            RunStatus.FAILED.value,
+            RunStatus.CANCELLED.value,
+            RunStatus.PENDING_APPROVAL.value,
+        }:
+            logger.warning(
+                "Run %s executor entered after terminal/non-running status %s; skipping",
+                run_id,
+                current_status,
+            )
+            return
+        if current_status != RunStatus.RUNNING.value:
             update_run_status(run_id, RunStatus.RUNNING.value, user_id=owner_id, repos=repos_obj)
         log_fn("Run started")
         log_fn("Validating inputs", level="debug")
@@ -1880,7 +1922,17 @@ def execute_run(
         # can raise the ceiling up to MAX_RUN_TIMEOUT_SECONDS (3600 s = 1 hour).
         timeout_seconds = _resolved_worker_timeout_seconds(config)
         log_fn(f"Executing worker (mode={mode}, runner={runner})", level="debug")
+        _mark_active_run_stage(run_id, "pre_sandbox")
+        latest_run = repos_obj.runs.get_any(run_id=run_id)
+        if (latest_run or {}).get("status") != RunStatus.RUNNING.value:
+            logger.warning(
+                "Run %s left running before sandbox dispatch (status=%s); skipping stale executor",
+                run_id,
+                (latest_run or {}).get("status"),
+            )
+            return
         driver = get_sandbox_driver(runner, config=config)
+        _mark_active_run_stage(run_id, "driver_run")
         with use_context_scope(context_scope_for_user(owner_id)):
             result = driver.run(
                 worker_id=worker_id,
@@ -2383,9 +2435,21 @@ def _run_thread_entry_with_semaphore(
     (llm-intensive worker); it is released alongside the main slot.
     """
     try:
+        _mark_active_run_stage(run_id, "thread_entry")
+        try:
+            add_log(
+                run_id,
+                "Executor thread entered; preparing run context.",
+                level="debug",
+                user_id=user_id,
+                repos=repos,
+            )
+        except Exception:
+            logger.debug("Failed to persist executor entry log for run %s", run_id, exc_info=True)
         # #1026: re-establish the run's tenant/workspace scope on this thread
         # (no-op in single-tenant OSS; cloud reconstructs it from the run row).
         with _run_execution_context(run_id):
+            _mark_active_run_stage(run_id, "context_entered")
             # Check for pre-dispatch cancellation (cancelled while queued).
             repos_obj = _repos(repos)
             run_row = repos_obj.runs.get_any(run_id=run_id)
@@ -2413,6 +2477,47 @@ def _run_thread_entry_with_semaphore(
                     logger.warning("Failed to mark pre-dispatch cancellation for run %s: %s", run_id, exc)
                 return
             execute_run(run_id, worker_id, inputs, user_id=user_id, repos=repos)
+    except Exception as exc:
+        logger.exception("Executor thread crashed before completing dispatch for run %s", run_id)
+        try:
+            repos_obj = _repos(repos)
+            row = repos_obj.runs.get_any(run_id=run_id)
+            owner_id = user_id or (row or {}).get("user_id")
+            message = (
+                "Executor thread crashed before sandbox startup: "
+                f"{exc.__class__.__name__}"
+            )
+            if owner_id and (row or {}).get("status") == RunStatus.RUNNING.value:
+                repos_obj.runs.add_log(
+                    user_id=str(owner_id),
+                    run_id=run_id,
+                    level="error",
+                    message=message,
+                    timestamp=_now_iso(),
+                    trace_id=None,
+                )
+                repos_obj.runs.update_status(
+                    user_id=str(owner_id),
+                    run_id=run_id,
+                    status=RunStatus.FAILED.value,
+                    error=message,
+                    error_code="executor_thread_pre_sandbox_exception",
+                )
+                trigger_source = str((row or {}).get("trigger_source") or "")
+                if _auto_requeue_abandoned_enabled() and _max_restart_retries() > 0 and not trigger_source.startswith("restart_retry"):
+                    _schedule_retry(
+                        original_run_id=run_id,
+                        worker_id=worker_id,
+                        inputs=inputs if isinstance(inputs, dict) else {},
+                        attempt=int((row or {}).get("retry_attempt") or 0) + 1,
+                        delay_seconds=0,
+                        user_id=str(owner_id),
+                        repos=repos_obj,
+                        trigger_source="restart_retry",
+                    )
+                    _wake_drain()
+        except Exception:
+            logger.exception("Failed to persist executor-thread crash for run %s", run_id)
     finally:
         _unregister_active_run(run_id)
         _get_semaphore().release()
