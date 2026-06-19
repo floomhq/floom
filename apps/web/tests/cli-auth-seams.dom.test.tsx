@@ -29,9 +29,6 @@ describe("CLI auth seams", () => {
     render(<CliAuthContent />);
 
     expect(await screen.findByText("Client: floom-cli")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Re-type the code from your terminal to confirm"), {
-      target: { value: "ABCD-2345" },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
 
     await waitFor(() => {
@@ -47,9 +44,6 @@ describe("CLI auth seams", () => {
     render(<CliAuthContent endpointBase="/app/api/cli-auth/" clientName="workeros-cli" />);
 
     expect(await screen.findByText("Client: workeros-cli")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Re-type the code from your terminal to confirm"), {
-      target: { value: "ABCD-2345" },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
 
     await waitFor(() => {
