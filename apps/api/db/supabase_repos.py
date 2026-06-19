@@ -2509,6 +2509,91 @@ class SupabaseRunRepository(_BaseSupabaseRepository):
                 },
             )
 
+    def fail_stale_running_without_sandbox_logs(
+        self,
+        *,
+        cutoff_iso: str,
+        exclude_run_ids: Iterable[str] = (),
+        error: str,
+        error_code: str | None = None,
+    ) -> list[dict[str, Any]]:
+        """Fail running rows claimed by the queue but not yet dispatched to E2B."""
+        excluded = {str(run_id) for run_id in exclude_run_ids if str(run_id)}
+        response = (
+            self._client.table("runs")
+            .select("id,user_id,worker_id,started_at,created_at")
+            .eq("status", RunStatus.RUNNING.value)
+            .lt("started_at", cutoff_iso)
+            .order("started_at", desc=False)
+            .limit(200)
+            .execute()
+        )
+        candidates = [
+            row for row in _response_rows(response)
+            if str(row.get("id") or "") and str(row.get("id") or "") not in excluded
+        ]
+        if not candidates:
+            return []
+
+        run_ids = [str(row["id"]) for row in candidates]
+        logs_response = (
+            self._client.table("run_logs")
+            .select("run_id,message")
+            .in_("run_id", run_ids)
+            .execute()
+        )
+        sandbox_started: set[str] = set()
+        for log in _response_rows(logs_response):
+            message = str(log.get("message") or "")
+            if (
+                message.startswith("[e2b] Preparing sandbox")
+                or message.startswith("[e2b] Spawning sandbox")
+                or message.startswith("[e2b] Sandbox ready")
+                or message.startswith("[e2b] Running worker")
+            ):
+                sandbox_started.add(str(log.get("run_id") or ""))
+
+        completed_at = datetime.now(timezone.utc).isoformat()
+        failed: list[dict[str, Any]] = []
+        for row in candidates:
+            run_id = str(row.get("id") or "")
+            user_id = str(row.get("user_id") or "")
+            if not run_id or not user_id or run_id in sandbox_started:
+                continue
+            updates: dict[str, Any] = {
+                "status": RunStatus.FAILED.value,
+                "error": error,
+                "completed_at": completed_at,
+            }
+            if error_code is not None:
+                updates["error_code"] = error_code
+            started_at = row.get("started_at") or row.get("created_at")
+            if started_at:
+                try:
+                    started = _as_aware_utc(datetime.fromisoformat(str(started_at).replace("Z", "+00:00")))
+                    completed = _as_aware_utc(datetime.fromisoformat(completed_at))
+                    updates["duration_ms"] = int((completed - started).total_seconds() * 1000)
+                except Exception:
+                    pass
+            update_response = (
+                self._client.table("runs")
+                .update(updates)
+                .eq("id", run_id)
+                .eq("user_id", user_id)
+                .eq("status", RunStatus.RUNNING.value)
+                .execute()
+            )
+            if _first_row(update_response) is not None:
+                failed.append({
+                    "run_id": run_id,
+                    "id": run_id,
+                    "user_id": user_id,
+                    "started_at": row.get("started_at"),
+                    "created_at": row.get("created_at"),
+                    "completed_at": completed_at,
+                })
+        return failed
+
     def add_log(
         self,
         *,
