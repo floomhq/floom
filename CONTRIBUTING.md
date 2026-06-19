@@ -22,7 +22,7 @@ Linux / macOS:
 
 ```bash
 ./scripts/setup.sh
-# edit apps/api/.env and add OPENAI_API_KEY + E2B_API_KEY
+# edit apps/api/.env and add E2B_API_KEY plus your model provider config
 ./scripts/dev.sh
 ```
 
@@ -30,11 +30,13 @@ Windows PowerShell:
 
 ```powershell
 .\scripts\setup.ps1
-# edit apps\api\.env and add OPENAI_API_KEY + E2B_API_KEY
+# edit apps\api\.env and add E2B_API_KEY plus your model provider config
 .\scripts\dev.ps1
 ```
 
 Open `http://localhost:3000`. The API listens on `http://localhost:8000`.
+See [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for OpenAI, Bedrock,
+Gemini, Vertex AI, and other litellm provider configuration.
 
 ## Manual backend setup
 

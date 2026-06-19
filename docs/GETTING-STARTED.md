@@ -37,7 +37,7 @@ Linux / macOS:
 
 ```bash
 ./scripts/setup.sh
-# edit apps/api/.env and add OPENAI_API_KEY + E2B_API_KEY
+# edit apps/api/.env and add E2B_API_KEY plus your model provider config
 ./scripts/dev.sh
 ```
 
@@ -45,7 +45,7 @@ Windows PowerShell:
 
 ```powershell
 .\scripts\setup.ps1
-# edit apps\api\.env and add OPENAI_API_KEY + E2B_API_KEY
+# edit apps\api\.env and add E2B_API_KEY plus your model provider config
 .\scripts\dev.ps1
 ```
 
@@ -64,7 +64,7 @@ python3.11 -m venv venv
 source venv/bin/activate
 pip install -r requirements.txt
 cp .env.example .env
-# edit .env and add OPENAI_API_KEY + E2B_API_KEY
+# edit .env and add E2B_API_KEY plus your model provider config
 python main.py
 ```
 
@@ -76,7 +76,7 @@ python -m venv venv
 .\venv\Scripts\activate
 pip install -r requirements.txt
 Copy-Item .env.example .env
-# edit .env and add OPENAI_API_KEY + E2B_API_KEY
+# edit .env and add E2B_API_KEY plus your model provider config
 python main.py
 ```
 
