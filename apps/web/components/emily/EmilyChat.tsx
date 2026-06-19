@@ -1057,11 +1057,44 @@ export function EmilyDock({ className }: { className?: string }) {
   }, [isHomeRoute]);
   const createMode = (createParam || createLatched) && isHomeRoute;
 
+  // Round-09 batch2 (Federico 2026-06-18): the home fullscreen Emily must be
+  // COLLAPSIBLE. Collapsing on home docks Emily to the right rail and shows the
+  // user's Workers list in the main pane (HomePane renders WorkersCollection
+  // when fullscreen is off). `userCollapsedHome` suppresses the auto-fullscreen
+  // effect so a manual collapse STICKS; it resets on a genuine fresh home entry
+  // (navigating INTO home from another route) so the next visit opens fullscreen.
+  const [userCollapsedHome, setUserCollapsedHome] = useState(false);
+  const prevHomeRef = useRef<boolean>(isHomeRoute);
   useEffect(() => {
-    if (isHomeRoute) setFullscreen(true);
+    const wasHome = prevHomeRef.current;
+    prevHomeRef.current = isHomeRoute;
+    // Fresh entry into home from elsewhere → clear any prior manual collapse and
+    // open fullscreen. Create mode always opens fullscreen too.
+    if (isHomeRoute && !wasHome) {
+      setUserCollapsedHome(false);
+      setFullscreen(true);
+      return;
+    }
+    // On the home route (no route change) only force fullscreen while the user
+    // has NOT manually collapsed it; create mode overrides the collapse.
+    if (isHomeRoute && (!userCollapsedHome || createMode)) {
+      setFullscreen(true);
+    }
     // Leaving home does NOT force-exit fullscreen (the user may have it open
-    // intentionally elsewhere); entering home always opens it.
-  }, [isHomeRoute, setFullscreen]);
+    // intentionally elsewhere).
+  }, [isHomeRoute, setFullscreen, userCollapsedHome, createMode]);
+
+  // Collapse the home fullscreen Emily into the right rail (shows the Workers
+  // list in the main pane). Maximize returns to fullscreen Emily.
+  const collapseHome = () => {
+    setUserCollapsedHome(true);
+    setMode((m) => (m === "collapsed" ? "rail" : m));
+    setFullscreen(false);
+  };
+  const maximizeHome = () => {
+    setUserCollapsedHome(false);
+    setFullscreen(true);
+  };
 
   return (
     <div
@@ -1126,9 +1159,10 @@ export function EmilyDock({ className }: { className?: string }) {
               takes over the main content area, the left nav stays (Federico
               2026-06-17). High-contrast so the affordance is clearly visible in
               BOTH light and night mode (the muted icon was hard to see).
-              Hidden on the HOME route: the home IS fullscreen Emily, there is no
-              page pane to shrink back to (Federico 2026-06-19). */}
-          {!isHomeRoute && (
+              On the HOME route this becomes the collapse/maximize control
+              (Federico 2026-06-18): collapsing docks Emily to the rail and shows
+              the Workers list in the main pane; maximizing returns to fullscreen. */}
+          {!isHomeRoute ? (
             <Button
               size="sm"
               variant="ghost"
@@ -1139,16 +1173,40 @@ export function EmilyDock({ className }: { className?: string }) {
             >
               {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
             </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
+              onClick={isFull ? collapseHome : maximizeHome}
+              title={isFull ? `Minimize ${assistantName}` : `Full screen ${assistantName}`}
+              aria-label={isFull ? `Minimize ${assistantName}` : `Expand ${assistantName}`}
+            >
+              {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </Button>
           )}
           {/* Full-screen CLOSE control (Federico 2026-06-17): only in full mode,
-              one click exits fullscreen straight back to the right rail. Hidden
-              on the HOME route (nothing to close back to). */}
+              one click exits fullscreen straight back to the right rail. On the
+              HOME route the X collapses to the rail (showing the Workers list)
+              rather than closing to a non-existent page pane. */}
           {isFull && !isHomeRoute && (
             <Button
               size="sm"
               variant="ghost"
               className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
               onClick={exitFull}
+              title="Close full screen"
+              aria-label="Close full screen"
+            >
+              <X className="size-4" />
+            </Button>
+          )}
+          {isFull && isHomeRoute && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
+              onClick={collapseHome}
               title="Close full screen"
               aria-label="Close full screen"
             >
