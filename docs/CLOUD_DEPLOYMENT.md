@@ -102,6 +102,18 @@ If the template env var is missing, the engine logs a warning and falls back to
 the normal runtime template. That means increasing memory in code is not enough;
 the matching E2B template mapping must exist in Railway.
 
+NovaSearch workers that keep a memory pack mounted for reads should also mark
+the pack writable only for the feedback/write operation, otherwise the E2B warm
+pool will treat every run as mutable and cold-start it:
+
+```yaml
+memory:
+  context: memory-novasearch-v5
+  writeable_when:
+    input: operation
+    equals: record_candidate_feedback
+```
+
 ## LLM Quota Controls
 
 LLM-heavy workers, such as NovaSearch judge runs, must declare:
