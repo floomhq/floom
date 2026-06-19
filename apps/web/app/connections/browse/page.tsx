@@ -18,6 +18,7 @@ import { toast } from "sonner";
 
 import { api } from "@/lib/api";
 import { HIDDEN_CHANNEL_SLUGS } from "@/components/connections/connection-data";
+import { ConnectionsChips } from "@/components/connections/ConnectionsChips";
 import { CollectionView } from "@/components/collection/CollectionView";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import {
@@ -463,6 +464,7 @@ export default function ConnectionsBrowsePage() {
   const config: CollectionConfig<IntegrationCatalogItem> = {
     title: "Browse apps",
     subtitle: "Connect the apps your workers need to take action.",
+    headerSlot: <ConnectionsChips />,
     items,
     loading,
     error: loadError,
