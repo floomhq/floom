@@ -92,7 +92,7 @@ def _ensure_standalone_share_links_table() -> None:
 
 def _create_or_get_standalone_share_link(
     *,
-    entity_type: Literal["worker", "brain_file", "brain_pack", "run"],
+    entity_type: Literal["worker", "brain_file", "brain_pack", "run", "review_pack"],
     entity_id: str,
     owner_id: str,
     file_path: str = "",

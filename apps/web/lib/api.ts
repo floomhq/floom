@@ -86,7 +86,10 @@ async function fetchApi(path: string, input: RequestInfo | URL, init?: RequestIn
 }
 
 function isSignedApprovalProxyPath(path: string): boolean {
-  return path.startsWith("/approvals/public/");
+  // Public, token-gated surfaces: a 401/403 here means "wrong token/password",
+  // NOT "your session expired". Never bounce an anonymous reviewer to /login —
+  // the page renders its own inline error instead.
+  return path.startsWith("/approvals/public/") || path.startsWith("/review/public/");
 }
 
 function currentPathForLoginNext(): string {
@@ -635,6 +638,30 @@ export const api = {
       }
       return res.json() as Promise<import("./types").ApprovalUploadResponse>;
     },
+  },
+  // Search Assistant Review Pack (sample-customer pilot) — public, no Workeros login. The
+  // token in the path is the share secret; the pack password gates the body.
+  // A 401/403 surfaces as an inline "wrong password" in the UI (the proxy path
+  // is allow-listed in isSignedApprovalProxyPath, so it never redirects to /login).
+  review: {
+    publicGet: (token: string, password?: string) => {
+      const qs = password ? `?password=${encodeURIComponent(password)}` : "";
+      return fetchJson<import("./types").ReviewPackPublicResponse>(
+        `/review/public/${encodeURIComponent(token)}${qs}`,
+      );
+    },
+    publicMyVotes: (token: string, reviewerKey: string, password?: string) => {
+      const qs = new URLSearchParams({ reviewer_key: reviewerKey });
+      if (password) qs.set("password", password);
+      return fetchJson<import("./types").ReviewPackFeedbackResponse>(
+        `/review/public/${encodeURIComponent(token)}/feedback?${qs.toString()}`,
+      );
+    },
+    publicFeedback: (token: string, input: import("./types").ReviewPackFeedbackInput) =>
+      fetchJson<import("./types").ReviewPackVoteResponse>(
+        `/review/public/${encodeURIComponent(token)}/feedback`,
+        { method: "POST", body: JSON.stringify(input) },
+      ),
   },
   secrets: {
     list: () => fetchJson<import("./types").SecretItem[]>("/secrets"),
