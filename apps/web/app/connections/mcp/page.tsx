@@ -23,6 +23,7 @@ import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
+import { ListLoading, ListEmpty, ListError } from "@/components/collection/CollectionStates";
 import { api } from "@/lib/api";
 import type { ConnectionItem, SecretItem } from "@/lib/types";
 
@@ -259,6 +260,9 @@ export default function McpConnectionsPage() {
   const [connections, setConnections] = useState<McpConnection[]>([]);
   const [secrets, setSecrets] = useState<SecretItem[]>([]);
   const [loading, setLoading] = useState(true);
+  // Distinguish a FAILED load from an empty one: a 500/network error renders an
+  // explicit retry state, never a perpetual skeleton or a misleading empty card.
+  const [loadError, setLoadError] = useState(false);
   const [deleting, setDeleting] = useState<string | null>(null);
   const [testing, setTesting] = useState<string | null>(null);
   // #566: track which MCP row is expanded for the in-place peek
@@ -294,10 +298,12 @@ export default function McpConnectionsPage() {
   const serverJsonValidation = useMemo(() => validateMcpJsonConfig(serverJson), [serverJson]);
 
   const load = useCallback(async () => {
+    setLoadError(false);
     try {
       const all = await api.connections.list();
       setConnections(all.filter((c) => c.kind === "mcp") as McpConnection[]);
     } catch {
+      setLoadError(true);
       toast.error("Failed to load MCP servers");
     } finally {
       setLoading(false);
@@ -887,42 +893,44 @@ export default function McpConnectionsPage() {
         </div>
       )}
 
-      {/* Saved servers list */}
-      <div className="overflow-hidden rounded-xl [border:var(--bd-card)] bg-[var(--bg-card)]">
-        {/* Header row */}
-        <div className="hidden grid-cols-[32px_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] gap-4 [border-bottom:var(--bd-div)] bg-[var(--bg-2)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid">
-          <span />
-          <span>Name</span>
-          <span>Endpoint</span>
-          <span>Auth</span>
-          <span>Tools</span>
-          <span className="pr-1 text-right">Actions</span>
-        </div>
-
-        {loading ? (
-          Array.from({ length: 3 }).map((_, i) => (
-            <div key={i} className="h-12 animate-pulse [border-bottom:var(--bd-div)] bg-muted/20 last:[border-bottom:0]" />
-          ))
-        ) : connections.length === 0 ? (
-          <div className="flex flex-col items-center gap-3 px-4 py-12 text-center">
-            <div className="flex size-10 items-center justify-center rounded-[var(--radius-pill)] [border:var(--bd-card)] bg-[var(--bg-app)]">
-              <Server className="size-5 text-muted-foreground/50" />
-            </div>
-            <div>
-              <p className="text-sm font-medium">No MCP servers yet</p>
-              <p className="mt-0.5 text-sm text-muted-foreground">
-                Add a server to give your workers extra tools.
-              </p>
-            </div>
-            {!formOpen && (
+      {/* Saved servers list. ONE shared loading / empty / error treatment so a
+          failed fetch never shows the old "ghost zebra rows" skeleton forever. */}
+      {loading ? (
+        <ListLoading rows={3} />
+      ) : loadError ? (
+        <ListError
+          message="Could not load your MCP servers. Check your connection and try again."
+          onRetry={() => {
+            setLoading(true);
+            void load();
+          }}
+        />
+      ) : connections.length === 0 ? (
+        <ListEmpty
+          icon={Server}
+          title="No MCP servers yet"
+          help="Add a server to give your workers extra tools."
+          action={
+            !formOpen ? (
               <Button type="button" size="sm" variant="outline" onClick={() => openForm("json")}>
                 <Plus className="size-4" />
                 Add MCP server
               </Button>
-            )}
+            ) : undefined
+          }
+        />
+      ) : (
+        <div className="overflow-hidden rounded-xl [border:var(--bd-card)] bg-[var(--bg-card)]">
+          {/* Header row */}
+          <div className="hidden grid-cols-[32px_minmax(0,1fr)_minmax(0,1.8fr)_minmax(0,.9fr)_minmax(0,1fr)_auto] gap-4 [border-bottom:var(--bd-div)] bg-[var(--bg-2)] px-3 py-2 text-[11px] font-medium uppercase tracking-wide text-muted-foreground md:grid">
+            <span />
+            <span>Name</span>
+            <span>Endpoint</span>
+            <span>Auth</span>
+            <span>Tools</span>
+            <span className="pr-1 text-right">Actions</span>
           </div>
-        ) : (
-          connections.map((conn) => (
+          {connections.map((conn) => (
             <McpRow
               key={conn.id}
               conn={conn}
@@ -933,9 +941,9 @@ export default function McpConnectionsPage() {
               onTest={() => void handleTest(conn)}
               onToggle={() => setExpandedId((prev) => prev === conn.id ? null : conn.id)}
             />
-          ))
-        )}
-      </div>
+          ))}
+        </div>
+      )}
 
       <p className="text-xs text-muted-foreground">
         MCP servers declared in a worker&apos;s{" "}

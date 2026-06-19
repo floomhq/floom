@@ -1,9 +1,23 @@
 import type { ComponentType, ReactNode } from "react";
-import { Inbox } from "lucide-react";
+import { Inbox, AlertTriangle } from "lucide-react";
 
-/** Empty / loading / error share one slot (SPEC §7). */
+/**
+ * The ONE shared loading / empty / error treatment for every list and
+ * collection surface in the app (SPEC §7). Three distinct states share one
+ * slot so a failed fetch can NEVER be mistaken for a slow one or an empty one:
+ *
+ *   <ListLoading/> — skeleton rows (we are still fetching)
+ *   <ListEmpty/>   — the fetch succeeded and there is genuinely nothing
+ *   <ListError/>   — the fetch FAILED (explicit message + retry), never a
+ *                    perpetual skeleton and never an empty card
+ *
+ * Bespoke surfaces (e.g. /connections/mcp, /connections/secrets) must use
+ * these instead of rolling their own skeleton/empty so the register is one
+ * system. `EmptyState`/`LoadingState`/`ErrorState` remain as aliases for the
+ * `Collection`-driven surfaces that already import them.
+ */
 
-export function EmptyState({
+export function ListEmpty({
   title,
   help,
   action,
@@ -30,7 +44,7 @@ export function EmptyState({
   );
 }
 
-export function LoadingState({ rows = 5 }: { rows?: number }) {
+export function ListLoading({ rows = 5 }: { rows?: number }) {
   // Skeleton mirrors the list layout (SPEC §4 — no partial flashes).
   return (
     <div className="c-ltable" aria-busy="true" aria-label="Loading">
@@ -65,13 +79,15 @@ export function LoadingState({ rows = 5 }: { rows?: number }) {
   );
 }
 
-export function ErrorState({ message, onRetry }: { message: string; onRetry?: () => void }) {
+export function ListError({ message, onRetry }: { message: string; onRetry?: () => void }) {
   return (
     <div className="c-statebox" role="alert">
-      <span className="g">
-        <Inbox size={24} />
+      {/* AlertTriangle (not the empty-state Inbox) so an ERROR never reads as
+          "nothing here" — the failure is visually distinct from empty. */}
+      <span className="g" style={{ color: "var(--negative, var(--destructive))" }}>
+        <AlertTriangle size={24} />
       </span>
-      <h3>Something went wrong</h3>
+      <h3>Couldn&apos;t load</h3>
       <p style={{ margin: 0, maxWidth: 360 }}>{message}</p>
       {onRetry && (
         <button type="button" className="c-addbtn" onClick={onRetry}>
@@ -81,3 +97,8 @@ export function ErrorState({ message, onRetry }: { message: string; onRetry?: ()
     </div>
   );
 }
+
+// Back-compat aliases — the `Collection`-driven surfaces import these names.
+export const EmptyState = ListEmpty;
+export const LoadingState = ListLoading;
+export const ErrorState = ListError;
