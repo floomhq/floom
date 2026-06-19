@@ -1,36 +1,30 @@
 # Workeros History
 
-Workeros is being released as a clean source-available repository after a long
-internal development cycle. The public history starts at a readable release
-commit so installers, contributors, and security reviewers do not have to sort
-through internal artifacts, generated logs, old experiments, or private
-operational history.
+Workeros is being released as a source-available repository after a long
+development and hardening cycle. The public repository keeps the useful project
+history so contributors, security reviewers, and operators can inspect how the
+runtime evolved.
 
-Before this public release, the project went through the preserved internal
-commits and hundreds of tracked issues across the API, web app, worker runtime,
-MCP surface, integrations, tests, and deployment hardening. This repository is
-the curated release cut.
+Before the public release, private/customer-specific artifacts, hosted
+deployment residue, generated audit assets, and obsolete worker experiments were
+removed from the current tree and from the main-branch history. That keeps the
+repository reviewable without hiding the engineering lineage.
 
-## Why The Public History Starts Clean
+## Public History Policy
 
-The first public commit is intentionally not a full dump of the internal history.
-That is a security and usability decision.
+The public history is intentionally curated, not squashed.
 
-- It keeps accidental secrets, local databases, screenshots, logs, feedback
-  folders, and generated audit artifacts out of public history.
-- It gives new users a small, understandable baseline for installation and
-  review.
-- It lets contributors work from a coherent v1 source tree instead of a long
-  internal timeline with private context.
-- It makes future security review and release tagging simpler.
-
-The clean start does not mean the project is new. It means the public repo is
-the safe release artifact.
+- Keep normal engineering commits, fixes, tests, and design decisions visible.
+- Remove files that are private, generated, obsolete, or not part of the OSS
+  product surface.
+- Keep local databases, screenshots, logs, feedback folders, credentials, and
+  hosted deployment artifacts out of public history.
+- Make future public development normal: issues, pull requests, changelog
+  entries, release tags, and reviewable commits.
 
 ## Development Milestones
 
-These are the major areas that were built and hardened before the first public
-release.
+These are the major areas built and hardened before the first public release.
 
 ### Worker Runtime
 
@@ -81,6 +75,3 @@ release.
 ## Release Line
 
 The public release line starts at `v1.0.0`.
-
-Future history in this repository should be normal public project history:
-issues, pull requests, changelog entries, release tags, and reviewable commits.

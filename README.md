@@ -11,8 +11,8 @@ New here? Start with [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for the
 short path from "why Workeros exists" to your first worker and a safe self-hosted
 deployment checklist.
 
-Workeros is being released as a clean source-available v1.0 after the preserved
-internal commits of development, hardening, and production testing. See
+Workeros is being released as a clean source-available v1.0 with its development
+history preserved and private/internal artifacts filtered out. See
 [HISTORY.md](HISTORY.md) for the provenance story and
 [docs/releases/v1.0.0.md](docs/releases/v1.0.0.md) for release notes.
 
@@ -94,8 +94,8 @@ runtime contract.
   recipes.
 - [API overview](docs/API.md) - curated endpoint map plus the OpenAPI location.
 - [Troubleshooting](docs/TROUBLESHOOTING.md) - setup, runtime, and test fixes.
-- [Project history](HISTORY.md) - why the public history is preserved from a clean
-  release commit.
+- [Project history](HISTORY.md) - what was scrubbed and how the public history is
+  preserved.
 - [v1.0.0 release notes](docs/releases/v1.0.0.md) - launch highlights, limits,
   and provenance.
 - [Contributing](CONTRIBUTING.md) - local checks, first-contribution map, and PR
@@ -122,8 +122,9 @@ npm run test:web
 npm run test:mcp
 ```
 
-The full GitHub Actions matrix currently runs on project GitHub-hosted runners, so
-external contributors should include the local commands they ran in the PR.
+GitHub Actions runs lint and test coverage on GitHub-hosted Linux runners, with
+Windows runtime tests included as advisory coverage. External contributors should
+also include the local commands they ran in the PR.
 
 ## Security
 
