@@ -507,7 +507,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
   );
 }
 
-// S29b: replaces the "Workeros" bottom-left footer with a user profile chip.
+// The bottom-left footer uses a user profile chip.
 // Today's single-user v0 shows "Local user"; the cloud build (see
 // Hosted builds can swap this for the signed-in user's email + avatar.
 //

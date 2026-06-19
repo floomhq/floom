@@ -1,5 +1,5 @@
 [Unit]
-Description=Workeros API (Workeros)
+Description=Workeros API
 After=network.target
 
 [Service]
