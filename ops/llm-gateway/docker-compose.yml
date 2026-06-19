@@ -1,0 +1,31 @@
+# #1448 Managed LLM gateway - local / single-host deploy (LiteLLM Proxy + Redis).
+# For cloud, run the same image as a hosted platform service with these env vars and the
+# config mounted (see README.md). Bring secrets via env / a .env file (NOT here).
+services:
+  redis:
+    image: redis:7-alpine
+    # Quota/backoff state is ephemeral coordination, not durable data.
+    command: ["redis-server", "--save", "", "--appendonly", "no"]
+    restart: unless-stopped
+
+  litellm:
+    image: ghcr.io/berriai/litellm:main-stable
+    depends_on: [redis]
+    ports:
+      - "4000:4000"
+    environment:
+      REDIS_HOST: redis
+      REDIS_PORT: "6379"
+      LITELLM_MASTER_KEY: ${LITELLM_MASTER_KEY:?set LITELLM_MASTER_KEY}
+      # Provider creds (only those you use). The gateway holds these; workers never do.
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
+      VERTEX_PROJECT: ${VERTEX_PROJECT:-}
+      GOOGLE_APPLICATION_CREDENTIALS: /secrets/vertex-sa.json
+      AWS_ACCESS_KEY_ID: ${AWS_ACCESS_KEY_ID:-}
+      AWS_SECRET_ACCESS_KEY: ${AWS_SECRET_ACCESS_KEY:-}
+    volumes:
+      - ./litellm_config.yaml:/app/config.yaml:ro
+      # Mount a Vertex service-account JSON here if using Gemini/Vertex.
+      - ${VERTEX_SA_JSON:-/dev/null}:/secrets/vertex-sa.json:ro
+    command: ["--config", "/app/config.yaml", "--port", "4000", "--num_workers", "4"]
+    restart: unless-stopped

@@ -1,0 +1,68 @@
+schema_version: "0.3"
+name: "hubspot-deal-slack-notify"
+title: "HubSpot Deal Slack Notify"
+description: "Posts a Slack message when a new deal is created in HubSpot."
+long_description: |
+  Listens for new deal events from HubSpot via Composio webhook trigger and
+  immediately posts a formatted message to a Slack channel with deal name,
+  owner, stage, and value. Zero configuration after connecting both apps.
+use_cases:
+  - "Keep the #sales channel updated when new deals are created."
+  - "Alert the team without manual copy-pasting from HubSpot."
+example_input:
+  deal_name: "Acme Corp — Q3 Expansion"
+  deal_value: 15000
+  deal_owner: "Alice"
+  deal_stage: "Proposal Sent"
+how_it_works: |
+  HubSpot deal created event
+    -> receive payload via Composio webhook
+    -> format Slack message with deal details
+    -> post to Slack channel
+    -> done
+folder: "Sales/CRM"
+tags:
+  - "hubspot"
+  - "slack"
+  - "sales"
+  - "notify"
+version: "0.1.0"
+is_example: false
+targets:
+  - "generic"
+exec:
+  entry: "SKILL.md"
+  runtime: "skill"
+  runner: "e2b"
+  inputs:
+    - name: "deal_name"
+      kind: "scalar"
+      type: "string"
+      required: true
+      label: "Deal name"
+    - name: "deal_value"
+      kind: "scalar"
+      type: "number"
+      required: false
+      label: "Deal value"
+    - name: "deal_owner"
+      kind: "scalar"
+      type: "string"
+      required: false
+      label: "Deal owner"
+    - name: "deal_stage"
+      kind: "scalar"
+      type: "string"
+      required: false
+      label: "Deal stage"
+  outputs:
+    - name: "notification"
+      kind: "file"
+      media_type: "text/plain"
+      path: "out/notification.txt"
+      required: true
+      label: "Slack notification"
+trigger:
+  type: "manual"
+connections:
+  - "slack"

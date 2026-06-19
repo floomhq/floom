@@ -1,0 +1,91 @@
+schema_version: "0.3"
+system_worker: true
+is_example: false
+name: "worker-author"
+title: "Worker Author"
+description: "Generates a new worker bundle from a natural-language prompt. The first worker every operator gets."
+long_description: |
+  Turns a one-paragraph description of a job into a runnable Workeros worker bundle.
+  Outputs worker.yml + run.py/SKILL.md + a sample input. Either returns a draft
+  for the operator to review, or creates the worker directly when mode=create.
+
+  Edit contexts/worker-author-style/ to shape every future worker this generates.
+use_cases:
+  - "Generate a new worker from a plain-English description of a task."
+  - "Draft a worker bundle for review before committing it to the registry."
+  - "Fork an existing worker into a customised variant."
+example_input:
+  prompt: "Every Monday morning, pull last week's GitHub PRs and send me a Slack summary"
+  mode: "draft"
+example_output: |
+  {
+    "worker_yml": "schema_version: \"0.3\"\nname: ...",
+    "skill_md": "# Weekly GitHub Digest\n...",
+    "suggested_id": "github-weekly-digest",
+    "run_code": null
+  }
+how_it_works: |
+  Prompt + mode
+    -> read worker-author-style context (schema + examples + anti-patterns + style)
+    -> list existing workers to avoid ID collisions
+    -> draft worker.yml + SKILL.md (or run.py for script-mode tasks)
+    -> validate worker.yml against schema 0.3
+    -> return bundle (draft) or write + register (create)
+folder: "System"
+tags:
+  - "system"
+  - "meta"
+  - "worker-creation"
+version: "0.1.0"
+entrypoint: "run.py"
+targets:
+  - "generic"
+limits:
+  max_tool_iterations: 20
+  max_output_tokens: 8000
+  max_total_tokens: 100000
+  timeout_seconds: 300
+exec:
+  entry: "run.py"
+  command: "python run.py"
+  runtime: "python311"
+  runner: "e2b"
+  # worker-author calls the platform-configured codegen provider from inside the
+  # sandbox to draft the bundle. The API runner passes first-party provider env
+  # only for this system worker, so fresh workspaces do not need a BYO AI key.
+  secrets: []
+  inputs:
+    - name: "prompt"
+      kind: "scalar"
+      type: "textarea"
+      required: true
+      label: "What should the worker do?"
+      placeholder: "e.g. Every Monday morning, pull last week's GitHub PRs and post a Slack summary"
+    - name: "mode"
+      kind: "scalar"
+      type: "select"
+      required: false
+      label: "Mode"
+      default: "draft"
+      options:
+        - "draft"
+        - "create"
+    - name: "parent_worker_id"
+      kind: "scalar"
+      type: "string"
+      required: false
+      label: "Fork from worker (optional)"
+      placeholder: "e.g. github-digest"
+  outputs:
+    - name: "bundle"
+      kind: "file"
+      media_type: "application/json"
+      path: "out/bundle.json"
+      required: true
+      label: "Worker bundle"
+trigger:
+  type: "manual"
+connections: []
+contexts:
+  - name: "worker-author-style"
+    writeable: false

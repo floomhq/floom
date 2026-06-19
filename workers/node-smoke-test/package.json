@@ -1,0 +1,10 @@
+{
+  "name": "node-smoke-test",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "main": "run.js",
+  "dependencies": {
+    "nanoid": "^5.0.7"
+  }
+}

@@ -1,0 +1,67 @@
+schema_version: "0.3"
+name: "csv-enricher"
+title: "CSV Enricher"
+description: "Adds a derived column to a CSV file based on existing columns."
+long_description: |
+  Takes a CSV file and a column rule (a natural-language description of what
+  to compute), then uses an LLM to add the derived column to every row.
+  Returns the enriched CSV. Works for categorisation, scoring, extraction,
+  and simple transforms.
+use_cases:
+  - "Add a 'seniority_level' column inferred from job titles."
+  - "Score leads by ICP fit based on industry and company size."
+example_input:
+  column_rule: "Classify each company as SMB, Mid-Market, or Enterprise based on employee_count"
+example_output: |
+  name,employee_count,segment
+  Acme,12,SMB
+  Corp Inc,350,Mid-Market
+how_it_works: |
+  CSV file + column rule
+    -> parse rows
+    -> for each row, call LLM with the rule and row context
+    -> append derived column
+    -> write enriched CSV
+folder: "Data/Enrichment"
+tags:
+  - "csv"
+  - "enrichment"
+  - "data"
+version: "0.1.0"
+is_example: false
+targets:
+  - "generic"
+exec:
+  entry: "run.py"
+  command: "python run.py"
+  runtime: "python311"
+  runner: "e2b"
+  inputs:
+    - name: "input_csv"
+      kind: "file"
+      media_type: "text/csv"
+      path: "inputs/input.csv"
+      required: true
+      label: "Input CSV"
+      max_size_mb: 5
+    - name: "column_rule"
+      kind: "scalar"
+      type: "textarea"
+      required: true
+      label: "Column rule"
+      placeholder: "e.g. Classify each company as SMB, Mid-Market, or Enterprise based on employee_count"
+    - name: "new_column_name"
+      kind: "scalar"
+      type: "string"
+      required: false
+      label: "New column name"
+      default: "derived"
+  outputs:
+    - name: "output_csv"
+      kind: "file"
+      media_type: "text/csv"
+      path: "out/enriched.csv"
+      required: true
+      label: "Enriched CSV"
+trigger:
+  type: "manual"

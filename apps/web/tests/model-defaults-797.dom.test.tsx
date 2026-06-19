@@ -1,0 +1,43 @@
+import { describe, it, expect, vi, beforeEach } from "vitest";
+import { render, screen, fireEvent, waitFor } from "@testing-library/react";
+
+// #797: ModelDefaults loads workspace settings, prefills fields, and persists
+// edits on blur via api.workspace.setSetting.
+
+const { getSettings, setSetting } = vi.hoisted(() => ({
+  getSettings: vi.fn(),
+  setSetting: vi.fn(),
+}));
+
+vi.mock("next/navigation", () => ({
+  useRouter: () => ({ push: vi.fn(), replace: vi.fn() }),
+  useSearchParams: () => new URLSearchParams(),
+  usePathname: () => "/settings",
+}));
+vi.mock("@/lib/api", () => ({ API_BASE: "/api/proxy", api: { workspace: { getSettings, setSetting } } }));
+
+beforeEach(() => {
+  vi.clearAllMocks();
+  getSettings.mockResolvedValue({ default_model: "claude-opus-4-8" });
+  setSetting.mockResolvedValue(null);
+});
+
+describe("ModelDefaults (#797)", () => {
+  it("prefills from settings and saves on blur", async () => {
+    const { ModelDefaults } = await import("@/app/settings/page");
+    render(<ModelDefaults />);
+
+    expect(await screen.findByText("Claude Opus 4.8")).toBeInTheDocument();
+
+    const capInput = screen.getByLabelText("Monthly spend cap (USD)") as HTMLInputElement;
+    fireEvent.change(capInput, { target: { value: "100" } });
+    fireEvent.blur(capInput);
+    // Round-09 trust fix B1: the spend cap MUST write the exact key the backend
+    // reads + enforces (`run_cost.py` reads `monthly_spend_cap_usd`; the
+    // workspace-settings allow-list only accepts `monthly_spend_cap_usd`). The
+    // UI previously wrote `spend_cap_usd`, which is NOT in the allow-list, so the
+    // save was rejected (422) and the cap was a silent no-op.
+    await waitFor(() => expect(setSetting).toHaveBeenCalledWith("monthly_spend_cap_usd", "100"));
+    expect(setSetting).not.toHaveBeenCalledWith("spend_cap_usd", "100");
+  });
+});

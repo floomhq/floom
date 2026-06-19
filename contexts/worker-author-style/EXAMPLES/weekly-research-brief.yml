@@ -1,0 +1,71 @@
+schema_version: "0.3"
+name: "weekly-research-brief"
+title: "Weekly Research Brief"
+description: "Generates a structured research brief on any topic for a given audience."
+long_description: |
+  Takes a topic and target audience, then produces a structured research brief
+  with summary, key findings, implications, and recommendations. Uses web search
+  to ground claims in current information. Output is formatted markdown ready
+  to send as an internal memo or investor update.
+use_cases:
+  - "Research a competitor before a sales call."
+  - "Produce a weekly sector brief for investors."
+  - "Summarise a regulatory topic for a non-technical executive."
+example_input:
+  topic: "Anthropic Claude API rate limits and pricing"
+  audience: "engineering team"
+example_output: |
+  # Research Brief: Anthropic Claude API
+
+  ## Summary
+  Claude 3.5 Sonnet is currently the recommended model for production...
+
+  ## Key Findings
+  - Rate limits: 4000 RPM on Tier 3...
+how_it_works: |
+  Topic + audience
+    -> web search for recent sources
+    -> synthesise key findings
+    -> structure as brief (summary, findings, implications, recommendations)
+    -> write markdown output
+folder: "Operations/Reporting"
+tags:
+  - "research"
+  - "markdown"
+  - "reporting"
+version: "0.1.0"
+is_example: false
+targets:
+  - "generic"
+limits:
+  max_tool_iterations: 15
+  max_output_tokens: 6000
+  max_total_tokens: 60000
+  timeout_seconds: 300
+exec:
+  entry: "SKILL.md"
+  runtime: "skill"
+  runner: "e2b"
+  inputs:
+    - name: "topic"
+      kind: "scalar"
+      type: "string"
+      required: true
+      label: "Topic"
+      placeholder: "e.g. Anthropic Claude API pricing"
+    - name: "audience"
+      kind: "scalar"
+      type: "string"
+      required: false
+      label: "Target audience"
+      default: "executive"
+      placeholder: "e.g. executive, engineering team, investors"
+  outputs:
+    - name: "brief"
+      kind: "file"
+      media_type: "text/markdown"
+      path: "out/brief.md"
+      required: true
+      label: "Research Brief"
+trigger:
+  type: "manual"

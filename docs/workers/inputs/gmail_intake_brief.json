@@ -1,0 +1,4 @@
+{
+  "query": "is:unread label:intake newer_than:7d",
+  "max_results": 5
+}

@@ -1,0 +1,84 @@
+schema_version: '0.3'
+is_example: true
+name: csv-enricher
+title: CSV Enricher
+description: Enriches CSV rows using a custom instruction.
+long_description: |
+  Adds structured columns to raw CSV rows using the instruction you provide. Use it for quick enrichment passes where the source data is already in a spreadsheet shape and the output needs to stay spreadsheet-friendly.
+use_cases:
+- Score company rows for ICP fit before outreach.
+- Add recruiter notes to a candidate export.
+- Normalize messy spreadsheet fields into a consistent review column.
+example_input:
+  csv_file: |
+    name,company,title,location
+    Jordan Lee,Acme Inc,Senior Recruiter,Remote
+    Sam Rivera,Globex,Developer Experience Lead,Remote
+  instruction: Add columns for persona, likely priority, and one concise outreach angle.
+example_output: |
+  ## Enriched CSV preview
+
+  ```csv
+  name,company,title,location,persona,priority,outreach_angle
+  Jordan Lee,Acme Inc,Senior Recruiter,Remote,Recruiting operator,High,Ask about reducing manual candidate writeup work
+  Sam Rivera,Globex,Developer Experience Lead,Remote,Developer tooling buyer,Medium,Lead with sandboxed worker reliability and audit trails
+  ```
+how_it_works: |
+  CSV rows
+    -> parse headers and records
+    -> apply enrichment instruction row by row
+    -> return CSV with original columns plus new fields
+folder: Operations/Data
+tags:
+- csv
+- enrichment
+- operations
+- spreadsheet
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+limits:
+  max_tool_iterations: 12
+  max_output_tokens: 12000
+  max_total_tokens: 50000
+  timeout_seconds: 300
+exec:
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  inputs:
+  - name: csv_file
+    kind: file
+    media_type: text/csv
+    accepts:
+    - text/csv
+    max_size_mb: 10
+    required: true
+    label: CSV file
+    description: Upload the CSV file you want to enrich.
+  - name: instruction
+    kind: scalar
+    type: string
+    required: true
+    label: Enrichment instruction
+    placeholder: For each company, infer ICP fit and add a reason.
+  secrets:
+  - OPENAI_API_KEY
+  outputs:
+  - name: enriched_csv
+    kind: file
+    media_type: text/csv
+    path: out/enriched_csv.csv
+    required: true
+    label: Enriched CSV
+  entry: run.py
+capabilities:
+  secrets:
+  - OPENAI_API_KEY
+  network:
+    egress: true
+approvals:
+  required: false
+trigger:
+  type: manual

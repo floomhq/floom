@@ -1,0 +1,66 @@
+schema_version: '0.3'
+name: webhook-test
+title: Webhook Test Worker
+description: Triggered by incoming HTTP webhooks. Echoes the payload back.
+long_description: |
+  A simple webhook echo worker for checking inbound HTTP triggering and payload serialization. It is intended for development tests before a real webhook-driven automation is connected.
+use_cases:
+- Confirm Workeros receives POST webhook payloads.
+- Inspect exactly what the worker receives after request parsing.
+- Test downstream run logs and JSON output artifacts.
+example_input: {}
+example_output: |
+  ```json
+  {
+    "event": "deal.created",
+    "source": "crm",
+    "payload_received": true
+  }
+  ```
+how_it_works: |
+  POST request
+    -> route to worker webhook endpoint
+    -> parse JSON body
+    -> start worker run
+    -> echo payload as JSON artifact
+folder: DevX/Webhooks
+tags:
+- webhook
+- testing
+- devx
+- json
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+limits:
+  max_tool_iterations: 12
+  max_output_tokens: 4096
+  max_total_tokens: 50000
+  timeout_seconds: 300
+exec:
+  mode: pure-script
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  inputs: []
+  secrets: []
+  outputs:
+  - name: echo
+    kind: file
+    media_type: application/json
+    path: out/echo.json
+    required: true
+    label: Echo Response
+capabilities:
+  secrets: []
+  network:
+    egress: false
+approvals:
+  required: false
+trigger:
+  type: webhook
+  webhook:
+    secret: true
+    allowed_methods:
+    - POST

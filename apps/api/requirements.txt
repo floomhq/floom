@@ -1,0 +1,38 @@
+# Pinned to exact versions for reproducible builds. These are the versions the
+# test suite runs against. Bump deliberately, not via floating ranges.
+bcrypt==4.3.0
+fastapi==0.136.3
+uvicorn[standard]==0.49.0
+pydantic==2.13.4
+python-dotenv==1.2.2
+pyyaml==6.0.1
+python-multipart==0.0.27
+httpx==0.28.1
+openai==2.41.1
+openai-agents[litellm]==0.17.4
+litellm==1.89.0
+ddgs==9.14.4
+pypdf==6.13.2
+python-docx==1.2.0
+requests==2.34.2
+resend==2.30.1
+e2b==2.28.0
+croniter==6.2.2
+# Ships the IANA tz database with the wheel. Windows has no system zoneinfo db,
+# so ZoneInfo("UTC") (scheduler/cron) raises ZoneInfoNotFoundError without this.
+tzdata==2026.2
+slowapi==0.1.9
+starlette==1.2.1
+pyjwt==2.13.0
+cryptography==48.0.0
+lxml==6.1.1
+pytest-xdist==3.8.0
+
+# Optional: AWS Bedrock / Claude model provider (resolved by litellm at runtime).
+# Not needed for the default OpenAI path and not installed by the test suite, so
+# left as a bounded range rather than a hard pin.
+boto3>=1.40,<2
+
+# Optional: Vertex AI / Gemini model provider (resolved by litellm at runtime).
+# Required when GOOGLE_APPLICATION_CREDENTIALS points at Google ADC/WIF config.
+google-auth>=2.49,<3

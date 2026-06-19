@@ -1,0 +1,74 @@
+import { CheckCircle2, Clock, Loader2, XCircle, Pause } from "lucide-react";
+import { StatusPill } from "@/components/collection/StatusPill";
+import type { PillTone } from "@/lib/collection/types";
+
+const SUCCESS_STATES = new Set(["completed", "success", "succeeded"]);
+const ERROR_STATES = new Set(["failed", "error", "cancelled"]);
+const RUNNING_STATES = new Set(["running", "pending"]);
+const QUEUED_STATES = new Set(["queued"]);
+const APPROVAL_STATES = new Set(["pending_approval"]);
+
+function classify(status: string): "success" | "error" | "running" | "queued" | "approval" | "unknown" {
+  const s = (status || "").toLowerCase();
+  if (SUCCESS_STATES.has(s)) return "success";
+  if (ERROR_STATES.has(s)) return "error";
+  if (RUNNING_STATES.has(s)) return "running";
+  if (QUEUED_STATES.has(s)) return "queued";
+  if (APPROVAL_STATES.has(s)) return "approval";
+  return "unknown";
+}
+
+export function RunStatusGlyph({
+  status,
+  className,
+}: {
+  status: string;
+  className?: string;
+}) {
+  const kind = classify(status);
+  const cls = className ?? "size-4";
+  if (kind === "success") return <CheckCircle2 className={`${cls} text-success`} />;
+  if (kind === "error") return <XCircle className={`${cls} text-error`} />;
+  if (kind === "running")
+    return <Loader2 className={`${cls} text-pending animate-spin`} />;
+  if (kind === "queued")
+    return <Clock className={`${cls} text-muted-foreground`} />;
+  if (kind === "approval")
+    return <Pause className={`${cls} text-muted-foreground`} />;
+  return <Clock className={`${cls} text-muted-foreground`} />;
+}
+
+const STATUS_TONE: Record<ReturnType<typeof classify>, PillTone> = {
+  success: "ok",
+  error: "err",
+  running: "run",
+  queued: "idle",
+  approval: "pending",
+  unknown: "idle",
+};
+
+// S29l (ChatGPT-audit P-2): pills are decoration when status is the
+// default-success state. Show only when the user must act (error, running,
+// unknown). The glyph in the row/header already covers "completed".
+export function RunStatusBadge({
+  status,
+  showSuccess = false,
+}: {
+  status: string;
+  // P2-4: opt-in success pill. Default stays quiet (S29l) everywhere; the
+  // History tab passes showSuccess so completed runs get a pill for parity
+  // with failed ones.
+  showSuccess?: boolean;
+}) {
+  const kind = classify(status);
+  if (kind === "success" && !showSuccess) return null;
+  // v6: Title-case statuses everywhere on the run page.
+  const humanized = status.replace(/_/g, " ").trim().toLowerCase();
+  const label =
+    kind === "approval"
+      ? "Awaiting approval"
+      : kind === "success"
+      ? "Completed"
+      : humanized.charAt(0).toUpperCase() + humanized.slice(1);
+  return <StatusPill spec={{ tone: STATUS_TONE[kind], label }} />;
+}

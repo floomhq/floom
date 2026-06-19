@@ -1,0 +1,104 @@
+schema_version: '0.3'
+is_example: true
+name: research-brief
+title: Research Brief
+description: Generates a markdown research brief on any topic.
+long_description: |
+  Produces a structured markdown research brief from a topic, audience, and depth setting. It is useful for quick market scans, product diligence, and internal prep where the output needs to be readable as a memo.
+  The worker can search the live web for fresh facts in addition to provided inputs, local bundle files, and model knowledge, and it qualifies any claim it cannot verify.
+use_cases:
+- Prepare an executive summary before a client or investor call.
+- Draft a technical landscape overview for a DevX topic.
+- Compare competitors before prioritizing product work.
+example_input:
+  topic: Competitor analysis for AI recruiting workflow tools in DACH
+  audience: executive
+  depth: detailed
+example_output: |
+  # AI recruiting workflow tools in DACH
+
+  ## Executive takeaways
+
+  - Buyers want CRM hygiene, candidate matching, and client-ready writeups in one loop.
+  - DACH-specific compliance and rate context remains a defensible gap.
+  - Trust signals matter: examples, traceability, and approval flows reduce adoption friction.
+how_it_works: |
+  Topic + audience + depth
+    -> build outline
+    -> collect and synthesize key points
+    -> adapt tone to audience
+    -> return markdown brief
+folder: Research
+tags:
+- research
+- brief
+- strategy
+- markdown
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+entrypoints:
+- name: main
+  path: SKILL.md
+  type: markdown
+limits:
+  max_tool_iterations: 12
+  max_output_tokens: 12000
+  max_total_tokens: 50000
+  timeout_seconds: 300
+exec:
+  runtime: skill
+  runner: e2b
+  inputs:
+  - name: topic
+    kind: scalar
+    type: string
+    required: true
+    label: Research topic
+    placeholder: e.g. "Competitor analysis for AI CRM tools"
+  - name: audience
+    kind: scalar
+    type: select
+    required: true
+    default: executive
+    enum:
+    - executive
+    - technical
+    - sales
+    label: Audience
+    options:
+    - executive
+    - technical
+    - sales
+  - name: depth
+    kind: scalar
+    type: select
+    required: true
+    default: overview
+    enum:
+    - overview
+    - detailed
+    - deep_dive
+    label: Depth
+    options:
+    - overview
+    - detailed
+    - deep_dive
+  outputs:
+  - name: brief
+    kind: file
+    media_type: text/markdown
+    path: out/brief.md
+    required: true
+    label: Research brief
+  entry: SKILL.md
+capabilities:
+  secrets: []
+  network:
+    egress: true
+approvals:
+  required: false
+  label: Approve research brief
+trigger:
+  type: manual

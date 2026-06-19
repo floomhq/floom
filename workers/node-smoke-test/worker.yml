@@ -1,0 +1,44 @@
+schema_version: "0.3"
+# Internal runtime-proof artifact, not an operator-facing business worker.
+# Marked system_worker so it is hidden from /workers and the overview catalog
+# (same treatment as workspace-agent / worker-author).
+system_worker: true
+is_example: true
+name: node-smoke-test
+title: Node Smoke Test
+description: Tiny Node worker that installs one npm dep (nanoid) and writes a result.json. Proves the Node runtime + npm install pipeline.
+long_description: |
+  Use this to confirm Workeros's E2B `node22` runtime is alive and that
+  `package.json` deps get installed via `npm install` before `node run.js`
+  fires. No secrets, no network state, deterministic output.
+use_cases:
+- Smoke-test the Node runtime + npm install path on Workeros.
+- Verify after backend changes that pure-script Node workers still work.
+- Run as a quick sanity check that the E2B sandbox is reachable and healthy.
+folder: Operations
+tags:
+- node
+- smoke-test
+- runtime
+version: 0.1.0
+targets:
+- generic
+limits:
+  max_tool_iterations: 1
+  max_output_tokens: 1000
+  max_total_tokens: 5000
+  timeout_seconds: 180
+exec:
+  command: node run.js
+  runtime: node22
+  runner: e2b
+  entry: run.js
+  outputs:
+  - name: result
+    kind: file
+    media_type: application/json
+    path: out/result.json
+    required: true
+    label: Runtime info JSON
+trigger:
+  type: manual

@@ -1,0 +1,30 @@
+# Ruff configuration for the Python codebase (apps/api, tests/, cli/, workers/).
+#
+# Incremental adoption. Enabled rules below are green today and gate every PR.
+# The four ignored pyflakes rules are real debt that CANNOT be bulk-autofixed
+# safely: this codebase deliberately keeps imports as backward-compat re-export
+# shims (e.g. apps/api/main.py) and as test patch-targets (e.g. run_service
+# re-exports _fire_alert_webhooks, models exposes `socket` for monkeypatching),
+# so `ruff --fix` for F401 silently breaks imports/tests. They will be cleared
+# file-by-file, then enabled.
+target-version = "py311"
+line-length = 100
+
+[lint]
+# The full pyflakes family (real bugs: bad string formatting, invalid
+# comparisons/asserts, dead f-strings, misplaced statements) + pycodestyle
+# syntax errors, invalid regex escapes, stray debugger imports, pylint errors,
+# and a few unambiguous bugbear rules.
+select = ["E9", "F", "W605", "T10", "PLE", "B002", "B005", "B018"]
+ignore = [
+  "F401",  # unused-import — re-export shims / patch-targets; bulk-fix unsafe
+  "F811",  # redefinition — aggregator/local re-imports
+  "F841",  # unused local variable — cleanup backlog
+  "F821",  # undefined name — needs per-case review (dynamic/star imports)
+]
+
+[lint.per-file-ignores]
+# Forward-looking: when F401/F811 are enabled, the aggregator's re-export shims
+# and local re-imports are expected and must not fail the gate.
+"apps/api/main.py" = ["F401", "F811"]
+"**/__init__.py" = ["F401"]

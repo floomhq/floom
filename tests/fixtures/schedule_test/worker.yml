@@ -1,0 +1,55 @@
+schema_version: '0.3'
+name: schedule-test
+title: Schedule Test Worker
+description: Fires every minute for testing the cron scheduler. Change cron expression to desired schedule after testing.
+long_description: |
+  A scheduler smoke test that runs every minute and records a simple message. It validates cron registration, run creation, and scheduler heartbeat behavior without external dependencies.
+use_cases:
+- Confirm scheduled workers are being registered and triggered.
+- Test pause and unpause behavior on cron-backed workers.
+- Generate a low-risk heartbeat run for scheduler diagnostics.
+example_input: {}
+example_output: |
+  Scheduled worker fired at 2026-05-26T01:00:00Z from cron expression `* * * * *`.
+how_it_works: |
+  Cron tick
+    -> scheduler selects due worker
+    -> local runner executes run.py
+    -> worker returns timestamped message
+folder: DevX/Scheduler
+tags:
+- scheduler
+- cron
+- testing
+- devx
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+limits:
+  max_tool_iterations: 12
+  max_output_tokens: 4096
+  max_total_tokens: 50000
+  timeout_seconds: 300
+exec:
+  mode: pure-script
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  inputs: []
+  secrets: []
+  outputs:
+  - name: message
+    kind: scalar
+    type: string
+    required: true
+    label: Scheduled Message
+capabilities:
+  secrets: []
+  network:
+    egress: false
+approvals:
+  required: false
+trigger:
+  type: schedule
+  cron: '* * * * *'

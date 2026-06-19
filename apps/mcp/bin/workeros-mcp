@@ -1,0 +1,13 @@
+#!/usr/bin/env node
+// #596: previously this script only imported dist/server.js without calling
+// main(). server.ts guards its main() call with an import.meta.url === argv[1]
+// check — which is FALSE when the binary wrapper is the entry point because
+// process.argv[1] is "bin/workeros-mcp", not "dist/server.js". The guard
+// evaluated to false, main() was never called, and the process exited
+// immediately. The MCP client received "Connection closed" before listTools.
+import { main } from "../dist/server.js";
+main().catch((/** @type {unknown} */ error) => {
+  const message = error instanceof Error ? error.message : String(error);
+  console.error(`workeros-mcp failed: ${message}`);
+  process.exit(1);
+});

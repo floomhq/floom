@@ -1,0 +1,61 @@
+schema_version: "0.3"
+is_example: true
+name: "whatsapp-listener"
+title: "WhatsApp Listener (workspace agent)"
+description: "Polls for incoming WhatsApp messages via Composio, forwards them to the workspace agent via /chat, and sends the reply back."
+long_description: |
+  Cron-driven v0 adapter that connects WhatsApp to the Workeros workspace agent.
+
+  When triggered, it:
+  1. Lists recent incoming WhatsApp messages via the Composio WHATSAPP integration.
+  2. For each unprocessed message, calls POST /chat with the message text.
+  3. Streams the workspace agent reply and sends it back to the sender.
+
+  Upgrade path: replace cron trigger with a Composio WhatsApp webhook trigger.
+use_cases:
+  - Chat with the workspace agent from your phone via WhatsApp.
+  - Route WhatsApp messages to the workspace agent for ops queries.
+  - Keep mobile follow-up questions in the same workspace conversation flow.
+example_input:
+  lookback_minutes: 10
+folder: "Examples"
+tags:
+  - "example"
+  - "whatsapp"
+  - "chat-adapter"
+version: "0.1.0"
+entrypoint: "run.py"
+limits:
+  max_tool_iterations: 10
+  max_output_tokens: 2048
+  max_total_tokens: 50000
+  timeout_seconds: 120
+exec:
+  entry: "run.py"
+  command: "python run.py"
+  runtime: "python311"
+  runner: "local"
+  inputs:
+    - name: "lookback_minutes"
+      kind: "scalar"
+      type: "number"
+      required: false
+      label: "How far back to look (minutes)"
+      default: 10
+  outputs:
+    - name: "summary"
+      type: "markdown"
+      required: true
+      label: "Processing summary"
+trigger:
+  type: "cron"
+  cron: "*/10 * * * *"
+secrets:
+  - COMPOSIO_API_KEY
+  - WORKEROS_API_SECRET
+  - WORKEROS_API_BASE
+connections:
+  - app: whatsapp
+    allowed_tools:
+      - WHATSAPP_GET_MESSAGES
+      - WHATSAPP_SEND_MESSAGE

@@ -1,0 +1,63 @@
+schema_version: '0.3'
+name: e2b-test
+title: E2B Sandbox Test
+description: Tests E2B cloud sandbox execution with numpy dependency install.
+long_description: |
+  Runs a minimal cloud sandbox smoke test that imports numpy and returns runtime diagnostics. Use it to confirm the E2B runner path can install dependencies and produce structured artifacts.
+use_cases:
+- Verify E2B sandbox credentials and execution wiring.
+- Confirm Python dependency installation works outside the local runner.
+- Produce a quick JSON diagnostic before enabling sandboxed workers.
+example_input: {}
+example_output: |
+  ```json
+  {
+    "runner": "e2b",
+    "numpy_version": "2.2.0",
+    "matrix_sum": 45,
+    "status": "ok"
+  }
+  ```
+how_it_works: |
+  Manual run
+    -> start E2B sandbox
+    -> install/import numpy
+    -> run diagnostic calculation
+    -> write JSON result artifact
+folder: DevX/Sandbox
+tags:
+- e2b
+- sandbox
+- devx
+- diagnostics
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+limits:
+  max_tool_iterations: 12
+  max_output_tokens: 4096
+  max_total_tokens: 50000
+  timeout_seconds: 300
+exec:
+  mode: pure-script
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  inputs: []
+  secrets: []
+  outputs:
+  - name: result
+    kind: file
+    media_type: application/json
+    path: out/result.json
+    required: true
+    label: Test Result
+capabilities:
+  secrets: []
+  network:
+    egress: false
+approvals:
+  required: false
+trigger:
+  type: manual

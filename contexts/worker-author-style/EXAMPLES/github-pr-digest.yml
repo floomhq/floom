@@ -1,0 +1,64 @@
+schema_version: "0.3"
+name: "github-pr-digest"
+title: "GitHub PR Digest"
+description: "Sends a daily digest of open GitHub PRs and issues to Slack."
+long_description: |
+  Every morning, pulls open pull requests and issues from your GitHub repos
+  and sends a structured summary to a Slack channel. Prioritises by age and
+  review status so the most urgent items surface first.
+use_cases:
+  - "Keep the engineering team aligned on open review queue without GitHub noise."
+  - "Auto-post the morning standup context to #engineering."
+example_input:
+  since_days: 7
+example_output: |
+  ## Open PRs (3)
+  - **Add OAuth flow** (main) — 2d old, needs review
+  - **Fix CSV parser** (dev) — 5d old, 1 approval
+how_it_works: |
+  Fetch open PRs + issues via GitHub Composio
+    -> rank by age and review status
+    -> format as markdown digest
+    -> post to Slack channel
+folder: "Engineering/GitHub"
+tags:
+  - "github"
+  - "slack"
+  - "digest"
+  - "engineering"
+  - "daily"
+version: "0.1.0"
+is_example: false
+targets:
+  - "generic"
+limits:
+  max_tool_iterations: 12
+  max_output_tokens: 4096
+  max_total_tokens: 50000
+  timeout_seconds: 300
+exec:
+  entry: "SKILL.md"
+  runtime: "skill"
+  runner: "e2b"
+  inputs:
+    - name: "since_days"
+      kind: "scalar"
+      type: "number"
+      required: false
+      label: "Look-back days"
+      default: 7
+      placeholder: "e.g. 7"
+  outputs:
+    - name: "digest"
+      kind: "file"
+      media_type: "text/markdown"
+      path: "out/digest.md"
+      required: true
+      label: "PR Digest"
+trigger:
+  type: "schedule"
+  cron: "0 9 * * 1-5"
+  timezone: "UTC"
+connections:
+  - "github"
+  - "slack"

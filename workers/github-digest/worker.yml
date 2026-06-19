@@ -1,0 +1,32 @@
+schema_version: "0.3"
+is_example: true
+name: "github-digest"
+title: "GitHub Digest Sender"
+description: "Every morning at 9am, send a digest of unread GitHub PRs and open issues."
+version: "0.1.0"
+targets: ["generic"]
+limits:
+  max_tool_iterations: 20
+  max_output_tokens: 12000
+  max_total_tokens: 200000
+  timeout_seconds: 300
+exec:
+  entry: "SKILL.md"
+  runtime: "skill"
+  runner: "e2b"
+  outputs:
+  - name: "digest"
+    kind: "file"
+    media_type: "text/markdown"
+    path: "out/digest.md"
+    required: true
+    label: "Daily Digest"
+trigger:
+  type: "schedule"
+  cron: "0 9 * * *"
+  timezone: "UTC"
+connections:
+  - app: github
+    allowed_tools:
+      - GITHUB_FIND_PULL_REQUESTS
+      - GITHUB_LIST_ASSIGNED_ISSUES

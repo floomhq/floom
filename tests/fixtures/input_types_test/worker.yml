@@ -1,0 +1,127 @@
+schema_version: '0.3'
+name: input-types-test
+title: Input Types Test
+description: Exercises every input type to verify the form renderer.
+long_description: |
+  A developer-facing fixture that renders every supported input control and echoes the submitted values. Use it when changing the form renderer, input serialization, or file upload path.
+use_cases:
+- Verify text, textarea, number, select, boolean, and file inputs in one form.
+- Confirm default values and required flags render correctly.
+- Capture raw submitted values for regression checks.
+example_input:
+  text_input: Hello Workeros
+  textarea_input: |
+    Multiline note for renderer verification.
+    Second line stays intact.
+  number_input: 42
+  select_input: beta
+  boolean_input: true
+  file_input: null
+example_output: |
+  ## Input echo
+
+  - `text_input`: Hello Workeros
+  - `number_input`: 42
+  - `select_input`: beta
+  - `boolean_input`: true
+  - `file_input`: sample.txt
+how_it_works: |
+  Form submission
+    -> collect every supported input type
+    -> serialize values into worker inputs
+    -> echo markdown summary and raw JSON
+folder: DevX/Fixtures
+tags:
+- testing
+- inputs
+- devx
+- forms
+version: 0.1.0
+entrypoint: SKILL.md
+targets:
+- generic
+entrypoints:
+- name: main
+  path: SKILL.md
+  type: markdown
+limits:
+  max_tool_iterations: 12
+  max_output_tokens: 4096
+  max_total_tokens: 50000
+  timeout_seconds: 300
+exec:
+  mode: agent
+  command: python run.py
+  runtime: python311
+  runner: e2b
+  inputs:
+  - name: text_input
+    kind: scalar
+    type: string
+    required: true
+    label: Text input
+    placeholder: Hello
+  - name: textarea_input
+    kind: scalar
+    type: string
+    required: false
+    label: Textarea input
+  - name: number_input
+    kind: scalar
+    type: number
+    required: false
+    label: Number input
+  - name: select_input
+    kind: scalar
+    type: select
+    required: true
+    default: beta
+    enum:
+    - alpha
+    - beta
+    - gamma
+    label: Select input
+    options:
+    - alpha
+    - beta
+    - gamma
+  - name: boolean_input
+    kind: scalar
+    type: boolean
+    required: false
+    default: false
+    label: Boolean (checkbox)
+  - name: file_input
+    kind: file
+    media_type: text/csv
+    accepts:
+    - text/csv
+    - application/octet-stream
+    max_size_mb: 1
+    path: inputs/file_input
+    required: false
+    label: File upload
+  secrets: []
+  outputs:
+  - name: summary
+    kind: file
+    media_type: text/markdown
+    path: out/summary.md
+    required: true
+    label: Summary
+  - name: raw_inputs
+    kind: file
+    media_type: application/json
+    path: out/raw_inputs.json
+    required: true
+    label: Raw inputs
+capabilities:
+  secrets: []
+  files:
+  - file_input
+  network:
+    egress: false
+approvals:
+  required: false
+trigger:
+  type: manual

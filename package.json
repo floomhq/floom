@@ -1,0 +1,32 @@
+{
+  "name": "workeros",
+  "version": "1.0.0",
+  "description": "The source-available, self-hosted runtime for AI workers. Sandboxed by default.",
+  "license": "SUL-1.0",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/floomhq/workeros.git"
+  },
+  "keywords": [
+    "ai",
+    "agents",
+    "workers",
+    "automation",
+    "self-hosted",
+    "mcp",
+    "sandbox"
+  ],
+  "scripts": {
+    "dev": "node scripts/dev-help.mjs",
+    "dev:web": "npm --prefix apps/web run dev",
+    "build:web": "npm --prefix apps/web run build",
+    "lint:web": "npm --prefix apps/web run lint",
+    "test:web": "npm --prefix apps/web test",
+    "build:mcp": "npm --prefix apps/mcp run build",
+    "test:mcp": "npm --prefix apps/mcp test",
+    "test:api": "python -m pytest tests -q -n auto --dist loadscope",
+    "test:api:serial": "python -m pytest tests -q",
+    "test:api:full": "python -m pytest apps/api/tests -q",
+    "test:crud": "python tests/crud_regression.py"
+  }
+}
