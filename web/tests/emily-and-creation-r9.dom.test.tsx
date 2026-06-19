@@ -46,12 +46,12 @@ vi.mock("@/lib/useChatStream", async (importOriginal) => {
   };
 });
 
-import { EmilyChatPage, EmilyDock } from "@/components/emily/EmilyChat";
+import { EmilyChatCore, EmilyDock } from "@/components/emily/EmilyChat";
 import { EmilyFullscreenProvider } from "@/components/emily/emily-fullscreen";
 
 describe("Emily creation flow — native composer", () => {
   it("create hero uses the real PromptInput (auto-resize TEXTAREA, not a form button)", () => {
-    render(<EmilyChatPage createMode />);
+    render(<EmilyChatCore fullPage createMode />);
     const composer = screen.getByPlaceholderText("Create me: a worker that…");
     // The real PromptInput is a <textarea>; the old hand-rolled hero used a
     // separate "Hire worker" submit button which we removed.
@@ -62,7 +62,7 @@ describe("Emily creation flow — native composer", () => {
   it("Enter submits the create prompt (no click required)", async () => {
     const user = userEvent.setup();
     sendMessage.mockClear();
-    render(<EmilyChatPage createMode />);
+    render(<EmilyChatCore fullPage createMode />);
     const composer = screen.getByPlaceholderText("Create me: a worker that…");
     await user.click(composer);
     await user.keyboard("Send a daily digest{Enter}");

@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -42,8 +42,10 @@ export { buildCreateWorkerMessage } from "@/lib/emily-create-intent";
 import { useAssistantName } from "@/lib/workspace/assistant-name";
 import { api } from "@/lib/api";
 import { reportError, logError } from "@/lib/notify";
-import type { ConversationSummary } from "@/lib/types";
+import type { ConversationSummary, SystemOverview } from "@/lib/types";
 import type { AttachedFile, ChatMessage } from "@/lib/emily-chat-types";
+import { useMcpModal } from "@/components/mcp/mcp-modal-context";
+import { EmilyHomeEmpty } from "@/components/home/EmilyHomeEmpty";
 
 // ── Chat controls (New chat + Export) ─────────────────────────────────────────
 
@@ -525,12 +527,27 @@ interface EmilyChatCoreProps {
   onConversationIdChange?: (id: string | null) => void;
   /** #1363 — when true, show a proactive first-run opener instead of the generic empty state. */
   isNewWorkspace?: boolean;
+  /** When set with createMode, the primed prompt is auto-submitted once on
+   *  mount — used by the Emily HOME drafting state so the home "becomes the
+   *  conversation" without the user re-pressing send. */
+  autoSubmitPrime?: boolean;
+  /** HOME mode (Federico 2026-06-19): the home route shows this REAL Emily
+   *  FULLSCREEN, and its empty state gets the home "stuff" — greeting + lean
+   *  pulse + pills — rendered ABOVE the real composer. Not a parallel composer:
+   *  the pulse/pills seed THIS composer. */
+  homeMode?: boolean;
+  /** Server-rendered overview, hydrates the home pulse without a round-trip. */
+  homeInitialData?: SystemOverview | null;
 }
 
 const WORKER_MUTATION_TOOLS = new Set(["workers__create", "workers__update", "workers__delete"]);
 
-function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpenRunDetails, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange, isNewWorkspace = false }: EmilyChatCoreProps) {
+// Exported so the Emily HOME (components/home/EmilyHome) can render the SAME
+// real chat core inline for its drafting state — reusing the live conversation
+// rendering + worker-drafting tool cards instead of rebuilding Emily.
+export function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpenRunDetails, hideControls = false, actionsRef, onHasMessagesChange, onConversationIdChange, isNewWorkspace = false, autoSubmitPrime = false, homeMode = false, homeInitialData = null }: EmilyChatCoreProps) {
   const assistantName = useAssistantName();
+  const mcpModal = useMcpModal();
   const {
     messages,
     conversationId,
@@ -543,6 +560,18 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
   } = useChatStream({ ephemeral: createMode });
   const router = useRouter();
   const [input, setInput] = useState(primeInput ?? "");
+  // Seed the composer when primeInput ARRIVES after mount. The full-page chat
+  // passes primeInput at mount (handled by useState above), but the dock core is
+  // mounted once for the whole app, so a later `/?create=1&prime=<text>` deep
+  // link delivers primeInput post-mount — sync it in once per new value (only
+  // while the composer is still empty and the thread hasn't started, so it never
+  // clobbers what the user is typing or an in-progress conversation).
+  const seededPrimeRef = useRef<string | undefined>(primeInput ?? undefined);
+  useEffect(() => {
+    if (!primeInput || seededPrimeRef.current === primeInput) return;
+    seededPrimeRef.current = primeInput;
+    setInput((prev) => (prev.trim().length === 0 ? primeInput : prev));
+  }, [primeInput]);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -671,6 +700,20 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
     setInput("");
     setAttachedFiles([]);
   }, [input, attachedFiles, sendMessage, createMode, messages.length]);
+
+  // HOME drafting: auto-submit the primed create prompt exactly once on mount so
+  // the home seamlessly "becomes the conversation". Guarded by a ref so it never
+  // re-fires (e.g. on re-render) and only when there are no messages yet.
+  const autoSubmittedRef = useRef(false);
+  useEffect(() => {
+    if (!autoSubmitPrime || !createMode) return;
+    if (autoSubmittedRef.current) return;
+    const text = (primeInput ?? "").trim();
+    if (!text || messages.length > 0 || isHydrating) return;
+    autoSubmittedRef.current = true;
+    sendMessage(buildCreateWorkerMessage(text));
+    setInput("");
+  }, [autoSubmitPrime, createMode, primeInput, messages.length, isHydrating, sendMessage]);
 
   // Create-mode source pill → append a natural "use my <source>" hint to the
   // composer so the assistant knows which context to wire into the new worker.
@@ -816,6 +859,18 @@ function EmilyChatCore({ fullPage = false, createMode = false, primeInput, onOpe
             <div className="flex h-full items-center justify-center px-6 text-center">
               <p className="text-xs text-muted-foreground">Loading conversation...</p>
             </div>
+          ) : homeMode ? (
+            // HOME empty state (Federico 2026-06-19): greeting + lean pulse +
+            // pills ABOVE the REAL composer (rendered at the bottom of this
+            // core). The pulse/pills seed THIS composer via setInput — no
+            // parallel textarea. Centered like ChatGPT/Claude's empty home.
+            <div className="flex h-full flex-col items-center justify-center py-10">
+              <EmilyHomeEmpty
+                initialData={homeInitialData}
+                onSeed={(text) => setInput(text)}
+                onPickMcp={() => mcpModal.open()}
+              />
+            </div>
           ) : (
             <ChatEmptyState onSuggest={(text) => { setInput(text); }} isNewWorkspace={isNewWorkspace} />
           )
@@ -938,17 +993,108 @@ export function EmilyDock({ className }: { className?: string }) {
       .catch((err) => logError("Could not load workspace overview.", err));
     return () => { alive = false; };
   }, []);
-  // #1141: reset the dock conversation when navigating away from /chat?mode=create
-  // so the Overview Emily panel shows a fresh context instead of the create-mode thread.
+  // #1141: reset the dock conversation when navigating away from the create flow
+  // so the next page (or a fresh home visit) shows a clean context instead of the
+  // ephemeral create-mode thread. The create flow now lives on the home route
+  // (?create=1), so reset on leaving home too.
   const pathname = usePathname();
   const prevPathname = useRef<string | null>(null);
   useEffect(() => {
     const prev = prevPathname.current;
     prevPathname.current = pathname;
-    if (prev !== null && prev.startsWith("/chat") && !pathname.startsWith("/chat")) {
+    const leftChat = prev !== null && prev.startsWith("/chat") && !pathname.startsWith("/chat");
+    const leftHome = prev === "/" || prev === "/overview";
+    const enteringHome = pathname === "/" || pathname === "/overview";
+    if (leftChat || (leftHome && !enteringHome)) {
       coreActionsRef.current?.newSession();
     }
   }, [pathname]);
+
+  // HOME (Federico 2026-06-19): "/" and "/overview" ARE the existing Emily shown
+  // FULLSCREEN — no separate main-pane composer, no parallel home. On the home
+  // route, force Emily into fullscreen so the dock fills the main area (the
+  // AppShell hides the empty page pane, the sidebar stays). The empty state then
+  // renders the home greeting + pulse + pills (homeMode below).
+  const isHomeRoute = pathname === "/" || pathname === "/overview";
+
+  // CREATE (Federico 2026-06-19): "New worker" / the old /chat?mode=create no
+  // longer open a SEPARATE full-page Emily with its own header. They land on the
+  // SAME dock-fullscreen Emily as the home, primed for create — `/?create=1`
+  // (with an optional `&prime=<text>` seeding the composer, used by the
+  // landing→app from-prompt handoff and the workers empty-state prompt). The
+  // dock reads the param, forces fullscreen, and renders the create empty state
+  // (the "Hire a new worker" hero + create pills) INSIDE this one Emily core.
+  const searchParams = useSearchParams();
+  const createParam = searchParams.get("create") === "1";
+  const primeParam = searchParams.get("prime")?.trim() || undefined;
+  // Latch create-mode once consumed so a later route change / param strip does
+  // not yank the user out of the create thread mid-conversation.
+  const [createLatched, setCreateLatched] = useState(false);
+  // Primed text is consumed once on enter (so it seeds the create composer) and
+  // then cleared — re-renders must not keep re-seeding it.
+  const [primeText, setPrimeText] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (createParam && isHomeRoute) {
+      setCreateLatched(true);
+      if (primeParam) setPrimeText(primeParam);
+      // Drop the params from the URL so create-prime is deep-linkable but not
+      // sticky across refresh/back (history.replace, no Next reload).
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("create");
+        url.searchParams.delete("prime");
+        window.history.replaceState(window.history.state, "", url.pathname + url.search);
+      }
+    }
+  }, [createParam, isHomeRoute, primeParam]);
+  // Reset the create latch when the user navigates away from the home route so
+  // the next visit shows the home greeting (not a stale create hero).
+  useEffect(() => {
+    if (!isHomeRoute) {
+      setCreateLatched(false);
+      setPrimeText(undefined);
+    }
+  }, [isHomeRoute]);
+  const createMode = (createParam || createLatched) && isHomeRoute;
+
+  // Round-09 batch2 (Federico 2026-06-18): the home fullscreen Emily must be
+  // COLLAPSIBLE. Collapsing on home docks Emily to the right rail and shows the
+  // user's Workers list in the main pane (HomePane renders WorkersCollection
+  // when fullscreen is off). `userCollapsedHome` suppresses the auto-fullscreen
+  // effect so a manual collapse STICKS; it resets on a genuine fresh home entry
+  // (navigating INTO home from another route) so the next visit opens fullscreen.
+  const [userCollapsedHome, setUserCollapsedHome] = useState(false);
+  const prevHomeRef = useRef<boolean>(isHomeRoute);
+  useEffect(() => {
+    const wasHome = prevHomeRef.current;
+    prevHomeRef.current = isHomeRoute;
+    // Fresh entry into home from elsewhere → clear any prior manual collapse and
+    // open fullscreen. Create mode always opens fullscreen too.
+    if (isHomeRoute && !wasHome) {
+      setUserCollapsedHome(false);
+      setFullscreen(true);
+      return;
+    }
+    // On the home route (no route change) only force fullscreen while the user
+    // has NOT manually collapsed it; create mode overrides the collapse.
+    if (isHomeRoute && (!userCollapsedHome || createMode)) {
+      setFullscreen(true);
+    }
+    // Leaving home does NOT force-exit fullscreen (the user may have it open
+    // intentionally elsewhere).
+  }, [isHomeRoute, setFullscreen, userCollapsedHome, createMode]);
+
+  // Collapse the home fullscreen Emily into the right rail (shows the Workers
+  // list in the main pane). Maximize returns to fullscreen Emily.
+  const collapseHome = () => {
+    setUserCollapsedHome(true);
+    setMode((m) => (m === "collapsed" ? "rail" : m));
+    setFullscreen(false);
+  };
+  const maximizeHome = () => {
+    setUserCollapsedHome(false);
+    setFullscreen(true);
+  };
 
   return (
     <div
@@ -1012,25 +1158,55 @@ export function EmilyDock({ className }: { className?: string }) {
           {/* PRIMARY make-fullscreen toggle — true one-click fullscreen: Emily
               takes over the main content area, the left nav stays (Federico
               2026-06-17). High-contrast so the affordance is clearly visible in
-              BOTH light and night mode (the muted icon was hard to see). */}
-          <Button
-            size="sm"
-            variant="ghost"
-            className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
-            onClick={toggleFull}
-            title={isFull ? `Exit full screen` : `Full screen ${assistantName}`}
-            aria-label={isFull ? `Shrink ${assistantName}` : `Expand ${assistantName}`}
-          >
-            {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
-          </Button>
+              BOTH light and night mode (the muted icon was hard to see).
+              On the HOME route this becomes the collapse/maximize control
+              (Federico 2026-06-18): collapsing docks Emily to the rail and shows
+              the Workers list in the main pane; maximizing returns to fullscreen. */}
+          {!isHomeRoute ? (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
+              onClick={toggleFull}
+              title={isFull ? `Exit full screen` : `Full screen ${assistantName}`}
+              aria-label={isFull ? `Shrink ${assistantName}` : `Expand ${assistantName}`}
+            >
+              {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </Button>
+          ) : (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
+              onClick={isFull ? collapseHome : maximizeHome}
+              title={isFull ? `Minimize ${assistantName}` : `Full screen ${assistantName}`}
+              aria-label={isFull ? `Minimize ${assistantName}` : `Expand ${assistantName}`}
+            >
+              {isFull ? <Minimize2 className="size-4" /> : <Maximize2 className="size-4" />}
+            </Button>
+          )}
           {/* Full-screen CLOSE control (Federico 2026-06-17): only in full mode,
-              one click exits fullscreen straight back to the right rail. */}
-          {isFull && (
+              one click exits fullscreen straight back to the right rail. On the
+              HOME route the X collapses to the rail (showing the Workers list)
+              rather than closing to a non-existent page pane. */}
+          {isFull && !isHomeRoute && (
             <Button
               size="sm"
               variant="ghost"
               className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
               onClick={exitFull}
+              title="Close full screen"
+              aria-label="Close full screen"
+            >
+              <X className="size-4" />
+            </Button>
+          )}
+          {isFull && isHomeRoute && (
+            <Button
+              size="sm"
+              variant="ghost"
+              className="size-7 p-0 text-[var(--text-primary)] hover:bg-[var(--active-nav-bg)] hover:text-foreground"
+              onClick={collapseHome}
               title="Close full screen"
               aria-label="Close full screen"
             >
@@ -1122,6 +1298,12 @@ export function EmilyDock({ className }: { className?: string }) {
           onHasMessagesChange={setCoreHasMessages}
           onConversationIdChange={setCoreConversationId}
           isNewWorkspace={isNewWorkspace}
+          // CREATE takes precedence over the home greeting: when entering via
+          // "New worker"/?create=1 the same Emily renders the "Hire a worker"
+          // create hero (create pills + sources) instead of the home pulse.
+          createMode={createMode}
+          primeInput={createMode ? primeText : undefined}
+          homeMode={isHomeRoute && !createMode}
         />
       </div>
     </div>
@@ -1132,7 +1314,16 @@ export function EmilyDock({ className }: { className?: string }) {
 
 export function EmilyMobileSheet() {
   const assistantName = useAssistantName();
+  const pathname = usePathname();
+  const isHomeRoute = pathname === "/" || pathname === "/overview";
+  // HOME (Federico 2026-06-19): on mobile the home is the SAME real Emily — the
+  // bottom sheet opens by default on the home route so the home greeting + pulse
+  // + pills render in Emily's empty state (homeMode), seeding Emily's composer.
+  // Off the home route it stays a tap-to-open FAB as before.
   const [open, setOpen] = useState(false);
+  useEffect(() => {
+    if (isHomeRoute) setOpen(true);
+  }, [isHomeRoute]);
   return (
     <>
       {!open && (
@@ -1171,9 +1362,11 @@ export function EmilyMobileSheet() {
                 <ChevronDown className="size-4" />
               </Button>
             </div>
-            {/* Mounted only while open → no second background chat instance */}
+            {/* Mounted only while open → no second background chat instance.
+                homeMode on the home route renders the home greeting/pulse/pills
+                in Emily's empty state (same as the desktop dock). */}
             <div className="flex-1 min-h-0 overflow-hidden">
-              <EmilyChatCore />
+              <EmilyChatCore homeMode={isHomeRoute} />
             </div>
           </div>
         </div>
@@ -1184,29 +1377,22 @@ export function EmilyMobileSheet() {
 
 // ── Full-page chat (used by /chat route) ──────────────────────────────────────
 
-export function EmilyChatPage({
-  createMode = false,
-  primeInput,
-}: {
-  createMode?: boolean;
-  primeInput?: string;
-} = {}) {
+// General "talk to Emily" full-page surface (the /chat route). Worker creation
+// is NOT here anymore — it lands on the home dock-fullscreen Emily primed for
+// create (?create=1); see app/chat/page.tsx + the EmilyDock create handling.
+export function EmilyChatPage() {
   const assistantName = useAssistantName();
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
       <div className="flex h-14 shrink-0 items-center gap-2 [border-bottom:var(--bd-div)] px-4">
         <EmilyAvatar size="sm" />
         <div className="flex-1 min-w-0 flex items-center gap-1.5">
-          <p className="text-sm font-semibold leading-none">
-            {createMode ? "Hire a worker" : assistantName}
-          </p>
-          {!createMode && (
-            <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
-          )}
+          <p className="text-sm font-semibold leading-none">{assistantName}</p>
+          <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
         </div>
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
-        <EmilyChatCore fullPage createMode={createMode} primeInput={primeInput} />
+        <EmilyChatCore fullPage />
       </div>
     </div>
   );

@@ -9,23 +9,14 @@ import { NextRequest } from "next/server";
 const APP_ORIGIN = "https://workers.floom.dev";
 const API_BASE = "https://workers-api.floom.dev";
 
-vi.mock("@/lib/verify-session", () => ({
-  resolveSessionPayload: vi.fn(async () => ({
-    payload: { access_token: "access-token" },
-    setCookieHeaders: [],
-  })),
-}));
-
 async function proxyWithLocation(location: string) {
-  process.env.WORKEROS_API_BASE = API_BASE;
+  process.env.FLOOM_API_BASE = API_BASE;
   vi.spyOn(globalThis, "fetch").mockResolvedValue(
     new Response(null, { status: 302, headers: { location } }),
   );
   const { GET } = await import("@/app/api/proxy/[...path]/route");
   const res = await GET(
-    new NextRequest(`${APP_ORIGIN}/api/proxy/connections/callback`, {
-      headers: { cookie: "workeros_cloud_session=session-token" },
-    }),
+    new NextRequest(`${APP_ORIGIN}/api/proxy/connections/callback`),
     { params: Promise.resolve({ path: ["connections", "callback"] }) },
   );
   return res;
@@ -34,7 +25,7 @@ async function proxyWithLocation(location: string) {
 describe("#1044 proxy Location header validation", () => {
   afterEach(() => {
     vi.restoreAllMocks();
-    delete process.env.WORKEROS_API_BASE;
+    delete process.env.FLOOM_API_BASE;
   });
 
   it("preserves same-app-origin absolute redirects", async () => {

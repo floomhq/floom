@@ -9,15 +9,13 @@ import { McpToolCatalog } from "@/components/McpToolCatalog";
 import { getPublicApiBase, getPublicApiHost } from "@/lib/api-base";
 import { getActiveWorkspaceId } from "@/lib/api";
 import { buildMcpJson } from "@/lib/mcp-config";
+import {
+  clearStoredSecret,
+  generateOssToken,
+  readStoredSecret,
+} from "@/lib/oss-token";
 
-// #1185: use sessionStorage (cleared when the tab closes) instead of
-// localStorage so the OSS API secret is not persisted across sessions where it
-// could be read by XSS or malicious browser extensions. Legacy localStorage
-// keys are purged on mount so existing stored secrets don't linger.
-const SECRET_SESSION_KEY = "workeros_api_secret";
-const SECRET_LEGACY_LS_KEYS = ["floom_secret", "FLOOM_SECRET", "workeros_api_secret"];
 const API_BASE = getPublicApiBase();
-const PROXY_BASE = "/api/proxy";
 
 type McpTarget = "claude" | "codex" | "cursor" | "vscode" | "windsurf" | "generic";
 
@@ -29,20 +27,6 @@ const MCP_TARGETS: { value: McpTarget; label: string; hint: string }[] = [
   { value: "windsurf", label: "Windsurf", hint: "~/.codeium/windsurf/mcp_config.json" },
   { value: "generic",  label: "Generic",  hint: "prints snippet; paste manually" },
 ];
-
-function readStoredSecret(): string {
-  if (typeof window === "undefined") return "";
-  // Migrate: purge any legacy localStorage values and re-store in sessionStorage.
-  for (const key of SECRET_LEGACY_LS_KEYS) {
-    const ls = window.localStorage.getItem(key);
-    if (ls && ls.trim()) {
-      window.sessionStorage.setItem(SECRET_SESSION_KEY, ls.trim());
-      window.localStorage.removeItem(key);
-      return ls.trim();
-    }
-  }
-  return window.sessionStorage.getItem(SECRET_SESSION_KEY)?.trim() ?? "";
-}
 
 function maskSecret(secret: string): string {
   // the operator 2026-05-29: show a full-length-style masked key like any other app
@@ -183,54 +167,14 @@ export function CliCommandPanel() {
     setActiveWorkspace(getActiveWorkspaceId());
   }, []);
 
-  function storeSecret(value: string) {
-    try {
-      // #1185: sessionStorage only — secret is not persisted across sessions.
-      window.sessionStorage.setItem(SECRET_SESSION_KEY, value);
-    } catch {}
-    setStoredSecret(value);
-  }
-
   async function generateToken() {
     setGenerating(true);
     setErrorText("");
     try {
-      const startedResponse = await fetch(`${PROXY_BASE}/cli-auth/devices`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ client_name: "workers-settings", scopes: [] }),
-      });
-      const started = (await startedResponse.json().catch(() => ({}))) as {
-        device_code?: string;
-        user_code?: string;
-        detail?: string;
-      };
-      if (!startedResponse.ok || !started.device_code || !started.user_code) {
-        throw new Error(started.detail || "Could not start token generation");
-      }
-
-      const approvedResponse = await fetch(`${PROXY_BASE}/cli-auth/approve`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ user_code: started.user_code }),
-      });
-      const approved = (await approvedResponse.json().catch(() => ({}))) as { detail?: string };
-      if (!approvedResponse.ok) {
-        throw new Error(approved.detail || "Could not approve token generation");
-      }
-
-      const polledResponse = await fetch(
-        `${PROXY_BASE}/cli-auth/poll/${encodeURIComponent(started.device_code)}`
-      );
-      const polled = (await polledResponse.json().catch(() => ({}))) as {
-        api_secret?: string;
-        detail?: string;
-      };
-      if (!polledResponse.ok || !polled.api_secret) {
-        throw new Error(polled.detail || "Generated token was not returned");
-      }
-
-      storeSecret(polled.api_secret);
+      // Shared device-auth flow (lib/oss-token) — same path the MCP-install
+      // panel uses, so a token minted in either place is the same credential.
+      const token = await generateOssToken("workers-settings");
+      setStoredSecret(token);
       setRevealed(true);
     } catch (error) {
       setErrorText(error instanceof Error ? error.message : "Could not generate token");
@@ -240,11 +184,7 @@ export function CliCommandPanel() {
   }
 
   function clearSecret() {
-    try {
-      window.sessionStorage.removeItem(SECRET_SESSION_KEY);
-      // Also clear any remaining legacy localStorage keys.
-      for (const key of SECRET_LEGACY_LS_KEYS) window.localStorage.removeItem(key);
-    } catch {}
+    clearStoredSecret();
     setStoredSecret("");
     setRevealed(false);
   }

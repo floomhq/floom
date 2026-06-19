@@ -5,6 +5,7 @@ import Link from "next/link";
 import { useRouter, useSearchParams } from "next/navigation";
 import { ArrowLeft, CheckCircle2, ExternalLink, Loader2, ShieldCheck } from "lucide-react";
 import { api } from "@/lib/api";
+import { sanitizeRedirect } from "@/lib/redirects";
 import { Button, buttonVariants } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { ProviderLogos } from "@/components/connections/ProviderLogos";
@@ -247,8 +248,7 @@ function RedirectInner() {
 }
 
 function normalizeReturnTo(value: string | null): string {
-  if (value && value.startsWith("/") && !value.startsWith("//")) return value;
-  return "/connections";
+  return sanitizeRedirect(value, "/connections");
 }
 
 function formatProviderName(slug: string): string {

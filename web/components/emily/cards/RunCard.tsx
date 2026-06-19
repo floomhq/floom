@@ -4,7 +4,6 @@ import { CheckCircle2, Loader2, XCircle, FileText, ExternalLink, Clock } from "l
 import { StatusPill } from "@/components/collection/StatusPill";
 import { BrandLogo } from "@/components/connections/BrandLogo";
 import { resolveProviderSlug } from "@/lib/provider-logo";
-import { sanitizeHref } from "@/lib/safe-url";
 import type { RunCard as RunCardType } from "@/lib/emily-chat-types";
 
 export function RunCard({ card }: { card: RunCardType }) {
@@ -53,7 +52,7 @@ export function RunCard({ card }: { card: RunCardType }) {
               </span>
               {actions?.find((a) => a.id === "download") && (
                 <a
-                  href={sanitizeHref(actions.find((a) => a.id === "download")!.href)}
+                  href={actions.find((a) => a.id === "download")!.href}
                   download
                   className="inline-flex h-5 w-5 shrink-0 ml-auto items-center justify-center rounded text-muted-foreground hover:text-foreground hover:bg-muted transition-colors"
                 >
@@ -70,7 +69,7 @@ export function RunCard({ card }: { card: RunCardType }) {
           {actions.filter((a) => a.id !== "download").map((action) => (
             <a
               key={action.id}
-              href={sanitizeHref(action.href)}
+              href={action.href}
               className="inline-flex h-7 items-center rounded-md [border:var(--bd-card)] bg-background px-2.5 text-xs font-normal text-foreground hover:bg-accent transition-colors"
             >
               {action.label ?? action.id}

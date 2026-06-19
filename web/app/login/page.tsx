@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { LoginEmailPanel } from "@/components/LoginEmailPanel";
-import { WorkerAvatar } from "@/components/WorkerAvatar";
+import { cn } from "@/lib/utils";
 import { safeAppNext } from "@/lib/safe-next";
 
 export const metadata = {
@@ -314,6 +314,47 @@ function FloomMark({ size = 20 }: { size?: number }) {
         fill="currentColor"
       />
     </svg>
+  );
+}
+
+// Inlined cloud-overlay avatar primitive. The engine's redesign branch dropped
+// the shared @/components/WorkerAvatar (moved to DiceBear-based marks), but this
+// pre-auth activity-proof panel wants the original muted-squircle + initials
+// treatment. Local copy of the old engine WorkerAvatar (single mono register,
+// rounded-[--radius-button] bg-muted) so the overlay has no dependency on the
+// removed engine component.
+function workerInitials(name: string): string {
+  const cleaned = name.replace(/[_-]+/g, " ").trim();
+  const parts = cleaned.split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  const first = parts[0]?.[0] ?? "";
+  const second = parts.length > 1 ? parts[parts.length - 1][0] : (parts[0]?.[1] ?? "");
+  return (first + second).toUpperCase();
+}
+
+function WorkerAvatar({
+  seed,
+  name,
+  className,
+  size = "size-9",
+}: {
+  seed?: string;
+  name?: string;
+  className?: string;
+  size?: string;
+}) {
+  const display = name || seed || "?";
+  return (
+    <div
+      className={cn(
+        "shrink-0 rounded-[var(--radius-button)] grid place-items-center font-medium tracking-tight bg-muted text-foreground",
+        size,
+        className,
+      )}
+      aria-label={`${display} avatar`}
+    >
+      <span className="text-[11px] leading-none">{workerInitials(display)}</span>
+    </div>
   );
 }
 

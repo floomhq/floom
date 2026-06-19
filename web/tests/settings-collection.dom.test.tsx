@@ -133,7 +133,7 @@ describe("Settings Collection (Phase 3)", () => {
 
     expect(await screen.findByRole("button", { name: "Grid view", pressed: true })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "List view" }));
-    await waitFor(() => expect(screen.getByText("System")).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByText("General")).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByText("Workspace defaults")).toBeInTheDocument();
     expect(screen.getByText("Slack, email & WhatsApp")).toBeInTheDocument();
     expect(screen.getByText("Configure Emily")).toBeInTheDocument();

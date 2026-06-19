@@ -2,15 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { CliAuthContent } from "@/app/cli-auth/page";
 
-const pushMock = vi.fn();
-
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: pushMock }),
-}));
-
 describe("CLI auth seams", () => {
   beforeEach(() => {
-    pushMock.mockReset();
     window.history.pushState({}, "", "/cli-auth?code=ABCD-2345");
     vi.stubGlobal(
       "fetch",
@@ -29,9 +22,6 @@ describe("CLI auth seams", () => {
     render(<CliAuthContent />);
 
     expect(await screen.findByText("Client: floom-cli")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Re-type the code from your terminal to confirm"), {
-      target: { value: "ABCD-2345" },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
 
     await waitFor(() => {
@@ -47,9 +37,6 @@ describe("CLI auth seams", () => {
     render(<CliAuthContent endpointBase="/app/api/cli-auth/" clientName="workeros-cli" />);
 
     expect(await screen.findByText("Client: workeros-cli")).toBeInTheDocument();
-    fireEvent.change(screen.getByLabelText("Re-type the code from your terminal to confirm"), {
-      target: { value: "ABCD-2345" },
-    });
     fireEvent.click(screen.getByRole("button", { name: "Approve" }));
 
     await waitFor(() => {

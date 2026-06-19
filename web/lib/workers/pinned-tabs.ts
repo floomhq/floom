@@ -12,6 +12,7 @@
  * Order in the stored array is ignored; the tab bar always renders advanced
  * tabs in their canonical ADVANCED_DETAIL_TABS order.
  */
+import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
 import { WORKER_DETAIL_TABS, type WorkerDetailTab } from "@/lib/workers/tabs";
 
 const LS_KEY_PINNED_TABS = "floom.workerDetail.pinnedTabs";
@@ -33,9 +34,8 @@ function isAdvancedTab(value: string): value is WorkerDetailTab {
 }
 
 export function getPinnedTabs(): Set<WorkerDetailTab> {
-  if (typeof window === "undefined") return new Set();
   try {
-    const raw = localStorage.getItem(LS_KEY_PINNED_TABS);
+    const raw = safeStorageGet("local", LS_KEY_PINNED_TABS);
     const parsed = raw ? (JSON.parse(raw) as unknown) : [];
     if (!Array.isArray(parsed)) return new Set();
     // Filter to known advanced tabs so a stale/renamed key never poisons the bar.
@@ -46,12 +46,7 @@ export function getPinnedTabs(): Set<WorkerDetailTab> {
 }
 
 export function savePinnedTabs(pinned: Set<WorkerDetailTab>): void {
-  if (typeof window === "undefined") return;
-  try {
-    // Persist in canonical order for a deterministic stored value.
-    const ordered = ADVANCED_DETAIL_TABS.filter((t) => pinned.has(t));
-    localStorage.setItem(LS_KEY_PINNED_TABS, JSON.stringify(ordered));
-  } catch {
-    /* ignore quota / privacy-mode errors */
-  }
+  // Persist in canonical order for a deterministic stored value.
+  const ordered = ADVANCED_DETAIL_TABS.filter((t) => pinned.has(t));
+  safeStorageSet("local", LS_KEY_PINNED_TABS, JSON.stringify(ordered));
 }

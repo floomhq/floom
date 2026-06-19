@@ -89,6 +89,7 @@ import {
   orderedSourceFiles,
 } from "@/lib/workers/derive";
 import { getFavorites, saveFavorites } from "@/lib/workers/favorites";
+import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
 import {
   ADVANCED_DETAIL_TABS,
   BASE_DETAIL_TABS,
@@ -988,9 +989,8 @@ function inputTemplatesKey(workerId: string): string {
   return `floom.workerDetail.inputTemplates.${workerId}`;
 }
 function loadInputTemplates(workerId: string): InputTemplate[] {
-  if (typeof window === "undefined") return [];
   try {
-    const raw = localStorage.getItem(inputTemplatesKey(workerId));
+    const raw = safeStorageGet("local", inputTemplatesKey(workerId));
     const parsed = raw ? (JSON.parse(raw) as unknown) : [];
     if (!Array.isArray(parsed)) return [];
     return parsed.filter(
@@ -1002,12 +1002,7 @@ function loadInputTemplates(workerId: string): InputTemplate[] {
   }
 }
 function saveInputTemplates(workerId: string, templates: InputTemplate[]): void {
-  if (typeof window === "undefined") return;
-  try {
-    localStorage.setItem(inputTemplatesKey(workerId), JSON.stringify(templates));
-  } catch {
-    /* ignore quota / privacy-mode */
-  }
+  safeStorageSet("local", inputTemplatesKey(workerId), JSON.stringify(templates));
 }
 
 // Operations > Inputs: a segmented named-template picker above the REAL
@@ -2049,7 +2044,7 @@ export default function WorkersCollection({
       };
     },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
-    add: { label: "Add", onSelect: () => router.push("/chat?mode=create") }, // #902: create = Emily flow
+    add: { label: "Add", onSelect: () => router.push("/?create=1") }, // #902/2026-06-19: create = the home fullscreen Emily, primed
     states: {
       // #1364 — improved help text + action CTA linking to /workers/new
       empty: {
@@ -2057,7 +2052,7 @@ export default function WorkersCollection({
         help: "Workers are AI agents that run on a schedule, webhook, or on demand, powered by your connected apps.",
         action: (
           <WorkersEmptyPrompt
-            onSubmit={(prompt) => router.push(`/chat?mode=create&q=${encodeURIComponent(prompt)}`)}
+            onSubmit={(prompt) => router.push(`/?create=1&prime=${encodeURIComponent(prompt)}`)}
           />
         ),
       },

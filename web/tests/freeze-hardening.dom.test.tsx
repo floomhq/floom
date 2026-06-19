@@ -76,8 +76,8 @@ describe("code-freeze hardening fixes", () => {
   });
 
   it("exposes secret creator metadata and gates row mutation actions", () => {
-    expect(source("../engine/apps/api/models.py")).toContain("user_id: Optional[str] = None");
-    expect(source("../engine/apps/api/routers/secrets.py")).toContain('user_id=db_row.get("user_id")');
+    expect(source("../api/models.py")).toContain("user_id: Optional[str] = None");
+    expect(source("../api/routers/secrets.py")).toContain('user_id=db_row.get("user_id")');
     const src = source("app/connections/secrets/page.tsx");
     expect(src).toContain("canMutateSecretItem");
     expect(src).toContain("{canMutate && (");

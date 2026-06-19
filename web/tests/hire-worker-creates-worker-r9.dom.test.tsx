@@ -48,7 +48,7 @@ vi.mock("@/lib/useChatStream", async (importOriginal) => {
   };
 });
 
-import { EmilyChatPage } from "@/components/emily/EmilyChat";
+import { EmilyChatCore, EmilyChatPage } from "@/components/emily/EmilyChat";
 import { buildCreateWorkerMessage } from "@/components/emily/EmilyChat";
 import { WORKER_AUTHORING_INTENT_RE } from "@/lib/emily-create-intent";
 
@@ -58,7 +58,7 @@ describe("Round-09 #2 — Hire worker drafts a worker (create intent)", () => {
   it("create-mode submit sends a worker-DRAFT directive, not the bare prompt", async () => {
     sendMessage.mockClear();
     const user = userEvent.setup();
-    render(<EmilyChatPage createMode />);
+    render(<EmilyChatCore fullPage createMode />);
 
     const composer = screen.getByPlaceholderText("Create me: a worker that…");
     await user.click(composer);

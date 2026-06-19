@@ -4,6 +4,8 @@
 // boot splash gate can share the localStorage key and the warm/cold decision
 // without circular imports.
 
+import { safeStorageGet } from "@/lib/safe-storage";
+
 export const PERSIST_STORAGE_KEY = "floom-query-cache";
 
 // Bump BUSTER on any deploy that alters a persisted query's data shape so the
@@ -35,9 +37,8 @@ export const PERSISTABLE_KEY_PREFIXES = [
 // splash until the first critical query resolves). Read once, synchronously,
 // before paint — never inside render-on-every-keystroke paths.
 export function hasPersistedCache(): boolean {
-  if (typeof window === "undefined") return false;
   try {
-    const raw = window.localStorage.getItem(PERSIST_STORAGE_KEY);
+    const raw = safeStorageGet("local", PERSIST_STORAGE_KEY);
     if (!raw) return false;
     const parsed = JSON.parse(raw) as {
       buster?: string;

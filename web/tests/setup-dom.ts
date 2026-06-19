@@ -2,7 +2,7 @@ import "@testing-library/jest-dom/vitest";
 import { cleanup } from "@testing-library/react";
 import { afterEach, beforeEach } from "vitest";
 
-function createMemoryStorage(): Storage {
+function makeMemoryStorage(): Storage {
   const store = new Map<string, string>();
   return {
     get length() {
@@ -26,31 +26,30 @@ function createMemoryStorage(): Storage {
   };
 }
 
-function ensureStorage(name: "localStorage" | "sessionStorage") {
-  const storage = window[name];
-  if (
-    storage &&
-    typeof storage.getItem === "function" &&
-    typeof storage.setItem === "function" &&
-    typeof storage.removeItem === "function" &&
-    typeof storage.clear === "function"
-  ) {
-    return;
+function ensureUsableLocalStorage() {
+  try {
+    const storage = window.localStorage;
+    if (
+      typeof storage?.getItem === "function" &&
+      typeof storage.setItem === "function" &&
+      typeof storage.removeItem === "function" &&
+      typeof storage.clear === "function"
+    ) {
+      return;
+    }
+  } catch {
+    // Replace unavailable storage below.
   }
-  Object.defineProperty(window, name, {
+
+  Object.defineProperty(window, "localStorage", {
     configurable: true,
-    value: createMemoryStorage(),
+    value: makeMemoryStorage(),
   });
 }
 
-beforeEach(() => {
-  ensureStorage("localStorage");
-  ensureStorage("sessionStorage");
-});
-
 // Unmount React trees between tests (jsdom project runs with globals).
+beforeEach(() => ensureUsableLocalStorage());
 afterEach(() => {
   cleanup();
-  ensureStorage("localStorage");
-  ensureStorage("sessionStorage");
+  ensureUsableLocalStorage();
 });
