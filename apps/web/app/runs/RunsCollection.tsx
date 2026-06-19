@@ -556,6 +556,30 @@ export default function RunsCollection({ initialRuns }: { initialRuns: RunSummar
     items: sorted,
     loading,
     idOf: (r) => r.id,
+    // #1558: a run deep-linked via ?sel that isn't on the current page (Runs is
+    // paginated, PAGE_SIZE=50) is hydrated on demand instead of false-toasting.
+    // RunDetail is a superset of RunSummary, so we project it down for the list.
+    resolveMissing: async (id) => {
+      try {
+        const d = await api.runs.get(id);
+        detailCache.set(d.id, d); // warm the detail-pane cache too
+        const summary: RunSummary = {
+          id: d.id,
+          worker_id: d.worker_id,
+          worker_name: d.worker_name,
+          status: d.status,
+          trigger_source: d.trigger_source,
+          created_at: d.created_at,
+          started_at: d.started_at,
+          completed_at: d.completed_at,
+          duration_ms: d.duration_ms,
+          error: d.error,
+        };
+        return summary;
+      } catch {
+        return null; // genuinely missing/inaccessible → real not-found toast
+      }
+    },
     view: { default: "list", grid: true },
     searchOf: (r) => `${r.worker_name ?? r.worker_id} ${r.id} ${r.trigger_source}`,
     tagsOf: (r) =>
