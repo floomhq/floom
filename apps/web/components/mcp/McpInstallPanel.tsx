@@ -17,7 +17,8 @@
 // token + generate flow are the shared oss-token helpers (same path the
 // CliCommandPanel uses), so a token minted anywhere is reused everywhere.
 import { useCallback, useEffect, useMemo, useState } from "react";
-import { Check, Copy, RefreshCw } from "lucide-react";
+import Link from "next/link";
+import { Check, Copy, RefreshCw, ArrowRight } from "lucide-react";
 
 import { buildMcpJson } from "@/lib/mcp-config";
 import { getActiveWorkspaceId } from "@/lib/api";
@@ -124,6 +125,17 @@ export function McpInstallPanel() {
         <code className="font-mono text-[11.5px]">{getPublicApiHost()}</code>;
         rotate it anytime in Settings → Connect &amp; automate.
       </p>
+
+      {/* Round-09 batch2: with the in-page Connections tab row gone, the full
+          MCP page (register MCP servers your workers call) is reached from here
+          — the popup is the canonical MCP entry, no duplicate sidebar nav. */}
+      <Link
+        href="/connections/mcp"
+        className="inline-flex items-center gap-1 text-[12px] font-medium text-[var(--ink-soft)] transition-colors hover:text-ink"
+      >
+        Manage MCP servers
+        <ArrowRight className="size-3" />
+      </Link>
     </div>
   );
 }

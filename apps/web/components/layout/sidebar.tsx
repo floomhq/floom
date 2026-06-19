@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound, Grid2x2 } from "lucide-react";
+import { Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound, Grid2x2, KeyRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -13,7 +13,6 @@ import { useApprovalsCount } from "@/lib/useApprovalsSync";
 import { useQueryClient } from "@tanstack/react-query";
 import { prefetchRouteData, prefetchIdleRoutes } from "@/lib/query/prefetch";
 import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
-import { WorkspaceMonogram } from "@/components/layout/WorkspaceMonogram";
 import { AlertsBell } from "@/components/overview/AlertsBell";
 import { api } from "@/lib/api";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
@@ -51,25 +50,43 @@ export function FloomMark({ size = 28 }: { size?: number }) {
   );
 }
 
-// #1306 / G5: user profile avatar fallback when /me returns no OAuth photo.
-// Flat squircle with plain initials: ink text on subtle bg, no gradient,
-// no DiceBear network fetch. Matches design-system: squircle (radius-button),
-// flat, no border, NO avatars/gradients.
-function UserInitialsAvatar({ seed, size }: { seed: string; size: number }) {
-  // Always derive a single visible LETTER/DIGIT initial — never blank, never a
-  // stray symbol. Strip non-alphanumerics first so a seed like "@acme" still
-  // yields "A", and fall back to "U" when there is nothing usable. (P0-3:
-  // the account mark must ALWAYS render a flat squircle monogram.)
-  const initial =
-    (seed || "").replace(/[^\p{L}\p{N}]/gu, "").trim()[0]?.toUpperCase() ?? "U";
+// #1305: the app is WHITE-LABELED — the workspace IS the brand. The mark must
+// be the WORKSPACE logo/avatar, never the Floom play-triangle.
+// DiceBear `shapes` avatar deterministically seeded by workspace name —
+// geometric, non-cartoonish, fits a serious B2B product.
+// Container uses var(--radius-button) (squircle), NOT a circle.
+function WorkspaceDiceBearAvatar({ name, size }: { name: string; size: number }) {
+  const seed = encodeURIComponent(resolveWorkspaceName(name) || name || "workspace");
+  const src = `https://api.dicebear.com/9.x/shapes/svg?seed=${seed}&backgroundColor=b6e3f4,c0aede,d1d4f9,ffd5dc,ffdfbf&backgroundType=gradientLinear&radius=0`;
   return (
-    <span
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt=""
       aria-hidden="true"
-      className="shrink-0 inline-flex items-center justify-center rounded-[var(--radius-button)] bg-[var(--bg-2)] text-[var(--ink-soft)] font-medium select-none"
-      style={{ width: size, height: size, fontSize: Math.round(size * 0.45) }}
-    >
-      {initial}
-    </span>
+      width={size}
+      height={size}
+      className="shrink-0 rounded-[var(--radius-button)] object-cover"
+      style={{ width: size, height: size }}
+    />
+  );
+}
+
+// #1306: user profile avatar fallback when /me returns no OAuth photo.
+// DiceBear `glass` style deterministically seeded by the user's email/name:
+// a calm geometric mark (no cartoon faces), consistent with the workspace
+// mark's squircle, flat, no-border treatment.
+function UserDiceBearAvatar({ seed, size }: { seed: string; size: number }) {
+  const safeSeed = encodeURIComponent(seed || "user");
+  const src = `https://api.dicebear.com/9.x/glass/svg?seed=${safeSeed}&radius=0`;
+  return (
+    // eslint-disable-next-line @next/next/no-img-element
+    <img
+      src={src}
+      alt="Profile avatar"
+      className="shrink-0 rounded-[var(--radius-button)] border-0 object-cover"
+      style={{ width: size, height: size }}
+    />
   );
 }
 
@@ -126,9 +143,8 @@ export function WorkspaceMark({
       />
     );
   }
-  // G3/G4: no avatars/DiceBear. Flat squircle monogram seeded by workspace
-  // name, consistent with WorkspaceSwitcher mark and UserInitialsAvatar.
-  return <WorkspaceMonogram name={workspaceName} size={size} />;
+  // DiceBear shapes avatar — consistent with the WorkspaceSwitcher mark.
+  return <WorkspaceDiceBearAvatar name={workspaceName} size={size} />;
 }
 
 /** Mobile top-bar workspace name (white-label, replaces the "Floom" wordmark). */
@@ -188,30 +204,53 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
       {nav.map((item) => {
         const active = pathname === item.href || pathname.startsWith(item.href + "/");
         const showBadge = item.badge && pendingCount > 0;
+        // Round-09 batch2: Secrets is a sidebar SUB-ITEM under Integrations
+        // (replaces the in-page tab row). Indented, lighter, same nav language.
+        const isIntegrations = item.href === "/connections";
+        const secretsActive = pathname.startsWith("/connections/secrets") || pathname.startsWith("/secrets");
         return (
-          <Link
-            key={item.href}
-            href={item.href}
-            prefetch
-            onMouseEnter={() => warm(item.href)}
-            onFocus={() => warm(item.href)}
-            onClick={onNavigate}
-            title={item.hint}
-            className={cn(
-              "flex h-9 items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
-              active
-                ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)] [&_svg]:text-[var(--active-nav-text)] [&_svg]:opacity-100"
-                : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
+          <div key={item.href}>
+            <Link
+              href={item.href}
+              prefetch
+              onMouseEnter={() => warm(item.href)}
+              onFocus={() => warm(item.href)}
+              onClick={onNavigate}
+              title={item.hint}
+              className={cn(
+                "flex h-9 items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
+                active
+                  ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)] [&_svg]:text-[var(--active-nav-text)] [&_svg]:opacity-100"
+                  : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
+              )}
+            >
+              <item.icon className="w-4 h-4" />
+              {item.label}
+              {showBadge && (
+                <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] px-1 text-[10px] font-semibold leading-none text-[var(--primary-text)]">
+                  {pendingCount}
+                </span>
+              )}
+            </Link>
+            {isIntegrations && (
+              <Link
+                href="/connections/secrets"
+                prefetch
+                onMouseEnter={() => warm("/connections/secrets")}
+                onFocus={() => warm("/connections/secrets")}
+                onClick={onNavigate}
+                className={cn(
+                  "ml-7 flex h-8 items-center gap-2 rounded-[var(--radius-button)] px-2.5 text-[13px] font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
+                  secretsActive
+                    ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)] [&_svg]:text-[var(--active-nav-text)] [&_svg]:opacity-100"
+                    : "text-[var(--ink-mute)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
+                )}
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                Secrets
+              </Link>
             )}
-          >
-            <item.icon className="w-4 h-4" />
-            {item.label}
-            {showBadge && (
-              <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] px-1 text-[10px] font-semibold leading-none text-[var(--primary-text)]">
-                {pendingCount}
-              </span>
-            )}
-          </Link>
+          </div>
         );
       })}
     </nav>
@@ -653,7 +692,7 @@ export function UserProfileFooter({
             // DiceBear avatar deterministically seeded by the user's
             // email/name, NOT bare initials. Squircle container, no border,
             // matching the workspace mark approach.
-            <UserInitialsAvatar seed={primary} size={28} />
+            <UserDiceBearAvatar seed={primary} size={28} />
           )}
           <div className="min-w-0 leading-tight text-left">
             <p className="text-xs font-medium text-foreground truncate">{primary}</p>

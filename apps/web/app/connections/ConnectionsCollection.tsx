@@ -11,7 +11,6 @@ import type { CollectionConfig, TagFamilyKey } from "@/lib/collection/types";
 import { Collection } from "@/components/collection";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import { BrandLogo } from "@/components/connections/BrandLogo";
-import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { RunStatusBadge } from "@/components/RunStatus";
 import { StatusPill } from "@/components/collection/StatusPill";
 import {
@@ -813,17 +812,15 @@ export default function ConnectionsCollection({
   const config: CollectionConfig<UnifiedConn> = {
     title: "Integrations",
     subtitle: "Apps, MCP servers and secrets your workers can use.",
-    headerSlot: <ConnectionsTabs />,
     items,
     loading,
     error,
     idOf: (i) => i.id,
     searchOf: (i) => `${i.name} ${i.account} ${TYPE_LABEL[i.kind]}`,
-    // The TYPE dimension (connection / mcp / secret) is already the job of the
-    // ConnectionsTabs surface-nav (Connected / Browse apps / MCP / Secrets), so
+    // The TYPE dimension (connection / mcp / secret) is surfaced by the IA
+    // itself — Browse apps (button) + the Secrets / MCP sidebar entries — so
     // duplicating it as filter chips here was redundant (P0-2, Federico
-    // 2026-06-19). Tabs answer "which surface"; the TagBar answers "which status
-    // within it". Only the STATUS chips remain, the one dimension the tabs do
+    // 2026-06-19). Only the STATUS chips remain, the one dimension the IA does
     // not cover. Type stays in searchOf so a search like "mcp" still matches.
     tagsOf: (i) =>
       ({ status: [i.statusKey] }) as Partial<Record<TagFamilyKey, string[]>>,
@@ -1186,6 +1183,14 @@ export default function ConnectionsCollection({
         ),
       },
     },
+    // Round-09 batch2: the in-page tab row is gone; "Browse apps" is now the
+    // primary discovery CTA on the Integrations page itself (the catalogue lives
+    // at /connections/browse). Sits left of the +Add button on the control bar.
+    toolbarActions: (
+      <Link href="/connections/browse" className="c-addbtn" style={pillBtn}>
+        Browse apps
+      </Link>
+    ),
     states: {
       empty: {
         title: "No integrations yet",
