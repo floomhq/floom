@@ -11,6 +11,7 @@ import { companyLogoUrl, prefillWorkspaceName } from "@/lib/workspace/company-lo
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import { WorkspaceMonogram } from "@/components/layout/WorkspaceMonogram";
 import { getWorkspaceActionCopy, isCloudMode } from "@/lib/workspace/action-copy";
+import { computeIsAdmin } from "@/lib/use-is-admin";
 import type { LocalWorkspace } from "@/lib/types";
 import { Button } from "@/components/ui/button";
 import {
@@ -63,15 +64,18 @@ export function WorkspaceSwitcher() {
   const [importing, setImporting] = useState(false);
   const [duplicating, setDuplicating] = useState(false);
   const [sharingLink, setSharingLink] = useState(false);
+  const [canExportWorkspace, setCanExportWorkspace] = useState(false);
   const importInputRef = useRef<HTMLInputElement>(null);
   // #1005: cloud speaks invite copy, OSS speaks template-zip copy.
   const copy = getWorkspaceActionCopy(isCloudMode());
 
   useEffect(() => {
     let cancelled = false;
-    api.workspace
-      .list()
-      .then((data) => {
+    Promise.all([
+      api.workspace.list(),
+      api.me().catch(() => null),
+    ])
+      .then(([data, me]) => {
         if (cancelled) return;
         const browserActiveId = getActiveWorkspaceId();
         const activeId =
@@ -82,6 +86,7 @@ export function WorkspaceSwitcher() {
           workspaces: data.workspaces ?? [],
           activeId,
         });
+        setCanExportWorkspace(computeIsAdmin(me));
       })
       .catch((err: Error) => {
         if (cancelled) return;
@@ -349,20 +354,22 @@ export function WorkspaceSwitcher() {
                   instance with agents + instructions, connections & secrets
                   NOT copied (intentional: they must be reconnected). */}
               <DropdownMenuSubContent className="w-64 border-0 p-1 ![box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.10)] ring-0 outline-none dark:![box-shadow:0_16px_36px_hsl(0_0%_0%_/_0.50)]">
-                <DropdownMenuItem
-                  closeOnClick={false}
-                  disabled={exporting}
-                  onClick={() => void handleExport()}
-                  className="flex flex-col items-start gap-0 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
-                >
-                  <div className="flex items-center gap-2">
-                    <Download className="size-4 shrink-0" />
-                    <span>{exporting ? copy.exporting : copy.exportLabel}</span>
-                  </div>
-                  <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
-                    {copy.exportHelp}
-                  </span>
-                </DropdownMenuItem>
+                {canExportWorkspace && (
+                  <DropdownMenuItem
+                    closeOnClick={false}
+                    disabled={exporting}
+                    onClick={() => void handleExport()}
+                    className="flex flex-col items-start gap-0 text-[var(--ink-soft)] focus:bg-[var(--active-nav-bg)] focus:text-ink"
+                  >
+                    <div className="flex items-center gap-2">
+                      <Download className="size-4 shrink-0" />
+                      <span>{exporting ? copy.exporting : copy.exportLabel}</span>
+                    </div>
+                    <span className="ml-6 text-[10px] text-[var(--ink-mute)] leading-tight">
+                      {copy.exportHelp}
+                    </span>
+                  </DropdownMenuItem>
+                )}
                 <DropdownMenuItem
                   closeOnClick={false}
                   disabled={importing}

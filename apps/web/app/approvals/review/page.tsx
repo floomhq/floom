@@ -59,9 +59,13 @@ function stringValue(value: unknown): string | null {
 function safePreviewHref(value: unknown): string | null {
   const href = stringValue(value);
   if (!href) return null;
+  if (href.startsWith("/") && !href.startsWith("//")) return href;
+  if (typeof window === "undefined") return null;
   try {
-    const parsed = new URL(href, "http://localhost");
-    if (parsed.protocol === "http:" || parsed.protocol === "https:") return href;
+    const parsed = new URL(href, window.location.origin);
+    if (parsed.origin === window.location.origin) {
+      return `${parsed.pathname}${parsed.search}${parsed.hash}`;
+    }
   } catch {
     return null;
   }

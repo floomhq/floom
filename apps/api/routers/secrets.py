@@ -257,6 +257,7 @@ def list_secrets(
             SecretItem(
                 name=name,
                 status=status,
+                user_id=db_row.get("user_id"),
                 last_used_at=db_row.get("last_used_at"),
                 last_checked_at=db_row.get("last_checked_at"),
                 last_check_status=db_row.get("last_check_status"),

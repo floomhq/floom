@@ -40,6 +40,24 @@ export interface ChatStreamState {
   loadConversation: (id: string) => void;
 }
 
+const GENERIC_CHAT_ERROR = "Emily could not complete that request.";
+
+function looksInternalErrorMessage(message: string): boolean {
+  const trimmed = message.trim();
+  return (
+    trimmed.startsWith("{") ||
+    trimmed.startsWith("[") ||
+    /traceback|pydantic|validationerror|stack trace|sqlite|supabase|workspace_id|user_id/i.test(trimmed)
+  );
+}
+
+export function userFacingChatErrorMessage(value: unknown): string {
+  if (typeof value !== "string") return GENERIC_CHAT_ERROR;
+  const trimmed = value.trim();
+  if (!trimmed || looksInternalErrorMessage(trimmed)) return GENERIC_CHAT_ERROR;
+  return trimmed;
+}
+
 /**
  * @param options.ephemeral When true the conversation is NOT persisted to the
  *   shared localStorage key and is NOT rehydrated on mount. Used by the
@@ -315,15 +333,15 @@ export function useChatStream(options?: { ephemeral?: boolean }): ChatStreamStat
           });
 
           if (!resp.ok || !resp.body) {
-            let errText = "";
+            let errText: unknown = "";
             try {
               const j = await resp.json();
               errText =
-                typeof j?.detail === "string" ? j.detail : JSON.stringify(j);
+                typeof j?.detail === "string" ? j.detail : j;
             } catch {
               errText = resp.statusText || `HTTP ${resp.status}`;
             }
-            throw new Error(errText || `HTTP ${resp.status}`);
+            throw new Error(userFacingChatErrorMessage(errText));
           }
 
           const reader = resp.body.getReader();
@@ -675,7 +693,7 @@ function sseErrorMessage(event: Extract<ChatSSEEvent, { type: "error" }>): strin
     optionalString(event.error) ??
     optionalString((event as { message?: unknown }).message) ??
     optionalString((event as { detail?: unknown }).detail);
-  return message ?? "Emily could not complete that request.";
+  return userFacingChatErrorMessage(message);
 }
 
 function appendAssistantError(
