@@ -1,9 +1,9 @@
-"""Public share projection: worker / brain-file / brain-pack -> public view.
+"""Public share projection: worker / brain-file / brain-pack / run -> public view.
 
 The strict public view of a worker (no secrets, source, run history, owner id,
 webhook url, or config internals), the signed-share-link resolver, the public
 file-entry shaping for brain shares, and the standalone-share-payload dispatcher
-that resolves a share token to its worker / brain-file / brain-pack card. Backs
+that resolves a share token to its worker / brain-file / brain-pack / run card. Backs
 the public worker, short-link, and standalone-share routes. Extracted verbatim
 from main.py.
 
@@ -251,6 +251,26 @@ def _public_brain_pack_share(row: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
+def _public_run_share(row: Dict[str, Any], repos: "Repositories") -> Dict[str, Any]:
+    from auth import AuthContext
+    from routers.runs import get_run
+
+    run_id = str(row.get("entity_id") or "")
+    owner_id = str(row.get("owner_id") or "")
+    if not run_id or not owner_id:
+        raise HTTPException(status_code=404, detail="Share link not found")
+    owner_auth = AuthContext(user_id=owner_id, email=None, scopes=("run_share",))
+    detail = get_run(run_id, auth=owner_auth, repos=repos).model_dump(mode="json")
+    worker_name = str(detail.get("worker_name") or detail.get("worker_id") or "Worker")
+    return {
+        "entity_type": "run",
+        "title": f"Run · {worker_name}",
+        "description": f"{detail.get('status') or 'run'} run {run_id}",
+        "run": detail,
+        "files": [],
+    }
+
+
 def _standalone_share_payload(token: str, repos: "Repositories") -> Dict[str, Any]:
     row = _load_standalone_share_row(token)
     if row:
@@ -264,6 +284,8 @@ def _standalone_share_payload(token: str, repos: "Repositories") -> Dict[str, An
             return _public_brain_file_share(row)
         if entity_type == "brain_pack":
             return _public_brain_pack_share(row)
+        if entity_type == "run":
+            return _public_run_share(row, repos)
         raise HTTPException(status_code=404, detail="Share link not found")
 
     # Backward compatibility for worker short links created before the unified

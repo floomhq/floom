@@ -104,6 +104,23 @@ def test_share_then_public_view(client_and_main):
     assert pub.json()["output"]["answer"] == "42"
 
 
+def test_share_then_standalone_share_page_payload(client_and_main):
+    client, _ = client_and_main
+    created = client.post("/runs/run_share_1/share-link")
+    assert created.status_code == 200, created.text
+    token = created.json()["token"]
+
+    from fastapi.testclient import TestClient
+    anon = TestClient(client.app, raise_server_exceptions=False)
+    pub = anon.get(f"/s/{token}")
+    assert pub.status_code == 200, pub.text
+    body = pub.json()
+    assert body["entity_type"] == "run"
+    assert body["title"] == "Run · Shared Run Worker"
+    assert body["run"]["id"] == "run_share_1"
+    assert body["run"]["output"]["answer"] == "42"
+
+
 def test_public_view_wrong_token_404(client_and_main):
     client, _ = client_and_main
     client.post("/runs/run_share_1/share-link")
