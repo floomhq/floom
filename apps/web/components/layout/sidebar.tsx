@@ -16,6 +16,7 @@ import { WorkspaceMonogram } from "@/components/layout/WorkspaceMonogram";
 import { AlertsBell } from "@/components/overview/AlertsBell";
 import { api } from "@/lib/api";
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
+import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
 import type { CurrentUser } from "@/lib/types";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import {
@@ -579,6 +580,7 @@ export function UserProfileFooter({
     } catch {
       // Clearing the cookie is best-effort; navigate regardless.
     }
+    clearClientLogoutState();
     onNavigate?.();
     router.replace("/login");
     router.refresh();

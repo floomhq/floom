@@ -14,7 +14,8 @@ import { KeyRound, TestTube2, Trash2, Plus, Check, X, ChevronDown } from "lucide
 import { toast } from "sonner";
 import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { formatRelativeTime } from "@/components/connections/connection-data";
-import { useIsAdmin } from "@/lib/use-is-admin";
+import { computeIsAdmin, useIsAdmin } from "@/lib/use-is-admin";
+import type { CurrentUser, SecretItem } from "@/lib/types";
 
 export default function SecretsPage() {
   return (
@@ -26,6 +27,12 @@ export default function SecretsPage() {
 
 // How many "used by" workers to show before truncating on mobile
 const USED_BY_INITIAL_COUNT = 2;
+
+export function canMutateSecretItem(secret: SecretItem, currentUser: CurrentUser | null): boolean {
+  if (!currentUser) return false;
+  if (computeIsAdmin(currentUser)) return true;
+  return !secret.user_id || secret.user_id === currentUser.user_id;
+}
 
 function SecretsContent() {
   // S24: ?prefill=NAME from /connections/browse -> opens add form pre-filled.
@@ -52,6 +59,7 @@ function SecretsContent() {
   const [updatingName, setUpdatingName] = useState<string | null>(null);
   const [updatingValue, setUpdatingValue] = useState("");
   const [deletingName, setDeletingName] = useState<string | null>(null);
+  const [currentUser, setCurrentUser] = useState<CurrentUser | null>(null);
   // Track which secrets have their "used by" list expanded on mobile
   const [expandedUsedBy, setExpandedUsedBy] = useState<Set<string>>(new Set());
 
@@ -60,6 +68,20 @@ function SecretsContent() {
     () => new Map(workers.map((w) => [w.name, w.id])),
     [workers],
   );
+
+  useEffect(() => {
+    let cancelled = false;
+    api.me()
+      .then((me) => {
+        if (!cancelled) setCurrentUser(me);
+      })
+      .catch(() => {
+        if (!cancelled) setCurrentUser(null);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, []);
 
   const refresh = useCallback(async () => {
     if (!isAdmin) return;
@@ -262,6 +284,7 @@ function SecretsContent() {
             </div>
           ) : (
             secrets.map((s) => {
+              const canMutate = canMutateSecretItem(s, currentUser);
               const usedByExpanded = expandedUsedBy.has(s.name);
               const usedByVisible = usedByExpanded
                 ? s.used_by
@@ -373,32 +396,36 @@ function SecretsContent() {
                         <TestTube2 className="w-3.5 h-3.5 sm:mr-1" />
                         <span className="hidden sm:inline">{testingName === s.name ? "Testing..." : "Test"}</span>
                       </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="min-h-[44px] px-2 text-xs text-muted-foreground hover:text-foreground sm:min-h-0 sm:h-7"
-                        onClick={() => {
-                          setUpdatingName(updatingName === s.name ? null : s.name);
-                          setUpdatingValue("");
-                        }}
-                        title="Update value"
-                      >
-                        <span className="hidden sm:inline">Update</span>
-                        <span className="sm:hidden text-xs">Edit</span>
-                      </Button>
-                      <Button
-                        variant="ghost"
-                        size="sm"
-                        className="min-h-[44px] min-w-[44px] px-2 text-xs text-[var(--negative)] hover:text-[var(--negative)] sm:min-h-0 sm:min-w-0 sm:h-7"
-                        onClick={() => handleDelete(s.name)}
-                        disabled={deletingName === s.name}
-                        title="Remove secret"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </Button>
+                      {canMutate && (
+                        <>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="min-h-[44px] px-2 text-xs text-muted-foreground hover:text-foreground sm:min-h-0 sm:h-7"
+                            onClick={() => {
+                              setUpdatingName(updatingName === s.name ? null : s.name);
+                              setUpdatingValue("");
+                            }}
+                            title="Update value"
+                          >
+                            <span className="hidden sm:inline">Update</span>
+                            <span className="sm:hidden text-xs">Edit</span>
+                          </Button>
+                          <Button
+                            variant="ghost"
+                            size="sm"
+                            className="min-h-[44px] min-w-[44px] px-2 text-xs text-[var(--negative)] hover:text-[var(--negative)] sm:min-h-0 sm:min-w-0 sm:h-7"
+                            onClick={() => handleDelete(s.name)}
+                            disabled={deletingName === s.name}
+                            title="Remove secret"
+                          >
+                            <Trash2 className="w-3.5 h-3.5" />
+                          </Button>
+                        </>
+                      )}
                     </div>
                   </div>
-                  {updatingName === s.name && (
+                  {canMutate && updatingName === s.name && (
                     <div className="flex flex-col gap-2 pb-2 pl-7 sm:flex-row sm:pl-10">
                       <Input
                         type="password"

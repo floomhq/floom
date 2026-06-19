@@ -104,6 +104,18 @@ logger = logging.getLogger("floom.api")
 runs_router = APIRouter()
 
 
+def _public_run_log_sse_event(event: Dict[str, Any]) -> Dict[str, Any]:
+    log_event: Dict[str, Any] = {
+        "type": "log",
+        "level": event.get("level") or "info",
+        "message": _redact_public_log_message(str(event.get("message") or "")),
+        "timestamp": event.get("timestamp"),
+    }
+    if event.get("trace_id"):
+        log_event["trace_id"] = event["trace_id"]
+    return log_event
+
+
 def _run_total_cost_usd(raw: Any) -> Optional[float]:
     """Coerce the stored ``runs.total_cost_usd`` (#793/#795) to a float for the run
     detail response. Returns None for missing/unparseable/zero values so the detail
@@ -1356,14 +1368,7 @@ async def stream_run_logs(
 
                     if evt_type == "log":
                         # Forward log events with trace_id when present.
-                        log_event: Dict[str, Any] = {
-                            "type": "log",
-                            "level": event.get("level") or "info",
-                            "message": event.get("message") or "",
-                            "timestamp": event.get("timestamp"),
-                        }
-                        if event.get("trace_id"):
-                            log_event["trace_id"] = event["trace_id"]
+                        log_event = _public_run_log_sse_event(event)
                         yield f"data: {json.dumps(log_event)}\n\n"
 
                     evt_status = event.get("status", "")

@@ -2421,6 +2421,7 @@ class PublicWorker(BaseModel):
 class SecretItem(BaseModel):
     name: str
     status: SecretStatus
+    user_id: Optional[str] = None
     last_used_at: Optional[str] = None
     last_checked_at: Optional[str] = None
     last_check_status: Optional[str] = None
