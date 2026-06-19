@@ -40,7 +40,7 @@ import { Textarea } from "@/components/ui/textarea";
 import { CollectionView } from "@/components/collection/CollectionView";
 import { emptyState } from "@/lib/collection/url-state";
 import type { CollectionConfig, CollectionState } from "@/lib/collection/types";
-import { SETTINGS_NAV, settingsGroup, groupLabel } from "@/lib/settings/nav-groups";
+import { SETTINGS_NAV, settingsGroup, groupLabel, type SettingsScope } from "@/lib/settings/nav-groups";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import { GitWorkspacePanel } from "@/components/GitWorkspacePanel";
 import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
@@ -65,6 +65,8 @@ import {
   Code2,
   Copy,
   History,
+  Info,
+  KeyRound,
   MessageSquare,
   Palette,
   QrCode,
@@ -78,6 +80,77 @@ import {
   Users,
   X,
 } from "lucide-react";
+
+// ---------------------------------------------------------------------------
+// Scope chips — the single clearest signal of WHICH scope a setting touches.
+// WORKSPACE = accent blue (shared by everyone); ACCOUNT = neutral ink (yours).
+// Used in the detail header and at the top of each token pane (mockup parity).
+// ---------------------------------------------------------------------------
+function ScopeChip({ scope, name }: { scope: SettingsScope; name?: string | null }) {
+  const isWs = scope === "workspace";
+  return (
+    <span
+      className={cn(
+        "inline-flex items-center gap-1.5 rounded-[var(--radius-ui)] px-2 py-0.5 text-[11px] font-medium",
+        isWs
+          ? "bg-[var(--accent-soft,color-mix(in_srgb,var(--accent)_14%,transparent))] text-[var(--accent)]"
+          : "bg-[var(--bg-2)] text-[var(--ink-mute)]",
+      )}
+    >
+      <span
+        className={cn("size-1.5 shrink-0", isWs ? "rounded-[var(--radius-ui)] bg-[var(--accent)]" : "rounded-full bg-[var(--ink-mute)]")} // ds-allow-round — scope dot
+      />
+      {isWs ? "Workspace" : "Account"}
+      {name ? <span className="opacity-70">· {name}</span> : null}
+    </span>
+  );
+}
+
+// Pane-level scope banner: a chip + one-line "what this scope means" detail,
+// restated at the top of the content (mockup .pane-scope).
+function ScopeBanner({ scope, name, detail }: { scope: SettingsScope; name?: string | null; detail: string }) {
+  return (
+    <div className="flex flex-wrap items-center gap-2">
+      <ScopeChip scope={scope} name={name} />
+      <span className="text-xs text-muted-foreground">{detail}</span>
+    </div>
+  );
+}
+
+// Cross-link callout that disambiguates the two token scopes in-place
+// (mockup .note). "This is not your personal token → see …" and vice-versa.
+function ScopeCrossLink({
+  title,
+  body,
+  linkLabel,
+  targetSel,
+}: {
+  title: string;
+  body: string;
+  linkLabel: string;
+  targetSel: string;
+}) {
+  return (
+    <div className="flex items-start gap-2.5 rounded-[var(--radius-ui)] bg-[var(--bg-2)] px-3.5 py-3 text-xs leading-relaxed text-[var(--ink-soft)]">
+      <Info className="mt-0.5 size-3.5 shrink-0 text-[var(--ink-mute)]" />
+      <span>
+        <span className="font-semibold text-foreground">{title}</span> {body}{" "}
+        <button
+          type="button"
+          className="font-medium text-[var(--accent)] hover:underline"
+          onClick={() => {
+            const params = new URLSearchParams(window.location.search);
+            params.set("sel", targetSel);
+            params.delete("tab");
+            window.location.href = `/settings?${params.toString()}`;
+          }}
+        >
+          {linkLabel}
+        </button>
+      </span>
+    </div>
+  );
+}
 
 function PersonalAccessTokensPanel() {
   const [tokens, setTokens] = useState<PersonalAccessToken[] | null>(null);
@@ -137,10 +210,11 @@ function PersonalAccessTokensPanel() {
 
   return (
     <section className="space-y-3">
-      <h2 className="text-sm font-medium text-muted-foreground">Personal access tokens</h2>
+      <h2 className="text-sm font-medium text-muted-foreground">Your tokens</h2>
       <p className="text-sm text-muted-foreground">
-        Use tokens to authenticate API and MCP requests without a shared secret.
-        Token values are shown once; store them securely.
+        Tokens tied to your account (prefix <code className="font-mono text-xs">fl_pat_</code>).
+        They authenticate as you and work in every workspace you belong to. No one
+        else can see or use them. Token values are shown once; store them securely.
       </p>
 
       {createdToken && (
@@ -284,7 +358,7 @@ export function WorkspaceTokensPanel() {
 
   return (
     <section className="space-y-3">
-      <h2 className="text-sm font-medium text-muted-foreground">Workspace token</h2>
+      <h2 className="text-sm font-medium text-muted-foreground">Shared token</h2>
       {forbidden ? (
         <p className="text-sm text-muted-foreground">
           Only workspace admins can manage the workspace token.
@@ -294,7 +368,9 @@ export function WorkspaceTokensPanel() {
       ) : tokens === null ? null : (
         <>
           <p className="text-sm text-muted-foreground">
-            A workspace token gives API access to workspace-shared workers only, not
+            One shared token (prefix <code className="font-mono text-xs">fl_wt_</code>) that
+            authenticates this workspace&apos;s CLI runs and CI. It is not tied to you
+            personally and gives API access to workspace-shared workers only, not
             private workers. Admins only. Token values are shown once; store them
             securely.
           </p>
@@ -390,13 +466,18 @@ function isValidSection(value: string | null): value is SectionKey {
 function sectionFromCandidate(value: string | null): SectionKey | null {
   const candidate =
     // Legacy aliases kept for back-compat with old deep-links.
-    value === "api" ? "developer" :
+    value === "api" ? "connect" :
     value === "slack" ? "channels" :
     value === "notifications" ? "channels" :
-    value === "git" ? "developer" :
-    // workspace_tokens was a standalone nav item before #1088 MECE fix.
-    // Deep-links to ?sel=workspace_tokens now land on Developer (Tokens tab).
-    value === "workspace_tokens" ? "developer" :
+    value === "git" ? "connect" :
+    // The "developer" section was split into two token panes + a connect pane.
+    // Old ?sel=developer links land on the API/MCP/CLI/Git reference.
+    value === "developer" ? "connect" :
+    // workspace_tokens was a standalone nav item, then briefly a Developer
+    // sub-tab; it is now its own workspace-scoped pane again.
+    value === "workspace_tokens" ? "workspace_token" :
+    // Personal tokens used to live under Developer > Tokens.
+    value === "tokens" ? "personal_tokens" :
     value;
   return isValidSection(candidate) ? candidate : null;
 }
@@ -698,12 +779,9 @@ function SettingsContent() {
           leading: <SettingsIcon icon={item.icon} />,
           title: item.label,
           sub: (
-            <span>
-              {item.scope === "workspace"
-                ? groupLabel("workspace", workspaceName)
-                : groupLabel("account", accountName)}
-              {" · "}
-              {item.description}
+            <span className="flex flex-wrap items-center gap-2">
+              <ScopeChip scope={item.scope} name={item.scope === "workspace" ? workspaceName : accountName} />
+              <span className="text-[var(--ink-mute)]">{item.description}</span>
             </span>
           ),
         },
@@ -762,10 +840,12 @@ function SettingsContent() {
             onClearRuns={handleClearRuns}
           />
         );
-      case "developer":
-        return (
-          <DeveloperSection />
-        );
+      case "workspace_token":
+        return <WorkspaceTokenSection workspaceName={workspaceName} />;
+      case "personal_tokens":
+        return <PersonalTokensSection accountName={accountName} workspaceName={workspaceName} />;
+      case "connect":
+        return <ConnectSection />;
       case "appearance":
         return <AppearanceSection />;
       case "profile":
@@ -865,7 +945,11 @@ function iconForSection(key: SectionKey): SettingsIconType {
       return History;
     case "danger":
       return ShieldAlert;
-    case "developer":
+    case "workspace_token":
+      return KeyRound;
+    case "personal_tokens":
+      return KeyRound;
+    case "connect":
       return Code2;
     case "appearance":
       return Palette;
@@ -1053,29 +1137,75 @@ function CopyCodeCard({ title, description, value }: { title: string; descriptio
   );
 }
 
-// DeveloperSection (#1088 MECE fix): one place for ALL access credentials —
-//   personal tokens (account-scoped), workspace token (admin-only, workspace-
-//   scoped), plus API/MCP/CLI reference and Git sync. Removed the standalone
-//   "Workspace token" nav item; tokens of both scopes live here to avoid the
-//   overlap between Channels (agent install) and Developer (API tokens).
-function DeveloperSection() {
+// WorkspaceTokenSection (workspace scope) — re-homes WorkspaceTokensPanel under
+// WORKSPACE with its own scope banner + a cross-link to Account · Personal
+// access tokens. The token CRUD itself is unchanged (same api.workspace.tokens
+// calls); this only re-homes + re-labels it (mockup .pane[data-pane="ws-token"]).
+function WorkspaceTokenSection({ workspaceName }: { workspaceName: string }) {
+  return (
+    <div className="space-y-5">
+      <ScopeBanner
+        scope="workspace"
+        name={workspaceName}
+        detail={`Scoped to ${workspaceName} · used by this workspace's CLI & CI`}
+      />
+      <WorkspaceTokensPanel />
+      <ScopeCrossLink
+        title="This is not your personal token."
+        body={`It is shared by everyone in ${workspaceName} and authenticates this workspace's CLI & CI. Rotating it breaks any CI using the old value. For a token tied to just you, see`}
+        linkLabel="Account → Personal access tokens"
+        targetSel="personal_tokens"
+      />
+    </div>
+  );
+}
+
+// PersonalTokensSection (account scope) — re-homes PersonalAccessTokensPanel
+// under ACCOUNT with its own scope banner + a cross-link to Workspace · token.
+// CRUD unchanged (api.tokens.*) (mockup .pane[data-pane="acct-tokens"]).
+function PersonalTokensSection({ accountName, workspaceName }: { accountName: string; workspaceName: string }) {
+  return (
+    <div className="space-y-5">
+      <ScopeBanner
+        scope="account"
+        name={accountName}
+        detail="Yours · works across all your workspaces"
+      />
+      <PersonalAccessTokensPanel />
+      <ScopeCrossLink
+        title="These are yours, not the workspace's."
+        body="They act on your behalf in every workspace you can access. To authenticate this workspace's shared CLI & CI instead, use"
+        linkLabel={`Workspace · ${workspaceName} → Workspace token`}
+        targetSel="workspace_token"
+      />
+    </div>
+  );
+}
+
+// ConnectSection (account scope) — the developer reference snippets that used to
+// share the Developer page with token CRUD: REST API, MCP install, CLI, and Git
+// sync. No token management here anymore (it moved to the two token panes); this
+// is read-only reference plus the Git workspace panel. (#616 GitWorkspacePanel
+// preserved.)
+function ConnectSection() {
   return (
     <Tabs defaultValue="api">
       <TabsList>
         <TabsTrigger value="api">API</TabsTrigger>
         <TabsTrigger value="mcp">MCP</TabsTrigger>
         <TabsTrigger value="cli">CLI</TabsTrigger>
-        <TabsTrigger value="tokens">My tokens</TabsTrigger>
-        <TabsTrigger value="workspace_token">Workspace token</TabsTrigger>
         <TabsTrigger value="git">Git</TabsTrigger>
       </TabsList>
       <TabsContent value="api" className="space-y-4">
         <div className="space-y-1">
           <h2 className="text-sm font-medium">REST API</h2>
           <p className="text-xs text-muted-foreground">
-            Call your workspace over HTTP. Authenticate every request with a
-            personal access token (My tokens tab) or a workspace token (admin only)
-            in the <code className="font-mono">x-floom-secret</code> header.
+            Call your workspace over HTTP. Authenticate every request with a token
+            in the <code className="font-mono">x-floom-secret</code> header: a{" "}
+            <span className="font-medium text-foreground">personal access token</span>{" "}
+            (Account scope) or the{" "}
+            <span className="font-medium text-foreground">workspace token</span>{" "}
+            (Workspace scope, admin only).
           </p>
         </div>
         <div className="flex items-center justify-between gap-3 rounded-[var(--radius-card)] bg-[var(--bg-2)] px-3 py-2.5">
@@ -1101,12 +1231,24 @@ function DeveloperSection() {
         </div>
         <CopyCodeCard
           title="Call the API"
-          description="Replace <your-token> with a personal access token from the My tokens tab."
+          description="Replace <your-token> with a personal access token from Account · Personal access tokens."
           value={API_CALL_SNIPPET}
         />
         <p className="text-xs text-muted-foreground">
-          Need a token? Open the{" "}
-          <span className="font-medium text-foreground">My tokens</span> tab.{" "}
+          Need a token? See{" "}
+          <button
+            type="button"
+            className="font-medium text-[var(--accent)] hover:underline"
+            onClick={() => {
+              const params = new URLSearchParams(window.location.search);
+              params.set("sel", "personal_tokens");
+              params.delete("tab");
+              window.location.href = `/settings?${params.toString()}`;
+            }}
+          >
+            Account · Personal access tokens
+          </button>
+          .{" "}
           <a
             href="https://github.com/floomhq/workeros#api"
             target="_blank"
@@ -1130,12 +1272,6 @@ function DeveloperSection() {
           description="Install the CLI, authenticate, and run a worker from your terminal."
           value={CLI_INSTALL_SNIPPET}
         />
-      </TabsContent>
-      <TabsContent value="tokens" className="space-y-4">
-        <PersonalAccessTokensPanel />
-      </TabsContent>
-      <TabsContent value="workspace_token" className="space-y-4">
-        <WorkspaceTokensPanel />
       </TabsContent>
       <TabsContent value="git" className="space-y-4">
         <GitWorkspacePanel />
