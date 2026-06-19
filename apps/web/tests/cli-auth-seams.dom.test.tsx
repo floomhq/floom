@@ -2,15 +2,8 @@ import { describe, it, expect, vi, beforeEach, afterEach } from "vitest";
 import { render, screen, fireEvent, waitFor } from "@testing-library/react";
 import { CliAuthContent } from "@/app/cli-auth/page";
 
-const pushMock = vi.fn();
-
-vi.mock("next/navigation", () => ({
-  useRouter: () => ({ push: pushMock }),
-}));
-
 describe("CLI auth seams", () => {
   beforeEach(() => {
-    pushMock.mockReset();
     window.history.pushState({}, "", "/cli-auth?code=ABCD-2345");
     vi.stubGlobal(
       "fetch",

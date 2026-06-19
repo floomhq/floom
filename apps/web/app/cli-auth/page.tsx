@@ -2,7 +2,6 @@
 
 export const dynamic = "force-dynamic";
 
-import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { Button } from "@/components/ui/button";
 
@@ -26,7 +25,6 @@ export function CliAuthContent({
   endpointBase = DEFAULT_CLI_AUTH_ENDPOINT_BASE,
   clientName = DEFAULT_CLI_CLIENT_NAME,
 }: CliAuthContentProps = {}) {
-  const router = useRouter();
   const [code, setCode] = useState("");
   const [busyAction, setBusyAction] = useState<"approve" | "deny" | null>(null);
   const [statusText, setStatusText] = useState("");
@@ -56,10 +54,10 @@ export function CliAuthContent({
         return;
       }
       if (action === "approve") {
+        // No auto-redirect: leave the user on the success state so they can
+        // return to their terminal (the engine twin of the cloud-overlay
+        // post-approve bounce fix).
         setStatusText("✓ Approved. You can return to your terminal.");
-        setTimeout(() => {
-          router.push("/");
-        }, 3000);
       } else {
         setStatusText("Request denied.");
       }
