@@ -119,6 +119,49 @@ def test_run_service_failed_status_update_synthesizes_error_fields(repo_bundle):
     assert row["error_code"] == "unknown_error"
 
 
+def test_run_service_scrubs_secret_values_before_persisting_output(repo_bundle):
+    import json
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    repos.workers.create(
+        user_id="user-a",
+        worker_id="worker-secret-output",
+        name="Worker Secret Output",
+        manifest_json=manifest("worker-secret-output", "Worker Secret Output"),
+        bundle_path="workers/worker-secret-output",
+    )
+    repos.secrets.set(user_id="user-a", name="API_KEY", value="sk-test-secret-output")
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-secret-output",
+        worker_id="worker-secret-output",
+        status=RunStatus.RUNNING.value,
+        trigger_source="manual",
+        runner="e2b",
+    )
+
+    run_service.update_run_status(
+        "run-secret-output",
+        RunStatus.COMPLETED.value,
+        output={
+            "plain": "value sk-test-secret-output",
+            "nested": {"token": "api_key=sk-test-secret-output"},
+            "list": ["sk-test-secret-output"],
+        },
+        user_id="user-a",
+        repos=repos,
+    )
+
+    row = repos.runs.get(user_id="user-a", run_id="run-secret-output")
+    raw = row["output_json"]
+    assert "sk-test-secret-output" not in raw
+    stored = json.loads(raw)
+    assert stored["plain"] == "value <REDACTED:API_KEY>"
+    assert stored["nested"]["token"] == "<REDACTED>"
+    assert stored["list"] == ["<REDACTED:API_KEY>"]
+
+
 def test_run_repo_fails_running_rows_by_owner(repo_bundle):
     repos, _db, manifest = repo_bundle
 

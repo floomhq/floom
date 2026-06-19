@@ -1,6 +1,7 @@
 ﻿import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
+import { readFileSync } from "node:fs";
 import { mkdtemp } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -16,6 +17,12 @@ import {
   createAuthenticatedClient,
 } from "../dist/lib/api.js";
 import { doctorCommand } from "../dist/commands/doctor.js";
+
+test("cloud login treats cli-exchange 429 as slow_down instead of fatal", () => {
+  const src = readFileSync(new URL("../src/commands/login.ts", import.meta.url), "utf8");
+  assert.match(src, /error\.status === 429 && isCloud/);
+  assert.match(src, /Math\.max\(started\.polling_interval_seconds \* 1000, 5000\)/);
+});
 
 async function withTempHome(fn) {
   const home = await mkdtemp(join(tmpdir(), "workeros-cli-cloud-"));

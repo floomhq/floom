@@ -6,6 +6,7 @@ import {
   isInternalToolName,
   normalizeToolName,
   reduceSSEEvent,
+  safeRunPartsStreamPath,
   shouldAutoOpenRunDetails,
 } from "@/lib/useChatStream";
 
@@ -16,6 +17,15 @@ function toolCards(messages: ChatMessage[]) {
 }
 
 describe("Emily chat tool cards", () => {
+  it("allowlists only run parts SSE stream paths from tool cards", () => {
+    expect(safeRunPartsStreamPath("/runs/run_123/stream")).toBe("/runs/run_123/stream");
+    expect(safeRunPartsStreamPath(" /runs/run-abc_123/stream ")).toBe("/runs/run-abc_123/stream");
+    expect(safeRunPartsStreamPath("/connections")).toBeNull();
+    expect(safeRunPartsStreamPath("/runs/run_123/logs/stream")).toBeNull();
+    expect(safeRunPartsStreamPath("/runs/run_123/stream?x=/connections")).toBeNull();
+    expect(safeRunPartsStreamPath("https://attacker.example/runs/run_123/stream")).toBeNull();
+  });
+
   it("hides internal finalization tools from the card stream", () => {
     const messages = reduceSSEEvent(
       [],

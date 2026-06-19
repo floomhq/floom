@@ -12,6 +12,7 @@ import types
 import uuid
 from datetime import datetime, timedelta, timezone
 from pathlib import Path
+from urllib.parse import parse_qs, urlparse
 from unittest.mock import patch
 
 import pytest
@@ -109,6 +110,30 @@ def _seed_connection(client: TestClient, app_name: str = "gmail") -> dict:
         )
     assert resp.status_code == 200, resp.text
     return resp.json()
+
+
+def _session_cookie(main, user_id: str = "local-user") -> dict[str, str]:
+    repos = main.get_repositories()
+    if repos.users.get(user_id=user_id) is None:
+        repos.users.create(
+            user_id=user_id,
+            username=user_id,
+            display_name=user_id,
+            password_hash="not-used",
+            role="admin",
+        )
+    repos.sessions.create(
+        session_id="session-" + user_id,
+        user_id=user_id,
+        expires_at="2999-01-01T00:00:00+00:00",
+    )
+    return {"wos_session": "session-" + user_id}
+
+
+def _oauth_state_for(main, user_id: str = "local-user") -> str:
+    from routers.connections import _issue_oauth_state
+
+    return _issue_oauth_state(user_id=user_id)
 
 
 # ---------------------------------------------------------------------------
@@ -411,6 +436,26 @@ class TestConnectionsListProjection:
 
 
 class TestConnectionCallbackAndComposio503:
+    def test_connect_callback_url_contains_signed_state(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+
+        with patch("composio_client.initiate_connection") as mock_init:
+            mock_init.return_value = {
+                "composio_connection_id": "composio_state_test",
+                "redirect_url": "https://auth.composio.dev/oauth/redirect",
+            }
+            resp = client.post(
+                "/connections",
+                json={"app_name": "gmail"},
+                headers=AUTH_HEADERS,
+            )
+
+        assert resp.status_code == 200, resp.text
+        _app, callback_url = mock_init.call_args.args[:2]
+        state = parse_qs(urlparse(callback_url).query).get("state", [""])[0]
+        assert state
+
     def test_callback_accepts_connected_account_id_alias_and_persists_status(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
         # #1073 dropped the hardcoded example.com default for the callback redirect
@@ -422,7 +467,9 @@ class TestConnectionCallbackAndComposio503:
 
         with patch("composio_client.check_status", return_value="valid"):
             resp = client.get(
-                f"/connections/callback?connected_account_id={conn['composio_connection_id']}&status=success",
+                f"/connections/callback?connected_account_id={conn['composio_connection_id']}"
+                f"&status=success&state={_oauth_state_for(main)}",
+                cookies=_session_cookie(main),
                 follow_redirects=False,
             )
 
@@ -432,21 +479,62 @@ class TestConnectionCallbackAndComposio503:
         item = next(c for c in listed.json() if c["id"] == conn["id"])
         assert item["status"] == "active"
 
-    def test_callback_success_promotes_transient_initiated_to_active(self, monkeypatch, tmp_path):
+    def test_callback_does_not_trust_success_query_when_remote_is_still_initiated(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
         client = TestClient(main.app, raise_server_exceptions=True)
         conn = _seed_connection(client, app_name="gmail")
 
         with patch("composio_client.check_status", return_value="initiated"):
             resp = client.get(
-                f"/connections/callback?connection_id={conn['composio_connection_id']}&status=success",
+                f"/connections/callback?connection_id={conn['composio_connection_id']}"
+                f"&status=success&state={_oauth_state_for(main)}",
+                cookies=_session_cookie(main),
                 follow_redirects=False,
             )
 
         assert resp.status_code in {302, 307}
         listed = client.get("/connections", headers=AUTH_HEADERS)
         item = next(c for c in listed.json() if c["id"] == conn["id"])
-        assert item["status"] == "active"
+        assert item["status"] == "initiated"
+
+    def test_callback_missing_state_does_not_activate_connection(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+        conn = _seed_connection(client, app_name="gmail")
+
+        with patch("composio_client.check_status", return_value="valid") as mock_check:
+            resp = client.get(
+                f"/connections/callback?connection_id={conn['composio_connection_id']}&status=success",
+                cookies=_session_cookie(main),
+                follow_redirects=False,
+            )
+
+        assert resp.status_code in {302, 307}
+        assert "error=oauth_state" in resp.headers["location"]
+        mock_check.assert_not_called()
+        listed = client.get("/connections", headers=AUTH_HEADERS)
+        item = next(c for c in listed.json() if c["id"] == conn["id"])
+        assert item["status"] == "initiated"
+
+    def test_callback_state_must_match_active_session_owner(self, monkeypatch, tmp_path):
+        main = _load_api(monkeypatch, tmp_path)
+        client = TestClient(main.app, raise_server_exceptions=True)
+        conn = _seed_connection(client, app_name="gmail")
+
+        with patch("composio_client.check_status", return_value="valid") as mock_check:
+            resp = client.get(
+                f"/connections/callback?connection_id={conn['composio_connection_id']}"
+                f"&status=success&state={_oauth_state_for(main, user_id='attacker')}",
+                cookies=_session_cookie(main, user_id="local-user"),
+                follow_redirects=False,
+            )
+
+        assert resp.status_code in {302, 307}
+        assert "error=oauth_state" in resp.headers["location"]
+        mock_check.assert_not_called()
+        listed = client.get("/connections", headers=AUTH_HEADERS)
+        item = next(c for c in listed.json() if c["id"] == conn["id"])
+        assert item["status"] == "initiated"
 
     def test_missing_composio_api_key_returns_503_for_connect_and_account_info(self, monkeypatch, tmp_path):
         main = _load_api(monkeypatch, tmp_path)
@@ -861,7 +949,23 @@ class TestMCPConnections:
                 id TEXT PRIMARY KEY,
                 worker_id TEXT,
                 status TEXT,
-                created_at TEXT
+                trigger_source TEXT,
+                runner TEXT,
+                input_json TEXT,
+                output_json TEXT,
+                error TEXT,
+                created_at TEXT,
+                started_at TEXT,
+                completed_at TEXT,
+                duration_ms INTEGER,
+                approval_status TEXT,
+                cancel_requested INTEGER DEFAULT 0,
+                cancelled_at TEXT,
+                bundle_snapshot_path TEXT,
+                quality_warning TEXT,
+                trigger_ref TEXT,
+                total_cost_usd REAL,
+                actor_user_id TEXT
             );
             CREATE TABLE files (
                 id TEXT PRIMARY KEY,
