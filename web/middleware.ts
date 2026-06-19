@@ -182,7 +182,7 @@ export async function middleware(req: NextRequest): Promise<NextResponse> {
     return respond();
   }
   const session = req.cookies.get(SESSION_COOKIE);
-  const verified = await verifySession(session?.value);
+  const verified = await verifySession(session?.value, req.headers.get("cookie"));
   if (!verified) {
     // Round-09 #5: never send a 307 HTML login redirect for an RSC/Flight or
     // Next data fetch — return a bodiless 401 (no-store) so the App Router

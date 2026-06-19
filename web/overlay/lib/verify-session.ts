@@ -174,8 +174,9 @@ export function resetJwksCacheForTests(): void {
  */
 export async function verifySession(
   raw: string | undefined,
+  cookieHeader?: string | null,
 ): Promise<{ payload: SessionPayload; verified: boolean } | null> {
-  const resolved = await resolveSessionPayload(raw);
+  const resolved = await resolveSessionPayload(raw, cookieHeader);
   if (!resolved) return null;
   const payload = resolved.payload;
 
