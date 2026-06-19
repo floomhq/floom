@@ -42,6 +42,11 @@ _INTERNAL_LOG_TOKEN_RE = re.compile(
 
 _LOG_METADATA_RE = re.compile(r"\b(?:mode|runner)=[^\s,;]+", re.IGNORECASE)
 
+_SECRET_ASSIGNMENT_RE = re.compile(
+    r"\b[A-Z][A-Z0-9_]*(?:SECRET|TOKEN|API_KEY|ACCESS_KEY|PASSWORD|PRIVATE_KEY)[A-Z0-9_]*\s*=\s*[^\s,;]+",
+    re.IGNORECASE,
+)
+
 _MISSING_SECRETS_RE = re.compile(r"Missing secrets?:\s*[A-Z0-9_, ]+", re.IGNORECASE)
 
 _ENV_SECRET_CONFIG_RE = re.compile(
@@ -349,6 +354,7 @@ def _redact_public_log_message(message: str) -> str:
     redacted = _ENV_SECRET_CONFIG_RE.sub("Required platform secret is not configured", redacted)
     redacted = _INTERNAL_LOG_TOKEN_RE.sub("[redacted-id]", redacted)
     redacted = _LOG_METADATA_RE.sub("[redacted-metadata]", redacted)
+    redacted = _SECRET_ASSIGNMENT_RE.sub("[redacted-secret]", redacted)
     # PATH-1 (2026-05-29): logs[].message still leaked host paths
     # (/root/workeros/...) and sandbox paths (/home/user/worker/run.py),
     # unlike error_raw which already strips them. Apply the SAME redaction so

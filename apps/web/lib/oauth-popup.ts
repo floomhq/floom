@@ -39,7 +39,7 @@ function openCenteredPopup(url: string): Window | null {
   return window.open(
     url,
     `oauth-${Date.now()}`,
-    `popup=yes,width=${POPUP_WIDTH},height=${POPUP_HEIGHT},left=${left},top=${top},toolbar=no,menubar=no,scrollbars=yes,resizable=yes`
+    `popup=yes,width=${POPUP_WIDTH},height=${POPUP_HEIGHT},left=${left},top=${top},toolbar=no,menubar=no,scrollbars=yes,resizable=yes,noopener,noreferrer`
   );
 }
 
@@ -57,6 +57,11 @@ export function openOAuthPopup({
       window.location.href = oauthUrl;
       // We never resolve here; the page navigates away.
       return;
+    }
+    try {
+      popup.opener = null;
+    } catch {
+      // Some browsers expose a readonly opener on cross-origin/noopener windows.
     }
 
     let done = false;
