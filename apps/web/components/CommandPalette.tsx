@@ -137,7 +137,7 @@ export function CommandPalette() {
         <CommandGroup heading="Actions">
           <CommandItem
             value="action new worker create add"
-            onSelect={() => go("/chat?mode=create")}
+            onSelect={() => go("/?create=1")}
           >
             <Plus />
             New worker
