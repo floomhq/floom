@@ -4,7 +4,7 @@ import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
-import { Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound, Grid2x2 } from "lucide-react";
+import { Box, Library, CheckCircle, Clock, Settings, Menu, X, Plug, Plus, Search, LogOut, ChevronLeft, ChevronRight, UserRound, Grid2x2, KeyRound } from "lucide-react";
 import { cn } from "@/lib/utils";
 import { ThemeModeButton } from "@/components/ThemeModeButton";
 import { openCommandPalette } from "@/components/CommandPalette";
@@ -204,30 +204,53 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
       {nav.map((item) => {
         const active = pathname === item.href || pathname.startsWith(item.href + "/");
         const showBadge = item.badge && pendingCount > 0;
+        // Round-09 batch2: Secrets is a sidebar SUB-ITEM under Integrations
+        // (replaces the in-page tab row). Indented, lighter, same nav language.
+        const isIntegrations = item.href === "/connections";
+        const secretsActive = pathname.startsWith("/connections/secrets") || pathname.startsWith("/secrets");
         return (
-          <Link
-            key={item.href}
-            href={item.href}
-            prefetch
-            onMouseEnter={() => warm(item.href)}
-            onFocus={() => warm(item.href)}
-            onClick={onNavigate}
-            title={item.hint}
-            className={cn(
-              "flex h-9 items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
-              active
-                ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)] [&_svg]:text-[var(--active-nav-text)] [&_svg]:opacity-100"
-                : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
+          <div key={item.href}>
+            <Link
+              href={item.href}
+              prefetch
+              onMouseEnter={() => warm(item.href)}
+              onFocus={() => warm(item.href)}
+              onClick={onNavigate}
+              title={item.hint}
+              className={cn(
+                "flex h-9 items-center gap-2.5 rounded-[var(--radius-button)] px-2.5 text-sm font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
+                active
+                  ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)] [&_svg]:text-[var(--active-nav-text)] [&_svg]:opacity-100"
+                  : "text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
+              )}
+            >
+              <item.icon className="w-4 h-4" />
+              {item.label}
+              {showBadge && (
+                <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] px-1 text-[10px] font-semibold leading-none text-[var(--primary-text)]">
+                  {pendingCount}
+                </span>
+              )}
+            </Link>
+            {isIntegrations && (
+              <Link
+                href="/connections/secrets"
+                prefetch
+                onMouseEnter={() => warm("/connections/secrets")}
+                onFocus={() => warm("/connections/secrets")}
+                onClick={onNavigate}
+                className={cn(
+                  "ml-7 flex h-8 items-center gap-2 rounded-[var(--radius-button)] px-2.5 text-[13px] font-medium transition-[background,color] duration-150 ease-[var(--ease)]",
+                  secretsActive
+                    ? "bg-[var(--active-nav-bg)] text-[var(--active-nav-text)] [&_svg]:text-[var(--active-nav-text)] [&_svg]:opacity-100"
+                    : "text-[var(--ink-mute)] hover:bg-[var(--active-nav-bg)] hover:text-ink [&_svg]:opacity-65"
+                )}
+              >
+                <KeyRound className="w-3.5 h-3.5" />
+                Secrets
+              </Link>
             )}
-          >
-            <item.icon className="w-4 h-4" />
-            {item.label}
-            {showBadge && (
-              <span className="ml-auto inline-flex h-4 min-w-4 items-center justify-center rounded-[var(--radius-pill)] bg-[var(--primary)] px-1 text-[10px] font-semibold leading-none text-[var(--primary-text)]">
-                {pendingCount}
-              </span>
-            )}
-          </Link>
+          </div>
         );
       })}
     </nav>

@@ -18,7 +18,6 @@ import { toast } from "sonner";
 
 import { api } from "@/lib/api";
 import { HIDDEN_CHANNEL_SLUGS } from "@/components/connections/connection-data";
-import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { CollectionView } from "@/components/collection/CollectionView";
 import { LoadingState } from "@/components/collection/CollectionStates";
 import {
@@ -462,9 +461,8 @@ export default function ConnectionsBrowsePage() {
   const trimmedSearch = state.q.trim();
 
   const config: CollectionConfig<IntegrationCatalogItem> = {
-    title: "Integrations",
+    title: "Browse apps",
     subtitle: "Connect the apps your workers need to take action.",
-    headerSlot: <ConnectionsTabs />,
     items,
     loading,
     error: loadError,

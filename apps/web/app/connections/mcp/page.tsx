@@ -22,7 +22,6 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
-import { ConnectionsTabs } from "@/components/connections/ConnectionsTabs";
 import { ListLoading, ListEmpty, ListError } from "@/components/collection/CollectionStates";
 import { api } from "@/lib/api";
 import type { ConnectionItem, SecretItem } from "@/lib/types";
@@ -502,13 +501,12 @@ export default function McpConnectionsPage() {
   return (
     <div className="space-y-6">
       <header>
-        <h1 className="text-2xl font-semibold tracking-tight">Integrations</h1>
+        <h1 className="text-2xl font-semibold tracking-tight">MCP</h1>
         <p className="mt-1 max-w-2xl text-sm text-[var(--ink-soft)]">
-          Connect apps via OAuth so workers can read and write on your behalf.
+          Use Floom as an MCP server in your AI client, or register MCP servers
+          your workers can call.
         </p>
       </header>
-
-      <ConnectionsTabs />
 
       {/* ============================================================= */}
       {/* Concept A — Use Floom Workers IN your AI client (secondary)   */}
