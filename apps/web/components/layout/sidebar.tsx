@@ -56,7 +56,12 @@ export function FloomMark({ size = 28 }: { size?: number }) {
 // no DiceBear network fetch. Matches design-system: squircle (radius-button),
 // flat, no border, NO avatars/gradients.
 function UserInitialsAvatar({ seed, size }: { seed: string; size: number }) {
-  const initial = (seed || "U").trim()[0]?.toUpperCase() ?? "U";
+  // Always derive a single visible LETTER/DIGIT initial — never blank, never a
+  // stray symbol. Strip non-alphanumerics first so a seed like "@acme" still
+  // yields "A", and fall back to "U" when there is nothing usable. (P0-3:
+  // the account mark must ALWAYS render a flat squircle monogram.)
+  const initial =
+    (seed || "").replace(/[^\p{L}\p{N}]/gu, "").trim()[0]?.toUpperCase() ?? "U";
   return (
     <span
       aria-hidden="true"
