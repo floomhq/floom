@@ -1,4 +1,4 @@
-"""Regression tests for cloud issue #418 — approvals.required must gate side effects.
+"""Regression tests for hosted issue #418 — approvals.required must gate side effects.
 
 The two-phase HITL contract:
   Phase 1 (propose): worker runs, drafts the action, emits decision_required,

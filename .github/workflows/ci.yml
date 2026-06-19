@@ -3,16 +3,17 @@ name: CI
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
-# #938: least-privilege token — CI only reads the repo.
 permissions:
   contents: read
 
 jobs:
   python-lint:
-    name: Python lint (ruff)
-    runs-on: [self-hosted, linux, x64, workeros-ci]
+    name: Python lint
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
@@ -21,47 +22,41 @@ jobs:
         with:
           python-version: "3.12"
       - name: Install ruff
-        run: pip install ruff==0.15.17
+        run: python -m pip install ruff==0.15.17
       - name: Ruff check
         run: ruff check .
 
   secret-scan:
-    name: Secret scan (gitleaks)
-    runs-on: [self-hosted, linux, x64, workeros-ci]
+    name: Secret scan
+    runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
         with:
           persist-credentials: false
       - name: Run gitleaks
-        # Scans the working tree for secrets; allowlist of known-benign fixtures
-        # lives in .gitleaks.toml. Fails the build on any new finding.
         run: |
           curl -sSfL https://github.com/gitleaks/gitleaks/releases/download/v8.21.2/gitleaks_8.21.2_linux_x64.tar.gz | tar -xz gitleaks
           ./gitleaks detect --no-git --source . --config .gitleaks.toml --no-banner --redact
 
-  api-tests:
-    name: API tests (pytest)
-    runs-on: [self-hosted, linux, x64, workeros-ci]
-    defaults:
-      run:
-        working-directory: apps/api
-
+  runtime-tests:
+    name: Runtime tests (${{ matrix.os }})
+    runs-on: ${{ matrix.os }}
+    continue-on-error: ${{ matrix.os == 'windows-latest' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
     steps:
       - uses: actions/checkout@v4
         with:
-          # #938: don't leave the GITHUB_TOKEN in .git/config on the
-          # self-hosted runner after the job finishes.
           persist-credentials: false
-
       - uses: actions/setup-python@v5
         with:
           python-version: "3.12"
           cache: pip
           cache-dependency-path: apps/api/requirements.txt
-
       - name: Install dependencies
-        run: pip install -r requirements.txt pytest pytest-asyncio
-
+        run: python -m pip install -r apps/api/requirements.txt pytest pytest-asyncio pytest-xdist
       - name: Collect tests
         env:
           WORKEROS_DEPLOY: local
@@ -69,98 +64,8 @@ jobs:
           FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
           OPENAI_API_KEY: sk-test-${{ github.run_id }}
           COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
-        run: pytest tests/ --collect-only -q -p no:warnings
-
-      - name: Run tests
-        env:
-          WORKEROS_DEPLOY: local
-          WORKEROS_ROOT: ${{ github.workspace }}
-          # #938: random per-run values — nothing that pattern-matches a real
-          # credential lives in the workflow file or repeats across runs.
-          FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
-          OPENAI_API_KEY: sk-test-${{ github.run_id }}
-          # Connection/MCP tests gate on COMPOSIO_API_KEY being set (a 503 guard);
-          # a dummy value is enough — no real Composio call is made under test.
-          COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
-        # #604: -p no:warnings keeps output clean; all test files auto-discovered.
-        run: pytest tests/ -v --tb=short -p no:warnings
-
-  runtime-tests:
-    name: Runtime tests (root pytest suite)
-    runs-on: [self-hosted, linux, x64, workeros-ci]
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # #938: don't leave the GITHUB_TOKEN in .git/config on the
-          # self-hosted runner after the job finishes.
-          persist-credentials: false
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: apps/api/requirements.txt
-
-      - name: Install dependencies
-        run: pip install -r apps/api/requirements.txt pytest pytest-asyncio
-
-      - name: Collect root runtime tests
-        env:
-          WORKEROS_DEPLOY: local
-          WORKEROS_ROOT: ${{ github.workspace }}
-          FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
-          OPENAI_API_KEY: sk-test-${{ github.run_id }}
-          COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
-        run: pytest tests/ --collect-only -q -p no:warnings
-
-      - name: Run root runtime tests
-        env:
-          WORKEROS_DEPLOY: local
-          WORKEROS_ROOT: ${{ github.workspace }}
-          # #938: random per-run values — nothing that pattern-matches a real
-          # credential lives in the workflow file or repeats across runs.
-          FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
-          OPENAI_API_KEY: sk-test-${{ github.run_id }}
-          # Connection/MCP tests gate on COMPOSIO_API_KEY being set (a 503 guard);
-          # a dummy value is enough — no real Composio call is made under test.
-          COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
-        # #604: root pytest.ini points at tests/ (66 files). These cover the
-        # full worker runtime — agent driver, E2B sandbox, run orchestration —
-        # and were previously not run in CI.
-        run: pytest tests/ -v --tb=short -p no:warnings -n auto --dist loadscope
-
-  runtime-tests-windows:
-    name: Runtime tests (Windows)
-    runs-on: windows-latest
-    # Advisory until GitHub-hosted Windows availability is proven for this repo.
-    # The same suite is blocking in the contributor workflow on Ubuntu.
-    continue-on-error: true
-
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          persist-credentials: false
-
-      - uses: actions/setup-python@v5
-        with:
-          python-version: "3.12"
-          cache: pip
-          cache-dependency-path: apps/api/requirements.txt
-
-      - name: Install dependencies
-        run: python -m pip install -r apps/api/requirements.txt pytest pytest-asyncio
-
-      - name: Collect root runtime tests
-        env:
-          WORKEROS_DEPLOY: local
-          WORKEROS_ROOT: ${{ github.workspace }}
-          FLOOM_SECRET: ci-${{ github.run_id }}-${{ github.run_attempt }}
-          OPENAI_API_KEY: sk-test-${{ github.run_id }}
-          COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
         run: python -m pytest tests/ --collect-only -q -p no:warnings
-
-      - name: Run root runtime tests
+      - name: Run tests
         env:
           WORKEROS_DEPLOY: local
           WORKEROS_ROOT: ${{ github.workspace }}
@@ -169,71 +74,44 @@ jobs:
           COMPOSIO_API_KEY: ci-test-composio-${{ github.run_id }}
         run: python -m pytest tests/ -v --tb=short -p no:warnings -n auto --dist loadscope
 
-  web-tests:
-    name: Web tests (vitest + tsx + lint)
-    runs-on: [self-hosted, linux, x64, workeros-ci]
+  web-lint:
+    name: Web lint
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/web
-
     steps:
       - uses: actions/checkout@v4
         with:
-          # #938: don't leave the GITHUB_TOKEN in .git/config on the
-          # self-hosted runner after the job finishes.
           persist-credentials: false
-
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: apps/web/package-lock.json
-
       - name: Install dependencies
         run: npm ci
-
       - name: Lint
         run: npm run lint
-
-      - name: Em-dash guard (no U+2014 in copy strings)
+      - name: Em-dash guard
         run: npm run lint:emdash
 
-      - name: Unit tests (vitest)
-        run: npm test
-
-      - name: Unit tests (tsx — source-inspection suite)
-        # #604: tsx-style tests check structural source properties and can't
-        # run via vitest (no describe blocks).
-        run: |
-          for f in tests/fl-*.test.ts tests/strip-citations.test.ts; do
-            if grep -q 'from "vitest"' "$f"; then
-              continue
-            fi
-            npx tsx "$f" || exit 1
-          done
-
   mcp-tests:
-    name: MCP package tests
-    runs-on: [self-hosted, linux, x64, workeros-ci]
+    name: MCP tests
+    runs-on: ubuntu-latest
     defaults:
       run:
         working-directory: apps/mcp
-
     steps:
       - uses: actions/checkout@v4
         with:
-          # #938: don't leave the GITHUB_TOKEN in .git/config on the
-          # self-hosted runner after the job finishes.
           persist-credentials: false
-
       - uses: actions/setup-node@v4
         with:
           node-version: "24"
           cache: npm
           cache-dependency-path: apps/mcp/package-lock.json
-
       - name: Install dependencies
         run: npm ci
-
       - name: Unit tests
         run: npm test

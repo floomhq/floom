@@ -8,7 +8,7 @@ import type { CallToolResult } from "@modelcontextprotocol/sdk/types.js";
 import { z } from "zod";
 import { readCredentials } from "./lib/credentials.js";
 
-const DEFAULT_API_BASE = "https://localhost:8000";
+const DEFAULT_API_BASE = "http://localhost:8000";
 const TERMINAL_RUN_STATUSES = new Set([
   "success",
   "error",
@@ -35,12 +35,17 @@ function apiBase(): string {
   return (process.env.WORKEROS_API_BASE || DEFAULT_API_BASE).replace(/\/+$/, "");
 }
 
-function isCloudApi(): boolean {
-  return /workeros-api\.floom\.dev/i.test(apiBase()) || Boolean(process.env.WORKEROS_API_TOKEN);
+function hostedModeRequested(): boolean {
+  const value = (process.env.WORKEROS_CLOUD || "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
+function isHostedApi(): boolean {
+  return Boolean(process.env.WORKEROS_API_TOKEN) || hostedModeRequested();
 }
 
 function resolvePath(path: string): string {
-  if (!isCloudApi()) return path;
+  if (!isHostedApi()) return path;
   if (path.startsWith("/api/")) return path;
   if (path.startsWith("/auth/")) return path;
   if (path === "/healthz") return path;
@@ -52,10 +57,10 @@ function resolvePath(path: string): string {
 // per-request, so we cache it here instead of reading the creds file each call.
 let resolvedWorkspaceId: string | undefined;
 
-// #1455: the cloud hard-requires x-workeros-workspace on worker WRITES
+// #1455: hosted APIs may require x-workeros-workspace on worker WRITES
 // (WORKEROS_REQUIRE_WORKSPACE_HEADER_FOR_WRITES=1). The CLI's lib/api.ts always
 // sends it; this server used to omit it, so every MCP worker mutation 400'd on
-// cloud while reads/secrets/contexts (which fall back to the PAT's default
+// hosted APIs while reads/secrets/contexts (which fall back to the PAT's default
 // workspace) silently worked - a confusing partial failure. Mirror the CLI:
 // send the header whenever we know the id, in every auth mode.
 function activeWorkspaceId(): string | undefined {

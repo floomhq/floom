@@ -1,11 +1,11 @@
-"""Follow-through for #833/#838/#840 — the workspace-agent MCP surface
+﻿"""Follow-through for #833/#838/#840 — the workspace-agent MCP surface
 (/api/mcp) must enforce the same per-tool gates as /mcp-tools/serve.
 
 RCA (found in adversarial review of the original fix batch): /api/mcp has its
 own dispatcher (_call_workeros_remote_mcp_tool) that routed tools like
 connections.add_mcp and secrets.set with no per-tool check — so the gates
 added to /mcp-tools/serve were bypassable by anyone holding the workspace
-agent token (and, in cloud mode, by member PATs).
+agent token (and, in hosted mode, by member PATs).
 
 Fix: _mcp_access_error is enforced in this surface's tools/list and
 tools/call, with the same audit logging.

@@ -1,7 +1,7 @@
-"""Issue #54 (follow-up to #200): draft-and-create must dedupe worker ids
+﻿"""Issue #54 (follow-up to #200): draft-and-create must dedupe worker ids
 against the REPOSITORY (DB), not just the ephemeral filesystem.
 
-In a multi-tenant deploy (workeros-cloud) worker rows live in the DB scoped by
+In a multi-tenant deploy (a downstream host) worker rows live in the DB scoped by
 workspace, but the worker id is a GLOBAL primary key (``id TEXT PRIMARY KEY``
 on the ``workers`` table). When the LLM author emits an id that already exists
 as a DB row in a DIFFERENT workspace than the request's active workspace, the
@@ -104,7 +104,7 @@ def _mock_openai_response(content: str):
 def client_with_tmp_workers(tmp_path, monkeypatch):
     import worker_registry
     # Empty filesystem view: the colliding id will NOT exist on disk, only
-    # in the repository (the cloud cross-workspace scenario).
+    # in the repository (the hosted cross-workspace scenario).
     monkeypatch.setattr(worker_registry, "WORKERS_DIR", tmp_path)
     from fastapi.testclient import TestClient
     from main import app  # importing main auto-generates a FLOOM_SECRET in env

@@ -1,8 +1,7 @@
-# Workeros Design System
+﻿# Workeros Design System
 
 > Source of truth for the visual system deployed at `localhost:3000`.
-> Engine repo: `floomhq/workeros` (`apps/web/app/globals.css`).  
-> Cloud repo (`floomhq/workeros-cloud`) copies tokens from the engine verbatim — update engine first, then re-sync.
+> Canonical tokens live in `apps/web/app/globals.css`.
 
 ---
 
@@ -324,7 +323,3 @@ Template cards use the same card component as the rest of the app: white bg, 18p
 - **Canonical tokens:** `apps/web/app/globals.css`
 - **Card component:** `apps/web/components/ui/card.tsx`
 - **Button component:** `apps/web/components/ui/button.tsx`
-- **Design rollout brief:** `docs/briefs/s43-design-system-rollout-2026-05-29.md`
-- **V2 overview brief:** `docs/briefs/s45-design-v2-overview-compress-2026-05-29.md`
-- **UI roast (what to avoid):** `docs/audits/ui-roast-2026-05-28/design-roast.md`
-- **Cloud sync note:** `workeros-cloud` copies `globals.css` verbatim from `engine/apps/web/app/globals.css` — update engine first, then re-sync.

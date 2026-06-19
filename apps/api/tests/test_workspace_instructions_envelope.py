@@ -3,7 +3,7 @@
 must be repairable — without mangling legit markdown that happens to start with
 ``{``.
 
-Bug: the Cloud wrapper PUT a JSON envelope to the OSS ``PUT /workspace``, which
+Bug: a hosted wrapper PUT a JSON envelope to the OSS ``PUT /workspace``, which
 stored the raw body verbatim. The literal ``{"content":"..."}`` string then got
 prepended to every agent's system prompt and shown on /assistant.
 """
@@ -89,6 +89,7 @@ def client_and_main(monkeypatch, tmp_path):
 
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("FLOOM_SECRET", "test-secret-envelope")
+    monkeypatch.setenv("WORKEROS_SHARED_SECRET_ROLE", "admin")
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))

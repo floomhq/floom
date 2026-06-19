@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
@@ -1702,7 +1702,7 @@ function WorkersEmptyPrompt({ onSubmit }: { onSubmit: (prompt: string) => void }
 
 
 /**
- * A host-injected top-level view (#1006). workeros-cloud passes its
+ * A host-injected top-level view (#1006). a downstream host passes its
  * cross-tenant "workspace-admin" view here so it can compose the engine
  * `WorkersCollection` instead of forking the whole 869-line component. The
  * host decides visibility (e.g. only pass it when `api.me().is_admin`); the

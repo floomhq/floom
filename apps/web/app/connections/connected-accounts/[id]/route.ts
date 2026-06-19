@@ -1,4 +1,4 @@
-import { NextResponse } from "next/server";
+﻿import { NextResponse } from "next/server";
 
 const API_BASE = process.env.FLOOM_API_BASE || "https://localhost:8000";
 const API_SECRET = process.env.FLOOM_API_SECRET || "";
@@ -6,7 +6,7 @@ const API_SECRET = process.env.FLOOM_API_SECRET || "";
 /**
  * Proxy GET /connections/connected-accounts/:id to the FastAPI service.
  *
- * The Composio API key lives on the FastAPI service, not on Vercel.
+ * The Composio API key lives on the FastAPI service, not on the web host.
  * The FastAPI endpoint GET /connections/:id/account-info handles the Composio call.
  * We accept the internal Floom connection id (NEW-7, 2026-06-02: the raw Composio
  * `ca_*` id is no longer exposed) and validate it via GET /connections before

@@ -1,7 +1,7 @@
 """Public base-URL resolvers (env-driven).
 
 Pure helpers that resolve the externally-visible base URLs for the API, the
-frontend, and short links from environment variables, with production defaults.
+frontend, and short links from environment variables, with local defaults.
 No application state — safe to import anywhere.
 
 Note: the near-duplicate pairs below (_api_public_base / _public_api_base_url and
@@ -25,7 +25,7 @@ def _public_api_base_url() -> str:
         or os.environ.get("WORKEROS_API_BASE")
         or os.environ.get("WORKEROS_API_URL")
         or os.environ.get("WORKERS_API_URL")
-        or "https://api.example.com"
+        or "http://localhost:8000"
     )
     return raw.rstrip("/")
 
@@ -38,7 +38,7 @@ def _api_public_base() -> str:
     return (
         os.environ.get("WORKEROS_API_BASE")
         or os.environ.get("WORKEROS_PUBLIC_API_URL")
-        or "https://api.example.com"
+        or "http://localhost:8000"
     ).rstrip("/")
 
 

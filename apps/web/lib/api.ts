@@ -1,8 +1,7 @@
 // Same-origin proxy base. Defaults to "/api/proxy" for the single-tenant OSS
-// build. The Cloud build serves the dashboard under basePath "/app", where raw
-// fetch() calls are NOT auto-prefixed by basePath, so Cloud sets
-// NEXT_PUBLIC_API_PROXY_BASE="/app/api/proxy". Keeping this an env seam lets the
-// Cloud wrapper consume this file unmodified (no fork).
+// build. Hosted builds can serve the dashboard under a basePath such as "/app";
+// raw fetch() calls are not auto-prefixed by basePath, so hosts can set
+// NEXT_PUBLIC_API_PROXY_BASE="/app/api/proxy" without forking this client.
 import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
 
 export const API_BASE = process.env.NEXT_PUBLIC_API_PROXY_BASE || "/api/proxy";
@@ -1113,9 +1112,9 @@ export const api = {
     },
   },
   // Workspace members (STEP 2). Engine-owned membership: the OSS engine is the
-  // single-owner degenerate case (you = Owner); Cloud serves the same shape with
-  // real members. The role matrix is enforced server-side; the UI only gates
-  // affordances on `my_role`.
+  // single-owner degenerate case (you = Owner); hosted deployments serve the
+  // same shape with real members. The role matrix is enforced server-side; the
+  // UI only gates affordances on `my_role`.
   members: {
     list: () =>
       fetchJson<import("./types").WorkspaceMembersResponse>("/workspace/members"),

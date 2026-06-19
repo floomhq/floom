@@ -1,4 +1,4 @@
-"""Static configuration constants for the WorkerOS API.
+﻿"""Static configuration constants for the WorkerOS API.
 
 These values were previously defined inline in ``main.py``. They are pure data
 (no application state, no FastAPI objects) and are consumed across many request
@@ -18,9 +18,9 @@ import re
 # ---------------------------------------------------------------------------
 
 def _is_cloud_deploy() -> bool:
-    """True when running in multi-tenant cloud mode.
+    """True when running in multi-tenant hosted mode.
 
-    In cloud mode the shared filesystem WORKERS_DIR holds bundles from
+    In hosted mode the shared filesystem WORKERS_DIR holds bundles from
     multiple tenants and MUST NOT be used as a fallback list source for
     any per-user endpoint. Defaults to False when WORKEROS_DEPLOY is unset
     so OSS single-tenant installs keep their first-time UX (empty DB ->

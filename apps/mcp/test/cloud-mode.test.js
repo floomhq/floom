@@ -1,4 +1,4 @@
-import assert from "node:assert/strict";
+﻿import assert from "node:assert/strict";
 import { createServer } from "node:http";
 import { once } from "node:events";
 import { mkdtemp } from "node:fs/promises";
@@ -60,7 +60,7 @@ test("readCredentials back-compat treats legacy schema as OSS mode", async () =>
 test("readCredentials rejects cloud creds missing refresh_token", async () => {
   await withTempHome(async () => {
     await writeCredentials({
-      api_base: "https://api.example.com",
+      api_base: "https://api.workeros.example.com",
       mode: "cloud",
       // refresh_token + supabase_url intentionally omitted
       authed_at: new Date().toISOString(),
@@ -73,7 +73,7 @@ test("readCredentials rejects cloud creds missing refresh_token", async () => {
 test("updateCredentials persists workspace_id without dropping refresh_token", async () => {
   await withTempHome(async () => {
     await writeCredentials({
-      api_base: "https://api.example.com",
+      api_base: "https://api.workeros.example.com",
       mode: "cloud",
       refresh_token: "rt-1",
       supabase_url: "https://abc.supabase.co",
@@ -91,13 +91,13 @@ test("updateCredentials persists workspace_id without dropping refresh_token", a
 
 test("readCredentials accepts cloud PAT from environment", async () => {
   await withTempHome(async () => {
-    process.env.WORKEROS_API_BASE = "https://api.example.com";
+    process.env.WORKEROS_API_BASE = "https://api.workeros.example.com";
     process.env.WORKEROS_API_TOKEN = "floom_pat_123";
     process.env.WORKEROS_WORKSPACE_ID = "ws_env";
     const creds = await readCredentials();
     assert.ok(creds);
     assert.equal(creds.mode, "cloud");
-    assert.equal(creds.api_base, "https://api.example.com");
+    assert.equal(creds.api_base, "https://api.workeros.example.com");
     assert.equal(creds.api_token, "floom_pat_123");
     assert.equal(creds.workspace_id, "ws_env");
   });

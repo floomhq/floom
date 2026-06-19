@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import os
 from functools import lru_cache
@@ -50,7 +50,7 @@ class Repositories(NamedTuple):
     alerts: AlertRepository
     mcp_tools: McpToolRepository
     # Members + per-asset visibility (Members STEP 1). Optional with defaults so a
-    # downstream factory (e.g. workeros-cloud) that predates these fields keeps
+    # downstream factory (for example, a downstream host) that predates these fields keeps
     # constructing Repositories(...) without them; it can register its own impls
     # when it ships member/visibility support.
     members: Optional[WorkspaceMemberRepository] = None
@@ -85,7 +85,7 @@ def _local_repositories() -> Repositories:
 
 # Registry of Repositories factories keyed by WORKEROS_DEPLOY value.
 # workeros (OSS) ships with "local" (SQLite) built in.
-# workeros-cloud registers its Supabase-backed Repositories at startup via
+# a downstream host registers its Supabase-backed Repositories at startup via
 # register_repositories("cloud", ...) — keeping Supabase deps out of the
 # OSS engine entirely.
 _repositories_factories: dict[str, Callable[[], Repositories]] = {
@@ -98,7 +98,7 @@ def register_repositories(
 ) -> None:
     """Register a Repositories factory for a given WORKEROS_DEPLOY value.
 
-    Called by downstream packages (e.g. workeros-cloud) at startup to plug
+    Called by downstream packages (for example, a downstream host) at startup to plug
     in their own repository implementations without modifying the OSS
     engine.
     """

@@ -24,7 +24,7 @@ permissions:
 
 jobs:
   release-please:
-    runs-on: [self-hosted, linux, x64, workeros-ci]
+    runs-on: ubuntu-latest
     steps:
       - uses: googleapis/release-please-action@v4
         with:

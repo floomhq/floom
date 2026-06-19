@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import importlib
 import sys
@@ -221,7 +221,7 @@ def test_body_limit_helpers_are_mount_prefix_agnostic(monkeypatch, tmp_path):
 
 
 def test_api_mounted_context_upload_not_413_for_one_mb(monkeypatch, tmp_path):
-    """B10 (cloud repro): with the engine mounted under /api (as workeros-cloud
+    """B10 (hosted repro): with the engine mounted under /api (as a downstream host
     does), a >256KB upload to /api/contexts/x/upload must NOT be rejected with
     413 by the body-size middleware. It should reach the route (auth/404),
     never 413."""

@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import importlib
 import os
@@ -37,7 +37,7 @@ def _load_api(
     monkeypatch.setenv("COMPOSIO_API_KEY", "cmp-test")
     monkeypatch.setenv("COMPOSIO_WEBHOOK_SIGNING_KEY", "whsec-test")
     monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://localhost:3000")
-    monkeypatch.setenv("ALLOWED_ORIGINS", "https://localhost:3000,https://app.example.com")
+    monkeypatch.setenv("ALLOWED_ORIGINS", "https://localhost:3000,https://workeros.example.com")
     monkeypatch.delenv("ALLOWED_ORIGIN_REGEX", raising=False)
     if upload_hourly_cap_bytes is None:
         monkeypatch.delenv("WORKEROS_UPLOAD_HOURLY_CAP_BYTES", raising=False)

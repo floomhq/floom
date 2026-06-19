@@ -3,7 +3,7 @@
 
 ROOT CAUSE
     The OSS ``PUT /workspace`` handler stored the raw request body verbatim as
-    ``workspace.md``. The Cloud wrapper (and some clients) PUT a JSON envelope
+    ``workspace.md``. A hosted wrapper (and some clients) PUT a JSON envelope
     ``{"content": "# ..."}`` instead of raw ``text/markdown``. The JSON string was
     therefore stored literally as the instruction BODY and then prepended to every
     agent's system prompt — corrupting all agent runs and the /assistant page.

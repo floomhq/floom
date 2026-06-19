@@ -32,7 +32,7 @@ Issue fix option #2 ("automatic retry on abandoned"), fully wired and unit-teste
   `WORKEROS_AUTO_REQUEUE_ABANDONED_RUNS` (default on) tune/disable it.
 - Reuses the existing cross-backend retry plumbing (`_schedule_retry` ->
   `repos.runs.create(retry_of_run_id=...)` -> `start_run`), so it works on both
-  the SQLite and Supabase (cloud) repositories with **no schema/Protocol change**.
+  the SQLite and Supabase repositories with **no schema/Protocol change**.
 - Tests: `tests/db/test_run_reaper.py` (requeue within budget, no-loop on a
   `restart_retry`, disable flag) + existing retry/reaper tests still green.
 
