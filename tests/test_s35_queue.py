@@ -113,13 +113,13 @@ def _get_client(main):
 class TestSemaphoreEnvVar:
     """WORKEROS_MAX_CONCURRENT_RUNS controls the semaphore cap."""
 
-    def test_default_cap_is_18(self, monkeypatch):
+    def test_default_cap_is_6(self, monkeypatch):
         monkeypatch.delenv("WORKEROS_MAX_CONCURRENT_RUNS", raising=False)
         for name in list(sys.modules):
             if name == "run_service":
                 sys.modules.pop(name, None)
         rs = importlib.import_module("run_service")
-        assert rs._max_concurrent_runs() == 18
+        assert rs._max_concurrent_runs() == 6
 
     def test_env_var_overrides_cap(self, monkeypatch):
         monkeypatch.setenv("WORKEROS_MAX_CONCURRENT_RUNS", "5")

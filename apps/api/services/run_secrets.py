@@ -10,6 +10,7 @@ from __future__ import annotations
 
 import logging
 import re
+import time
 from pathlib import Path
 from typing import Dict
 
@@ -138,6 +139,7 @@ def get_secrets_for_worker(
     local user, so behaviour is unchanged.
     """
     from run_service import _repos, _worker_owner_id, _get_worker_config_for_run
+    from run_service import _cache_ttl_seconds, _secret_cache_by_key, _secret_cache_lock
     repos_obj = _repos(repos)
     true_owner_id = _worker_owner_id(worker_id, repos_obj)
     # Resolve strictly against the worker's real owner. Only fall back to the
@@ -153,12 +155,24 @@ def get_secrets_for_worker(
             user_id,
             true_owner_id,
         )
+    ttl = _cache_ttl_seconds("WORKEROS_RUN_SECRET_CACHE_TTL_SECONDS", 10.0)
+    cache_key = (worker_id, owner_id)
+    if ttl > 0:
+        now = time.monotonic()
+        with _secret_cache_lock:
+            cached = _secret_cache_by_key.get(cache_key)
+            if cached is not None and cached[0] > now:
+                return dict(cached[1])
     _load_runtime_env_files()
     config = _get_worker_config_for_run(worker_id, repos_obj)
     names = set(config.secrets if config else [])
     names.update(_secret_names_from_db(owner_id, repos_obj))
     # DO NOT union env-file keys here. They include platform infra secrets.
     allowed_names = [name for name in names if name not in _PLATFORM_SECRET_NAMES]
-    return repos_obj.secrets.resolve(user_id=owner_id, names=allowed_names)
+    resolved = repos_obj.secrets.resolve(user_id=owner_id, names=allowed_names)
+    if ttl > 0:
+        with _secret_cache_lock:
+            _secret_cache_by_key[cache_key] = (time.monotonic() + ttl, dict(resolved))
+    return resolved
 
 

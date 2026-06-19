@@ -18,15 +18,15 @@ from datetime import datetime, timedelta, timezone
 
 # ---------------------------------------------------------------------------
 # Concurrency gate — E2B has a hard cap of 20 concurrent sandboxes.
-# We cap at WORKEROS_MAX_CONCURRENT_RUNS (default 18) to leave headroom for
-# the workspace-agent /chat lane and manual smokes.
+# Default concurrency is 6 because executor prep is still Python/GIL-bound
+# inside one worker process. Operators can raise it after measuring.
 # ---------------------------------------------------------------------------
 
 def _max_concurrent_runs() -> int:
     try:
-        return max(1, int(os.environ.get("WORKEROS_MAX_CONCURRENT_RUNS", "18")))
+        return max(1, int(os.environ.get("WORKEROS_MAX_CONCURRENT_RUNS", "6")))
     except ValueError:
-        return 18
+        return 6
 
 # Semaphore is initialised lazily on first use so that tests can override the
 # env-var before importing this module.
@@ -129,6 +129,26 @@ import contextlib
 
 logger = logging.getLogger("floom.run_service")
 
+
+def workeros_role() -> str:
+    """Runtime role for process split.
+
+    ``all`` preserves OSS/local behavior. Hosted deployments can run separate
+    processes with ``WORKEROS_ROLE=web`` and ``WORKEROS_ROLE=worker`` against the
+    same DB: web accepts requests and creates queued runs; worker drains and
+    executes them.
+    """
+    raw = (os.environ.get("WORKEROS_ROLE") or os.environ.get("WORKEROS_PROCESS_ROLE") or "all").strip().lower()
+    if raw in {"api", "web", "http"}:
+        return "web"
+    if raw in {"worker", "executor", "runner"}:
+        return "worker"
+    return "all"
+
+
+def execution_role_enabled() -> bool:
+    return workeros_role() in {"all", "worker"}
+
 # Run notifications (failure email + SSRF-pinned alert webhooks) moved to
 # services.run_notifications; re-imported for backward compatibility.
 from services.run_notifications import (
@@ -161,6 +181,77 @@ UNKNOWN_RUN_ERROR_MESSAGE = (
 _run_execution_context_provider: Optional[Callable[[str], "contextlib.AbstractContextManager[Any]"]] = None
 _scheduled_retry_keys: set[tuple[str, int, str]] = set()
 _scheduled_retry_lock = threading.Lock()
+
+
+def _cache_ttl_seconds(env_name: str, default: float) -> float:
+    try:
+        return max(0.0, float(os.environ.get(env_name, str(default))))
+    except ValueError:
+        return default
+
+
+_recipe_cache_lock = threading.Lock()
+_recipe_cache_by_worker: dict[str, tuple[float, Optional[tuple[str | None, WorkerConfig, Optional[Dict[str, Any]]]]]] = {}
+_secret_cache_lock = threading.Lock()
+_secret_cache_by_key: dict[tuple[str, str], tuple[float, Dict[str, str]]] = {}
+
+
+@dataclass(frozen=True)
+class _PendingLog:
+    user_id: str
+    run_id: str
+    level: str
+    message: str
+    timestamp: str
+    trace_id: str | None
+
+
+_log_queue: "queue.Queue[_PendingLog | None]" = queue.Queue(maxsize=10000)
+_log_flush_thread: Optional[threading.Thread] = None
+_log_flush_lock = threading.Lock()
+_log_flush_stop = threading.Event()
+
+
+def _async_log_flush_enabled() -> bool:
+    raw = (os.environ.get("WORKEROS_ASYNC_LOG_FLUSH") or "").strip().lower()
+    return raw in {"1", "true", "yes", "on"}
+
+
+def _log_flush_batch_size() -> int:
+    try:
+        return max(1, int(os.environ.get("WORKEROS_LOG_FLUSH_BATCH_SIZE", "100")))
+    except ValueError:
+        return 100
+
+
+def _log_flush_interval_seconds() -> float:
+    try:
+        return max(0.01, float(os.environ.get("WORKEROS_LOG_FLUSH_INTERVAL_SECONDS", "0.25")))
+    except ValueError:
+        return 0.25
+
+
+def invalidate_worker_run_cache(worker_id: str | None = None) -> None:
+    """Drop per-process run hot-path caches after worker recipe mutations."""
+    with _recipe_cache_lock:
+        if worker_id:
+            _recipe_cache_by_worker.pop(worker_id, None)
+        else:
+            _recipe_cache_by_worker.clear()
+    if worker_id:
+        with _secret_cache_lock:
+            for key in [k for k in _secret_cache_by_key if k[0] == worker_id]:
+                _secret_cache_by_key.pop(key, None)
+
+
+def invalidate_secret_run_cache(user_id: str | None = None) -> None:
+    """Drop per-process resolved secret caches after secret mutations."""
+    with _secret_cache_lock:
+        if user_id:
+            for key in [k for k in _secret_cache_by_key if k[1] == user_id]:
+                _secret_cache_by_key.pop(key, None)
+        else:
+            _secret_cache_by_key.clear()
 
 
 def set_run_execution_context_provider(
@@ -448,7 +539,16 @@ def _load_worker_recipe(
     repos: Repositories | None = None,
 ) -> Optional[tuple[str | None, WorkerConfig, Optional[Dict[str, Any]]]]:
     """Load the executable recipe from the repository layer plus instance row."""
+    ttl = _cache_ttl_seconds("WORKEROS_RUN_RECIPE_CACHE_TTL_SECONDS", 10.0)
+    if ttl > 0:
+        now = time.monotonic()
+        with _recipe_cache_lock:
+            cached = _recipe_cache_by_worker.get(worker_id)
+            if cached is not None and cached[0] > now:
+                return cached[1]
+
     repos_obj = _repos(repos)
+    loaded: Optional[tuple[str | None, WorkerConfig, Optional[Dict[str, Any]]]] = None
     try:
         recipe = repos_obj.workers.get_recipe(worker_id=worker_id)
         if recipe:
@@ -462,7 +562,7 @@ def _load_worker_recipe(
                     fs_config = get_worker_config(worker_id)
                     if fs_config and fs_config.calls:
                         config = config.model_copy(update={"calls": fs_config.calls})
-                return (
+                loaded = (
                     recipe.get("owner_id"),
                     config,
                     {
@@ -471,13 +571,24 @@ def _load_worker_recipe(
                         "enabled": bool(recipe.get("enabled", True)),
                     },
                 )
+                if ttl > 0:
+                    with _recipe_cache_lock:
+                        _recipe_cache_by_worker[worker_id] = (time.monotonic() + ttl, loaded)
+                return loaded
     except Exception:
         logger.exception("Failed to load worker recipe from database for %s", worker_id)
 
     config = get_worker_config(worker_id)
     if not config:
+        if ttl > 0:
+            with _recipe_cache_lock:
+                _recipe_cache_by_worker[worker_id] = (time.monotonic() + ttl, None)
         return None
-    return (_worker_owner_id(worker_id, repos_obj), config, None)
+    loaded = (_worker_owner_id(worker_id, repos_obj), config, None)
+    if ttl > 0:
+        with _recipe_cache_lock:
+            _recipe_cache_by_worker[worker_id] = (time.monotonic() + ttl, loaded)
+    return loaded
 
 
 def _get_worker_config_for_run(
@@ -635,6 +746,130 @@ def create_run(
     return run_id
 
 
+def _persist_log_batch(batch: list[_PendingLog], repos: Repositories | None = None) -> None:
+    if not batch:
+        return
+    repos_obj = _repos(repos)
+    add_logs = getattr(repos_obj.runs, "add_logs", None)
+    if callable(add_logs):
+        add_logs(rows=[
+            {
+                "user_id": item.user_id,
+                "run_id": item.run_id,
+                "level": item.level,
+                "message": item.message,
+                "timestamp": item.timestamp,
+                "trace_id": item.trace_id,
+            }
+            for item in batch
+        ])
+        return
+    for item in batch:
+        repos_obj.runs.add_log(
+            user_id=item.user_id,
+            run_id=item.run_id,
+            level=item.level,
+            message=item.message,
+            timestamp=item.timestamp,
+            trace_id=item.trace_id,
+        )
+
+
+def _log_flush_loop() -> None:
+    logger.info("Async run-log flush loop started")
+    batch_size = _log_flush_batch_size()
+    interval = _log_flush_interval_seconds()
+    pending: list[_PendingLog] = []
+    while not _log_flush_stop.is_set():
+        try:
+            item = _log_queue.get(timeout=interval)
+        except queue.Empty:
+            item = None
+        if item is None:
+            if pending:
+                try:
+                    _persist_log_batch(pending)
+                except Exception as exc:
+                    logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
+                pending = []
+            _log_queue.task_done()
+            continue
+        pending.append(item)
+        _log_queue.task_done()
+        if len(pending) >= batch_size:
+            try:
+                _persist_log_batch(pending)
+            except Exception as exc:
+                logger.warning("Async run-log flush failed for %d row(s): %s", len(pending), exc)
+            pending = []
+
+    # Final best-effort drain on shutdown.
+    while True:
+        try:
+            item = _log_queue.get_nowait()
+        except queue.Empty:
+            break
+        if item is not None:
+            pending.append(item)
+        _log_queue.task_done()
+        if len(pending) >= batch_size:
+            try:
+                _persist_log_batch(pending)
+            except Exception as exc:
+                logger.warning("Async run-log shutdown flush failed for %d row(s): %s", len(pending), exc)
+            pending = []
+    if pending:
+        try:
+            _persist_log_batch(pending)
+        except Exception as exc:
+            logger.warning("Async run-log shutdown flush failed for %d row(s): %s", len(pending), exc)
+
+
+def start_log_flush_loop() -> None:
+    global _log_flush_thread
+    if not _async_log_flush_enabled():
+        return
+    with _log_flush_lock:
+        if _log_flush_thread is not None and _log_flush_thread.is_alive():
+            return
+        _log_flush_stop.clear()
+        _log_flush_thread = threading.Thread(
+            target=_log_flush_loop,
+            daemon=True,
+            name="workeros-log-flush",
+        )
+        _log_flush_thread.start()
+
+
+def stop_log_flush_loop(timeout: float = 5.0) -> None:
+    global _log_flush_thread
+    _log_flush_stop.set()
+    try:
+        _log_queue.put_nowait(None)
+    except queue.Full:
+        pass
+    with _log_flush_lock:
+        thread = _log_flush_thread
+    if thread is not None:
+        thread.join(timeout=timeout)
+
+
+def flush_run_logs(run_id: str | None = None, *, timeout: float = 2.0) -> None:
+    """Best-effort barrier for tests/terminal transitions when async logging is on."""
+    if not _async_log_flush_enabled():
+        return
+    start_log_flush_loop()
+    try:
+        _log_queue.put_nowait(None)
+    except queue.Full:
+        pass
+    deadline = time.monotonic() + timeout
+    while time.monotonic() < deadline:
+        if _log_queue.unfinished_tasks == 0:
+            return
+        time.sleep(0.01)
+
+
 def add_log(
     run_id: str,
     message: str,
@@ -653,14 +888,36 @@ def add_log(
             return
         owner_id, _worker_id = scope
     ts = _now_iso()
-    repos_obj.runs.add_log(
-        user_id=owner_id,
-        run_id=run_id,
-        level=level,
-        message=message,
-        timestamp=ts,
-        trace_id=trace_id,
-    )
+    if _async_log_flush_enabled():
+        start_log_flush_loop()
+        try:
+            _log_queue.put_nowait(_PendingLog(
+                user_id=owner_id,
+                run_id=run_id,
+                level=level,
+                message=message,
+                timestamp=ts,
+                trace_id=trace_id,
+            ))
+        except queue.Full:
+            logger.warning("Async run-log queue full; writing log synchronously for run %s", run_id)
+            repos_obj.runs.add_log(
+                user_id=owner_id,
+                run_id=run_id,
+                level=level,
+                message=message,
+                timestamp=ts,
+                trace_id=trace_id,
+            )
+    else:
+        repos_obj.runs.add_log(
+            user_id=owner_id,
+            run_id=run_id,
+            level=level,
+            message=message,
+            timestamp=ts,
+            trace_id=trace_id,
+        )
     _publish_sse(run_id, {
         "type": "log",
         "run_id": run_id,
@@ -723,6 +980,13 @@ def update_run_status(
         error=error,
         error_code=error_code,
     )
+    if status in {
+        RunStatus.COMPLETED.value,
+        RunStatus.FAILED.value,
+        RunStatus.CANCELLED.value,
+        RunStatus.PENDING_APPROVAL.value,
+    }:
+        flush_run_logs(run_id)
 
     if worker_id and status in {RunStatus.COMPLETED.value, RunStatus.FAILED.value}:
         # #793/#795: persist per-run cost at terminal status (best-effort) so
@@ -1357,6 +1621,9 @@ def _drain_one_batch() -> None:
 def start_drain_loop() -> None:
     """Start the background queue drain thread (idempotent)."""
     global _drain_thread
+    if not execution_role_enabled():
+        logger.info("Skipping queue drain loop start because WORKEROS_ROLE=%s", workeros_role())
+        return
     with _drain_lock:
         if _drain_thread is not None and _drain_thread.is_alive():
             return
@@ -1396,6 +1663,9 @@ def _run_reaper_loop() -> None:
 def start_run_reaper_loop() -> None:
     """Start the abandoned-run reaper thread (idempotent)."""
     global _run_reaper_thread
+    if not execution_role_enabled():
+        logger.info("Skipping run reaper loop start because WORKEROS_ROLE=%s", workeros_role())
+        return
     with _run_reaper_lock:
         if _run_reaper_thread is not None and _run_reaper_thread.is_alive():
             return

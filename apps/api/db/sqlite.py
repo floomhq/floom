@@ -51,6 +51,24 @@ _UNKNOWN_RUN_ERROR_MESSAGE = (
 logger = logging.getLogger("floom.db.sqlite")
 
 
+def _invalidate_run_worker_cache(worker_id: str | None = None) -> None:
+    try:
+        from run_service import invalidate_worker_run_cache
+
+        invalidate_worker_run_cache(worker_id)
+    except Exception:
+        logger.debug("Failed to invalidate run worker cache", exc_info=True)
+
+
+def _invalidate_run_secret_cache(user_id: str | None = None) -> None:
+    try:
+        from run_service import invalidate_secret_run_cache
+
+        invalidate_secret_run_cache(user_id)
+    except Exception:
+        logger.debug("Failed to invalidate run secret cache", exc_info=True)
+
+
 def _normalize_failed_error_fields(
     *,
     run_id: str,
@@ -1000,6 +1018,7 @@ class SqliteWorkerRepository:
         created = self.get(user_id=user_id, worker_id=worker_id)
         if created is None:
             raise RuntimeError(f"failed to create worker {worker_id}")
+        _invalidate_run_worker_cache(worker_id)
         return created
 
     def upsert(self, *, user_id: str, **fields: Any) -> dict[str, Any]:
@@ -1090,6 +1109,7 @@ class SqliteWorkerRepository:
         upserted = self.get(user_id=user_id, worker_id=worker_id)
         if upserted is None:
             raise RuntimeError(f"failed to upsert worker {worker_id}")
+        _invalidate_run_worker_cache(worker_id)
         return upserted
 
     def update(self, *, user_id: str, worker_id: str, **fields: Any) -> dict[str, Any] | None:
@@ -1158,7 +1178,10 @@ class SqliteWorkerRepository:
                     f"UPDATE workers SET {', '.join(updates)} WHERE id = ? AND owner_id = ?",
                     tuple(params),
                 )
-        return self.get(user_id=user_id, worker_id=worker_id)
+        updated = self.get(user_id=user_id, worker_id=worker_id)
+        if updated is not None and (updates or manifest_json is not None or bundle_path is not None):
+            _invalidate_run_worker_cache(worker_id)
+        return updated
 
     def delete(self, *, user_id: str, worker_id: str) -> bool:
         with get_db() as conn:
@@ -1166,7 +1189,10 @@ class SqliteWorkerRepository:
                 "DELETE FROM workers WHERE id = ? AND owner_id = ?",
                 (worker_id, user_id),
             )
-            return cursor.rowcount > 0
+            deleted = cursor.rowcount > 0
+        if deleted:
+            _invalidate_run_worker_cache(worker_id)
+        return deleted
 
     def list_recent_runs(self, *, user_id: str, worker_id: str, limit: int = 10) -> list[dict[str, Any]]:
         with get_db() as conn:
@@ -1394,6 +1420,7 @@ class SqliteWorkerRepository:
                 "DELETE FROM skill_versions WHERE id = ?",
                 (skill_version_id,),
             )
+        _invalidate_run_worker_cache()
 
     def get_recipe(self, *, worker_id: str, user_id: str | None = None) -> dict[str, Any] | None:
         cache = _recipe_cache.get()
@@ -2511,6 +2538,36 @@ class SqliteRunRepository:
             if cursor.rowcount == 0:
                 raise ValueError(f"run {run_id} not found for {user_id}")
 
+    def add_logs(self, *, rows: Iterable[dict[str, Any]]) -> None:
+        batch = [
+            (
+                row["run_id"],
+                row["level"],
+                row["message"],
+                row["timestamp"],
+                row.get("trace_id"),
+                row["run_id"],
+                row["user_id"],
+            )
+            for row in rows
+        ]
+        if not batch:
+            return
+        with get_db() as conn:
+            conn.executemany(
+                """
+                INSERT INTO logs (run_id, level, message, timestamp, trace_id)
+                SELECT ?, ?, ?, ?, ?
+                WHERE EXISTS (
+                    SELECT 1
+                    FROM runs r
+                    JOIN workers w ON w.id = r.worker_id
+                    WHERE r.id = ? AND w.owner_id = ?
+                )
+                """,
+                batch,
+            )
+
     def list_logs(
         self,
         *,
@@ -3411,6 +3468,7 @@ class SqliteSecretRepository:
         item = self.get(user_id=user_id, name=name)
         if item is None:
             raise RuntimeError(f"failed to set secret {name}")
+        _invalidate_run_secret_cache(user_id)
         return item
 
     def delete(self, *, user_id: str, name: str) -> bool:
@@ -3420,6 +3478,7 @@ class SqliteSecretRepository:
                 "DELETE FROM secrets WHERE user_id = ? AND name = ?",
                 (user_id, name),
             )
+        _invalidate_run_secret_cache(user_id)
         return removed
 
     def read_value(self, *, user_id: str, name: str) -> str | None:
