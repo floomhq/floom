@@ -2,7 +2,7 @@
 
 import { useCallback, useContext, useEffect, useRef, useState } from "react";
 import { usePathname, useSearchParams } from "next/navigation";
-import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
+import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, MessageCircle, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
 import {
@@ -1217,24 +1217,25 @@ export function EmilyMobileSheet() {
   const assistantName = useAssistantName();
   const pathname = usePathname();
   const isHomeRoute = pathname === "/" || pathname === "/overview";
-  // HOME (Federico 2026-06-19): on mobile the home is the SAME real Emily — the
-  // bottom sheet opens by default on the home route so the home greeting + pulse
-  // + pills render in Emily's empty state (homeMode), seeding Emily's composer.
-  // Off the home route it stays a tap-to-open FAB as before.
+  // MOBILE Emily (Federico 2026-06-19): on mobile the page pane shows the
+  // Workers list (the home pane) and Emily lives behind a clearly-labeled
+  // floating "Ask <assistant>" FAB. We do NOT auto-open the sheet — an aggressive
+  // auto-open hid the FAB and left no reliable affordance to reach Emily (#1544).
+  // The user taps the FAB to open the SAME real Emily, sized for the sheet; on
+  // the home route it opens in homeMode (greeting + pulse + pills + composer).
+  // Closing returns to the Workers list behind it.
   const [open, setOpen] = useState(false);
-  useEffect(() => {
-    if (isHomeRoute) setOpen(true);
-  }, [isHomeRoute]);
   return (
     <>
       {!open && (
         <button
           type="button"
           onClick={() => setOpen(true)}
-          aria-label={`Open ${assistantName}`}
-          className="fixed bottom-4 right-4 z-40 flex size-12 items-center justify-center rounded-[var(--radius-pill)] bg-background shadow-lg [border:var(--bd-card)]"
+          aria-label={`Ask ${assistantName}`}
+          className="fixed bottom-4 right-4 z-40 flex items-center gap-2 rounded-[var(--radius-pill)] bg-background py-2.5 pl-3 pr-4 shadow-lg [border:var(--bd-card)]"
         >
-          <EmilyAvatar size="sm" />
+          <MessageCircle className="size-5 text-[var(--text-primary)]" />
+          <span className="text-sm font-semibold leading-none text-[var(--text-primary)]">Ask {assistantName}</span>
         </button>
       )}
       {open && (

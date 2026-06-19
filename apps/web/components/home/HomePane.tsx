@@ -24,11 +24,11 @@ export function HomePane() {
   const isDesktop = useIsDesktop();
 
   // MOBILE home (Federico 2026-06-19): on mobile, Emily is the bottom sheet
-  // (EmilyMobileSheet, auto-opened on the home route) — it owns its own overlay
-  // and never hides this pane via the desktop `emilyFull` path. So this pane must
-  // ALWAYS show the Workers list on mobile (the same one /workers uses), never the
-  // aria-hidden radar placeholder. Closing the sheet then reveals this list, never
-  // a blank radar.
+  // (EmilyMobileSheet) reached via a floating "Ask Emily" FAB — it owns its own
+  // overlay and never hides this pane via the desktop `emilyFull` path. So this
+  // pane must ALWAYS show the Workers list on mobile (the same one /workers uses),
+  // never the aria-hidden radar placeholder. The FAB sits over this list; opening
+  // the sheet covers it, closing reveals it again — never a blank radar.
   if (!isDesktop) {
     return <WorkersCollection initialWorkers={[]} />;
   }
