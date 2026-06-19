@@ -12,6 +12,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { KeyRound, TestTube2, Trash2, Plus, Check, X, ChevronDown } from "lucide-react";
 import { toast } from "sonner";
+import { ConnectionsChips } from "@/components/connections/ConnectionsChips";
 import { formatRelativeTime } from "@/components/connections/connection-data";
 import { computeIsAdmin, useIsAdmin } from "@/lib/use-is-admin";
 import type { CurrentUser, SecretItem } from "@/lib/types";
@@ -180,6 +181,7 @@ function SecretsContent() {
             Manage environment secrets for your workers. Values are write-only.
           </p>
         </header>
+        <ConnectionsChips />
         <Card className="[border:var(--bd-card)] shadow-none bg-card">
           <CardContent className="py-8 text-center text-sm text-muted-foreground">
             <KeyRound className="mx-auto mb-3 h-5 w-5 opacity-60" />
@@ -193,9 +195,9 @@ function SecretsContent() {
 
   return (
     <div className="space-y-6">
-      {/* Secrets lives under /connections/secrets (P2-9), reached from the
-          Integrations sidebar sub-item (round-09 batch2: the in-page tab row was
-          dropped in favour of proper IA — Browse=button, Secrets=sidebar). */}
+      {/* Secrets lives under /connections/secrets (P2-9) and shares the
+          Connections chip nav (Federico 2026-06-19: "the chips to filter are
+          enough" — the in-page tab row became chip-style filter nav). */}
       <header className="flex flex-col gap-3 sm:flex-row sm:items-start sm:justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight">Secrets</h1>
@@ -213,6 +215,7 @@ function SecretsContent() {
           Add secret
         </Button>
       </header>
+      <ConnectionsChips />
 
       {addingOpen && (
         <Card className="[border:var(--bd-card)] shadow-none bg-card">

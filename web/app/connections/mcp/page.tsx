@@ -22,6 +22,7 @@ import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
 import { Textarea } from "@/components/ui/textarea";
+import { ConnectionsChips } from "@/components/connections/ConnectionsChips";
 import { ListLoading, ListEmpty, ListError } from "@/components/collection/CollectionStates";
 import { api } from "@/lib/api";
 import type { ConnectionItem, SecretItem } from "@/lib/types";
@@ -507,6 +508,8 @@ export default function McpConnectionsPage() {
           your workers can call.
         </p>
       </header>
+
+      <ConnectionsChips />
 
       {/* ============================================================= */}
       {/* Concept A — Use Floom Workers IN your AI client (secondary)   */}

@@ -1,12 +1,14 @@
-// Round-09 batch2 (Federico 2026-06-18): drop the Connections in-page tab row;
-// proper IA — Browse=button on /connections, Secrets=sidebar sub-item, MCP=the
-// existing sidebar popup (no duplicate nav). Proves:
-//   1. ConnectionsCollection renders a primary "Browse apps" CTA (→
-//      /connections/browse) and NO in-page tab nav ("Integrations sections").
-//   2. The sidebar NavLinks renders a Secrets sub-item under Integrations
-//      (→ /connections/secrets).
+// Connections IA (Federico 2026-06-19): the four Connections surfaces
+// (Connected / Browse apps / MCP / Secrets) share a CHIP-style segmented nav
+// (ConnectionsChips) at the top of each route — "the chips to filter are
+// enough". This reverts the round-09 batch2 IA (Browse=button on /connections,
+// Secrets=sidebar sub-item). Proves:
+//   1. ConnectionsCollection renders the chip nav (4 chips, aria-label
+//      "Integrations sections") and NO standalone "Browse apps" CTA button.
+//   2. The sidebar NavLinks has Integrations as a SINGLE nav row, with NO
+//      Secrets sub-item (Secrets lives in the chip nav, not the sidebar).
 import { describe, it, expect, vi, beforeEach } from "vitest";
-import { render, screen } from "@testing-library/react";
+import { render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
 
@@ -31,8 +33,8 @@ function TestQueryProvider({ children }: { children: ReactNode }) {
 
 beforeEach(() => vi.clearAllMocks());
 
-describe("Connections IA — no tab row, Browse is a button", () => {
-  it("ConnectionsCollection shows a Browse apps CTA and NO in-page tab nav", async () => {
+describe("Connections IA — chip nav, not a tab row or Browse button", () => {
+  it("ConnectionsCollection renders the 4-chip surface nav and NO Browse-button CTA", async () => {
     const { default: ConnectionsCollection } = await import(
       "@/app/connections/ConnectionsCollection"
     );
@@ -42,17 +44,29 @@ describe("Connections IA — no tab row, Browse is a button", () => {
       </TestQueryProvider>,
     );
 
-    // Primary discovery CTA → the catalogue.
-    const browse = await screen.findByRole("link", { name: /browse apps/i });
+    // The chip nav (aria-label="Integrations sections") with all 4 surfaces.
+    const chipNav = await screen.findByRole("navigation", { name: /integrations sections/i });
+    const connected = within(chipNav).getByRole("link", { name: /^connected$/i });
+    expect(connected).toHaveAttribute("href", "/connections");
+    const browse = within(chipNav).getByRole("link", { name: /browse apps/i });
     expect(browse).toHaveAttribute("href", "/connections/browse");
+    const mcp = within(chipNav).getByRole("link", { name: /^mcp$/i });
+    expect(mcp).toHaveAttribute("href", "/connections/mcp");
+    const secrets = within(chipNav).getByRole("link", { name: /^secrets$/i });
+    expect(secrets).toHaveAttribute("href", "/connections/secrets");
+    expect(within(chipNav).getAllByRole("link")).toHaveLength(4);
 
-    // The old shared tab strip (aria-label="Integrations sections") is gone.
-    expect(screen.queryByRole("navigation", { name: /integrations sections/i })).toBeNull();
+    // The active chip ("Connected" on /connections) is emphasized via .on.
+    expect(connected.className).toContain("on");
+
+    // The option-A standalone "Browse apps" CTA button is gone — the only
+    // "Browse apps" link is the chip inside the surface nav.
+    expect(screen.getAllByRole("link", { name: /browse apps/i })).toHaveLength(1);
   });
 });
 
-describe("Sidebar IA — Secrets is a sub-item under Integrations", () => {
-  it("NavLinks renders a Secrets sub-item linking to /connections/secrets", async () => {
+describe("Sidebar IA — Integrations is a single nav row, no Secrets sub-item", () => {
+  it("NavLinks has no Secrets sidebar sub-item", async () => {
     vi.doMock("@/lib/useApprovalsSync", () => ({ useApprovalsCount: () => 0 }));
     vi.doMock("@/lib/query/prefetch", () => ({
       prefetchRouteData: vi.fn(),
@@ -68,7 +82,7 @@ describe("Sidebar IA — Secrets is a sub-item under Integrations", () => {
     const integrations = screen.getByRole("link", { name: /integrations/i });
     expect(integrations).toHaveAttribute("href", "/connections");
 
-    const secrets = screen.getByRole("link", { name: /secrets/i });
-    expect(secrets).toHaveAttribute("href", "/connections/secrets");
+    // The option-A Secrets sidebar sub-item is reverted: no Secrets link here.
+    expect(screen.queryByRole("link", { name: /^secrets$/i })).toBeNull();
   });
 });
