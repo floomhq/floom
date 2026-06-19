@@ -643,23 +643,31 @@ export const api = {
   // A 401/403 surfaces as an inline "wrong password" in the UI (the proxy path
   // is allow-listed in isSignedApprovalProxyPath, so it never redirects to /login).
   review: {
-    publicGet: (token: string, password?: string) => {
-      const qs = password ? `?password=${encodeURIComponent(password)}` : "";
+    publicGet: (token: string, password?: string, reviewerToken?: string) => {
+      const headers = new Headers();
+      if (password) headers.set("x-review-pack-password", password);
+      if (reviewerToken) headers.set("x-review-pack-reviewer-token", reviewerToken);
       return fetchJson<import("./types").ReviewPackPublicResponse>(
-        `/review/public/${encodeURIComponent(token)}${qs}`,
+        `/review/public/${encodeURIComponent(token)}`,
+        { headers },
       );
     },
-    publicMyVotes: (token: string, reviewerKey: string, password?: string) => {
-      const qs = new URLSearchParams({ reviewer_key: reviewerKey });
-      if (password) qs.set("password", password);
+    publicMyVotes: (token: string, reviewerToken: string, password?: string) => {
+      const headers = new Headers({ "x-review-pack-reviewer-token": reviewerToken });
+      if (password) headers.set("x-review-pack-password", password);
       return fetchJson<import("./types").ReviewPackFeedbackResponse>(
-        `/review/public/${encodeURIComponent(token)}/feedback?${qs.toString()}`,
+        `/review/public/${encodeURIComponent(token)}/feedback`,
+        { headers },
       );
     },
-    publicFeedback: (token: string, input: import("./types").ReviewPackFeedbackInput) =>
+    publicFeedback: (token: string, reviewerToken: string, input: import("./types").ReviewPackFeedbackInput) =>
       fetchJson<import("./types").ReviewPackVoteResponse>(
         `/review/public/${encodeURIComponent(token)}/feedback`,
-        { method: "POST", body: JSON.stringify(input) },
+        {
+          method: "POST",
+          headers: { "x-review-pack-reviewer-token": reviewerToken },
+          body: JSON.stringify(input),
+        },
       ),
   },
   secrets: {

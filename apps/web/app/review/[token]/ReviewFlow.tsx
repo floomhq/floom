@@ -38,19 +38,9 @@ const NOTE_MAX = 240;
 
 type Reviewer = { key: string; name: string; role: string };
 type LocalVote = { verdict: ReviewVerdict; note: string | null };
-type Screen = "loading" | "gate" | "identity" | "review" | "done";
+type Screen = "loading" | "gate" | "review" | "done";
 
 // ── helpers ─────────────────────────────────────────────────────────────────
-function slugify(name: string): string {
-  return name
-    .toLowerCase()
-    .normalize("NFKD")
-    .replace(/[\u0300-\u036f]/g, "")
-    .replace(/[^a-z0-9]+/g, "-")
-    .replace(/^-+|-+$/g, "")
-    .slice(0, 48) || "reviewer";
-}
-
 function keyOf(jobId: string, candidateId: string): string {
   return `${jobId}|${candidateId}`;
 }
@@ -70,7 +60,10 @@ function consensusMap(list: ReviewConsensus[]): Record<string, ReviewConsensus> 
 
 export function ReviewFlow({ token }: { token: string }) {
   const pwKey = `reviewpack.${token}.pw`;
-  const reviewerKey = `reviewpack.${token}.reviewer`;
+  const reviewerToken = useMemo(() => {
+    if (typeof window === "undefined") return "";
+    return new URLSearchParams(window.location.search).get("reviewer") || "";
+  }, []);
 
   const [screen, setScreen] = useState<Screen>("loading");
   const [pack, setPack] = useState<ReviewPack | null>(null);
@@ -86,10 +79,6 @@ export function ReviewFlow({ token }: { token: string }) {
   const [passwordInput, setPasswordInput] = useState("");
   const [gateError, setGateError] = useState<string | null>(null);
   const [unlocking, setUnlocking] = useState(false);
-
-  // Identity form
-  const [nameInput, setNameInput] = useState("");
-  const [roleInput, setRoleInput] = useState("");
 
   // Force the Workeros dark theme for this standalone client surface. The app
   // defaults to the light ("day") theme; the review pack is always presented in
@@ -112,17 +101,24 @@ export function ReviewFlow({ token }: { token: string }) {
     setPack(res.pack);
     setPassword(pw);
     setConsensus(consensusMap(res.consensus || []));
+    if (res.reviewer?.name) {
+      setReviewer({ key: res.reviewer.key, name: res.reviewer.name, role: res.reviewer.role || "" });
+    }
     setActiveJobId((current) => current || res.pack.jobs[0]?.id || "");
   }, []);
 
   const loadMyVotes = useCallback(
-    async (rv: Reviewer, pw: string | null) => {
+    async (pw: string | null) => {
+      if (!reviewerToken) return;
       try {
         const res: ReviewPackFeedbackResponse = await api.review.publicMyVotes(
           token,
-          rv.key,
+          reviewerToken,
           pw ?? undefined,
         );
+        if (res.reviewer?.name) {
+          setReviewer({ key: res.reviewer.key, name: res.reviewer.name, role: res.reviewer.role || "" });
+        }
         const votes: Record<string, LocalVote> = {};
         const drafts: Record<string, string> = {};
         for (const v of res.my_votes || []) {
@@ -137,7 +133,7 @@ export function ReviewFlow({ token }: { token: string }) {
         // Non-fatal: reviewer can still vote; their prior votes just won't prefill.
       }
     },
-    [token, mergeConsensus],
+    [token, reviewerToken, mergeConsensus],
   );
 
   // Initial load: resume from localStorage. Try a (stored-password) GET; if the
@@ -146,25 +142,22 @@ export function ReviewFlow({ token }: { token: string }) {
     let cancelled = false;
     (async () => {
       let storedPw: string | null = null;
-      let storedReviewer: Reviewer | null = null;
       try {
         storedPw = window.localStorage.getItem(pwKey);
-        const raw = window.localStorage.getItem(reviewerKey);
-        if (raw) storedReviewer = JSON.parse(raw) as Reviewer;
       } catch {
         /* localStorage unavailable — fall through to the gate */
       }
       try {
-        const res = await api.review.publicGet(token, storedPw ?? undefined);
+        const res = await api.review.publicGet(token, storedPw ?? undefined, reviewerToken || undefined);
         if (cancelled) return;
         applyPack(res, storedPw ?? null);
-        if (storedReviewer?.name) {
-          setReviewer(storedReviewer);
-          await loadMyVotes(storedReviewer, storedPw ?? null);
-          if (!cancelled) setScreen("review");
-        } else if (!cancelled) {
-          setScreen("identity");
+        if (!res.reviewer?.name) {
+          setGateError("Dieser Review-Link ist nicht personalisiert. Bitte nutzen Sie den Link aus Ihrer E-Mail.");
+          setScreen("gate");
+          return;
         }
+        await loadMyVotes(storedPw ?? null);
+        if (!cancelled) setScreen("review");
       } catch {
         if (!cancelled) setScreen("gate");
       }
@@ -172,44 +165,35 @@ export function ReviewFlow({ token }: { token: string }) {
     return () => {
       cancelled = true;
     };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [token]);
+  }, [token, reviewerToken, pwKey, applyPack, loadMyVotes]);
 
   const unlock = useCallback(
     async (pw: string) => {
       setUnlocking(true);
       setGateError(null);
       try {
-        const res = await api.review.publicGet(token, pw);
+        const res = await api.review.publicGet(token, pw, reviewerToken || undefined);
         applyPack(res, pw);
+        if (!res.reviewer?.name) {
+          setGateError("Dieser Review-Link ist nicht personalisiert. Bitte nutzen Sie den Link aus Ihrer E-Mail.");
+          setScreen("gate");
+          return;
+        }
         try {
           window.localStorage.setItem(pwKey, pw);
         } catch {
           /* ignore persistence failure */
         }
-        setScreen("identity");
+        await loadMyVotes(pw);
+        setScreen("review");
       } catch {
         setGateError("Passwort ist nicht korrekt oder der Link ist abgelaufen.");
       } finally {
         setUnlocking(false);
       }
     },
-    [token, applyPack, pwKey],
+    [token, reviewerToken, applyPack, loadMyVotes, pwKey],
   );
-
-  const startReviewing = useCallback(async () => {
-    const name = nameInput.trim();
-    if (!name) return;
-    const rv: Reviewer = { key: slugify(name), name, role: roleInput.trim() };
-    setReviewer(rv);
-    try {
-      window.localStorage.setItem(reviewerKey, JSON.stringify(rv));
-    } catch {
-      /* ignore */
-    }
-    setScreen("review");
-    await loadMyVotes(rv, password);
-  }, [nameInput, roleInput, password, reviewerKey, loadMyVotes]);
 
   const saveVote = useCallback(
     async (jobId: string, candidateId: string, verdict: ReviewVerdict, note: string | null) => {
@@ -219,13 +203,11 @@ export function ReviewFlow({ token }: { token: string }) {
       setMyVotes((m) => ({ ...m, [k]: { verdict, note } }));
       setSaving((s) => ({ ...s, [k]: true }));
       try {
-        const res = await api.review.publicFeedback(token, {
+        if (!reviewerToken) throw new Error("Reviewer token missing");
+        const res = await api.review.publicFeedback(token, reviewerToken, {
           password: password ?? undefined,
           job_id: jobId,
           candidate_id: candidateId,
-          reviewer_key: reviewer.key,
-          reviewer_name: reviewer.name,
-          reviewer_role: reviewer.role || null,
           verdict,
           note,
         });
@@ -242,7 +224,7 @@ export function ReviewFlow({ token }: { token: string }) {
         setSaving((s) => ({ ...s, [k]: false }));
       }
     },
-    [reviewer, pack, myVotes, token, password, mergeConsensus],
+    [reviewer, pack, myVotes, token, reviewerToken, password, mergeConsensus],
   );
 
   const handleVote = useCallback(
@@ -301,23 +283,6 @@ export function ReviewFlow({ token }: { token: string }) {
         onChange={setPasswordInput}
         onSubmit={() => passwordInput.trim() && void unlock(passwordInput.trim())}
         expiresAt={pack?.meta.expires_at}
-      />
-    );
-  }
-
-  if (screen === "identity") {
-    return (
-      <IdentityScreen
-        pack={pack}
-        name={nameInput}
-        role={roleInput}
-        onName={setNameInput}
-        onRole={setRoleInput}
-        onPick={(s) => {
-          setNameInput(s.name);
-          setRoleInput(s.role ?? "");
-        }}
-        onStart={() => void startReviewing()}
       />
     );
   }
