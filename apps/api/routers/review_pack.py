@@ -4,7 +4,7 @@ from __future__ import annotations
 
 from typing import Any, Dict, Literal, Optional
 
-from fastapi import APIRouter, Depends, Query
+from fastapi import APIRouter, Depends, Header
 from pydantic import BaseModel, Field
 
 from auth import AuthContext, get_auth_context
@@ -13,6 +13,7 @@ from services.context_access import _require_context_for_user
 from services.review_pack import (
     load_public_feedback,
     load_public_review_pack,
+    materialize_review_pack_from_run,
     mint_review_pack_share_link,
     public_pack_projection,
     record_public_feedback,
@@ -31,43 +32,44 @@ class ReviewPackFeedbackInput(BaseModel):
     password: Optional[str] = None
     job_id: str = Field(min_length=1, max_length=120)
     candidate_id: str = Field(min_length=1, max_length=120)
-    reviewer_key: str = Field(min_length=1, max_length=48)
-    reviewer_name: str = Field(min_length=1, max_length=120)
-    reviewer_role: Optional[str] = Field(default=None, max_length=120)
     verdict: Literal["interested", "maybe", "pass"]
     note: Optional[str] = Field(default=None, max_length=240)
+
+
+class ReviewPackMaterializeInput(BaseModel):
+    run_id: str = Field(min_length=1, max_length=200)
 
 
 @review_pack_router.get("/review/public/{token}")
 def get_public_review_pack(
     token: str,
-    password: Optional[str] = Query(default=None),
+    password: Optional[str] = Header(default=None, alias="x-review-pack-password"),
+    reviewer_token: Optional[str] = Header(default=None, alias="x-review-pack-reviewer-token"),
 ) -> Dict[str, Any]:
-    return load_public_review_pack(token, password)
+    return load_public_review_pack(token, password, reviewer_token)
 
 
 @review_pack_router.get("/review/public/{token}/feedback")
 def get_public_review_pack_feedback(
     token: str,
-    reviewer_key: str = Query(..., min_length=1, max_length=48),
-    password: Optional[str] = Query(default=None),
+    password: Optional[str] = Header(default=None, alias="x-review-pack-password"),
+    reviewer_token: str = Header(..., alias="x-review-pack-reviewer-token"),
 ) -> Dict[str, Any]:
-    return load_public_feedback(token, reviewer_key, password)
+    return load_public_feedback(token, reviewer_token, password)
 
 
 @review_pack_router.post("/review/public/{token}/feedback")
 def post_public_review_pack_feedback(
     token: str,
     body: ReviewPackFeedbackInput,
+    reviewer_token: str = Header(..., alias="x-review-pack-reviewer-token"),
 ) -> Dict[str, Any]:
     return record_public_feedback(
         token,
         password=body.password,
+        reviewer_token=reviewer_token,
         job_id=body.job_id,
         candidate_id=body.candidate_id,
-        reviewer_key=body.reviewer_key,
-        reviewer_name=body.reviewer_name,
-        reviewer_role=body.reviewer_role,
         verdict=body.verdict,
         note=body.note,
     )
@@ -79,11 +81,28 @@ def create_review_pack_share_link(
     pack_id: str,
     auth: AuthContext = Depends(get_auth_context),
     repos: Repositories = Depends(get_repos),
-) -> Dict[str, str]:
+) -> Dict[str, Any]:
     safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id, repos=repos)
     return mint_review_pack_share_link(
         context_name=safe_name,
         pack_id=pack_id,
+        owner_id=auth.user_id,
+    )
+
+
+@review_pack_router.post("/contexts/{name}/review-packs/{pack_id}/from-run")
+def materialize_review_pack(
+    name: str,
+    pack_id: str,
+    body: ReviewPackMaterializeInput,
+    auth: AuthContext = Depends(get_auth_context),
+    repos: Repositories = Depends(get_repos),
+) -> Dict[str, Any]:
+    safe_name, _metadata = _require_context_for_user(name, user_id=auth.user_id, repos=repos)
+    return materialize_review_pack_from_run(
+        context_name=safe_name,
+        pack_id=pack_id,
+        run_id=body.run_id,
         owner_id=auth.user_id,
     )
 
