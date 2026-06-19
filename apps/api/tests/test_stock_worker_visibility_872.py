@@ -39,8 +39,6 @@ KEPT_TEMPLATES = {
     "csv_enricher",
     "github-digest",
     "node-smoke-test",
-    "openblog",
-    "opendraft",
     "outbound-approval-demo",
     "research_brief",
 }

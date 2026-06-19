@@ -2,7 +2,7 @@
 //
 // Before this middleware existed, the same-origin proxy at /api/proxy/* injected
 // the server-side FLOOM_API_SECRET and forwarded EVERY request (GET + mutations)
-// to workers-api.floom.dev with no client authentication. Any anonymous internet
+// to localhost:8000 with no client authentication. Any anonymous internet
 // visitor could read owner data (connections, secret inventory, approval drafts)
 // AND mutate it (create/delete/run workers, approve approvals).
 //
@@ -35,7 +35,7 @@ const PUBLIC_PAGE_PREFIXES = [
   "/login",
   "/connections/callback", // OAuth provider return path; finishes via tokenless callback id
   "/approvals/review", // external signed-link approval review
-  "/review/", // Search Assistant Review Pack: public client review flow (token in URL,
+  "/review/", // ReviewPack Review Pack: public client review flow (token in URL,
   //       pack-password gated in-page). Trailing slash so it never matches an
   //       auth-gated route that merely starts with "/review" (OW-02 footgun).
   "/w/", // public worker share (token-gated, server-rendered)
@@ -65,7 +65,7 @@ const PUBLIC_PAGE_EXACT = [
 const PUBLIC_PROXY_PATHS = ["/api/proxy/connections/callback"];
 const PUBLIC_PROXY_PREFIXES = [
   "/api/proxy/approvals/public/",
-  // Search Assistant Review Pack: the public token-gated read/vote endpoints the
+  // ReviewPack Review Pack: the public token-gated read/vote endpoints the
   // /review/[token] page calls from the browser (no Floom session). The path
   // token + pack password are the secret; CSRF still applies to the POST.
   "/api/proxy/review/public/",

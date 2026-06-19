@@ -43,11 +43,11 @@ def stubbed(monkeypatch):
     )
 
 
-def _casual(user="federico"):
+def _casual(user="local-user"):
     return chat_service.build_system_prompt_for_source(user, "web", message="hi")
 
 
-def _authoring(user="federico"):
+def _authoring(user="local-user"):
     return chat_service.build_system_prompt_for_source(
         user, "web", message="Create a worker that summarizes Gmail every morning"
     )

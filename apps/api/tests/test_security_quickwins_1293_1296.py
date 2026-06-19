@@ -169,7 +169,7 @@ class TestMcpServeEndpoint:
             content=json.dumps("not-a-dict"),
             headers={"content-type": "application/json"},
         )
-        # C2 (PROVISIONAL, round-09 reconciliation, awaiting Federico sign-off):
+        # C2 (PROVISIONAL, round-09 reconciliation, awaiting Maintainer sign-off):
         # main's spec-correct JSON-RPC 2.0 behavior is canonical — transport-level
         # success (HTTP 200) carrying an RPC-level error envelope (-32600), NOT a
         # transport 400. Updated from base's superseded 400 assertion.

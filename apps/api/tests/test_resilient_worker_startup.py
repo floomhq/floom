@@ -1,7 +1,7 @@
 """Platform-resilience: one bad worker must never crash startup.
 
 Regression for the 2026-06-14 outage: a foreign directory
-(`.sample-search-v4-backup-...`) carrying a `worker.yml` was dropped into the
+(`.review_pack-v4-backup-...`) carrying a `worker.yml` was dropped into the
 workers dir. `discover_workers()` ingested it and `_persist_discovered_workers`
 raised `sqlite3.IntegrityError` (FOREIGN KEY constraint failed) UNCAUGHT, which
 crashed API startup into a ~60s autodeploy crash-loop (prod 502 for ~10 min).
@@ -124,7 +124,7 @@ def test_bad_worker_is_skipped_good_workers_persist(main_env, monkeypatch):
 
     with main.get_db() as conn:
         loaded, skipped = ops._persist_discovered_workers(
-            conn, workers, user_id="federico"
+            conn, workers, user_id="local-user"
         )
 
     assert loaded == 2
@@ -155,7 +155,7 @@ def test_raise_on_skip_propagates_for_single_worker_save(main_env, monkeypatch):
     with pytest.raises(sqlite3.IntegrityError):
         with main.get_db() as conn:
             ops._persist_discovered_workers(
-                conn, workers, user_id="federico", raise_on_skip=True
+                conn, workers, user_id="local-user", raise_on_skip=True
             )
 
 
@@ -192,7 +192,7 @@ def test_real_fk_violation_is_skipped_not_fatal(main_env, monkeypatch):
 
     with main.get_db() as conn:
         loaded, skipped = ops._persist_discovered_workers(
-            conn, workers, user_id="federico"
+            conn, workers, user_id="local-user"
         )
 
     assert loaded == 1
@@ -208,14 +208,14 @@ def test_discover_skips_dot_prefixed_dirs(main_env):
     _write_worker(workers_dir, "real-worker")
 
     # Foreign backup dir that carries a worker.yml — the 2026-06-14 poison shape.
-    backup = workers_dir / ".sample-search-v4-backup-20260614-200950"
+    backup = workers_dir / ".review_pack-v4-backup-20260614-200950"
     backup.mkdir()
-    (backup / "worker.yml").write_text(_worker_yml("sample-search-v4"), encoding="utf-8")
+    (backup / "worker.yml").write_text(_worker_yml("review_pack-v4"), encoding="utf-8")
     (backup / "candidates.json").write_text("[]", encoding="utf-8")
 
     main.invalidate_worker_cache()
     ids = {w["id"] for w in main.discover_workers()}
 
     assert "real-worker" in ids
-    assert ".sample-search-v4-backup-20260614-200950" not in ids
-    assert "sample-search-v4" not in ids
+    assert ".review_pack-v4-backup-20260614-200950" not in ids
+    assert "review_pack-v4" not in ids

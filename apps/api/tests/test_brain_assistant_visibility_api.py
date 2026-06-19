@@ -30,12 +30,12 @@ def client_and_main(monkeypatch, tmp_path):
     contexts_dir = tmp_path / "contexts"
     contexts_dir.mkdir()
 
-    # An existing operator pack owned by the local user (federico).
+    # An existing operator pack owned by the local user (local-user).
     pack = contexts_dir / "company"
     pack.mkdir()
     (pack / "README.md").write_text("# Company\nicp.\n", encoding="utf-8")
     (contexts_dir / ".workeros-contexts.json").write_text(
-        '{"company": {"owner_id": "federico", "writeable": true}}\n',
+        '{"company": {"owner_id": "local-user", "writeable": true}}\n',
         encoding="utf-8",
     )
 
@@ -85,7 +85,7 @@ def test_existing_pack_defaults_private_with_permissions(client_and_main):
     assert "company" in items
     pack = items["company"]
     assert pack["visibility"] == "private"
-    assert pack["owner_id"] == "federico"
+    assert pack["owner_id"] == "local-user"
     # Owner can share/edit on the single-owner engine.
     assert pack["permissions"]["can_share"] is True
     assert pack["permissions"]["is_owner"] is True
@@ -95,7 +95,7 @@ def test_pack_detail_carries_visibility(client_and_main):
     client, _main = client_and_main
     detail = client.get("/contexts/company").json()
     assert detail["visibility"] == "private"
-    assert detail["owner_id"] == "federico"
+    assert detail["owner_id"] == "local-user"
     assert detail["permissions"]["can_share"] is True
 
 
@@ -123,7 +123,7 @@ def test_new_pack_defaults_private(client_and_main):
     assert created.status_code == 200, created.text
     body = created.json()
     assert body["visibility"] == "private"
-    assert body["owner_id"] == "federico"
+    assert body["owner_id"] == "local-user"
 
 
 def test_new_pack_uses_active_workspace_for_brain_pack_row(client_and_main):
@@ -196,7 +196,7 @@ def test_assistant_defaults_workspace_with_permissions(client_and_main):
     client, _main = client_and_main
     info = client.get("/system/workspace-agent").json()
     assert info["visibility"] == "workspace"
-    assert info["owner_id"] == "federico"
+    assert info["owner_id"] == "local-user"
     assert info["permissions"]["can_share"] is True
     assert info["permissions"]["is_owner"] is True
 

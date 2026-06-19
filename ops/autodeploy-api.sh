@@ -8,7 +8,7 @@
 
 set -Eeuo pipefail
 
-WORKEROS_ROOT="${WORKEROS_ROOT:-/root/workeros}"
+WORKEROS_ROOT="${WORKEROS_ROOT:-/opt/workeros}"
 WORKEROS_BRANCH="${WORKEROS_BRANCH:-main}"
 SERVICE_LABEL="${WORKEROS_AUTODEPLOY_LABEL:-workeros-api}"
 DEPLOY_CMD="${WORKEROS_DEPLOY_CMD:-$WORKEROS_ROOT/ops/deploy-api.sh}"

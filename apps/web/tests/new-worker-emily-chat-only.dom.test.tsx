@@ -1,4 +1,4 @@
-// Federico 2026-06-18: "The new worker should literally just be an Emily chat
+// Maintainer 2026-06-18: "The new worker should literally just be an Emily chat
 // with some pills. It's literally an Emily chat. That's it. Don't make it
 // anything more." This test pins the create-mode surface to that spec:
 //   - heading "Hire a new worker" + one-line subtext

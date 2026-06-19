@@ -2,7 +2,7 @@
 
 A worker's `runtime.bundle_path` can be a STALE ABSOLUTE path baked at
 registration time from an older `FLOOM_WORKERS_DIR` (e.g.
-`/opt/managed-deployment/var/workers/job-digest`). At run time
+`/opt/workeros/var/workers/job-digest`). At run time
 `FLOOM_WORKERS_DIR` points at `.../engine/workers`, so the stale absolute
 path resolved outside the current root and `_resolve_worker_bundle_dir`
 raised `ValueError: Path traversal attempt: .../var/workers/job-digest`.

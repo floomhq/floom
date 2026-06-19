@@ -5,7 +5,7 @@ import {
   ASSISTANT_NAME_KEY,
 } from "@/lib/workspace/assistant-name";
 
-// Round-09 — the assistant name is a workspace setting (Federico 2026-06-17).
+// Round-09 — the assistant name is a workspace setting (Maintainer 2026-06-17).
 // resolveAssistantName is the single source of truth used by every visible label.
 describe("resolveAssistantName", () => {
   it("falls back to the default when unset", () => {

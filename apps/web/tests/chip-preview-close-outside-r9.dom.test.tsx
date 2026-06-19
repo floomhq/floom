@@ -2,7 +2,7 @@ import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { Dialog, DialogContent } from "@/components/ui/dialog";
 
-// GAP-POPCLOSE (Federico 2026-06-16): the integration/brain chip preview popover
+// GAP-POPCLOSE (Maintainer 2026-06-16): the integration/brain chip preview popover
 // must close when the user clicks OUTSIDE the box (the backdrop), not only via
 // the X. This mounts the real ChipPreviewDialog and proves both close paths.
 
@@ -80,7 +80,7 @@ describe("GAP-POPCLOSE: chip preview popover dismissal", () => {
   // The realistic reproduction: the chip preview opens from inside the worker
   // detail Dialog (WorkerBrainEditor / WorkerToolsEditor render inside it), so
   // it is a NESTED Base UI dialog. This is where the backdrop-equality branch
-  // bit Federico in the real browser.
+  // bit Maintainer in the real browser.
   it("closes on outside click while nested inside another open Dialog", async () => {
     const { ChipPreviewDialog } = await import("@/components/worker/ChipPreviewDialog");
     const onOpenChange = vi.fn();

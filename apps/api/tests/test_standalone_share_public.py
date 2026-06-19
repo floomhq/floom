@@ -14,7 +14,7 @@ def _boot(tmp_path: Path):
     os.environ["FLOOM_DB"] = str(tmp_path / "workeros.db")
     os.environ["FLOOM_CONTEXTS_DIR"] = str(tmp_path / "contexts")
     os.environ["WORKEROS_DEPLOY"] = "local"
-    os.environ["WORKEROS_USER_ID"] = "federico"
+    os.environ["WORKEROS_USER_ID"] = "local-user"
     os.environ["FLOOM_SECRET"] = "standalone-share-test-secret"
     import contexts
     import db
@@ -87,7 +87,7 @@ def test_worker_standalone_share_wraps_public_worker_projection():
         main, client = _boot(Path(td))
         worker = {
             "id": "share-worker",
-            "owner_id": "federico",
+            "owner_id": "local-user",
             "name": "Share Worker",
             "description": "Does useful work.",
             "example_output": "A tidy result",
@@ -147,7 +147,7 @@ def test_worker_share_run_meta_and_public_run_are_scoped(monkeypatch):
         main, client = _boot(Path(td))
         worker = {
             "id": "share-worker",
-            "owner_id": "federico",
+            "owner_id": "local-user",
             "name": "Share Worker",
             "description": "Public form worker.",
             "trigger_type": "manual",
@@ -168,7 +168,7 @@ def test_worker_share_run_meta_and_public_run_are_scoped(monkeypatch):
                 return worker if worker_id == "share-worker" else None
 
             def get(self, *, user_id: str, worker_id: str, role: str | None = None):
-                return worker if user_id == "federico" and worker_id == "share-worker" else None
+                return worker if user_id == "local-user" and worker_id == "share-worker" else None
 
         class RunsRepo:
             pass
@@ -201,7 +201,7 @@ def test_worker_share_run_meta_and_public_run_are_scoped(monkeypatch):
         token = _create_or_get_standalone_share_link(
             entity_type="worker",
             entity_id="share-worker",
-            owner_id="federico",
+            owner_id="local-user",
         )["token"]
         try:
             meta = client.get(f"/workers/public/share-worker/run-meta?token={token}")
@@ -221,7 +221,7 @@ def test_worker_share_run_meta_and_public_run_are_scoped(monkeypatch):
                 "worker_id": "share-worker",
                 "inputs": {"topic": "pricing"},
                 "trigger_source": "public_share",
-                "auth_user_id": "federico",
+                "auth_user_id": "local-user",
                 "auth_method": "public_share",
             }
 
@@ -245,17 +245,17 @@ def test_worker_share_token_streams_only_same_worker_run(monkeypatch):
         token = _create_or_get_standalone_share_link(
             entity_type="worker",
             entity_id="share-worker",
-            owner_id="federico",
+            owner_id="local-user",
         )["token"]
         other_token = _create_or_get_standalone_share_link(
             entity_type="worker",
             entity_id="other-worker",
-            owner_id="federico",
+            owner_id="local-user",
         )["token"]
         run = {
             "id": "run_public_1",
             "worker_id": "share-worker",
-            "actor_user_id": "federico",
+            "actor_user_id": "local-user",
             "status": "completed",
         }
 
@@ -275,7 +275,7 @@ def test_worker_share_token_streams_only_same_worker_run(monkeypatch):
             runs_router,
             "_get_run_by_explicit_id",
             lambda run_id, *, user_id, repos: run
-            if run_id == "run_public_1" and user_id == "federico"
+            if run_id == "run_public_1" and user_id == "local-user"
             else None,
         )
         monkeypatch.setattr(runs_router, "_run_part_snapshot", lambda run_id: None)

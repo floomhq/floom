@@ -17,7 +17,7 @@ import urllib.request
 API_SECRET = os.environ["WORKEROS_API_SECRET"]
 API_BASE = os.environ.get("WORKEROS_API_BASE", "http://localhost:8000").rstrip("/")
 COMPOSIO_API_KEY = os.environ.get("COMPOSIO_API_KEY", "")
-ENTITY_ID = os.environ.get("FLOOM_USER_ID", "federico")
+ENTITY_ID = os.environ.get("FLOOM_USER_ID", "local-user")
 
 
 def composio_execute(tool: str, arguments: dict, connected_account_id: str) -> dict:

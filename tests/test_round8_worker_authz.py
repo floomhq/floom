@@ -10,6 +10,7 @@ import uuid
 from pathlib import Path
 
 import pytest
+from fastapi import Request
 from fastapi.testclient import TestClient
 
 
@@ -1053,7 +1054,7 @@ def test_reload_preserves_existing_owner_on_conflict(monkeypatch, tmp_path):
 
 
 def test_list_secrets_hides_foreign_worker_requirements_but_keeps_stock(monkeypatch, tmp_path):
-    main = _load_api(monkeypatch, tmp_path, stock_workers=("opendraft",))
+    main = _load_api(monkeypatch, tmp_path, stock_workers=("csv_enricher",))
     client = TestClient(main.app)
 
     created = client.post(
@@ -1076,8 +1077,8 @@ def test_list_secrets_hides_foreign_worker_requirements_but_keeps_stock(monkeypa
     owner_names = {item["name"] for item in owner_list.json()}
     foreign_names = {item["name"] for item in foreign_list.json()}
 
-    assert "GOOGLE_API_KEY" in owner_names
-    assert "GOOGLE_API_KEY" in foreign_names
+    assert "OPENAI_API_KEY" in owner_names
+    assert "OPENAI_API_KEY" in foreign_names
     assert "TEAM_ONLY_SECRET" in owner_names
     assert "TEAM_ONLY_SECRET" not in foreign_names
 
@@ -1260,11 +1261,12 @@ def test_member_cannot_archive_or_restore_shared_worker_owned_by_another_user():
 
     auth = AuthContext(user_id="member-user", role="member", auth_method="session")
     repos = Repos()
+    request = Request({"type": "http", "method": "POST", "path": "/", "headers": [(b"host", b"asgi")]})
 
     with pytest.raises(HTTPException) as archive_exc:
-        worker_admin.archive_worker("shared-worker", auth=auth, repos=repos)
+        worker_admin.archive_worker("shared-worker", request=request, auth=auth, repos=repos)
     with pytest.raises(HTTPException) as restore_exc:
-        worker_admin.restore_worker("shared-worker", auth=auth, repos=repos)
+        worker_admin.restore_worker("shared-worker", request=request, auth=auth, repos=repos)
 
     assert archive_exc.value.status_code == 403
     assert restore_exc.value.status_code == 403

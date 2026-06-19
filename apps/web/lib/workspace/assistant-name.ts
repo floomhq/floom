@@ -1,4 +1,4 @@
-// Round-09 (Federico 2026-06-17): the assistant's name is a WORKSPACE SETTING,
+// Round-09 (Maintainer 2026-06-17): the assistant's name is a WORKSPACE SETTING,
 // not a hardcoded "Emily". It is stored in the workspace settings KV under
 // `assistant_name` (admin-only PUT, same store as behaviour toggles / model
 // defaults), so renaming it in Settings propagates everywhere the name is shown

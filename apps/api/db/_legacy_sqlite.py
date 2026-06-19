@@ -334,7 +334,7 @@ def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
                 input_values_json TEXT,
                 enabled INTEGER DEFAULT 1 NOT NULL,
                 created_at TEXT NOT NULL,
-                owner_id TEXT NOT NULL DEFAULT 'federico',
+                owner_id TEXT NOT NULL DEFAULT 'local-user',
                 FOREIGN KEY(skill_version_id) REFERENCES skill_versions(id)
             );
             """
@@ -403,7 +403,7 @@ def _migrate_worker_contract_split(conn: sqlite3.Connection) -> None:
                     json.dumps({}),
                     1,
                     created_at,
-                    "federico",
+                    "local-user",
                 ),
             )
 
@@ -575,7 +575,7 @@ def _migrate_secrets_user_scope(conn: sqlite3.Connection) -> None:
     _execute_sql_script(conn,
         """
         CREATE TABLE IF NOT EXISTS secrets_new (
-            user_id TEXT NOT NULL DEFAULT 'federico',
+            user_id TEXT NOT NULL DEFAULT 'local-user',
             name TEXT NOT NULL,
             status TEXT NOT NULL,
             last_used_at TEXT,
@@ -599,7 +599,7 @@ def _migrate_secrets_user_scope(conn: sqlite3.Connection) -> None:
             VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
             """,
             (
-                "federico",
+                "local-user",
                 row["name"],
                 row["status"],
                 row["last_used_at"],
@@ -1350,7 +1350,7 @@ MIGRATIONS: list[Migration] = [
     """,
     # -- migration 23: scope OAuth connections to the owning user -------------
     """
-    ALTER TABLE composio_connections ADD COLUMN user_id TEXT NOT NULL DEFAULT 'federico';
+    ALTER TABLE composio_connections ADD COLUMN user_id TEXT NOT NULL DEFAULT 'local-user';
     CREATE INDEX IF NOT EXISTS idx_composio_connections_user_id
         ON composio_connections(user_id);
     """,

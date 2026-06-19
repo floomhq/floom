@@ -140,7 +140,7 @@ GOOGLE_APPLICATION_CREDENTIALS=/absolute/path/to/application-default-or-wif.json
 ```
 
 If `GOOGLE_APPLICATION_CREDENTIALS` points at an AWS workload identity
-federation config, Google auth also needs AWS credentials and a region in the
+localration config, Google auth also needs AWS credentials and a region in the
 backend process environment:
 
 ```bash
@@ -280,8 +280,6 @@ Browse [`workers/`](../workers/) for the full set. A few useful examples:
 - **github-digest:** summarizes recent activity on a GitHub repo.
 - **outbound-approval-demo:** demonstrates a two-run human-in-the-loop approval
   pattern.
-- **openblog** / **opendraft:** bundled upstream content-generation engine
-  demos.
 - **gmail-summarize-latest** / **gmail-smart-replies:** Gmail automation
   templates.
 

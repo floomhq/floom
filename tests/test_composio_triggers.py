@@ -44,7 +44,7 @@ def _load_api(monkeypatch, tmp_path):
     return main, composio_client
 
 
-def _worker_yml(event="GMAIL_NEW_EMAIL", connection_id="conn_gmail_federico_stub"):
+def _worker_yml(event="GMAIL_NEW_EMAIL", connection_id="conn_gmail_local-user_stub"):
     return f"""
 schema_version: "0.3"
 name: gmail-composio
@@ -128,7 +128,7 @@ def test_worker_create_with_composio_trigger_calls_enable(monkeypatch, tmp_path)
 
     assert response.status_code == 200, response.text
     assert calls == [
-        ("GMAIL_NEW_EMAIL", "conn_gmail_federico_stub", "https://example.test/composio-events", {})
+        ("GMAIL_NEW_EMAIL", "conn_gmail_local-user_stub", "https://example.test/composio-events", {})
     ]
     with main.get_db() as conn:
         row = conn.execute("SELECT composio_trigger_id, composio_event FROM workers WHERE id = ?", ("gmail-composio",)).fetchone()
@@ -148,7 +148,7 @@ def test_composio_events_with_valid_hmac_creates_run(monkeypatch, tmp_path):
             "metadata": {
                 "trigger_id": "ct_gmail_123",
                 "trigger_slug": "GMAIL_NEW_EMAIL",
-                "connected_account_id": "conn_gmail_federico_stub",
+                "connected_account_id": "conn_gmail_local-user_stub",
             },
             "data": {"subject": "Hello"},
         }).encode()
@@ -251,7 +251,7 @@ def test_composio_events_replay_same_delivery_is_ignored(monkeypatch, tmp_path):
             "metadata": {
                 "trigger_id": "ct_gmail_123",
                 "trigger_slug": "GMAIL_NEW_EMAIL",
-                "connected_account_id": "conn_gmail_federico_stub",
+                "connected_account_id": "conn_gmail_local-user_stub",
             },
             "data": {"subject": "Replay me"},
         }).encode()
@@ -352,7 +352,7 @@ def test_worker_update_trigger_change_disables_previous_composio_trigger(monkeyp
         assert updated.status_code == 200, updated.text
 
     assert enabled == [
-        ("GMAIL_NEW_EMAIL", "conn_gmail_federico_stub", "https://example.test/composio-events", {}, "ct_gmail_1"),
+        ("GMAIL_NEW_EMAIL", "conn_gmail_local-user_stub", "https://example.test/composio-events", {}, "ct_gmail_1"),
         ("GMAIL_NEW_EMAIL", "conn_gmail_second", "https://example.test/composio-events", {}, "ct_gmail_2"),
     ]
     assert disabled == [("GMAIL_NEW_EMAIL", "ct_gmail_1")]
@@ -391,7 +391,7 @@ def test_worker_update_rolls_back_new_composio_trigger_when_old_disable_fails(mo
 
     assert updated.status_code == 502, updated.text
     assert enabled == [
-        ("GMAIL_NEW_EMAIL", "conn_gmail_federico_stub", "ct_gmail_1"),
+        ("GMAIL_NEW_EMAIL", "conn_gmail_local-user_stub", "ct_gmail_1"),
         ("GMAIL_NEW_EMAIL", "conn_gmail_second", "ct_gmail_2"),
     ]
     assert disabled == [
@@ -511,9 +511,9 @@ def test_gmail_composio_register_and_stub_event_end_to_end(monkeypatch, tmp_path
             "metadata": {
                 "trigger_id": "ct_gmail_123",
                 "trigger_slug": "GMAIL_NEW_EMAIL",
-                "connected_account_id": "conn_gmail_federico_stub",
+                "connected_account_id": "conn_gmail_local-user_stub",
             },
-            "data": {"from": "federico@example.test"},
+            "data": {"from": "local-user@example.test"},
         }).encode()
         event_response = client.post(
             "/composio-events",
@@ -581,7 +581,7 @@ def test_composio_client_uses_current_v3_trigger_endpoints(monkeypatch, tmp_path
     assert composio_client.list_triggers() == [{"slug": "GMAIL_NEW_EMAIL"}]
     trigger_id = composio_client.enable_trigger(
         "GMAIL_NEW_EMAIL",
-        "conn_gmail_federico_stub",
+        "conn_gmail_local-user_stub",
         "https://example.test/composio-events",
         {"labelIds": ["INBOX"]},
     )
@@ -592,7 +592,7 @@ def test_composio_client_uses_current_v3_trigger_endpoints(monkeypatch, tmp_path
         "POST",
         "/trigger_instances/GMAIL_NEW_EMAIL/upsert",
         {
-            "connected_account_id": "conn_gmail_federico_stub",
+            "connected_account_id": "conn_gmail_local-user_stub",
             "trigger_config": {"labelIds": ["INBOX"]},
         },
     ) in calls

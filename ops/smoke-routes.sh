@@ -15,10 +15,10 @@ set -uo pipefail
 TARGET="${1:-all}"
 FAIL=0
 
-OS_HOST="https://workers.floom.dev"
-OS_API="https://workers-api.floom.dev"
-CLOUD_HOST="https://workeros.floom.dev"
-CLOUD_API="https://workeros-api.floom.dev"
+OS_HOST="https://localhost:3000"
+OS_API="https://localhost:8000"
+CLOUD_HOST="https://app.example.com"
+CLOUD_API="https://api.example.com"
 
 # Unauthenticated routes that must never return 508/5xx.
 # Authenticated pages can return 200, 3xx, or 4xx; route loops and server errors fail.

@@ -20,8 +20,8 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 _SECRET = "grants-enforce-767"
-_OWNER = "federico"
-_OWNER_EMAIL = "federico@example.com"
+_OWNER = "local-user"
+_OWNER_EMAIL = "local-user@example.com"
 _GRANTEE = "alice"
 _GRANTEE_EMAIL = "alice@example.com"
 

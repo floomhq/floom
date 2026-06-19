@@ -33,7 +33,7 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 _SECRET = "test-secret-members"
-_USER_ID = "federico"
+_USER_ID = "local-user"
 
 
 @pytest.fixture
@@ -88,7 +88,7 @@ def _seed_member(db, workspace_id, user_id, role, status="active", email=None):
 
 
 def _demote_caller_and_make_owner(db, new_owner_id, caller_role="member"):
-    """Atomically demote the bootstrap caller (federico) off owner and install a
+    """Atomically demote the bootstrap caller (local-user) off owner and install a
     different owner, respecting the one-active-owner partial unique index."""
     with db.get_db() as conn:
         now = db.now_iso()
@@ -185,7 +185,7 @@ class TestInvite:
 class TestSetRole:
     def test_owner_promotes_member_to_admin(self, client_and_repos):
         client, _repos, db = client_and_repos
-        client.get("/workspace/members")  # bootstrap owner=federico
+        client.get("/workspace/members")  # bootstrap owner=local-user
         _seed_member(db, "local-default", "m1", "member")
         resp = client.patch("/workspace/members/m1", json={"role": "admin"})
         assert resp.status_code == 200, resp.text
@@ -244,7 +244,7 @@ class TestRemove:
 class TestTransferOwner:
     def test_owner_transfers_to_active_member(self, client_and_repos):
         client, _repos, db = client_and_repos
-        client.get("/workspace/members")  # bootstrap owner=federico
+        client.get("/workspace/members")  # bootstrap owner=local-user
         _seed_member(db, "local-default", "m1", "member")
         resp = client.post("/workspace/members/transfer-owner", json={"new_owner_id": "m1"})
         assert resp.status_code == 200, resp.text

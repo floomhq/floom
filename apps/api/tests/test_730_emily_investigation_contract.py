@@ -72,7 +72,7 @@ class TestContractReachesWhatsApp:
             "_build_capabilities_snapshot",
             lambda uid: "## What you can do here (capabilities snapshot)\n- Workers: 0",
         )
-        prompt = chat_service.build_system_prompt_for_source("federico", source="whatsapp")
+        prompt = chat_service.build_system_prompt_for_source("local-user", source="whatsapp")
         assert "Investigate fully, reply once" in prompt
         assert "## Current environment: WhatsApp" in prompt
 

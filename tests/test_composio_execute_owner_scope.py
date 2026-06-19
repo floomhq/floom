@@ -177,7 +177,7 @@ class TestComposioExecuteOwnerScope:
 
         # Owner A owns the run; Owner B is a different tenant with their OWN
         # active gmail connection that must NEVER be selected for A's run.
-        owner_a = "federico"  # single-tenant bootstrap owner
+        owner_a = "local-user"  # single-tenant bootstrap owner
         owner_b = "other-tenant"
 
         worker_a = _seed_worker(main, owner_id=owner_a)
@@ -204,7 +204,7 @@ class TestComposioExecuteOwnerScope:
         client = TestClient(main.app, raise_server_exceptions=True)
         # Seed an unrelated active connection so a buggy fallback would have
         # something to grab.
-        _seed_connection(main, owner_id="federico", app_name="gmail", composio_connection_id="CONN_X")
+        _seed_connection(main, owner_id="local-user", app_name="gmail", composio_connection_id="CONN_X")
 
         captured, fake_post = _patch_composio_post()
         with patch("requests.post", side_effect=fake_post):
@@ -224,7 +224,7 @@ class TestComposioExecuteOwnerScope:
         main = _load_api(monkeypatch, tmp_path)
         client = TestClient(main.app, raise_server_exceptions=True)
 
-        owner = "federico"
+        owner = "local-user"
         worker = _seed_worker(main, owner_id=owner)
         repos = main.get_repositories()
         run_id = f"run_{uuid.uuid4().hex[:8]}"
@@ -252,7 +252,7 @@ class TestComposioExecuteOwnerScope:
         main = _load_api(monkeypatch, tmp_path)
         client = TestClient(main.app, raise_server_exceptions=True)
 
-        owner = "federico"
+        owner = "local-user"
         worker = _seed_worker(main, owner_id=owner, connections="connections: []")
         run_id = _seed_running_run(main, owner_id=owner, worker_id=worker)
         _seed_connection(main, owner_id=owner, app_name="gmail", composio_connection_id="CONN_A")
@@ -273,7 +273,7 @@ class TestComposioExecuteOwnerScope:
         main = _load_api(monkeypatch, tmp_path)
         client = TestClient(main.app, raise_server_exceptions=True)
 
-        owner = "federico"
+        owner = "local-user"
         worker = _seed_worker(
             main,
             owner_id=owner,
@@ -303,7 +303,7 @@ connections:
         main = _load_api(monkeypatch, tmp_path)
         client = TestClient(main.app, raise_server_exceptions=True)
 
-        owner = "federico"
+        owner = "local-user"
         worker = _seed_worker(
             main,
             owner_id=owner,

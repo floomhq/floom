@@ -20,7 +20,7 @@ def test_public_api_base_prefers_api_base_and_uses_prod_default(monkeypatch):
     assert slack._slack_oauth_callback_url() == "https://api.example.test/slack/oauth/callback"
 
     monkeypatch.delenv("WORKEROS_API_BASE", raising=False)
-    assert _public_api_base_url() == "https://workeros-api.floom.dev"
+    assert _public_api_base_url() == "https://api.example.com"
 
 
 def test_session_ids_are_hashed_and_legacy_plaintext_migrates(tmp_path, monkeypatch):

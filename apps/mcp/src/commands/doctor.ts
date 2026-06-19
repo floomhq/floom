@@ -21,7 +21,7 @@ function warn(name: string, detail?: string, hint?: string): Check {
   return { name, ok: true, detail, hint };
 }
 
-const API_DEFAULT = "https://workers-api.floom.dev";
+const API_DEFAULT = "https://localhost:8000";
 
 async function checkApiReachable(apiBase: string): Promise<Check> {
   try {
@@ -74,7 +74,7 @@ function checkMcpInstall(): Check {
     { label: "Cursor", path: join(home, ".cursor", "mcp.json") },
     { label: "Continue", path: join(home, ".continue", ".continuerc.json") },
     { label: "Codex", path: join(home, ".codex", "config.json") },
-    { label: "Kimi", path: join(home, ".kimi", "mcp.json") },
+    { label: "external audit", path: join(home, ".external-audit", "mcp.json") },
   ];
 
   const found: string[] = [];

@@ -35,7 +35,7 @@ def _configure_env(
 ) -> None:
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
-    monkeypatch.setenv("WORKEROS_USER_ID", "federico")
+    monkeypatch.setenv("WORKEROS_USER_ID", "local-user")
     monkeypatch.setenv("WORKEROS_DB", str(db_path))
     monkeypatch.setenv("FLOOM_DB", str(db_path))
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(contexts_dir))
@@ -68,7 +68,7 @@ def _seed_db(db, session_user_id: str) -> None:
             """
             INSERT INTO users
                 (id, username, password_hash, role, disabled, created_at, updated_at)
-            VALUES (?, 'fede', 'test-hash', 'member', 0, ?, ?)
+            VALUES (?, 'local', 'test-hash', 'member', 0, ?, ?)
             """,
             (session_user_id, now, now),
         )
@@ -82,8 +82,8 @@ def _seed_db(db, session_user_id: str) -> None:
         )
     repos = db.get_repositories()
     for worker_id, owner_id, manifest in (
-        ("legacy-real", "federico", _manifest("legacy-real")),
-        ("legacy-system", "federico", _manifest("legacy-system", system_worker=True)),
+        ("legacy-real", "local-user", _manifest("legacy-real")),
+        ("legacy-system", "local-user", _manifest("legacy-system", system_worker=True)),
         ("other-private", "other-user", _manifest("other-private")),
     ):
         repos.workers.create(
@@ -142,7 +142,7 @@ def test_emily_worker_list_resolves_uuid_session_to_legacy_default_owner(tmp_pat
     session_user_id = "9d3dc98d-58a0-4b64-9b39-5bb1c2d27e0a"
     db_path = tmp_path / "workeros.db"
     contexts_dir = tmp_path / "contexts"
-    legacy_pack = contexts_dir / "federico" / "company"
+    legacy_pack = contexts_dir / "local-user" / "company"
     legacy_pack.mkdir(parents=True)
     (legacy_pack / "README.md").write_text("# Company\n", encoding="utf-8")
     _configure_env(monkeypatch, db_path=db_path, contexts_dir=contexts_dir)
@@ -186,7 +186,7 @@ def test_emily_worker_list_resolves_header_alias_to_user_with_workers(tmp_path, 
             """
             INSERT INTO users
                 (id, username, password_hash, role, disabled, created_at, updated_at)
-            VALUES (?, 'fede', 'test-hash', 'admin', 0, ?, ?)
+            VALUES (?, 'local', 'test-hash', 'admin', 0, ?, ?)
             """,
             (session_user_id, now, now),
         )
@@ -201,7 +201,7 @@ def test_emily_worker_list_resolves_header_alias_to_user_with_workers(tmp_path, 
     )
     chat_service = _load_chat_service()
 
-    result = chat_service._tool_workers_list_all({}, "fede")
+    result = chat_service._tool_workers_list_all({}, "local")
 
     assert result["count"] == 1
     assert {worker["id"] for worker in result["workers"]} == {"alias-real"}

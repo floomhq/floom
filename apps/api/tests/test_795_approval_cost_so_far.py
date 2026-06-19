@@ -31,7 +31,7 @@ def client_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_SECRET", SECRET)
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
-    monkeypatch.setenv("WORKEROS_USER_ID", "federico")
+    monkeypatch.setenv("WORKEROS_USER_ID", "local-user")
     for name in list(sys.modules):
         if name in ("main", "models", "worker_registry", "run_service", "chat_service", "cost") or name.startswith(("routers", "services", "core", "db", "auth", "contexts")):
             sys.modules.pop(name, None)
@@ -64,7 +64,7 @@ def _seed_run_and_approval(client, *, tokens, cost):
         )
         conn.execute(
             "INSERT INTO approvals (id, run_id, worker_id, status, created_at, owner_id, tokens_so_far, cost_usd_so_far) "
-            "VALUES ('appr_1', 'run_appr', 'w-appr', 'pending', ?, 'federico', ?, ?)",
+            "VALUES ('appr_1', 'run_appr', 'w-appr', 'pending', ?, 'local-user', ?, ?)",
             (now_iso(), tokens, cost),
         )
 

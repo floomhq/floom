@@ -105,7 +105,7 @@ def test_args_preview_redacts_large_yaml_and_file_content(booted):
 
 def test_args_preview_redacts_common_sensitive_fields_for_every_emily_tool(booted):
     chat_service = booted["chat_service"]
-    tool_names = [getattr(tool, "name", "") for tool in chat_service._workspace_tools("federico")]
+    tool_names = [getattr(tool, "name", "") for tool in chat_service._workspace_tools("local-user")]
     leaked_values = [
         "sk-live-secret-value-1234567890",
         "Bearer abcdefghijklmnop",
@@ -132,7 +132,7 @@ def test_args_preview_redacts_common_sensitive_fields_for_every_emily_tool(boote
 def test_connections_list_redacts_mcp_auth_secret_from_tool_result(booted):
     repos = booted["db"].get_repositories()
     repos.connections.upsert(
-        user_id="federico",
+        user_id="local-user",
         id="mcp-redact",
         app_name="mcp",
         composio_connection_id="mcp-redact",
@@ -145,7 +145,7 @@ def test_connections_list_redacts_mcp_auth_secret_from_tool_result(booted):
     )
     chat_tools = importlib.import_module("services.chat_tool_impls")
 
-    result = chat_tools._tool_connections_list({}, "federico")
+    result = chat_tools._tool_connections_list({}, "local-user")
     encoded = json.dumps(result)
     conn = result["connections"][0]
 
@@ -160,7 +160,7 @@ def test_connections_add_mcp_tool_reuses_http_label_validation(booted):
 
     result = chat_tools._tool_connections_add_mcp(
         {"label": "bad label with spaces", "url": "https://mcp.example.com"},
-        "federico",
+        "local-user",
     )
 
     assert result["ok"] is False
@@ -172,7 +172,7 @@ def test_connections_add_mcp_tool_reuses_http_ssrf_validation(booted):
 
     blocked = chat_tools._tool_connections_add_mcp(
         {"label": "evil", "url": "http://169.254.169.254/latest/meta-data"},
-        "federico",
+        "local-user",
     )
     assert blocked["ok"] is False
     assert "not allowed" in blocked["error"].lower()
@@ -183,7 +183,7 @@ def test_connections_add_mcp_tool_reuses_http_ssrf_validation(booted):
     ):
         allowed = chat_tools._tool_connections_add_mcp(
             {"label": "good_mcp", "url": "https://mcp.example.com", "allowed_tools": ["search"]},
-            "federico",
+            "local-user",
         )
     assert allowed["ok"] is True
 
@@ -309,7 +309,7 @@ async def test_stream_chat_uses_tool_result_when_provider_fails_after_workers_to
     q: asyncio.Queue = asyncio.Queue()
     await chat_service.stream_chat(
         message="What workers do I have?",
-        user_id="federico",
+        user_id="local-user",
         conversation_id=None,
         part_queue=q,
         source="web",
@@ -411,7 +411,7 @@ def test_tool_result_preview_redacts_secret_query_params(booted):
                     "id": "apr_1",
                     "run_id": "run_1",
                     "worker_id": "gmail_sender",
-                    "link": f"https://workers.floom.dev/approvals/review?id=apr_1&token={approval_token}",
+                    "link": f"https://localhost:3000/approvals/review?id=apr_1&token={approval_token}",
                 }
             ],
         },
@@ -428,7 +428,7 @@ def test_approval_list_result_keeps_token_out_of_model_visible_text(booted):
     token = chat_service._approval_public_token({
         "id": "apr_1",
         "run_id": "run_1",
-        "owner_id": "federico",
+        "owner_id": "local-user",
     })
 
     metadata = chat_service.build_tool_event_metadata(
@@ -441,7 +441,7 @@ def test_approval_list_result_keeps_token_out_of_model_visible_text(booted):
             "approvals": [
                 {
                     "id": "apr_1",
-                    "owner_id": "federico",
+                    "owner_id": "local-user",
                     "worker_id": "gmail_sender",
                     "worker_name": "Gmail Sender",
                     "run_id": "run_1",
@@ -471,7 +471,7 @@ def test_finish_tool_args_are_normalized_before_card_metadata(booted):
         {
             "reply": (
                 "Done — with dash. "
-                f"https://workers.floom.dev/approvals/review?id=apr_1&token={approval_token}"
+                f"https://localhost:3000/approvals/review?id=apr_1&token={approval_token}"
             )
         },
     )
@@ -496,7 +496,7 @@ def test_streaming_text_sanitizer_redacts_split_approval_tokens(booted):
     sanitizer = chat_service._StreamingTextSanitizer()
 
     chunks = [
-        "Review it here: https://workers.floom.dev/approvals/review?id=apr_1&tok",
+        "Review it here: https://localhost:3000/approvals/review?id=apr_1&tok",
         "en=" + token[:20],
         token[20:45],
         token[45:] + " now.",
@@ -622,7 +622,7 @@ def test_worker_author_run_quota_releases_claimed_draft_slot(booted, monkeypatch
 def test_conversation_get_replays_tool_cards(booted):
     chat_service = booted["chat_service"]
     main = booted["main"]
-    conv_id = chat_service.create_conversation("federico", title="Replay")
+    conv_id = chat_service.create_conversation("local-user", title="Replay")
     metadata = chat_service.build_tool_event_metadata(
         "workers__create_from_prompt",
         "call_replay",
@@ -630,7 +630,7 @@ def test_conversation_get_replays_tool_cards(booted):
         result={"ok": True, "run_id": "run_replay", "worker_id": "worker-author"},
         phase="result",
     )
-    chat_service._persist_tool_card(conv_id, "federico", "call_replay", "workers__create_from_prompt", metadata)
+    chat_service._persist_tool_card(conv_id, "local-user", "call_replay", "workers__create_from_prompt", metadata)
 
     from fastapi.testclient import TestClient
 

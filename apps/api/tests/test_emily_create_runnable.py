@@ -166,7 +166,7 @@ def test_emily_created_worker_materializes_files_on_disk(booted, monkeypatch):
     workers_dir = booted["workers_dir"]
     _stub_smoke_gate(monkeypatch, run_service, workers_dir)
 
-    result = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    result = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "local-user")
     assert result["ok"] is True, result
     worker_id = result["worker_id"]
 
@@ -177,7 +177,7 @@ def test_emily_created_worker_materializes_files_on_disk(booted, monkeypatch):
     # The DB row must exist too (registered via the shared discover+persist path).
     db = booted["db"]
     repos = db.get_repositories()
-    assert repos.workers.get(user_id="federico", worker_id=worker_id) is not None
+    assert repos.workers.get(user_id="local-user", worker_id=worker_id) is not None
 
 
 def test_emily_created_worker_runs_to_completion(booted, monkeypatch):
@@ -187,7 +187,7 @@ def test_emily_created_worker_runs_to_completion(booted, monkeypatch):
     _stub_smoke_gate(monkeypatch, run_service, workers_dir)
     _fake_uppercase_driver(monkeypatch, run_service)
 
-    created = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    created = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "local-user")
     assert created["ok"] is True, created
     worker_id = created["worker_id"]
 
@@ -195,9 +195,9 @@ def test_emily_created_worker_runs_to_completion(booted, monkeypatch):
     # _snapshot_worker_bundle -> _worker_dir_for_run, which raised
     # "worker directory not found" before the fix.
     run_id = run_service.create_run(
-        worker_id, {"text": "hello world"}, trigger_source="workspace-agent", user_id="federico"
+        worker_id, {"text": "hello world"}, trigger_source="workspace-agent", user_id="local-user"
     )
-    run_service.execute_run(run_id, worker_id, {"text": "hello world"}, user_id="federico")
+    run_service.execute_run(run_id, worker_id, {"text": "hello world"}, user_id="local-user")
 
     db = booted["db"]
     repos = db.get_repositories()
@@ -216,7 +216,7 @@ def test_emily_update_writes_manifest_to_disk_and_regenerates_run_py(booted, mon
     workers_dir = booted["workers_dir"]
     _stub_smoke_gate(monkeypatch, run_service, workers_dir)
 
-    created = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    created = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "local-user")
     assert created["ok"] is True, created
     worker_id = created["worker_id"]
 
@@ -240,7 +240,7 @@ def test_emily_update_writes_manifest_to_disk_and_regenerates_run_py(booted, mon
         'description: "Uppercases a text input. (edited)"',
     )
     res = chat_service._tool_workers_update(
-        {"id": worker_id, "yaml_text": updated_yml}, "federico"
+        {"id": worker_id, "yaml_text": updated_yml}, "local-user"
     )
     assert res["ok"] is True, res
 
@@ -277,7 +277,7 @@ def test_emily_create_generates_runpy_and_gates(booted, monkeypatch):
     monkeypatch.setattr(run_service, "_repair_run_py", _spy_repair)
     monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _spy_gate)
 
-    result = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    result = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "local-user")
     assert result["ok"] is True, result
     worker_id = result["worker_id"]
 
@@ -617,11 +617,11 @@ def test_update_preserves_real_run_js_worker_entry(booted, monkeypatch):
         [DraftFile(path="worker.yml", content=js_yml),
          DraftFile(path="run.js", content="console.log('hi')\n"),
          DraftFile(path="package.json", content='{"name":"realnode"}\n')],
-        user_id="federico", repos=get_repositories(), dedupe_id=True,
+        user_id="local-user", repos=get_repositories(), dedupe_id=True,
     )
 
     updated = js_yml.replace('A genuine node worker.', 'A genuine node worker. (v2)')
-    res = chat_service._tool_workers_update({"id": worker_id, "yaml_text": updated}, "federico")
+    res = chat_service._tool_workers_update({"id": worker_id, "yaml_text": updated}, "local-user")
     assert res["ok"] is True, res
 
     yml_on_disk = (workers_dir / worker_id / "worker.yml").read_text(encoding="utf-8")
@@ -674,7 +674,7 @@ def test_agent_skill_md_worker_not_codegen_or_backfilled_on_update(booted, monke
     worker_id = _register_worker_from_files(
         [DraftFile(path="worker.yml", content=agent_yml),
          DraftFile(path="SKILL.md", content="You are a helpful agent.\n")],
-        user_id="federico", repos=get_repositories(), dedupe_id=True,
+        user_id="local-user", repos=get_repositories(), dedupe_id=True,
     )
 
     codegen_calls: list = []
@@ -690,7 +690,7 @@ def test_agent_skill_md_worker_not_codegen_or_backfilled_on_update(booted, monke
     monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _gate)
 
     updated = agent_yml.replace("agent worker", "agent worker v2")
-    res = chat_service._tool_workers_update({"id": worker_id, "yaml_text": updated}, "federico")
+    res = chat_service._tool_workers_update({"id": worker_id, "yaml_text": updated}, "local-user")
     assert res["ok"] is True, res
     # The meaningful invariant: the run.py-specific machinery (codegen) is NOT
     # applied to an agent worker. (A benign run.py stub from the shared
@@ -730,7 +730,7 @@ def test_run_js_worker_not_codegen_or_placeholder_gated(booted, monkeypatch):
         [DraftFile(path="worker.yml", content=js_yml),
          DraftFile(path="run.js", content="console.log('hi')\n"),
          DraftFile(path="package.json", content='{"name":"noderun"}\n')],
-        user_id="federico", repos=get_repositories(), dedupe_id=True,
+        user_id="local-user", repos=get_repositories(), dedupe_id=True,
     )
 
     # codegen returns NO code (Codex's failure trigger). If the run.py machinery
@@ -752,7 +752,7 @@ def test_run_js_worker_not_codegen_or_placeholder_gated(booted, monkeypatch):
 
     import yaml as _yaml
     updated = js_yml.replace('node worker', 'node worker v2')
-    res = chat_service._tool_workers_update({"id": worker_id, "yaml_text": updated}, "federico")
+    res = chat_service._tool_workers_update({"id": worker_id, "yaml_text": updated}, "local-user")
     assert res["ok"] is True, res
     # codegen must NOT have been called for a run.js worker.
     assert codegen_calls == [], f"run.js worker was codegen'd into run.py: {codegen_calls}"
@@ -770,7 +770,7 @@ def test_emily_create_strips_divergent_command_before_persist(booted, monkeypatc
     _stub_smoke_gate(monkeypatch, run_service, workers_dir)
 
     result = chat_service._tool_workers_create(
-        {"yaml_text": _DIVERGENT_COMMAND_YML}, "federico"
+        {"yaml_text": _DIVERGENT_COMMAND_YML}, "local-user"
     )
     assert result["ok"] is True, result
     worker_id = result["worker_id"]
@@ -791,7 +791,7 @@ def test_emily_update_runs_smoke_gate(booted, monkeypatch):
     workers_dir = booted["workers_dir"]
     _stub_smoke_gate(monkeypatch, run_service, workers_dir)
 
-    created = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    created = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "local-user")
     assert created["ok"] is True, created
     worker_id = created["worker_id"]
 
@@ -804,7 +804,7 @@ def test_emily_update_runs_smoke_gate(booted, monkeypatch):
     monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _spy_gate)
 
     res = chat_service._tool_workers_update(
-        {"id": worker_id, "yaml_text": _DIVERGENT_COMMAND_YML}, "federico"
+        {"id": worker_id, "yaml_text": _DIVERGENT_COMMAND_YML}, "local-user"
     )
     assert res["ok"] is True, res
     assert gate_calls == [worker_id], "update did not run the smoke gate"
@@ -819,7 +819,7 @@ def test_emily_update_gate_failure_surfaces_and_disables(booted, monkeypatch):
     workers_dir = booted["workers_dir"]
     _stub_smoke_gate(monkeypatch, run_service, workers_dir)
 
-    created = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    created = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "local-user")
     assert created["ok"] is True, created
     worker_id = created["worker_id"]
 
@@ -833,7 +833,7 @@ def test_emily_update_gate_failure_surfaces_and_disables(booted, monkeypatch):
         'description: "Uppercases a text input. (v2)"',
     )
     res = chat_service._tool_workers_update(
-        {"id": worker_id, "yaml_text": updated_yml}, "federico"
+        {"id": worker_id, "yaml_text": updated_yml}, "local-user"
     )
     assert res["ok"] is True, res
     assert res.get("smoke_status") == "failed", res
@@ -853,7 +853,7 @@ def test_skipped_smoke_is_not_reported_as_verified(booted, monkeypatch):
 
     monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _skip_gate)
 
-    res = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    res = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "local-user")
     assert res["ok"] is True, res
     assert res.get("smoke_status") == "skipped", res
     msg = res.get("message", "").lower()
@@ -874,7 +874,7 @@ def test_errored_smoke_is_not_reported_as_verified(booted, monkeypatch):
 
     monkeypatch.setattr(run_service, "smoke_and_gate_generated_worker", _boom_gate)
 
-    res = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "federico")
+    res = chat_service._tool_workers_create({"yaml_text": _UPPERCASE_YML}, "local-user")
     assert res["ok"] is True, res
     assert res.get("smoke_status") == "errored", res
     msg = res.get("message", "").lower()
@@ -913,7 +913,7 @@ def test_smoke_runs_output_schema_contract_like_a_real_run(booted, monkeypatch):
     worker_id = _register_worker_from_files(
         [DraftFile(path="worker.yml", content=json_yml),
          DraftFile(path="run.py", content="print('hi')\n")],
-        user_id="federico",
+        user_id="local-user",
         repos=get_repositories(),
         dedupe_id=True,
     )
@@ -927,7 +927,7 @@ def test_smoke_runs_output_schema_contract_like_a_real_run(booted, monkeypatch):
     monkeypatch.setattr(run_service, "get_sandbox_driver", lambda *a, **k: _BadJsonDriver())
     # No code repair so we get the raw verdict, not a codegen rewrite.
     smoke = run_service._smoke_and_repair_generated_worker(
-        worker_id, {}, user_id="federico", repos=get_repositories(),
+        worker_id, {}, user_id="local-user", repos=get_repositories(),
         log_fn=lambda *a, **k: None, allow_code_repair=False,
     )
     assert smoke["status"] == "failed", (
@@ -952,7 +952,7 @@ def test_disabled_worker_smoke_is_not_reported_verified(booted, monkeypatch):
         'trigger:\n  type: "manual"\n',
         'paused: true\ntrigger:\n  type: "manual"\n',
     )
-    res = chat_service._tool_workers_create({"yaml_text": paused_yml}, "federico")
+    res = chat_service._tool_workers_create({"yaml_text": paused_yml}, "local-user")
     assert res["ok"] is True, res
     # Must be skipped (intentionally off), never passed/verified.
     assert res.get("smoke_status") == "skipped", res
@@ -965,5 +965,5 @@ def test_disabled_worker_smoke_is_not_reported_verified(booted, monkeypatch):
     import pytest as _pytest
     with _pytest.raises(ValueError, match="disabled"):
         run_service.create_run(
-            worker_id, {"text": "x"}, trigger_source="workspace-agent", user_id="federico"
+            worker_id, {"text": "x"}, trigger_source="workspace-agent", user_id="local-user"
         )

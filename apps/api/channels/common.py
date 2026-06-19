@@ -70,10 +70,10 @@ def notify_pending_approval_via_whatsapp(
 
         # Reverse-lookup: find active wa_id bound to this owner.
         # #871: an admin/FLOOM_SECRET-created run is owned by the bootstrap id
-        # ('federico'), but the human's binding is keyed to their real user
+        # ('local-user'), but the human's binding is keyed to their real user
         # uuid (and a legacy binding may be under bootstrap). Match the binding
         # against the bootstrap<->uuid alternates so the owner still gets pinged.
-        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "local-user"
         candidate_ids = [owner_id]
         wa_id: Optional[str] = None
         try:
@@ -155,7 +155,7 @@ def notify_pending_approval_via_slack(
         from db import get_db
         import requests as _requests
 
-        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "local-user"
         candidate_ids = [owner_id]
         slack_user_id: Optional[str] = None
         team_id: Optional[str] = None
@@ -304,7 +304,7 @@ def notify_run_complete_via_slack(
         from db import get_db
         import requests as _requests
 
-        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "local-user"
         candidate_ids = [owner_id]
         slack_user_id: Optional[str] = None
         team_id: Optional[str] = None
@@ -426,7 +426,7 @@ def notify_run_complete_via_whatsapp(
         if not _whatsapp_configured():
             return
 
-        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "local-user"
         candidate_ids = [owner_id]
         wa_id: Optional[str] = None
         try:
@@ -504,7 +504,7 @@ def notify_worker_created_via_slack(
         from db import get_db
         import requests as _requests
 
-        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "local-user"
         candidate_ids = [owner_id]
         slack_user_id: Optional[str] = None
         team_id: Optional[str] = None
@@ -620,7 +620,7 @@ def notify_worker_created_via_whatsapp(
         if not _whatsapp_configured():
             return
 
-        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+        bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "local-user"
         candidate_ids = [owner_id]
         wa_id: Optional[str] = None
         try:
@@ -696,7 +696,7 @@ def bound_user_is_valid(user_id: str) -> bool:
 
     1. The ``users`` table contains a row for ``user_id`` (normal multi-member case).
     2. ``user_id`` equals the bootstrap/legacy owner id
-       (``WORKEROS_USER_ID`` env var, defaulting to ``"federico"``).  Legacy
+       (``WORKEROS_USER_ID`` env var, defaulting to ``"local-user"``).  Legacy
        single-user installs bind under this id, which pre-dates the ``users``
        table.  Resetting that binding when there is no matching users row would
        disconnect a valid owner (preserves #845 legacy-bootstrap-owner behavior).
@@ -714,7 +714,7 @@ def bound_user_is_valid(user_id: str) -> bool:
     # Bootstrap/legacy owner id is always valid — this id pre-dates the users
     # table and represents the single-tenant owner (#845).  Resolved without
     # importing main to avoid a circular import.
-    bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "federico"
+    bootstrap_id = (os.environ.get("WORKEROS_USER_ID") or "").strip() or "local-user"
     if user_id == bootstrap_id:
         return True
 

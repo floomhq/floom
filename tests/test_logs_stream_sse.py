@@ -80,7 +80,7 @@ def _insert_worker_and_run(main, run_id: str, status: str = "completed"):
                 (id, skill_version_id, name, trigger_type, grants_json,
                  input_values_json, enabled, created_at, owner_id)
             VALUES ('ls-worker', 'sv_ls_worker', 'LS Worker', 'manual',
-                    '{}', '{}', 1, ?, 'federico')
+                    '{}', '{}', 1, ?, 'local-user')
             """,
             (now,),
         )

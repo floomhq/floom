@@ -47,7 +47,7 @@ connections: []
 
 _WORKER_ID = "ai-news-digest"
 _SECRET = "test-secret-feedback"
-_USER_ID = "federico"
+_USER_ID = "local-user"
 
 
 @pytest.fixture

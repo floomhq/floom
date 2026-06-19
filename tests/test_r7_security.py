@@ -31,7 +31,7 @@ def _load_api(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_SECRET", AUTH["x-floom-secret"])
     monkeypatch.setenv("COMPOSIO_API_KEY", "cmp-test")
     monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "1")
-    monkeypatch.setenv("WORKEROS_USER_ID", "federico")
+    monkeypatch.setenv("WORKEROS_USER_ID", "local-user")
     monkeypatch.setenv("trusted_proxies", "*")
     monkeypatch.delenv("WORKEROS_ENABLE_INTERNAL_AUTH_CONFIGS", raising=False)
     monkeypatch.delenv("ALLOWED_ORIGINS", raising=False)
@@ -66,7 +66,7 @@ def _load_api(monkeypatch, tmp_path):
     return main
 
 
-def _headers(user_id: str = "federico") -> dict[str, str]:
+def _headers(user_id: str = "local-user") -> dict[str, str]:
     return {**AUTH, "x-floom-user": user_id}
 
 
@@ -77,7 +77,7 @@ def _stored_zip(size_bytes: int) -> bytes:
     return buffer.getvalue()
 
 
-def _insert_connection(main, *, user_id: str = "federico") -> str:
+def _insert_connection(main, *, user_id: str = "local-user") -> str:
     local_id = str(uuid.uuid4())
     now = main.now_iso()
     with main.get_db() as conn:
@@ -124,7 +124,7 @@ def _insert_minimal_worker(main, worker_id: str) -> None:
         conn.execute(
             """
             INSERT INTO workers (id, skill_version_id, name, trigger_type, created_at, owner_id)
-            VALUES (?, ?, ?, 'manual', ?, 'federico')
+            VALUES (?, ?, ?, 'manual', ?, 'local-user')
             """,
             (worker_id, skill_version_id, worker_id, now),
         )
@@ -227,7 +227,7 @@ def test_cli_auth_store_bounded(monkeypatch, tmp_path):
         if index == 0:
             first_device_code = resp.json()["device_code"]
 
-    records = main.get_repositories().cli_auth.list(user_id="federico")
+    records = main.get_repositories().cli_auth.list(user_id="local-user")
     assert len(records) == 100
     assert first_device_code not in {record["device_code"] for record in records}
 
@@ -324,7 +324,7 @@ def test_account_info_strips_internal_ids(monkeypatch, tmp_path):
         fetch_info.return_value = {
             "email": "user@example.com",
             "scopes": ["gmail.readonly"],
-            "user_id": "federico",
+            "user_id": "local-user",
             "auth_config_id": "ac_internal",
         }
         resp = client.get(f"/connections/{connection_id}/account-info", headers=_headers())
@@ -344,7 +344,7 @@ def test_account_info_strips_internal_ids(monkeypatch, tmp_path):
     assert "user_id" not in body
     assert "auth_config_id" not in body
     assert "ac_internal" not in resp.text
-    assert "federico" not in resp.text
+    assert "local-user" not in resp.text
 
 
 def test_auth_configs_endpoint_internal_only(monkeypatch, tmp_path):

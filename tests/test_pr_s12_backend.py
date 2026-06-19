@@ -193,7 +193,7 @@ def test_execute_run_fetches_secrets_once_for_log_scrubbing(api_ctx, monkeypatch
         ).fetchone()[0]
 
     assert log_count > 1
-    assert calls == [(worker_id, "federico")]
+    assert calls == [(worker_id, "local-user")]
 
 
 def test_runs_filter_and_total_count_header(api_ctx):

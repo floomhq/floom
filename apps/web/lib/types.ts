@@ -1185,8 +1185,8 @@ export interface AuthMe {
 }
 
 // ---------------------------------------------------------------------------
-// Search Assistant Review Pack (sample-customer pilot) — public client-facing review flow.
-// Schema: context/vault/sample-search/pack.schema.json (v1.0).
+// ReviewPack Review Pack (demo-client pilot) — public client-facing review flow.
+// Schema: context/vault/review_pack/pack.schema.json (v1.0).
 // The public GET projection NEVER carries integrity.password_plain — the API
 // strips it at the public boundary (DoD: "password_plain never in public GET").
 // ---------------------------------------------------------------------------

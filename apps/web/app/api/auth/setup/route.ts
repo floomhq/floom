@@ -1,7 +1,7 @@
 import { NextRequest, NextResponse } from "next/server";
 import { forwardSecureSetCookies } from "@/lib/secure-set-cookie";
 
-const API_BASE = process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
+const API_BASE = process.env.FLOOM_API_BASE || "https://localhost:8000";
 
 /**
  * POST /api/auth/setup

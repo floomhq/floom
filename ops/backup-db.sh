@@ -16,7 +16,7 @@
 #   - 4 weekly restore points
 #
 # Override via env:
-#   WORKEROS_ROOT            repo root (default: /root/workeros)
+#   WORKEROS_ROOT            repo root (default: /opt/workeros)
 #   WORKEROS_API_DIR         API dir for relative FLOOM_DB paths (default: $WORKEROS_ROOT/apps/api)
 #   FLOOM_DB                 SQLite path (default: $WORKEROS_ROOT/data/floom.db)
 #   FLOOM_ARTIFACTS_DIR      artifacts dir (default: $WORKEROS_ROOT/data/artifacts)
@@ -27,7 +27,7 @@
 
 set -euo pipefail
 
-WORKEROS_ROOT="${WORKEROS_ROOT:-/root/workeros}"
+WORKEROS_ROOT="${WORKEROS_ROOT:-/opt/workeros}"
 WORKEROS_API_DIR="${WORKEROS_API_DIR:-$WORKEROS_ROOT/apps/api}"
 DB_PATH="${FLOOM_DB:-$WORKEROS_ROOT/data/floom.db}"
 ARTIFACTS_DIR="${FLOOM_ARTIFACTS_DIR:-$WORKEROS_ROOT/data/artifacts}"

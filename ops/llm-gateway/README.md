@@ -1,4 +1,4 @@
-# Managed LLM gateway (#1448)
+﻿# Managed LLM gateway (#1448)
 
 LLM calls run **inside** the E2B sandbox (worker code calls litellm/openai), so
 the engine can't intercept them in-process. The fix is a gateway the workers
@@ -27,7 +27,7 @@ precedence). The gateway host is also added to the sandbox egress allowlist.
 
 | Var | Meaning |
 |-----|---------|
-| `WORKEROS_LLM_GATEWAY_URL` | Gateway OpenAI-compatible base, e.g. `https://llm-gw.floom.dev/v1`. **Unset = off** (workers call providers directly with their own keys = today's behaviour; this is the kill-switch). |
+| `WORKEROS_LLM_GATEWAY_URL` | Gateway OpenAI-compatible base, e.g. `https://llm-gateway.example.com/v1`. **Unset = off** (workers call providers directly with their own keys = today's behaviour; this is the kill-switch). |
 | `WORKEROS_LLM_GATEWAY_KEY` | The shared virtual key (the proxy's `LITELLM_MASTER_KEY` or a minted virtual key). Injected as the worker's `OPENAI_API_KEY`. |
 
 ## Run it
@@ -43,11 +43,11 @@ export WORKEROS_LLM_GATEWAY_URL=http://localhost:4000/v1
 export WORKEROS_LLM_GATEWAY_KEY=$LITELLM_MASTER_KEY
 ```
 
-Cloud (Railway): deploy `ghcr.io/berriai/litellm:main-stable` as a service with
+Hosted platform: deploy `ghcr.io/berriai/litellm:main-stable` as a service with
 `litellm_config.yaml` mounted (or baked) and the same env vars; add a managed
 Redis; then set `WORKEROS_LLM_GATEWAY_URL` / `WORKEROS_LLM_GATEWAY_KEY` on the
-`managed-deployment-api` service. No engine submodule change is needed beyond the
-code already in `e2b_driver.py`.
+API service. No code change is needed beyond the gateway wiring already in
+`e2b_driver.py`.
 
 ## Tuning the pool
 Edit `litellm_config.yaml`: add/remove regional deployments per `model_name` for

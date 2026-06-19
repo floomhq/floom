@@ -1676,7 +1676,7 @@ function SettingsHistoryMenu({
   );
 }
 
-// Round-09 (Federico 2026-06-17): the assistant name is a workspace setting.
+// Round-09 (Maintainer 2026-06-17): the assistant name is a workspace setting.
 // Renaming here writes the `assistant_name` KV and propagates to every visible
 // surface (chat header, channels copy, approvals copy) via useAssistantName().
 function AssistantNameSection({ canEdit }: { canEdit: boolean }) {
@@ -2352,7 +2352,7 @@ function VersionList({ title, versions }: { title: string; versions: VersionSumm
 // To regenerate: python3 -c "import qrcode; ..." (see git history for script).
 //
 // #1385: WA_BOT_NUMBER is read from NEXT_PUBLIC_WA_BOT_NUMBER env at build time.
-// Cloud sets it via Railway env. Self-hosters set their own number. When unset,
+// Cloud sets it via hosted platform env. Self-hosters set their own number. When unset,
 // the WhatsApp card renders a "not configured" state instead of QR/number.
 // The pre-computed QR SVG below encodes the cloud number; it is only rendered
 // when the env number matches (i.e. the cloud deployment). Self-hosters with a
@@ -2363,7 +2363,7 @@ function VersionList({ title, versions }: { title: string; versions: VersionSumm
 // regenerating WA_QR_PATH.
 const WA_QR_CLOUD_NUMBER = "16503999709";
 
-// Read from env — set NEXT_PUBLIC_WA_BOT_NUMBER in Railway (cloud) or .env
+// Read from env — set NEXT_PUBLIC_WA_BOT_NUMBER in hosted platform (cloud) or .env
 // (self-host). When absent the WhatsApp channel card renders unconfigured.
 const WA_BOT_NUMBER = (process.env.NEXT_PUBLIC_WA_BOT_NUMBER || "").trim() || null;
 const WA_LINK = WA_BOT_NUMBER ? `https://wa.me/${WA_BOT_NUMBER}` : null;

@@ -43,7 +43,7 @@ def test_worker_call_token_blocked_from_general_api(monkeypatch, tmp_path):
     from run_token import issue_worker_call_token
 
     token = issue_worker_call_token(
-        user_id="federico",
+        user_id="local-user",
         parent_run_id="run-parent",
         callable_workers=["child-worker"],
     )

@@ -46,7 +46,7 @@ from auth.dependency import get_auth_context  # noqa: E402
 
 _SECRET = "test-secret-f4-uploads"
 _AUTH = {"x-floom-secret": _SECRET}
-_OWNER = "federico"
+_OWNER = "local-user"
 
 
 def _auth_as(user_id: str):
@@ -166,9 +166,9 @@ def test_delete_keeps_blob_when_still_referenced_by_run():
 
 def test_delete_is_owner_scoped_non_owner_gets_404():
     client = _client()
-    sha = _upload(client, b"owned by federico only")
+    sha = _upload(client, b"owned by local-user only")
 
-    # A second user must not be able to delete federico's upload. Swap the auth
+    # A second user must not be able to delete local-user's upload. Swap the auth
     # override to a different user for just this DELETE.
     main.app.dependency_overrides[get_auth_context] = _auth_as("intruder")
     try:

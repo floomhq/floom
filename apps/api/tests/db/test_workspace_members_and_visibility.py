@@ -20,16 +20,16 @@ def _create_worker(repos, manifest, *, user_id, worker_id, **fields):
 
 def test_new_worker_defaults_private_and_workspace_id(repo_bundle):
     repos, _db, manifest = repo_bundle
-    worker = _create_worker(repos, manifest, user_id="federico", worker_id="w1")
+    worker = _create_worker(repos, manifest, user_id="local-user", worker_id="w1")
     assert worker["visibility"] == "private"
-    assert worker["owner_id"] == "federico"
+    assert worker["owner_id"] == "local-user"
     # base user under default workspace
     assert worker["workspace_id"] == "local-default"
 
 
 def test_derived_workspace_id_from_scoped_owner(repo_bundle):
     repos, _db, manifest = repo_bundle
-    owner = "federico__ws_0123456789abcd"
+    owner = "local-user__ws_0123456789abcd"
     worker = _create_worker(repos, manifest, user_id=owner, worker_id="w2")
     assert worker["workspace_id"] == "ws_0123456789abcd"
 
@@ -71,16 +71,16 @@ def _seed_owner(db, workspace_id, user_id):
 
 def test_members_list_returns_single_owner(repo_bundle):
     repos, db, _manifest = repo_bundle
-    _seed_owner(db, "local-default", "federico")
+    _seed_owner(db, "local-default", "local-user")
     members = repos.members.list(workspace_id="local-default")
     assert len(members) == 1
     assert members[0]["role"] == "owner"
-    assert members[0]["user_id"] == "federico"
+    assert members[0]["user_id"] == "local-user"
 
 
 def test_one_active_owner_index_blocks_second_owner(repo_bundle):
     repos, db, _manifest = repo_bundle
-    _seed_owner(db, "local-default", "federico")
+    _seed_owner(db, "local-default", "local-user")
     import sqlite3
 
     with pytest.raises(sqlite3.IntegrityError):
@@ -193,10 +193,10 @@ def test_admin_cannot_remove_other_admin(repo_bundle):
 
 def test_owner_has_full_permissions(repo_bundle):
     repos, db, manifest = repo_bundle
-    _create_worker(repos, manifest, user_id="federico", worker_id="w-own")
-    _seed_owner(db, "local-default", "federico")
+    _create_worker(repos, manifest, user_id="local-user", worker_id="w-own")
+    _seed_owner(db, "local-default", "local-user")
     perms = repos.asset_access.get_permissions(
-        workspace_id="local-default", user_id="federico", asset_type="worker", asset_id="w-own"
+        workspace_id="local-default", user_id="local-user", asset_type="worker", asset_id="w-own"
     )
     assert perms["is_owner"] is True
     assert all(perms[k] for k in ("can_view", "can_edit", "can_run", "can_delete", "can_share"))
@@ -296,12 +296,12 @@ def test_non_owner_member_cannot_set_visibility(repo_bundle):
 
 def test_set_visibility_rejects_invalid_value(repo_bundle):
     repos, db, manifest = repo_bundle
-    _create_worker(repos, manifest, user_id="federico", worker_id="w-inv")
-    _seed_owner(db, "local-default", "federico")
+    _create_worker(repos, manifest, user_id="local-user", worker_id="w-inv")
+    _seed_owner(db, "local-default", "local-user")
     with pytest.raises(ValueError):
         repos.asset_access.set_visibility(
             workspace_id="local-default",
-            actor_id="federico",
+            actor_id="local-user",
             asset_type="worker",
             asset_id="w-inv",
             visibility="public",

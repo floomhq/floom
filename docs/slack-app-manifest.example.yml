@@ -20,7 +20,7 @@ features:
         message: Summarize the current worker status.
   slash_commands:
     - command: /floom
-      url: https://workers-api.floom.dev/slack/events
+      url: https://localhost:8000/slack/events
       description: Ask the Workeros workspace agent or manage pending approvals.
       usage_hint: "approvals | <request>"
       should_escape: false
@@ -44,7 +44,7 @@ oauth_config:
 
 settings:
   event_subscriptions:
-    request_url: https://workers-api.floom.dev/slack/events
+    request_url: https://localhost:8000/slack/events
     bot_events:
       - app_mention
       - assistant_thread_started
@@ -52,7 +52,7 @@ settings:
       - message.im
   interactivity:
     is_enabled: true
-    request_url: https://workers-api.floom.dev/slack/events
+    request_url: https://localhost:8000/slack/events
   org_deploy_enabled: false
   socket_mode_enabled: false
   token_rotation_enabled: false

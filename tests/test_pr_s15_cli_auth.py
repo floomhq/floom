@@ -1,4 +1,4 @@
-"""Regression tests for PR S15 CLI device-code auth endpoints."""
+﻿"""Regression tests for PR S15 CLI device-code auth endpoints."""
 
 from __future__ import annotations
 
@@ -29,11 +29,11 @@ def _load_api(monkeypatch, tmp_path):
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_ARTIFACTS_DIR", str(artifacts_dir))
     monkeypatch.setenv("FLOOM_SECRET", AUTH_HEADER["x-floom-secret"])
-    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
-    # #1073 dropped the hardcoded floom.dev default for the public API base
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://localhost:3000")
+    # #1073 dropped the hardcoded example.com default for the public API base
     # (OSS default is now localhost:8000). Pin WORKEROS_API_BASE so the poll
     # response's api_base is deterministic instead of relying on a default.
-    monkeypatch.setenv("WORKEROS_API_BASE", "https://workers-api.floom.dev")
+    monkeypatch.setenv("WORKEROS_API_BASE", "https://localhost:8000")
 
     reset_prefixes = ("auth.", "db.")
     reset_exact = {
@@ -80,7 +80,7 @@ def test_devices_create_and_pending_poll_shape(monkeypatch, tmp_path):
     payload = response.json()
     assert payload["device_code"]
     assert payload["user_code"].count("-") == 1
-    assert payload["verification_url"].startswith("https://workers.floom.dev/cli-auth?code=")
+    assert payload["verification_url"].startswith("https://localhost:3000/cli-auth?code=")
     assert payload["polling_interval_seconds"] == 2
     assert payload["expires_in_seconds"] == 600
 
@@ -141,7 +141,7 @@ def test_poll_returns_approved_once_then_404_after_consumption(monkeypatch, tmp_
     assert first_poll.status_code == 200
     body = first_poll.json()
     assert body["status"] == "approved"
-    assert body["api_base"] == "https://workers-api.floom.dev"
+    assert body["api_base"] == "https://localhost:8000"
     assert body["api_secret"].startswith("wos_")
     assert body["api_secret"] != AUTH_HEADER["x-floom-secret"]
 

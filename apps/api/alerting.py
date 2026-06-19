@@ -110,7 +110,7 @@ def _send_email(subject: str, body: str) -> None:
 
 def _notify(worker_id: str, worker_name: str, reason: str, details: str) -> None:
     """Dispatch alert via all configured channels."""
-    frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "https://workers.floom.dev").rstrip("/")
+    frontend_url = os.environ.get("WORKERS_FRONTEND_URL", "https://localhost:3000").rstrip("/")
     worker_url = f"{frontend_url}/workers/{worker_id}"
 
     # Structured log is always emitted (visible via journalctl)

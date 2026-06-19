@@ -78,7 +78,7 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
 
   program.command("login")
     .description("Login via browser device authorization")
-    .option("--cloud", "Authenticate against Workeros Cloud (workeros.floom.dev)")
+    .option("--cloud", "Authenticate against Workeros Cloud (app.example.com)")
     .action(async (options: { cloud?: boolean }) => runAction(runLoginCommand(options)));
 
   program.command("logout")

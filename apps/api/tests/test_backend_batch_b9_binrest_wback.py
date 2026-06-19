@@ -291,7 +291,7 @@ def test_agent_writeback_persists_writeable_context(monkeypatch, tmp_path):
     # (the agent can mutate staged files via run_command), then write back.
     context_root = (tmp_path / "artifacts" / "run1" / "context")
     context_root.mkdir(parents=True, exist_ok=True)
-    driver._stage_contexts(config=config, context_root=context_root, user_id="federico", log_fn=log_fn)
+    driver._stage_contexts(config=config, context_root=context_root, user_id="local-user", log_fn=log_fn)
 
     # Edit the staged writeable pack + the staged read-only pack.
     (context_root / "notes" / "memo.md").write_text("v1-edited\n", encoding="utf-8")
@@ -299,7 +299,7 @@ def test_agent_writeback_persists_writeable_context(monkeypatch, tmp_path):
     (context_root / "readonly" / "fixed.md").write_text("HACKED\n", encoding="utf-8")
 
     driver._persist_writeable_contexts(
-        config=config, context_root=context_root, user_id="federico", log_fn=log_fn
+        config=config, context_root=context_root, user_id="local-user", log_fn=log_fn
     )
 
     # Writeable pack edits persisted (edit + new file).

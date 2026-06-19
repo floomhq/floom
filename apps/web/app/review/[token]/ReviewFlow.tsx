@@ -1,6 +1,6 @@
 "use client";
 
-// Search Assistant Review Pack — public client review flow (sample-customer pilot).
+// ReviewPack Review Pack — public client review flow (demo-client pilot).
 // German UI, mobile-first, no phone-frame chrome, no demo bar. Four screens:
 //   Gate (pack password) -> Identity (name/role) -> Review (job tabs, candidate
 //   cards, 👍/🤔/👎, auto-save) -> Done.

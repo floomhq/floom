@@ -23,7 +23,7 @@ export function humanizeKey(raw: string): string {
 }
 
 // ---------------------------------------------------------------------------
-// Export-success booleans. The OpenDraft (and similar) workers emit
+// Export-success booleans. Some workers emit
 // `pdf_export_success` / `docx_export_success` scalars. The matching
 // export_report distinguishes "not requested" from "failed", but the bare
 // scalar is just a boolean. Surface a clear human STATE, never bare `false`.

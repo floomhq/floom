@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+﻿import { describe, it, expect, vi, beforeEach } from "vitest";
 import { fireEvent, render, screen, within } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import type { ReactNode } from "react";
@@ -21,7 +21,7 @@ const gmail = {
   created_at: "2026-01-01",
   updated_at: "2026-01-01",
   display_name: "Gmail",
-  account_label: "team@floom.dev",
+  account_label: "team@example.com",
   scopes: ["gmail.readonly", "gmail.send"],
   owner_id: null,
   kind: "composio",

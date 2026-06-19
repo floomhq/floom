@@ -142,6 +142,4 @@ def test_stock_worker_migration_dispatch_matrix():
         )
 
     assert rows["research_brief"] == ("agent", "AgentDriver")
-    assert rows["openblog"] == ("pure-script", "E2BSandboxDriver")
-    assert rows["opendraft"] == ("pure-script", "E2BSandboxDriver")
     assert rows["csv_enricher"] == ("pure-script", "E2BSandboxDriver")

@@ -285,7 +285,7 @@ class AsyncBytesUpload:
 async def async_upload_bytes(content: bytes, index: int) -> Any:
     request = SimpleNamespace(headers={})
     file = AsyncBytesUpload(f"async-{index}.csv", content, "text/csv")
-    auth = api_main.AuthContext(user_id="federico", email=None, scopes=("admin",))
+    auth = api_main.AuthContext(user_id="local-user", email=None, scopes=("admin",))
     return await api_upload_file(request, auth=auth, file=file, max_size_mb=1, accepts=None)
 
 

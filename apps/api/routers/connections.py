@@ -1843,7 +1843,7 @@ async def _run_connection_sweep(*, user_id: str | None = None) -> None:
             error = str(exc)
         _write_connection_check(conn_id, check, error, tested_at, repos=repos)
         # Also refresh account_label + scopes for ACTIVE connections so the
-        # user sees their actual email rather than the hardcoded "federico"
+        # user sees their actual email rather than the hardcoded "local-user"
         # user_id. _fetch_composio_account_info uses Composio's tool-execute
         # proxy to get the real email via GMAIL_GET_PROFILE etc.
         if check == "valid":

@@ -19,7 +19,7 @@ async function validCookie(): Promise<string> {
 function req(p: string, cookie?: string): NextRequest {
   const headers: Record<string, string> = {};
   if (cookie) headers.cookie = cookie;
-  return new NextRequest(`https://workers.floom.dev${p}`, { headers });
+  return new NextRequest(`https://localhost:3000${p}`, { headers });
 }
 
 function directive(csp: string, name: string): string {

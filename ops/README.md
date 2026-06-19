@@ -6,41 +6,29 @@ Operational scripts and systemd units for the production API.
 
 Files:
 - `autodeploy-api.sh` - deterministic wrapper for systemd/webhook autodeploys
-- `workeros-api-autodeploy.service` - OSS API oneshot unit
-- `managed-deployment-api-autodeploy.service` - cloud API oneshot unit
+- `workeros-api-autodeploy.service` - API oneshot unit
 
 The wrapper never runs `git pull`. It fetches `origin/main`, rejects tracked
 changes, staged changes, untracked files, and local-only commits with an
 actionable error, then resets a clean deploy mirror to `origin/main` and invokes
 the configured deploy command.
 
-Install or refresh the OSS unit:
+Install or refresh the unit:
 
 ```bash
-install -m 0755 ops/autodeploy-api.sh /root/workeros/ops/autodeploy-api.sh
+install -m 0755 ops/autodeploy-api.sh /opt/workeros/ops/autodeploy-api.sh
 install -m 0644 ops/workeros-api-autodeploy.service /etc/systemd/system/workeros-api-autodeploy.service
 systemctl daemon-reload
 systemctl start workeros-api-autodeploy.service
 ```
 
-Install or refresh the cloud unit:
-
-```bash
-install -m 0755 ops/autodeploy-api.sh /usr/local/bin/workeros-api-autodeploy
-install -m 0644 ops/managed-deployment-api-autodeploy.service /etc/systemd/system/managed-deployment-api-autodeploy.service
-systemctl daemon-reload
-systemctl start managed-deployment-api-autodeploy.service
-```
-
 Optional failure alerting:
 
 ```bash
-cat >/root/.config/workeros/autodeploy.env <<'EOF'
+cat >/etc/workeros/autodeploy.env <<'EOF'
 WORKEROS_AUTODEPLOY_ALERT_WEBHOOK=https://example.invalid/webhook
 EOF
 ```
-
-Cloud uses `/root/.config/managed-deployment/autodeploy.env`.
 
 ## Hard Post-Deploy Smoke Gate
 
@@ -50,9 +38,8 @@ After every production deploy and before relying on a production alias, run:
 bash ops/smoke-routes.sh
 ```
 
-The gate must pass. It curls critical OS and Cloud routes and fails on any 508,
-5xx, or curl failure. If it fails, the deploy is not promoted, and any changed
-alias is rolled back to the last known-good deployment.
+The gate must pass. It curls critical routes and fails on any 508, 5xx, or curl
+failure. If it fails, the deploy is not promoted.
 
 `ops/deploy-api.sh` runs this gate automatically after the API health, endpoint,
 and schema checks pass.
@@ -82,14 +69,14 @@ Restore a backup:
 
 ```bash
 gunzip -c /root/backups/workeros-YYYY-MM-DD-HHMM/floom.db.gz > /tmp/restore-floom.db
-sqlite3 /root/workeros/data/floom.db ".restore '/tmp/restore-floom.db'"
+sqlite3 /opt/workeros/data/floom.db ".restore '/tmp/restore-floom.db'"
 ```
 
 Install or refresh production units:
 
 ```bash
-install -m 0755 ops/backup-db.sh /root/workeros/ops/backup-db.sh
-install -m 0755 ops/rotate-artifacts.py /root/workeros/ops/rotate-artifacts.py
+install -m 0755 ops/backup-db.sh /opt/workeros/ops/backup-db.sh
+install -m 0755 ops/rotate-artifacts.py /opt/workeros/ops/rotate-artifacts.py
 install -m 0644 ops/workeros-backup.service /etc/systemd/system/workeros-backup.service
 install -m 0644 ops/workeros-backup.timer /etc/systemd/system/workeros-backup.timer
 systemctl daemon-reload
@@ -105,7 +92,7 @@ ls -la /root/backups
 ```
 
 Tunables:
-- `WORKEROS_ROOT` repo root, default `/root/workeros`
+- `WORKEROS_ROOT` repo root, default `/opt/workeros`
 - `WORKEROS_API_DIR` API dir used to resolve relative `FLOOM_DB`, default `$WORKEROS_ROOT/apps/api`
 - `FLOOM_DB` source SQLite path, default `$WORKEROS_ROOT/data/floom.db`; relative paths resolve from `WORKEROS_API_DIR`
 - `FLOOM_ARTIFACTS_DIR` artifacts dir, default `$WORKEROS_ROOT/data/artifacts`; relative paths resolve from `WORKEROS_API_DIR`

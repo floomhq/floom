@@ -9,7 +9,7 @@
 import { cookies } from "next/headers";
 
 const API_BASE =
-  process.env.FLOOM_API_BASE || "https://workers-api.floom.dev";
+  process.env.FLOOM_API_BASE || "https://localhost:8000";
 const API_SECRET = process.env.FLOOM_API_SECRET || "";
 const ACTIVE_WORKSPACE_COOKIE_KEY = "workeros.activeWorkspaceId";
 

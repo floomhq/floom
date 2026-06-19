@@ -249,7 +249,7 @@ class TestScopesUX:
                     "https://www.googleapis.com/auth/gmail.readonly",
                     "https://www.googleapis.com/auth/gmail.send",
                 ],
-                "user_id": "federico",
+                "user_id": "local-user",
                 "auth_config_id": "ac_gmail_123",
                 "status": "active",
             }

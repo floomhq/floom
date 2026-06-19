@@ -62,7 +62,7 @@ def test_platform_config_only_includes_missing_names(tmp_path):
     os.environ["E2B_API_KEY"] = "e2b-test"
     os.environ["COMPOSIO_API_KEY"] = "cmp-test"
     os.environ["COMPOSIO_WEBHOOK_SIGNING_KEY"] = "whsec-test"
-    os.environ["WORKERS_FRONTEND_URL"] = "https://workers.floom.dev"
+    os.environ["WORKERS_FRONTEND_URL"] = "https://localhost:3000"
     os.environ["FLOOM_SECRET"] = "test-secret-platform"
 
     resp = client.get("/system/platform-config", headers={"x-floom-secret": "test-secret-platform"})
@@ -86,7 +86,7 @@ def test_platform_config_marks_missing_required_names(tmp_path):
     os.environ["E2B_API_KEY"] = "e2b-test"
     os.environ["COMPOSIO_API_KEY"] = "cmp-test"
     os.environ["COMPOSIO_WEBHOOK_SIGNING_KEY"] = "whsec-test"
-    os.environ["WORKERS_FRONTEND_URL"] = "https://workers.floom.dev"
+    os.environ["WORKERS_FRONTEND_URL"] = "https://localhost:3000"
     os.environ["FLOOM_SECRET"] = "test-secret-platform"
 
     resp = client.get("/system/platform-config", headers={"x-floom-secret": "test-secret-platform"})

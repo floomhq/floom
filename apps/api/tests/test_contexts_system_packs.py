@@ -51,7 +51,7 @@ def client_and_main(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
     # Owner-mismatch hiding only applies when scoping is on OR cloud; force it
-    # so the other-user pack is correctly hidden from "federico".
+    # so the other-user pack is correctly hidden from "local-user".
     monkeypatch.setenv("WORKEROS_ENABLE_USER_HEADER_SCOPE", "0")
 
     for name in [
@@ -172,7 +172,7 @@ def test_upload_can_create_missing_pack_when_requested(client_and_main):
     assert detail.status_code == 200, detail.text
     body = detail.json()
     assert body["writeable"] is True
-    assert body["owner_id"] == "federico"
+    assert body["owner_id"] == "local-user"
     assert any(f["path"] == "first-note.md" for f in body["files"])
 
 
@@ -430,7 +430,7 @@ def test_brain_attach_materializes_missing_db_worker_dir(client_and_main):
         "ctx-consumer",
         {},
         status="completed",
-        user_id="federico",
+        user_id="local-user",
         repos=main.get_repositories(),
     )
     refreshed = client.get("/workers/ctx-consumer")

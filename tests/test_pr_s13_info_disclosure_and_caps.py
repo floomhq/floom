@@ -53,7 +53,7 @@ def _load_api(
     monkeypatch.setenv("E2B_API_KEY", "e2b-test")
     monkeypatch.setenv("COMPOSIO_API_KEY", "cmp-test")
     monkeypatch.setenv("COMPOSIO_WEBHOOK_SIGNING_KEY", "whsec-test")
-    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://workers.floom.dev")
+    monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://localhost:3000")
     monkeypatch.setenv("WORKEROS_DRAFT_RATE_HOUR", str(draft_rate_hour))
     if run_create_rate_minute is None:
         monkeypatch.delenv("WORKEROS_RUN_CREATE_RATE_LIMIT", raising=False)
@@ -199,7 +199,7 @@ def _insert_minimal_worker(
     worker_id: str,
     *,
     secrets: list[str] | None = None,
-    owner_id: str = "federico",
+    owner_id: str = "local-user",
 ) -> None:
     now = main.now_iso()
     skill_version_id = f"skill_{worker_id}"
@@ -231,7 +231,7 @@ def _insert_minimal_worker(
         )
 
 
-def _insert_file_input_worker(main: Any, worker_id: str, *, owner_id: str = "federico") -> None:
+def _insert_file_input_worker(main: Any, worker_id: str, *, owner_id: str = "local-user") -> None:
     now = main.now_iso()
     skill_version_id = f"skill_{worker_id}"
     manifest = {
@@ -1054,13 +1054,13 @@ def test_run_events_redact_trace_ids_and_internal_metadata(monkeypatch, tmp_path
             run_id,
             "trace_a2278662e7ae4e05 mode=agent runner=e2b private log",
             trace_id="trace_a2278662e7ae4e05",
-            user_id="federico",
+            user_id="local-user",
         )
         run_service.update_run_status(
             run_id,
             main.RunStatus.COMPLETED.value,
             error="thread_a2278662e7ae4e05 runner=e2b",
-            user_id="federico",
+            user_id="local-user",
         )
 
     events = []

@@ -1,7 +1,7 @@
 """Regression: the worker path-traversal guard must not fire on legit paths.
 
-Root cause (2026-06-14 cloud audit, Issue 10): on Railway, FLOOM_WORKERS_DIR was
-`/opt/managed-deployment/var/workers` where a parent segment is a symlink. The old
+Root cause (2026-06-14 cloud audit, Issue 10): on hosted platform, FLOOM_WORKERS_DIR was
+`/opt/workeros/var/workers` where a parent segment is a symlink. The old
 `_safe_path` did `WORKERS_DIR.joinpath(id).resolve()` then
 `relative_to(WORKERS_DIR)` — `.resolve()` follows symlinks, so a valid
 `<WORKERS_DIR>/<worker_id>` could resolve to a realpath that is no longer
@@ -127,7 +127,7 @@ def test_runner_utils_symlink_inside_base_escape_blocked(tmp_path):
 
 def test_worker_registry_symlinked_deploy_root_still_works(tmp_path):
     """Regression guard for the original P0 the PR fixed: when WORKERS_DIR is
-    reached *through* a symlink (Railway deploy root), a legit worker id must
+    reached *through* a symlink (hosted platform deploy root), a legit worker id must
     still resolve. The realpath layer must NOT re-break this, because base and
     target both fully resolve the same symlink prefix.
     """

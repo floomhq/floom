@@ -106,7 +106,7 @@ def app_ctx(monkeypatch, tmp_path):
     main.invalidate_worker_cache()
     workers = main.discover_workers()
     with main.get_db() as conn:
-        main._persist_discovered_workers(conn, workers, user_id="federico")
+        main._persist_discovered_workers(conn, workers, user_id="local-user")
 
     from fastapi.testclient import TestClient
 

@@ -8,7 +8,7 @@ The two-phase HITL contract:
   Phase 2 (execute): on approval the engine spawns a follow-up run with
     `decision: "approved"`. The side effect fires EXACTLY ONCE.
 
-#418 proved (live on Railway) that the side effect ran BEFORE approval AND
+#418 proved (live on hosted platform) that the side effect ran BEFORE approval AND
 AGAIN on approval. These tests pin the engine-side guarantees:
   (a) no side effect (and decision == "proposed") before approval;
   (b) exactly one execution (decision == "approved") after approval;

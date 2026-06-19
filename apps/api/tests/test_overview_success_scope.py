@@ -96,7 +96,7 @@ def client_and_main(monkeypatch, tmp_path):
     main.invalidate_worker_cache()
     workers = main.discover_workers()
     with main.get_db() as conn:
-        main._persist_discovered_workers(conn, workers, user_id="federico")
+        main._persist_discovered_workers(conn, workers, user_id="local-user")
 
     from fastapi.testclient import TestClient
     with TestClient(main.app, headers={"x-floom-secret": "test-secret-overview"}) as client:
@@ -106,7 +106,7 @@ def client_and_main(monkeypatch, tmp_path):
 
 def _seed_run(repos, worker_id: str, status: str) -> None:
     repos.runs.create(
-        user_id="federico",
+        user_id="local-user",
         worker_id=worker_id,
         run_id=f"run_{uuid.uuid4().hex[:12]}",
         status=status,
@@ -120,7 +120,7 @@ def test_success_rate_excludes_paused_worker_runs(client_and_main):
     _seed_run(repos, "active-probe", "completed")
     _seed_run(repos, "active-probe", "failed")
     # Paused worker: 4 failures. If counted, the aggregate would be 1/6 = 16.7%.
-    repos.workers.update(user_id="federico", worker_id="paused-probe", enabled=False)
+    repos.workers.update(user_id="local-user", worker_id="paused-probe", enabled=False)
     for _ in range(4):
         _seed_run(repos, "paused-probe", "failed")
 
@@ -146,7 +146,7 @@ def test_success_rate_excludes_paused_worker_runs(client_and_main):
 def test_success_rate_none_when_no_active_worker_runs(client_and_main):
     client, main, repos = client_and_main
     # Only the paused worker has runs -> nothing in the active-real scope.
-    repos.workers.update(user_id="federico", worker_id="paused-probe", enabled=False)
+    repos.workers.update(user_id="local-user", worker_id="paused-probe", enabled=False)
     _seed_run(repos, "paused-probe", "failed")
     _seed_run(repos, "paused-probe", "completed")
 

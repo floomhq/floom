@@ -79,7 +79,7 @@ def test_register_worker_from_files_creates_real_worker(monkeypatch, tmp_path):
         main.DraftFile(path="worker.yml", content=_valid_worker_yml()),
         main.DraftFile(path="SKILL.md", content="# GitHub PR Digest\n\nDo the thing."),
     ]
-    worker_id = main._register_worker_from_files(files, user_id="federico", repos=None)
+    worker_id = main._register_worker_from_files(files, user_id="local-user", repos=None)
 
     assert worker_id == "github-pr-digest"
     assert (tmp_path / worker_id / "worker.yml").exists()
@@ -123,14 +123,14 @@ def test_register_worker_from_files_dedupes_when_requested(monkeypatch, tmp_path
         main.DraftFile(path="worker.yml", content=_valid_worker_yml()),
         main.DraftFile(path="SKILL.md", content="# A\n"),
     ]
-    first = main._register_worker_from_files(files1, user_id="federico", repos=None, dedupe_id=True)
+    first = main._register_worker_from_files(files1, user_id="local-user", repos=None, dedupe_id=True)
     assert first == "github-pr-digest"
 
     files2 = [
         main.DraftFile(path="worker.yml", content=_valid_worker_yml()),
         main.DraftFile(path="SKILL.md", content="# B\n"),
     ]
-    second = main._register_worker_from_files(files2, user_id="federico", repos=None, dedupe_id=True)
+    second = main._register_worker_from_files(files2, user_id="local-user", repos=None, dedupe_id=True)
     assert second != first
     assert second.startswith("github-pr-digest-"), second
     # The rewritten manifest agrees with the deduped dir name.
@@ -181,7 +181,7 @@ def test_register_authored_worker_reads_bundle_and_registers(monkeypatch, tmp_pa
         "run_test",
         outputs={},
         artifacts=artifacts,
-        user_id="federico",
+        user_id="local-user",
         repos=None,
         log_fn=log_fn,
     )
@@ -226,7 +226,7 @@ def test_register_authored_worker_rejects_empty_bundle(monkeypatch, tmp_path):
 
     worker_id = run_service._register_authored_worker(
         "run_empty", outputs={}, artifacts=artifacts,
-        user_id="federico", repos=None, log_fn=lambda *a, **k: None,
+        user_id="local-user", repos=None, log_fn=lambda *a, **k: None,
     )
 
     assert worker_id is None
@@ -284,7 +284,7 @@ def test_register_authored_worker_normalizes_invalid_use_cases(monkeypatch, tmp_
         "run_meta",
         outputs={},
         artifacts=artifacts,
-        user_id="federico",
+        user_id="local-user",
         repos=None,
         log_fn=lambda *a, **k: None,
     )
@@ -326,7 +326,7 @@ def test_register_authored_worker_is_idempotent(monkeypatch, tmp_path):
         "run_already",
         outputs={"created_worker_id": "already-made"},
         artifacts=[],
-        user_id="federico",
+        user_id="local-user",
         repos=None,
         log_fn=lambda *a, **k: None,
     )
@@ -362,7 +362,7 @@ def test_register_authored_worker_skips_broken_bundle(monkeypatch, tmp_path):
         "run_bad",
         outputs={},
         artifacts=artifacts,
-        user_id="federico",
+        user_id="local-user",
         repos=None,
         log_fn=lambda *a, **k: None,
     )
@@ -515,10 +515,10 @@ def test_smoke_skips_non_script_worker(monkeypatch, tmp_path):
         main.DraftFile(path="worker.yml", content=_valid_worker_yml("agent-worker")),
         main.DraftFile(path="SKILL.md", content="# Agent\n"),
     ]
-    wid = main._register_worker_from_files(files, user_id="federico", repos=None)
+    wid = main._register_worker_from_files(files, user_id="local-user", repos=None)
 
     out = run_service._smoke_and_repair_generated_worker(
-        wid, {}, user_id="federico", repos=None, log_fn=lambda *a, **k: None
+        wid, {}, user_id="local-user", repos=None, log_fn=lambda *a, **k: None
     )
     assert out["status"] == "skipped"
     assert "script" in out["reason"].lower()

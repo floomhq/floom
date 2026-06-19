@@ -14,7 +14,7 @@ from urllib.error import HTTPError, URLError
 WORKER_DIR = Path(__file__).parent.resolve()
 STATE_FILE = WORKER_DIR / "state.json"
 RULES_FILE = Path.home() / ".agents/skills/gmail-inbox-manager/data/rules.yaml"
-WORKEROS_API_URL_STR = os.environ.get("WORKEROS_API_URL", "https://workers-api.floom.dev").rstrip("/")
+WORKEROS_API_URL_STR = os.environ.get("WORKEROS_API_URL", "https://localhost:8000").rstrip("/")
 FLOOM_RUN_ID = os.environ.get("FLOOM_RUN_ID", "")
 WORKEROS_RUN_TOKEN = os.environ.get("WORKEROS_RUN_TOKEN", "")
 

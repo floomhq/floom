@@ -51,7 +51,7 @@ def test_persist_discovered_workers_does_not_reenter_sqlite_repo(monkeypatch, tm
     }
 
     with main.get_db() as conn:
-        main._persist_discovered_workers(conn, [worker], user_id="federico")
+        main._persist_discovered_workers(conn, [worker], user_id="local-user")
 
     with main.get_db() as conn:
         row = conn.execute(
@@ -61,4 +61,4 @@ def test_persist_discovered_workers_does_not_reenter_sqlite_repo(monkeypatch, tm
 
     assert row is not None
     assert row["name"] == worker["name"]
-    assert row["owner_id"] == "federico"
+    assert row["owner_id"] == "local-user"

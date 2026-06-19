@@ -45,7 +45,7 @@ def client(monkeypatch, tmp_path):
     (wdir / "run.py").write_text("print('hi')\n", encoding="utf-8")
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("FLOOM_SECRET", SECRET)
-    monkeypatch.setenv("WORKEROS_USER_ID", "federico")
+    monkeypatch.setenv("WORKEROS_USER_ID", "local-user")
     monkeypatch.setenv("WORKEROS_API_ENV_FILE", str(tmp_path / "api.env"))
     monkeypatch.setenv("FLOOM_WORKERS_DIR", str(workers_dir))
     monkeypatch.setenv("FLOOM_CONTEXTS_DIR", str(tmp_path / "contexts"))
@@ -66,7 +66,7 @@ def client(monkeypatch, tmp_path):
     main.invalidate_worker_cache()
     workers = main.discover_workers()
     with main.get_db() as conn:
-        main._persist_discovered_workers(conn, workers, user_id="federico")
+        main._persist_discovered_workers(conn, workers, user_id="local-user")
     from fastapi.testclient import TestClient
     c = TestClient(main.app, headers={"x-floom-secret": SECRET}, raise_server_exceptions=False)
     yield c, wdir

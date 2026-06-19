@@ -168,7 +168,7 @@ def client_and_main(monkeypatch, tmp_path):
     main.invalidate_worker_cache()
     workers = main.discover_workers()
     with main.get_db() as conn:
-        main._persist_discovered_workers(conn, workers, user_id="federico")
+        main._persist_discovered_workers(conn, workers, user_id="local-user")
 
     from fastapi.testclient import TestClient
     client = TestClient(main.app, headers={"x-floom-secret": "test-secret-defaults"})
@@ -252,7 +252,7 @@ def test_scheduled_run_creation_applies_worker_yml_defaults(client_and_main):
         "scheduled-with-defaults",
         {},
         trigger_source="schedule",
-        user_id="federico",
+        user_id="local-user",
         repos=repos,
     )
 
@@ -277,7 +277,7 @@ def test_repeated_scheduled_missing_secret_failures_auto_pause_worker(client_and
             "scheduled-missing-secret",
             {},
             trigger_source="schedule",
-            user_id="federico",
+            user_id="local-user",
             repos=repos,
         )
         run_ids.append(run_id)
@@ -285,16 +285,16 @@ def test_repeated_scheduled_missing_secret_failures_auto_pause_worker(client_and
             run_id,
             "scheduled-missing-secret",
             {},
-            user_id="federico",
+            user_id="local-user",
             repos=repos,
         )
 
     for run_id in run_ids:
-        row = repos.runs.get(user_id="federico", run_id=run_id)
+        row = repos.runs.get(user_id="local-user", run_id=run_id)
         assert row["status"] == "failed"
         assert row["error_code"] == "missing_secret"
 
-    worker = repos.workers.get(user_id="federico", worker_id="scheduled-missing-secret")
+    worker = repos.workers.get(user_id="local-user", worker_id="scheduled-missing-secret")
     assert worker["enabled"] is False
     assert worker["manifest"]["paused"] is True
     assert "paused: true" in (workers_dir / "scheduled-missing-secret" / "worker.yml").read_text(encoding="utf-8")

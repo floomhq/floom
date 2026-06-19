@@ -1,4 +1,4 @@
-"""Floom API — FastAPI backend for the OS for Background Workers."""
+﻿"""Floom API — FastAPI backend for the OS for Background Workers."""
 
 import asyncio
 import os
@@ -67,7 +67,7 @@ from dotenv import load_dotenv
 # supplies env via the orchestrator (WORKEROS_DEPLOY != local); fixed api.env
 # loading remains below. LOCAL deploy (the default) IS dev mode, so load the cwd
 # .env there too — otherwise `python main.py` / scripts/dev.* get no FLOOM_DB and
-# no provider creds, and auth collapses EVERY session to the 'federico' dev
+# no provider creds, and auth collapses EVERY session to the 'local-user' dev
 # default (db/__init__ + auth/dependency._is_local_dev_mode both key off FLOOM_DB).
 if os.environ.get("WORKEROS_DEV") == "1":
     load_dotenv()
@@ -1109,7 +1109,7 @@ def _cors_allowed_origins() -> List[str]:
         return [origin.strip() for origin in configured.split(",") if origin.strip()]
 
     # #921: explicit production origins only — no wildcard subdomain match.
-    origins = ["https://workers.floom.dev", "https://workeros.floom.dev"]
+    origins = ["https://localhost:3000", "https://app.example.com"]
     if os.environ.get("WORKEROS_DEV"):
         origins.extend(["http://localhost:3000", "http://localhost:3011"])
     return origins
@@ -1122,7 +1122,7 @@ def _cors_allowed_origin_regex() -> Optional[str]:
     if os.environ.get("WORKEROS_DEV"):
         return r"^https://[a-z0-9-]+\.workeros-[a-z0-9-]+\.vercel\.app$"
     # #921: the old default `^https://([a-z0-9-]+\.)*floom\.dev$` allowed ANY
-    # floom.dev subdomain to make credentialed requests — one compromised
+    # example.com subdomain to make credentialed requests — one compromised
     # subdomain meant workspace-wide CSRF. Production now relies on the explicit
     # allowlist above; set ALLOWED_ORIGIN_REGEX to opt back in.
     return None
@@ -5549,7 +5549,7 @@ def _workspace_agent_mcp_setup_card() -> Dict[str, Any]:
     return {
         "name": "Workeros",
         "description": "Remote MCP setup for Langdock, Claude Code, Cursor, and other agent clients.",
-        "server_url": "https://workeros-api.floom.dev/api/mcp",
+        "server_url": "https://api.example.com/api/mcp",
         "transport": "STREAMABLE_HTTP",
         "authentication": {
             "method": "API Key",

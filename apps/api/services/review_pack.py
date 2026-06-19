@@ -1,4 +1,4 @@
-"""Search Assistant Review Pack — load pack.json, public vote persistence, consensus."""
+"""ReviewPack Review Pack — load pack.json, public vote persistence, consensus."""
 
 from __future__ import annotations
 

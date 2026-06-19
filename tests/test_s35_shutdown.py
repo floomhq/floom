@@ -44,7 +44,7 @@ def test_request_active_run_shutdown_marks_cancel_and_kills_sandbox(monkeypatch)
         run_service._ActiveRun(
             run_id="run_shutdown",
             worker_id="worker_shutdown",
-            user_id="federico",
+            user_id="local-user",
             thread=thread,
         )
     )
@@ -59,7 +59,7 @@ def test_request_active_run_shutdown_marks_cancel_and_kills_sandbox(monkeypatch)
 
         assert cancelled == 1
         assert repos.runs.cancelled[0]["run_id"] == "run_shutdown"
-        assert repos.runs.cancelled[0]["user_id"] == "federico"
+        assert repos.runs.cancelled[0]["user_id"] == "local-user"
         assert repos.runs.logs[0]["message"] == run_service.INTERRUPTED_RUN_ERROR
         assert killed == [("run_shutdown", run_service.INTERRUPTED_RUN_ERROR)]
         assert run_service.was_shutdown_cancelled("run_shutdown") is True

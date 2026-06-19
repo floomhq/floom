@@ -36,7 +36,7 @@ def _user_scoped_local_mode() -> bool:
 def _bootstrap_user_id() -> str:
     """The single operator's user id in OSS single-tenant mode (env-overridable)."""
     configured = (os.environ.get("WORKEROS_USER_ID") or "").strip()
-    return configured or "federico"
+    return configured or "local-user"
 
 
 # ---------------------------------------------------------------------------
@@ -128,8 +128,6 @@ PROTECTED_STOCK_WORKER_IDS = frozenset(
         "csv_enricher",
         "github-digest",
         "node-smoke-test",
-        "openblog",
-        "opendraft",
         "outbound-approval-demo",
         "research_brief",
         # engine/system workers that power Workeros itself (not tenant content)
@@ -167,8 +165,6 @@ PUBLIC_STOCK_WORKER_IDS = frozenset(
         "csv_enricher",          # is_example, enriches arbitrary CSV rows — no real data source
         "github-digest",         # is_example, digest of the runner's own GitHub — generic pattern
         "node-smoke-test",       # is_example, benign runtime smoke (used by E2E)
-        "openblog",              # is_example, upstream OpenBlog engine demo
-        "opendraft",             # is_example, upstream OpenDraft engine demo
         "outbound-approval-demo",# is_example, HITL two-run approval pattern demo
         "research_brief",        # is_example, research brief on any topic — generic
     }

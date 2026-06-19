@@ -114,7 +114,7 @@ def _insert_run(main, run_id="run_s22d"):
                      input_values_json, enabled, created_at, owner_id)
                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                 """,
-                ("s22d-worker", "sv_s22d_worker_0_1_0", "S22d Worker", "manual", "{}", "{}", 1, now, "federico"),
+                ("s22d-worker", "sv_s22d_worker_0_1_0", "S22d Worker", "manual", "{}", "{}", 1, now, "local-user"),
             )
         else:
             conn.execute(

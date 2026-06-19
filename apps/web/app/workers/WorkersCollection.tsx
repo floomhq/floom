@@ -344,7 +344,7 @@ function OverviewTab({ w }: { w: WorkerSummary }) {
   return (
     <div style={{ display: "flex", flexDirection: "column", gap: 18 }}>
       {/* #1290: "Latest output" removed — its purpose was unclear to operators
-          (Federico: "why is latest output shown?") and it only showed run status +
+          (Maintainer: "why is latest output shown?") and it only showed run status +
           ID with no actual output text. The History tab shows the run list. */}
       <div>
         <h4 style={h4}>WHAT IT DOES</h4>
@@ -759,7 +759,7 @@ function ToolsTab({ w }: { w: WorkerSummary }) {
   const [d, applyDetail] = useWorkerDetail(w.id);
   const [busy, setBusy] = useState(false);
   // B4: the Add-tool combobox is sourced from the workspace's connected apps
-  // (Federico: "we already have the list of connections") plus the integrations
+  // (Maintainer: "we already have the list of connections") plus the integrations
   // catalog, so the user picks from a searchable list instead of free-typing a
   // slug. Per-app allowlist tools come from the catalog, cached per app.
   const [availableApps, setAvailableApps] = useState<ToolAppOption[]>([]);
@@ -2032,7 +2032,7 @@ export default function WorkersCollection({
         })(),
         // R9 FIX 1: the advanced group is a clearly-visible affordance ON the
         // primary tab row (right-aligned), not a header-overflow "Customize"
-        // pill — Federico couldn't find the advanced tabs at all.
+        // pill — Maintainer couldn't find the advanced tabs at all.
         tabsTrailing: (
           <CustomizeTabsMenu
             workerId={w.id}

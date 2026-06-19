@@ -1,4 +1,4 @@
-import { describe, it, expect, vi, beforeEach } from "vitest";
+﻿import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
 import { QueryClient, QueryClientProvider } from "@tanstack/react-query";
 import React from "react";
@@ -47,7 +47,7 @@ const overview = {
 vi.mock("@/lib/api", () => ({
   api: {
     system: { overview: vi.fn().mockResolvedValue(overview) },
-    me: vi.fn().mockResolvedValue({ display_name: "Fede", email: "fede@floom.dev" }),
+    me: vi.fn().mockResolvedValue({ display_name: "Maintainer", email: "local@example.com" }),
   },
 }));
 

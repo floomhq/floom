@@ -298,7 +298,7 @@ def _schedule_retry_for_failed_run(
     return True
 
 
-API_ENV_PATH = Path("/root/.config/workeros/api.env")
+API_ENV_PATH = Path("/etc/workeros/api.env")
 
 
 # --- authored-worker registration + smoke/gate (services/run_authoring.py) ---
@@ -2201,7 +2201,7 @@ def execute_run(
         # and Skill drivers called _validate_output_schema internally; the E2B
         # script driver (.py/.sh/.js — the common case) skipped it entirely, so
         # declared output `type` (json/csv/markdown/text), CSV `columns`, and
-        # `json_required_keys` were silently unenforced (Vivek's P0). Validating
+        # `json_required_keys` were silently unenforced (maintainer's P0). Validating
         # here, on the path every driver flows through, makes the contract
         # enforcement DRY and uniform. A hard type/column/key mismatch FAILS the
         # run (the whole point) rather than surfacing garbage as COMPLETED.

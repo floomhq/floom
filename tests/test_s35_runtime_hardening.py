@@ -92,7 +92,7 @@ def _insert_minimal_worker(main, worker_id: str) -> None:
             INSERT INTO workers
                 (id, skill_version_id, name, trigger_type, grants_json,
                  input_values_json, enabled, created_at, owner_id)
-            VALUES (?, ?, ?, 'manual', '{}', '{}', 1, ?, 'federico')
+            VALUES (?, ?, ?, 'manual', '{}', '{}', 1, ?, 'local-user')
             """,
             (worker_id, f"sv_{worker_id}", worker_id, now),
         )

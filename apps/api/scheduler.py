@@ -124,7 +124,7 @@ def _owner_is_active(repos, user_id: str | None) -> bool:
 
     Returns False when the install has real user accounts and the worker's
     owner is missing or disabled. Installs with an empty users table (legacy
-    single-user ids like "federico") keep firing. Fails open on repo errors so
+    single-user ids like "local-user") keep firing. Fails open on repo errors so
     a transient DB hiccup can't silence every schedule.
     """
     users = getattr(repos, "users", None)

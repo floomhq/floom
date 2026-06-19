@@ -3,7 +3,7 @@ over WhatsApp.
 
 Root cause: notify_pending_approval_via_whatsapp looked up the binding by
 WHERE user_id = owner_id, but an admin/FLOOM_SECRET-created run is owned by the
-bootstrap id ('federico') while the human's binding is keyed to their real
+bootstrap id ('local-user') while the human's binding is keyed to their real
 user uuid → no match → silent pending approval.
 
 Fix: match the binding against the bootstrap<->uuid alternates (admin user
@@ -29,7 +29,7 @@ def env(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKEROS_DEPLOY", "local")
     monkeypatch.setenv("WORKEROS_DB", str(tmp_path / "floom.db"))
     monkeypatch.setenv("FLOOM_DB", str(tmp_path / "floom.db"))
-    monkeypatch.setenv("WORKEROS_USER_ID", "federico")
+    monkeypatch.setenv("WORKEROS_USER_ID", "local-user")
     monkeypatch.setenv("WHATSAPP_PHONE_ID", "phone-1")
     monkeypatch.setenv("WHATSAPP_TOKEN", "tok-1")
     for name in list(sys.modules):
@@ -71,7 +71,7 @@ def test_bootstrap_owned_run_notifies_admin_binding(env, monkeypatch):
 
     # run is owned by the BOOTSTRAP id, not the admin uuid
     common.notify_pending_approval_via_whatsapp(
-        owner_id="federico", run_id="run-1", worker_name="Gmail Brief",
+        owner_id="local-user", run_id="run-1", worker_name="Gmail Brief",
         label="Send email", approval_id="apr_abc123def456",
     )
     assert sent.get("wa_id") == "15551239709", "bootstrap-owned run did not resolve the admin's binding"
@@ -98,6 +98,6 @@ def test_no_binding_is_silent_noop(env, monkeypatch):
     monkeypatch.setattr(wa, "_whatsapp_configured", lambda: True)
     monkeypatch.setattr(wa, "send_whatsapp_text", lambda wa_id, text: sent.update(wa_id=wa_id))
     common.notify_pending_approval_via_whatsapp(
-        owner_id="federico", run_id="run-3", worker_name="W", label="L", approval_id="apr_y",
+        owner_id="local-user", run_id="run-3", worker_name="W", label="L", approval_id="apr_y",
     )
     assert sent == {}

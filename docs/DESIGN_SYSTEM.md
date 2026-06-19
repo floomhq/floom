@@ -1,6 +1,6 @@
 # Workeros Design System
 
-> Source of truth for the visual system deployed at `workers.floom.dev`.  
+> Source of truth for the visual system deployed at `localhost:3000`.
 > Engine repo: `floomhq/workeros` (`apps/web/app/globals.css`).  
 > Cloud repo (`floomhq/managed-deployment`) copies tokens from the engine verbatim — update engine first, then re-sync.
 

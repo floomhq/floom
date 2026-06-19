@@ -26,7 +26,7 @@ set -euo pipefail
 # ---------------------------------------------------------------------------
 # Config (all overridable via env)
 # ---------------------------------------------------------------------------
-WORKEROS_ROOT="${WORKEROS_ROOT:-/root/workeros}"
+WORKEROS_ROOT="${WORKEROS_ROOT:-/opt/workeros}"
 DB_PATH="${FLOOM_DB:-$WORKEROS_ROOT/data/floom.db}"
 BACKUP_ROOT="${WORKEROS_BACKUP_ROOT:-/root/backups}"
 SERVICE_VENV="${WORKEROS_API_VENV:-$WORKEROS_ROOT/apps/api/venv}"
@@ -288,7 +288,7 @@ check_endpoint() {
 
 # Read FLOOM_SECRET from the env file (it's not in our environment)
 FLOOM_SECRET=""
-ENV_FILE="/root/.config/workeros/api.env"
+ENV_FILE="/etc/workeros/api.env"
 if [[ -f "$ENV_FILE" ]]; then
   FLOOM_SECRET="$(grep '^FLOOM_SECRET=' "$ENV_FILE" | cut -d= -f2- | tr -d '"' | tr -d "'" | head -1)"
 fi

@@ -1,4 +1,4 @@
-// Round-09 (Federico 2026-06-17) — Emily + creation real-component build.
+// Round-09 (Maintainer 2026-06-17) — Emily + creation real-component build.
 //   1. Worker-creation hero reuses the REAL PromptInput composer (not a bespoke
 //      textarea + "Hire worker" button) and Enter submits.
 //   2. Emily dock full-screen exposes an explicit CLOSE control + a
@@ -116,7 +116,7 @@ describe("Emily dock — full screen controls", () => {
     expect(dock().className).not.toContain("flex-1");
     await user.click(screen.getByRole("button", { name: /expand emily/i }));
     // Fullscreen: flex-1 (fills main area) and NOT fixed inset overlay (which
-    // would cover the left nav — the regression Federico flagged).
+    // would cover the left nav — the regression Maintainer flagged).
     expect(dock().getAttribute("aria-label")).toMatch(/fullscreen/i);
     expect(dock().className).toContain("flex-1");
     expect(dock().className).not.toContain("fixed");

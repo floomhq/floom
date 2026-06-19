@@ -131,7 +131,7 @@ export function AppShell({ children, noSidebarPaths = [] }: AppShellProps) {
 // Inner body that consumes the Emily fullscreen context. When Emily is in true
 // fullscreen, the page pane (<main>) is hidden so Emily flex-grows to fill the
 // whole main area (everything to the RIGHT of the left sidebar, which stays
-// visible — Federico 2026-06-17 spec). The GlobalAlertsBell also hides with the
+// visible — Maintainer 2026-06-17 spec). The GlobalAlertsBell also hides with the
 // pane since there is no page content to anchor it to.
 function StandardShellBody({
   children,

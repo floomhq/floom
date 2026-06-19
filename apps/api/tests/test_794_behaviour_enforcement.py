@@ -1,4 +1,4 @@
-"""#794 — workspace behaviour toggles are ENFORCED (not just stored).
+﻿"""#794 — workspace behaviour toggles are ENFORCED (not just stored).
 
 - approval_default="always" → a new worker with no explicit approvals block
   is created with approvals.required=true; an explicit block still wins.
@@ -112,15 +112,15 @@ class TestFailureEmail:
         with get_db() as conn:
             conn.execute(
                 "INSERT INTO workspace_settings (workspace_id, key, value, updated_at) "
-                "VALUES ('local-default', 'failure_email_to', 'ops@floom.dev', '2026-01-01')"
+                "VALUES ('local-default', 'failure_email_to', 'ops@example.com', '2026-01-01')"
             )
-        assert run_service._workspace_failure_email_recipients() == ["ops@floom.dev"]
+        assert run_service._workspace_failure_email_recipients() == ["ops@example.com"]
 
     def test_env_fallback_when_setting_absent(self, client_main, monkeypatch):
         import run_service
 
-        monkeypatch.setenv("NOTIFY_EMAIL", "fallback@floom.dev")
-        assert run_service._workspace_failure_email_recipients() == ["fallback@floom.dev"]
+        monkeypatch.setenv("NOTIFY_EMAIL", "fallback@example.com")
+        assert run_service._workspace_failure_email_recipients() == ["fallback@example.com"]
 
     def test_failure_email_wired_into_terminal_dispatch(self, client_main):
         import inspect

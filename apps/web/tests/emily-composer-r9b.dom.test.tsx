@@ -1,4 +1,4 @@
-// Round-09b (Federico 2026-06-17) — Emily composer fixes:
+// Round-09b (Maintainer 2026-06-17) — Emily composer fixes:
 //   B15: typing must stay possible WHILE Emily streams a reply. Only the SEND
 //        action is disabled during the stream; the textarea stays editable.
 //   E10: the composer is a flat #FBFBFC (bg-app) box, NOT the grey --bg-2 panel

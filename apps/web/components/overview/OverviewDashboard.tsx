@@ -1,6 +1,6 @@
 "use client";
 
-// V4 "Brief / digest" (Federico-approved, scored winner). Mockup: /tmp/ov-variant-4.png.
+// V4 "Brief / digest" (Maintainer-approved, scored winner). Mockup: /tmp/ov-variant-4.png.
 //
 // The most reduced overview. A single editorial column:
 //   1. Time-aware greeting ("Good evening, {firstName}") + date line.
@@ -454,7 +454,7 @@ export function OverviewDashboard({
 
   return (
     <div className="flex flex-col flex-1 min-h-0 pb-6 pt-1">
-      {/* Content column FILLS the pane width (Federico 2026-06-17: "the overview
+      {/* Content column FILLS the pane width (Maintainer 2026-06-17: "the overview
           is not properly filling the container"). The previous fixed
           max-w-[920px] cap stopped ~377px short of the Emily-panel boundary on a
           1920px screen, leaving a dead gap. The pane already bounds the width:

@@ -75,7 +75,7 @@ def client_and_main(monkeypatch, tmp_path):
 
     # Seed a secret to prove its VALUE never appears in the response.
     repos = db.get_repositories()
-    repos.secrets.set(user_id="federico", name="OPENAI_API_KEY", value="sk-super-secret-value")
+    repos.secrets.set(user_id="local-user", name="OPENAI_API_KEY", value="sk-super-secret-value")
 
     from fastapi.testclient import TestClient
     with TestClient(main.app, headers={"x-floom-secret": "test-secret-wsagent"}) as client:
@@ -297,9 +297,9 @@ def test_worker_authoring_rules_are_gated_by_message_intent(client_and_main):
     _client, _main = client_and_main
     import chat_service
 
-    casual = chat_service.build_system_prompt_for_source("federico", "web", message="hi")
+    casual = chat_service.build_system_prompt_for_source("local-user", "web", message="hi")
     authoring = chat_service.build_system_prompt_for_source(
-        "federico",
+        "local-user",
         "web",
         message="Create a worker that summarizes Gmail every morning",
     )

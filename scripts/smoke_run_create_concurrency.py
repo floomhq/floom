@@ -24,7 +24,7 @@ def _read_secret(explicit: str | None) -> str:
     env_secret = os.environ.get("FLOOM_SECRET", "").strip()
     if env_secret:
         return env_secret
-    for path in (Path(".deploy-secret"), Path("/root/workeros/.deploy-secret")):
+    for path in (Path(".deploy-secret"), Path("/opt/workeros/.deploy-secret")):
         if path.is_file():
             return path.read_text().strip()
     raise SystemExit("FLOOM_SECRET or --secret is required")
@@ -53,7 +53,7 @@ def _post_run(base_url: str, secret: str, worker_id: str, index: int, timeout: f
 
 def main() -> int:
     parser = argparse.ArgumentParser()
-    parser.add_argument("--api", default=os.environ.get("WORKEROS_API_URL", "https://workers-api.floom.dev"))
+    parser.add_argument("--api", default=os.environ.get("WORKEROS_API_URL", "https://localhost:8000"))
     parser.add_argument("--secret", default=None)
     parser.add_argument("--worker", default="node-smoke-test")
     parser.add_argument("--count", type=int, default=20)

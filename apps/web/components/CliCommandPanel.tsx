@@ -317,7 +317,7 @@ export function CliCommandPanel() {
             <code className="font-mono">{getPublicApiHost()}</code>. Use it as{" "}
             <code className="font-mono">x-floom-secret</code>; Cloud PATs start
             with <code className="font-mono">floom_</code> and belong to{" "}
-            <code className="font-mono">workeros-api.floom.dev</code>.
+            <code className="font-mono">api.example.com</code>.
           </p>
         </div>
         {storedSecret ? (

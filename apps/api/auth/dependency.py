@@ -16,7 +16,7 @@ def _local_dev_context() -> AuthContext:
     function is only called when WORKEROS_DEPLOY=local AND no secret is set AND
     we cannot reach the DB (e.g. during early startup before init_db).
     """
-    user_id = (os.environ.get("WORKEROS_USER_ID") or "federico").strip() or "federico"
+    user_id = (os.environ.get("WORKEROS_USER_ID") or "local-user").strip() or "local-user"
     return AuthContext(user_id=user_id, email=None, scopes=("admin",), role="admin", auth_method="dev")
 
 

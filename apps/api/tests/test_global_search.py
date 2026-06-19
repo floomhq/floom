@@ -15,7 +15,7 @@ if str(API_DIR) not in sys.path:
     sys.path.insert(0, str(API_DIR))
 
 SECRET = "test-secret-search"
-OWNER = "federico"
+OWNER = "local-user"
 
 
 def _yml(name: str, desc: str) -> str:

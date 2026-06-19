@@ -183,7 +183,7 @@ class TestCapabilitiesSnapshot:
 
     def test_snapshot_has_expected_sections(self, db_env):
         chat = db_env["chat"]
-        snap = chat._build_capabilities_snapshot("federico")
+        snap = chat._build_capabilities_snapshot("local-user")
         assert "## What you can do here" in snap
         assert "Connections:" in snap
         assert "Workers:" in snap
@@ -193,24 +193,24 @@ class TestCapabilitiesSnapshot:
 
     def test_snapshot_is_compact(self, db_env):
         chat = db_env["chat"]
-        snap = chat._build_capabilities_snapshot("federico")
+        snap = chat._build_capabilities_snapshot("local-user")
         word_count = len(snap.split())
         assert word_count <= 160, f"snapshot too long: {word_count} words"
 
     def test_snapshot_shows_worker_count(self, db_env):
         db = db_env["db"]
         chat = db_env["chat"]
-        self._seed_worker(db, user_id="federico", worker_id="w1", name="Email digest")
-        self._seed_worker(db, user_id="federico", worker_id="w2", name="Report builder")
-        snap = chat._build_capabilities_snapshot("federico")
+        self._seed_worker(db, user_id="local-user", worker_id="w1", name="Email digest")
+        self._seed_worker(db, user_id="local-user", worker_id="w2", name="Report builder")
+        snap = chat._build_capabilities_snapshot("local-user")
         # Should mention at least total worker count.
         assert "2" in snap or "Email digest" in snap or "Report builder" in snap
 
     def test_snapshot_lists_notable_enabled_workers(self, db_env):
         db = db_env["db"]
         chat = db_env["chat"]
-        self._seed_worker(db, user_id="federico", worker_id="w1", name="My Worker", enabled=True)
-        snap = chat._build_capabilities_snapshot("federico")
+        self._seed_worker(db, user_id="local-user", worker_id="w1", name="My Worker", enabled=True)
+        snap = chat._build_capabilities_snapshot("local-user")
         assert "My Worker" in snap
 
     def test_snapshot_includes_example_workers_in_notable(self, db_env):
@@ -223,7 +223,7 @@ class TestCapabilitiesSnapshot:
         db = db_env["db"]
         chat = db_env["chat"]
         # Seed a real worker and an example worker.
-        self._seed_worker(db, user_id="federico", worker_id="real-w", name="Real Worker", enabled=True)
+        self._seed_worker(db, user_id="local-user", worker_id="real-w", name="Real Worker", enabled=True)
         example_manifest = {
             "id": "ex-w", "name": "Example Worker", "is_example": True,
             "trigger": {"type": "manual"},
@@ -232,7 +232,7 @@ class TestCapabilitiesSnapshot:
         }
         repos = db.get_repositories()
         repos.workers.create(
-            user_id="federico",
+            user_id="local-user",
             worker_id="ex-w",
             name="Example Worker",
             manifest_json=_json.dumps(example_manifest),
@@ -242,7 +242,7 @@ class TestCapabilitiesSnapshot:
         )
         with db.get_db() as conn:
             conn.execute("UPDATE workers SET enabled = 1 WHERE id = 'ex-w'")
-        snap = chat._build_capabilities_snapshot("federico")
+        snap = chat._build_capabilities_snapshot("local-user")
         assert "Real Worker" in snap
         # The example worker is now a real worker — it must appear in the snapshot.
         assert "Example Worker" in snap
@@ -250,7 +250,7 @@ class TestCapabilitiesSnapshot:
     def test_snapshot_owner_role(self, db_env):
         chat = db_env["chat"]
         # The OS single-tenant user defaults to owner.
-        snap = chat._build_capabilities_snapshot("federico")
+        snap = chat._build_capabilities_snapshot("local-user")
         assert "owner" in snap.lower() or "admin" in snap.lower() or "full access" in snap.lower()
 
     def test_snapshot_shows_connections(self, db_env):
@@ -258,16 +258,16 @@ class TestCapabilitiesSnapshot:
         chat = db_env["chat"]
         repos = db.get_repositories()
         repos.connections.upsert(
-            user_id="federico", id="c1", app_name="gmail",
+            user_id="local-user", id="c1", app_name="gmail",
             composio_connection_id="ca_x", status="active",
             display_name="work@example.com",
         )
-        snap = chat._build_capabilities_snapshot("federico")
+        snap = chat._build_capabilities_snapshot("local-user")
         assert "gmail" in snap.lower()
 
     def test_snapshot_shows_no_connections_when_none(self, db_env):
         chat = db_env["chat"]
-        snap = chat._build_capabilities_snapshot("federico")
+        snap = chat._build_capabilities_snapshot("local-user")
         assert "none" in snap.lower()
 
     def test_snapshot_fallback_on_error(self, monkeypatch):

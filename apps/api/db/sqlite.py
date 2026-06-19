@@ -41,7 +41,7 @@ from ._legacy_sqlite import _row_dict, get_db, now_iso
 _SECRET_PREFIX = "__WORKEROS_SECRET__"
 _SECRET_ENC_PREFIX = "enc:v1:"
 _LOCAL_SECRETS_KEY_PATH = Path.home() / ".config" / "workeros" / "secrets.key"
-_FLOOM_USER_ID = "federico"
+_FLOOM_USER_ID = "local-user"
 _UNKNOWN_RUN_ERROR_CODE = "unknown_error"
 _UNKNOWN_RUN_ERROR_MESSAGE = (
     "Run failed before the engine captured a specific failure reason. "
@@ -154,7 +154,7 @@ def _legacy_source_relative_env_path() -> Path:
 
     THIS PATH IS THE N4-1 BUG. Because it is resolved relative to this source
     file, two processes serving the SAME shared DB but running from different
-    checkouts/deploy directories (e.g. ``/root/workeros`` vs
+    checkouts/deploy directories (e.g. ``/opt/workeros`` vs
     ``/opt/workeros-live`` vs a ``/tmp`` worktree) resolve it to DIFFERENT
     files. A secret set by one process writes its value into that process's
     tree, while the DB row (anchored to the ABSOLUTE ``WORKEROS_DB``/``FLOOM_DB``

@@ -22,7 +22,7 @@ trap cleanup INT TERM EXIT
 
 # Explicit local dev mode: makes the backend load apps/api/.env (FLOOM_DB + creds).
 # Without it a fresh clone has no .env loaded, so auth collapses every session to
-# the 'federico' dev default and no provider keys are picked up.
+# the 'local-user' dev default and no provider keys are picked up.
 export WORKEROS_DEV=1
 
 echo "==> backend  -> http://localhost:8000"

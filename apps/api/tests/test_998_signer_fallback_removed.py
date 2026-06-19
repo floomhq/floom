@@ -80,7 +80,7 @@ def test_main_share_token_signers_raise_503_without_secret(monkeypatch, tmp_path
         main._worker_public_token({"id": "w1"})
     assert e1.value.status_code == 503
     with pytest.raises(HTTPException) as e2:
-        main._workspace_share_token("federico")
+        main._workspace_share_token("local-user")
     assert e2.value.status_code == 503
     with pytest.raises(HTTPException) as e3:
         main._approval_public_token({"id": "a1", "run_id": "r1", "owner_id": "o1"})

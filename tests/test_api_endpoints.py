@@ -919,7 +919,7 @@ class TestApprovalStatusPublisher(unittest.TestCase):
             )
             conn.execute(
                 """INSERT INTO approvals (id, run_id, worker_id, owner_id, status, label, preview, created_at)
-                   VALUES (?, ?, ?, 'federico', 'pending', 'Approve output', 'preview', datetime('now'))""",
+                   VALUES (?, ?, ?, 'local-user', 'pending', 'Approve output', 'preview', datetime('now'))""",
                 (approval_id, run_id, worker_id),
             )
         return run_id

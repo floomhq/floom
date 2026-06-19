@@ -153,30 +153,30 @@ def test_slug_roundtrip_create_get_delete_uses_one_canonical_id(monkeypatch, tmp
     created = client.post(
         "/workers",
         headers=_headers(),
-        json=_worker_payload("fede_gmail_cleaner"),
+        json=_worker_payload("local_gmail_cleaner"),
     )
     assert created.status_code == 200, created.text
-    assert created.json()["id"] == "fede-gmail-cleaner"
+    assert created.json()["id"] == "local-gmail-cleaner"
 
-    fetched = client.get("/workers/fede_gmail_cleaner", headers=_headers())
+    fetched = client.get("/workers/local_gmail_cleaner", headers=_headers())
     assert fetched.status_code == 200, fetched.text
-    assert fetched.json()["id"] == "fede-gmail-cleaner"
+    assert fetched.json()["id"] == "local-gmail-cleaner"
 
-    deleted = client.delete("/workers/fede_gmail_cleaner", headers=_headers())
+    deleted = client.delete("/workers/local_gmail_cleaner", headers=_headers())
     assert deleted.status_code == 204, deleted.text
-    assert not (Path(main.WORKERS_DIR) / "fede-gmail-cleaner").exists()
-    assert client.get("/workers/fede-gmail-cleaner", headers=_headers()).status_code == 404
+    assert not (Path(main.WORKERS_DIR) / "local-gmail-cleaner").exists()
+    assert client.get("/workers/local-gmail-cleaner", headers=_headers()).status_code == 404
 
 
 def test_delete_reaps_orphan_dir_without_db_row(monkeypatch, tmp_path):
     main = _load_api(monkeypatch, tmp_path)
     client = TestClient(main.app)
-    orphan_dir = Path(main.WORKERS_DIR) / "fede-gmail-cleaner"
+    orphan_dir = Path(main.WORKERS_DIR) / "local-gmail-cleaner"
     orphan_dir.mkdir()
-    (orphan_dir / "worker.yml").write_text(_worker_yml("fede-gmail-cleaner"), encoding="utf-8")
+    (orphan_dir / "worker.yml").write_text(_worker_yml("local-gmail-cleaner"), encoding="utf-8")
     (orphan_dir / "run.py").write_text("def run(inputs, context):\n    return {}\n", encoding="utf-8")
 
-    deleted = client.delete("/workers/fede_gmail_cleaner", headers=_headers())
+    deleted = client.delete("/workers/local_gmail_cleaner", headers=_headers())
 
     assert deleted.status_code == 204, deleted.text
     assert not orphan_dir.exists()

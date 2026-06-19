@@ -303,7 +303,7 @@ def test_writeable_when_makes_memory_mount_read_only_for_default_read_operation(
         inputs=[SimpleNamespace(name="operation", default="profile")],
         contexts=[
             {
-                "name": "memory-research-assistant",
+                "name": "memory-review_pack-v5",
                 "writeable": True,
                 "writeable_when": {"input": "operation", "equals": "record_candidate_feedback"},
             }
@@ -312,7 +312,7 @@ def test_writeable_when_makes_memory_mount_read_only_for_default_read_operation(
 
     selected, selected_err = e2b_driver_mod._selected_contexts_for_inputs(cfg, {})
     warm_key, warm_err = e2b_driver_mod._warm_pool_key(
-        worker_id="research-assistant",
+        worker_id="review_pack-v5",
         user_id="u",
         worker_dir=worker_dir,
         config=cfg,
@@ -323,7 +323,7 @@ def test_writeable_when_makes_memory_mount_read_only_for_default_read_operation(
     assert selected_err is None
     assert selected == [
         {
-            "name": "memory-research-assistant",
+            "name": "memory-review_pack-v5",
             "writeable": False,
             "source": "local",
             "writeable_when": {"input": "operation", "equals": "record_candidate_feedback"},
@@ -345,7 +345,7 @@ def test_writeable_when_keeps_memory_mount_mutable_for_write_operation(monkeypat
         inputs=[SimpleNamespace(name="operation", default="record_candidate_feedback")],
         contexts=[
             {
-                "name": "memory-research-assistant",
+                "name": "memory-review_pack-v5",
                 "writeable": True,
                 "writeable_when": {"input": "operation", "equals": "record_candidate_feedback"},
             }
@@ -357,7 +357,7 @@ def test_writeable_when_keeps_memory_mount_mutable_for_write_operation(monkeypat
         {"operation": "record_candidate_feedback"},
     )
     warm_key, warm_err = e2b_driver_mod._warm_pool_key(
-        worker_id="research-assistant",
+        worker_id="review_pack-v5",
         user_id="u",
         worker_dir=worker_dir,
         config=cfg,
@@ -380,7 +380,7 @@ def test_read_only_writeable_when_context_is_not_persisted(monkeypatch, tmp_path
         inputs=[SimpleNamespace(name="operation", default="profile")],
         contexts=[
             {
-                "name": "memory-research-assistant",
+                "name": "memory-review_pack-v5",
                 "writeable": True,
                 "writeable_when": {"input": "operation", "equals": "record_candidate_feedback"},
             }
@@ -395,7 +395,7 @@ def test_read_only_writeable_when_context_is_not_persisted(monkeypatch, tmp_path
         config=cfg,
         log_fn=lambda *_args: None,
         user_id="u",
-        mounted_contexts={"memory-research-assistant"},
+        mounted_contexts={"memory-review_pack-v5"},
         writeable_contexts=set(),
     )
 
