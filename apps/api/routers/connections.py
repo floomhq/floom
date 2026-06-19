@@ -17,11 +17,15 @@ the connection test fixtures, so the bindings refresh per reload.
 from __future__ import annotations
 
 import asyncio
+import base64
 import copy
+import hashlib
+import hmac
 import json
 import logging
 import os
 import re
+import secrets as pysecrets
 import threading
 import time
 import urllib.parse
@@ -33,6 +37,7 @@ from fastapi import APIRouter, Depends, HTTPException, Request
 from pydantic import BaseModel, Field
 
 from auth import AuthContext, get_auth_context
+from auth.multi_member import SESSION_COOKIE
 from core import hot_cache
 from core.utils import _parse_iso8601, row_to_dict
 from db import Repositories, get_repos, get_repositories, now_iso
@@ -55,6 +60,7 @@ connections_router = APIRouter()
 _CONNECTION_LIST_CACHE_TTL_SECONDS = 10.0
 _connection_list_cache_lock = threading.Lock()
 _connection_list_cache: Dict[str, tuple[float, List["ConnectionItem"]]] = {}
+_OAUTH_STATE_FALLBACK_SECRET = pysecrets.token_urlsafe(32)
 
 
 def _connection_list_cache_get(user_id: str) -> List["ConnectionItem"] | None:
@@ -194,6 +200,97 @@ def _get_callback_url() -> str:
     """Build the OAuth callback URL for Composio to redirect to."""
     base = os.environ.get("WORKERS_FRONTEND_URL", "http://localhost:3000")
     return f"{base}/connections/callback"
+
+
+def _oauth_state_secret() -> str:
+    return (
+        os.environ.get("WORKEROS_OAUTH_STATE_SECRET")
+        or os.environ.get("WORKEROS_MAGIC_LINK_SECRET")
+        or os.environ.get("FLOOM_SECRET")
+        or _OAUTH_STATE_FALLBACK_SECRET
+    )
+
+
+def _b64url(data: bytes) -> str:
+    return base64.urlsafe_b64encode(data).rstrip(b"=").decode("ascii")
+
+
+def _b64url_decode(value: str) -> bytes:
+    return base64.urlsafe_b64decode(value + "=" * (-len(value) % 4))
+
+
+def _issue_oauth_state(*, user_id: str, ttl_seconds: int = 600) -> str:
+    payload = {
+        "user_id": user_id,
+        "nonce": pysecrets.token_urlsafe(18),
+        "exp": int(time.time()) + ttl_seconds,
+    }
+    encoded = _b64url(json.dumps(payload, separators=(",", ":"), sort_keys=True).encode("utf-8"))
+    signature = hmac.new(
+        _oauth_state_secret().encode("utf-8"),
+        encoded.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    return f"{encoded}.{signature}"
+
+
+def _validate_oauth_state(state: str) -> str:
+    try:
+        encoded, signature = state.split(".", 1)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state") from exc
+    expected = hmac.new(
+        _oauth_state_secret().encode("utf-8"),
+        encoded.encode("ascii"),
+        hashlib.sha256,
+    ).hexdigest()
+    if not hmac.compare_digest(expected, signature):
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+    try:
+        payload = json.loads(_b64url_decode(encoded).decode("utf-8"))
+    except Exception as exc:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state") from exc
+    if int(payload.get("exp") or 0) < int(time.time()):
+        raise HTTPException(status_code=400, detail="OAuth state expired")
+    user_id = str(payload.get("user_id") or "")
+    if not user_id:
+        raise HTTPException(status_code=400, detail="Invalid OAuth state")
+    return user_id
+
+
+def _callback_url_with_state(callback_url: str, state: str) -> str:
+    parsed = urllib.parse.urlsplit(callback_url)
+    query = urllib.parse.parse_qsl(parsed.query, keep_blank_values=True)
+    query.append(("state", state))
+    return urllib.parse.urlunsplit(
+        (parsed.scheme, parsed.netloc, parsed.path, urllib.parse.urlencode(query), parsed.fragment)
+    )
+
+
+def _session_user_id_from_request(request: Request, repos: Repositories) -> str | None:
+    session_id = request.cookies.get(SESSION_COOKIE)
+    if not session_id or repos.sessions is None:
+        return None
+    row = repos.sessions.get(session_id=session_id)
+    if not row:
+        return None
+    return str(row.get("user_id") or "") or None
+
+
+def _verify_oauth_callback_state(
+    *,
+    request: Request,
+    repos: Repositories,
+    existing: Dict[str, Any],
+    state: str,
+) -> None:
+    if not state:
+        raise HTTPException(status_code=400, detail="Missing OAuth state")
+    state_user_id = _validate_oauth_state(state)
+    owner_id = str(existing.get("user_id") or "")
+    session_user_id = _session_user_id_from_request(request, repos)
+    if state_user_id != owner_id or session_user_id != owner_id:
+        raise HTTPException(status_code=400, detail="OAuth state does not match the active session")
 
 
 def _parse_scopes_json(scopes_json: Optional[str]) -> List[str]:
@@ -893,7 +990,8 @@ def initiate_connection(
     if not app_name:
         raise HTTPException(status_code=400, detail="app_name is required")
 
-    callback_url = _get_callback_url()
+    oauth_state = _issue_oauth_state(user_id=auth.user_id)
+    callback_url = _callback_url_with_state(_get_callback_url(), oauth_state)
     try:
         result = composio_initiate(app_name, callback_url, user_id=auth.user_id)
     except NoManagedAuthError as exc:
@@ -983,10 +1081,10 @@ def create_mcp_connection(
 
 
 @connections_router.get("/connections/callback")
-def connections_callback(request: Request, connection_id: str = "", status: str = ""):
+def connections_callback(request: Request, connection_id: str = "", status: str = "", state: str = ""):
     """OAuth callback landing — Composio redirects here after user authorizes.
 
-    Composio sends: ?connection_id=<composio_conn_id>&status=<status>
+    Composio sends: ?connection_id=<composio_conn_id>&status=<status>&state=<signed-state>
     We update the local DB and redirect the user to /connections.
     """
     from fastapi.responses import RedirectResponse
@@ -1039,6 +1137,16 @@ def connections_callback(request: Request, connection_id: str = "", status: str 
         # Ignore unknown callback IDs; known IDs are validated by persisted state.
         if not existing:
             return RedirectResponse(url=f"{frontend_url}/connections?connected=1")
+        try:
+            _verify_oauth_callback_state(
+                request=request,
+                repos=repos,
+                existing=existing,
+                state=state or request.query_params.get("state", ""),
+            )
+        except HTTPException:
+            logger.warning("Rejected OAuth callback with invalid state for connection %s", callback_connection_id)
+            return RedirectResponse(url=f"{frontend_url}/connections?connected=0&error=oauth_state")
 
         landing_id = existing["id"]
         landing_app = existing.get("app_name") or ""
@@ -1158,8 +1266,8 @@ def _dedupe_connection_account(
         "The existing /connections/callback route remains the primary callback URL."
     ),
 )
-def connections_callback_alias(request: Request, connection_id: str = "", status: str = ""):
-    return connections_callback(request=request, connection_id=connection_id, status=status)
+def connections_callback_alias(request: Request, connection_id: str = "", status: str = "", state: str = ""):
+    return connections_callback(request=request, connection_id=connection_id, status=status, state=state)
 
 
 @connections_router.get("/connections/{connection_id}/status", response_model=ConnectionItem)

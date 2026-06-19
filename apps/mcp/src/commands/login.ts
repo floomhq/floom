@@ -203,6 +203,13 @@ export async function runLoginCommand(options: LoginOptions = {}): Promise<numbe
           await sleep(started.polling_interval_seconds * 1000);
           continue;
         }
+        if (error.status === 429 && isCloud) {
+          // Hosted: pending approval polls can collide with the cloud rate
+          // limiter. Treat the rate limit as slow_down instead of failing the
+          // device flow before a human can approve it.
+          await sleep(Math.max(started.polling_interval_seconds * 1000, 5000));
+          continue;
+        }
       }
       throw error;
     }

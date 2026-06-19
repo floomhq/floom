@@ -104,6 +104,28 @@ logger = logging.getLogger("floom.api")
 runs_router = APIRouter()
 
 
+def _safe_run_output_payload(run_row: Dict[str, Any], *, user_id: str, repos: Repositories) -> Dict[str, Any]:
+    try:
+        output_payload = json.loads(run_row.get("output_json") or "{}")
+    except Exception:
+        output_payload = {}
+    if not isinstance(output_payload, dict):
+        output_payload = {}
+
+    worker_id = str(run_row.get("worker_id") or "")
+    if not worker_id:
+        return output_payload
+    try:
+        from run_service import get_secrets_for_worker, scrub_secret_values
+
+        secrets = get_secrets_for_worker(worker_id, user_id=user_id, repos=repos)
+        scrubbed = scrub_secret_values(output_payload, secrets)
+        return scrubbed if isinstance(scrubbed, dict) else {}
+    except Exception:
+        logger.exception("Failed to scrub output for run %s", run_row.get("id"))
+        return output_payload
+
+
 def _public_run_log_sse_event(event: Dict[str, Any]) -> Dict[str, Any]:
     log_event: Dict[str, Any] = {
         "type": "log",
@@ -602,9 +624,7 @@ def export_runs_bundle(
                 continue
             run_data = row_to_dict(run_row)
             prefix = f"run-{_sanitize_download_name(str(run_data.get('id') or run_id))}/"
-            output_payload = json.loads(run_row["output_json"] or "{}")
-            if not isinstance(output_payload, dict):
-                output_payload = {}
+            output_payload = _safe_run_output_payload(row_to_dict(run_row), user_id=auth.user_id, repos=repos)
             metadata = {
                 k: run_data.get(k)
                 for k in ("id", "worker_id", "status", "trigger_source", "runner",
@@ -654,10 +674,8 @@ def download_run_bundle(
         raise HTTPException(status_code=404, detail="Run not found")
     artifact_rows = repos.runs.list_artifacts(user_id=auth.user_id, run_id=run_id)
 
-    output_payload = json.loads(run_row["output_json"] or "{}")
-    if not isinstance(output_payload, dict):
-        output_payload = {}
     run_data = row_to_dict(run_row)
+    output_payload = _safe_run_output_payload(run_data, user_id=auth.user_id, repos=repos)
 
     archive_buffer = io.BytesIO()
     with zipfile.ZipFile(archive_buffer, mode="w", compression=zipfile.ZIP_DEFLATED) as archive:
@@ -774,7 +792,7 @@ def get_run(
     if not run:
         raise HTTPException(status_code=404, detail="Run not found")
 
-    run["output"] = json.loads(run.get("output_json") or "{}")
+    run["output"] = _safe_run_output_payload(run, user_id=auth.user_id, repos=repos)
     run["outputs"] = run["output"]
     # Build typed output schema from worker config
     output_config = get_worker_config_for_run(run["worker_id"])

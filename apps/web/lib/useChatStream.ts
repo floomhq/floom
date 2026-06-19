@@ -174,7 +174,8 @@ export function useChatStream(options?: { ephemeral?: boolean }): ChatStreamStat
         if (subscribedCardIds.current.has(card.card_id)) continue;
 
         const cardId = card.card_id;
-        const streamPath = card.streams.parts;
+        const streamPath = safeRunPartsStreamPath(card.streams.parts);
+        if (!streamPath) continue;
         // Extract run_id for fallback REST poll: path is /runs/{id}/stream
         const runId = streamPath.match(/\/runs\/([^/]+)\//)?.[1];
 
@@ -1049,6 +1050,13 @@ export function shouldAutoOpenRunDetails(card: ToolCard): card is RunCard {
     card.status === "completed" &&
     Boolean(card.runId)
   );
+}
+
+export function safeRunPartsStreamPath(path: unknown): string | null {
+  if (typeof path !== "string") return null;
+  const trimmed = path.trim();
+  if (!/^\/runs\/[A-Za-z0-9_-]+\/stream$/.test(trimmed)) return null;
+  return trimmed;
 }
 
 export function getAutoOpenRunDetailsHref(card: ToolCard): string | null {
