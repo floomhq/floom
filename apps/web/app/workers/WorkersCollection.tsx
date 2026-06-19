@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import Link from "next/link";
-import { useRouter, useSearchParams } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { toast } from "sonner";
 import { api } from "@/lib/api";
 import { reportError, logError } from "@/lib/notify";
@@ -1770,60 +1770,12 @@ export default function WorkersCollection({
 
   useEffect(() => {
     if (workersQuery.data) {
-      setWorkers((prev) => {
-        const fresh = workersQuery.data!.filter((w) => !isSystemWorker(w));
-        // Preserve any on-demand-hydrated worker (see hydration effect below)
-        // that the cache-first list doesn't include yet, so a freshly-opened
-        // worker doesn't blink out when the background refetch resolves.
-        const freshIds = new Set(fresh.map((w) => w.id));
-        const carry = prev.filter((w) => !freshIds.has(w.id) && hydratedIdsRef.current.has(w.id));
-        return [...fresh, ...carry];
-      });
+      // Deep-linked workers absent from the cache-first list (#1558) are now
+      // hydrated by CollectionView via config.resolveMissing and held in its own
+      // merged set, so this effect just mirrors the filtered server list.
+      setWorkers(workersQuery.data.filter((w) => !isSystemWorker(w)));
     }
   }, [workersQuery.data]);
-
-  // BUG FIX (open-worker "Item not found … old ID format"): the workers list is
-  // cache-first (staleTime 30s, refetchOnMount:false), so a deep-link or Emily
-  // "Open worker" to a worker that isn't in the cached list yet (e.g. one just
-  // created) resolves to null in CollectionView → false "not found" toast +
-  // cleared selection. The id format is fine (slugs match); the list is just
-  // stale. When ?sel points at an id we don't have, fetch it by id and merge a
-  // summary so the selection resolves. api.workers.get(id) resolves the same
-  // slug ids used everywhere, so this is robust to the link format.
-  const searchParams = useSearchParams();
-  const selParam = searchParams.get("sel");
-  const hydratedIdsRef = useRef<Set<string>>(new Set());
-  const hydratingIdRef = useRef<string | null>(null);
-  useEffect(() => {
-    if (!selParam) return;
-    if (workers.some((w) => w.id === selParam)) return; // already present
-    // Wait for the initial list load to settle before deciding it's missing,
-    // so we don't fire a redundant fetch during the first paint.
-    if (workersQuery.isLoading) return;
-    if (hydratingIdRef.current === selParam) return; // in flight
-    hydratingIdRef.current = selParam;
-    let alive = true;
-    api.workers
-      .get(selParam)
-      .then((d) => {
-        if (!alive) return;
-        hydratedIdsRef.current.add(d.id);
-        detailCache.set(d.id, d); // warm the detail-pane cache too
-        setWorkers((prev) =>
-          prev.some((w) => w.id === d.id) ? prev : [detailToSummary(d), ...prev],
-        );
-      })
-      .catch(() => {
-        // Genuinely missing/inaccessible worker → let CollectionView surface the
-        // existing "not found" toast (the real not-found path, not a stale list).
-      })
-      .finally(() => {
-        if (hydratingIdRef.current === selParam) hydratingIdRef.current = null;
-      });
-    return () => {
-      alive = false;
-    };
-  }, [selParam, workers, workersQuery.isLoading]);
 
   // Skeleton only on a true cold start (no cache and no server data); a slow
   // backend with cached data shows the cache, never the skeleton or the error.
@@ -1876,6 +1828,20 @@ export default function WorkersCollection({
     loading,
     error,
     idOf: (w) => w.id,
+    // #1558: the workers list is cache-first (staleTime 30s) and filters system
+    // workers, so a deep-link / Emily "Open worker" to an id not in the loaded
+    // list (e.g. one just created) would false-toast "not found". Hydrate it by
+    // id and project the detail into a summary; CollectionView merges it so the
+    // detail opens with no toast. A genuine miss (null/throw) keeps the toast.
+    resolveMissing: async (id) => {
+      try {
+        const d = await api.workers.get(id);
+        detailCache.set(d.id, d); // warm the detail-pane cache too
+        return detailToSummary(d);
+      } catch {
+        return null;
+      }
+    },
     searchPlaceholder: "Search workers or tags…",
     searchOf: (w) => `${w.name} ${displayBrandCopy(w.description)} ${(w.tags ?? []).join(" ")}`,
     tagsOf: (w) =>
