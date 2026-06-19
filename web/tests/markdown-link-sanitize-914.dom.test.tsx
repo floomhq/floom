@@ -49,6 +49,20 @@ describe("#914 markdown link sanitization", () => {
     expect(hrefs).toContain("mailto:a@b.co");
     expect(hrefs).toContain("/runs/123");
   });
+
+  it("does not render protocol-relative links as same-tab internal links", () => {
+    const md = "[View failed run](//attacker.example/fake-login)";
+
+    for (const container of [
+      render(<GenericOutput type="markdown" value={md} />).container,
+      render(<MarkdownText text={md} />).container,
+    ]) {
+      const found = anchors(container);
+      expect(found.length).toBe(1);
+      expect(found[0].getAttribute("href")).toBeNull();
+      expect(found[0].getAttribute("target")).toBe("_blank");
+    }
+  });
 });
 
 describe("#914 sanitizeHref unit", () => {
@@ -61,6 +75,11 @@ describe("#914 sanitizeHref unit", () => {
     expect(sanitizeHref("vbscript:x")).toBeUndefined();
     expect(sanitizeHref("data:text/html,x")).toBeUndefined();
     expect(sanitizeHref("file:///etc/passwd")).toBeUndefined();
+  });
+
+  it("blocks protocol-relative external URLs", () => {
+    expect(sanitizeHref("//attacker.example/fake-login")).toBeUndefined();
+    expect(sanitizeHref(" \t//attacker.example/fake-login")).toBeUndefined();
   });
 
   it("allows http(s), mailto, tel and relative URLs", () => {
