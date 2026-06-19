@@ -15,6 +15,8 @@ import { WorkspaceSwitcher } from "@/components/layout/WorkspaceSwitcher";
 import { WorkspaceMonogram } from "@/components/layout/WorkspaceMonogram";
 import { AlertsBell } from "@/components/overview/AlertsBell";
 import { api } from "@/lib/api";
+import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
+import { clearClientLogoutState } from "@/lib/auth/logout-cleanup";
 import type { CurrentUser } from "@/lib/types";
 import { resolveWorkspaceName } from "@/lib/workspace/display-name";
 import {
@@ -278,24 +280,17 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
 
   // Hydrate from localStorage after mount to avoid SSR mismatch
   useEffect(() => {
-    try {
-      const stored = localStorage.getItem(SIDEBAR_COLLAPSE_KEY);
-      if (stored === "1") setCollapsed(true);
-    } catch {
-      // localStorage may be unavailable (private browsing, SSR)
-    }
+    if (safeStorageGet("local", SIDEBAR_COLLAPSE_KEY) === "1") setCollapsed(true);
   }, []);
 
   const toggleCollapse = () => {
     setCollapsed((prev) => {
       const next = !prev;
-      try {
-        if (next) {
-          localStorage.setItem(SIDEBAR_COLLAPSE_KEY, "1");
-        } else {
-          localStorage.removeItem(SIDEBAR_COLLAPSE_KEY);
-        }
-      } catch {}
+      if (next) {
+        safeStorageSet("local", SIDEBAR_COLLAPSE_KEY, "1");
+      } else {
+        safeStorageRemove("local", SIDEBAR_COLLAPSE_KEY);
+      }
       return next;
     });
   };
@@ -585,6 +580,7 @@ export function UserProfileFooter({
     } catch {
       // Clearing the cookie is best-effort; navigate regardless.
     }
+    clearClientLogoutState();
     onNavigate?.();
     router.replace("/login");
     router.refresh();

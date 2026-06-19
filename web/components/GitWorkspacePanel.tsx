@@ -5,6 +5,7 @@ import { Check, ExternalLink, GitBranch, Loader2, Plus, RefreshCw, Unlink } from
 import { toast } from "sonner";
 
 import { api } from "@/lib/api";
+import { computeIsAdmin } from "@/lib/use-is-admin";
 import type { GitRepoItem, GitWorkspaceStatus } from "@/lib/types";
 import { formatRelative } from "@/lib/formatters";
 import { Button } from "@/components/ui/button";
@@ -404,8 +405,9 @@ export function GitWorkspacePanel() {
       api.system.gitStatus().catch(() => null),
       api.me().catch(() => null),
     ]).then(([s, me]) => {
-      // role === "admin" or unset (dev mode / OSS single-user) = admin access
-      const admin = !me || !me.role || me.role === "admin";
+      // Owners and admins can mutate Git workspace config; unset role is
+      // OSS/dev single-user admin access.
+      const admin = !me || computeIsAdmin(me);
       setIsAdmin(admin);
       if (s?.connected) {
         setStatus(s);

@@ -526,6 +526,7 @@ export interface WorkerSuggestResponse {
 export interface SecretItem {
   name: string;
   status: SecretStatus;
+  user_id?: string | null;
   last_used_at?: string;
   last_checked_at?: string | null;
   last_check_status?: string | null;
