@@ -255,9 +255,8 @@ export function CliCommandPanel() {
           <p className="text-sm text-muted-foreground mt-0.5">
             Generate a browser copy of the single-user token for{" "}
             <code className="font-mono">{getPublicApiHost()}</code>. Use it as{" "}
-            <code className="font-mono">x-floom-secret</code>; Cloud PATs start
-            with <code className="font-mono">floom_</code> and belong to{" "}
-            <code className="font-mono">workeros-api.floom.dev</code>.
+            <code className="font-mono">x-floom-secret</code> for local or
+            self-hosted API calls.
           </p>
         </div>
         {storedSecret ? (

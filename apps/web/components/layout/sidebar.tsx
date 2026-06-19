@@ -564,9 +564,8 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
 }
 
 // S29b: replaces the "Floom v0" bottom-left footer with a user profile chip.
-// Today's single-user v0 shows "Local user"; the cloud build (see
-// docs/architecture/supabase-cloud-wiring-brief.md) will swap this for the
-// signed-in Supabase user's email + avatar.
+// Today's single-user v0 shows "Local user"; hosted builds can swap this for
+// the signed-in user's email + avatar.
 //
 // V8 (the operator 2026-06-02): "have settings next to name, as the gear icon, not
 // its own row." Settings is now a small gear-icon button inline on the name
