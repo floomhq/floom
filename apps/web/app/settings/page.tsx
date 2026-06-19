@@ -726,11 +726,14 @@ function SettingsContent() {
   const workspaceName = resolveWorkspaceName(
     workspaceList?.workspaces.find((workspace) => workspace.id === workspaceList.active_id)?.name,
   );
+  // When the user has no real display name/email/username, leave this
+  // undefined so the ScopeChip + group labels show just "Account" instead of
+  // leaking the internal "the operator" placeholder into the UI.
   const accountName =
     currentUser?.display_name?.trim() ||
     currentUser?.email?.trim() ||
     currentUser?.username?.trim() ||
-    "the operator";
+    undefined;
 
   const config = useMemo<CollectionConfig<SettingsNavItemWithIcon>>(() => {
     const items = SETTINGS_NAV.map((item) => ({ ...item, icon: iconForSection(item.key) }));
@@ -780,10 +783,10 @@ function SettingsContent() {
           leading: <SettingsIcon icon={item.icon} />,
           title: item.label,
           sub: (
-            <span className="flex flex-wrap items-center gap-2">
+            <>
               <ScopeChip scope={item.scope} name={item.scope === "workspace" ? workspaceName : accountName} />
-              <span className="text-[var(--ink-mute)]">{item.description}</span>
-            </span>
+              <span className="c-dh-desc">{item.description}</span>
+            </>
           ),
         },
         tabs: [
@@ -1158,7 +1161,7 @@ function WorkspaceTokenSection({ workspaceName }: { workspaceName: string }) {
 // PersonalTokensSection (account scope) — re-homes PersonalAccessTokensPanel
 // under ACCOUNT with its own scope banner + a cross-link to Workspace · token.
 // CRUD unchanged (api.tokens.*) (mockup .pane[data-pane="acct-tokens"]).
-function PersonalTokensSection({ accountName, workspaceName }: { accountName: string; workspaceName: string }) {
+function PersonalTokensSection({ accountName, workspaceName }: { accountName?: string; workspaceName: string }) {
   return (
     <div className="space-y-5">
       <ScopeBanner
