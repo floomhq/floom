@@ -1,0 +1,40 @@
+# Copy to `secrets.auto.tfvars` (gitignored) and fill in. NEVER commit real values.
+# Pull the values straight from your current Railway service env.
+
+region    = "eu-central-1"   # == your Supabase region
+image_tag = "latest"
+
+# Until engine #1531 (WORKEROS_ROLE split + worker entrypoint) is merged, keep the
+# worker at 0 so it doesn't crash-loop. Web runs as role=all-compatible.
+worker_desired_count = 0
+
+# Optional: HTTPS on the ALB for workeros-api.floom.dev (create an ACM cert first).
+# acm_certificate_arn = "arn:aws:acm:eu-central-1:ACCOUNT:certificate/..."
+
+# Non-secret env (both services). WORKEROS_ROLE + PORT are injected automatically.
+container_env = {
+  WORKEROS_MAX_CONCURRENT_RUNS         = "6"
+  WORKEROS_E2B_PYTHON_TEMPLATE_MEMORY_2048 = "gzm0071hrus9jwkse7w6"
+  # AWS_REGION for Bedrock calls (independent of compute region; us-east-1 = 125 models)
+  AWS_REGION = "us-east-1"
+}
+
+# Secret env -> stored as SSM SecureString, injected via valueFrom.
+# This is the list the cloud needs; copy values from Railway. (sensitive)
+container_secrets = {
+  SUPABASE_URL                         = "https://sgizlsyygvlqosgwdimb.supabase.co"
+  SUPABASE_SERVICE_ROLE_KEY            = "REPLACE"
+  SUPABASE_ANON_KEY                    = "REPLACE"
+  WORKEROS_CLOUD_SECRETS_ENCRYPTION_KEY = "REPLACE"
+  WORKEROS_CLOUD_DB_HOST               = "aws-1-eu-central-1.pooler.supabase.com"
+  WORKEROS_CLOUD_DB_PORT               = "5432"
+  WORKEROS_CLOUD_DB_NAME               = "postgres"
+  WORKEROS_CLOUD_DB_USER               = "workeros_scheduler.sgizlsyygvlqosgwdimb"
+  WORKEROS_CLOUD_DB_PASSWORD           = "REPLACE"
+  E2B_API_KEY                          = "REPLACE"
+  E2B_API_KEY_FALLBACK                 = "REPLACE"
+  # AWS creds for Bedrock/Vertex-WIF from the app (or use the task IAM role instead)
+  AWS_ACCESS_KEY_ID                    = "REPLACE"
+  AWS_SECRET_ACCESS_KEY                = "REPLACE"
+  # ... add any other secrets your Railway service currently sets
+}
