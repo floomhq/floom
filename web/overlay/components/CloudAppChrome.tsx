@@ -33,6 +33,11 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isLoginPath = pathname === "/login" || pathname.startsWith("/login/") || pathname === "/app/login" || pathname.startsWith("/app/login/");
   const isJoinPath = pathname === "/join" || pathname.startsWith("/join/") || pathname === "/app/join" || pathname.startsWith("/app/join/");
+  // cli-auth is a standalone approval gate (no sidebar/dock chrome): the engine
+  // page centers itself + is in the engine standalonePrefixes. Mirror the login
+  // standalone treatment so it escapes the shell. Match both /cli-auth and
+  // /app/cli-auth (basePath-aware, same as isLoginPath).
+  const isCliAuthPath = pathname === "/cli-auth" || pathname.startsWith("/cli-auth/") || pathname === "/app/cli-auth" || pathname.startsWith("/app/cli-auth/");
   const isApprovalReviewPath =
     pathname === "/approvals/review" ||
     pathname.startsWith("/approvals/review/") ||
@@ -82,7 +87,7 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (isApprovalReviewPath) {
+  if (isApprovalReviewPath || isCliAuthPath) {
     return (
       <>
         <IconSprite />
