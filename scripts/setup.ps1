@@ -32,7 +32,7 @@ Invoke-Step ".\venv\Scripts\python.exe" @("-m", "pip", "install", "--quiet", "-r
 # 2. Scaffold apps\api\.env from the example (never clobber an existing one).
 if (-not (Test-Path .env)) {
   Copy-Item .env.example .env
-  Write-Host "==> backend: created apps\api\.env - add OPENAI_API_KEY + E2B_API_KEY (or Bedrock keys)"
+  Write-Host "==> backend: created apps\api\.env - add E2B_API_KEY and model provider keys (see docs\GETTING-STARTED.md)"
 } else {
   Write-Host "==> backend: apps\api\.env already exists - left untouched"
 }

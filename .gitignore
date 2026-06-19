@@ -21,6 +21,7 @@ data/artifacts/*
 !data/artifacts/.gitkeep
 data/blobs/
 data/run-bundles/
+data/*.log
 # The API runs from apps/api/, so its local SQLite DB + run bundles live at
 # apps/api/data/ — the repo-root data/ rules above don't reach it. This dir
 # holds OAuth tokens, secrets, sessions and PATs; never commit it.
@@ -33,9 +34,12 @@ contexts/*
 
 # Audit reports (may contain leaked secret values in evidence; keep local only)
 docs/launch-readiness/agent-runs/
+# Local review/feedback drops are iteration evidence, not OSS source.
+feedback/
 
 # Build
 .next/
+apps/web/*.log
 dist/
 build/
 
