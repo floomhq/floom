@@ -961,10 +961,12 @@ export function EmilyDock({ className }: { className?: string }) {
   return (
     <div
       className={cn(
-        "flex h-full flex-col bg-background overflow-hidden [border-left:var(--bd-div)]",
+        "flex h-full flex-col bg-background overflow-hidden",
         // Fullscreen: flex-grow to fill the main area (page pane is hidden by
         // AppShell), sidebar stays to the left. Otherwise: fixed-width rail.
-        isFull ? "flex-1 min-w-0" : cn("shrink-0", DOCK_WIDTH[mode]),
+        // Left divider only in docked mode; in fullscreen it would double up
+        // against the sidebar's right border.
+        isFull ? "flex-1 min-w-0" : cn("shrink-0 [border-left:var(--bd-div)]", DOCK_WIDTH[mode]),
         className
       )}
       aria-label={
