@@ -341,9 +341,12 @@ from run_service import (
     update_run_status,
     request_active_run_shutdown,
     start_drain_loop,
+    start_log_flush_loop,
     start_run_reaper_loop,
     stop_drain_loop,
+    stop_log_flush_loop,
     stop_run_reaper_loop,
+    execution_role_enabled,
     queued_run_position,
     smoke_and_gate_generated_worker,
     InsufficientDiskSpaceError,
@@ -947,6 +950,7 @@ async def lifespan(app: FastAPI):
     except Exception as _sec_exc:
         logger.warning("Startup workspace config restore failed (non-fatal): %s", _sec_exc)
     deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
+    executor_enabled = execution_role_enabled()
     if deploy == "local":
         bootstrap_user_id = _bootstrap_user_id()
         # Worker reload MUST be non-fatal on startup. A single malformed or
@@ -971,51 +975,59 @@ async def lifespan(app: FastAPI):
             _backfill_worker_memory_packs(bootstrap_user_id)
         except Exception as _memory_exc:
             logger.warning("Startup worker memory backfill failed (non-fatal): %s", _memory_exc)
-        fail_interrupted_runs_on_startup(user_id=bootstrap_user_id)
-        # #1130: sweep for zombie runs from previous deployments / server restarts.
-        # Unlike fail_interrupted_runs_on_startup (process-local tracking), this
-        # uses a very broad window (24h) to catch runs that were never cleaned up
-        # regardless of how many restarts occurred since.
-        try:
-            from run_service import recover_abandoned_runs as _recover
-            _recover(timeout_seconds=86400, grace_seconds=0)
-        except Exception as _reap_exc:
-            logger.warning("Startup zombie-run sweep failed (non-fatal): %s", _reap_exc)
-        reap_abandoned_pending_approval_runs()
-        re_enqueue_queued_runs_on_startup()
-        start_drain_loop()
-        start_run_reaper_loop()
-        from scheduler import start_scheduler
+        if executor_enabled:
+            start_log_flush_loop()
+            fail_interrupted_runs_on_startup(user_id=bootstrap_user_id)
+            # #1130: sweep for zombie runs from previous deployments / server restarts.
+            # Unlike fail_interrupted_runs_on_startup (process-local tracking), this
+            # uses a very broad window (24h) to catch runs that were never cleaned up
+            # regardless of how many restarts occurred since.
+            try:
+                from run_service import recover_abandoned_runs as _recover
+                _recover(timeout_seconds=86400, grace_seconds=0)
+            except Exception as _reap_exc:
+                logger.warning("Startup zombie-run sweep failed (non-fatal): %s", _reap_exc)
+            reap_abandoned_pending_approval_runs()
+            re_enqueue_queued_runs_on_startup()
+            start_drain_loop()
+            start_run_reaper_loop()
+            from scheduler import start_scheduler
 
-        start_scheduler()
+            start_scheduler()
+        else:
+            logger.info(
+                "WORKEROS_ROLE=web: executor drain, reaper, scheduler, and run recovery disabled in this process"
+            )
         # Launch hourly connection health sweep
         _sweep_task = asyncio.create_task(_hourly_sweep_loop())
     yield
     # Shutdown
     if deploy == "local":
-        stop_run_reaper_loop(timeout=5.0)
-        stop_drain_loop(timeout=5.0)
-        from scheduler import stop_scheduler
+        if executor_enabled:
+            stop_run_reaper_loop(timeout=5.0)
+            stop_drain_loop(timeout=5.0)
+            from scheduler import stop_scheduler
 
-        stop_scheduler()
-        try:
-            drain_timeout = float(os.environ.get("WORKEROS_SHUTDOWN_RUN_DRAIN_SECONDS", "75"))
-        except ValueError:
-            drain_timeout = 75.0
-        cancelled_runs = await asyncio.to_thread(
-            request_active_run_shutdown,
-            timeout_seconds=drain_timeout,
-        )
-        if cancelled_runs:
-            logger.warning("Shutdown requested cancellation for %d active run(s)", cancelled_runs)
-        try:
-            from runner_sandbox.e2b_driver import clear_warm_pool
+            stop_scheduler()
+            try:
+                drain_timeout = float(os.environ.get("WORKEROS_SHUTDOWN_RUN_DRAIN_SECONDS", "75"))
+            except ValueError:
+                drain_timeout = 75.0
+            cancelled_runs = await asyncio.to_thread(
+                request_active_run_shutdown,
+                timeout_seconds=drain_timeout,
+            )
+            if cancelled_runs:
+                logger.warning("Shutdown requested cancellation for %d active run(s)", cancelled_runs)
+            stop_log_flush_loop(timeout=5.0)
+            try:
+                from runner_sandbox.e2b_driver import clear_warm_pool
 
-            cleared_warm = clear_warm_pool()
-            if cleared_warm:
-                logger.info("Cleared %d warm E2B sandbox(es) on shutdown", cleared_warm)
-        except Exception as _warm_pool_exc:
-            logger.warning("Warm E2B sandbox pool cleanup failed: %s", _warm_pool_exc)
+                cleared_warm = clear_warm_pool()
+                if cleared_warm:
+                    logger.info("Cleared %d warm E2B sandbox(es) on shutdown", cleared_warm)
+            except Exception as _warm_pool_exc:
+                logger.warning("Warm E2B sandbox pool cleanup failed: %s", _warm_pool_exc)
         if _sweep_task:
             _sweep_task.cancel()
             try:

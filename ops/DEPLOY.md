@@ -25,6 +25,33 @@ silently leaving production behind.
 
 Prints every step with "DRY-RUN: would…" — no changes made.
 
+### Split web and worker services
+
+The default OSS service runs with `WORKEROS_ROLE=all`. For high-throughput
+deployments, run two services from the same code and database:
+
+- Web/API service: `WORKEROS_ROLE=web`. It serves HTTP and creates queued runs,
+  but never starts the scheduler, run reaper, queue drain, or E2B executor.
+- Worker service: `WORKEROS_ROLE=worker`. It drains queued runs, runs the
+  scheduler/reaper, performs graceful run drain on shutdown, and launches E2B
+  sandboxes.
+
+Recommended worker-service env:
+
+```bash
+WORKEROS_ROLE=worker
+WORKEROS_MAX_CONCURRENT_RUNS=<your E2B-safe cap>
+WORKEROS_RUN_RECIPE_CACHE_TTL_SECONDS=10
+WORKEROS_RUN_SECRET_CACHE_TTL_SECONDS=10
+WORKEROS_ASYNC_LOG_FLUSH=1
+WORKEROS_LOG_FLUSH_BATCH_SIZE=100
+WORKEROS_LOG_FLUSH_INTERVAL_SECONDS=0.25
+```
+
+Both services must point at the same `WORKEROS_DB`/repository backend and the
+same worker/context/artifact storage. Send user traffic to the web service; keep
+the worker service private except for health checks.
+
 ### Flags
 
 | Flag | Effect |

@@ -313,6 +313,8 @@ class RunRepository(Protocol):
         trace_id: str | None = None,
     ) -> None: ...
 
+    def add_logs(self, *, rows: Iterable[RowDict]) -> None: ...
+
     def list_logs(
         self,
         *,
