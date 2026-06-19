@@ -7,10 +7,10 @@ _floom_completion() {
   prev="\${COMP_WORDS[COMP_CWORD-1]}"
   local commands="login logout whoami run workers workspaces workspace runs secrets connections mcp completion --help --version"
   local workers_sub="list show"
-  local workspaces_sub="list show switch use"
+  local workspaces_sub="list create show switch use"
   local runs_sub="list show logs download"
   local secrets_sub="list set delete"
-  local connections_sub="list import-mcp-config"
+  local connections_sub="list add import-mcp-config"
   local mcp_sub="list switch test add install uninstall"
 
   if [[ \${COMP_CWORD} -eq 1 ]]; then
@@ -57,10 +57,10 @@ compdef _floom floom
 function fishCompletion(): string {
   return `complete -c floom -f -a "login logout whoami run workers workspaces workspace runs secrets connections mcp completion"
 complete -c floom -n "__fish_seen_subcommand_from workers" -a "list show"
-complete -c floom -n "__fish_seen_subcommand_from workspaces workspace" -a "list show switch use"
+complete -c floom -n "__fish_seen_subcommand_from workspaces workspace" -a "list create show switch use"
 complete -c floom -n "__fish_seen_subcommand_from runs" -a "list show logs download"
 complete -c floom -n "__fish_seen_subcommand_from secrets" -a "list set delete"
-complete -c floom -n "__fish_seen_subcommand_from connections" -a "list import-mcp-config"
+complete -c floom -n "__fish_seen_subcommand_from connections" -a "list add import-mcp-config"
 complete -c floom -n "__fish_seen_subcommand_from mcp" -a "list switch test add install uninstall"
 `;
 }

@@ -8,7 +8,8 @@ import test from "node:test";
 
 import { readCredentials, writeCredentials } from "../dist/lib/credentials.js";
 import { WorkerosApiClient } from "../dist/lib/api.js";
-import { workspacesSwitchCommand, workspacesListCommand } from "../dist/commands/workspaces.js";
+import { workspacesCreateCommand, workspacesSwitchCommand, workspacesListCommand } from "../dist/commands/workspaces.js";
+import { connectionsAddCommand } from "../dist/commands/connections.js";
 import { mcpInstallCommand, mcpListCommand, mcpSwitchCommand, mcpTestCommand } from "../dist/commands/mcp.js";
 
 async function withTempHome(fn) {
@@ -58,38 +59,62 @@ const TEST_RESULTS = {
 // Minimal OSS API stub: /workspaces, /workspaces/:id/select, /connections.
 async function withStubServer(fn, { cloud = false } = {}) {
   const calls = [];
+  const bodies = [];
   const server = createServer((req, res) => {
     calls.push(`${req.method} ${req.url}`);
     const prefix = cloud ? "/api" : "";
-    res.setHeader("content-type", "application/json");
-    if (req.method === "GET" && req.url === `${prefix}/workspaces`) {
-      res.end(JSON.stringify({ workspaces: WORKSPACES, active_id: "local-default" }));
-      return;
-    }
-    const select = req.url.match(/^\/workspaces\/([^/]+)\/select$/);
-    if (!cloud && req.method === "POST" && select) {
-      const found = WORKSPACES.find((row) => row.id === select[1]);
-      res.statusCode = found ? 200 : 404;
-      res.end(JSON.stringify(found || { detail: "workspace not found" }));
-      return;
-    }
-    if (req.method === "GET" && req.url === `${prefix}/connections`) {
-      res.end(JSON.stringify(CONNECTIONS));
-      return;
-    }
-    const connTest = req.url.match(/^\/connections\/([^/]+)\/test$/);
-    if (!cloud && req.method === "POST" && connTest && TEST_RESULTS[connTest[1]]) {
-      res.end(JSON.stringify(TEST_RESULTS[connTest[1]]));
-      return;
-    }
-    res.statusCode = 404;
-    res.end(JSON.stringify({ detail: "not found" }));
+    let raw = "";
+    req.on("data", (chunk) => { raw += chunk; });
+    req.on("end", () => {
+      const parsedBody = raw ? JSON.parse(raw) : null;
+      bodies.push({ method: req.method, url: req.url, body: parsedBody });
+      res.setHeader("content-type", "application/json");
+      if (req.method === "GET" && req.url === `${prefix}/workspaces`) {
+        res.end(JSON.stringify({ workspaces: WORKSPACES, active_id: "local-default" }));
+        return;
+      }
+      if (req.method === "POST" && req.url === `${prefix}/workspaces`) {
+        res.end(JSON.stringify({
+          id: "ws_created",
+          name: parsedBody?.name || "Created",
+          created_at: "2026-01-03",
+        }));
+        return;
+      }
+      const select = req.url.match(/^\/workspaces\/([^/]+)\/select$/);
+      if (!cloud && req.method === "POST" && select) {
+        const found = WORKSPACES.find((row) => row.id === select[1]);
+        res.statusCode = found ? 200 : 404;
+        res.end(JSON.stringify(found || { detail: "workspace not found" }));
+        return;
+      }
+      if (req.method === "GET" && req.url === `${prefix}/connections`) {
+        res.end(JSON.stringify(CONNECTIONS));
+        return;
+      }
+      if (req.method === "POST" && req.url === `${prefix}/connections`) {
+        res.end(JSON.stringify({
+          id: "conn-created",
+          app_name: parsedBody?.app_name || "gmail",
+          redirect_url: "https://auth.example/authorize",
+          composio_connection_id: "ca_created",
+        }));
+        return;
+      }
+      const connTest = req.url.match(/^\/connections\/([^/]+)\/test$/);
+      if (!cloud && req.method === "POST" && connTest && TEST_RESULTS[connTest[1]]) {
+        res.end(JSON.stringify(TEST_RESULTS[connTest[1]]));
+        return;
+      }
+      res.statusCode = 404;
+      res.end(JSON.stringify({ detail: "not found" }));
+    });
   });
   server.listen(0, "127.0.0.1");
   await once(server, "listening");
   const base = `http://127.0.0.1:${server.address().port}`;
   try {
-    return await fn(base, calls);
+    return await fn(base, calls, bodies);
   } finally {
     server.close();
   }
@@ -172,6 +197,24 @@ test("workspace list marks the active workspace and shows auth status", async ()
   });
 });
 
+test("workspace create posts to API and persists new active workspace", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base, calls, bodies) => {
+      await writeOssCreds(base);
+      const code = await workspacesCreateCommand("Customer A", { json: true });
+      assert.equal(code, 0);
+      const creds = await readCredentials();
+      assert.equal(creds.workspace_id, "ws_created");
+      assert.equal(creds.workspace_name, "Customer A");
+      assert.ok(calls.includes("POST /workspaces"));
+      assert.deepEqual(
+        bodies.find((call) => call.method === "POST" && call.url === "/workspaces")?.body,
+        { name: "Customer A" },
+      );
+    });
+  });
+});
+
 test("OSS auth headers carry the persisted active workspace", async () => {
   await withTempHome(async () => {
     await writeOssCreds("https://workers-api.floom.dev", { workspace_id: "ws_0123456789abcd" });
@@ -197,6 +240,64 @@ test("workspace switch works against cloud /api/workspaces", async () => {
       const creds = await readCredentials();
       assert.equal(creds.workspace_id, "ws_0123456789abcd");
       assert.ok(!calls.some((call) => call.includes("/select")), "cloud mode does not call /select");
+    }, { cloud: true });
+  });
+});
+
+test("workspace create works against cloud /api/workspaces", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base, calls) => {
+      await writeCredentials({
+        api_base: base,
+        mode: "cloud",
+        api_token: "pat-token",
+        authed_at: new Date().toISOString(),
+      });
+      const code = await workspacesCreateCommand("Cloud Customer", { json: true });
+      assert.equal(code, 0);
+      const creds = await readCredentials();
+      assert.equal(creds.workspace_id, "ws_created");
+      assert.equal(creds.workspace_name, "Cloud Customer");
+      assert.ok(calls.includes("POST /api/workspaces"));
+    }, { cloud: true });
+  });
+});
+
+test("connections add starts OAuth and prints the authorization URL", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base, calls, bodies) => {
+      await writeOssCreds(base);
+      const captured = captureStdout();
+      let code;
+      try {
+        code = await connectionsAddCommand("Gmail", {});
+      } finally {
+        captured.restore();
+      }
+      assert.equal(code, 0);
+      assert.ok(calls.includes("POST /connections"));
+      assert.deepEqual(
+        bodies.find((call) => call.method === "POST" && call.url === "/connections")?.body,
+        { app_name: "gmail" },
+      );
+      assert.match(captured.text(), /https:\/\/auth\.example\/authorize/);
+    });
+  });
+});
+
+test("connections add works against cloud /api/connections", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base, calls) => {
+      await writeCredentials({
+        api_base: base,
+        mode: "cloud",
+        api_token: "pat-token",
+        workspace_id: "ws_cloud",
+        authed_at: new Date().toISOString(),
+      });
+      const code = await connectionsAddCommand("github", { json: true });
+      assert.equal(code, 0);
+      assert.ok(calls.includes("POST /api/connections"));
     }, { cloud: true });
   });
 });

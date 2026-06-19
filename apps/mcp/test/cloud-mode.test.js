@@ -23,6 +23,7 @@ async function withTempHome(fn) {
   const originalToken = process.env.WORKEROS_API_TOKEN;
   const originalBase = process.env.WORKEROS_API_BASE;
   const originalWorkspace = process.env.WORKEROS_WORKSPACE_ID;
+  const originalCloud = process.env.WORKEROS_CLOUD;
   process.env.HOME = home;
   try {
     return await fn(home);
@@ -34,6 +35,8 @@ async function withTempHome(fn) {
     else process.env.WORKEROS_API_BASE = originalBase;
     if (originalWorkspace === undefined) delete process.env.WORKEROS_WORKSPACE_ID;
     else process.env.WORKEROS_WORKSPACE_ID = originalWorkspace;
+    if (originalCloud === undefined) delete process.env.WORKEROS_CLOUD;
+    else process.env.WORKEROS_CLOUD = originalCloud;
   }
 }
 
@@ -97,6 +100,20 @@ test("readCredentials accepts cloud PAT from environment", async () => {
     assert.equal(creds.api_base, "https://workeros-api.floom.dev");
     assert.equal(creds.api_token, "floom_pat_123");
     assert.equal(creds.workspace_id, "ws_env");
+  });
+});
+
+test("WORKEROS_CLOUD=1 does not silently reuse saved OSS credentials", async () => {
+  await withTempHome(async () => {
+    await writeCredentials({
+      api_base: "https://workers-api.floom.dev",
+      mode: "oss",
+      api_secret: "legacy-secret",
+      authed_at: new Date().toISOString(),
+    });
+    process.env.WORKEROS_CLOUD = "1";
+    const creds = await readCredentials();
+    assert.equal(creds, null);
   });
 });
 
