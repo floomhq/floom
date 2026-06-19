@@ -1294,12 +1294,14 @@ export interface ReviewConsensus {
 export interface ReviewPackPublicResponse {
   pack: ReviewPack;
   consensus: ReviewConsensus[];
+  reviewer?: { key: string; name: string; role?: string | null } | null;
 }
 
 /** Response of GET /review/public/{token}/feedback?reviewer_key= */
 export interface ReviewPackFeedbackResponse {
   my_votes: ReviewPackFeedback[];
   consensus: ReviewConsensus[];
+  reviewer?: { key: string; name: string; role?: string | null } | null;
 }
 
 /** Body of POST /review/public/{token}/feedback */
@@ -1308,9 +1310,6 @@ export interface ReviewPackFeedbackInput {
   password?: string;
   job_id: string;
   candidate_id: string;
-  reviewer_key: string;
-  reviewer_name: string;
-  reviewer_role?: string | null;
   verdict: ReviewVerdict;
   note?: string | null;
 }
