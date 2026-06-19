@@ -49,11 +49,19 @@ export function isCancellableRunStatus(status?: string): boolean {
   return status === "running" || status === "queued";
 }
 
-function useRunDetail(id: string, status?: string): RunDetail | undefined {
-  const [d, setD] = useState<RunDetail | undefined>(detailCache.get(id));
+// Exported for the cache-on-cancel regression test (P0-2). The cache write must
+// survive a fetch that resolves after unmount so a remount reads it synchronously.
+export function useRunDetail(id: string, status?: string): RunDetail | undefined {
+  // Derive the initial state synchronously from the cache so a REMOUNT shows
+  // data immediately (no skeleton, no waiting on a fresh fetch). The cache is
+  // only served as the seed for terminal runs — active runs still refetch below
+  // (§2.1) so the detail updates when the run completes.
+  const isActive = status === "running" || status === "queued";
+  const [d, setD] = useState<RunDetail | undefined>(() =>
+    isActive ? undefined : detailCache.get(id),
+  );
   // §2.1: never serve a cached entry for an active (running/queued) run so the
   // detail re-fetches when the run completes and the OutputTab shows final output.
-  const isActive = status === "running" || status === "queued";
   useEffect(() => {
     if (!isActive && detailCache.has(id)) {
       setD(detailCache.get(id));
@@ -63,6 +71,11 @@ function useRunDetail(id: string, status?: string): RunDetail | undefined {
     api.runs
       .get(id)
       .then((rd) => {
+        // P0-2 fetch race: ALWAYS write the resolved result into the cache, even
+        // when the effect was already cleaned up (`!alive`). A dropped/cancelled
+        // fetch must never strand the skeleton — the next mount reads this cache
+        // synchronously via the lazy initial state above. (Terminal runs only;
+        // an active run's pre-completion snapshot is not cached so it refetches.)
         if (!isActive) detailCache.set(id, rd);
         if (alive) setD(rd);
       })
