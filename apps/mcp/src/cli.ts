@@ -15,6 +15,7 @@ import {
   workersValidateCommand,
 } from "./commands/workers.js";
 import {
+  workspacesCreateCommand,
   workspacesListCommand,
   workspacesShowCommand,
   workspacesSwitchCommand,
@@ -31,6 +32,7 @@ import {
   secretsSetCommand,
 } from "./commands/secrets.js";
 import {
+  connectionsAddCommand,
   connectionsImportMcpConfigCommand,
   connectionsListCommand,
 } from "./commands/connections.js";
@@ -142,6 +144,11 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
     .description("List workspaces your credentials can access")
     .option("--json", "Print raw JSON")
     .action(async (options: { json?: boolean }) => runAction(workspacesListCommand(options)));
+  workspaces.command("create")
+    .description("Create a workspace and make it active")
+    .argument("<name>", "Workspace name")
+    .option("--json", "Print raw JSON")
+    .action(async (name: string, options: { json?: boolean }) => runAction(workspacesCreateCommand(name, options)));
   workspaces.command("show")
     .description("Show the currently active workspace")
     .option("--json", "Print raw JSON")
@@ -197,6 +204,13 @@ export function buildCliProgram(commandName: "workeros" | "floom" = "workeros"):
     .description("List saved connections")
     .option("--json", "Print raw JSON")
     .action(async (options: { json?: boolean }) => runAction(connectionsListCommand(options)));
+  connections.command("add")
+    .description("Start OAuth for an app connection")
+    .argument("<app>", "App/toolkit slug, for example gmail, github, googlecalendar")
+    .option("--open", "Open the authorization URL in a browser")
+    .option("--json", "Print raw JSON")
+    .action(async (app: string, options: { json?: boolean; open?: boolean }) =>
+      runAction(connectionsAddCommand(app, options)));
   connections.command("import-mcp-config")
     .description("Import MCP servers from a Claude/Cursor/VS Code mcpServers JSON file")
     .argument("<path>", "Path to MCP client config JSON")

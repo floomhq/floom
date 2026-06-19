@@ -68,6 +68,35 @@ export async function workspacesListCommand(options: { json?: boolean }): Promis
   }
 }
 
+export async function workspacesCreateCommand(name: string, options: { json?: boolean } = {}): Promise<number> {
+  try {
+    const trimmed = name.trim();
+    if (!trimmed) {
+      log.err("workspace name is required");
+      return 1;
+    }
+    const { client } = await createAuthenticatedClient();
+    const created = (await client.requestJson("POST", "/workspaces", {
+      body: { name: trimmed },
+    })) as WorkspaceRow;
+    await updateCredentials({
+      workspace_id: created.id,
+      workspace_name: created.name,
+    });
+    if (options.json) {
+      printJson(created);
+    } else {
+      log.ok(`Created workspace ${created.name} (${created.id}).`);
+      log.step("Active workspace updated for future CLI and MCP requests.");
+    }
+    return 0;
+  } catch (error) {
+    const handled = handleAuthError(error);
+    if (handled !== null) return handled;
+    throw error;
+  }
+}
+
 export async function workspacesShowCommand(options: { json?: boolean }): Promise<number> {
   try {
     const { credentials } = await createAuthenticatedClient();

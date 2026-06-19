@@ -36,6 +36,11 @@ function envApiBase(defaultBase: string): string {
   return (process.env.WORKEROS_API_BASE || process.env.FLOOM_API_BASE || defaultBase).replace(/\/+$/, "");
 }
 
+function envCloudRequested(): boolean {
+  const value = (process.env.WORKEROS_CLOUD || "").trim().toLowerCase();
+  return value === "1" || value === "true" || value === "yes" || value === "on";
+}
+
 function resolveHomeDir(): string {
   return process.env.HOME || process.env.USERPROFILE || "";
 }
@@ -62,7 +67,7 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
   }
 
   const envOssSecret = (process.env.WORKEROS_API_SECRET || process.env.FLOOM_API_SECRET || "").trim();
-  if (envOssSecret) {
+  if (envOssSecret && !envCloudRequested()) {
     return {
       api_base: envApiBase(DEFAULT_OSS_API_BASE),
       mode: "oss",
@@ -85,6 +90,11 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
   // Back-compat: existing creds files only have api_base + api_secret +
   // authed_at. Treat them as OSS mode.
   const mode: AuthMode = parsed.mode === "cloud" ? "cloud" : "oss";
+  if (envCloudRequested() && mode !== "cloud") {
+    // WORKEROS_CLOUD=1 must not silently continue using a saved OSS secret.
+    // Return "not logged in" so callers tell the user to run `floom login --cloud`.
+    return null;
+  }
   if (mode === "oss" && !parsed.api_secret) {
     return null;
   }
@@ -92,7 +102,7 @@ export async function readCredentials(): Promise<StoredCredentials | null> {
     return null;
   }
   return {
-    api_base: (parsed.api_base || DEFAULT_OSS_API_BASE).replace(/\/+$/, ""),
+    api_base: (parsed.api_base || (mode === "cloud" ? DEFAULT_CLOUD_API_BASE : DEFAULT_OSS_API_BASE)).replace(/\/+$/, ""),
     mode,
     api_secret: parsed.api_secret,
     api_token: parsed.api_token,

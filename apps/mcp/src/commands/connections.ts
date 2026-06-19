@@ -1,4 +1,5 @@
 import { readFile } from "node:fs/promises";
+import open from "open";
 import { createAuthenticatedClient } from "../lib/api.js";
 import { handleAuthError } from "../lib/cli-errors.js";
 import { log, printJson, renderTable } from "../lib/output.js";
@@ -13,6 +14,13 @@ type ParsedMcpServer = {
   args?: string[];
   env?: Record<string, string>;
   cwd?: string | null;
+};
+
+type ConnectionInitResponse = {
+  id: string;
+  app_name: string;
+  redirect_url: string;
+  composio_connection_id?: string;
 };
 
 function isRecord(value: unknown): value is Record<string, unknown> {
@@ -90,6 +98,42 @@ export async function connectionsListCommand(options: { json?: boolean }): Promi
         { key: "status", label: "Status" },
       ],
     ) + "\n");
+    return 0;
+  } catch (error) {
+    const handled = handleAuthError(error);
+    if (handled !== null) return handled;
+    throw error;
+  }
+}
+
+export async function connectionsAddCommand(
+  appName: string,
+  options: { json?: boolean; open?: boolean } = {},
+): Promise<number> {
+  try {
+    const normalized = appName.trim().toLowerCase();
+    if (!normalized) {
+      log.err("app name is required");
+      return 1;
+    }
+    const { client } = await createAuthenticatedClient();
+    const created = (await client.requestJson("POST", "/connections", {
+      body: { app_name: normalized },
+    })) as ConnectionInitResponse;
+    if (options.open) {
+      try {
+        await open(created.redirect_url);
+      } catch {
+        log.warn("Could not open browser automatically.");
+      }
+    }
+    if (options.json) {
+      printJson(created);
+    } else {
+      log.ok(`Started ${created.app_name} connection (${created.id}).`);
+      log.kv("Authorize", created.redirect_url);
+      log.step("Complete the OAuth flow in the browser, then run `floom connections list`.");
+    }
     return 0;
   } catch (error) {
     const handled = handleAuthError(error);
