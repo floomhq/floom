@@ -1,10 +1,10 @@
-import { chmodSync, existsSync } from "node:fs";
+﻿import { chmodSync, existsSync } from "node:fs";
 import { mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { dirname, join } from "node:path";
 
 // AuthMode determines how the CLI hits the API:
 // - "oss" -> single-tenant OSS engine, x-floom-secret header, no workspaces
-// - "cloud" -> workeros-cloud, Supabase refresh token + JWT bearer OR PAT, workspace header
+// - "cloud" -> hosted mode, refresh token + JWT bearer OR PAT, workspace header
 export type AuthMode = "oss" | "cloud";
 
 export type StoredCredentials = {
@@ -12,15 +12,15 @@ export type StoredCredentials = {
   mode: AuthMode;
   // OSS mode: per-CLI shared secret minted by /cli-auth/devices.
   api_secret?: string;
-  // Cloud mode: Personal Access Token sent as x-floom-token.
+  // Hosted mode: Personal Access Token sent as x-floom-token.
   api_token?: string;
-  // Cloud mode: Supabase refresh token (returned by /auth/cli-exchange).
+  // Hosted mode: Supabase refresh token (returned by /auth/cli-exchange).
   refresh_token?: string;
-  // Cloud mode: Supabase project URL (so the CLI can refresh JWTs).
+  // Hosted mode: Supabase project URL (so the CLI can refresh JWTs).
   supabase_url?: string;
-  // Cloud mode: Supabase anon key (needed for the /auth/v1/token refresh call).
+  // Hosted mode: Supabase anon key (needed for the /auth/v1/token refresh call).
   supabase_anon_key?: string;
-  // Currently-active workspace id (cloud or OSS). Sent as X-Workeros-Workspace.
+  // Currently-active workspace id (hosted or OSS). Sent as X-Workeros-Workspace.
   workspace_id?: string;
   // Human-readable workspace name (for `floom workspaces show`).
   workspace_name?: string;
@@ -30,7 +30,7 @@ export type StoredCredentials = {
 };
 
 const DEFAULT_OSS_API_BASE = "https://localhost:8000";
-const DEFAULT_CLOUD_API_BASE = "https://api.example.com";
+const DEFAULT_CLOUD_API_BASE = "https://api.workeros.example.com";
 
 function envApiBase(defaultBase: string): string {
   return (process.env.WORKEROS_API_BASE || process.env.FLOOM_API_BASE || defaultBase).replace(/\/+$/, "");

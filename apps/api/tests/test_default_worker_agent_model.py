@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import asyncio
 import sys
@@ -170,7 +170,7 @@ def test_default_worker_agent_model_falls_back_to_openai_when_unset(monkeypatch)
 
 def test_worker_contract_picks_up_bedrock_env_after_import(monkeypatch):
     """A freshly built contract with no explicit model resolves to the live env
-    value, not the import-time snapshot. This is the exact cloud path."""
+    value, not the import-time snapshot. This is the exact hosted path."""
     from models import WorkerContract, worker_contract_to_worker_config
 
     monkeypatch.setenv("WORKEROS_WORKER_AGENT_MODEL", _BEDROCK)

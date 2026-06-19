@@ -1,4 +1,4 @@
-# Skill: Emily Slack Onboarding (#542)
+﻿# Skill: Emily Slack Onboarding (#542)
 
 Reusable, end-to-end runbook for bringing Emily (the workspace agent) into a
 Slack workspace: install, auth/linking, first DM/channel use, troubleshooting.
@@ -7,8 +7,8 @@ staged as a brain pack. Companion references: `docs/slack-events.md`
 (receiver contract), `docs/slack-self-test.md` (live verification checklist),
 `docs/slack-app-manifest.example.yml` (app manifest).
 
-Applies to OSS/self-host (`https://localhost:8000`) and Cloud
-(`https://api.example.com`); substitute your API base below.
+Applies to OSS/self-host (`https://localhost:8000`) and hosted Workeros
+(`https://api.workeros.example.com`); substitute your API base below.
 
 ---
 

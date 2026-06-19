@@ -1,4 +1,4 @@
-"""Regression tests for the MCP-surface bugs a red-team found (2026-06-14).
+﻿"""Regression tests for the MCP-surface bugs a red-team found (2026-06-14).
 
 Findings (all verified live on cloud + OSS before the fix):
 
@@ -436,7 +436,7 @@ def test_m05_static_token_rejected_on_cloud(monkeypatch, tmp_path):
             data=json.dumps(_rpc("tools/list")),
             headers=_auth_headers("test-langdock-token"),
         )
-        # a per-tenant PAT still works (Emily's correct cloud path)
+        # a per-tenant PAT still works (Emily's correct hosted path)
         pat = client.post(
             "/api/mcp",
             data=json.dumps(_rpc("tools/list")),

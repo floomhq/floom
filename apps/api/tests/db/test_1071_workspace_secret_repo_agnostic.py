@@ -1,6 +1,6 @@
-"""#1071 — workspace-secret writes crossed the Repositories boundary with a
+﻿"""#1071 — workspace-secret writes crossed the Repositories boundary with a
 SQLite-encoded synthetic actor id (db.sqlite.workspace_actor_id), which 500s
-under the cloud Supabase repo. The repo now owns workspace scoping via
+under the hosted Supabase repo. The repo now owns workspace scoping via
 set/get/list/delete_workspace_secret.
 
 These exercise the SQLite implementation: it must keep storing workspace secrets

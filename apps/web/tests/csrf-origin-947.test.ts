@@ -1,4 +1,4 @@
-// #947 — the /api/proxy/* surface must reject cross-site state-changing
+﻿// #947 — the /api/proxy/* surface must reject cross-site state-changing
 // requests (CSRF defence-in-depth beyond SameSite=lax). The documented attack
 // hit POST /api/proxy/auth/tokens with Origin: https://evil.com.
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
@@ -142,9 +142,9 @@ describe("#947 CSRF origin validation on /api/proxy", () => {
     const { middleware } = await import("@/middleware");
     const res = await middleware(
       req("/api/proxy/workers", {
-        forwardedHost: "internal-deploy.vercel.app",
-        xForwardedHost: "app.example.com",
-        origin: "https://app.example.com",
+        forwardedHost: "internal-deploy.hosting.example",
+        xForwardedHost: "workeros.example.com",
+        origin: "https://workeros.example.com",
         cookie: await validCookie(),
       }),
     );

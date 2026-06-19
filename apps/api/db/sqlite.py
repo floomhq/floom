@@ -102,7 +102,7 @@ def _public_stock_worker_ids() -> frozenset[str]:
             _PUBLIC_STOCK_WORKER_IDS_CACHE = frozenset()
     return _PUBLIC_STOCK_WORKER_IDS_CACHE
 
-# Per-request batch caches — same pattern as supabase_repos.py in the cloud.
+# Per-request batch caches - same pattern hosts can use in alternate repositories.
 # Populated before per-worker loops; consumed by get_last_run() / get_recipe().
 # ContextVar isolation ensures no cross-request contamination.
 _last_run_batch: contextvars.ContextVar[dict[str, Any] | None] = contextvars.ContextVar(
@@ -4117,7 +4117,8 @@ class SqliteWorkspaceMemberRepository:
     On the OSS engine each workspace has exactly one active owner (the local
     user). ``list`` returns that one owner row; mutations that don't apply to a
     single-owner workspace (invite/set_role/remove others) are no-ops or raise so
-    the same API surface renders identically to Cloud without forking the UI.
+    the same API surface renders identically in hosted deployments without
+    forking the UI.
     """
 
     _cols = (
@@ -4308,7 +4309,7 @@ class SqliteAssetAccessRepository:
     requesting user's workspace role. The OSS single-owner case: the local user
     is the owner of their own assets, so every permission is granted; a private
     asset they do not own is invisible (no permissions). The same logic is the
-    multi-member-correct rule, so Cloud's RLS mirrors it without a fork.
+    multi-member-correct rule, so hosted repositories can mirror it without a fork.
     """
 
     def _asset_row(self, conn: sqlite3.Connection, asset_type: str, asset_id: str) -> sqlite3.Row | None:

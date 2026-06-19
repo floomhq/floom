@@ -1,4 +1,4 @@
-import { writeFile } from "node:fs/promises";
+﻿import { writeFile } from "node:fs/promises";
 import { join, resolve as resolvePath } from "node:path";
 import { createAuthenticatedClient, WorkerosApiError } from "../lib/api.js";
 import { log, printJson, renderTable } from "../lib/output.js";
@@ -159,7 +159,7 @@ export async function runsLogsCommand(runId: string, options: { follow?: boolean
     }
 
     // SSE follow needs a raw fetch (not requestJson), but we still want the
-    // cloud JWT + workspace header in cloud mode and x-floom-secret in OSS
+    // hosted JWT + workspace header in hosted mode and x-floom-secret in OSS
     // mode. authHeaders() resolves the right pair; the engine is mounted
     // under /api on the cloud app, so prefix the events path there.
     const eventsPath = credentials.mode === "cloud"

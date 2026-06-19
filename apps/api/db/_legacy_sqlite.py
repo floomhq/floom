@@ -951,7 +951,7 @@ def _migrate_brain_pack_assistant_backfill(conn: sqlite3.Connection) -> None:
 
     Brain packs are NOT backfilled here because their owner_id already lives in
     the per-workspace ``.workeros-contexts.json`` (which the SQLite DB cannot see
-    in cloud's per-workspace FS layout). Instead the API lazily upserts a
+    in host-managed per-workspace FS layouts). Instead the API lazily upserts a
     ``brain_packs`` row the first time a pack's visibility is read/changed (see
     ``ensure_brain_pack_row`` in contexts.py), defaulting to ``private`` — the
     secure default that matches the existing owner-only behaviour. This keeps the
@@ -1005,7 +1005,7 @@ def _assistant_row_id(workspace_id: str) -> str:
     """Stable per-workspace assistant row id.
 
     One assistant per workspace, keyed by workspace so the OSS default workspace
-    and each derived/cloud workspace get exactly one ``assistants`` row.
+    and each derived workspace get exactly one ``assistants`` row.
     """
     ws = (workspace_id or "local-default").strip() or "local-default"
     return f"workspace-agent:{ws}"

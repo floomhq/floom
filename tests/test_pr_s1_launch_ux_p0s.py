@@ -1,4 +1,4 @@
-"""Regression tests for PR S1 - launch-critical UX P0s.
+﻿"""Regression tests for PR S1 - launch-critical UX P0s.
 
 Tests:
 - #5 Generate button: verify prompt state is readable and non-empty prompts enable the button
@@ -91,7 +91,7 @@ _MINIMAL_RUN_PY = "# placeholder\n"
 # ---------------------------------------------------------------------------
 # #9 - POST /workers returns 200 (not 400) for a valid payload
 # This is the API-layer regression for the "create worker proxy 400" bug.
-# The Vercel proxy forwards JSON as-is; if the API rejects a valid body
+# The web proxy forwards JSON as-is; if the API rejects a valid body
 # that was a proxy bug. We confirm here the API accepts a clean payload.
 # ---------------------------------------------------------------------------
 

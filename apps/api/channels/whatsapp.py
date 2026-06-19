@@ -1,4 +1,4 @@
-"""WhatsApp (Meta WhatsApp Business Cloud API) channel — routes and helpers.
+﻿"""WhatsApp (Meta WhatsApp Business Cloud API) channel — routes and helpers.
 
 All route paths are identical to those previously defined directly on the
 ``app`` FastAPI instance in main.py.  The router is included in main.py via
@@ -76,7 +76,7 @@ _DEFAULT_WORKSPACE_ID = "local-default"
 # ---------------------------------------------------------------------------
 #
 # The engine persists WhatsApp sender bindings in the local SQLite
-# ``whatsapp_sender_bindings`` table.  A multi-tenant host (workeros-cloud)
+# ``whatsapp_sender_bindings`` table.  A multi-tenant downstream host
 # needs them in Postgres/Supabase instead.  Rather than have the host
 # monkeypatch the private ``_whatsapp_*`` functions via ``setattr`` (fragile,
 # and bypassed entirely for callers that imported the symbol at module load —
@@ -94,7 +94,7 @@ _DEFAULT_WORKSPACE_ID = "local-default"
 class WhatsAppBindingStore(Protocol):
     """Host-pluggable persistence for WhatsApp sender bindings (#1007).
 
-    workeros-cloud registers a Supabase-backed implementation at startup via
+    a downstream host registers its implementation at startup via
     :func:`set_whatsapp_binding_store`; OSS leaves it unset and the engine uses
     its local SQLite ``whatsapp_sender_bindings`` table.  The method contracts
     mirror the engine's own ``_whatsapp_binding_info`` / ``_whatsapp_create_claim``
@@ -124,8 +124,8 @@ _whatsapp_binding_store: Optional[WhatsAppBindingStore] = None
 def set_whatsapp_binding_store(store: Optional[WhatsAppBindingStore]) -> None:
     """Register a host binding store, or ``None`` to use the local SQLite store.
 
-    Called once at startup by a downstream host (e.g. workeros-cloud) so binding
-    reads/claims/resets are persisted in its own multi-tenant store.  This is the
+    Called once at startup by a downstream host so binding reads/claims/resets
+    are persisted in its own multi-tenant store.  This is the
     supported replacement for monkeypatching the private ``_whatsapp_*`` helpers
     (#1007); pass ``None`` to clear (OSS mode).
     """
@@ -419,8 +419,8 @@ def claim_whatsapp_sender(
         # so downstream consumers that use local_workspace_user_id round-trip correctly.
         scoped_user_id = local_workspace_user_id(base_user_id, workspace_id)
     else:
-        # Cloud: workspace is carried in the cloud's own auth context and
-        # resolved by the cloud repository. #865: persist NULL instead of a
+        # Hosted: workspace is carried in the host's auth context and resolved
+        # by the hosted repository. #865: persist NULL instead of a
         # fabricated 'local-default' that downstream code then ignores.
         scoped_user_id = auth.user_id
         workspace_id = None
@@ -1191,7 +1191,7 @@ async def _handle_whatsapp_message(*, wa_id: str, text: str, message_id: str, pr
             return
         scoped_user_id = local_workspace_user_id(base_only, workspace_id)
     else:
-        # Cloud: user_id is already fully qualified; no local scoping.
+        # Hosted: user_id is already fully qualified; no local scoping.
         scoped_user_id = base_user_id
 
     # ---------------------------------------------------------------------------

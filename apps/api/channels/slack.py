@@ -1,4 +1,4 @@
-"""Slack Events API channel — routes, OAuth helpers, and message handlers.
+﻿"""Slack Events API channel — routes, OAuth helpers, and message handlers.
 
 All route paths are identical to those previously defined directly on the
 ``app`` FastAPI instance in main.py.  The router is included in main.py via
@@ -108,7 +108,7 @@ def _public_api_base_url() -> str:
         or os.environ.get("WORKEROS_API_BASE")
         or os.environ.get("WORKEROS_API_URL")
         or os.environ.get("WORKERS_API_URL")
-        or "https://api.example.com"
+        or "http://localhost:8000"
     )
     return raw.rstrip("/")
 
@@ -1107,7 +1107,7 @@ def claim_slack_sender(
         # #865: pin a VALIDATED workspace at claim time (mirrors WhatsApp).
         # Local engine: the workspace is embedded in the scoped auth user id
         # ("base__ws_x"); verify it actually exists for the claiming owner.
-        # Cloud: the cloud repository owns workspace resolution — persist NULL
+        # Hosted: the hosted repository owns workspace resolution — persist NULL
         # rather than a fabricated 'local-default'.
         deploy = (os.environ.get("WORKEROS_DEPLOY") or "local").strip().lower()
         bound_user_id = auth.user_id

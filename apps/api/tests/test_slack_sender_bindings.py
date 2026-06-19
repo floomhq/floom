@@ -1,4 +1,4 @@
-"""Tests for per-user Slack DM claim-linking (Phase 2 of channels-flow workplan).
+﻿"""Tests for per-user Slack DM claim-linking (Phase 2 of channels-flow workplan).
 
 Covers:
 - Unbound DM sender gets a claim link reply and NO agent run.
@@ -647,4 +647,4 @@ def test_slack_short_claim_url_defaults_to_api_host(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKERS_FRONTEND_URL", "https://localhost:3000")
 
     short_url = _slack_mod._slack_short_claim_url("deftok2")
-    assert short_url == "https://api.example.com/c/deftok2"
+    assert short_url == "http://localhost:8000/c/deftok2"

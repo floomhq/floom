@@ -1,4 +1,4 @@
-from __future__ import annotations
+﻿from __future__ import annotations
 
 import hashlib
 import importlib
@@ -7,7 +7,7 @@ import os
 import types
 
 
-def test_public_api_base_prefers_api_base_and_uses_prod_default(monkeypatch):
+def test_public_api_base_prefers_api_base_and_uses_local_default(monkeypatch):
     monkeypatch.delenv("WORKEROS_PUBLIC_API_URL", raising=False)
     monkeypatch.delenv("WORKEROS_API_URL", raising=False)
     monkeypatch.delenv("WORKERS_API_URL", raising=False)
@@ -20,7 +20,7 @@ def test_public_api_base_prefers_api_base_and_uses_prod_default(monkeypatch):
     assert slack._slack_oauth_callback_url() == "https://api.example.test/slack/oauth/callback"
 
     monkeypatch.delenv("WORKEROS_API_BASE", raising=False)
-    assert _public_api_base_url() == "https://api.example.com"
+    assert _public_api_base_url() == "http://localhost:8000"
 
 
 def test_session_ids_are_hashed_and_legacy_plaintext_migrates(tmp_path, monkeypatch):

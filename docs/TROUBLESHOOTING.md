@@ -6,7 +6,7 @@ If a problem is not listed here, open a bug report with the template in
 
 ## Setup
 
-### Frontend shows the hosted Cloud sign-in page
+### Frontend shows a remote sign-in page
 
 Copy the local web env file:
 
@@ -16,7 +16,7 @@ cp .env.example .env
 ```
 
 The local frontend should point at `http://localhost:8000`. Without that file it
-may fall back to the hosted API.
+may fall back to a remote API.
 
 ### PowerShell blocks setup scripts
 

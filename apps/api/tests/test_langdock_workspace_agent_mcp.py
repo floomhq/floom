@@ -1,4 +1,4 @@
-import importlib
+﻿import importlib
 import json
 import sys
 import types
@@ -108,7 +108,7 @@ def test_workspace_agent_mcp_discovery_routes_require_auth(monkeypatch, tmp_path
     assert authenticated.status_code == expected_status, authenticated.text
     body = authenticated.json()
     if "setup" in path:
-        assert body["server_url"] == "https://api.example.com/api/mcp"
+        assert body["server_url"] == "http://localhost:8000/api/mcp"
         assert body["transport"] == "STREAMABLE_HTTP"
         assert body["authentication"]["method"] == "API Key"
         assert body["authentication"]["token_configured"] is True
@@ -365,7 +365,7 @@ def test_langdock_setup_card_exposes_self_service_metadata(monkeypatch, tmp_path
 
     assert response.status_code == 200, response.text
     body = response.json()
-    assert body["server_url"] == "https://api.example.com/api/mcp"
+    assert body["server_url"] == "http://localhost:8000/api/mcp"
     assert body["transport"] == "STREAMABLE_HTTP"
     assert body["authentication"]["method"] == "API Key"
     assert body["authentication"]["token_configured"] is True

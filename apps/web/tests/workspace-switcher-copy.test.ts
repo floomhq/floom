@@ -1,9 +1,9 @@
-import { describe, it, expect } from "vitest";
+﻿import { describe, it, expect } from "vitest";
 
 import { getWorkspaceActionCopy } from "@/lib/workspace/action-copy";
 
 describe("getWorkspaceActionCopy (#1005)", () => {
-  it("uses OSS template-zip vocabulary when not in cloud mode", () => {
+  it("uses OSS template-zip vocabulary when not in hosted mode", () => {
     const copy = getWorkspaceActionCopy(false);
     expect(copy.exportLabel).toBe("Export workspace");
     expect(copy.duplicateLabel).toBe("Duplicate workspace");
@@ -12,7 +12,7 @@ describe("getWorkspaceActionCopy (#1005)", () => {
     expect(copy.shareFailed).toBe("Failed to create template link");
   });
 
-  it("uses cloud invite vocabulary in cloud mode", () => {
+  it("uses cloud invite vocabulary in hosted mode", () => {
     const copy = getWorkspaceActionCopy(true);
     expect(copy.exportLabel).toBe("Download copy");
     expect(copy.duplicateLabel).toBe("Make a local copy");

@@ -1,4 +1,4 @@
-"""Worker visibility + resolution for the Emily chat tools.
+﻿"""Worker visibility + resolution for the Emily chat tools.
 
 Backs the workers.list_all / get / run tool surface: role-aware visibility
 filtering, fuzzy worker-reference resolution, and the runnable-worker lookup.
@@ -17,7 +17,7 @@ from typing import Any, Dict, List, Optional
 def _tool_workers_list_all(args: Dict[str, Any], user_id: str) -> Dict[str, Any]:
     from chat_service import _effective_worker_visibility_user_id
     # #1027: route through the repository Protocol (was a direct get_db() read)
-    # so non-SQLite backends (cloud Supabase) supply their own implementation.
+    # so non-SQLite backends (hosted Supabase) supply their own implementation.
     # The visibility logic now lives in WorkerRepository.list_for_agent; stock
     # ids are passed in (caller owns the PUBLIC/PROTECTED sets) to keep the repo
     # free of a db<-main import cycle.

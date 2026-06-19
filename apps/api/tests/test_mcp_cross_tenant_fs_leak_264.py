@@ -1,5 +1,5 @@
-"""#264 — MCP read tools must not leak another tenant's worker via the shared
-filesystem in cloud mode.
+﻿"""#264 — MCP read tools must not leak another tenant's worker via the shared
+filesystem in hosted mode.
 
 Root cause: the PUBLIC_STOCK_WORKER_IDS on-disk bypass in services.worker_access
 (_list_visible_workers -> _stock_workers_from_filesystem, _get_visible_worker,

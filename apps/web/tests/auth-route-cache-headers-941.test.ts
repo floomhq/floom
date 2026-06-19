@@ -1,6 +1,6 @@
-// #941 — authenticated JSON endpoints must never be shared-cacheable.
+﻿// #941 — authenticated JSON endpoints must never be shared-cacheable.
 // Regression: every identity-bearing route sets private/no-store explicitly
-// (Vercel applied `public, max-age=0, must-revalidate` when nothing was set).
+// (a web host applied `public, max-age=0, must-revalidate` when nothing was set).
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 

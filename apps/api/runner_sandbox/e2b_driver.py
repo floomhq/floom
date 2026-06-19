@@ -1,4 +1,4 @@
-"""E2B cloud sandbox driver for Workeros - uses e2b SDK 2.x.
+﻿"""E2B cloud sandbox driver for Workeros - uses e2b SDK 2.x.
 
 Worker protocol: run.py in an E2B worker reads inputs from inputs.json and
 MUST write result.json with:
@@ -1382,7 +1382,7 @@ def _extract_context_tar(raw_tar: bytes, target_dir: Path) -> None:
 
 def _worker_dir_for_run(worker_id: str, config: Optional[WorkerConfig]) -> Path:
     # Keep E2B parity with run_service and agent_driver: bundle_path drift and
-    # bare relative cloud paths must resolve through the single shared guard.
+    # bare relative hosted paths must resolve through the single shared guard.
     from runner_utils import _resolve_worker_bundle_dir
 
     return _resolve_worker_bundle_dir(WORKERS_DIR, worker_id, config, _safe_path)
@@ -1587,7 +1587,7 @@ class E2BSandboxDriver(SandboxDriver):
             # #607: if the sandbox was killed because the user clicked cancel,
             # surface "cancelled" instead of "error" so the UI shows the right
             # terminal state. cancel_requested is the canonical flag; read it
-            # through the active repository before logging so cloud Supabase
+            # through the active repository before logging so hosted Supabase
             # runs are classified correctly.
             if run_cancel_requested(run_id):
                 logger.info("E2B sandbox terminated by user cancel for run %s", run_id)

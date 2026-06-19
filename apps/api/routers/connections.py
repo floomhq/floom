@@ -1,4 +1,4 @@
-"""Composio + MCP connection routes.
+﻿"""Composio + MCP connection routes.
 
 The connections surface: list / create (OAuth init + MCP), the OAuth callback,
 per-connection status / activity / account-info / peek / tools, deletion, the
@@ -1298,7 +1298,7 @@ def get_connection_account_info(
     """Return Composio connected-account info needed by the UI.
 
     The frontend calls this to hydrate connection cards. The Composio API key
-    lives here on the API service so it never needs to be on Vercel.
+    lives here on the API service so it never needs to be on the web host.
     """
     row = _connection_row_for_user(
         connection_id,
@@ -1379,7 +1379,7 @@ def get_connection_peek(
 def get_auth_config(auth_config_id: str) -> Dict[str, Any]:
     """Return Composio auth_config (scopes definition) for a given auth_config_id.
 
-    Proxies to Composio so the key stays on the API service, not on Vercel.
+    Proxies to Composio so the key stays on the API service, not on the web host.
     """
     if os.environ.get("WORKEROS_ENABLE_INTERNAL_AUTH_CONFIGS") != "1":
         raise HTTPException(status_code=404, detail="Not found")

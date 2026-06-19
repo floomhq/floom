@@ -51,13 +51,13 @@ If `WORKEROS_GIT_REMOTE` is set, the engine calls `configure_remote(workspace_di
 
 `clone_or_init(workspace_dir, remote_url)` is used on a fresh install when a remote is already configured: it clones the remote so the full history arrives intact rather than starting blank.
 
-## Cloud hook: workspace_id resolver
+## Host hook: workspace_id resolver
 
-In OSS single-tenant mode the git root is a single directory shared by the one user. In cloud multi-tenant mode each workspace needs its own isolated git root.
+In OSS single-tenant mode the git root is a single directory shared by the one user. A downstream multi-tenant host can give each workspace its own isolated git root.
 
-`set_workspace_id_resolver(fn)` registers a callable that returns the active `workspace_id` for the current request. When set, the cloud layer uses the returned value to scope the git root to the right per-workspace directory. In OSS mode this resolver is never registered and all functions receive the workspace dir directly as a parameter.
+`set_workspace_id_resolver(fn)` registers a callable that returns the active `workspace_id` for the current request. When set, the host uses the returned value to scope the git root to the right per-workspace directory. In OSS mode this resolver is never registered and all functions receive the workspace dir directly as a parameter.
 
-The cloud layer (workeros-cloud) registers this at startup:
+A downstream host can register this at startup:
 
 ```python
 import git_ops

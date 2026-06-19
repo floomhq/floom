@@ -1,4 +1,4 @@
-"use client";
+﻿"use client";
 
 export const dynamic = "force-dynamic";
 
@@ -2355,7 +2355,7 @@ function VersionList({ title, versions }: { title: string; versions: VersionSumm
 // Cloud sets it via hosted platform env. Self-hosters set their own number. When unset,
 // the WhatsApp card renders a "not configured" state instead of QR/number.
 // The pre-computed QR SVG below encodes the cloud number; it is only rendered
-// when the env number matches (i.e. the cloud deployment). Self-hosters with a
+// when the env number matches (i.e. the hosted deployment). Self-hosters with a
 // custom number get the wa.me link only (they can regenerate the QR if needed).
 // ---------------------------------------------------------------------------
 

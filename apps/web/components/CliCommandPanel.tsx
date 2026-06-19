@@ -1,4 +1,4 @@
-/* <!-- S15: drop <CliCommandPanel /> into the API access tab after S12 lands --> */
+﻿/* <!-- S15: drop <CliCommandPanel /> into the API access tab after S12 lands --> */
 "use client";
 
 import { useEffect, useMemo, useState } from "react";
@@ -317,7 +317,7 @@ export function CliCommandPanel() {
             <code className="font-mono">{getPublicApiHost()}</code>. Use it as{" "}
             <code className="font-mono">x-floom-secret</code>; Cloud PATs start
             with <code className="font-mono">floom_</code> and belong to{" "}
-            <code className="font-mono">api.example.com</code>.
+            <code className="font-mono">api.workeros.example.com</code>.
           </p>
         </div>
         {storedSecret ? (
