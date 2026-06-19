@@ -86,6 +86,7 @@ class _WarmSandboxEntry:
     sandbox: Any
     workdir: str
     mounted_contexts: set[str]
+    writeable_contexts: set[str] = field(default_factory=set)
     created_at: float = field(default_factory=time.monotonic)
     last_used_at: float = field(default_factory=time.monotonic)
     uses: int = 0
@@ -1430,6 +1431,13 @@ def _selected_contexts_for_inputs(
         try:
             context = normalize_context_mount(raw_context)
             if context_mount_matches_inputs(context, effective_inputs):
+                writeable_when = context.get("writeable_when")
+                if context.get("writeable") and writeable_when:
+                    context = dict(context)
+                    context["writeable"] = context_mount_matches_inputs(
+                        {"name": context["name"], "when": writeable_when},
+                        effective_inputs,
+                    )
                 selected.append(context)
         except ValueError as exc:
             return [], f"Invalid context declaration: {exc}"
@@ -1441,8 +1449,6 @@ def _warm_pool_sensitive_run_material(
     inputs: Dict[str, Any] | None,
     secrets: Dict[str, str] | None = None,
 ) -> str | None:
-    if inputs:
-        return "run inputs"
     if secrets:
         return "secrets"
     if config and getattr(config, "connections", None):
@@ -1786,6 +1792,7 @@ class E2BSandboxDriver(SandboxDriver):
                     )
                 made_dirs = {workdir}
                 mounted_contexts = set(warm_entry.mounted_contexts if warm_entry else set())
+                writeable_contexts = set(warm_entry.writeable_contexts if warm_entry else set())
             else:
                 sandbox.files.make_dir(workdir)
 
@@ -1814,6 +1821,7 @@ class E2BSandboxDriver(SandboxDriver):
                     log_fn("[e2b] Uploaded workeros.py (worker-to-worker calling enabled)", "info")
 
                 mounted_contexts: set[str] = set()
+                writeable_contexts: set[str] = set()
                 context_error = self._upload_contexts_to_sandbox(
                     sandbox=sandbox,
                     workdir=workdir,
@@ -1823,6 +1831,7 @@ class E2BSandboxDriver(SandboxDriver):
                     log_fn=log_fn,
                     user_id=user_id,
                     mounted_contexts=mounted_contexts,
+                    writeable_contexts=writeable_contexts,
                 )
                 if context_error:
                     return WorkerResult(
@@ -2177,6 +2186,7 @@ class E2BSandboxDriver(SandboxDriver):
                     log_fn=log_fn,
                     user_id=user_id,
                     mounted_contexts=mounted_contexts,
+                    writeable_contexts=writeable_contexts,
                 )
                 keep_warm = bool(warm_key) and _cleanup_run_state(sandbox, workdir, log_fn=log_fn)
 
@@ -2202,6 +2212,7 @@ class E2BSandboxDriver(SandboxDriver):
                     sandbox=sandbox,
                     workdir=workdir,
                     mounted_contexts=set(mounted_contexts),
+                    writeable_contexts=set(writeable_contexts),
                 )
                 pooled = _warm_pool_return(entry, log_fn=log_fn)
             if not pooled:
@@ -2225,28 +2236,31 @@ class E2BSandboxDriver(SandboxDriver):
         log_fn: Callable[[str, str], None],
         user_id: str | None = None,
         mounted_contexts: set[str] | None = None,
+        writeable_contexts: set[str] | None = None,
     ) -> str | None:
         if not config or not config.contexts:
             return None
         inputs = inputs or {}
-        effective_inputs = _effective_context_inputs(config, inputs)
+        selected_contexts, context_error = _selected_contexts_for_inputs(config, inputs)
+        if context_error:
+            return context_error
 
         contexts_root = f"{workdir}/context"
         made_context_root = False
 
         with use_context_scope(context_scope_for_user(user_id)):
             ensure_memory_context_pack(config=config, user_id=user_id, log_fn=log_fn)
+            selected_names = {context["name"] for context in selected_contexts}
             for raw_context in config.contexts:
                 try:
                     context = normalize_context_mount(raw_context)
-                    should_mount = context_mount_matches_inputs(context, effective_inputs)
                 except ValueError as exc:
                     return f"Invalid context declaration: {exc}"
-
                 name = context["name"]
-                if not should_mount:
+                if name not in selected_names:
                     log_fn(f"[e2b] Skipping context {name!r}: run inputs did not match mount condition", "debug")
-                    continue
+            for context in selected_contexts:
+                name = context["name"]
 
                 if not made_context_root:
                     sandbox.files.make_dir(contexts_root)
@@ -2259,6 +2273,8 @@ class E2BSandboxDriver(SandboxDriver):
                 made_dirs.add(sandbox_target)
                 if mounted_contexts is not None:
                     mounted_contexts.add(name)
+                if writeable_contexts is not None and context.get("writeable"):
+                    writeable_contexts.add(name)
 
                 if source.startswith("git+"):
                     try:
@@ -2306,6 +2322,7 @@ class E2BSandboxDriver(SandboxDriver):
         log_fn: Callable[[str, str], None],
         user_id: str | None = None,
         mounted_contexts: set[str] | None = None,
+        writeable_contexts: set[str] | None = None,
     ) -> None:
         if not config or not config.contexts:
             return
@@ -2330,6 +2347,12 @@ class E2BSandboxDriver(SandboxDriver):
                 if mounted_contexts is not None and name not in mounted_contexts:
                     log_fn(
                         f"[e2b] Skipping writeback for context {name!r}: it was not mounted for this run",
+                        "debug",
+                    )
+                    continue
+                if writeable_contexts is not None and name not in writeable_contexts:
+                    log_fn(
+                        f"[e2b] Skipping writeback for context {name!r}: it was read-only for this run",
                         "debug",
                     )
                     continue

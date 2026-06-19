@@ -400,6 +400,16 @@ contexts:
 
 Supported predicates are `equals`/`eq`, `not_equals`/`neq`, `in`, `not_in`, `exists`, and `truthy`. Dotted input paths such as `candidate.source` are supported. Omitting `when` preserves the default behavior: the pack is mounted on every run.
 
+For memory packs that are read on most runs but written only by a specific operation, use `memory.writeable_when`. The pack still mounts for read operations, but E2B treats it as read-only unless the predicate matches, which keeps read-only runs eligible for warm-pool reuse.
+
+```yaml
+memory:
+  context: memory-novasearch-v5
+  writeable_when:
+    input: operation
+    equals: record_candidate_feedback
+```
+
 E2B hosts can also keep successfully prepared sandboxes warm for repeat runs of the same worker/template/context shape:
 
 ```bash

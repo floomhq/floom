@@ -291,7 +291,157 @@ def test_context_selection_changes_with_run_inputs(monkeypatch, tmp_path):
     assert [context["name"] for context in profile_contexts] == ["profile-data"]
 
 
-def test_warm_pool_disabled_for_run_inputs_and_secrets(monkeypatch, tmp_path):
+def test_writeable_when_makes_memory_mount_read_only_for_default_read_operation(monkeypatch, tmp_path):
+    import runner_sandbox.e2b_driver as e2b_driver_mod
+
+    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+    cfg = SimpleNamespace(
+        runtime=SimpleNamespace(command="python run.py", type="python"),
+        inputs=[SimpleNamespace(name="operation", default="profile")],
+        contexts=[
+            {
+                "name": "memory-novasearch-v5",
+                "writeable": True,
+                "writeable_when": {"input": "operation", "equals": "record_candidate_feedback"},
+            }
+        ],
+    )
+
+    selected, selected_err = e2b_driver_mod._selected_contexts_for_inputs(cfg, {})
+    warm_key, warm_err = e2b_driver_mod._warm_pool_key(
+        worker_id="novasearch-v5",
+        user_id="u",
+        worker_dir=worker_dir,
+        config=cfg,
+        inputs={"operation": "profile"},
+        sandbox_template="tmpl",
+    )
+
+    assert selected_err is None
+    assert selected == [
+        {
+            "name": "memory-novasearch-v5",
+            "writeable": False,
+            "source": "local",
+            "writeable_when": {"input": "operation", "equals": "record_candidate_feedback"},
+        }
+    ]
+    assert warm_err is None
+    assert warm_key
+
+
+def test_writeable_when_keeps_memory_mount_mutable_for_write_operation(monkeypatch, tmp_path):
+    import runner_sandbox.e2b_driver as e2b_driver_mod
+
+    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+    cfg = SimpleNamespace(
+        runtime=SimpleNamespace(command="python run.py", type="python"),
+        inputs=[SimpleNamespace(name="operation", default="record_candidate_feedback")],
+        contexts=[
+            {
+                "name": "memory-novasearch-v5",
+                "writeable": True,
+                "writeable_when": {"input": "operation", "equals": "record_candidate_feedback"},
+            }
+        ],
+    )
+
+    selected, selected_err = e2b_driver_mod._selected_contexts_for_inputs(
+        cfg,
+        {"operation": "record_candidate_feedback"},
+    )
+    warm_key, warm_err = e2b_driver_mod._warm_pool_key(
+        worker_id="novasearch-v5",
+        user_id="u",
+        worker_dir=worker_dir,
+        config=cfg,
+        inputs={},
+        sandbox_template="tmpl",
+    )
+
+    assert selected_err is None
+    assert selected[0]["writeable"] is True
+    assert warm_err is None
+    assert warm_key is None
+
+
+def test_read_only_writeable_when_context_is_not_persisted(monkeypatch, tmp_path):
+    import runner_sandbox.e2b_driver as e2b_driver_mod
+
+    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
+    cfg = SimpleNamespace(
+        runtime=SimpleNamespace(command="python run.py", type="python"),
+        inputs=[SimpleNamespace(name="operation", default="profile")],
+        contexts=[
+            {
+                "name": "memory-novasearch-v5",
+                "writeable": True,
+                "writeable_when": {"input": "operation", "equals": "record_candidate_feedback"},
+            }
+        ],
+    )
+    sandbox = _FakeSandbox()
+
+    e2b_driver_mod.E2BSandboxDriver()._persist_writeable_contexts(
+        sandbox=sandbox,
+        workdir="/home/user/worker",
+        run_id="run-read",
+        config=cfg,
+        log_fn=lambda *_args: None,
+        user_id="u",
+        mounted_contexts={"memory-novasearch-v5"},
+        writeable_contexts=set(),
+    )
+
+    assert sandbox.commands.runs == []
+
+
+def test_warm_pool_allows_scalar_run_inputs_but_still_keys_selected_contexts(monkeypatch, tmp_path):
+    import runner_sandbox.e2b_driver as e2b_driver_mod
+
+    monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
+    worker_dir = tmp_path / "worker"
+    worker_dir.mkdir()
+    (worker_dir / "run.py").write_text("print('ok')\n", encoding="utf-8")
+    cfg = SimpleNamespace(
+        runtime=SimpleNamespace(command="python run.py", type="python"),
+        contexts=[
+            {"name": "search-data", "when": {"input": "operation", "equals": "search"}},
+            {"name": "profile-data", "when": {"input": "operation", "equals": "profile"}},
+        ],
+    )
+
+    search_key, search_err = e2b_driver_mod._warm_pool_key(
+        worker_id="w",
+        user_id="u",
+        worker_dir=worker_dir,
+        config=cfg,
+        inputs={"operation": "search"},
+        sandbox_template="tmpl",
+    )
+    profile_key, profile_err = e2b_driver_mod._warm_pool_key(
+        worker_id="w",
+        user_id="u",
+        worker_dir=worker_dir,
+        config=cfg,
+        inputs={"operation": "profile"},
+        sandbox_template="tmpl",
+    )
+
+    assert search_err is None
+    assert profile_err is None
+    assert search_key
+    assert profile_key
+    assert search_key != profile_key
+
+
+def test_warm_pool_disabled_for_secrets_and_connections(monkeypatch, tmp_path):
     import runner_sandbox.e2b_driver as e2b_driver_mod
 
     monkeypatch.setenv("WORKEROS_E2B_WARM_POOL_ENABLED", "1")
@@ -305,16 +455,22 @@ def test_warm_pool_disabled_for_run_inputs_and_secrets(monkeypatch, tmp_path):
         user_id="u",
         worker_dir=worker_dir,
         config=cfg,
-        inputs={"operation": "search"},
+        inputs={},
+        secrets={"API_KEY": "secret"},
         sandbox_template="tmpl",
     ) == (None, None)
+
+    connection_cfg = SimpleNamespace(
+        runtime=SimpleNamespace(command="python run.py", type="python"),
+        contexts=[],
+        connections=["gmail"],
+    )
     assert e2b_driver_mod._warm_pool_key(
         worker_id="w",
         user_id="u",
         worker_dir=worker_dir,
-        config=cfg,
+        config=connection_cfg,
         inputs={},
-        secrets={"API_KEY": "secret"},
         sandbox_template="tmpl",
     ) == (None, None)
 
