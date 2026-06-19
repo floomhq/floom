@@ -1641,6 +1641,7 @@ async def auth_middleware(request: Request, call_next):
             or path == "/api/workspace-agent/mcp"
             or path == "/connections/callback"
             or path.startswith("/approvals/public/")
+            or path.startswith("/review/public/")
             or path.startswith("/workers/public/")
             or path.startswith("/runs/public/")  # #765: token-gated read-only run view
             # #1338 #1329: public SSE stream for share-link viewers. The route
@@ -5260,6 +5261,9 @@ from routers.contexts import (
     _record_candidate_feedback_event,
 )
 app.include_router(contexts_router)
+
+from routers.review_pack import review_pack_router
+app.include_router(review_pack_router)
 
 # Workspace route group (instructions/base-persona docs, members, settings,
 # template export/import, share link, changelog).
