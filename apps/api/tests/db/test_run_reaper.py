@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import datetime as dt
+import contextlib
+import time
 import threading
 
 from models import RunStatus
@@ -198,6 +200,169 @@ def test_recover_requeues_claimed_run_that_never_reached_sandbox(repo_bundle, mo
     logs = repos.runs.list_logs(user_id="user-a", run_id="run-claimed-orphan")
     assert any(log["message"] == run_service.DISPATCH_ORPHAN_ERROR for log in logs)
     assert scheduled[0]["original_run_id"] == "run-claimed-orphan"
+
+
+def test_recover_requeues_stale_active_thread_before_sandbox_start(repo_bundle, monkeypatch):
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    _create_worker(repos, manifest)
+    now = dt.datetime.now(dt.timezone.utc)
+    stale = (now - dt.timedelta(seconds=180)).isoformat()
+    _make_stale_running(repos, manifest, "run-active-pre-sandbox", started=stale)
+    repos.runs.add_log(
+        user_id="user-a",
+        run_id="run-active-pre-sandbox",
+        level="info",
+        message="Queue drain claimed run; dispatching executor thread.",
+        timestamp=stale,
+    )
+    active = run_service._ActiveRun(
+        run_id="run-active-pre-sandbox",
+        worker_id="worker-a",
+        user_id="user-a",
+        thread=threading.current_thread(),
+        started_monotonic=time.monotonic() - 180,
+        stage="thread_entry",
+    )
+    scheduled: list[dict] = []
+    monkeypatch.setattr(run_service, "_schedule_retry", lambda **kw: scheduled.append(kw))
+    monkeypatch.setenv("WORKEROS_AUTO_REQUEUE_ABANDONED_RUNS", "1")
+    monkeypatch.setenv("WORKEROS_DISPATCH_ORPHAN_TIMEOUT_SECONDS", "120")
+
+    run_service._register_active_run(active)
+    try:
+        result = run_service.recover_abandoned_runs(
+            repos=repos, now=now, timeout_seconds=300, grace_seconds=60
+        )
+    finally:
+        run_service._unregister_active_run("run-active-pre-sandbox")
+
+    assert result == {"failed": 1, "requeued": 1}
+    row = repos.runs.get(user_id="user-a", run_id="run-active-pre-sandbox")
+    assert row["status"] == RunStatus.FAILED.value
+    assert row["error_code"] == run_service.DISPATCH_ORPHAN_ERROR_CODE
+    assert scheduled[0]["original_run_id"] == "run-active-pre-sandbox"
+
+
+def test_recover_does_not_reap_fresh_active_thread_before_sandbox_start(repo_bundle, monkeypatch):
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    _create_worker(repos, manifest)
+    now = dt.datetime.now(dt.timezone.utc)
+    fresh = (now - dt.timedelta(seconds=20)).isoformat()
+    _make_stale_running(repos, manifest, "run-fresh-active-pre-sandbox", started=fresh)
+    repos.runs.add_log(
+        user_id="user-a",
+        run_id="run-fresh-active-pre-sandbox",
+        level="info",
+        message="Queue drain claimed run; dispatching executor thread.",
+        timestamp=fresh,
+    )
+    active = run_service._ActiveRun(
+        run_id="run-fresh-active-pre-sandbox",
+        worker_id="worker-a",
+        user_id="user-a",
+        thread=threading.current_thread(),
+        started_monotonic=time.monotonic(),
+        stage="thread_entry",
+    )
+    monkeypatch.setenv("WORKEROS_DISPATCH_ORPHAN_TIMEOUT_SECONDS", "120")
+
+    run_service._register_active_run(active)
+    try:
+        result = run_service.recover_abandoned_runs(
+            repos=repos, now=now, timeout_seconds=300, grace_seconds=60
+        )
+    finally:
+        run_service._unregister_active_run("run-fresh-active-pre-sandbox")
+
+    assert result == {"failed": 0, "requeued": 0}
+    row = repos.runs.get(user_id="user-a", run_id="run-fresh-active-pre-sandbox")
+    assert row["status"] == RunStatus.RUNNING.value
+
+
+def test_executor_thread_logs_and_fails_pre_sandbox_exception(repo_bundle, monkeypatch):
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    _create_worker(repos, manifest)
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-context-boom",
+        worker_id="worker-a",
+        status=RunStatus.RUNNING.value,
+        started_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+        trigger_source="manual",
+        runner="e2b",
+        input_json={"q": "hello"},
+    )
+
+    @contextlib.contextmanager
+    def broken_context(_run_id):
+        raise RuntimeError("workspace lookup hung up")
+        yield
+
+    scheduled: list[dict] = []
+    monkeypatch.setattr(run_service, "_run_execution_context", broken_context)
+    monkeypatch.setattr(run_service, "_schedule_retry", lambda **kw: scheduled.append(kw))
+
+    run_service._run_thread_entry_with_semaphore(
+        "run-context-boom",
+        "worker-a",
+        {"q": "hello"},
+        user_id="user-a",
+        repos=repos,
+    )
+
+    row = repos.runs.get(user_id="user-a", run_id="run-context-boom")
+    assert row["status"] == RunStatus.FAILED.value
+    assert row["error_code"] == "executor_thread_pre_sandbox_exception"
+    logs = repos.runs.list_logs(user_id="user-a", run_id="run-context-boom")
+    messages = [log["message"] for log in logs]
+    assert "Executor thread entered; preparing run context." in messages
+    assert any("Executor thread crashed before sandbox startup" in msg for msg in messages)
+    assert scheduled[0]["original_run_id"] == "run-context-boom"
+
+
+def test_pre_sandbox_exception_does_not_loop_restart_retry(repo_bundle, monkeypatch):
+    import run_service
+
+    repos, _db, manifest = repo_bundle
+    _create_worker(repos, manifest)
+    repos.runs.create(
+        user_id="user-a",
+        run_id="run-context-boom-retry",
+        worker_id="worker-a",
+        status=RunStatus.RUNNING.value,
+        started_at=dt.datetime.now(dt.timezone.utc).isoformat(),
+        trigger_source="restart_retry",
+        runner="e2b",
+        input_json={"q": "hello"},
+    )
+
+    @contextlib.contextmanager
+    def broken_context(_run_id):
+        raise RuntimeError("workspace lookup still failing")
+        yield
+
+    scheduled: list[dict] = []
+    monkeypatch.setattr(run_service, "_run_execution_context", broken_context)
+    monkeypatch.setattr(run_service, "_schedule_retry", lambda **kw: scheduled.append(kw))
+
+    run_service._run_thread_entry_with_semaphore(
+        "run-context-boom-retry",
+        "worker-a",
+        {"q": "hello"},
+        user_id="user-a",
+        repos=repos,
+    )
+
+    row = repos.runs.get(user_id="user-a", run_id="run-context-boom-retry")
+    assert row["status"] == RunStatus.FAILED.value
+    assert row["error_code"] == "executor_thread_pre_sandbox_exception"
+    assert scheduled == []
 
 
 def test_recover_does_not_reap_running_run_after_sandbox_start_log(repo_bundle, monkeypatch):
