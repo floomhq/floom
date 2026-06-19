@@ -17,12 +17,27 @@ vi.mock("next/navigation", () => ({
   useSearchParams: () => new URLSearchParams(),
 }));
 
+// EmilyHomeEmpty (now shown in create mode too) reads these hooks — stub them.
+vi.mock("@/lib/query/hooks", () => ({
+  useOverview: () => ({
+    data: { stats: { work_shipped_7d: 7 }, outcomes: [], recent_runs: [], scheduled_today: [], needs_attention: [] },
+    isError: false,
+    isLoading: false,
+  }),
+  useWorkers: () => ({
+    data: [{ id: "w1", archived: false, system: false, is_example: false }],
+    isError: false,
+    isLoading: false,
+  }),
+}));
+
 vi.mock("@/lib/api", async (importOriginal) => {
   const mod = await importOriginal<Record<string, unknown>>();
   return {
     ...mod,
     api: {
       ...(mod.api as Record<string, unknown>),
+      me: vi.fn().mockResolvedValue({ display_name: "Fede", email: "fede@floom.dev" }),
       contexts: { list: vi.fn().mockResolvedValue([]) },
       chat: { uploadAttachments: vi.fn().mockResolvedValue([]) },
     },
@@ -60,10 +75,10 @@ describe("Round-09 #2 — Hire worker drafts a worker (create intent)", () => {
     const user = userEvent.setup();
     render(<EmilyChatCore fullPage createMode />);
 
-    const composer = screen.getByPlaceholderText("Create me: a worker that…");
+    const composer = await screen.findByPlaceholderText("Message Emily...");
     await user.click(composer);
-    // Round-09 (Emily-native create hero): the bespoke "Hire worker" button was
-    // replaced by the real PromptInput composer — submit is Enter-to-send.
+    // Consistent Emily empty state: the real PromptInput composer — submit is
+    // Enter-to-send. The first create-mode send is still wrapped as a worker draft.
     await user.type(composer, PLAIN_JOB);
     await user.keyboard("{Enter}");
 
