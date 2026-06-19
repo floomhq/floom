@@ -819,14 +819,15 @@ export default function ConnectionsCollection({
     error,
     idOf: (i) => i.id,
     searchOf: (i) => `${i.name} ${i.account} ${TYPE_LABEL[i.kind]}`,
+    // The TYPE dimension (connection / mcp / secret) is already the job of the
+    // ConnectionsTabs surface-nav (Connected / Browse apps / MCP / Secrets), so
+    // duplicating it as filter chips here was redundant (P0-2, Federico
+    // 2026-06-19). Tabs answer "which surface"; the TagBar answers "which status
+    // within it". Only the STATUS chips remain, the one dimension the tabs do
+    // not cover. Type stays in searchOf so a search like "mcp" still matches.
     tagsOf: (i) =>
-      ({ type: [i.kind], status: [i.statusKey] }) as Partial<Record<TagFamilyKey, string[]>>,
+      ({ status: [i.statusKey] }) as Partial<Record<TagFamilyKey, string[]>>,
     tags: {
-      type: [
-        { value: "connection", label: "Connection" },
-        { value: "mcp", label: "MCP" },
-        { value: "secret", label: "Secret" },
-      ],
       status: [
         { value: "active", label: "active" },
         { value: "reauth", label: "reauth" },
