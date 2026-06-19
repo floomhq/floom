@@ -2,12 +2,10 @@ import { cookies } from "next/headers";
 
 const SESSION_COOKIE_NAME = "workeros_cloud_session";
 
-type SessionPayload = {
-  access_token?: string;
-  refresh_token?: string;
-  expires_at?: number;
-  token_type?: string;
-};
+const API_BASE =
+  process.env.WORKEROS_API_BASE ||
+  process.env.NEXT_PUBLIC_WORKEROS_API_BASE ||
+  "https://workeros-api.floom.dev";
 
 function decodeBase64Url(value: string): string {
   const padded = value + "=".repeat((4 - (value.length % 4)) % 4);
@@ -34,21 +32,34 @@ export async function readSession(): Promise<{
   const raw = cookieStore.get(SESSION_COOKIE_NAME)?.value;
   if (!raw) return null;
 
-  let payload: SessionPayload;
+  // The session cookie is "v2." + Fernet ciphertext (minted by the backend
+  // apps/api/routes/auth.py). It cannot be decoded here without the Fernet
+  // secret, so we ask the backend's GET /auth/session-token to validate it and
+  // return a fresh Supabase access token. 401 ⇒ no usable session.
+  let accessToken: string | null = null;
   try {
-    payload = JSON.parse(decodeBase64Url(raw));
+    const upstream = await fetch(`${API_BASE}/auth/session-token`, {
+      method: "GET",
+      headers: { cookie: `${SESSION_COOKIE_NAME}=${raw}` },
+      cache: "no-store",
+    });
+    if (!upstream.ok) return null;
+    const payload = (await upstream.json().catch(() => null)) as
+      | { access_token?: unknown }
+      | null;
+    const token = payload?.access_token;
+    accessToken = typeof token === "string" && token ? token : null;
   } catch {
     return null;
   }
 
-  const accessToken = payload.access_token ?? null;
   if (!accessToken) return null;
 
+  // The access token is a standard Supabase JWT; its payload (email, sub) is
+  // base64url-encoded and needs no secret to read for display.
   const jwt = parseJwt(accessToken);
-  if (!jwt) return null;
-
-  const email = typeof jwt.email === "string" ? jwt.email : null;
-  const userId = typeof jwt.sub === "string" ? jwt.sub : null;
+  const email = jwt && typeof jwt.email === "string" ? jwt.email : null;
+  const userId = jwt && typeof jwt.sub === "string" ? jwt.sub : null;
 
   return { email, userId, accessToken };
 }

@@ -1,41 +1,46 @@
 // #821 — lightweight session presence for the landing nav CTA.
 //
 // The session cookie (workeros_cloud_session, set on .floom.dev by the
-// backend auth callback) is HttpOnly, so the client cannot inspect it. The
-// nav fetches this endpoint non-blockingly after paint and swaps "Sign in"
-// for "Dashboard" when a structurally valid, unexpired session is present.
-// Display-only: no signature verification here — the dashboard middleware
-// (web/) verifies the JWT before anything sensitive renders.
+// backend auth callback) is HttpOnly AND encrypted ("v2." + Fernet
+// ciphertext, minted by apps/api/routes/auth.py _encode_session_cookie), so
+// the landing cannot decode it in TS without duplicating the Fernet secret.
+//
+// Instead we ask the backend to validate it: the existing GET /auth/session-token
+// endpoint decodes the cookie, refreshes if needed, and returns 200 with an
+// access token for a valid session or 401 for a missing/garbage/expired one.
+// We forward the incoming cookie and report authed:true only on a 200.
+// Display-only: no token leaves this route.
 
-import { NextResponse } from "next/server";
-import { cookies } from "next/headers";
+import { NextRequest, NextResponse } from "next/server";
 
 const SESSION_COOKIE = "workeros_cloud_session";
 
-function hasUsableSession(raw: string | undefined): boolean {
-  if (!raw) return false;
-  try {
-    const value = raw.trim().replace(/^"|"$/g, "");
-    const padded = value + "=".repeat((4 - (value.length % 4)) % 4);
-    const decoded = Buffer.from(
-      padded.replace(/-/g, "+").replace(/_/g, "/"),
-      "base64",
-    ).toString("utf-8");
-    const payload = JSON.parse(decoded) as {
-      access_token?: unknown;
-      expires_at?: unknown;
-    };
-    if (typeof payload.access_token !== "string" || !payload.access_token) return false;
-    const expiresAt = Number(payload.expires_at);
-    return Number.isFinite(expiresAt) && expiresAt > Math.floor(Date.now() / 1000) + 30;
-  } catch {
-    return false;
-  }
-}
+const API_BASE =
+  process.env.WORKEROS_API_BASE ||
+  process.env.NEXT_PUBLIC_WORKEROS_API_BASE ||
+  "https://workeros-api.floom.dev";
 
-export async function GET() {
-  const cookieStore = await cookies();
-  const authed = hasUsableSession(cookieStore.get(SESSION_COOKIE)?.value);
+export async function GET(req: NextRequest) {
+  const raw = req.cookies.get(SESSION_COOKIE)?.value;
+  if (!raw) {
+    return NextResponse.json(
+      { authed: false },
+      { headers: { "cache-control": "private, no-store, max-age=0" } },
+    );
+  }
+
+  let authed = false;
+  try {
+    const upstream = await fetch(`${API_BASE}/auth/session-token`, {
+      method: "GET",
+      headers: { cookie: `${SESSION_COOKIE}=${raw}` },
+      cache: "no-store",
+    });
+    authed = upstream.ok;
+  } catch {
+    authed = false;
+  }
+
   return NextResponse.json(
     { authed },
     { headers: { "cache-control": "private, no-store, max-age=0" } },
