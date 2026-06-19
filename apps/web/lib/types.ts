@@ -1182,3 +1182,140 @@ export interface AuthMe {
   auth_method: string;
   is_admin: boolean;
 }
+
+// ---------------------------------------------------------------------------
+// Search Assistant Review Pack (sample-customer pilot) — public client-facing review flow.
+// Schema: context/vault/sample-search/pack.schema.json (v1.0).
+// The public GET projection NEVER carries integrity.password_plain — the API
+// strips it at the public boundary (DoD: "password_plain never in public GET").
+// ---------------------------------------------------------------------------
+
+/** Vote enum. UI labels (DE): Interessiert | Vielleicht | Nein. */
+export type ReviewVerdict = "interested" | "maybe" | "pass";
+
+export interface ReviewPackCandidate {
+  /** Stable per-pack slug, e.g. "c_lisa-chen-01". Vote correlation key. */
+  id: string;
+  rank: number;
+  name: string;
+  title: string;
+  company: string;
+  location: string;
+  /** 0..100 match score. */
+  score: number;
+  linkedin?: string;
+  why: string;
+  source?: string;
+}
+
+export interface ReviewPackJob {
+  /** Stable slug: software-engineer | data-automation | property-manager-weg. */
+  id: string;
+  personio_id?: string;
+  title: string;
+  location: string;
+  department: string;
+  must_haves: string[];
+  sourcing_hint?: string;
+  /** PM honesty: thin-pool / coverage caveat surfaced on the job panel. */
+  coverage_note?: string;
+  candidates: ReviewPackCandidate[];
+}
+
+export interface ReviewPackClient {
+  slug: string;
+  name: string;
+}
+
+export interface ReviewPackMeta {
+  title: string;
+  published_at: string;
+  /** ISO timestamp the share link lapses (14 days from publish). */
+  expires_at: string;
+  locale: "de-DE" | string;
+  timezone?: string;
+}
+
+export interface ReviewPackReviewerSuggestion {
+  name: string;
+  role?: string;
+}
+
+export interface ReviewPackSummary {
+  total_candidates?: number;
+  generated_by?: string;
+  run_ids?: string[];
+}
+
+/** Public projection of pack.json (integrity stripped). */
+export interface ReviewPack {
+  schema_version: "1.0" | string;
+  id: string;
+  client: ReviewPackClient;
+  meta: ReviewPackMeta;
+  reviewers_suggested?: ReviewPackReviewerSuggestion[];
+  jobs: ReviewPackJob[];
+  coverage_notes?: string[];
+  summary?: ReviewPackSummary;
+}
+
+/** A single reviewer's recorded vote (one feedback event). */
+export interface ReviewPackFeedback {
+  uuid?: string;
+  pack_id: string;
+  job_id: string;
+  candidate_id: string;
+  /** Stable per-reviewer key (slug of name), idempotency dimension. */
+  reviewer_key: string;
+  reviewer_name: string;
+  reviewer_role?: string | null;
+  verdict: ReviewVerdict;
+  /** Optional ≤240 chars; only collected on maybe/pass in the UI. */
+  note?: string | null;
+  ts?: string;
+}
+
+/** One chip in the team-consensus row on a candidate card. */
+export interface ReviewVoteChip {
+  reviewer_name: string;
+  verdict: ReviewVerdict;
+}
+
+/** Computed-on-read consensus for a single (job_id, candidate_id) pair. */
+export interface ReviewConsensus {
+  job_id: string;
+  candidate_id: string;
+  counts: { interested: number; maybe: number; pass: number };
+  chips: ReviewVoteChip[];
+}
+
+/** Response of GET /review/public/{token}?password= */
+export interface ReviewPackPublicResponse {
+  pack: ReviewPack;
+  consensus: ReviewConsensus[];
+}
+
+/** Response of GET /review/public/{token}/feedback?reviewer_key= */
+export interface ReviewPackFeedbackResponse {
+  my_votes: ReviewPackFeedback[];
+  consensus: ReviewConsensus[];
+}
+
+/** Body of POST /review/public/{token}/feedback */
+export interface ReviewPackFeedbackInput {
+  /** Included when the pack is password-gated. */
+  password?: string;
+  job_id: string;
+  candidate_id: string;
+  reviewer_key: string;
+  reviewer_name: string;
+  reviewer_role?: string | null;
+  verdict: ReviewVerdict;
+  note?: string | null;
+}
+
+/** Response of POST /review/public/{token}/feedback (idempotent upsert). */
+export interface ReviewPackVoteResponse {
+  vote: ReviewPackFeedback;
+  consensus: ReviewConsensus[];
+}
