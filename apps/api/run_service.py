@@ -476,6 +476,40 @@ def scrub_secrets(text: str, secrets: Dict[str, str]) -> str:
     return text
 
 
+def scrub_secret_values(value: Any, secrets: Dict[str, str]) -> Any:
+    """Recursively redact secret values from persisted run outputs."""
+    if isinstance(value, str):
+        return scrub_secrets(value, secrets)
+    if isinstance(value, list):
+        return [scrub_secret_values(item, secrets) for item in value]
+    if isinstance(value, tuple):
+        return [scrub_secret_values(item, secrets) for item in value]
+    if isinstance(value, dict):
+        return {
+            str(key): scrub_secret_values(item, secrets)
+            for key, item in value.items()
+        }
+    return value
+
+
+def _scrub_run_output(
+    output: Optional[Dict[str, Any]],
+    *,
+    worker_id: str,
+    owner_id: str,
+    repos: Repositories,
+) -> Optional[Dict[str, Any]]:
+    if output is None:
+        return None
+    try:
+        run_secrets = get_secrets_for_worker(worker_id, user_id=owner_id, repos=repos)
+    except Exception:
+        logger.warning("Could not resolve secrets while scrubbing output for worker %s", worker_id, exc_info=True)
+        run_secrets = {}
+    safe = scrub_secret_values(output, run_secrets)
+    return safe if isinstance(safe, dict) else {}
+
+
 # ---------------------------------------------------------------------------
 # Run lifecycle
 # ---------------------------------------------------------------------------
@@ -947,6 +981,8 @@ def update_run_status(
         owner_id, _worker_id = scope
     run_row = repos_obj.runs.get(user_id=owner_id, run_id=run_id)
     worker_id = str((run_row or {}).get("worker_id") or "")
+    if output is not None and worker_id:
+        output = _scrub_run_output(output, worker_id=worker_id, owner_id=owner_id, repos=repos_obj)
     previous_error = (run_row or {}).get("error")
     previous_error_code = (run_row or {}).get("error_code")
     if status == RunStatus.FAILED.value:
@@ -2419,11 +2455,17 @@ def execute_run(
             # emit exactly ONE pending_approval status SSE event below — the
             # richer one carrying approval_id + label. Calling update_run_status
             # here would publish a second, leaner status event (duplicate).
+            safe_outputs = _scrub_run_output(
+                outputs,
+                worker_id=worker_id,
+                owner_id=owner_id,
+                repos=repos_obj,
+            )
             repos_obj.runs.update_status(
                 user_id=owner_id,
                 run_id=run_id,
                 status=RunStatus.PENDING_APPROVAL.value,
-                output_json=outputs,
+                output_json=safe_outputs,
             )
             _publish_sse(run_id, {
                 "type": "status",
