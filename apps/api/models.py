@@ -1,4 +1,4 @@
-"""Pydantic models for Workeros: request schemas, response schemas, and domain types."""
+"""Pydantic models for Workeros request, response, and domain types."""
 
 import ipaddress
 import os

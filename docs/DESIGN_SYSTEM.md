@@ -12,7 +12,7 @@
 Calm, deliberate, premium without being theatrical. Think Linear × Apple System Settings × a warm kitchen table. Matte surfaces, one accent hue per mode, generous radius, zero gratuitous blur or parallax.
 
 **What this replaces:**
-- The old Workeros design system (emerald green, glass refraction, aurora backgrounds, Bricolage Grotesque) is **archived**. Do not use it for any new workeros surfaces.
+- The legacy pre-release design system (emerald green, glass refraction, aurora backgrounds, Bricolage Grotesque) is **archived**. Do not use it for any new Workeros surfaces.
 
 ---
 

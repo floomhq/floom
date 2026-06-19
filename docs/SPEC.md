@@ -1,8 +1,8 @@
-﻿# Workeros Spec
+# Workeros Product Spec
 
 ## The OS for Background Workers
 
-Floom lets users spawn background workers, give them secrets/tools, run them manually or through triggers, and observe every execution.
+Workeros lets users spawn background workers, give them secrets/tools, run them manually or through triggers, and observe every execution.
 
 The core promise:
 
@@ -28,7 +28,7 @@ These workers may be:
 
 They need an operating layer.
 
-Floom provides that layer:
+Workeros provides that layer:
 
 - creation
 - execution
@@ -40,18 +40,18 @@ Floom provides that layer:
 - approvals
 - observability
 
-Floom is not a visual workflow builder.
-Floom is not Zapier.
-Floom is not n8n.
-Floom is not a prompt playground.
+Workeros is not a visual workflow builder.
+Workeros is not Zapier.
+Workeros is not n8n.
+Workeros is not a prompt playground.
 
-Floom is the OS for background workers.
+Workeros is the OS for background workers.
 
 ---
 
 # 2. Core Product Loop
 
-The entire V0 should optimize for this loop:
+The entire The initial release should optimize for this loop:
 
 ```txt
 Create worker
@@ -68,7 +68,7 @@ The smallest magical loop:
 
 ```txt
 Drop worker folder into /workers
-→ Floom discovers it
+→ Workeros discovers it
 → UI generates a run form
 → user clicks Run
 → backend executes the worker
@@ -95,7 +95,7 @@ workers/
 
 ## 3.2 Trigger
 
-V0 supports: Manual, Schedule, Webhook. No other triggers in V0.
+The initial release supports: Manual, Schedule, Webhook. No other triggers in the initial release.
 
 ## 3.3 Run
 
@@ -103,7 +103,7 @@ A run is one execution. Stores: worker id, status, trigger source, input, logs, 
 
 ## 3.4 Secret
 
-Private value available to a worker (OPENAI_API_KEY, APOLLO_API_KEY, etc.). For local V0, secret values live in `.env`. The database stores metadata only.
+Private value available to a worker (OPENAI_API_KEY, APOLLO_API_KEY, etc.). For local development, secret values live in `.env`. The database stores metadata only.
 
 ## 3.5 Artifact
 
@@ -133,7 +133,7 @@ Logs make runs observable. Human-readable first, technical second.
 
 # 5. Non-Goals
 
-Do not build these in V0:
+Do not build these in Initial release:
 
 * visual workflow builder
 * drag-and-drop nodes
@@ -153,7 +153,7 @@ Do not build these in V0:
 * complex scheduling engine
 * distributed queue infra
 
-V0 should prove:
+The initial release should prove:
 
 ```txt
 Workers are easy to spawn.
@@ -199,7 +199,7 @@ Backend: Python, FastAPI, SQLite, Pydantic, PyYAML.
 
 Execution: Local Python subprocess/import runner first. E2B sandbox runner optional.
 
-Storage: SQLite for V0. Local filesystem for artifacts. `.env` for secret values.
+Storage: SQLite for the initial release. Local filesystem for artifacts. `.env` for secret values.
 
 ---
 
@@ -313,7 +313,7 @@ markdown, text, json, csv, file
 
 ## 8.5 Supported Runtime Types
 
-V0: python. Later: node, bash, browser.
+Initial release: python. Later: node, bash, browser.
 
 ---
 
@@ -368,7 +368,7 @@ Do not require E2B for the first version.
 
 Primary V0 trigger. User clicks Run now. UI generates a form from `worker.yml`.
 
-## 11.2 Schedule Trigger (V0.5)
+## 11.2 Schedule Trigger (later release)
 
 ```yaml
 trigger:
@@ -378,7 +378,7 @@ trigger:
 
 Simple scheduler loop in FastAPI. No complex recurrence UI.
 
-## 11.3 Webhook Trigger (V0.5)
+## 11.3 Webhook Trigger (later release)
 
 Each worker gets a webhook URL: `POST /webhooks/{worker_id}`. Request body becomes run input.
 
@@ -414,7 +414,7 @@ Never show secret values in the UI.
 
 # 13. Database Schema
 
-Use SQLite for V0.
+Use SQLite for the initial release.
 
 ## 13.1 workers
 
@@ -509,7 +509,7 @@ CREATE TABLE secrets (
 );
 ```
 
-## 13.7 schedules (V0.5)
+## 13.7 schedules (later release)
 
 ```sql
 CREATE TABLE schedules (
@@ -560,7 +560,7 @@ Base URL: `http://localhost:8000`
 
 ## 15.1 Navigation
 
-Only: Overview, Workers, Runs, Approvals, Secrets, Settings. No Connections page in local V0 unless needed. Connections can come later.
+Only: Overview, Workers, Runs, Approvals, Secrets, Settings. No Connections page in local development unless needed. Connections can come later.
 
 ## 15.2 Overview Page
 
@@ -618,7 +618,7 @@ Approval: not_required, pending, approved, rejected.
 
 # 18. Observability Requirements
 
-V0 observability must include: logs, run status, timestamps, duration, input, output, errors, artifacts, approval state.
+Initial observability must include: logs, run status, timestamps, duration, input, output, errors, artifacts, approval state.
 
 Do not build: token-level tracing, LLM evals, advanced metrics, distributed tracing, complex cost dashboards.
 
@@ -637,7 +637,7 @@ floom worker create weekly_update
 floom run weekly_update
 ```
 
-`floom dev` starts FastAPI backend + Next.js frontend. `floom worker create` scaffolds folder. `floom run` runs from CLI. CLI can come after UI V0.
+`floom dev` starts FastAPI backend + Next.js frontend. `floom worker create` scaffolds folder. `floom run` runs from CLI. CLI can come after the UI.
 
 ---
 
@@ -647,19 +647,19 @@ floom run weekly_update
 
 Build: Next.js UI, FastAPI API, SQLite, worker discovery, manual run, logs, output, approvals. Skip: auth, schedule, webhook, E2B, real connection system, secret editing UI.
 
-## Phase 1: Real Local V0
+## Phase 1: Real Local Development
 
 Add: worker scaffold command, `.env` secret detection, artifacts, better error handling, worker reload, run detail page, approval inbox, UI polish.
 
-## Phase 2: Trigger V0
+## Phase 2: Trigger Runtime
 
 Add: schedule trigger, webhook trigger, next_run_at, scheduler loop, webhook endpoints.
 
-## Phase 3: Sandbox V0
+## Phase 3: Sandbox Runtime
 
 Add: E2B runner, per-worker runner config, dependency installation, stdout/stderr capture, artifact sync from sandbox.
 
-## Phase 4: Hosted V0
+## Phase 4: Hosted Runtime
 
 Add: auth, Postgres, hosted workers, encrypted secrets, team workspaces, deployment model.
 
@@ -683,7 +683,7 @@ See `workers/weekly_update/` and `workers/csv_enricher/` in the repo for the ref
 
 # 24. What Makes This Pitchable
 
-The demo shows: real worker folder → Floom discovers it → UI appears → fill a generated form → worker runs → logs appear → output appears → approval appears.
+The demo shows: real worker folder → Workeros discovers it → UI appears → fill a generated form → worker runs → logs appear → output appears → approval appears.
 
 This proves: the abstraction, the runtime, the UI, the observability, the safety layer. Without overbuilding.
 
@@ -691,7 +691,7 @@ This proves: the abstraction, the runtime, the UI, the observability, the safety
 
 # 25. Final MVP Definition
 
-V0 is done when:
+The initial release is done when:
 
 1. A worker folder can be discovered
 2. The worker appears in the UI
@@ -710,13 +710,13 @@ Everything else is optional.
 
 # 26. Final Product Sentence
 
-Floom is the OS for background workers.
+Workeros is the OS for background workers.
 
 It lets you spawn workers, run them manually or through triggers, give them secrets, and observe every run.
 
-V0 should make one thing feel obvious:
+The initial release should make one thing feel obvious:
 
 ```txt
 Workers are becoming part of the company stack.
-Floom is where they live, run, and get supervised.
+Workeros is where they live, run, and get supervised.
 ```
