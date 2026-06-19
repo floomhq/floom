@@ -120,6 +120,24 @@ routers, and re-exports moved names for backward compatibility.
 - Worker source: edit files under the configured `FLOOM_WORKERS_DIR` and call `POST /workers/reload` if you change files outside the API.
 - Frontend: build and deploy `apps/web` with your hosting provider of choice.
 
+### Web/Worker Process Split
+
+By default `WORKEROS_ROLE=all`, which preserves the simple OSS deployment: one
+API process handles HTTP, schedules work, drains queued runs, and launches E2B
+sandboxes. High-throughput deployments should split this into two services
+against the same database:
+
+- `WORKEROS_ROLE=web`: serves HTTP/UI/API traffic and creates queued run rows.
+  It does not start the queue drain, scheduler, reaper, or E2B executor.
+- `WORKEROS_ROLE=worker`: starts the queue drain, scheduler, abandoned-run
+  recovery, graceful drain, warm-pool cleanup, and E2B executor. It may expose
+  the same FastAPI app for health checks, but user traffic should go to web.
+
+This removes executor threads from the web process, reducing GIL contention and
+pre-sandbox latency under concurrent runs. Tune `WORKEROS_MAX_CONCURRENT_RUNS`
+on the worker service, and enable `WORKEROS_ASYNC_LOG_FLUSH=1` there if noisy
+workers are spending noticeable time writing logs.
+
 ## Why This Document Exists
 
 A May 2026 audit produced findings such as "workers can inject FastAPI routes"
