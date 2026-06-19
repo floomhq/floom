@@ -89,13 +89,17 @@ export async function connectionsListCommand(options: { json?: boolean }): Promi
     process.stdout.write(renderTable(
       rows.map((row) => ({
         kind: row.kind || "composio",
-        label: row.mcp_label || row.display_name || row.app_name,
+        app: row.kind === "mcp" ? row.mcp_label || row.app_name : row.app_name,
+        account: row.account_label || row.display_name || row.mcp_url || "-",
         status: row.status,
+        last_used_by: row.last_used_by || "-",
       })),
       [
         { key: "kind", label: "Kind" },
-        { key: "label", label: "Label" },
+        { key: "app", label: "App" },
+        { key: "account", label: "Account" },
         { key: "status", label: "Status" },
+        { key: "last_used_by", label: "Last used by" },
       ],
     ) + "\n");
     return 0;

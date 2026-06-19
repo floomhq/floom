@@ -9,7 +9,7 @@ import test from "node:test";
 import { readCredentials, writeCredentials } from "../dist/lib/credentials.js";
 import { WorkerosApiClient } from "../dist/lib/api.js";
 import { workspacesCreateCommand, workspacesSwitchCommand, workspacesListCommand } from "../dist/commands/workspaces.js";
-import { connectionsAddCommand } from "../dist/commands/connections.js";
+import { connectionsAddCommand, connectionsListCommand } from "../dist/commands/connections.js";
 import { mcpInstallCommand, mcpListCommand, mcpSwitchCommand, mcpTestCommand } from "../dist/commands/mcp.js";
 
 async function withTempHome(fn) {
@@ -48,7 +48,15 @@ const WORKSPACES = [
 const CONNECTIONS = [
   { id: "conn-github", kind: "mcp", mcp_label: "github", mcp_transport: "streamable_http", status: "active" },
   { id: "conn-linear", kind: "mcp", mcp_label: "linear", mcp_transport: "sse", status: "active" },
-  { id: "conn-gmail", kind: "composio", app_name: "gmail", status: "active" },
+  {
+    id: "conn-gmail",
+    kind: "composio",
+    app_name: "gmail",
+    account_label: "federico",
+    display_name: "federico",
+    status: "active",
+    last_used_by: "Gmail Intake Brief",
+  },
 ];
 
 const TEST_RESULTS = {
@@ -281,6 +289,28 @@ test("connections add starts OAuth and prints the authorization URL", async () =
         { app_name: "gmail" },
       );
       assert.match(captured.text(), /https:\/\/auth\.example\/authorize/);
+    });
+  });
+});
+
+test("connections list separates app from account label", async () => {
+  await withTempHome(async () => {
+    await withStubServer(async (base) => {
+      await writeOssCreds(base);
+      const captured = captureStdout();
+      let code;
+      try {
+        code = await connectionsListCommand({});
+      } finally {
+        captured.restore();
+      }
+      assert.equal(code, 0);
+      const out = captured.text();
+      assert.match(out, /App/);
+      assert.match(out, /Account/);
+      assert.match(out, /gmail/);
+      assert.match(out, /federico/);
+      assert.match(out, /Gmail Intake Brief/);
     });
   });
 });
