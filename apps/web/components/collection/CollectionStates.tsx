@@ -1,5 +1,6 @@
 import type { ComponentType, ReactNode } from "react";
 import { Inbox, AlertTriangle } from "lucide-react";
+import { Skeleton } from "@/components/ui/skeleton";
 
 /**
  * The ONE shared loading / empty / error treatment for every list and
@@ -45,7 +46,12 @@ export function ListEmpty({
 }
 
 export function ListLoading({ rows = 5 }: { rows?: number }) {
-  // Skeleton mirrors the list layout (SPEC §4 — no partial flashes).
+  // Restored to the previous good list skeleton (Federico 2026-06-18): a
+  // bordered list card with full-width shimmer ROW bars that mirror the real
+  // list rows, using the design-system <Skeleton> (skeleton-shimmer) — the
+  // source of truth — NOT the cramped avatar + two short bars that read as
+  // broken on a wide list. Rows are full-bleed `.c-lrow`-height bars so the
+  // skeleton occupies the same footprint the loaded list will (no layout jump).
   return (
     <div className="c-ltable" aria-busy="true" aria-label="Loading">
       {Array.from({ length: rows }).map((_, i) => (
@@ -54,25 +60,7 @@ export function ListLoading({ rows = 5 }: { rows?: number }) {
           className="c-lrow"
           style={{ gridTemplateColumns: "1fr", pointerEvents: "none" }}
         >
-          <div className="c-lprimary">
-            <span className="c-av animate-pulse" style={{ background: "var(--bg-3)" }} />
-            <div className="c-lp-tx" style={{ flex: 1 }}>
-              <div
-                className="animate-pulse"
-                style={{ height: 12, width: "40%", background: "var(--bg-3)", borderRadius: "var(--radius-button)" }}
-              />
-              <div
-                className="animate-pulse"
-                style={{
-                  height: 10,
-                  width: "60%",
-                  background: "var(--bg-3)",
-                  borderRadius: "var(--radius-button)",
-                  marginTop: 6,
-                }}
-              />
-            </div>
-          </div>
+          <Skeleton className="h-4 w-full rounded-[var(--radius-button)]" />
         </div>
       ))}
     </div>

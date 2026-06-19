@@ -36,6 +36,11 @@ function useGreeting() {
   const [firstName, setFirstName] = useState<string | null>(null);
 
   useEffect(() => {
+    // Time-of-day greeting from the USER'S LOCAL time (Federico 2026-06-18:
+    // "Good morning" was showing at night). `new Date().getHours()` runs only
+    // in this client effect, so it reads the browser's local hour — never the
+    // server/UTC hour. The initial SSR state is the neutral "Hello" until this
+    // effect resolves, so there is no UTC flash either.
     const hour = new Date().getHours();
     if (hour < 12) setGreeting("Good morning");
     else if (hour < 18) setGreeting("Good afternoon");
@@ -187,7 +192,7 @@ export function EmilyHomeEmpty({
   const [fixMode, setFixMode] = useState(false);
 
   // Seed the REAL composer from a fix (whole-batch or per-worker) without
-  // sending — copy is explicit: Emily will PROPOSE a fix you approve.
+  // sending — copy is explicit: Emily will PROPOSE a fix for you to approve.
   const seedFixAll = useCallback(() => {
     if (fixItems.length === 0) return;
     setFixMode(true);
