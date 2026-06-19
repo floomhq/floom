@@ -147,4 +147,4 @@ For common local setup and runtime issues, check
 ## License
 
 By contributing, you agree that your contributions will be licensed under the
-[MIT License](LICENSE) that covers this project.
+[Sustainable Use License 1.0](LICENSE) that covers this project.

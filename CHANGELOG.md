@@ -4,28 +4,67 @@ All notable changes to this project are documented here.
 
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
-Releases are managed automatically by [release-please](https://github.com/googleapis/release-please)
-from [Conventional Commits](https://www.conventionalcommits.org/) — entries below 0.1.0
-are seeded by hand.
 
 ## [Unreleased]
 
-Pending changes for the first release (release-please will assign the version + date when releasing is turned on). Highlights so far — the open-source WorkerOS engine (FastAPI API + Next.js web + MCP server, E2B-sandboxed worker execution):
+No unreleased changes yet.
+
+## [1.0.0] - 2026-06-19
+
+Initial source-available release of Workeros, the self-hosted runtime for AI
+workers. This public repository starts from a preserved public history after the preserved
+internal commits of development, hardening, and production testing. See
+[HISTORY.md](HISTORY.md) and [the v1.0.0 release notes](docs/releases/v1.0.0.md)
+for provenance and launch context.
+
+### Added
+
+- FastAPI backend for workers, runs, connections, approvals, contexts, users,
+  tokens, and operational views.
+- Next.js web app for creating, running, monitoring, and sharing workers.
+- MCP and CLI package published as `@floomhq/workeros`.
+- E2B-sandboxed execution for script workers and agent workers.
+- Manifest-driven worker model with `schema_version: "0.3"`.
+- Script worker support through `run.py` and agent worker support through
+  `SKILL.md`.
+- Manual, cron schedule, webhook, and Composio-triggered runs.
+- Composio OAuth connections with server-side tool proxying for sandboxed
+  workers.
+- Human approval flows for workers that need review before side effects.
+- Run logs, artifacts, transcript capture, bundle snapshots, replay metadata,
+  and share-link/public run views.
+- Context packs for reusable worker knowledge.
+- Git-backed workspace export/version history when configured outside the
+  engine source checkout.
+- Seed workers for Gmail, GitHub, Slack, WhatsApp, worker authoring, worker
+  authoring, and workspace operations.
+- Setup scripts for Linux, macOS, and Windows PowerShell.
+- Contributor guide, security policy, code of conduct, roadmap, issue
+  templates, PR template, and repository metadata.
 
 ### Security
-- Sanitize markdown links in the FilesEditor and contexts renderers — block `javascript:`/`data:`/`vbscript:` (#1043, #1045).
-- Validate the proxy upstream `Location` header to prevent open redirects (#1044).
-- Cap E2B writeback-tar extraction (per-member + total) to prevent API-host OOM (#1041).
-- Clamp worker execution limits to operator maxima and enforce a minimum cron interval (#1067).
-- Reject `TRUSTED_PROXIES='*'` wildcard; require explicit IPs/CIDRs (#1042).
-- Reject percent-encoded path separators in the worker/context file-path validators (#1052).
-- Input-validation hardening: alert recipient restrictions, env-shadowing secret-name blocklist, clean handling of empty secret keys (#1068).
 
-### Fixed
-- Workspace-secret writes are now repository-agnostic (real actor + workspace id), fixing a 500 on the managed/cloud repo (#1071).
+- Workers run in isolated E2B sandboxes by default; there is no supported local
+  in-process worker runner.
+- Platform secrets remain on the API side and are not injected into sandbox
+  worker code unless explicitly declared as worker secrets.
+- Run-scoped tokens gate sandbox-to-API proxy calls.
+- Connection declarations and allowed Composio tool lists are explicit in
+  `worker.yml`.
+- Worker bundle extraction, file paths, uploads, markdown links, proxy
+  redirects, webhook tokens, MCP URLs, and auth/session/token surfaces include
+  dedicated validation and tests.
+- Local `.env` files, SQLite databases, run artifacts, and generated runtime data
+  are excluded from source control.
 
-### Changed
-- API port is configurable via `WORKEROS_API_PORT` (default `8000`).
-- Adopted a `ruff` lint gate in CI; added `CODE_OF_CONDUCT.md`, issue/PR templates, `CODEOWNERS`, and repository metadata.
+### Notes
 
-[Unreleased]: https://github.com/floomhq/workeros/commits/main
+- Worker execution requires E2B credentials.
+- Local setup requires at least one configured model provider.
+- Composio event triggers require `COMPOSIO_WEBHOOK_SIGNING_KEY` and a reachable
+  webhook URL.
+- E2B warm pools are available behind environment flags and should be sized
+  conservatively because warm sandboxes are still running compute.
+
+[Unreleased]: https://github.com/floomhq/workeros/compare/v1.0.0...HEAD
+[1.0.0]: https://github.com/floomhq/workeros/releases/tag/v1.0.0

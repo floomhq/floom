@@ -1,9 +1,9 @@
 # Workeros
 
 [![CI](https://github.com/floomhq/workeros/actions/workflows/ci.yml/badge.svg?branch=main)](https://github.com/floomhq/workeros/actions/workflows/ci.yml)
-[![License: MIT](https://img.shields.io/badge/License-MIT-blue.svg)](LICENSE)
+[![License: SUL-1.0](https://img.shields.io/badge/License-SUL--1.0-blue.svg)](LICENSE)
 
-The open-source, self-hosted runtime for AI workers. Sandboxed by default.
+The source-available, self-hosted runtime for AI workers. Sandboxed by default.
 
 > Create a worker. Give it tools. Let it run. See everything.
 
@@ -11,34 +11,44 @@ New here? Start with [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md) for the
 short path from "why Workeros exists" to your first worker and a safe self-hosted
 deployment checklist.
 
-## Worker execution model
+Workeros is being released as a clean source-available v1.0 after the preserved
+internal commits of development, hardening, and production testing. See
+[HISTORY.md](HISTORY.md) for the provenance story and
+[docs/releases/v1.0.0.md](docs/releases/v1.0.0.md) for release notes.
 
-Pure-script workers run in an **E2B sandbox by default** — isolated dependencies, no host process access, contained resource usage. Agent workers (`SKILL.md`) run through the API-hosted AgentDriver tool loop. There is no supported local in-process worker runner.
+## Worker Execution Model
 
-You pay only for sandbox execution time (E2B bills per second of run time), with **no per-task or per-execution caps** — unlike task-metered automation platforms. Tune schedules and worker code to keep run time low.
+Pure-script workers run in an **E2B sandbox by default**: isolated dependencies,
+no host process access, and contained resource usage. Agent workers (`SKILL.md`)
+run through the API-hosted AgentDriver tool loop. There is no supported local
+in-process worker runner.
 
----
+You pay only for sandbox execution time (E2B bills per second of run time), with
+**no per-task or per-execution caps** unlike task-metered automation platforms.
+Tune schedules and worker code to keep run time low.
 
 ## Quick Start
 
 **Linux / macOS**
+
 ```bash
 ./scripts/setup.sh
-# edit apps/api/.env and add OPENAI_API_KEY and E2B_API_KEY
+# edit apps/api/.env and add a model provider key and E2B_API_KEY
 ./scripts/dev.sh
 ```
 
 **Windows PowerShell**
+
 ```powershell
 .\scripts\setup.ps1
-# edit apps\api\.env and add OPENAI_API_KEY and E2B_API_KEY
+# edit apps\api\.env and add a model provider key and E2B_API_KEY
 .\scripts\dev.ps1
 ```
 
-Requires Python 3.11+, Node.js 20+, Git, an OpenAI key, and an E2B key from
-[e2b.dev](https://e2b.dev). On Windows, run commands from PowerShell.
+Requires Python 3.11+, Node.js 20+, Git, a model provider key, and an E2B key
+from [e2b.dev](https://e2b.dev). On Windows, run commands from PowerShell.
 
-Open [http://localhost:3000](http://localhost:3000) and sign in. That's the
+Open [http://localhost:3000](http://localhost:3000) and sign in. That is the
 whole setup: no auth secret required for local dev, and the example workers are
 seeded on first boot.
 
@@ -47,11 +57,9 @@ self-hosting notes, see [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md).
 For common setup/runtime issues, see
 [docs/TROUBLESHOOTING.md](docs/TROUBLESHOOTING.md).
 
----
-
 ## Architecture
 
-```
+```text
 apps/web      Next.js + TypeScript + Tailwind + shadcn/ui
 apps/api      FastAPI + SQLite + Pydantic
 apps/mcp      MCP server + CLI  (@floomhq/workeros)
@@ -61,9 +69,7 @@ data/         SQLite DB + run artifacts
 
 **Platform support:** Linux, macOS, Windows (Python 3.11+, Node 18+).
 
----
-
-## Core concepts
+## Core Concepts
 
 - **Workers:** folders under `workers/<name>/` with `worker.yml` plus either a
   script entrypoint (`run.py`) or an agent prompt (`SKILL.md`).
@@ -78,29 +84,29 @@ Write your first worker in [docs/GETTING-STARTED.md](docs/GETTING-STARTED.md),
 then use [docs/AUTHORING.md](docs/AUTHORING.md) for the full manifest and
 runtime contract.
 
----
-
 ## Docs
 
-- [Getting started](docs/GETTING-STARTED.md) — why Workeros exists, first run,
+- [Getting started](docs/GETTING-STARTED.md) - why Workeros exists, first run,
   first worker, and safe self-hosting checklist.
-- [Authoring workers](docs/AUTHORING.md) — full `worker.yml` schema, execution
+- [Authoring workers](docs/AUTHORING.md) - full `worker.yml` schema, execution
   modes, secrets, connections, triggers, and approvals.
-- [Agent cookbook](docs/AGENT-COOKBOOK.md) — agent-assisted worker authoring
+- [Agent cookbook](docs/AGENT-COOKBOOK.md) - agent-assisted worker authoring
   recipes.
-- [API overview](docs/API.md) — curated endpoint map plus the OpenAPI location.
-- [Troubleshooting](docs/TROUBLESHOOTING.md) — setup, runtime, and test fixes.
-- [Contributing](CONTRIBUTING.md) — local checks, first-contribution map, and PR
+- [API overview](docs/API.md) - curated endpoint map plus the OpenAPI location.
+- [Troubleshooting](docs/TROUBLESHOOTING.md) - setup, runtime, and test fixes.
+- [Project history](HISTORY.md) - why the public history is preserved from a clean
+  release commit.
+- [v1.0.0 release notes](docs/releases/v1.0.0.md) - launch highlights, limits,
+  and provenance.
+- [Contributing](CONTRIBUTING.md) - local checks, first-contribution map, and PR
   expectations.
-
----
+- [Licensing](docs/LICENSING.md) - what SUL-1.0 allows and what needs a
+  commercial agreement.
 
 ## API
 
 For a curated endpoint map, see [docs/API.md](docs/API.md). For the exhaustive
 reference, start the API and open `http://localhost:8000/docs`.
-
----
 
 ## Contributing
 
@@ -126,4 +132,7 @@ privately rather than opening a public issue.
 
 ## License
 
-[MIT](LICENSE) © Workeros contributors
+[Sustainable Use License 1.0](LICENSE) (c) Workeros contributors. Workeros is
+free for internal business use, non-commercial use, and personal use. Offering
+Workeros itself as a paid hosted service or commercial product requires a
+separate commercial agreement.
