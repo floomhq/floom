@@ -60,6 +60,12 @@ function findPagePane(container: HTMLElement): HTMLElement {
   return main as HTMLElement;
 }
 
+// Check for the EXACT Tailwind `hidden` (display:none) class token — NOT a
+// substring, so `overflow-hidden` on the pane doesn't false-match.
+function isHidden(el: HTMLElement): boolean {
+  return el.className.split(/\s+/).includes("hidden");
+}
+
 describe("Emily fullscreen — AppShell hides the page pane, keeps the sidebar", () => {
   beforeEach(() => {
     pathname.mockReturnValue("/overview");
@@ -79,19 +85,19 @@ describe("Emily fullscreen — AppShell hides the page pane, keeps the sidebar",
     );
 
     // Before: page pane visible (not hidden), sidebar present.
-    expect(findPagePane(container).className).not.toContain("hidden");
+    expect(isHidden(findPagePane(container))).toBe(false);
     expect(screen.getByTestId("app-sidebar")).toBeInTheDocument();
 
     // Enter fullscreen.
     await user.click(screen.getByRole("button", { name: /enter emily fullscreen/i }));
     // Page pane is now hidden (display:none, still mounted) — Emily fills the area.
-    expect(findPagePane(container).className).toContain("hidden");
+    expect(isHidden(findPagePane(container))).toBe(true);
     // Sidebar STAYS visible (Federico spec: keep nav).
     expect(screen.getByTestId("app-sidebar")).toBeInTheDocument();
 
     // Exit fullscreen → page pane restored.
     await user.click(screen.getByRole("button", { name: /exit emily fullscreen/i }));
-    expect(findPagePane(container).className).not.toContain("hidden");
+    expect(isHidden(findPagePane(container))).toBe(false);
   });
 });
 

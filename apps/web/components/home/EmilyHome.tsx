@@ -1,27 +1,27 @@
 "use client";
 
-// Emily-fullscreen HOME — replaces the old Overview page.
+// Emily-fullscreen HOME, replaces the old Overview page.
 //
 // Spec: the approved mockup /tmp/emily-home-mockup/v6.html (Federico's flagship
 // redesign). The home IS Emily, full-screen inside the app shell (the left
 // sidebar stays). Three states:
 //
-//   A · First-worker  (workspace has ZERO real workers): a create-only hero —
+//   A · First-worker  (workspace has ZERO real workers): a create-only hero , 
 //       Emily radar mark, "Let's hire your first worker", a unified composer
 //       ("Ask Emily, or describe a worker to build…"), create pills + a
 //       "Find an MCP server" pill + a quiet "See what Emily can connect" link.
-//       NO pulse. Gated on a SUCCESSFUL workers fetch with 0 real workers — see
+//       NO pulse. Gated on a SUCCESSFUL workers fetch with 0 real workers, see
 //       resolveWorkersGate(); NEVER shown on a fetch error / while loading.
 //
-//   B · Active  (has workers): a lean one-line pulse — "{done} done this week ·
-//       {N} need attention" — then the unified composer, then a few pills. The
+//   B · Active  (has workers): a lean one-line pulse, "{done} done this week ·
+//       {N} need attention", then the unified composer, then a few pills. The
 //       "need attention" affordance is CALM at rest (muted ink + a small warning
 //       dot), warning-orange only on hover/focus.
 //
 //   D · Drafting  (post-submit): the home BECOMES the Emily conversation. We
 //       mount the SAME real EmilyChatCore (createMode) inline so the worker is
 //       drafted by the real backend + rendered via the real worker-draft tool
-//       card — we do not rebuild Emily or fake a draft block.
+//       card, we do not rebuild Emily or fake a draft block.
 //
 // Data: reuses the real useOverview (pulse) + useWorkers (gate) hooks. No new
 // data layer.
@@ -65,7 +65,7 @@ function useGreeting() {
         const name = raw ? raw.charAt(0).toUpperCase() + raw.slice(1) : null;
         if (name) setFirstName(name);
       } catch {
-        // no name available — greeting renders without one
+        // no name available, greeting renders without one
       }
     })();
     return () => {
@@ -244,11 +244,11 @@ export function EmilyHome({
   const { greeting, firstName } = useGreeting();
   const todayLabel = useTodayLabel();
 
-  // Pulse data (Active state) — reuse the real overview hook.
+  // Pulse data (Active state), reuse the real overview hook.
   const overviewQuery = useOverview(initialData);
   const overview = overviewQuery.data ?? null;
 
-  // First-worker gate — reuse the real workers hook. The gate NEVER trips on a
+  // First-worker gate, reuse the real workers hook. The gate NEVER trips on a
   // fetch error or while loading (resolveWorkersGate enforces this).
   const workersQuery = useWorkers();
   const gate = resolveWorkersGate({
@@ -258,7 +258,7 @@ export function EmilyHome({
   });
   const isFirstWorker = gate.isFirstWorker;
 
-  // Drafting transition — once the user submits a create prompt the home becomes
+  // Drafting transition, once the user submits a create prompt the home becomes
   // the real Emily conversation (createMode core, auto-submitted).
   const [draftPrompt, setDraftPrompt] = useState<string | null>(null);
 
@@ -282,19 +282,19 @@ export function EmilyHome({
     setDraftPrompt(text);
   }, [input]);
 
-  // Seed the composer from a fix (whole-batch or per-worker) without sending —
+  // Seed the composer from a fix (whole-batch or per-worker) without sending , 
   // copy is explicit: Emily will PROPOSE a fix you approve.
   const seedFixAll = useCallback(() => {
     if (fixItems.length === 0) return;
     setFixMode(true);
     const names = fixItems.map((f) => f.name).join(" and ");
-    setInput(`${names} failed — propose a fix and re-run.`);
+    setInput(`${names} failed, propose a fix and re-run.`);
     setSeeded(true);
   }, [fixItems]);
 
   const seedFixOne = useCallback((f: FixItem) => {
     setFixMode(true);
-    setInput(`${f.name} failed — ${f.why.toLowerCase()}. Propose a fix and re-run.`);
+    setInput(`${f.name} failed, ${f.why.toLowerCase()}. Propose a fix and re-run.`);
     setSeeded(true);
   }, []);
 
@@ -322,7 +322,7 @@ export function EmilyHome({
         className="absolute left-1/2 flex w-full max-w-[600px] -translate-x-1/2 flex-col items-center px-6"
         style={{ top: "calc(40vh - 56px)" }}
       >
-        {/* ABOVE the composer — greeting/hero stack upward, never moving the anchor */}
+        {/* ABOVE the composer, greeting/hero stack upward, never moving the anchor */}
         <div className="absolute inset-x-0 bottom-full flex flex-col items-center px-6 pb-[22px]">
           {isFirstWorker ? (
             <div className="flex flex-col items-center">
@@ -366,7 +366,7 @@ export function EmilyHome({
           )}
         </div>
 
-        {/* THE COMPOSER (anchored — shared hero for A & B) */}
+        {/* THE COMPOSER (anchored, shared hero for A & B) */}
         <HomeComposer
           value={input}
           onChange={onChangeInput}
@@ -375,7 +375,7 @@ export function EmilyHome({
           placeholder="Ask Emily, or describe a worker to build…"
         />
 
-        {/* BELOW the composer — grows downward, never moves the anchor */}
+        {/* BELOW the composer, grows downward, never moves the anchor */}
         <div className="flex w-full flex-col items-center">
           {/* seeded annotation (fix-as-prompt) */}
           {seeded && (
@@ -426,7 +426,7 @@ export function EmilyHome({
               {fixMode
                 ? fixItems.map((f) => (
                     <Pill key={f.id} fix onClick={() => seedFixOne(f)}>
-                      Fix {f.name} — {f.why}
+                      Fix {f.name}, {f.why}
                     </Pill>
                   ))
                 : ACTIVE_PILLS.map((p) => (

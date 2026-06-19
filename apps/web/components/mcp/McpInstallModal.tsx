@@ -1,6 +1,6 @@
 "use client";
 
-// MCP install POPUP modal — "Add Floom to your AI client".
+// MCP install POPUP modal, "Add Floom to your AI client".
 //
 // Opened from the sidebar "MCP" item (NOT a page). Claude / Cursor / VS Code
 // tabs, a copy-able config with the user's REAL token baked in, Copy button,
@@ -187,7 +187,7 @@ export function McpInstallModal({ open, onClose }: { open: boolean; onClose: () 
           Add Floom to your AI client
         </h2>
         <p className="mt-1.5 text-[13.5px] leading-relaxed text-[var(--text-muted)]">
-          Use your Floom workers as tools in Claude, Cursor, or VS Code. Paste this —
+          Use your Floom workers as tools in Claude, Cursor, or VS Code. Paste it in,
           your token&apos;s already in it.
         </p>
 
@@ -230,7 +230,7 @@ export function McpInstallModal({ open, onClose }: { open: boolean; onClose: () 
         {!hasToken && (
           <div className="mt-3 flex items-center gap-2.5 rounded-[var(--radius-button)] bg-[var(--bg-2)] px-3 py-2.5">
             <p className="flex-1 text-[12px] leading-snug text-[var(--ink-mute)]">
-              No token in this browser yet — generate one to bake it into the config above.
+              No token in this browser yet, generate one to bake it into the config above.
             </p>
             <button
               type="button"

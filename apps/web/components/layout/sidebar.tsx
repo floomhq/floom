@@ -29,7 +29,7 @@ import {
 
 // Exported so the Cloud wrapper's sidebar overlay can compose the engine's
 // brand mark + nav + primary actions and only add its account/workspace
-// footer — keeping the dashboard UI in sync with the engine (no fork).
+// footer, keeping the dashboard UI in sync with the engine (no fork).
 export function FloomMark({ size = 28 }: { size?: number }) {
   return (
     <svg
@@ -121,11 +121,11 @@ export function WorkspaceMark({
     );
   }
   // G3/G4: no avatars/DiceBear. Flat squircle monogram seeded by workspace
-  // name — consistent with WorkspaceSwitcher mark and UserInitialsAvatar.
+  // name, consistent with WorkspaceSwitcher mark and UserInitialsAvatar.
   return <WorkspaceMonogram name={workspaceName} size={size} />;
 }
 
-/** Mobile top-bar workspace name (white-label — replaces the "Floom" wordmark). */
+/** Mobile top-bar workspace name (white-label, replaces the "Floom" wordmark). */
 function MobileWorkspaceName() {
   const name = useActiveWorkspaceName();
   return (
@@ -139,7 +139,7 @@ function MobileWorkspaceName() {
 // /connections ("Connected" / "Browse" / "Secrets"). Connections + secrets
 // are the same mental model (credentials a worker can read) so they share
 // a surface.
-// `hint` is surfaced as a native title tooltip on hover — the flat single-row
+// `hint` is surfaced as a native title tooltip on hover, the flat single-row
 // nav has no room for a permanent subtitle without a redesign, so the
 // employee-model microcopy ("Workers run on triggers") lives in the tooltip
 // instead (the operator 2026-06-02).
@@ -151,10 +151,10 @@ type NavItem = {
   badge?: boolean;
 };
 
-// Emily-home redesign (Federico 2026-06-19): the "Overview" nav item is GONE —
+// Emily-home redesign (Federico 2026-06-19): the "Overview" nav item is GONE , 
 // the home ("/") is now the Emily-fullscreen home, reached via the workspace
 // logo/switcher, not a nav row. Nav: Workers · Library · Runs · Approvals ·
-// Integrations. (MCP is a pinned item above the profile footer — see below.)
+// Integrations. (MCP is a pinned item above the profile footer, see below.)
 const nav: NavItem[] = [
   { href: "/workers", label: "Workers", icon: Box, hint: "Your AI workers" },
   { href: "/library", label: "Library", icon: Library },
@@ -212,7 +212,7 @@ export function NavLinks({ pathname, onNavigate }: { pathname: string; onNavigat
   );
 }
 
-// MCP item — pinned LOW, just above the profile footer (Emily-home redesign).
+// MCP item, pinned LOW, just above the profile footer (Emily-home redesign).
 // Opens the MCP-install POPUP modal (not a page). The badge mirrors the v6
 // "12" affordance but is informational chrome only; the count is omitted here
 // since the OSS engine has no live "installed clients" count to show honestly.
@@ -244,7 +244,7 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
   return (
     <div className="px-3 pt-3 pb-3 space-y-1.5">
       {/* #902 (wireframe newbtn): creating a worker = a conversation with
-          Emily — full-page chat in create mode, not a form. */}
+          Emily, full-page chat in create mode, not a form. */}
       <Link
         href="/chat?mode=create"
         onClick={() => onNavigate?.()}
@@ -344,7 +344,7 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
     <>
       {/* ── Mobile top bar ─────────────────────────────────────────────────── */}
       <header className="sticky top-0 z-30 flex h-14 items-center justify-between [border-bottom:var(--bd-div)] bg-[var(--bg-app)] px-4 md:hidden">
-        {/* #1305: white-label — workspace mark + name, not the Floom brand. */}
+        {/* #1305: white-label, workspace mark + name, not the Floom brand. */}
         <Link href="/overview" className="flex items-center gap-2 min-w-0">
           <WorkspaceMark size={22} />
           <MobileWorkspaceName />
@@ -396,19 +396,19 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
                 onClick={toggleCollapse}
                 className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] hover:bg-[var(--active-nav-bg)] hover:text-ink"
               >
-              {/* #1305: white-label — workspace mark, not the Floom brand. */}
+              {/* #1305: white-label, workspace mark, not the Floom brand. */}
               <WorkspaceMark size={22} />
             </button>
           ) : (
             <>
-              {/* #1305: white-label — the WorkspaceSwitcher already renders the
+              {/* #1305: white-label, the WorkspaceSwitcher already renders the
                   workspace mark + name as the top-left identity, so no separate
                   Floom brand mark here (it would be a redundant second mark and
                   leaks the Floom brand into a white-labeled app). */}
               <div className="min-w-0 flex-1">
                 <WorkspaceSwitcher />
               </div>
-              {/* Collapse chevron — dim at rest, full opacity on hover */}
+              {/* Collapse chevron, dim at rest, full opacity on hover */}
               <button
                 type="button"
                 aria-label="Collapse navigation"
@@ -465,12 +465,12 @@ export function Sidebar({ accountFooter }: SidebarProps = {}) {
             })}
             {/* Settings icon at bottom */}
             <div className="flex-1" />
-            {/* MCP — opens the install popup modal (above Settings). */}
+            {/* MCP, opens the install popup modal (above Settings). */}
             <button
               type="button"
               onClick={() => mcpModal.open()}
-              title="MCP — add Floom to your AI client"
-              aria-label="MCP — add Floom to your AI client"
+              title="MCP, add Floom to your AI client"
+              aria-label="MCP, add Floom to your AI client"
               className="inline-flex size-9 items-center justify-center rounded-[var(--radius-button)] text-[var(--ink-soft)] transition-[background,color] duration-150 hover:bg-[var(--active-nav-bg)] hover:text-ink"
             >
               <Grid2x2 className="w-4 h-4" />
@@ -619,7 +619,7 @@ export function UserProfileFooter({
 
   return (
     <div className="flex items-center gap-2 [border-top:var(--bd-div)] px-3 py-3">
-      {/* Profile chip — clicking opens a dropdown with Settings + Sign out (M37). */}
+      {/* Profile chip, clicking opens a dropdown with Settings + Sign out (M37). */}
       <DropdownMenu>
         <DropdownMenuTrigger
           className={cn(
