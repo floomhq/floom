@@ -33,6 +33,8 @@ inputs:
     type: string
     label: Mandate
 outputs: []
+secrets:
+  - OUTPUT_SECRET
 connections: []
 """
 
@@ -104,3 +106,29 @@ def test_run_inputs_are_exposed_in_list_and_detail(client_and_main):
     body = detail.json()
     assert body["input"] == expected_input
     assert body["inputs"] == body["input"]
+
+
+def test_run_detail_redacts_legacy_persisted_output_secrets(client_and_main):
+    client, main = client_and_main
+    repos = main.get_repositories()
+    repos.secrets.set(user_id=OWNER, name="OUTPUT_SECRET", value="sk-legacy-output-secret")
+    repos.runs.create(
+        user_id=OWNER,
+        run_id="run_legacy_secret_output",
+        worker_id="input-log-worker",
+        status=main.RunStatus.COMPLETED.value,
+        trigger_source="manual",
+        runner="e2b",
+        input_json={},
+        output_json={
+            "plain": "sk-legacy-output-secret",
+            "nested": {"value": "prefix-sk-legacy-output-secret"},
+        },
+    )
+
+    detail = client.get("/runs/run_legacy_secret_output")
+    assert detail.status_code == 200, detail.text
+    body = detail.json()
+    assert "sk-legacy-output-secret" not in detail.text
+    assert body["output"]["plain"] == "<REDACTED:OUTPUT_SECRET>"
+    assert body["output"]["nested"]["value"] == "prefix-<REDACTED:OUTPUT_SECRET>"
