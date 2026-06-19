@@ -39,7 +39,7 @@ export function PromptInput({
   /** Hard-disable the whole composer (textarea + attach + send). */
   disabled?: boolean;
   /**
-   * B15 (Maintainer 2026-06-17): decouple typing from sending. When Emily is
+   * B15 (Federico 2026-06-17): decouple typing from sending. When Emily is
    * streaming a reply we keep the textarea EDITABLE so the user can draft their
    * next message, and disable ONLY the send action until the stream completes.
    */
@@ -117,7 +117,7 @@ export function PromptInput({
           /workers/new (lib/prompt-detect). */}
       <PromptChips prompt={value} className="px-1" />
 
-      {/* E10 (Maintainer 2026-06-17): flat #FBFBFC composer (bg-app), NOT the grey
+      {/* E10 (Federico 2026-06-17): flat #FBFBFC composer (bg-app), NOT the grey
           --bg-2 panel that read as an unwanted "white box" appearing on type/focus.
           A single subtle divider outline keeps it discoverable; more compact
           padding (py-2) makes the box shorter. */}

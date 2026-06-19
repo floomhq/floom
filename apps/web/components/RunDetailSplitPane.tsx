@@ -787,19 +787,29 @@ function InputsView({ run }: { run: RunDetail }) {
   if (entries.length === 0) {
     return <p className="text-sm text-muted-foreground">No inputs were provided for this run.</p>;
   }
+  // Labeled key→value list. Strings render as a readable text block; structured
+  // values (objects / arrays) go through the GENERIC renderer so an array of
+  // objects becomes a table and an object becomes a KV list, instead of a raw
+  // JSON code box sitting in dead space.
   return (
-    <div className="space-y-3">
+    <div className="space-y-4">
       {entries.map(([key, value]) => (
-        <div key={key} className="space-y-1">
+        <div key={key} className="space-y-1.5">
           <p className="text-xs font-medium text-muted-foreground uppercase tracking-wide">{key}</p>
           {typeof value === "string" ? (
             <p className="text-sm text-foreground whitespace-pre-wrap break-words rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 px-3 py-2">
               {value || <span className="italic text-muted-foreground">empty</span>}
             </p>
+          ) : value == null ? (
+            <p className="text-sm rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 px-3 py-2">
+              <span className="italic text-muted-foreground">empty</span>
+            </p>
+          ) : isScalarOutput(value) ? (
+            <p className="text-sm text-foreground rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 px-3 py-2">
+              {String(value)}
+            </p>
           ) : (
-            <pre className="text-xs text-foreground whitespace-pre-wrap break-words rounded-[var(--radius-button)] [border:var(--bd-card)] bg-muted/30 px-3 py-2">
-              {JSON.stringify(value, null, 2)}
-            </pre>
+            <GenericOutput type="json" value={value} />
           )}
         </div>
       ))}

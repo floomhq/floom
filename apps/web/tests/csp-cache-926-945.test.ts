@@ -1,4 +1,4 @@
-﻿// #926 — nonce-based CSP replaces 'unsafe-inline' script-src.
+// #926 — nonce-based CSP replaces 'unsafe-inline' script-src.
 // #945 — protected page shells must carry private/no-store cache headers and
 //        must not opt into static/ISR rendering.
 import { readFileSync, readdirSync, statSync } from "node:fs";
@@ -19,7 +19,7 @@ async function validCookie(): Promise<string> {
 function req(p: string, cookie?: string): NextRequest {
   const headers: Record<string, string> = {};
   if (cookie) headers.cookie = cookie;
-  return new NextRequest(`https://localhost:3000${p}`, { headers });
+  return new NextRequest(`https://workers.floom.dev${p}`, { headers });
 }
 
 function directive(csp: string, name: string): string {
@@ -43,10 +43,10 @@ describe("#926 buildCsp", () => {
   });
 
   it("CSP_EXTRA_CONNECT_SRC extends connect-src for self-hosted cross-origin APIs", () => {
-    process.env.CSP_EXTRA_CONNECT_SRC = "https://api.workeros.example.com";
+    process.env.CSP_EXTRA_CONNECT_SRC = "https://api.example.com";
     try {
       const connect = directive(buildCsp("n"), "connect-src");
-      expect(connect).toBe("connect-src 'self' https://api.workeros.example.com");
+      expect(connect).toBe("connect-src 'self' https://api.example.com");
     } finally {
       delete process.env.CSP_EXTRA_CONNECT_SRC;
     }

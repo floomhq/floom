@@ -6,8 +6,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { NextRequest } from "next/server";
 
-const APP_ORIGIN = "https://localhost:3000";
-const API_BASE = "https://localhost:8000";
+const APP_ORIGIN = "https://workers.floom.dev";
+const API_BASE = "https://workers-api.floom.dev";
 
 async function proxyWithLocation(location: string) {
   process.env.FLOOM_API_BASE = API_BASE;
@@ -56,7 +56,7 @@ describe("#1044 proxy Location header validation", () => {
   });
 
   it("drops scheme-downgrade same-host redirects", async () => {
-    const res = await proxyWithLocation("http://localhost:3000/callback");
+    const res = await proxyWithLocation("http://workers.floom.dev/callback");
     expect(res.headers.get("location")).toBeNull();
   });
 });

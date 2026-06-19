@@ -1,4 +1,4 @@
-﻿import { describe, it, expect, vi, beforeEach } from "vitest";
+import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 
@@ -62,7 +62,7 @@ beforeEach(() => {
   window.history.replaceState(null, "", "/settings");
   apiMock.me.mockResolvedValue({
     user_id: "u1",
-    email: "member@example.com",
+    email: "member@floom.dev",
     display_name: "Member User",
     role: "member",
     is_admin: false,
@@ -112,7 +112,7 @@ beforeEach(() => {
       {
         workspace_id: "w1",
         user_id: "u1",
-        email: "member@example.com",
+        email: "member@floom.dev",
         display_name: "Member User",
         role: "member",
         status: "active",
@@ -133,7 +133,7 @@ describe("Settings Collection (Phase 3)", () => {
 
     expect(await screen.findByRole("button", { name: "Grid view", pressed: true })).toBeInTheDocument();
     await user.click(screen.getByRole("button", { name: "List view" }));
-    await waitFor(() => expect(screen.getByText("System")).toBeInTheDocument(), { timeout: 3000 });
+    await waitFor(() => expect(screen.getByText("General")).toBeInTheDocument(), { timeout: 3000 });
     expect(screen.getByText("Workspace defaults")).toBeInTheDocument();
     expect(screen.getByText("Slack, email & WhatsApp")).toBeInTheDocument();
     expect(screen.getByText("Configure Emily")).toBeInTheDocument();

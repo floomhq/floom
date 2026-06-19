@@ -1,4 +1,4 @@
-﻿import { NextResponse } from "next/server";
+import { NextResponse } from "next/server";
 
 const API_BASE = process.env.FLOOM_API_BASE || "https://localhost:8000";
 const API_SECRET = process.env.FLOOM_API_SECRET || "";

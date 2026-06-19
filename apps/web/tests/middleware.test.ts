@@ -13,7 +13,7 @@ async function validCookie(): Promise<string> {
 function req(path: string, cookie?: string): NextRequest {
   const headers: Record<string, string> = {};
   if (cookie) headers.cookie = cookie;
-  return new NextRequest(`https://localhost:3000${path}`, { headers });
+  return new NextRequest(`https://workers.floom.dev${path}`, { headers });
 }
 
 describe("middleware auth gate", () => {
@@ -189,7 +189,7 @@ describe("middleware: #974 proxy rejections are never shared-cacheable", () => {
 
   it("403 (CSRF) /api/proxy carries private no-store", async () => {
     const { middleware } = await import("@/middleware");
-    const evil = new NextRequest("https://localhost:3000/api/proxy/auth/tokens", {
+    const evil = new NextRequest("https://workers.floom.dev/api/proxy/auth/tokens", {
       method: "POST",
       headers: { origin: "https://evil.com" },
     });
