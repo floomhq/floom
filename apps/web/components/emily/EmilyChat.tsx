@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { usePathname } from "next/navigation";
+import { usePathname, useSearchParams } from "next/navigation";
 import { AlertTriangle, Check, ChevronRight, ChevronLeft, ChevronDown, Copy, Maximize2, Minimize2, PenSquare, Download, History, MoreHorizontal, X } from "lucide-react";
 import { Button } from "@/components/ui/button";
 import { Separator } from "@/components/ui/separator";
@@ -560,6 +560,18 @@ export function EmilyChatCore({ fullPage = false, createMode = false, primeInput
   } = useChatStream({ ephemeral: createMode });
   const router = useRouter();
   const [input, setInput] = useState(primeInput ?? "");
+  // Seed the composer when primeInput ARRIVES after mount. The full-page chat
+  // passes primeInput at mount (handled by useState above), but the dock core is
+  // mounted once for the whole app, so a later `/?create=1&prime=<text>` deep
+  // link delivers primeInput post-mount — sync it in once per new value (only
+  // while the composer is still empty and the thread hasn't started, so it never
+  // clobbers what the user is typing or an in-progress conversation).
+  const seededPrimeRef = useRef<string | undefined>(primeInput ?? undefined);
+  useEffect(() => {
+    if (!primeInput || seededPrimeRef.current === primeInput) return;
+    seededPrimeRef.current = primeInput;
+    setInput((prev) => (prev.trim().length === 0 ? primeInput : prev));
+  }, [primeInput]);
   const [attachedFiles, setAttachedFiles] = useState<AttachedFile[]>([]);
   const bottomRef = useRef<HTMLDivElement>(null);
   const scrollContainerRef = useRef<HTMLDivElement>(null);
@@ -981,14 +993,19 @@ export function EmilyDock({ className }: { className?: string }) {
       .catch((err) => logError("Could not load workspace overview.", err));
     return () => { alive = false; };
   }, []);
-  // #1141: reset the dock conversation when navigating away from /chat?mode=create
-  // so the Overview Emily panel shows a fresh context instead of the create-mode thread.
+  // #1141: reset the dock conversation when navigating away from the create flow
+  // so the next page (or a fresh home visit) shows a clean context instead of the
+  // ephemeral create-mode thread. The create flow now lives on the home route
+  // (?create=1), so reset on leaving home too.
   const pathname = usePathname();
   const prevPathname = useRef<string | null>(null);
   useEffect(() => {
     const prev = prevPathname.current;
     prevPathname.current = pathname;
-    if (prev !== null && prev.startsWith("/chat") && !pathname.startsWith("/chat")) {
+    const leftChat = prev !== null && prev.startsWith("/chat") && !pathname.startsWith("/chat");
+    const leftHome = prev === "/" || prev === "/overview";
+    const enteringHome = pathname === "/" || pathname === "/overview";
+    if (leftChat || (leftHome && !enteringHome)) {
       coreActionsRef.current?.newSession();
     }
   }, [pathname]);
@@ -999,6 +1016,47 @@ export function EmilyDock({ className }: { className?: string }) {
   // AppShell hides the empty page pane, the sidebar stays). The empty state then
   // renders the home greeting + pulse + pills (homeMode below).
   const isHomeRoute = pathname === "/" || pathname === "/overview";
+
+  // CREATE (Federico 2026-06-19): "New worker" / the old /chat?mode=create no
+  // longer open a SEPARATE full-page Emily with its own header. They land on the
+  // SAME dock-fullscreen Emily as the home, primed for create — `/?create=1`
+  // (with an optional `&prime=<text>` seeding the composer, used by the
+  // landing→app from-prompt handoff and the workers empty-state prompt). The
+  // dock reads the param, forces fullscreen, and renders the create empty state
+  // (the "Hire a new worker" hero + create pills) INSIDE this one Emily core.
+  const searchParams = useSearchParams();
+  const createParam = searchParams.get("create") === "1";
+  const primeParam = searchParams.get("prime")?.trim() || undefined;
+  // Latch create-mode once consumed so a later route change / param strip does
+  // not yank the user out of the create thread mid-conversation.
+  const [createLatched, setCreateLatched] = useState(false);
+  // Primed text is consumed once on enter (so it seeds the create composer) and
+  // then cleared — re-renders must not keep re-seeding it.
+  const [primeText, setPrimeText] = useState<string | undefined>(undefined);
+  useEffect(() => {
+    if (createParam && isHomeRoute) {
+      setCreateLatched(true);
+      if (primeParam) setPrimeText(primeParam);
+      // Drop the params from the URL so create-prime is deep-linkable but not
+      // sticky across refresh/back (history.replace, no Next reload).
+      if (typeof window !== "undefined") {
+        const url = new URL(window.location.href);
+        url.searchParams.delete("create");
+        url.searchParams.delete("prime");
+        window.history.replaceState(window.history.state, "", url.pathname + url.search);
+      }
+    }
+  }, [createParam, isHomeRoute, primeParam]);
+  // Reset the create latch when the user navigates away from the home route so
+  // the next visit shows the home greeting (not a stale create hero).
+  useEffect(() => {
+    if (!isHomeRoute) {
+      setCreateLatched(false);
+      setPrimeText(undefined);
+    }
+  }, [isHomeRoute]);
+  const createMode = (createParam || createLatched) && isHomeRoute;
+
   useEffect(() => {
     if (isHomeRoute) setFullscreen(true);
     // Leaving home does NOT force-exit fullscreen (the user may have it open
@@ -1182,7 +1240,12 @@ export function EmilyDock({ className }: { className?: string }) {
           onHasMessagesChange={setCoreHasMessages}
           onConversationIdChange={setCoreConversationId}
           isNewWorkspace={isNewWorkspace}
-          homeMode={isHomeRoute}
+          // CREATE takes precedence over the home greeting: when entering via
+          // "New worker"/?create=1 the same Emily renders the "Hire a worker"
+          // create hero (create pills + sources) instead of the home pulse.
+          createMode={createMode}
+          primeInput={createMode ? primeText : undefined}
+          homeMode={isHomeRoute && !createMode}
         />
       </div>
     </div>
@@ -1256,29 +1319,22 @@ export function EmilyMobileSheet() {
 
 // ── Full-page chat (used by /chat route) ──────────────────────────────────────
 
-export function EmilyChatPage({
-  createMode = false,
-  primeInput,
-}: {
-  createMode?: boolean;
-  primeInput?: string;
-} = {}) {
+// General "talk to Emily" full-page surface (the /chat route). Worker creation
+// is NOT here anymore — it lands on the home dock-fullscreen Emily primed for
+// create (?create=1); see app/chat/page.tsx + the EmilyDock create handling.
+export function EmilyChatPage() {
   const assistantName = useAssistantName();
   return (
     <div className="flex h-[calc(100vh-4rem)] flex-col">
       <div className="flex h-14 shrink-0 items-center gap-2 [border-bottom:var(--bd-div)] px-4">
         <EmilyAvatar size="sm" />
         <div className="flex-1 min-w-0 flex items-center gap-1.5">
-          <p className="text-sm font-semibold leading-none">
-            {createMode ? "Hire a worker" : assistantName}
-          </p>
-          {!createMode && (
-            <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
-          )}
+          <p className="text-sm font-semibold leading-none">{assistantName}</p>
+          <span className="size-2 shrink-0 rounded-[var(--radius-pill)] bg-green-500" aria-label="Online" />
         </div>
       </div>
       <div className="flex-1 min-h-0 overflow-hidden">
-        <EmilyChatCore fullPage createMode={createMode} primeInput={primeInput} />
+        <EmilyChatCore fullPage />
       </div>
     </div>
   );

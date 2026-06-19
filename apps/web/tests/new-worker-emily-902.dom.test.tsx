@@ -1,6 +1,11 @@
 // #902 (punchlist A1) — "New worker" primes Emily full-screen instead of the
 // removed /workers/new form page. Wireframe newWorker(): Emily full overlay,
 // composer placeholder "Create me: a worker that…".
+//
+// Federico 2026-06-19: the create flow is now the SAME fullscreen Emily as the
+// home (the dock-fullscreen surface), primed for create — `/?create=1`. The
+// shared engine is EmilyChatCore (fullPage + createMode); the create-mode empty
+// state / composer behaviour is pinned against it directly here.
 import { readFileSync } from "node:fs";
 import path from "node:path";
 import { describe, expect, it, vi } from "vitest";
@@ -44,14 +49,14 @@ vi.mock("@/lib/useChatStream", async (importOriginal) => {
   };
 });
 
-import { EmilyChatPage } from "@/components/emily/EmilyChat";
+import { EmilyChatCore, EmilyChatPage } from "@/components/emily/EmilyChat";
 
 const root = path.resolve(__dirname, "..");
 const src = (rel: string) => readFileSync(path.join(root, rel), "utf-8");
 
 describe("#902 New worker → Emily full-screen", () => {
   it("create mode shows the create-primed composer placeholder", () => {
-    render(<EmilyChatPage createMode />);
+    render(<EmilyChatCore fullPage createMode />);
     expect(
       screen.getByPlaceholderText("Create me: a worker that…"),
     ).toBeInTheDocument();
@@ -63,14 +68,14 @@ describe("#902 New worker → Emily full-screen", () => {
   });
 
   it("primeInput pre-fills the composer (legacy ?prompt= deep links)", () => {
-    render(<EmilyChatPage createMode primeInput="Create me: a digest worker" />);
+    render(<EmilyChatCore fullPage createMode primeInput="Create me: a digest worker" />);
     expect(
       screen.getByDisplayValue("Create me: a digest worker"),
     ).toBeInTheDocument();
   });
 
   it("create mode shows source pills mirroring the landing", async () => {
-    render(<EmilyChatPage createMode />);
+    render(<EmilyChatCore fullPage createMode />);
     expect(await screen.findByText("Add sources")).toBeInTheDocument();
     for (const label of ["Company brain", "ICP brief", "Pricing", "Tone guide", "Style guide"]) {
       expect(screen.getByRole("button", { name: new RegExp(label, "i") })).toBeInTheDocument();
@@ -79,7 +84,7 @@ describe("#902 New worker → Emily full-screen", () => {
 
   it("clicking a source pill appends a source hint to the composer", async () => {
     const user = userEvent.setup();
-    render(<EmilyChatPage createMode />);
+    render(<EmilyChatCore fullPage createMode />);
     const composer = screen.getByPlaceholderText("Create me: a worker that…") as HTMLTextAreaElement;
     expect(composer.value).toBe("");
     await user.click(await screen.findByRole("button", { name: /Pricing/i }));
@@ -94,17 +99,20 @@ describe("#902 New worker → Emily full-screen", () => {
     expect(screen.queryByText("Add sources")).not.toBeInTheDocument();
   });
 
-  it("sidebar has the New worker button routing to the Emily create flow", () => {
+  it("sidebar has the New worker button routing to the home create flow", () => {
     const sidebar = src("components/layout/sidebar.tsx");
-    expect(sidebar).toContain('href="/chat?mode=create"');
+    expect(sidebar).toContain('href="/?create=1"');
     expect(sidebar).toContain("New worker");
   });
 
-  it("/workers/new is a redirect, not a form; all create entry points use the chat flow", () => {
+  it("/workers/new is a redirect, not a form; all create entry points use the home create flow", () => {
     const newPage = src("app/workers/new/page.tsx");
-    expect(newPage).toContain("redirect(`/chat?mode=create");
+    expect(newPage).toContain("redirect(`/?create=1");
     expect(newPage).not.toContain("worker-author");
-    expect(src("app/workers/WorkersCollection.tsx")).toContain('router.push("/chat?mode=create")');
-    expect(src("components/CommandPalette.tsx")).toContain('go("/chat?mode=create")');
+    expect(src("app/workers/WorkersCollection.tsx")).toContain('router.push("/?create=1")');
+    expect(src("components/CommandPalette.tsx")).toContain('go("/?create=1")');
+    // The legacy /chat?mode=create deep link still works → redirects to the home
+    // create flow instead of rendering a separate full-page create surface.
+    expect(src("app/chat/page.tsx")).toContain("redirect(`/?create=1");
   });
 });

@@ -2044,7 +2044,7 @@ export default function WorkersCollection({
       };
     },
     // Contextual toolbar action only; the global sidebar CTA was removed for v4.
-    add: { label: "Add", onSelect: () => router.push("/chat?mode=create") }, // #902: create = Emily flow
+    add: { label: "Add", onSelect: () => router.push("/?create=1") }, // #902/2026-06-19: create = the home fullscreen Emily, primed
     states: {
       // #1364 — improved help text + action CTA linking to /workers/new
       empty: {
@@ -2052,7 +2052,7 @@ export default function WorkersCollection({
         help: "Workers are AI agents that run on a schedule, webhook, or on demand, powered by your connected apps.",
         action: (
           <WorkersEmptyPrompt
-            onSubmit={(prompt) => router.push(`/chat?mode=create&q=${encodeURIComponent(prompt)}`)}
+            onSubmit={(prompt) => router.push(`/?create=1&prime=${encodeURIComponent(prompt)}`)}
           />
         ),
       },

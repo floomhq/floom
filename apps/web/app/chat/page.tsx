@@ -1,13 +1,16 @@
 /**
- * /chat -- full-page Emily chat interface.
+ * /chat -- full-page Emily chat interface (general "talk to Emily").
  *
  * The AppShell removes the dock and content padding for this route.
  * EmilyChatPage renders its own header + full-height message thread.
  *
- * #902: ?mode=create opens the create-worker flow (create-primed composer,
- * wireframe newWorker()); ?prime=<text> pre-fills the composer (used by the
- * legacy /workers/new?prompt= deep-link redirect).
+ * Create flow (Federico 2026-06-19): creating a worker is NO LONGER a separate
+ * full-page surface. "New worker" / the legacy `?mode=create` open the SAME
+ * fullscreen Emily as the home (the dock-fullscreen surface), primed for create
+ * — `/?create=1` (with `&prime=<text>` seeding the composer). Old `?mode=create`
+ * links redirect there so nothing breaks.
  */
+import { redirect } from "next/navigation";
 import { EmilyChatPage } from "@/components/emily/EmilyChat";
 
 export const metadata = {
@@ -21,10 +24,9 @@ export default async function ChatPage({
   searchParams: Promise<{ mode?: string; prime?: string }>;
 }) {
   const { mode, prime } = await searchParams;
-  return (
-    <EmilyChatPage
-      createMode={mode === "create"}
-      primeInput={typeof prime === "string" && prime ? prime : undefined}
-    />
-  );
+  if (mode === "create") {
+    const primeQs = typeof prime === "string" && prime ? `&prime=${encodeURIComponent(prime)}` : "";
+    redirect(`/?create=1${primeQs}`);
+  }
+  return <EmilyChatPage />;
 }

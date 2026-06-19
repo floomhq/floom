@@ -245,9 +245,11 @@ export function SidebarPrimaryActions({ onNavigate }: { onNavigate?: () => void 
   return (
     <div className="px-3 pt-3 pb-3 space-y-1.5">
       {/* #902 (wireframe newbtn): creating a worker = a conversation with
-          Emily, full-page chat in create mode, not a form. */}
+          Emily. Federico 2026-06-19: it is the SAME fullscreen Emily as the home
+          (the dock-fullscreen surface), primed for create via `/?create=1`, not a
+          separate full-page chat with its own header. */}
       <Link
-        href="/chat?mode=create"
+        href="/?create=1"
         onClick={() => onNavigate?.()}
         className="flex h-9 w-full items-center justify-center gap-2 rounded-[var(--radius-button)] bg-[var(--primary)] px-3 text-sm font-medium text-[var(--primary-text)] transition-colors duration-150 hover:opacity-90"
       >

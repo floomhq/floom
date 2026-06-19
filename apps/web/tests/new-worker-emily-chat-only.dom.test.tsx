@@ -48,7 +48,7 @@ vi.mock("@/lib/useChatStream", async (importOriginal) => {
   };
 });
 
-import { EmilyChatPage } from "@/components/emily/EmilyChat";
+import { EmilyChatCore } from "@/components/emily/EmilyChat";
 
 const PILLS = [
   "Summarise my Granola meetings → HubSpot daily",
@@ -62,7 +62,7 @@ afterEach(() => {
 
 describe("new worker = literally an Emily chat with pills", () => {
   it("shows the spec heading + one-line subtext", () => {
-    render(<EmilyChatPage createMode />);
+    render(<EmilyChatCore fullPage createMode />);
     expect(screen.getByRole("heading", { name: "Hire a new worker" })).toBeInTheDocument();
     expect(
       screen.getByText(/Describe the job in one sentence\./i),
@@ -70,7 +70,7 @@ describe("new worker = literally an Emily chat with pills", () => {
   });
 
   it("renders the SAME Emily composer — not a bespoke form", () => {
-    render(<EmilyChatPage createMode />);
+    render(<EmilyChatCore fullPage createMode />);
     const composer = screen.getByPlaceholderText("Create me: a worker that…");
     // The real PromptInput is a <textarea>; the removed bespoke hero had a
     // "Hire worker" submit button + example cards instead.
@@ -79,7 +79,7 @@ describe("new worker = literally an Emily chat with pills", () => {
   });
 
   it("renders the 2-3 suggestion pills (no example cards)", () => {
-    render(<EmilyChatPage createMode />);
+    render(<EmilyChatCore fullPage createMode />);
     for (const pill of PILLS) {
       expect(screen.getByRole("button", { name: pill })).toBeInTheDocument();
     }
@@ -88,7 +88,7 @@ describe("new worker = literally an Emily chat with pills", () => {
 
   it("clicking a pill primes the composer with that prompt", async () => {
     const user = userEvent.setup();
-    render(<EmilyChatPage createMode />);
+    render(<EmilyChatCore fullPage createMode />);
     const composer = screen.getByPlaceholderText("Create me: a worker that…") as HTMLTextAreaElement;
     expect(composer.value).toBe("");
     await user.click(screen.getByRole("button", { name: PILLS[0] }));
@@ -97,7 +97,7 @@ describe("new worker = literally an Emily chat with pills", () => {
 
   it("shows the previous-chat note ONLY when a prior Emily chat is persisted", async () => {
     window.localStorage.setItem(CONVERSATION_STORAGE_KEY, "conv-123");
-    render(<EmilyChatPage createMode />);
+    render(<EmilyChatCore fullPage createMode />);
     await waitFor(() =>
       expect(screen.getByText(/Your previous chat is still running/i)).toBeInTheDocument(),
     );
@@ -105,7 +105,7 @@ describe("new worker = literally an Emily chat with pills", () => {
   });
 
   it("hides the previous-chat note when no prior chat exists", () => {
-    render(<EmilyChatPage createMode />);
+    render(<EmilyChatCore fullPage createMode />);
     expect(screen.queryByText(/Your previous chat is still running/i)).not.toBeInTheDocument();
   });
 });
