@@ -71,8 +71,8 @@ export function CliAuthContent({
   return (
     // Full-screen standalone gate (AppShell standalonePrefixes), centered like
     // /login: no sidebar chrome, the page IS the single authorize action.
-    <div className="min-h-screen grid place-items-center bg-[var(--bg-app)] px-6 py-10 text-[var(--ink)]">
-      <div className="w-full max-w-xl space-y-6">
+    <div className="min-h-screen w-full grid place-items-center bg-[var(--bg-app)] px-6 py-10 text-[var(--ink)]">
+      <div className="max-w-md mx-auto space-y-6">
         {/* S29s: dropped Card wrapper. The page IS the action; a card around
             a short form added nothing. Heading + content sit flat. */}
         <div>
