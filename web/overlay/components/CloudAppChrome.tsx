@@ -10,6 +10,7 @@ import { TelemetryProvider } from "@/components/TelemetryProvider";
 import { CloudAccountFooter } from "@/components/CloudAccountFooter";
 import { EmilyDock } from "@/components/emily/EmilyChat";
 import { EmilyFullscreenProvider, useEmilyFullscreen } from "@/components/emily/emily-fullscreen";
+import { McpModalProvider } from "@/components/mcp/mcp-modal-context";
 import { Sidebar } from "@/components/layout/sidebar";
 import { Toaster } from "@/components/ui/sonner";
 
@@ -33,6 +34,11 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const isLoginPath = pathname === "/login" || pathname.startsWith("/login/") || pathname === "/app/login" || pathname.startsWith("/app/login/");
   const isJoinPath = pathname === "/join" || pathname.startsWith("/join/") || pathname === "/app/join" || pathname.startsWith("/app/join/");
+  // cli-auth is a standalone approval gate (no sidebar/dock chrome): the engine
+  // page centers itself + is in the engine standalonePrefixes. Mirror the login
+  // standalone treatment so it escapes the shell. Match both /cli-auth and
+  // /app/cli-auth (basePath-aware, same as isLoginPath).
+  const isCliAuthPath = pathname === "/cli-auth" || pathname.startsWith("/cli-auth/") || pathname === "/app/cli-auth" || pathname.startsWith("/app/cli-auth/");
   const isApprovalReviewPath =
     pathname === "/approvals/review" ||
     pathname.startsWith("/approvals/review/") ||
@@ -52,7 +58,13 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
   // column. The Cloud chrome previously wrapped EVERY page in the padded
   // max-w-7xl container, which broke the height chain on cloud — so the brain
   // divider stopped short of the viewport bottom. Mirror the engine here.
+  // The Emily-fullscreen HOME ("/" and "/overview") + Library are also
+  // full-bleed (composer-anchored / fill-the-pane) — match engine AppShell
+  // fullBleedCollectionPaths exactly so home/library fill the pane on cloud.
   const isFullBleedCollectionPath = [
+    "/",
+    "/overview",
+    "/library",
     "/brain",
     "/workers",
     "/runs",
@@ -82,7 +94,7 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
     );
   }
 
-  if (isApprovalReviewPath) {
+  if (isApprovalReviewPath || isCliAuthPath) {
     return (
       <>
         <IconSprite />
@@ -95,8 +107,11 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
   }
 
   if (isChatPath) {
+    // Mirror engine AppShell noDock branch: wrap in McpModalProvider so the
+    // sidebar's "MCP" item + Emily's connect affordance (both call useMcpModal)
+    // open the shared MCP-install modal here too.
     return (
-      <>
+      <McpModalProvider>
         <IconSprite />
         <Ambient />
         <Sidebar accountFooter={({ onNavigate }) => <CloudAccountFooter onNavigate={onNavigate} />} />
@@ -104,7 +119,7 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
         <CommandPalette />
         <TelemetryProvider />
         <Toaster position="bottom-right" />
-      </>
+      </McpModalProvider>
     );
   }
 
@@ -115,18 +130,27 @@ export function CloudAppChrome({ children }: { children: React.ReactNode }) {
   // sidebar stays. Without the provider the dock falls back to the no-op
   // context and the control is inert (the bug). Reuse the engine context — do
   // NOT fork a second fullscreen state.
+  //
+  // McpModalProvider (Federico 2026-06-19): mirror the engine AppShell which
+  // wraps the whole shell in McpModalProvider. The synced sidebar.tsx +
+  // EmilyChat.tsx call useMcpModal() to open the SHARED MCP-install popup;
+  // without the provider they fall back to the no-op context and the popup
+  // never mounts/opens on cloud (the MCP-popup regression). Restored from
+  // origin/redeploy/r9-fullscreen, lost when r9-r2 cloned main fresh.
   return (
-    <EmilyFullscreenProvider>
-      <IconSprite />
-      <Ambient />
-      <Sidebar accountFooter={({ onNavigate }) => <CloudAccountFooter onNavigate={onNavigate} />} />
-      <CloudShellBody isFullBleedCollectionPath={isFullBleedCollectionPath}>
-        {children}
-      </CloudShellBody>
-      <CommandPalette />
-      <TelemetryProvider />
-      <Toaster position="bottom-right" />
-    </EmilyFullscreenProvider>
+    <McpModalProvider>
+      <EmilyFullscreenProvider>
+        <IconSprite />
+        <Ambient />
+        <Sidebar accountFooter={({ onNavigate }) => <CloudAccountFooter onNavigate={onNavigate} />} />
+        <CloudShellBody isFullBleedCollectionPath={isFullBleedCollectionPath}>
+          {children}
+        </CloudShellBody>
+        <CommandPalette />
+        <TelemetryProvider />
+        <Toaster position="bottom-right" />
+      </EmilyFullscreenProvider>
+    </McpModalProvider>
   );
 }
 

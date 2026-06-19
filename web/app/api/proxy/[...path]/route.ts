@@ -36,15 +36,8 @@ const SUPABASE_ORIGIN = (() => {
 async function getAccessToken(
   req: NextRequest,
 ): Promise<{ token: string | null; refreshedCookies: string[] }> {
-  let raw = req.cookies.get(SESSION_COOKIE)?.value;
-  if (!raw) {
-    try {
-      const cookieStore = await cookies();
-      raw = cookieStore.get(SESSION_COOKIE)?.value;
-    } catch {
-      raw = undefined;
-    }
-  }
+  const cookieStore = await cookies();
+  const raw = cookieStore.get(SESSION_COOKIE)?.value;
   if (!raw) return { token: null, refreshedCookies: [] };
 
   const resolved = await resolveSessionPayload(
@@ -74,7 +67,7 @@ function safeProxyLocation(location: string | null, req: NextRequest): string | 
   }
 
   if (parsed.origin === req.nextUrl.origin) {
-    return parsed.toString();
+    return `${parsed.pathname}${parsed.search}${parsed.hash}`;
   }
 
   // OAuth login: the backend 307s to the configured Supabase authorize URL.
@@ -95,7 +88,7 @@ function safeProxyLocation(location: string | null, req: NextRequest): string | 
   } else if (upstreamPath.startsWith("/api/")) {
     upstreamPath = upstreamPath.slice(4);
   }
-  return `${upstreamPath}${parsed.search}${parsed.hash}`;
+  return `${PROXY_PREFIX}${upstreamPath}${parsed.search}${parsed.hash}`;
 }
 
 async function handler(

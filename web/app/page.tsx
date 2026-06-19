@@ -1,27 +1,15 @@
-// S44: RSC — fetch overview on the server to eliminate client-side fetch round-trip.
-import { Suspense } from "react";
-import { fetchOverview } from "@/lib/server-api";
-import { OverviewDashboard } from "@/components/overview/OverviewDashboard";
-import { OverviewSkeleton } from "@/components/overview/OverviewSkeleton";
+// Home ("/") — the EXISTING Emily shown FULLSCREEN (Federico 2026-06-19).
+//
+// The home is NOT a separate composer. The EmilyDock (mounted in AppShell)
+// detects the home route, forces Emily into TRUE fullscreen (the page pane
+// hides, the sidebar stays), and renders the home greeting + lean pulse + pills
+// in Emily's OWN empty state — seeding Emily's real composer. This page only
+// renders a quiet placeholder for the pane (hidden once Emily goes fullscreen).
+import { HomePane } from "@/components/home/HomePane";
 
-// #945: was `revalidate = N` (ISR) — an authenticated, per-user data fetch
-// must not be baked into a statically-cached shell shared across requests.
+// #945: authenticated, per-user dashboard must not be statically cached.
 export const dynamic = "force-dynamic";
 
-export default async function HomePage() {
-  return (
-    <Suspense fallback={<OverviewSkeleton />}>
-      <OverviewFetcher />
-    </Suspense>
-  );
-}
-
-async function OverviewFetcher() {
-  let initialData: import("@/lib/types").SystemOverview | null = null;
-  try {
-    initialData = await fetchOverview();
-  } catch {
-    // Fall through — OverviewDashboard will fetch client-side
-  }
-  return <OverviewDashboard initialData={initialData} />;
+export default function HomePage() {
+  return <HomePane />;
 }

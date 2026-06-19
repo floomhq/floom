@@ -101,12 +101,13 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
     : user?.email
       ? "Signed in"
       : "Floom";
-  // #1306 / G5: show the real Google/GitHub photo when present; fall back to a
-  // flat squircle with a single initial — NO DiceBear, NO gradient, NO circle.
-  // Design-system: squircle (radius-button), flat bg-[var(--bg-2)] ink-soft
-  // initial, no border, no network fetch on fallback.
+  // #1306: show the real Google/GitHub photo when present; otherwise fall back
+  // to a DiceBear "glass" avatar deterministically seeded by the user's
+  // email/name — matching the engine UserDiceBearAvatar (sidebar.tsx) exactly,
+  // NOT a flat initials square. Squircle (radius-button), no border.
   const avatarUrl = user?.picture && !avatarFailed ? user.picture : null;
-  const avatarInitial = (primary || "U").trim()[0]?.toUpperCase() ?? "U";
+  const avatarSeed = encodeURIComponent(primary || "user");
+  const diceBearUrl = `https://api.dicebear.com/9.x/glass/svg?seed=${avatarSeed}&radius=0`;
 
   async function logout() {
     try {
@@ -132,8 +133,8 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
           )}
           aria-label="Profile menu"
         >
-          {/* #1306 / G5: real photo for OAuth logins; flat squircle initial
-              otherwise. No DiceBear, no gradient, no circle — DS rule. */}
+          {/* #1306: real photo for OAuth logins; DiceBear "glass" avatar
+              otherwise — matching the engine UserDiceBearAvatar exactly. */}
           {avatarUrl ? (
             <img
               src={avatarUrl}
@@ -143,12 +144,12 @@ export function CloudAccountFooter({ onNavigate }: { onNavigate?: () => void } =
               className="size-7 shrink-0 rounded-[var(--radius-button)] object-cover"
             />
           ) : (
-            <span
-              aria-hidden="true"
-              className="size-7 shrink-0 inline-flex items-center justify-center rounded-[var(--radius-button)] bg-[var(--bg-2)] text-[var(--ink-soft)] font-medium select-none text-[13px]"
-            >
-              {avatarInitial}
-            </span>
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={diceBearUrl}
+              alt="Profile avatar"
+              className="size-7 shrink-0 rounded-[var(--radius-button)] border-0 object-cover"
+            />
           )}
           <div className="min-w-0 leading-tight text-left">
             <p className="truncate text-xs font-medium text-foreground">{primary}</p>

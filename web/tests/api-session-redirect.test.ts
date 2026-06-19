@@ -2,30 +2,21 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 
 function stubBrowserLocation(pathname = "/app/runs/run_123", search = "?tab=approval") {
   const assign = vi.fn();
-  const location = {
-    pathname,
-    search,
-    href: `https://workeros.floom.dev${pathname}${search}`,
-    hash: "",
-    assign,
-  };
   vi.stubGlobal("window", {
-    location,
+    location: { pathname, search, assign },
     localStorage: {
       getItem: vi.fn(() => null),
       setItem: vi.fn(),
       removeItem: vi.fn(),
     },
   });
-  vi.stubGlobal("location", location);
   return assign;
 }
 
 function stubWorkspaceCookieBrowser(protocol: "http:" | "https:") {
   const written: string[] = [];
-  const location = { protocol, href: `${protocol}//workeros.floom.dev/app`, hash: "" };
   vi.stubGlobal("window", {
-    location,
+    location: { protocol },
     localStorage: {
       getItem: vi.fn(() => null),
       setItem: vi.fn(),
@@ -37,7 +28,6 @@ function stubWorkspaceCookieBrowser(protocol: "http:" | "https:") {
       },
     },
   });
-  vi.stubGlobal("location", location);
   return written;
 }
 
@@ -109,21 +99,17 @@ describe("api session expiry handling", () => {
     let written = stubWorkspaceCookieBrowser("https:");
     let mod = await import("@/lib/api");
     mod.setActiveWorkspaceId("ws secure");
-    expect(written.at(-1)).toContain("workeros.activeWorkspaceId=ws%20secure");
-    expect(written.at(-1)).toContain("Path=/");
-    expect(written.at(-1)).toContain("Max-Age=31536000");
-    expect(written.at(-1)).toContain("SameSite=Lax");
-    expect(written.at(-1)).toContain("Secure");
+    expect(written.at(-1)).toBe(
+      "workeros.activeWorkspaceId=ws%20secure; Path=/; Max-Age=31536000; SameSite=Lax; Secure",
+    );
 
     vi.resetModules();
     vi.unstubAllGlobals();
     written = stubWorkspaceCookieBrowser("http:");
     mod = await import("@/lib/api");
     mod.setActiveWorkspaceId("ws local");
-    expect(written.at(-1)).toContain("workeros.activeWorkspaceId=ws%20local");
-    expect(written.at(-1)).toContain("Path=/");
-    expect(written.at(-1)).toContain("Max-Age=31536000");
-    expect(written.at(-1)).toContain("SameSite=Lax");
-    expect(written.at(-1)).not.toContain("Secure");
+    expect(written.at(-1)).toBe(
+      "workeros.activeWorkspaceId=ws%20local; Path=/; Max-Age=31536000; SameSite=Lax",
+    );
   });
 });

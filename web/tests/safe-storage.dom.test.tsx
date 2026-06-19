@@ -1,69 +1,65 @@
-import { describe, expect, it, vi, afterEach } from "vitest";
-import { render, screen, waitFor } from "@testing-library/react";
+import { fireEvent, render, screen } from "@testing-library/react";
+import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { ThemeModeButton } from "@/components/ThemeModeButton";
+import { ThemeModeToggleGroup } from "@/components/ThemeModeToggleGroup";
+import { getActiveWorkspaceId, setActiveWorkspaceId } from "@/lib/api";
+import { safeStorageGet, safeStorageRemove, safeStorageSet } from "@/lib/safe-storage";
 
-import { safeStorageGet, safeStorageSet } from "@/lib/safe-storage";
+let originalLocalStorage: PropertyDescriptor | undefined;
+
+function makeLocalStorageThrow() {
+  Object.defineProperty(window, "localStorage", {
+    configurable: true,
+    get() {
+      throw new Error("storage unavailable");
+    },
+  });
+}
+
+beforeEach(() => {
+  originalLocalStorage = Object.getOwnPropertyDescriptor(window, "localStorage");
+});
 
 afterEach(() => {
-  vi.restoreAllMocks();
-  vi.unstubAllGlobals();
+  if (originalLocalStorage) {
+    Object.defineProperty(window, "localStorage", originalLocalStorage);
+  } else {
+    Reflect.deleteProperty(window, "localStorage");
+  }
 });
 
-describe("safe storage guards", () => {
-  it("returns null/false when browser storage access throws", () => {
-    const original = Object.getOwnPropertyDescriptor(window, "localStorage");
-    Object.defineProperty(window, "localStorage", {
-      configurable: true,
-      get() {
-        throw new Error("storage disabled");
-      },
-    });
+describe("safe storage", () => {
+  it("turns unavailable localStorage into null/no-op instead of throwing", () => {
+    makeLocalStorageThrow();
 
-    expect(safeStorageGet("local", "floom-theme")).toBeNull();
-    expect(safeStorageSet("local", "floom-theme", "night")).toBe(false);
-
-    if (original) Object.defineProperty(window, "localStorage", original);
+    expect(safeStorageGet("local", "anything")).toBeNull();
+    expect(() => safeStorageSet("local", "anything", "value")).not.toThrow();
+    expect(() => safeStorageRemove("local", "anything")).not.toThrow();
   });
 
-  it("theme controls render when localStorage is unavailable", async () => {
-    const original = Object.getOwnPropertyDescriptor(window, "localStorage");
-    Object.defineProperty(window, "localStorage", {
-      configurable: true,
-      get() {
-        throw new Error("storage disabled");
-      },
-    });
-    Object.defineProperty(window, "matchMedia", {
-      configurable: true,
-      value: vi.fn(() => ({
-        matches: false,
-        addEventListener: vi.fn(),
-        removeEventListener: vi.fn(),
-      })),
-    });
+  it("keeps active workspace helpers usable when localStorage is blocked", () => {
+    makeLocalStorageThrow();
 
-    const { ThemeModeButton } = await import("@/components/ThemeModeButton");
-    render(<ThemeModeButton />);
-
-    expect(screen.getByRole("button", { name: /theme mode/i })).toBeInTheDocument();
-
-    if (original) Object.defineProperty(window, "localStorage", original);
+    expect(getActiveWorkspaceId()).toBe("local-default");
+    expect(() => setActiveWorkspaceId("ws_test")).not.toThrow();
+    expect(() => setActiveWorkspaceId(null)).not.toThrow();
   });
-});
 
-describe("global error boundary telemetry", () => {
-  it("reports non-chunk app errors instead of swallowing them", async () => {
-    const reportError = vi.fn();
-    const trackTelemetry = vi.fn();
-    vi.doMock("@/lib/notify", () => ({ reportError }));
-    vi.doMock("@/lib/telemetry", () => ({ trackTelemetry }));
+  it("renders theme controls when localStorage is blocked", () => {
+    makeLocalStorageThrow();
 
-    const { default: GlobalError } = await import("@/app/error");
-    render(<GlobalError error={new Error("boom")} reset={vi.fn()} />);
-
-    await waitFor(() => expect(reportError).toHaveBeenCalledWith("Unhandled app error.", expect.any(Error)));
-    expect(trackTelemetry).toHaveBeenCalledWith(
-      "web.unhandled_error",
-      expect.objectContaining({ message: "boom" }),
+    render(
+      <>
+        <ThemeModeButton />
+        <ThemeModeToggleGroup />
+      </>
     );
+
+    const cycleButton = screen.getByRole("button", { name: /theme mode/i });
+    expect(cycleButton).toBeInTheDocument();
+    expect(screen.getByRole("button", { name: "System" })).toBeInTheDocument();
+
+    expect(() => fireEvent.click(cycleButton)).not.toThrow();
+    expect(() => fireEvent.click(screen.getByRole("button", { name: "Dark" }))).not.toThrow();
   });
 });

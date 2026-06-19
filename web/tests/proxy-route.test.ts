@@ -41,7 +41,7 @@ describe("api proxy route", () => {
     cookieState.value = "";
   });
 
-  it("keeps same-origin frontend redirects unchanged", async () => {
+  it("keeps same-origin frontend redirects as relative locations", async () => {
     process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
     cookieState.value = sessionCookie();
     const fetchMock = vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -66,12 +66,10 @@ describe("api proxy route", () => {
       expect.objectContaining({ redirect: "manual" }),
     );
     expect(res.status).toBe(307);
-    expect(res.headers.get("location")).toBe(
-      "https://workers.floom.dev/connections?connected=1&connection_id=local_123",
-    );
+    expect(res.headers.get("location")).toBe("/connections?connected=1&connection_id=local_123");
   });
 
-  it("rewrites backend-origin redirects to app-relative locations", async () => {
+  it("rewrites backend-origin redirects through the proxy", async () => {
     process.env.WORKEROS_API_BASE = "https://workeros-api.floom.dev";
     cookieState.value = sessionCookie();
     vi.spyOn(globalThis, "fetch").mockResolvedValue(
@@ -87,7 +85,7 @@ describe("api proxy route", () => {
       { params: Promise.resolve({ path: ["workers"] }) },
     );
 
-    expect(res.headers.get("location")).toBe("/workers/abc?tab=source");
+    expect(res.headers.get("location")).toBe("/api/proxy/workers/abc?tab=source");
   });
 
   it("uses backend session-token resolution for encrypted v2 cookies", async () => {

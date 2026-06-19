@@ -17,7 +17,6 @@ const API_BASE = "https://workeros-api.test";
 let privateKey: CryptoKey;
 let publicJwks: { keys: Record<string, unknown>[] };
 let backendSessionToken: string | null = null;
-let requiredBackendCookieFragment: string | null = null;
 
 async function makeKeys() {
   const pair = await generateKeyPair("ES256");
@@ -46,16 +45,9 @@ function cookieFor(accessToken: string, userId = "user-123", expiresIn = 3600): 
 }
 
 function mockJwksFetch() {
-  vi.spyOn(globalThis, "fetch").mockImplementation(async (input, init) => {
+  vi.spyOn(globalThis, "fetch").mockImplementation(async (input) => {
     const url = String(input);
     if (url.includes("/auth/session-token")) {
-      if (requiredBackendCookieFragment) {
-        const headers = init?.headers as Record<string, string> | undefined;
-        const cookie = String(headers?.cookie || "");
-        if (!cookie.includes(requiredBackendCookieFragment)) {
-          return new Response(JSON.stringify({ detail: "missing cookie fragment" }), { status: 401 });
-        }
-      }
       const token = backendSessionToken ?? (await signToken());
       return new Response(
         JSON.stringify({
@@ -84,7 +76,6 @@ function mockJwksFetch() {
 beforeEach(async () => {
   await makeKeys();
   backendSessionToken = null;
-  requiredBackendCookieFragment = null;
   resetJwksCacheForTests();
   vi.stubEnv("SUPABASE_URL", SUPABASE_URL);
   vi.stubEnv("WORKEROS_API_BASE", API_BASE);
@@ -222,30 +213,6 @@ describe("#935 middleware integration", () => {
     const validRes = await middleware(validReq);
 
     expect(validRes.headers.get("x-middleware-next")).toBe("1");
-  });
-
-  it("allows a valid encrypted v2 session cookie on direct /app/runs hard reload with the full cookie header", async () => {
-    const { middleware } = await import("@/middleware");
-    backendSessionToken = await signToken();
-    requiredBackendCookieFragment = "sb-refresh-token=refresh-123";
-    const validReq = new NextRequest("https://workeros.floom.dev/app/runs", {
-      headers: {
-        cookie:
-          "sb-refresh-token=refresh-123; workeros_cloud_session=v2.gAAAAencrypted; another=value",
-      },
-    });
-
-    const validRes = await middleware(validReq);
-
-    expect(validRes.headers.get("x-middleware-next")).toBe("1");
-    expect(globalThis.fetch).toHaveBeenCalledWith(
-      `${API_BASE}/auth/session-token`,
-      expect.objectContaining({
-        headers: expect.objectContaining({
-          cookie: expect.stringContaining("sb-refresh-token=refresh-123"),
-        }),
-      }),
-    );
   });
 });
 

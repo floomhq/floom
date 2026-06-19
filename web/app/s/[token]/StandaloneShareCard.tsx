@@ -11,10 +11,9 @@ import Link from "next/link";
 import { ChevronRight, Download, FileText, Folder, Package, X } from "lucide-react";
 import { GenericOutput } from "@/components/generic-output";
 import { BrandLogo } from "@/components/connections/BrandLogo";
-import { RunStatusBadge } from "@/components/RunStatus";
 import { WorkerShareCard } from "@/components/share/WorkerShareCard";
 import { SHARE_CARD_BODY_HEIGHT, FloomMark } from "@/components/share/ShareCardShell";
-import type { PublicShareFile, RunDetail, StandaloneShare } from "@/lib/types";
+import type { PublicShareFile, StandaloneShare } from "@/lib/types";
 
 function formatBytes(bytes: number): string {
   if (bytes < 1024) return `${bytes} B`;
@@ -115,10 +114,6 @@ export function StandaloneShareCard({
         </div>
       </div>
     );
-  }
-
-  if (share.entity_type === "run" && share.run) {
-    return <RunShareView run={share.run} ctaHref={ctaHref} ctaLabel={ctaLabel} />;
   }
 
   // Breadcrumb segments for the current location.
@@ -417,76 +412,5 @@ function Metric({ label, value }: { label: string; value: string | number }) {
       <span className="font-medium text-[var(--ink)]">{value}</span>
       <span>{label}</span>
     </span>
-  );
-}
-
-function RunShareView({
-  run,
-  ctaHref,
-  ctaLabel,
-}: {
-  run: RunDetail;
-  ctaHref: string;
-  ctaLabel: string;
-}) {
-  const output = run.output ?? {};
-  const hasOutput = Object.keys(output).length > 0;
-  const title = run.worker_name ?? run.worker_id;
-  return (
-    <div className="mx-auto w-full px-3 py-10" style={{ maxWidth: 760 }}>
-      <div className="rounded-[var(--radius-card)] bg-[var(--bg-card)] shadow-[var(--shadow-pop)]">
-        <div className="flex items-center justify-between rounded-t-[var(--radius-card)] [border-bottom:var(--bd-div)] px-5 py-3">
-          <FloomMark />
-          <Link href={ctaHref} className="text-sm text-[var(--ink-soft)] no-underline hover:text-[var(--ink)]">
-            {ctaLabel}
-          </Link>
-        </div>
-
-        <div className="px-7 pb-1 pt-4">
-          <div className="mb-3 flex flex-wrap items-center justify-between gap-3">
-            <div className="min-w-0">
-              <p className="text-[13px] text-[var(--ink-soft)]">Shared run</p>
-              <h1 className="truncate text-xl font-semibold tracking-tight">{title}</h1>
-            </div>
-            <RunStatusBadge status={run.status} showSuccess />
-          </div>
-
-          <div
-            className="flex flex-col overflow-hidden rounded-[var(--radius-card)] bg-[var(--bg-2)]"
-            style={{ height: SHARE_CARD_BODY_HEIGHT }}
-          >
-            <div className="flex shrink-0 flex-wrap items-center gap-x-4 gap-y-1 [border-bottom:var(--bd-div)] bg-[var(--bg-card)] px-5 py-3 text-xs text-[var(--ink-soft)]">
-              <Metric label="Run" value={run.id} />
-              {run.duration_ms != null && <Metric label="ms" value={run.duration_ms} />}
-              {run.created_at && <Metric label="Created" value={new Date(run.created_at).toLocaleString()} />}
-            </div>
-            <div className="min-h-0 flex-1 overflow-y-auto bg-[var(--bg-card)] px-5 py-4">
-              {hasOutput ? (
-                <GenericOutput type="json" value={output} />
-              ) : run.error ? (
-                <GenericOutput type="text" value={run.error} />
-              ) : (
-                <p className="text-sm text-[var(--ink-soft)]">This run has no structured output.</p>
-              )}
-            </div>
-            <div className="flex shrink-0 flex-wrap items-center justify-between gap-3 [border-top:var(--bd-div)] bg-[var(--bg-2)] px-5 py-3">
-              <p className="text-xs text-[var(--ink-soft)]">Read-only run result shared via Floom.</p>
-              <Link
-                href={ctaHref}
-                className="inline-flex h-9 items-center rounded-[var(--radius-button)] bg-[var(--primary)] px-4 text-[13px] font-medium text-[var(--primary-text)] no-underline hover:opacity-90"
-              >
-                {ctaLabel}
-              </Link>
-            </div>
-          </div>
-        </div>
-
-        <div className="px-7 pb-5 pt-3">
-          <p className="text-xs text-[var(--ink-faint)]">
-            Shared via <span className="font-medium text-[var(--ink-soft)]">Floom</span>. Review the visible output before using it.
-          </p>
-        </div>
-      </div>
-    </div>
   );
 }
